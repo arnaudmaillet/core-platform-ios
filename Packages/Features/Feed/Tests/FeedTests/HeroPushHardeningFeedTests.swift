@@ -165,6 +165,62 @@ struct HeroPushHardeningFeedTests {
         #expect(stack.nav.navigationBar.overrideUserInterfaceStyle == expected)
     }
 
+    // MARK: - A grab decided after the pop hands the bars back (#1500)
+
+    /// ⚠️ A COMMITTED GRAB REPORTS FROM THE TRANSITION'S COMPLETION, AFTER
+    /// THE POP: the feed is off the stack and has no `navigationController`.
+    /// The release found no bars, and the presenter's header stayed dark after
+    /// a rightward grab (filmed by the owner, 2026-10-21). A cancelled grab
+    /// keeps the dark bars: the post is still on screen.
+    @Test(arguments: [true, false])
+    func aGrabDecidedAfterThePopHandsTheBarsBack(commits: Bool) {
+        let feed = Self.feed()
+        feed.seedProjection([SnapActionColumnLayoutTests.mediaModel(mediaURL: URL(string: "mock://media/1"))])
+        let stack = Stack()
+        stack.nav.setViewControllers([stack.presenter, feed], animated: false)
+        // The stack's own appearance of the feed, done before the grab.
+        stack.window.layoutIfNeeded()
+        #expect(stack.nav.navigationBar.overrideUserInterfaceStyle == .dark, "the media page lent no style")
+
+        var decide: ((Bool) -> Void)?
+        feed.handBackChromeTheme(interactive: true) { decide = $0 }
+        #expect(stack.nav.navigationBar.overrideUserInterfaceStyle == .dark, "the header went light mid-grab")
+        if commits {
+            // UIKit has popped the feed by the time the completion reports.
+            stack.nav.setViewControllers([stack.presenter], animated: false)
+            #expect(feed.navigationController == nil)
+        }
+        decide?(commits)
+        let expected: UIUserInterfaceStyle = commits ? .unspecified : .dark
+        #expect(stack.nav.navigationBar.overrideUserInterfaceStyle == expected, "the presenter's header kept the post's style")
+        #expect(stack.nav.toolbar.overrideUserInterfaceStyle == expected)
+    }
+
+    /// Once handed back, a late callback lends nothing (#1500): an appearance
+    /// callback, a page settling or the author pill re-hosted after the
+    /// release re-styled the presenter's bars, with nothing to hand them back.
+    @Test func nothingLendsTheBarsAfterTheHandBack() {
+        let feed = Self.feed()
+        feed.seedProjection([SnapActionColumnLayoutTests.mediaModel(mediaURL: URL(string: "mock://media/1"))])
+        let stack = Stack()
+        stack.nav.setViewControllers([stack.presenter, feed], animated: false)
+        // The stack's own appearance of the feed, done before the hand-back.
+        stack.window.layoutIfNeeded()
+        #expect(stack.nav.navigationBar.overrideUserInterfaceStyle == .dark, "the media page lent no style")
+        feed.handBackChromeTheme(interactive: false) { _ in }
+        #expect(stack.nav.navigationBar.overrideUserInterfaceStyle == .unspecified)
+
+        // A late "did appear" — the re-apply paths' shape.
+        feed.viewDidAppear(false)
+        #expect(stack.nav.navigationBar.overrideUserInterfaceStyle == .unspecified, "a late callback re-lent the style")
+        #expect(stack.nav.toolbar.overrideUserInterfaceStyle == .unspecified)
+
+        // Appearing again lends it again.
+        feed.beginAppearanceTransition(true, animated: false)
+        feed.endAppearanceTransition()
+        #expect(stack.nav.navigationBar.overrideUserInterfaceStyle == .dark, "a return lent no style")
+    }
+
     // MARK: - Fixtures
 
     private static func feed() -> SnapFeedViewController {
