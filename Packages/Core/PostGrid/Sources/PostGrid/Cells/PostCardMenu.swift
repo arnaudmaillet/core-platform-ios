@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import UIKit
 
 /// One row of a post's menu — the long press's and the card's "..." alike
@@ -108,13 +109,15 @@ public enum PostCardMenuAction {
         }
     }
 
-    /// The glyph: the palette's FILLED when its state is on.
+    /// The glyph: the palette's FILLED when its state is on. Save, Like,
+    /// Repost and Comment are the app's own symbols (#1128), from their
+    /// contracts (`SaveStar`, `LikesSymbol`, #1190), as the card's are.
     var symbolName: String {
         switch self {
-        case .save(let isOn, _): isOn ? "star.fill" : "star"
-        case .repost(let isOn, _): isOn ? "arrow.2.squarepath" : "arrow.2.squarepath"
-        case .comment: "bubble.right"
-        case .like(let isOn, _): isOn ? "heart.fill" : "heart"
+        case .save(let isOn, _): SaveStar.symbol(saved: isOn)
+        case .repost: PostActionSymbol.repost
+        case .comment: PostActionSymbol.comments
+        case .like(let isOn, _): isOn ? LikesSymbol.glyph : LikesSymbol.outlineGlyph
         case .share: "square.and.arrow.up"
         case .copyText: "doc.on.doc"
         case .copyLink: "link"
