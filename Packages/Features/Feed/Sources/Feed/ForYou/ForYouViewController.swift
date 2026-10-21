@@ -395,6 +395,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         page.authorMenuActions = { [weak self] context in
             self?.authorMenuActions(for: context) ?? []
         }
+        page.isViewer = { [weak self] id in self?.viewModel.circle(of: id) == .viewer }
 
         viewModel.onSnapshotChange = { [weak self] snapshot in
             guard let self else { return }
@@ -896,9 +897,17 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     private func authorMenuActions(
         for context: ForYouGridPage.AuthorMenuContext
     ) -> [PostCardMenuAction] {
-        var actions: [PostCardMenuAction] = []
+        // The viewer's own post: no author rows (#1498) — nothing to follow,
+        // hide, mute or report on oneself.
+        guard viewModel.circle(of: context.authorID) != .viewer else { return [] }
+        var actions: [PostCardMenuAction] = [.viewProfile { [weak self] in self?.openAuthor(of: context.post) }]
+        let followed = viewModel.isFollowed(context.authorID)
+        if socialGraph != nil, !followed {
+            let handle = context.post.authorHandle ?? ""
+            actions.append(.follow { [weak self] in self?.follow(context.authorID, handle: handle) })
+        }
         // Discover is everyone: Unfollow only for an author the viewer follows.
-        if socialGraph != nil, viewModel.isFollowed(context.authorID) {
+        if socialGraph != nil, followed {
             let handle = context.post.authorHandle ?? ""
             actions.append(.unfollow { [weak self] in
                 // The handle is not in the ROW (the card names its author right
@@ -907,12 +916,43 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 self?.unfollow(context.authorID, handle: handle)
             })
         }
+        actions.append(.hide { [weak self] in self?.hidePost(context.post.id) })
         if reporting != nil {
             actions.append(.report { [weak self] in
                 self?.presentReportReasons(for: context)
             })
         }
         return actions
+    }
+
+    /// "Hide This Post" (#1498): off this screen for the session, with Undo —
+    /// the post screen's "Not interested" toast (#957).
+    private func hidePost(_ id: PostID) {
+        viewModel.hidePost(id)
+        Feedback.undoable(
+            "Hidden from this feed", symbol: "hand.thumbsdown", from: self,
+            commit: {},
+            undo: { [weak self] in self?.viewModel.unhidePost(id) }
+        )
+    }
+
+    /// Follows from a post's menu (#1498): said when it is accepted, said
+    /// when it is not.
+    private func follow(_ id: ProfileID, handle: String) {
+        guard let socialGraph else { return }
+        let name = handle.isEmpty ? "this author" : "@\(handle)"
+        MemberGates.perform(.follow(handle: handle.isEmpty ? nil : handle), from: self) { [weak self] in
+            Task { [weak self] in
+                do {
+                    try await socialGraph.setFollowing(true, for: id)
+                    guard let self else { return }
+                    viewModel.restoreAuthor(id)
+                    Feedback.success("Following \(name)", symbol: "person.badge.plus", from: self)
+                } catch {
+                    self?.presentFailure("Couldn't follow \(name)")
+                }
+            }
+        }
     }
 
     // MARK: - The rows' long press
@@ -923,14 +963,12 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// same seams, as the list's cards.
     private func cardMenuElements(for post: GalleryPost) -> [UIMenuElement] {
         guard let authorID = post.authorID else { return [] }
-        var elements: [UIMenuElement] = [profileAction { [weak self] in self?.openAuthor(of: post) }]
+        // The author rows under "@handle" (#1498), View Profile among them.
         let rows = authorMenuActions(
             for: ForYouGridPage.AuthorMenuContext(post: post, authorID: authorID, anchor: shelf)
         )
-        if let menu = PostCardMenu.menu(for: rows) {
-            elements.append(UIMenu(options: .displayInline, children: menu.children))
-        }
-        return elements
+        let author = post.authorHandle.flatMap { $0.isEmpty ? nil : PostCardMenuAuthor(handle: $0) }
+        return PostCardMenu.sections(for: rows, author: author)
     }
 
     /// The same for a friend's face: their profile, and Unfollow. No Report —
@@ -2106,6 +2144,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         list.authorMenuActions = { [weak self] context in
             self?.authorMenuActions(for: context) ?? []
         }
+        list.isViewer = { [weak self] id in self?.viewModel.circle(of: id) == .viewer }
         // What is loaded NOW, so the push shows the list rather than a
         // skeleton waiting for the next publish.
         if let lastSnapshot {

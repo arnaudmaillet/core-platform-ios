@@ -161,6 +161,13 @@ public final class PostAuthorBandView: UIView {
         syncShape()
     }
 
+    /// Who the menu's author submenu is named after: the band's own author,
+    /// with the face it draws.
+    var menuAuthor: PostCardMenuAuthor? {
+        guard let model, model.showsIdentity, !model.handle.isEmpty else { return nil }
+        return PostCardMenuAuthor(handle: model.handle, face: avatarImage.isHidden ? nil : avatarImage.image)
+    }
+
     #if DEBUG
     /// Whether the "..." is drawn.
     var debugShowsMenu: Bool { !menuButton.isHidden }
@@ -275,8 +282,10 @@ public final class PostAuthorBandView: UIView {
         // group.
         menuButton.menu = UIMenu(children: [
             UIDeferredMenuElement.uncached { [weak self] completion in
-                guard let actions = self?.menuActions?() else { return completion([]) }
-                completion(actions.map(\.element))
+                guard let self, let actions = menuActions?() else { return completion([]) }
+                // ONE menu with the long press's (#1498): the author rows
+                // under "@handle", the band's own face as its image.
+                completion(PostCardMenu.sections(for: actions, author: menuAuthor))
             }
         ])
         // ⚠️ THE "..." OUTRANKS THE IDENTITY HORIZONTALLY.

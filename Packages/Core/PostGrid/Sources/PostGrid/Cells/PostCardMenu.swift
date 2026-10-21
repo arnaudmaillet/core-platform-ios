@@ -1,89 +1,208 @@
 import CoreModels
+import DesignSystem
 import UIKit
 
-/// One row of a post card's "..." menu.
+/// One row of a post's menu — the long press's and the card's "..." alike
+/// (#1498: ONE menu, built in one place, `PostCardMenu`).
 ///
-/// The SURFACE chooses which rows exist; this type owns what each one says and
-/// how it reads. That split is the point: a Following feed and a profile
-/// gallery offer different sets — Unfollow means nothing on a screen whose
-/// header already owns the relationship — but "Report" must be the same word,
-/// the same glyph and the same weight in both, and two hosts writing their own
-/// `UIAction`s would agree on the day they were written.
+/// The SURFACE chooses which rows exist; this type owns what each one says,
+/// how it reads and where it goes. That split is the point: a Following feed
+/// and a profile gallery offer different sets, but "Report" must be the same
+/// word, the same glyph and the same weight in both.
 ///
-/// Each case carries its own handler rather than the menu reporting a
-/// selection back through one closure. A host builds the rows it can actually
-/// service, so the row and the thing it does are decided in one place and an
-/// action that cannot act is simply not built.
+/// Each case carries its own handler. A host builds the rows it can actually
+/// service; a row that cannot act yet is built DISABLED where the owner wants
+/// it seen (Repost until #801, Copy Link until posts have a URL).
 @MainActor
 public enum PostCardMenuAction {
-    /// Stop following the post's author. Offered where the viewer is looking at
-    /// a feed OF the people they follow, and withheld where a screen already
-    /// centralises the relationship on one control.
+    // MARK: The palette (one horizontal row of icons)
+
+    /// Keep the post (the star). `isOn`: saved.
+    case save(isOn: Bool, perform: () -> Void)
+    /// Repost it. Nil `perform`: shown disabled (#801, the owner's choice).
+    case repost(isOn: Bool, perform: (() -> Void)?)
+    /// Open the post on its comments.
+    case comment(perform: () -> Void)
+    /// Like it — a Points stake, so the row OPENS the amounts (the owner's
+    /// choice, #1498): `amounts` is the card heart's stake menu. `isOn`: the
+    /// viewer has staked on it.
+    case like(isOn: Bool, amounts: UIMenu)
+
+    // MARK: The post
+
+    /// The share sheet.
+    case share(perform: () -> Void)
+    /// Copy the caption.
+    case copyText(perform: () -> Void)
+    /// Copy the post's link. Nil `perform`: shown disabled — posts have no
+    /// public URL yet (the owner's choice).
+    case copyLink(perform: (() -> Void)?)
+    /// Select the caption in place (#1498 §4).
+    case selectText(perform: () -> Void)
+
+    // MARK: The viewer's own post
+
+    /// Change it.
+    case edit(perform: () -> Void)
+    /// Remove it.
+    case delete(perform: () -> Void)
+    /// Takes the post out of the viewer's viewing history (#1344).
+    case removeFromHistory(perform: () -> Void)
+
+    // MARK: The author (the "@handle ▸" submenu)
+
+    /// Their profile.
+    case viewProfile(perform: () -> Void)
+    /// Start following the author.
+    case follow(perform: () -> Void)
+    /// Stop following the author.
     case unfollow(perform: () -> Void)
+    /// Not interested: the post leaves this feed, with Undo (#957).
+    case hide(perform: () -> Void)
+    /// Mute the author (#689).
+    case mute(perform: () -> Void)
+    /// Block the author.
+    case block(perform: () -> Void)
     /// Raise a moderation case against the post.
     case report(perform: () -> Void)
-    /// The viewer's OWN post: change it. Offered before the feature exists,
-    /// so the menu says what a card of one's own is for; the handler is the
-    /// host's, and nothing today.
-    case edit(perform: () -> Void)
-    /// The viewer's own post: remove it. Same terms as `edit`.
-    case delete(perform: () -> Void)
-    /// Takes the post out of the viewer's viewing history (#1344): the
-    /// History tab's rows and tiles.
-    case removeFromHistory(perform: () -> Void)
+
+    /// Where a row sits in the menu.
+    enum Group {
+        case palette, post, own, author
+    }
+
+    var group: Group {
+        switch self {
+        case .save, .repost, .comment, .like: .palette
+        case .share, .copyText, .copyLink, .selectText: .post
+        case .edit, .delete, .removeFromHistory: .own
+        case .viewProfile, .follow, .unfollow, .hide, .mute, .block, .report: .author
+        }
+    }
 
     /// Public so a surface can audit what it composed — the menu itself is a
     /// system surface no screenshot can read.
     ///
-    /// BARE VERBS, the same rule the profile's "..." settled on: the menu
-    /// already belongs to a card that names its author two lines above, so the
-    /// handle in the row was redundant. It was also actively worse — in the sim
-    /// "Unfollow @sofia.reyes" wrapped to two lines and UIKit hyphenated it
-    /// mid-handle, as "@sofi-a.reyes".
+    /// BARE VERBS: the menu belongs to a card that names its author, and the
+    /// author's rows sit under their handle — "Unfollow @sofia.reyes" wrapped
+    /// and UIKit hyphenated it mid-handle.
     public var title: String {
         switch self {
-        case .unfollow: "Unfollow"
-        case .report: "Report"
+        case .save(let isOn, _): isOn ? "Saved" : "Save"
+        case .repost(let isOn, _): isOn ? "Reposted" : "Repost"
+        case .comment: "Comment"
+        case .like(let isOn, _): isOn ? "Liked" : "Like"
+        case .share: "Share"
+        case .copyText: "Copy Text"
+        case .copyLink: "Copy Link"
+        case .selectText: "Select Text"
         case .edit: "Edit post"
         case .delete: "Delete post"
         case .removeFromHistory: "Remove from History"
+        case .viewProfile: "View Profile"
+        case .follow: "Follow"
+        case .unfollow: "Unfollow"
+        case .hide: "Hide This Post"
+        case .mute: "Mute"
+        case .block: "Block"
+        case .report: "Report"
         }
     }
 
+    /// The glyph: the palette's FILLED when its state is on. Save, Like,
+    /// Repost and Comment are the app's own symbols (#1128), from their
+    /// contracts (`SaveStar`, `LikesSymbol`, #1190), as the card's are.
     var symbolName: String {
         switch self {
-        case .unfollow: "person.badge.minus"
-        case .report: "flag"
+        case .save(let isOn, _): SaveStar.symbol(saved: isOn)
+        case .repost: PostActionSymbol.repost
+        case .comment: PostActionSymbol.comments
+        case .like(let isOn, _): isOn ? LikesSymbol.glyph : LikesSymbol.outlineGlyph
+        case .share: "square.and.arrow.up"
+        case .copyText: "doc.on.doc"
+        case .copyLink: "link"
+        case .selectText: "selection.pin.in.out"
         case .edit: "pencil"
         case .delete: "trash"
         case .removeFromHistory: "clock.badge.xmark"
+        case .viewProfile: "person.crop.circle"
+        case .follow: "person.badge.plus"
+        case .unfollow: "person.badge.minus"
+        case .hide: "eye.slash"
+        case .mute: "speaker.slash"
+        case .block: "hand.raised"
+        case .report: "flag"
         }
     }
 
-    /// Report is destructive in the menu's sense — it is the irreversible,
-    /// consequence-carrying row. Unfollow deliberately is NOT: it is undone by
-    /// following again, and painting it red would make the menu's one genuinely
-    /// serious row indistinguishable from its routine one.
+    /// Report, Delete and Block are destructive — the irreversible,
+    /// consequence-carrying rows. Unfollow is not: following again undoes it.
     var attributes: UIMenuElement.Attributes {
         switch self {
-        case .unfollow, .edit, .removeFromHistory: []
-        case .report, .delete: .destructive
+        case .report, .delete, .block: .destructive
+        case .repost(_, let perform), .copyLink(let perform): perform == nil ? .disabled : []
+        default: []
         }
     }
 
-    var handler: () -> Void {
+    var element: UIMenuElement {
+        let image = UIImage.symbol(named: symbolName)
         switch self {
-        case .unfollow(let perform), .report(let perform),
-             .edit(let perform), .delete(let perform), .removeFromHistory(let perform): perform
+        case .like(_, let amounts):
+            // The amounts, under the heart (the owner's choice).
+            return UIMenu(title: title, image: image, children: amounts.children)
+        default:
+            let perform = handler
+            return UIAction(title: title, image: image, attributes: attributes) { _ in perform?() }
         }
     }
 
-    var element: UIAction {
-        UIAction(
-            title: title,
-            image: UIImage.symbol(named: symbolName),
-            attributes: attributes
-        ) { _ in handler() }
+    private var handler: (() -> Void)? {
+        switch self {
+        case .save(_, let perform), .comment(let perform), .share(let perform), .copyText(let perform),
+             .selectText(let perform), .edit(let perform), .delete(let perform),
+             .removeFromHistory(let perform), .viewProfile(let perform), .follow(let perform),
+             .unfollow(let perform), .hide(let perform), .mute(let perform), .block(let perform),
+             .report(let perform):
+            perform
+        case .repost(_, let perform), .copyLink(let perform):
+            perform
+        case .like:
+            nil
+        }
+    }
+}
+
+/// Who the author submenu is named after: "@handle", their face as its image.
+public struct PostCardMenuAuthor {
+    public let handle: String
+    public let face: UIImage?
+
+    public init(handle: String, face: UIImage? = nil) {
+        self.handle = handle
+        self.face = face.map(Self.menuFace)
+    }
+
+    /// The side a face is drawn at in a menu row.
+    static let faceSide: CGFloat = 24
+
+    /// ⚠️ A MENU DRAWS AN IMAGE AT ITS OWN SIZE: the avatar's full picture
+    /// filled the submenu's header (filmed). So the face is redrawn as a
+    /// small disc, kept in its colours (`.alwaysOriginal`, not tinted).
+    static func menuFace(_ image: UIImage) -> UIImage {
+        let side = faceSide
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = false
+        let disc = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { _ in
+            let bounds = CGRect(x: 0, y: 0, width: side, height: side)
+            UIBezierPath(ovalIn: bounds).addClip()
+            // Aspect-fill the square.
+            let scale = max(side / max(image.size.width, 1), side / max(image.size.height, 1))
+            let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            image.draw(in: CGRect(x: (side - size.width) / 2, y: (side - size.height) / 2,
+                                  width: size.width, height: size.height))
+        }
+        return disc.withRenderingMode(.alwaysOriginal)
     }
 }
 
@@ -103,14 +222,55 @@ public extension GalleryPost {
     }
 }
 
-/// Builds the card's "..." menu from the rows a surface can service.
+/// Builds a post's menu from the rows a surface can service (#1498 §3):
+///
+/// ```
+/// [ ☆ ] [ ⟳ ] [ 💬 ] [ ♡ ]        ← the palette: one row of icons
+/// Share · Copy Text · Copy Link · Select Text
+/// Edit post · Delete post · Remove from History   ← the viewer's own
+/// @handle ▸  View Profile · Follow/Unfollow · Hide This Post · Mute · Block · Report
+/// ```
+///
+/// The same builder for the long press and the card's "...", on every host.
 @MainActor
 public enum PostCardMenu {
     /// `nil` when there is nothing to offer — a caller with no rows must hide
     /// the control rather than show one that opens an empty sheet.
-    public static func menu(for actions: [PostCardMenuAction]) -> UIMenu? {
+    ///
+    /// `author`: the author rows go under a submenu named after them. Nil (a
+    /// host that names no author, or the viewer's own post): inline.
+    public static func menu(for actions: [PostCardMenuAction], author: PostCardMenuAuthor? = nil) -> UIMenu? {
         guard !actions.isEmpty else { return nil }
-        return UIMenu(children: actions.map(\.element))
+        return UIMenu(children: sections(for: actions, author: author))
+    }
+
+    /// The menu's sections, in reading order — what `menu` holds, for a host
+    /// that adds them to a menu of its own.
+    public static func sections(for actions: [PostCardMenuAction], author: PostCardMenuAuthor?) -> [UIMenuElement] {
+        func rows(_ group: PostCardMenuAction.Group) -> [UIMenuElement] {
+            actions.filter { $0.group == group }.map(\.element)
+        }
+        var sections: [UIMenuElement] = []
+        let palette = rows(.palette)
+        if !palette.isEmpty {
+            sections.append(UIMenu(options: [.displayInline, .displayAsPalette], children: palette))
+        }
+        for group in [PostCardMenuAction.Group.post, .own] {
+            let section = rows(group)
+            if !section.isEmpty { sections.append(UIMenu(options: .displayInline, children: section)) }
+        }
+        let authorRows = rows(.author)
+        if !authorRows.isEmpty {
+            if let author, !author.handle.isEmpty {
+                sections.append(UIMenu(options: .displayInline, children: [
+                    UIMenu(title: "@" + author.handle, image: author.face ?? UIImage(systemName: "person.crop.circle"),
+                           children: authorRows)
+                ]))
+            } else {
+                sections.append(UIMenu(options: .displayInline, children: authorRows))
+            }
+        }
+        return sections
     }
 }
 

@@ -821,10 +821,10 @@ final class PlaceProfileViewController: UIViewController {
         activityPage.onItemCommentsTapped = { [weak self] index in
             self?.openTile(at: index, in: self?.activityPage, showingComments: true)
         }
-        // The card band's own "..." stays dark here: the reporting and
-        // social-graph seams are not threaded into this screen, and a menu
-        // whose rows cannot act is worse than no control. An empty answer is
-        // how `PostAuthorBandView` is told to hide it.
+        // No author rows here: the reporting and social-graph seams are not
+        // threaded into this screen, and a row that cannot act is worse than
+        // none. The "..." still offers the post's own rows and View Profile
+        // (#1498 §3), which the page services itself.
         activityPage.authorMenuActions = { _ in [] }
         configureNavigationItems()
     }

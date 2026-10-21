@@ -232,7 +232,9 @@ struct ProfileMenuBuilderTests {
         )
         for rows in [own, other] {
             let menu = PostCardMenu.menu(for: rows)
-            menu?.children.forEach { ($0 as? UIAction)?.performWithSender(nil, target: nil) }
+            // The rows sit in inline sections (#1498 §3).
+            menu?.children.flatMap { ($0 as? UIMenu)?.children ?? [$0] }
+                .forEach { ($0 as? UIAction)?.performWithSender(nil, target: nil) }
         }
         // Edit is named before it exists: its handler does nothing.
         #expect(taps.fired == ["delete", "report"])

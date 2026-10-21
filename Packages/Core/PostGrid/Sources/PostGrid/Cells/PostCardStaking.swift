@@ -86,7 +86,7 @@ public final class PostCardStaking {
         cell.stakeTapAmount = WalletStore.Policy.defaultStakeAmount
         cell.onStake = { [weak self, weak cell] amount in
             guard let self, let cell else { return }
-            stake(.likes(amount), on: key, cell: cell)
+            stake(.likes(amount), on: key, cell: cell, source: cell)
         }
         cell.stakeMenu = { [weak self, weak cell] in
             // A guest gets no stake menu (#1146): no amounts, no way into the
@@ -96,11 +96,11 @@ public final class PostCardStaking {
                 for: menuState(for: key),
                 stake: { [weak self, weak cell] amount in
                     guard let self, let cell else { return }
-                    stake(.likes(amount), on: key, cell: cell)
+                    stake(.likes(amount), on: key, cell: cell, source: cell)
                 },
                 shoot: { [weak self, weak cell] in
                     guard let self, let cell else { return }
-                    stake(.shot, on: key, cell: cell)
+                    stake(.shot, on: key, cell: cell, source: cell)
                 },
                 undo: { [weak self, weak cell] in
                     guard let self else { return }
@@ -211,31 +211,57 @@ public final class PostCardStaking {
         )
     }
 
-    func stake(_ spend: WalletStakeSpend, on key: String, cell: PostGridListRowCell) {
+    /// The stake menu for `postID` raised from anywhere — a post's long-press
+    /// or "..." menu (#1498: the palette's ♥ opens the amounts, the owner's
+    /// choice). The card that shows the post, if one is bound, plays the
+    /// receipt; the toast rises from `source`'s screen. Nil for a guest
+    /// (#1146), as on the card.
+    public func stakeMenu(for postID: PostID, from source: UIView) -> UIMenu? {
+        guard !MemberGates.isGuest(source) else { return nil }
+        let key = postID.rawValue
+        return StakeMenu.menu(
+            for: menuState(for: key),
+            stake: { [weak self, weak source] amount in
+                guard let self, let source else { return }
+                stake(.likes(amount), on: key, cell: boundRow(for: key), source: source)
+            },
+            shoot: { [weak self, weak source] in
+                guard let self, let source else { return }
+                stake(.shot, on: key, cell: boundRow(for: key), source: source)
+            },
+            undo: { [weak self] in
+                guard let self else { return }
+                undo(on: key, cell: boundRow(for: key))
+            },
+            openShop: StakeShop.openAction(from: source)
+        )
+    }
+
+    func stake(_ spend: WalletStakeSpend, on key: String, cell: PostGridListRowCell?, source: UIView) {
         if case .likes(let amount) = spend, amount <= 0 { return }
         // A guest signs up first; the stake then lands on the cell that asked,
         // if it still shows this post.
-        MemberGates.perform(.like, from: cell) { [weak self, weak cell] in
-            guard let self, let cell else { return }
-            self.commitStake(spend, on: key, cell: cell)
+        MemberGates.perform(.like, from: source) { [weak self, weak cell, weak source] in
+            guard let self, let source else { return }
+            self.commitStake(spend, on: key, cell: cell, source: source)
         }
     }
 
-    private func commitStake(_ spend: WalletStakeSpend, on key: String, cell: PostGridListRowCell) {
+    private func commitStake(_ spend: WalletStakeSpend, on key: String, cell: PostGridListRowCell?, source: UIView) {
         switch wallet.stake(spend, on: key) {
         case .boosted(_, let targetTotal, let spent):
             session[key, default: 0] += spent
             HapticImpact(style: .medium).impactOccurred()
             // Receipt before theatre, as on the rail: the heart's ink first,
             // then the "+N" rising off it.
-            if isBound(cell, to: key) {
+            if let cell, isBound(cell, to: key) {
                 cell.setViewerStake(targetTotal)
                 cell.playStakeConfirmation(amount: spent)
             }
-            showStakeToast(on: key, from: cell)
+            showStakeToast(on: key, from: cell ?? source)
         case .insufficientBalance, .targetCapReached, .noShotsLeft, .shotDoesNotFit:
             HapticNotification().notificationOccurred(.error)
-            if isBound(cell, to: key) { cell.playStakeDenied() }
+            if let cell, isBound(cell, to: key) { cell.playStakeDenied() }
         }
     }
 

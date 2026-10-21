@@ -199,7 +199,7 @@ struct CardStakeTests {
         let cell = row()
         staking.bind(cell, to: PostID("post-1"))
 
-        staking.stake(.shot, on: "post-1", cell: cell)
+        staking.stake(.shot, on: "post-1", cell: cell, source: cell)
 
         let shot = WalletStore.Policy.StakePack.likesPerShot
         #expect(wallet.balance == before - shot)
@@ -219,8 +219,8 @@ struct CardStakeTests {
         let staking = PostCardStaking(wallet: wallet)
         let cell = row()
         staking.bind(cell, to: PostID("post-1"))
-        staking.stake(.shot, on: "post-1", cell: cell)
-        staking.stake(.shot, on: "post-1", cell: cell)
+        staking.stake(.shot, on: "post-1", cell: cell, source: cell)
+        staking.stake(.shot, on: "post-1", cell: cell, source: cell)
 
         let state = staking.menuState(for: "post-1")
         #expect(state.stakedOnTarget == 200)

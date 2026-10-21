@@ -57,27 +57,48 @@ struct TileNativePreviewTests {
         #expect(lift.identifier as? String == "p3")
     }
 
-    /// Open, View Profile, then the host's author rows: the Following shelf's
-    /// menu, from the seams every host already sets.
-    @Test func theMenuIsTheShelfsFromTheHostsSeams() {
+    /// Every action in `menu`, at any depth: sections and the author's
+    /// submenu included.
+    private func leafTitles(_ menu: UIMenu) -> [String] {
+        menu.children.flatMap { element -> [String] in
+            if let action = element as? UIAction { return [action.title] }
+            if let sub = element as? UIMenu { return leafTitles(sub) }
+            return []
+        }
+    }
+
+    /// The post's rows, then the author's under "@handle" — View Profile
+    /// first, then the host's rows (#1498 §3). No "Open": a tap on the
+    /// preview opens the post.
+    @Test func theMenuIsThePostsThenTheAuthorsFromTheHostsSeams() throws {
         let page = makePage()
         page.onAuthorTapped = { _ in }
         page.authorMenuActions = { _ in [PostCardMenuAction.unfollow {}] }
         let menu = page.tileMenu(for: page.posts[2], at: page.indexPath(for: 2))
-        let titles = menu.children.compactMap { ($0 as? UIAction)?.title }
-        #expect(titles.first == "Open")
-        #expect(titles.contains("View Profile"))
-        let inline = menu.children.compactMap { $0 as? UIMenu }.flatMap(\.children)
-        #expect(!inline.isEmpty, "the host's author rows are missing")
+        let titles = leafTitles(menu)
+        #expect(!titles.contains("Open"))
+        #expect(titles.contains("Comment"))
+        #expect(titles.contains("Share"))
+        let handle = "@" + (page.posts[2].authorHandle ?? "")
+        let submenus = menu.children.compactMap { $0 as? UIMenu }.flatMap(\.children).compactMap { $0 as? UIMenu }
+        let author = try #require(submenus.first { $0.title == handle })
+        #expect(author.children.compactMap { ($0 as? UIAction)?.title } == ["View Profile", "Unfollow"])
     }
 
-    /// A host that offers nothing about the author (the viewer's own posts)
-    /// leaves Open alone — no Unfollow, no Report.
-    @Test func ownPostsOfferOnlyOpen() {
+    /// The viewer's own post: the post's rows, and no author to view, follow
+    /// or report.
+    @Test func ownPostsOfferNoAuthorRows() {
         let page = makePage()
+        page.onAuthorTapped = { _ in }
+        let own = page.posts[0].authorID
+        page.isViewer = { $0 == own }
         page.authorMenuActions = { _ in [] }
         let menu = page.tileMenu(for: page.posts[0], at: page.indexPath(for: 0))
-        #expect(menu.children.count == 1)
+        let titles = leafTitles(menu)
+        #expect(titles.contains("Comment"))
+        #expect(!titles.contains("View Profile"))
+        let submenus = menu.children.compactMap { $0 as? UIMenu }.flatMap(\.children).compactMap { $0 as? UIMenu }
+        #expect(!submenus.contains { $0.title.hasPrefix("@") })
     }
 
     // MARK: - List cards: the media alone (#1377)

@@ -92,8 +92,9 @@ struct ProfileFollowChannelTests {
     }
 
     /// A row configured before the relationship said "this is the viewer's
-    /// own profile" drew no "..."; once it settles the rows are asked again,
-    /// and Edit / Delete appear without the row being configured again.
+    /// own profile" offers only the post's own rows (#1498 §3); once it
+    /// settles the rows are asked again, and Edit / Delete join them without
+    /// the row being configured again.
     @Test func theOwnProfilesRowsGainTheirMenuWhenTheRelationshipSettles() throws {
         let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list)
         var isOwnProfile = false
@@ -116,13 +117,18 @@ struct ProfileFollowChannelTests {
         page.collectionView.layoutIfNeeded()
         let path = try #require(page.debugIndexPath(for: PostID("p0")))
         let row = try #require(page.collectionView.cellForItem(at: path) as? PostGridListRowCell)
-        #expect(!row.debugShowsAuthorMenu)
+        func titles() -> [String] {
+            page.menuActions(for: posts[0], authorID: ProfileID("prof-demo"), anchor: row).map(\.title)
+        }
+        #expect(row.debugShowsAuthorMenu)
+        #expect(!titles().contains("Edit post"))
 
         // The relationship lands: the viewer's own profile.
         isOwnProfile = true
         page.refreshAuthorMenus()
 
         #expect(row.debugShowsAuthorMenu)
+        #expect(titles().contains("Edit post") && titles().contains("Delete post"))
     }
 }
 
