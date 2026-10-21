@@ -99,6 +99,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// Loads a post's first page of comments into the panel's synchronous
     /// cache. Optional so the other entry points need not supply one.
     private let prefetchTopComments: ((PostID) async -> Void)?
+    /// A text post's prefetched top comments, for its long-press preview (#1498).
+    private let cachedTopComments: ((PostID) -> [CommentEntry]?)?
     /// Posts whose first page of comments has been asked for. A set, because
     /// the reconcile that feeds it runs at ~30Hz while a finger is moving and
     /// the same three cards are on screen for most of it.
@@ -191,6 +193,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         openPostHero: ((UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void)? = nil,
         prewarm: @escaping ([PostID]) async -> Void,
         prefetchTopComments: ((PostID) async -> Void)? = nil,
+        cachedTopComments: ((PostID) -> [CommentEntry]?)? = nil,
         router: (any Router)? = nil,
         reporting: (any ContentReporting)? = nil,
         socialGraph: (any SocialGraphWriting)? = nil,
@@ -209,6 +212,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         self.videoPlayback = videoPlayback
         self.prewarm = prewarm
         self.prefetchTopComments = prefetchTopComments
+        self.cachedTopComments = cachedTopComments
         self.router = router
         self.reporting = reporting
         self.socialGraph = socialGraph
@@ -386,6 +390,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // one profile destination, reached the way every other author tap
         // reaches it. The screen names the route; it never builds the profile.
         page.onAuthorTapped = { [weak self] post in self?.openAuthor(of: post) }
+        // A text card's long press shows its top comments (#1498).
+        page.topComments = cachedTopComments
         page.authorMenuActions = { [weak self] context in
             self?.authorMenuActions(for: context) ?? []
         }

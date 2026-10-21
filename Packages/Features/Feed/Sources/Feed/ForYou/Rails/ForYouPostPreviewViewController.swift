@@ -43,8 +43,13 @@ import UIKit
 /// author line of the card's overlay, which said who but not when or how
 /// liked. White words over a scrim and soft shadows, as on a card's media.
 ///
-/// A text post keeps the card's own overlay (`ForYouCardCaptionOverlay`). The
-/// caption is an `EmoteLabel` either way, so its emotes animate here too.
+/// ⚠️ A TEXT POST'S PREVIEW IS ITS POST SCREEN, IN SMALL (#1498, the owner
+/// 2026-10-20): the same author band, the caption, then its most popular
+/// comments in the post screen's own rows (`CommentRowView`) — as many as
+/// fit, never one cut in half; read-only, no composer. No comments: the
+/// caption alone. Measured when it is made, so UIKit sizes the lift to it.
+///
+/// The caption is an `EmoteLabel` either way, so its emotes animate here too.
 @MainActor
 final class ForYouPostPreviewViewController: UIViewController {
     let post: GalleryPost
@@ -76,13 +81,27 @@ final class ForYouPostPreviewViewController: UIViewController {
         return CGSize(width: width, height: (width / aspect).rounded())
     }
 
-    init(post: GalleryPost, imagePipeline: ImagePipeline, width: CGFloat, videoPlayback: VideoPlaybackController? = nil) {
+    /// - Parameter comments: a text post's top comments, most popular first
+    ///   (the post screen's first page, prefetched) — the preview shows the
+    ///   top-level ones that fit. Ignored for a picture.
+    init(
+        post: GalleryPost, imagePipeline: ImagePipeline, width: CGFloat,
+        videoPlayback: VideoPlaybackController? = nil, comments: [CommentEntry] = []
+    ) {
         self.post = post
         self.imagePipeline = imagePipeline
         self.videoPlayback = videoPlayback
         super.init(nibName: nil, bundle: nil)
-        preferredContentSize = Self.preferredSize(for: post, width: width)
+        if post.kind == .text {
+            textCard = TextCardPreview(post: post, comments: comments, width: width, imagePipeline: imagePipeline)
+            preferredContentSize = textCard?.size ?? Self.preferredSize(for: post, width: width)
+        } else {
+            preferredContentSize = Self.preferredSize(for: post, width: width)
+        }
     }
+
+    /// A text post's preview — see the note on this type.
+    private var textCard: TextCardPreview?
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -138,7 +157,9 @@ final class ForYouPostPreviewViewController: UIViewController {
             videoView.isUserInteractionEnabled = false
             videoView.pin(to: view)
         }
-        if isText {
+        if let textCard {
+            textCard.install(in: view)
+        } else if isText {
             let overlay = ForYouCardCaptionOverlay(post: post, placement: .onCard, imagePipeline: imagePipeline)
             overlay.pin(to: view)
         } else {
@@ -230,6 +251,8 @@ final class ForYouPostPreviewViewController: UIViewController {
     }
 
     #if DEBUG
+    /// A text post's preview, for a test (#1498).
+    var debugTextCard: TextCardPreview? { textCard }
     /// The foot's pieces, for a test (#1498).
     var debugBand: PostAuthorBandView { band }
     var debugLikes: PostLikeReadoutView { likes }
@@ -253,4 +276,99 @@ private final class PreviewFootScrimView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+
+/// A text post's preview (#1498): the author band, the caption, then the top
+/// comments that fit — laid out by frames, measured once at `width`.
+@MainActor
+final class TextCardPreview {
+    /// Between the words and the card's edges.
+    static let inset: CGFloat = 16
+    /// Between the band and the caption, and the caption and the rule.
+    static let gap: CGFloat = 12
+    /// The caption's lines at most: the post screen shows it whole, a lift
+    /// shows enough to read.
+    static let captionLines = 8
+    /// The tallest the lift is, as a share of its width — room for the menu
+    /// under it on any phone.
+    static let maxHeightShare: CGFloat = 1.35
+    /// Between two comments.
+    static let rowSpacing: CGFloat = 8
+    /// The caption's type: the post screen's body.
+    static let captionFont = UIFont.scaledFont(forTextStyle: .body, weight: .regular)
+
+    let band = PostAuthorBandView()
+    let likes = PostLikeReadoutView(ground: .card, font: ForYouPostPreviewViewController.likeFont)
+    let caption = EmoteLabel()
+    let rule = UIView()
+    /// The comments shown — those that fit, in order.
+    private(set) var rows: [CommentRowView] = []
+    /// Where each piece sits.
+    private var frames: [UIView: CGRect] = [:]
+    /// The card's measured size.
+    private(set) var size: CGSize = .zero
+
+    init(post: GalleryPost, comments: [CommentEntry], width: CGFloat, imagePipeline: ImagePipeline) {
+        let inset = Self.inset
+        let inner = max(0, width - 2 * inset)
+        var y = inset
+
+        band.configure(with: PostAuthorBandView.Model(post: post), imagePipeline: imagePipeline)
+        band.isUserInteractionEnabled = false
+        likes.setCount(post.reactionCount)
+        let bandHeight = PostAuthorBandView.height(showsIdentity: true)
+        let likeSize = likes.fittedSize
+        frames[likes] = CGRect(x: width - inset - likeSize.width, y: y + (bandHeight - likeSize.height) / 2,
+                               width: likeSize.width, height: likeSize.height)
+        let bandTrailing = likes.isHidden ? width - inset : width - inset - likeSize.width - 8
+        frames[band] = CGRect(x: inset, y: y, width: max(0, bandTrailing - inset), height: bandHeight)
+        y += bandHeight + Self.gap
+
+        caption.font = Self.captionFont
+        caption.textColor = .label
+        caption.textEntityStyle = .link
+        caption.numberOfLines = Self.captionLines
+        caption.lineBreakMode = .byTruncatingTail
+        caption.text = post.caption
+        let captionHeight = ceil(caption.sizeThatFits(CGSize(width: inner, height: .greatestFiniteMagnitude)).height)
+        frames[caption] = CGRect(x: inset, y: y, width: inner, height: captionHeight)
+        y += captionHeight
+
+        let maxHeight = (width * Self.maxHeightShare).rounded()
+        let now = Date()
+        let topLevel = comments.map { CommentDisplayModel(entry: $0, now: now) }.filter { !$0.isReply }
+        if !topLevel.isEmpty {
+            rule.backgroundColor = .separator
+            let ruleY = y + Self.gap
+            var rowY = ruleY + 1 + Self.gap / 2
+            for model in topLevel {
+                let row = CommentRowView(installsContextMenu: false)
+                row.configure(with: model, imagePipeline: imagePipeline)
+                row.isUserInteractionEnabled = false
+                let height = ceil(row.systemLayoutSizeFitting(
+                    CGSize(width: inner, height: UIView.layoutFittingCompressedSize.height),
+                    withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+                ).height)
+                // Never one cut in half: a row that does not fit ends the list.
+                guard rowY + height + inset <= maxHeight else { break }
+                frames[row] = CGRect(x: inset, y: rowY, width: inner, height: height)
+                rows.append(row)
+                rowY += height + Self.rowSpacing
+            }
+            if !rows.isEmpty {
+                frames[rule] = CGRect(x: inset, y: ruleY, width: inner, height: 0.5)
+                y = rowY - Self.rowSpacing
+            }
+        }
+        size = CGSize(width: width, height: min(maxHeight, ceil(y + inset)))
+    }
+
+    /// Puts every piece in `view`, at its measured frame.
+    func install(in view: UIView) {
+        for piece in [band, likes, caption] as [UIView] + (rows.isEmpty ? [] : [rule]) + rows {
+            piece.translatesAutoresizingMaskIntoConstraints = true
+            piece.frame = frames[piece] ?? .zero
+            view.addSubview(piece)
+        }
+    }
 }

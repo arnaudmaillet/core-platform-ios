@@ -345,6 +345,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             prefetchTopComments: { [commentsProvider] id in
                 await commentsProvider?.prefetchTopComments(for: id)
             },
+            // …and read back by a text card's long press (#1498).
+            cachedTopComments: { [commentsProvider] id in
+                commentsProvider?.cachedTopComments(for: id)
+            },
             // For the `+` item, which routes to the composer rather than
             // building one.
             router: router,

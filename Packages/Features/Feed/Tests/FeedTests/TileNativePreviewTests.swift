@@ -161,8 +161,9 @@ struct TileNativePreviewTests {
             let control = try #require(Self.firstControl(in: cell))
             let center = control.convert(CGPoint(x: control.bounds.midX, y: control.bounds.midY), to: cell)
             #expect(!swallows(center, in: cell), "a control keeps its press")
+            // A text card lifts whole now (#1498): nothing of it is swallowed.
             let text = try row(page, item: 1)
-            #expect(swallows(CGPoint(x: text.bounds.midX, y: 30), in: text), "a text card")
+            #expect(!swallows(CGPoint(x: text.bounds.midX, y: 30), in: text), "a text card's hold was swallowed")
         }
     }
 
@@ -176,15 +177,18 @@ struct TileNativePreviewTests {
         return nil
     }
 
-    /// A text-only card has no preview anywhere on it.
-    @Test func aTextCardHasNoPreview() throws {
+    /// ⚠️ A TEXT-ONLY CARD LIFTS WHOLE (#1498, the owner 2026-10-20 —
+    /// replacing #1377 for text cards): a press anywhere on it previews the
+    /// post, and the lift is the whole card.
+    @Test func aTextCardLiftsWhole() throws {
         try hostingList { page in
             let cell = try row(page, item: 1)
             #expect(cell.mediaHeroRect == nil)
             for y in stride(from: 4, to: cell.bounds.height, by: 24) {
-                #expect(try press(page, item: 1, at: CGPoint(x: cell.bounds.midX, y: y)) == nil)
+                #expect(try press(page, item: 1, at: CGPoint(x: cell.bounds.midX, y: y)) != nil, "no preview at y \(y)")
             }
-            #expect(page.tilePreview(at: page.indexPath(for: 1)) == nil)
+            let lift = try #require(page.tilePreview(at: page.indexPath(for: 1)))
+            #expect(lift.view === cell.contentView, "the lift is not the whole card")
         }
     }
 
