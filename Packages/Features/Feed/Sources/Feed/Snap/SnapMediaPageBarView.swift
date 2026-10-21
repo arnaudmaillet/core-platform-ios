@@ -105,6 +105,25 @@ final class SnapMediaPageBarView: UIView {
     /// Still clearly over the track's `restingAlpha`.
     static let restingFillInk: CGFloat = 0.6
 
+    // MARK: The clip's bar and its cursor (#1544, the owner 2026-10-21)
+
+    /// A clip's bar at rest: thinner than the strip's footprint
+    /// (`thickness`, which the layout keeps, so nothing around it moves).
+    /// A carousel's segments keep the full thickness; the bar thins as the
+    /// strip becomes one (`clipness`).
+    static let clipTrackHeight: CGFloat = 3
+    /// The bar while it is handled — a touch, a scrub: taller, so the thumb
+    /// sees what it holds. It grows into the band around the strip, outside
+    /// the footprint, which costs the layout nothing.
+    static let handledTrackHeight: CGFloat = 8
+    /// The cursor after a release, until the strip rests: a disc.
+    static let cursorDiameter: CGFloat = 8
+    /// The cursor while handled: a small vertical pill.
+    static let handledCursorSize = CGSize(width: 4, height: 14)
+    /// How long the bar and its cursor take to grow when touched, and to
+    /// shrink back on release.
+    static let handleDuration: TimeInterval = 0.2
+
     /// Whether the strip is up (a touch, a scrub): the indicator's full ink.
     private var isAwake = false
     private var fillInk: UIColor { UIColor.white.withAlphaComponent(isAwake ? 1 : Self.restingFillInk) }
@@ -289,6 +308,8 @@ final class SnapMediaPageBarView: UIView {
         wakeTimer = nil
         alpha = Self.restingOpacity
         isAwake = false
+        handling.settle(at: 0)
+        awakeness.settle(at: 0)
         pageCount = count
         isHidden = !hasStrip
         guard hasStrip else { return }
@@ -408,6 +429,7 @@ final class SnapMediaPageBarView: UIView {
         }
         guard alpha < 1 || !isAwake else { return }
         isAwake = true
+        animate(\.awakeness, to: 1, duration: 0.18)
         UIView.animate(withDuration: 0.18, delay: 0,
                        options: [.allowUserInteraction, .beginFromCurrentState]) {
             self.alpha = 1
@@ -419,6 +441,8 @@ final class SnapMediaPageBarView: UIView {
         wakeTimer?.invalidate()
         wakeTimer = nil
         isAwake = false
+        // The cursor shrinks back into the bar as the strip dims, together.
+        animate(\.awakeness, to: 0, duration: 0.45)
         UIView.animate(withDuration: 0.45, delay: 0,
                        options: [.allowUserInteraction, .beginFromCurrentState]) {
             self.alpha = Self.restingOpacity
@@ -490,6 +514,11 @@ final class SnapMediaPageBarView: UIView {
         // are drawn as, clip shape included.
         let clipness = clipPageProximity
         let clipWeights = clipness > 0 ? clipShapeWeights(available: runWidth) : nil
+        // The bar's thickness: the strip's own on a carousel, the clip's
+        // (thin at rest, taller when handled) as the strip becomes its bar.
+        let clipTrack = Self.clipTrackHeight
+            + (Self.handledTrackHeight - Self.clipTrackHeight) * handling.value
+        let trackHeight = bounds.height + (clipTrack - bounds.height) * clipness
         let shown = segments.indices.map { index -> CGFloat in
             guard let clipWeights else { return rooms[index] }
             // ⚠️ A DISTANCE, NOT A BOOLEAN — the same mistake this file made in
@@ -538,9 +567,9 @@ final class SnapMediaPageBarView: UIView {
             // ever is: assigning a frame to a transformed view re-derives its
             // bounds and cancels the transform silently — the trap
             // `SnapFeedCell.pageStage` documents one view up.
-            segment.bounds = CGRect(x: 0, y: 0, width: max(width, 0), height: bounds.height)
+            segment.bounds = CGRect(x: 0, y: 0, width: max(width, 0), height: trackHeight)
             segment.center = CGPoint(x: x + width / 2, y: bounds.height / 2)
-            segment.layer.cornerRadius = min(bounds.height, max(width, 0)) / 2
+            segment.layer.cornerRadius = min(trackHeight, max(width, 0)) / 2
             // ⚠️ A CLIP'S BAR IS A TRACK, so the segment carrying it steps back
             // to the resting ink and the PLAYED part is the bright thing. Left
             // at full white it would be a bar that reads as finished from the
@@ -614,6 +643,7 @@ final class SnapMediaPageBarView: UIView {
         layoutPulse(onPage: index, isBar: isBar, clipness: clipness)
         guard isBar, let playhead = drawnPlayhead else {
             fills[index]?.isHidden = true
+            if index == Int(position.rounded()) { cursor.isHidden = true }
             return
         }
         let fill = fills[index] ?? {
@@ -633,9 +663,126 @@ final class SnapMediaPageBarView: UIView {
         // indicator no longer grows in from the bar's start (#1305). Its only
         // motion is the cross-fade with the loading pulse (`setLoading`).
         fill.alpha = clipness * proximity(toPage: index) * indicatorPresence
+        let track = segments[index].bounds.height
         let played = max(min(CGFloat(playhead), 1), 0) * width
-        fill.frame = CGRect(x: 0, y: 0, width: played, height: bounds.height)
-        fill.layer.cornerRadius = min(bounds.height, played) / 2
+        fill.frame = CGRect(x: 0, y: 0, width: played, height: track)
+        fill.layer.cornerRadius = min(track, played) / 2
+        layoutCursor(onPage: index, played: played, track: track, alpha: fill.alpha)
+    }
+
+    /// The cursor at the end of the played part (#1544): as tall as the bar
+    /// at rest — it melts into the indicator's end and is not seen — a disc
+    /// after a release, and a small vertical pill while the bar is handled.
+    /// It never shrinks below the bar's height, so it never vanishes into
+    /// nothing; it dims with the strip.
+    private func layoutCursor(onPage index: Int, played: CGFloat, track: CGFloat, alpha: CGFloat) {
+        if cursor.superview == nil {
+            cursor.isUserInteractionEnabled = false
+            addSubview(cursor)
+        }
+        let segment = segments[index]
+        let disc = track + (Self.cursorDiameter - track) * awakeness.value
+        let size = CGSize(
+            width: disc + (Self.handledCursorSize.width - disc) * handling.value,
+            height: disc + (Self.handledCursorSize.height - disc) * handling.value
+        )
+        let minX = segment.center.x - segment.bounds.width / 2
+        let end = minX + played
+        // Inside the bar's ends, so the disc never hangs past the track.
+        let x = min(max(end, minX + size.width / 2), minX + max(segment.bounds.width, size.width) - size.width / 2)
+        cursor.isHidden = false
+        cursor.bounds = CGRect(origin: .zero, size: size)
+        cursor.center = CGPoint(x: x, y: bounds.height / 2)
+        cursor.layer.cornerRadius = min(size.width, size.height) / 2
+        cursor.backgroundColor = fillInk
+        cursor.alpha = segment.alpha * alpha
+    }
+
+    // MARK: - The bar's two tweens (#1544)
+
+    /// A value eased toward a target over a duration — driven by a display
+    /// link because the bar is laid out by hand, 30 times a second by the
+    /// playhead feed, and a `UIView` animation of its frames would be cut
+    /// by the next feed.
+    struct Tween {
+        private(set) var value: CGFloat = 0
+        private var from: CGFloat = 0
+        private var to: CGFloat = 0
+        private var start: CFTimeInterval = 0
+        private var duration: CFTimeInterval = 0
+
+        var isMoving: Bool { value != to }
+
+        mutating func settle(at target: CGFloat) {
+            value = target
+            from = target
+            to = target
+            duration = 0
+        }
+
+        mutating func move(to target: CGFloat, duration: CFTimeInterval, now: CFTimeInterval) {
+            guard target != to || value != target else { return }
+            guard duration > 0 else { return settle(at: target) }
+            from = value
+            to = target
+            start = now
+            self.duration = duration
+        }
+
+        /// Advances to `now`, ease-out.
+        mutating func step(now: CFTimeInterval) {
+            guard isMoving else { return }
+            let progress = min(max((now - start) / duration, 0), 1)
+            let eased = 1 - pow(1 - progress, 3)
+            value = progress >= 1 ? to : from + (to - from) * CGFloat(eased)
+        }
+    }
+
+    /// How handled the bar is: 1 while a finger is on it.
+    private var handling = Tween()
+    /// How awake the strip is: 1 from a touch until it rests.
+    private var awakeness = Tween()
+    private let cursor = UIView()
+    private var tweenLink: CADisplayLink?
+
+    private func animate(_ tween: ReferenceWritableKeyPath<SnapMediaPageBarView, Tween>, to target: CGFloat, duration: TimeInterval) {
+        let moves = window != nil && !UIAccessibility.isReduceMotionEnabled
+        self[keyPath: tween].move(to: target, duration: moves ? duration : 0, now: CACurrentMediaTime())
+        guard handling.isMoving || awakeness.isMoving else { return layoutSegments() }
+        guard tweenLink == nil else { return }
+        let link = CADisplayLink(target: TweenTarget(self), selector: #selector(TweenTarget.tick))
+        link.add(to: .main, forMode: .common)
+        tweenLink = link
+    }
+
+    fileprivate func stepTweens() {
+        let now = CACurrentMediaTime()
+        handling.step(now: now)
+        awakeness.step(now: now)
+        layoutSegments()
+        guard !handling.isMoving, !awakeness.isMoving else { return }
+        tweenLink?.invalidate()
+        tweenLink = nil
+    }
+
+    /// The display link's target, holding the bar weakly: a link retains its
+    /// target, and a bar retained by its own link would never leave.
+    @MainActor
+    private final class TweenTarget: NSObject {
+        weak var bar: SnapMediaPageBarView?
+        init(_ bar: SnapMediaPageBarView) { self.bar = bar }
+        @objc func tick(_ link: CADisplayLink) {
+            guard let bar else { return link.invalidate() }
+            bar.stepTweens()
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window == nil else { return }
+        tweenLink?.invalidate()
+        tweenLink = nil
+        handling.settle(at: 0)
     }
 
     // MARK: - Loading (#1537)
@@ -853,6 +1000,7 @@ final class SnapMediaPageBarView: UIView {
         switch state {
         case .began:
             wake()
+            animate(\.handling, to: 1, duration: Self.handleDuration)
             touchDownX = x
             travelled = false
             isDraggingPlayhead = false
@@ -885,6 +1033,7 @@ final class SnapMediaPageBarView: UIView {
             // `.ended` leaves a card hanging on screen.
             onScrubPreview(nil)
             wake()
+            animate(\.handling, to: 0, duration: Self.handleDuration)
             if isDraggingPlayhead {
                 isDraggingPlayhead = false
                 // The hold stays up, released, until the player agrees.
@@ -1106,6 +1255,20 @@ final class SnapMediaPageBarView: UIView {
     func debugFillAlpha(_ index: Int) -> CGFloat? {
         guard let fill = fills[index], !fill.isHidden else { return nil }
         return fill.alpha
+    }
+
+    /// The cursor's size, or nil when it is not drawn. Tests.
+    var debugCursorSize: CGSize? { cursor.isHidden || cursor.superview == nil ? nil : cursor.bounds.size }
+    /// The bar's drawn thickness on `index`. Tests.
+    func debugTrackHeight(_ index: Int) -> CGFloat? { segmentFrame(index)?.height }
+    /// Runs both tweens to their targets now. Tests.
+    func debugFinishTweens() {
+        let later = CACurrentMediaTime() + 10
+        handling.step(now: later)
+        awakeness.step(now: later)
+        tweenLink?.invalidate()
+        tweenLink = nil
+        layoutSegments()
     }
 
     func debugFillFrame(_ index: Int) -> CGRect? {
