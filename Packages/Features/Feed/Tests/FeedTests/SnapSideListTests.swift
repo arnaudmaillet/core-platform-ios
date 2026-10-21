@@ -2,6 +2,8 @@ import CoreContracts
 import CoreModels
 import Foundation
 import MediaCore
+import MediaPlayback
+import PostGrid
 import Testing
 import UIKit
 @testable import Feed
@@ -176,6 +178,62 @@ struct SnapSideListTests {
         #expect(sideList.listView.isHidden)
         #expect(feed.isReadyForInteractiveDismissal)
         #expect(!pager.allowsBackwardPaging)
+    }
+
+    // MARK: - Autoplay (#1509)
+
+    private struct StubSource: VideoSource {
+        func playableURL(for url: URL) async throws -> URL {
+            FileManager.default.temporaryDirectory.appendingPathComponent("stub.mp4")
+        }
+    }
+
+    private static func clip(_ id: String) -> FeedEntry {
+        FeedEntry(
+            post: Post(
+                id: PostID(id), authorID: ProfileID("author-\(id)"), caption: "",
+                attachments: [MediaAttachment(
+                    url: URL(string: "mock://video/side-\(id)"), thumbnailURL: nil,
+                    mimeType: "video/mp4", pixelWidth: 1080, pixelHeight: 1920
+                )],
+                publishedAt: Date(timeIntervalSince1970: 1_760_000_000), likeCountsHidden: false
+            ),
+            author: AuthorSummary(id: ProfileID("author-\(id)"), handle: "h", displayName: "N", avatarURL: nil),
+            likeCount: 812
+        )
+    }
+
+    /// ⚠️ THE LIST'S VIDEO TILES PLAY WHILE IT IS OPEN, AND ONLY THEN (#1509,
+    /// the owner's choice): muted, on the app's pool, within the shared
+    /// ranking's budget; closed, every tile gives its player back.
+    @Test func theListsVideoTilesPlayWhileItIsOpen() async throws {
+        let pool = VideoPlaybackController(source: StubSource(), poolSize: 6)
+        let list = SnapSideListView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        list.autoplay = SnapSideListAutoplay(pool: pool, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        list.frame = CGRect(x: 0, y: 0, width: 80, height: 600)
+        list.layoutIfNeeded()
+        list.show((0..<6).map { Self.clip("v\($0)") })
+        let cells = list.debugTileCells
+        #expect(cells.count >= 3, "guard: tiles on screen")
+        #expect(cells.allSatisfy { $0.loadedVideoRenderView == nil }, "a tile played while the list was closed")
+
+        // A tile plays once its poster is up (the galleries' rule).
+        for _ in 0..<600 where !cells.allSatisfy({ $0.renderedCover != nil }) {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(cells.allSatisfy { $0.renderedCover != nil }, "guard: the covers landed")
+        var waited = 0
+        while !GridVideoPlaybackCoordinator.allowsAutoplay(), waited < 400 {
+            waited += 1
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        list.setPlaying(true)
+        let started = cells.filter { $0.loadedVideoRenderView != nil }.count
+        #expect(started > 0 && started <= SnapSideListAutoplay.concurrentPlayers, "\(started) tiles started")
+        #expect(cells.allSatisfy { $0.isCompact }, "a side-list tile kept the grid's counter")
+
+        list.setPlaying(false)
+        #expect(list.autoplay?.playback.isPlaying(PostID("v0")) != true, "a tile kept playing once closed")
     }
 
     /// The list offers current posts of the feed's kind, none already in it.

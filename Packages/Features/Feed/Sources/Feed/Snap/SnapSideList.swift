@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import MediaCore
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -135,9 +136,11 @@ final class SnapSideListController: NSObject, UIGestureRecognizerDelegate {
 
     var isOpen: Bool { progress >= 1 }
 
-    init(host: SnapFeedViewController, imagePipeline: ImagePipeline) {
+    init(host: SnapFeedViewController, imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController? = nil) {
         self.host = host
         listView = SnapSideListView(imagePipeline: imagePipeline)
+        // Its video tiles loop, muted, on the app's one pool (#1509).
+        listView.autoplay = videoPlayback.map { SnapSideListAutoplay(pool: $0, imagePipeline: imagePipeline) }
         super.init()
         pan.addTarget(self, action: #selector(handlePan(_:)))
         pan.delegate = self
@@ -239,6 +242,8 @@ final class SnapSideListController: NSObject, UIGestureRecognizerDelegate {
             guard let self else { return }
             isSettling = false
             if !open { listView.isHidden = true }
+            // The tiles play while the list is open, and only then.
+            listView.setPlaying(open)
             host?.setContentScrollEnabled(true)
             host?.sideListDidSettle(open: open)
         }
@@ -290,6 +295,9 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
     private let imagePipeline: ImagePipeline
     private let collection: UICollectionView
     private(set) var entries: [FeedEntry] = []
+    /// The video tiles playing on their own, muted (#1509). Nil: none do
+    /// (no pool, tests).
+    var autoplay: SnapSideListAutoplay?
     private var outlined: PostID?
     var onSelect: ((FeedEntry) -> Void)?
 
@@ -322,6 +330,36 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
     func show(_ entries: [FeedEntry]) {
         self.entries = entries
         collection.reloadData()
+        collection.layoutIfNeeded()
+        reconcilePlayback()
+    }
+
+    /// The list is open (its tiles may play) or closed (they give their
+    /// players back now).
+    func setPlaying(_ playing: Bool) {
+        autoplay?.setActive(playing)
+        if playing { reconcilePlayback() }
+    }
+
+    /// Reconciles the tiles' players against the tiles on screen.
+    private func reconcilePlayback() {
+        guard let autoplay else { return }
+        let items = collection.indexPathsForVisibleItems.compactMap { path -> SnapSideListAutoplay.Item? in
+            guard entries.indices.contains(path.item),
+                  let cell = collection.cellForItem(at: path) as? PostGridTileCell else { return nil }
+            return .init(post: ForYouRepository.galleryPost(from: entries[path.item]), cell: cell)
+        }
+        autoplay.reconcile(items, in: collection)
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        reconcilePlayback()
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath
+    ) {
+        autoplay?.stop(cell)
     }
 
     func outline(_ id: PostID?) {
@@ -358,6 +396,8 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
                 with: ForYouRepository.galleryPost(from: entry), imagePipeline: imagePipeline,
                 showsInfo: entry.post.attachments.isEmpty
             )
+            // A cover landing late is when a still tile may start.
+            tile.onCoverLoaded = { [weak self] in self?.reconcilePlayback() }
         }
         cell.contentView.layer.cornerRadius = 6
         cell.contentView.layer.cornerCurve = .continuous
@@ -379,6 +419,9 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
     }
 
     #if DEBUG
+    /// The tiles on screen. Tests.
+    var debugTileCells: [PostGridTileCell] { collection.visibleCells.compactMap { $0 as? PostGridTileCell } }
+
     /// Selects the item at `index`, for a QA hook or a test.
     func debugSelect(_ index: Int) {
         guard entries.indices.contains(index) else { return }

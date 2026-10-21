@@ -563,7 +563,7 @@ final class SnapFeedViewController: UIViewController {
         view.backgroundColor = emptyGround
         configureCollectionView()
         if installsSideList {
-            let sideList = SnapSideListController(host: self, imagePipeline: imagePipeline)
+            let sideList = SnapSideListController(host: self, imagePipeline: imagePipeline, videoPlayback: videoPlayback)
             sideList.install(in: view)
             self.sideList = sideList
         }
@@ -934,6 +934,8 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // …and play again on a return to an open list (#1509).
+        if let sideList, sideList.isOpen { sideList.listView.setPlaying(true) }
         #if DEBUG
         // `-snap-side-list-open` (QA, #1509): the side list opens a beat
         // after the feed lands, to film or measure its open pose.
@@ -1288,6 +1290,8 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // The side list's tiles stop with the screen (#1509).
+        sideList?.listView.setPlaying(false)
         assertNoTabBarAfterAbandonedDismissal()
         revealDockWhenCloseCommits()
         setNativePopSuppressed(false)

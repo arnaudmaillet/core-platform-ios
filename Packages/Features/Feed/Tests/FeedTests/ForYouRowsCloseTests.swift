@@ -256,8 +256,11 @@ struct ForYouRowsCloseTests {
             let chrome = try #require(card.zoomRestingChrome)
 
             #expect(!Self.drawsPlayGlyph(card), "\(style) \(kind) flies a play glyph")
-            #expect(chrome.subviews.count == (style == .tile ? 1 : 0))
-            if style == .tile, let count = chrome.subviews.first {
+            // A brick's count, over the brick's gradient (#1509); nothing on a row.
+            #expect(chrome.subviews.count == (style == .tile ? 2 : 0))
+            if style == .tile {
+                #expect(chrome.subviews.contains { $0 is PostTileCountGradientView }, "the twin lost the brick's gradient")
+                let count = try #require(chrome.subviews.first { $0 is PostMetricLabel })
                 #expect(abs(count.frame.maxX - (130 - 8)) < 0.5, "the count sits where the tile's does")
             }
         }

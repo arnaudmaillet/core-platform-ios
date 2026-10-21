@@ -2562,13 +2562,57 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
 extension PostGridListRowCell: GridPlaybackCell {}
 
+/// The low, light gradient behind a tile's count (#1509): clear at its top,
+/// `PostGridTileCell.countGradientOpacity` black at the tile's bottom edge.
+/// Public so the tile's flight twin (`PostGridFlightCard`) wears it too.
+public final class PostTileCountGradientView: UIView {
+    override public class var layerClass: AnyClass { CAGradientLayer.self }
+
+    /// Where it sits on a tile of `bounds`: along the bottom edge.
+    public static func frame(in bounds: CGRect) -> CGRect {
+        let height = min(PostGridTileCell.countGradientMaxHeight, bounds.height * PostGridTileCell.countGradientHeightFraction)
+        return CGRect(x: bounds.minX, y: bounds.maxY - height, width: bounds.width, height: height)
+    }
+
+    override public init(frame: CGRect) {
+        super.init(frame: frame)
+        guard let gradient = layer as? CAGradientLayer else { return }
+        gradient.colors = [
+            UIColor.black.withAlphaComponent(0).cgColor,
+            UIColor.black.withAlphaComponent(PostGridTileCell.countGradientOpacity).cgColor,
+        ]
+        gradient.startPoint = CGPoint(x: 0.5, y: 0)
+        gradient.endPoint = CGPoint(x: 0.5, y: 1)
+    }
+
+    @available(*, unavailable)
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+
 // MARK: - Media tile
 
 /// One square of the Media grid: photo thumbnail, or video poster + badge,
-/// with the compact counter pair (reactions, views) resting bottom-leading —
-/// caption2 over a soft shadow, no scrim, so the preview stays the star.
+/// with the likes count resting bottom-trailing — caption2 over a soft
+/// shadow and a LOW, LIGHT gradient (#1509: the count read on no picture at
+/// all on a bright one), so the preview stays the star.
+///
+/// ⚠️ A NARROW TILE TAKES THE COMPACT REGISTER ON ITS OWN (#1509, the
+/// owner's choice): below `compactWidth` — the snap feed's side list — the
+/// count is smaller and tucked closer to the corner, so "♥ 812" fits whole.
+/// No per-screen flag: the For You, profile and place grids are wider and
+/// keep their size.
 public final class PostGridTileCell: UICollectionViewCell {
     public static let reuseID = "PostGridTileCell"
+
+    /// Below this width, the compact counter (#1509).
+    public static let compactWidth: CGFloat = 90
+    /// The compact counter's face.
+    static let compactMetaFont = UIFont.systemFont(ofSize: 10, weight: .semibold)
+    /// The gradient behind the count: how much of the tile's height it
+    /// covers, and how dark it ends at the bottom edge.
+    static let countGradientHeightFraction: CGFloat = 0.35
+    static let countGradientMaxHeight: CGFloat = 64
+    static let countGradientOpacity: CGFloat = 0.35
 
     /// The mosaic's rounding, and the default: it is paired with that layout's
     /// 1.5pt hairline gutter, where anything softer would leave visible pinches
@@ -2670,6 +2714,14 @@ public final class PostGridTileCell: UICollectionViewCell {
     private let likes = PostMetricLabel(
         symbol: LikesSymbol.glyph, font: metaFont, color: .white, shadowed: true
     )
+    /// The count's corner margins, regular and compact.
+    private var likesTrailing: NSLayoutConstraint?
+    private var likesBottom: NSLayoutConstraint?
+    /// Behind the count: transparent at its top, `countGradientOpacity`
+    /// black at the tile's bottom edge (#1509). Shown with the count.
+    private let countGradient = PostTileCountGradientView()
+    /// Whether the counter wears the compact register now.
+    public private(set) var isCompact = false
     /// The cover and the live surface over it (#1088): the cover's arrival
     /// on the loading ladder — a reconfigure cancelling the load in flight
     /// (#781), a parked frame outranking a late thumbnail — and the surface's
@@ -2711,13 +2763,20 @@ public final class PostGridTileCell: UICollectionViewCell {
         // numbers gather at the trailing edge on every surface, and a mosaic of
         // bricks whose counters sat on the other side would be the one place
         // the eye had to look somewhere else for them.
-        likes.constrain(in: contentView) { parent in
-            likes.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -8)
-            likes.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -7)
-            likes.leadingAnchor.constraint(
-                greaterThanOrEqualTo: parent.leadingAnchor, constant: 8
-            )
-        }
+        // Under the count, over the picture: added first so the count
+        // (constrained next) sits above it.
+        countGradient.isUserInteractionEnabled = false
+        contentView.addSubview(countGradient)
+        contentView.addSubview(likes)
+        likes.translatesAutoresizingMaskIntoConstraints = false
+        let trailing = likes.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8)
+        let bottom = likes.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -7)
+        likesTrailing = trailing
+        likesBottom = bottom
+        NSLayoutConstraint.activate([
+            trailing, bottom,
+            likes.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: 4),
+        ])
     }
 
     @available(*, unavailable)
@@ -2801,6 +2860,21 @@ public final class PostGridTileCell: UICollectionViewCell {
         // collection view sized it decides here, once it has a size.
         refreshInfoOverlay()
         infoOverlay?.frame = contentView.bounds
+        applyCounterRegister()
+        countGradient.frame = PostTileCountGradientView.frame(in: contentView.bounds)
+        countGradient.isHidden = likes.isHidden
+    }
+
+    /// The compact register below `compactWidth`, the regular one above
+    /// (#1509): its face and its corner margins.
+    private func applyCounterRegister() {
+        let compact = bounds.width > 0 && bounds.width < Self.compactWidth
+        guard compact != isCompact else { return }
+        isCompact = compact
+        likes.setFont(compact ? Self.compactMetaFont : Self.metaFont)
+        likes.glyphSpacing = compact ? 2 : 4
+        likesTrailing?.constant = compact ? -4 : -8
+        likesBottom?.constant = compact ? -4 : -7
     }
 
     /// Puts a cover on the tile immediately, without waiting for the async load
@@ -2870,6 +2944,8 @@ public final class PostGridTileCell: UICollectionViewCell {
     public var debugInfoOverlay: PostCardCaptionOverlay? { infoOverlay }
     /// Whether the tile's own likes readout (bottom-right) is drawn.
     public var debugShowsCornerLikes: Bool { !likes.isHidden }
+    /// Whether the gradient behind the count is drawn (#1509).
+    public var debugShowsCountGradient: Bool { !countGradient.isHidden && countGradient.frame.height > 0 }
     #endif
 
     /// Takes `post`'s counter and nothing else — see the list row's.
@@ -3016,6 +3092,7 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// would be one too many.
     private func applyCornerLikes() {
         likes.isHidden = infoOverlay != nil
+        countGradient.isHidden = likes.isHidden
     }
 
     private func removeInfoOverlay() {
