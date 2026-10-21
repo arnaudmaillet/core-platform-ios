@@ -2323,6 +2323,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         onReuse = nil
         onCoverLoaded = nil
         endVideoPreview()
+        // A selection belongs to the post it was made on.
+        endCaptionSelection()
         // Concealment is per-flight state and must not ride a recycled cell to
         // whatever post it is bound to next — the row equivalent of the tile's
         // `isHidden` reset.
@@ -2386,6 +2388,45 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // whatever post it is bound to next — see `setHeroConcealed`.
         card.alpha = 1
         authorBand.alpha = 1
+    }
+
+    // MARK: - Select Text (#1498 §4)
+
+    /// The caption made selectable in place, while a selection is up.
+    private var captionSelection: SelectableTextOverlay?
+
+    /// Whether Select Text can act here: a caption is drawn, and it can show
+    /// whole — a card of a fixed height (`fixedCaptionLines`) cuts its own
+    /// tail, so a selection there would select words nobody sees.
+    public var canSelectCaption: Bool {
+        !fullCaption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && fixedCaptionLines == nil && !captionLabel.isHidden
+    }
+
+    /// Selects the whole caption with the system's handles and edit menu
+    /// (`SelectableTextOverlay`, as comments and messages do). A truncated
+    /// caption is revealed first, so the selection is the caption itself,
+    /// never its "… Show more".
+    public func beginCaptionSelection() {
+        guard canSelectCaption else { return }
+        if !isCaptionExpanded, showMoreRange != nil {
+            revealTapped()
+            layoutIfNeeded()
+        }
+        let overlay = captionSelection ?? SelectableTextOverlay(label: captionLabel, host: card)
+        captionSelection = overlay
+        overlay.begin()
+    }
+
+    public func endCaptionSelection() {
+        captionSelection?.end()
+    }
+
+    public var isSelectingCaption: Bool { captionSelection?.isActive ?? false }
+
+    /// Whether a touch on `view` belongs to the selection in progress.
+    public func captionSelectionContains(_ view: UIView?) -> Bool {
+        captionSelection?.contains(view) ?? false
     }
 
     private func revealTapped() {

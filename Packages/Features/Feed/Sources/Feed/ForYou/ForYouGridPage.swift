@@ -165,6 +165,8 @@ final class ForYouGridPage: UIView {
     /// view has neither. It supplies the context and renders whatever comes
     /// back — including nothing, which hides the control.
     var authorMenuActions: ((AuthorMenuContext) -> [PostCardMenuAction])?
+    /// Select Text's session on this page's list cards (#1498 §4).
+    private let captionSelection = CaptionSelectionSession()
     /// Whether this author is the viewer — whose own post's menu names no
     /// profile to view (#1498). Nil: the page cannot tell, and offers it.
     var isViewer: ((ProfileID) -> Bool)?
@@ -986,6 +988,7 @@ final class ForYouGridPage: UIView {
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.addGestureRecognizer(offMediaHold)
+        captionSelection.install(on: collectionView)
         refreshControl.addAction(UIAction { [weak self] _ in self?.onRefresh?() }, for: .valueChanged)
         collectionView.refreshControl = refreshControl
         collectionView.pin(to: self)
@@ -3618,6 +3621,10 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         }
     }
 
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        captionSelection.end()
+    }
+
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         positionPagingFooter()
         schedulePinnedSectionCheck()
@@ -3842,9 +3849,40 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             comment: { [weak self] in self?.openPost(rawID: id.rawValue, showingComments: true) },
             savedDidChange: { [weak self] saved in
                 (self?.cell(for: id) as? PostGridListRowCell)?.isBookmarked = saved
-            }
+            },
+            // In place, where a list card draws the caption; a tile draws
+            // none, and offers no row (#1498 §4).
+            selectText: (cell(for: id) as? PostGridListRowCell)?.canSelectCaption == true
+                ? { [weak self] in
+                    guard let self, let card = cell(for: id) as? PostGridListRowCell else { return }
+                    captionSelection.begin(in: card)
+                }
+                : nil
         ).rows(for: post, anchor: anchor)
     }
+
+    /// A long press's menu showing ends a caption selection; one asked for
+    /// from the menu begins once it has gone (`CaptionSelectionSession`).
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willDisplayContextMenu configuration: UIContextMenuConfiguration,
+        animator: (any UIContextMenuInteractionAnimating)?
+    ) {
+        captionSelection.menuWillDisplay()
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willEndContextMenuInteraction configuration: UIContextMenuConfiguration,
+        animator: (any UIContextMenuInteractionAnimating)?
+    ) {
+        captionSelection.menuWillEnd(animator: animator)
+    }
+
+    #if DEBUG
+    /// Whether a caption selection is up. Tests.
+    var debugIsSelectingCaption: Bool { captionSelection.isActive }
+    #endif
 
     /// Opens the post with this id, wherever it now sits.
     private func openPost(rawID: String, showingComments: Bool = false) {

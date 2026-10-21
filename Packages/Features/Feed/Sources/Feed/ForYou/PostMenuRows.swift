@@ -7,7 +7,8 @@ import UIKit
 
 /// A post menu's own rows (#1498 §3), for every host that shows a post: Save,
 /// Repost, Comment and Like in the palette — each in its state, each doing
-/// what the card's control does — then Share, Copy Text and Copy Link.
+/// what the card's control does — then Share, Copy Text, Copy Link and,
+/// where the card draws its caption, Select Text.
 ///
 /// One builder, so the grid's pages, the shelf and the sound sheet cannot
 /// word or wire the same row two ways. Each seam is optional and gates its
@@ -24,6 +25,9 @@ struct PostMenuRows {
     var comment: (() -> Void)?
     /// After Save toggled: the host redraws its card's star.
     var savedDidChange: ((Bool) -> Void)?
+    /// Selects the caption where the card draws it (#1498 §4). Nil: no
+    /// Select Text row — a tile, which draws no caption.
+    var selectText: (() -> Void)?
 
     func rows(for post: GalleryPost, anchor: UIView) -> [PostCardMenuAction] {
         var rows: [PostCardMenuAction] = []
@@ -58,6 +62,7 @@ struct PostMenuRows {
             })
         }
         rows.append(.copyLink(perform: nil))
+        if let selectText, !caption.isEmpty { rows.append(.selectText(perform: selectText)) }
         return rows
     }
 

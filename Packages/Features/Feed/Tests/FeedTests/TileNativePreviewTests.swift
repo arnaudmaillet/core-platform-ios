@@ -154,6 +154,49 @@ struct TileNativePreviewTests {
         )
     }
 
+    /// Select Text (#1498 §4): a list card, which draws its caption, offers
+    /// it and selects in place; a grid tile, which draws none, does not.
+    @Test func selectTextIsOfferedWhereTheCaptionIsDrawn() async throws {
+        try hostingList { page in
+            let menu = page.tileMenu(for: page.posts[1], at: page.indexPath(for: 1))
+            let select = try #require(
+                menu.children.compactMap { $0 as? UIMenu }.flatMap(\.children)
+                    .compactMap { $0 as? UIAction }.first { $0.title == "Select Text" }
+            )
+            select.performWithSender(nil, target: nil)
+        }
+        let grid = makePage()
+        #expect(!leafTitles(grid.tileMenu(for: grid.posts[1], at: grid.indexPath(for: 1))).contains("Select Text"))
+    }
+
+    /// The selection starts a turn after the row's action, once its menu has
+    /// gone, and a drag ends it.
+    @Test func aCaptionSelectionBeginsAfterTheMenuAndADragEndsIt() async throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 3000))
+        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list)
+        page.frame = window.bounds
+        window.addSubview(page)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        page.setCorpusComplete(true)
+        page.render(.content(listPosts()))
+        page.layoutIfNeeded()
+        page.collectionView.layoutIfNeeded()
+
+        let menu = page.tileMenu(for: page.posts[1], at: page.indexPath(for: 1))
+        let select = try #require(
+            menu.children.compactMap { $0 as? UIMenu }.flatMap(\.children)
+                .compactMap { $0 as? UIAction }.first { $0.title == "Select Text" }
+        )
+        select.performWithSender(nil, target: nil)
+        await Task.yield()
+        for _ in 0..<20 where !page.debugIsSelectingCaption { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(page.debugIsSelectingCaption)
+
+        page.scrollViewWillBeginDragging(page.collectionView)
+        #expect(!page.debugIsSelectingCaption)
+    }
+
     /// Only a press that starts on the media lifts a list card: the caption,
     /// the header and the card's margins lift nothing.
     @Test func aListCardLiftsOnlyFromItsMedia() throws {
