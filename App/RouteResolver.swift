@@ -237,6 +237,18 @@ final class RouteResolver: Router {
                 push(destination, using: navigator, animated: false)
             }
 
+        case .profileCard:
+            // ⚠️ THE VIEWER'S OWN PILL PUSHES THEIR PROFILE (#1524): a card
+            // of oneself has nothing to act on.
+            switch route.profileCardResolution {
+            case .presentCard(let profileID, let stub):
+                presentProfileCard(profileID, stub: stub, using: navigator)
+            case .pushProfile(let profile):
+                self.route(to: profile)
+            case nil:
+                break
+            }
+
         case .profileHandle(let handle):
             // A tapped `@handle` or a `core-platform.click/@handle` link (#524). ⚠️ PUSHED
             // AT ONCE (#800): the profile resolves the handle behind its
@@ -374,6 +386,27 @@ extension RouteResolver {
         }
         attachBalance(profile)
         return profile
+    }
+
+    /// The profile card (#1524), over whatever the active stack shows on
+    /// top — a full-screen post included. Its "open the profile" pushes the
+    /// profile through `.profile` once the card has closed, and its lists
+    /// push on the same stack.
+    private func presentProfileCard(_ profileID: ProfileID, stub: ProfileIdentityStub?, using navigator: AppNavigating) {
+        guard let navigation = navigator.activeNavigationController else { return }
+        var presenter: UIViewController = navigation
+        while let presented = presenter.presentedViewController, !presented.isBeingDismissed {
+            presenter = presented
+        }
+        let card = profileFeature().makeProfileCardViewController(
+            for: profileID, identityStub: stub,
+            openProfile: { [weak self] in self?.route(to: .profile(profileID, stub: stub)) },
+            push: { [weak self, weak navigator] screen in
+                guard let self, let navigator else { return }
+                push(screen, using: navigator)
+            }
+        )
+        presenter.present(card, animated: true)
     }
 
     /// The screen a route would push, for a caller that pushes it itself —

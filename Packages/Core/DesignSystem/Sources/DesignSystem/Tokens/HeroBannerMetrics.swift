@@ -17,4 +17,9 @@ public enum HeroBannerMetrics {
     /// wider than the standard page margin so the block reads airy against a
     /// full-bleed picture.
     public static let identityInset: CGFloat = 20
+    /// A profile's band card at its second notch: the page climbs until the
+    /// avatar's top rests this far under the bar. The profile card sheet
+    /// (#1524) opens at that same climb, read from here, so the two cannot
+    /// drift apart.
+    public static let bandAvatarDetentGap: CGFloat = 40
 }

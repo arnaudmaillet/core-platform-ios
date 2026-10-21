@@ -330,6 +330,22 @@ public final class FeedViewModel {
         router?.route(to: .profile(id, stub: authorStubs[id]))
     }
 
+    /// The bottom toolbar's author pill (#1524): the author's profile CARD,
+    /// or, on the viewer's own post, their profile.
+    public func didTapAuthorPill(_ id: ProfileID, isViewer: Bool) {
+        let stub = authorStubs[id]
+        router?.route(to: .profileCard(id, stub: Self.pillStub(stub, isViewer: isViewer)))
+    }
+
+    /// The pill's stub, saying whether it is the viewer's. Pure, for tests.
+    nonisolated static func pillStub(_ stub: ProfileIdentityStub?, isViewer: Bool) -> ProfileIdentityStub? {
+        guard isViewer else { return stub }
+        return ProfileIdentityStub(
+            handle: stub?.handle ?? "", displayName: stub?.displayName ?? "",
+            isFollowing: stub?.isFollowing, isSelf: true
+        )
+    }
+
     /// The author's profile, made but NOT pushed — what a leftward swipe
     /// pushes following the finger (#1525). Nil without a router that makes
     /// one.

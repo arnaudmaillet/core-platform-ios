@@ -65,7 +65,7 @@ final class ProfileHeaderView: UIView {
         static let bandRowInset: CGFloat = Spacing.md
         /// The air between the bar's foot and a band card's avatar at its
         /// detent.
-        static let bandAvatarDetentGap: CGFloat = 40
+        static let bandAvatarDetentGap: CGFloat = HeroBannerMetrics.bandAvatarDetentGap
         /// The air above the tray, carried by the tray itself so it holds
         /// whether or not a website row sits above it.
         static let trayGap: CGFloat = Spacing.md
@@ -674,6 +674,16 @@ final class ProfileHeaderView: UIView {
 
     /// The action tray (Follow · Message · QR · ⋯).
     private weak var actionRowView: UIView?
+
+    /// Whether the action tray is shown. The profile card sheet (#1524)
+    /// hides it: its actions are the sheet's own bars.
+    var showsActionTray = true {
+        didSet {
+            guard showsActionTray != oldValue else { return }
+            actionRowView?.isHidden = !showsActionTray
+            layoutRevision += 1
+        }
+    }
 
     /// The action tray's foot in `view`'s space: once it has scrolled under
     /// the navigation bar, the bar takes the relationship over (the owner,
@@ -1489,7 +1499,10 @@ final class ProfileHeaderView: UIView {
         // row before it is the website or the bio.
         actionRow.isLayoutMarginsRelativeArrangement = true
         actionRow.directionalLayoutMargins.top = Metrics.trayGap
-        actionRow.heightAnchor.constraint(equalToConstant: Metrics.bubbleSize + Metrics.trayGap).isActive = true
+        // 999: a hidden tray (`showsActionTray`) collapses to nothing.
+        let trayHeight = actionRow.heightAnchor.constraint(equalToConstant: Metrics.bubbleSize + Metrics.trayGap)
+        trayHeight.priority = UILayoutPriority(999)
+        trayHeight.isActive = true
 
         // Layering: banner first (back), identity column on top of it — the
         // screen may move the banner further back, behind its content

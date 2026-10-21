@@ -17,6 +17,11 @@ public enum AppRoute: Equatable, Sendable {
     /// compose its navigation chrome before the push animates; `nil` when the
     /// origin knows nothing beyond the id (deep links, debug args).
     case profile(ProfileID, stub: ProfileIdentityStub?)
+    /// Someone's profile as a CARD (#1524): a measured sheet over the screen —
+    /// the banner, the header, the actions — that a bottom toolbar's author
+    /// pill opens instead of pushing the profile. The viewer's own (a stub
+    /// that says so) is the profile itself, pushed.
+    case profileCard(ProfileID, stub: ProfileIdentityStub?)
     /// A profile named by its handle — a tapped `@handle`, a
     /// `core-platform.click/@handle` link (#524). The handle without its `@`. The
     /// profile is pushed at once and looks the handle up itself (#800); one
@@ -84,4 +89,20 @@ public enum AppRoute: Equatable, Sendable {
     /// other side) when it still exists — a supervision notification's tap
     /// (#1106). A link that has ended opens the page alone.
     case supervision(otherAccountID: String)
+}
+
+public extension AppRoute {
+    /// What a `.profileCard` route opens (#1524): the card, or — the
+    /// viewer's own pill — the profile itself, pushed. Nil for any other
+    /// route.
+    var profileCardResolution: ProfileCardResolution? {
+        guard case .profileCard(let id, let stub) = self else { return nil }
+        return stub?.isSelf == true ? .pushProfile(.profile(id, stub: stub)) : .presentCard(id, stub: stub)
+    }
+}
+
+/// See `AppRoute.profileCardResolution`.
+public enum ProfileCardResolution: Equatable, Sendable {
+    case presentCard(ProfileID, stub: ProfileIdentityStub?)
+    case pushProfile(AppRoute)
 }

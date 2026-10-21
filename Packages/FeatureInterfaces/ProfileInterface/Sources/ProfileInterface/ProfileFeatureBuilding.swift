@@ -68,6 +68,21 @@ public protocol ProfileFeatureBuilding {
     /// the origin only has the id.
     func makeProfileViewController(for profileID: ProfileID, identityStub: ProfileIdentityStub?) -> UIViewController
 
+    /// Someone's profile CARD (#1524): a measured bottom sheet — the band
+    /// card at the profile's second notch, the profile's header, its actions
+    /// as native bar items — that a bottom toolbar's author pill opens
+    /// instead of pushing the profile. Ready to present.
+    /// - `openProfile`: the card was asked for the full profile (its info
+    ///   tapped). Called once the card has closed; the router pushes it.
+    /// - `push`: a screen the card opens on the presenter's stack (the
+    ///   followers and following lists). Called once the card has closed.
+    func makeProfileCardViewController(
+        for profileID: ProfileID,
+        identityStub: ProfileIdentityStub?,
+        openProfile: @escaping () -> Void,
+        push: @escaping (UIViewController) -> Void
+    ) -> UIViewController
+
     /// A profile named by a handle or a share token (#800). Pushed at once on
     /// its loading state, like any routed profile: the screen asks `lookup`
     /// whose it is, then loads that profile. A reference that names no one,

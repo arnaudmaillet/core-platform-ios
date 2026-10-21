@@ -622,6 +622,36 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         return controller
     }
 
+    public func makeProfileCardViewController(
+        for profileID: ProfileID,
+        identityStub: ProfileIdentityStub?,
+        openProfile: @escaping () -> Void,
+        push: @escaping (UIViewController) -> Void
+    ) -> UIViewController {
+        cache.observe(followEvents)
+        let card = ProfileCardViewController(
+            viewModel: ProfileViewModel(
+                repository: repository,
+                mapPinning: mapPinning,
+                reporting: reporting,
+                gallery: gallery,
+                galleryPreferences: galleryPreferences,
+                source: .profile(profileID),
+                router: router,
+                cache: cache,
+                followEvents: followEvents,
+                lookup: nil,
+                postDeleted: onPostDeleted
+            ),
+            imagePipeline: imagePipeline,
+            shareTargeting: shareTargeting,
+            makeRelationshipsViewController: makeRelationshipsFactory(),
+            identityStub: identityStub,
+            actions: .init(openProfile: openProfile, push: push)
+        )
+        return card.wrappedInSheet()
+    }
+
     public func viewerAvatarImage() async -> UIImage? {
         guard let url = (try? await repository.currentUserProfile())?.avatarURL else { return nil }
         return try? await imagePipeline.image(for: url, size: .avatar)

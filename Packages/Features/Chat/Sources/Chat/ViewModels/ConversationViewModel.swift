@@ -651,6 +651,14 @@ public final class ConversationViewModel {
         router?.route(to: .profile(peerProfileID, stub: nil))
     }
 
+    /// The toolbar's peer pill (#1524): the correspondent's profile CARD. The
+    /// header's other ways to the profile (the ••• View Profile, a message's
+    /// avatar) still push it (`didTapIdentity`).
+    public func didTapIdentityPill() {
+        guard let peerProfileID else { return }
+        router?.route(to: .profileCard(peerProfileID, stub: nil))
+    }
+
     /// The correspondent's profile, made but NOT pushed — a leftward swipe's
     /// interactive push (#1525). Nil until the peer resolves, or for group
     /// shapes with no single peer.

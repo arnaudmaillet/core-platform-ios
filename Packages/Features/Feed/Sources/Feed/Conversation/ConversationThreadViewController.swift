@@ -647,7 +647,8 @@ final class ConversationThreadViewController: UIViewController {
 
         peerPill.setFollowBadge(.none)
         peerPill.setOverMedia(false)
-        peerPill.onAuthorTapped = { [weak self] _ in self?.driver.didTapIdentity() }
+        // The pill opens the peer's profile card (#1524).
+        peerPill.onAuthorTapped = { [weak self] _ in self?.driver.didTapIdentityPill() }
         peerPill.onFollowTapped = { [weak self] id in self?.followPeer(id) }
         // The pill is the toolbar's (#671); a preview (no toolbar) keeps it
         // in the bar.
