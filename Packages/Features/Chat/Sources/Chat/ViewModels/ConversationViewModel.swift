@@ -651,6 +651,14 @@ public final class ConversationViewModel {
         router?.route(to: .profile(peerProfileID, stub: nil))
     }
 
+    /// The correspondent's profile, made but NOT pushed — a leftward swipe's
+    /// interactive push (#1525). Nil until the peer resolves, or for group
+    /// shapes with no single peer.
+    public func peerProfileDestination() -> UIViewController? {
+        guard let peerProfileID else { return nil }
+        return router?.destination(for: .profile(peerProfileID, stub: nil))
+    }
+
     private func loadTitle() {
         // A draft arrives with the identity the origin was already rendering —
         // the picker row, the suggestion, the map pin — so the header is right

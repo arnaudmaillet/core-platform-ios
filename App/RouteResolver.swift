@@ -203,17 +203,7 @@ final class RouteResolver: Router {
             // deep stack would strand every screen beneath it on an identity
             // that no longer applies — those actions belong at the canonical
             // entry point only.
-            let profile: UIViewController = if stub?.isSelf == true {
-                profileFeature().makeCurrentUserProfileViewController(
-                    onLogout: nil, identityStub: stub
-                )
-            } else {
-                profileFeature().makeProfileViewController(for: profileID, identityStub: stub)
-            }
-            // The header reads `[back][filter] … [coins]`: the balance is the
-            // viewer's, on anyone's profile. Attached BEFORE the push so the
-            // item rides the push instead of popping in after it.
-            attachBalance(profile)
+            let profile = makeProfile(profileID, stub: stub)
             // ⚠️ AT ONCE, ON ITS LOADING STATE (#778, the owner's rule
             // 2026-10-10: a push never waits on data). The header redacts in
             // place and the gallery shows its bones; the data cross-fades in
@@ -371,6 +361,32 @@ extension RouteResolver {
         // The balance rides the push, as on an author's profile.
         attachBalance(profile)
         pushProfile(profile, for: route, using: navigator)
+    }
+
+    /// The profile a `.profile` route pushes — the viewer's own when the
+    /// stub says so — with the balance on its bar, attached BEFORE any push so
+    /// the item rides it instead of popping in after.
+    private func makeProfile(_ profileID: ProfileID, stub: ProfileIdentityStub?) -> UIViewController {
+        let profile: UIViewController = if stub?.isSelf == true {
+            profileFeature().makeCurrentUserProfileViewController(onLogout: nil, identityStub: stub)
+        } else {
+            profileFeature().makeProfileViewController(for: profileID, identityStub: stub)
+        }
+        attachBalance(profile)
+        return profile
+    }
+
+    /// The screen a route would push, for a caller that pushes it itself —
+    /// a swipe's interactive push (#1525). A profile only, for now: what a
+    /// leftward swipe hangs on the feed and the conversation. Profile routes
+    /// are not gated, so a guest gets one too.
+    func destination(for route: AppRoute) -> UIViewController? {
+        switch route {
+        case .profile(let profileID, let stub):
+            return makeProfile(profileID, stub: stub)
+        default:
+            return nil
+        }
     }
 
     /// Records a profile push for the repeat filter, under the route's own

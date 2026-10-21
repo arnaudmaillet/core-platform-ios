@@ -204,6 +204,10 @@ public protocol ConversationThreadDriving: AnyObject {
     func pickMedia(_ source: ConversationThreadMediaSource, from presenter: UIViewController)
     /// Sends a failed message again.
     func retry(_ messageID: String)
+    /// The correspondent's profile, made but NOT pushed — what a leftward
+    /// swipe on the thread pushes following the finger (#1525). Nil while
+    /// the peer is unresolved, or for a conversation with no single peer.
+    func peerProfileDestination() -> UIViewController?
 }
 
 public extension ConversationThreadDriving {
@@ -227,6 +231,8 @@ public extension ConversationThreadDriving {
     var sendsMedia: Bool { false }
     func pickMedia(_ source: ConversationThreadMediaSource, from presenter: UIViewController) {}
     func retry(_ messageID: String) {}
+    /// Drivers with no profile to push.
+    func peerProfileDestination() -> UIViewController? { nil }
 }
 
 @MainActor

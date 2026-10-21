@@ -189,14 +189,21 @@ extension SnapSideList {
 
 /// The side list's gesture, state and views, for one snap feed screen.
 @MainActor
-final class SnapSideListController: NSObject, UIGestureRecognizerDelegate {
+///
+/// ⚠️ ITS DRAG IS THE SCREEN'S SWIPE CHAIN'S (#1525): no pan of its own. The
+/// feed's `SwipeStageArbiter` picks it as the panel stage — leftward on a
+/// media post, rightward while open — and hands it the drag
+/// (`SwipePanel`); a leftward drag with the list open goes to the next stage,
+/// the author's profile.
+final class SnapSideListController: NSObject, SwipePanel {
     private weak var host: SnapFeedViewController?
-    let pan = UIPanGestureRecognizer()
     let listView: SnapSideListView
     /// 0 closed … 1 open.
     private(set) var progress: CGFloat = 0
     private var startProgress: CGFloat = 0
-    private var isSettling = false
+    private(set) var isSettling = false
+    /// A drag drives the list now.
+    private var isDragging = false
     private var loadTask: Task<Void, Never>?
     /// The post the list on show was made for (#1509: a new list per
     /// anchor, cached while the screen lives — `SnapFeedViewController
@@ -205,7 +212,7 @@ final class SnapSideListController: NSObject, UIGestureRecognizerDelegate {
 
     /// Open, opening or closing: the screen's dismissals stand aside.
     var isEngaged: Bool {
-        progress > 0 || isSettling || pan.state == .began || pan.state == .changed
+        progress > 0 || isSettling || isDragging
     }
 
     var isOpen: Bool { progress >= 1 }
@@ -216,15 +223,11 @@ final class SnapSideListController: NSObject, UIGestureRecognizerDelegate {
         // Its video tiles loop, muted, on the app's one pool (#1509).
         listView.autoplay = videoPlayback.map { SnapSideListAutoplay(pool: $0, imagePipeline: imagePipeline) }
         super.init()
-        pan.addTarget(self, action: #selector(handlePan(_:)))
-        pan.delegate = self
-        pan.maximumNumberOfTouches = 1
         listView.isHidden = true
         listView.onSelect = { [weak self] entry in self?.host?.showSideListEntry(entry) }
     }
 
     func install(in view: UIView) {
-        view.addGestureRecognizer(pan)
         view.addSubview(listView)
     }
 
@@ -263,50 +266,28 @@ final class SnapSideListController: NSObject, UIGestureRecognizerDelegate {
         if value > 0 { listView.isHidden = false }
     }
 
-    // MARK: Gesture
+    // MARK: The drag (`SwipePanel`, driven by the screen's arbiter)
 
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard gestureRecognizer === pan, let host, !isSettling else { return false }
-        let velocity = pan.velocity(in: host.view)
-        guard abs(velocity.x) > abs(velocity.y) else { return false }
-        // Open: a rightward drag closes. Closed: a leftward one opens, where
-        // the screen has nothing else for it.
-        if progress > 0 { return velocity.x > 0 }
-        guard velocity.x < 0 else { return false }
-        let origin = CGPoint(
-            x: pan.location(in: host.view).x - pan.translation(in: host.view).x,
-            y: pan.location(in: host.view).y - pan.translation(in: host.view).y
-        )
-        return host.sideListMayOpen(from: origin)
-    }
-
-    /// Alongside the dismissal drivers (which never begin leftward, and
-    /// stand aside while the list is engaged) and the pager, which is frozen
-    /// the moment this begins.
-    func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-    ) -> Bool {
-        true
-    }
-
-    @objc private func handlePan(_ pan: UIPanGestureRecognizer) {
+    func panelDragDidBegin() {
         guard let host else { return }
-        switch pan.state {
-        case .began:
-            startProgress = progress
-            host.setContentScrollEnabled(false)
-            loadIfNeeded()
-        case .changed:
-            let dx = pan.translation(in: host.view).x
-            apply(min(1, max(0, startProgress - dx / geometry.travel)))
-        case .ended:
-            settle(open: geometry.settlesOpen(progress: progress, velocityX: pan.velocity(in: host.view).x))
-        case .cancelled, .failed:
-            settle(open: startProgress >= 1)
-        default:
-            break
-        }
+        isDragging = true
+        startProgress = progress
+        host.setContentScrollEnabled(false)
+        loadIfNeeded()
+    }
+
+    func panelDragDidChange(translationX: CGFloat) {
+        apply(min(1, max(0, startProgress - translationX / geometry.travel)))
+    }
+
+    func panelDragDidEnd(velocityX: CGFloat) {
+        isDragging = false
+        settle(open: geometry.settlesOpen(progress: progress, velocityX: velocityX))
+    }
+
+    func panelDragDidCancel() {
+        isDragging = false
+        settle(open: startProgress >= 1)
     }
 
     /// Springs to open or closed, then gives the pager back.

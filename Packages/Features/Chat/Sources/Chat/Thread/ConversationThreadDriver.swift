@@ -153,6 +153,7 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     func forward(_ messageID: String) { viewModel.perform(.forward, on: messageID) }
     func delete(_ messageID: String) { viewModel.deleteMessage(messageID) }
     func didTapIdentity() { viewModel.didTapIdentity() }
+    func peerProfileDestination() -> UIViewController? { viewModel.peerProfileDestination() }
 
     // MARK: - Media (#681)
 

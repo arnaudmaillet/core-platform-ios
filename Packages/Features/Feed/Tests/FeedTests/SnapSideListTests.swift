@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNavigation
 import Foundation
 import MediaCore
 import MediaPlayback
@@ -254,11 +255,15 @@ struct SnapSideListTests {
     }
 
     /// A feed of `ids`, the side list installed, its "similar posts" `others`.
-    private func openableFeed(_ ids: [String], others: [String]) async throws -> SnapFeedViewController {
+    private func openableFeed(
+        _ ids: [String], others: [String], text: Set<String> = [], router: (any Router)? = nil
+    ) async throws -> SnapFeedViewController {
         let controller = SnapFeedViewController(
             // Its first page IS the feed: a seed alone is replaced by the
             // first page when it lands.
-            viewModel: FeedViewModel(repository: PostsProvider(entries: ids.map { Self.entry($0) })),
+            viewModel: FeedViewModel(
+                repository: PostsProvider(entries: ids.map { Self.entry($0, media: !text.contains($0)) }), router: router
+            ),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             reporting: SideListReporter()
         )
@@ -274,6 +279,20 @@ struct SnapSideListTests {
     private func settle(_ condition: () -> Bool) async -> Bool {
         for _ in 0..<600 where !condition() { try? await Task.sleep(for: .milliseconds(5)) }
         return condition()
+    }
+
+    func openableFeedForChain(
+        _ ids: [String], others: [String] = [], text: Set<String> = [], router: (any Router)?
+    ) async throws -> SnapFeedViewController {
+        let feed = try await openableFeed(ids, others: others, text: text, router: router)
+        // The chain reads the post on show: settled under a loaded suite too.
+        try #require(await settle { feed.activePostID == PostID(ids[0]) && !feed.collectionView.isDecelerating },
+                     "guard: the first post on show")
+        return feed
+    }
+
+    func openForChain(_ feed: SnapFeedViewController) async throws -> SnapSideListController {
+        try await open(feed)
     }
 
     /// Opens `feed`'s list on the post on show and waits for it to drive the card.
@@ -339,6 +358,97 @@ struct SnapSideListTests {
         sideList.settle(open: false, animated: false)
         #expect(feed.orderedIDs == [PostID("p1"), PostID("p2")])
         #expect(feed.activePostID == PostID("p1"))
+    }
+}
+
+/// The leftward swipe chain on the vertical feed (#1525): the side list on a
+/// media post, the author's profile on a text post and past the open list.
+@MainActor
+struct SnapSwipeChainTests {
+    /// Makes a profile screen for every `.profile` route, and records them.
+    @MainActor
+    final class ProfileRouter: Router {
+        var made: [ProfileID] = []
+        func route(to route: AppRoute) {}
+        func destination(for route: AppRoute) -> UIViewController? {
+            guard case .profile(let id, _) = route else { return nil }
+            made.append(id)
+            let screen = UIViewController()
+            screen.title = id.rawValue
+            return screen
+        }
+    }
+
+    private let tests = SnapSideListTests()
+
+    private func center(of feed: SnapFeedViewController) -> CGPoint {
+        CGPoint(x: feed.view.bounds.midX - 40, y: feed.view.bounds.midY)
+    }
+
+    private static func isPanel(_ stage: SwipeStage?) -> Bool {
+        if case .panel = stage { return true }
+        return false
+    }
+
+    private static func pushed(_ stage: SwipeStage?) -> UIViewController? {
+        if case .push(let make) = stage { return make() }
+        return nil
+    }
+
+    /// A media post, the list closed: leftward opens the list; rightward is
+    /// not the chain's (the dismissal's).
+    @Test func aMediaPostsLeftwardOpensTheList() async throws {
+        let feed = try await tests.openableFeedForChain(["p1", "p2"], router: ProfileRouter())
+        #expect(Self.isPanel(feed.swipeStage(for: .leftward, at: center(of: feed))))
+        #expect(feed.swipeStage(for: .rightward, at: center(of: feed)) == nil)
+    }
+
+    /// ⚠️ A TEXT POST HAS NO LIST (#1525, the owner): leftward pushes the
+    /// author's profile.
+    @Test func aTextPostsLeftwardPushesTheAuthor() async throws {
+        let router = ProfileRouter()
+        let feed = try await tests.openableFeedForChain(["t1", "p2"], text: ["t1"], router: router)
+        let stage = feed.swipeStage(for: .leftward, at: center(of: feed))
+        #expect(!Self.isPanel(stage), "a text post opened the side list")
+        let profile = try #require(Self.pushed(stage))
+        #expect(profile.title == "author-t1", "not the post's author")
+    }
+
+    /// ⚠️ WITH THE LIST OPEN, LEFTWARD PUSHES THE CARD'S AUTHOR — the post on
+    /// show, the list's current item, not the anchor's; rightward closes.
+    @Test func withTheListOpenLeftwardPushesTheShownPostsAuthor() async throws {
+        let feed = try await tests.openableFeedForChain(["p1", "p2"], others: ["m1", "m2"], router: ProfileRouter())
+        let sideList = try await tests.openForChain(feed)
+        feed.settlePager(onIndex: feed.orderedIDs.count - 1)
+        let shown = try #require(feed.activePostID)
+        #expect(shown != PostID("p1"), "guard: the card moved off the anchor")
+        let profile = try #require(Self.pushed(feed.swipeStage(for: .leftward, at: CGPoint(x: 60, y: feed.view.bounds.midY))))
+        #expect(profile.title == "author-\(shown.rawValue)", "not the shown post's author")
+        #expect(Self.isPanel(feed.swipeStage(for: .rightward, at: center(of: feed))), "rightward does not close the list")
+        _ = sideList
+    }
+
+    /// ⚠️ BACK FROM THE PROFILE, THE POST IS FULL SCREEN (#1525): a committed
+    /// push closes the list behind it, the post on show placed after the
+    /// anchor; a cancelled one leaves the list open.
+    @Test func aCommittedPushClosesTheListBehindTheProfile() async throws {
+        let feed = try await tests.openableFeedForChain(["p1", "p2"], others: ["m1", "m2"], router: ProfileRouter())
+        let sideList = try await tests.openForChain(feed)
+        feed.settlePager(onIndex: feed.orderedIDs.count - 1)
+        let shown = try #require(feed.activePostID)
+
+        feed.swipePushDidEnd(committed: false)
+        #expect(sideList.isOpen, "a cancelled push closed the list")
+        feed.swipePushDidEnd(committed: true)
+        #expect(!sideList.isOpen)
+        #expect(feed.activePostID == shown, "the post on show did not stay")
+        #expect(feed.orderedIDs == [PostID("p1"), shown, PostID("p2")])
+    }
+
+    /// No router that makes a profile: no push stage at all.
+    @Test func noDestinationNoPushStage() async throws {
+        let feed = try await tests.openableFeedForChain(["t1"], text: ["t1"], router: nil)
+        #expect(feed.swipeStage(for: .leftward, at: center(of: feed)) == nil)
     }
 }
 
