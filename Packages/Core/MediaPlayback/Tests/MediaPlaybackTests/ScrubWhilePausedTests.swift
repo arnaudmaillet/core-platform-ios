@@ -102,25 +102,33 @@ struct ScrubWhilePausedTests {
         // ⚠️ THE CLOCK STARTS WHEN THE PLAYER PLAYS, NOT AT THE CALL (#1405,
         // develop d485a18c): on a starved runner the rate took ~1.9 s to land
         // after `setPaused(false)`, and the head, still on the scrubbed
-        // frame, read as 1.9 s behind. The start is bracketed by the last
-        // look that saw it stopped and the first that saw it playing, so a
-        // late look widens the window rather than skewing it.
-        var stopped = ContinuousClock.now
-        var playing: ContinuousClock.Instant?
+        // frame, read as 1.9 s behind.
+        //
+        // ⚠️ AND FROM WHERE THE HEAD WAS THEN, NOT FROM THE SCRUB (#1405,
+        // develop a60f986f): the item's timebase can run before
+        // `timeControlStatus` reaches the main thread, and CI read the head
+        // 0.257 s AHEAD of a clock started on the status. Nor from the first
+        // look where the head moved: a resume can nudge it a frame or two
+        // before it plays (measured: 0.05 s of advance after 0.31 s). The
+        // player's own head at the first look that sees it playing is the
+        // start; the drag-back this suite guards is seconds, not a fraction.
+        var resumed: (head: Double, at: ClosedRange<ContinuousClock.Instant>)?
         for _ in 0..<6_000 {
-            let look = ContinuousClock.now
             if controller.isPlayingForReal(in: surface) {
-                playing = look
+                let before = ContinuousClock.now
+                let head = try #require(controller.playhead(in: surface)).fraction
+                resumed = (head, before...ContinuousClock.now)
                 break
             }
-            stopped = look
             try await Task.sleep(for: .milliseconds(10))
         }
-        let resumed = try #require(playing, "the player never played after the resume")
+        let (start, startedAt) = try #require(resumed, "the player never played after the resume")
+        #expect(abs(start - scrubbed) * Self.duration < 1,
+                "resuming dragged the clip back to where the scrub started: \(start) after a scrub to \(scrubbed)")
         // Not a wait for something to happen: a stretch of playback, read back
         // against the time it actually took (below), however long that was.
         try await Task.sleep(for: .milliseconds(300))
-        var reading = try read(controller, surface, playingSince: stopped...resumed)
+        var reading = try read(controller, surface, playingSince: startedAt)
         // ⚠️ NEVER BETWEEN THE ITEM'S END AND THE LOOP'S RESTART (#1405). The
         // loop is `actionAtItemEnd = .none` and a seek to zero on the end
         // notification, run on the main queue: until that seek runs, the item
@@ -132,7 +140,7 @@ struct ScrubWhilePausedTests {
         // look, and that is far off the loop.
         for _ in 0..<600 where reading.head.fraction >= Self.heldAtTheEnd {
             try await Task.sleep(for: .milliseconds(10))
-            reading = try read(controller, surface, playingSince: stopped...resumed)
+            reading = try read(controller, surface, playingSince: startedAt)
         }
         let (head, readFrom, readBy) = reading
 
@@ -140,12 +148,15 @@ struct ScrubWhilePausedTests {
         // (#599): a starved "300 ms" ran ~2.4 s on CI and wrapped the 3 s loop
         // back to 0.56. Dragged back to where the scrub started, the clip is
         // off by the scrub's length whatever the elapsed time.
-        let duration = 3.0
+        let duration = Self.duration
         #expect(TimingTolerance.isOnLoop(
-            head.fraction * duration, start: scrubbed * duration,
+            head.fraction * duration, start: start * duration,
             elapsed: Self.seconds(readFrom)...Self.seconds(readBy), period: duration, slack: 0.25
-        ), "resuming dragged the clip back to where the scrub started: \(head) after \(readFrom)…\(readBy)")
+        ), "the clip did not play on from where it resumed (\(start)): \(head) after \(readFrom)…\(readBy)")
     }
+
+    /// The fixture's length (`clip()`'s default).
+    private static let duration = 3.0
 
     /// A playhead this close to 1 is the item held at its end, waiting for
     /// the loop's seek to zero: closer than half a frame of the 30 fps fixture.
