@@ -257,3 +257,66 @@ final class EmptyForYouProvider: ForYouProviding, @unchecked Sendable {
     func firstPage() async throws -> ForYouPage { ForYouPage(posts: [], nextPageToken: nil) }
     func page(after token: String) async throws -> ForYouPage { ForYouPage(posts: [], nextPageToken: nil) }
 }
+
+/// The long press's preview of a picture (#1498, the owner 2026-10-20): the
+/// card's author band at card size over the media's foot, the likes at its
+/// trailing end, the caption's lines above it.
+@MainActor
+struct PreviewAuthorBandTests {
+    private static func photo(likes: Int64? = 123, caption: String = "Quiet morning, notes and a long walk before work") -> GalleryPost {
+        GalleryPost(
+            id: PostID("p"), kind: .photo, isRepost: false,
+            thumbnailURL: URL(string: "https://example.com/p.jpg"),
+            aspectRatio: 3.0 / 4.0, caption: caption, publishedAtMS: 1,
+            authorID: ProfileID("marcus"), authorName: "Marcus Holt", authorHandle: "marcus.holt",
+            reactionCount: likes
+        )
+    }
+
+    private func laidOut(_ post: GalleryPost) -> ForYouPostPreviewViewController {
+        let preview = ForYouPostPreviewViewController(
+            post: post, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), width: 360
+        )
+        preview.loadViewIfNeeded()
+        preview.view.frame = CGRect(origin: .zero, size: preview.preferredContentSize)
+        preview.view.layoutIfNeeded()
+        return preview
+    }
+
+    @Test func thePicturesAuthorIsTheCardsBandWithItsLikes() {
+        let preview = laidOut(Self.photo())
+        let band = preview.debugBand
+        let size = preview.view.bounds.size
+        #expect(band.superview === preview.view)
+        #expect(band.frame.height == PostAuthorBandView.avatarDiameter, "not the card's band size: \(band.frame)")
+        #expect(abs(band.frame.maxY - (size.height - ForYouPostPreviewViewController.footInset)) < 0.5, "not on the media's foot")
+        #expect(band.overrideUserInterfaceStyle == .dark, "the band's ink is not light over the picture")
+
+        let likes = preview.debugLikes
+        #expect(!likes.isHidden && likes.postLikeCount == 123)
+        #expect(likes.frame.maxX <= size.width - ForYouPostPreviewViewController.footInset + 0.5, "the likes are not trailing")
+        #expect(band.frame.maxX <= likes.frame.minX, "the band runs under the likes")
+        #expect(abs(likes.frame.midY - band.frame.midY) < 0.5, "the likes do not close the band's line")
+
+        let caption = preview.debugCaption
+        #expect(!caption.isHidden && caption.frame.maxY <= band.frame.minY, "the caption is not above the author")
+        #expect(caption.numberOfLines == PostCardCaptionOverlay.mediaCaptionLines)
+        #expect(!preview.view.subviews.contains { $0 is PostCardCaptionOverlay }, "the small author line came back")
+    }
+
+    /// No caption: the band alone; no count: no likes.
+    @Test func withoutCaptionOrCountTheBandStandsAlone() {
+        let preview = laidOut(Self.photo(likes: nil, caption: ""))
+        #expect(preview.debugCaption.isHidden)
+        #expect(preview.debugLikes.isHidden)
+        #expect(abs(preview.debugBand.frame.maxX - (preview.view.bounds.width - ForYouPostPreviewViewController.footInset)) < 0.5)
+    }
+
+    /// A text post keeps the card's own overlay — its preview is the next slice.
+    @Test func aTextPostKeepsTheCardsOverlay() {
+        let text = GalleryPost(id: PostID("t"), kind: .text, isRepost: false, thumbnailURL: nil, caption: "Words", publishedAtMS: 1)
+        let preview = laidOut(text)
+        #expect(preview.view.subviews.contains { $0 is PostCardCaptionOverlay })
+        #expect(preview.debugBand.superview == nil)
+    }
+}

@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import EmoteKit
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -35,8 +36,15 @@ import UIKit
 /// playing gets a playback of the preview's own, returned when it closes.
 /// Without a pool (or for a photograph) the cover is the preview.
 ///
-/// The caption is the card's own overlay (`ForYouCardCaptionOverlay`), so its
-/// emotes animate here too (`EmoteLabel`).
+/// ⚠️ A PICTURE'S AUTHOR IS THE CARD'S BAND (#1498, the owner 2026-10-20):
+/// over the media's foot, the card's own `PostAuthorBandView` at card size —
+/// the 40 pt disc, the name over `@handle · date` — with the likes at its
+/// trailing end, and the caption's two lines above it. It replaced the small
+/// author line of the card's overlay, which said who but not when or how
+/// liked. White words over a scrim and soft shadows, as on a card's media.
+///
+/// A text post keeps the card's own overlay (`ForYouCardCaptionOverlay`). The
+/// caption is an `EmoteLabel` either way, so its emotes animate here too.
 @MainActor
 final class ForYouPostPreviewViewController: UIViewController {
     let post: GalleryPost
@@ -130,10 +138,12 @@ final class ForYouPostPreviewViewController: UIViewController {
             videoView.isUserInteractionEnabled = false
             videoView.pin(to: view)
         }
-        let overlay = ForYouCardCaptionOverlay(
-            post: post, placement: isText ? .onCard : .onMedia, imagePipeline: imagePipeline
-        )
-        overlay.pin(to: view)
+        if isText {
+            let overlay = ForYouCardCaptionOverlay(post: post, placement: .onCard, imagePipeline: imagePipeline)
+            overlay.pin(to: view)
+        } else {
+            installMediaFoot()
+        }
 
         guard !isText, let url = post.thumbnailURL else { return }
         cover.load(url, using: imagePipeline) { [weak self] image, transition in
@@ -142,10 +152,105 @@ final class ForYouPostPreviewViewController: UIViewController {
         }
     }
 
+    // MARK: - A picture's foot (#1498)
+
+    /// The scrim under the words: clear at its top, dark at the foot.
+    private let footScrim = PreviewFootScrimView()
+    /// The caption's two lines, white, over the scrim.
+    private let captionLabel = EmoteLabel()
+    /// The card's author band, at card size.
+    private let band = PostAuthorBandView()
+    /// The likes, closing the band's line.
+    private let likes = PostLikeReadoutView(ground: .media, font: ForYouPostPreviewViewController.likeFont)
+
+    /// Between the foot's words and the preview's edges.
+    static let footInset: CGFloat = 16
+    /// Between the caption and the band under it.
+    static let captionToBand: CGFloat = 10
+    /// The likes' type: the band's handle line, a step up.
+    static let likeFont = UIFont.scaledFont(forTextStyle: .subheadline, weight: .semibold)
+
+    private func installMediaFoot() {
+        footScrim.isUserInteractionEnabled = false
+        view.addSubview(footScrim)
+
+        captionLabel.font = .scaledFont(forTextStyle: .footnote, weight: .medium)
+        captionLabel.textColor = .white
+        captionLabel.textEntityStyle = .emphasis
+        captionLabel.numberOfLines = PostCardCaptionOverlay.mediaCaptionLines
+        captionLabel.lineBreakMode = .byTruncatingTail
+        captionLabel.text = post.caption
+        captionLabel.isHidden = post.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        view.addSubview(captionLabel)
+
+        // The card's band, drawn in the dark style over the picture: its
+        // `.label` / `.secondaryLabel` ink reads white on the scrim.
+        band.overrideUserInterfaceStyle = .dark
+        band.configure(with: PostAuthorBandView.Model(post: post), imagePipeline: imagePipeline)
+        band.isUserInteractionEnabled = false
+        view.addSubview(band)
+
+        likes.setCount(post.reactionCount)
+        likes.isUserInteractionEnabled = false
+        view.addSubview(likes)
+
+        for ink in [captionLabel, band, likes] as [UIView] {
+            ink.layer.shadowColor = UIColor.black.cgColor
+            ink.layer.shadowOpacity = 0.45
+            ink.layer.shadowRadius = 3
+            ink.layer.shadowOffset = .zero
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        guard band.superview != nil else { return }
+        let bounds = view.bounds
+        let inset = Self.footInset
+        let bandHeight = PostAuthorBandView.height(showsIdentity: true)
+        let likeSize = likes.isHidden ? .zero : likes.fittedSize
+        likes.frame = CGRect(
+            x: bounds.maxX - inset - likeSize.width,
+            y: bounds.maxY - inset - bandHeight / 2 - likeSize.height / 2,
+            width: likeSize.width, height: likeSize.height
+        )
+        let bandTrailing = likes.isHidden ? bounds.maxX - inset : likes.frame.minX - 8
+        band.frame = CGRect(x: inset, y: bounds.maxY - inset - bandHeight,
+                            width: max(0, bandTrailing - inset), height: bandHeight)
+        let captionWidth = max(0, bounds.width - 2 * inset)
+        let captionHeight = captionLabel.isHidden ? 0
+            : captionLabel.sizeThatFits(CGSize(width: captionWidth, height: .greatestFiniteMagnitude)).height
+        captionLabel.frame = CGRect(
+            x: inset, y: band.frame.minY - Self.captionToBand - captionHeight,
+            width: captionWidth, height: captionHeight
+        )
+        // From a little above the words to the foot.
+        let top = (captionLabel.isHidden ? band.frame.minY : captionLabel.frame.minY) - 40
+        footScrim.frame = CGRect(x: 0, y: max(0, top), width: bounds.width, height: bounds.maxY - max(0, top))
+    }
+
     #if DEBUG
+    /// The foot's pieces, for a test (#1498).
+    var debugBand: PostAuthorBandView { band }
+    var debugLikes: PostLikeReadoutView { likes }
+    var debugCaption: UILabel { captionLabel }
     var debugShowsCover: Bool { imageView.image != nil }
     /// The clip's surface and whether the preview owns its playback (#1318).
     var debugVideoView: VideoRenderView { videoView }
     var debugOwnsPlayback: Bool { ownsPlayback }
     #endif
+}
+
+/// The preview's foot scrim (#1498): clear at its top, 55 % black at the foot.
+private final class PreviewFootScrimView: UIView {
+    override class var layerClass: AnyClass { CAGradientLayer.self }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        guard let gradient = layer as? CAGradientLayer else { return }
+        gradient.colors = [UIColor.black.withAlphaComponent(0).cgColor, UIColor.black.withAlphaComponent(0.55).cgColor]
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
