@@ -56,8 +56,13 @@ struct EmoteSeeds: Sendable {
     private static let seeded = Set(ids)
 
     /// Whether `emote` at this size and motion is seeded. Cheap: no I/O.
+    ///
+    /// ⚠️ THE 48 PX BUCKET TOO (#1504): For You's card caption is
+    /// `.footnote`, whose em box rounds to 48 px and missed the 64 px seeds —
+    /// a bake on every cold launch. The 64 px sheet drawn at three quarters
+    /// is sharper than a 48 px bake, and ships already.
     func covers(_ emote: Emote, pixelSide: Int, motion: EmoteEngine.Motion) -> Bool {
-        pixelSide == Self.side && motion == .loop && Self.seeded.contains(emote.id)
+        pixelSide <= Self.side && motion == .loop && Self.seeded.contains(emote.id)
     }
 
     /// The seed's bytes, or nil when `emote` at this size and motion has none.
