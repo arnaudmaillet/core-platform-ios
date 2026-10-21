@@ -357,22 +357,35 @@ final class ProfileCardViewController: UIViewController {
 
     /// The toolbar's items for a relationship. Pure, for tests.
     nonisolated enum ToolbarItem: Equatable, Sendable {
-        case follow, following, requested, openProfile, message, more
+        case follow, requested, openProfile, message, bell, qr
     }
 
-    nonisolated static func toolbarItems(for followButton: ProfileViewModel.FollowButton) -> [ToolbarItem] {
+    /// ⚠️ THE OWNER'S BARS (#1562, 2026-10-22): `[——Follow——][Message][QR]`
+    /// while not followed, `[bell][——Message——][QR]` once followed — the
+    /// mute bell down from the top bar, Following gone (Unfollow is in the
+    /// ••• menu, now top left). `showsBell`: a member who can mute;
+    /// `showsQR`: a share card to show (or the profile not loaded yet).
+    nonisolated static func toolbarItems(
+        for followButton: ProfileViewModel.FollowButton, showsBell: Bool = true, showsQR: Bool = true
+    ) -> [ToolbarItem] {
+        let qr: [ToolbarItem] = showsQR ? [.qr] : []
         switch followButton {
-        case .follow: [.follow, .message, .more]
-        case .following: [.following, .message, .more]
-        case .requested: [.requested, .message, .more]
-        // Not followable (#726): Message and the menu stay, as on the profile.
-        case .unavailable: [.message, .more]
-        // Unknown yet: what does not depend on the answer.
-        case .hidden: [.message, .more]
+        case .follow: return [.follow, .message] + qr
+        case .following: return (showsBell ? [.bell] : []) + [.message] + qr
+        // A private profile asked: its request is withdrawn from its item.
+        case .requested: return [.requested, .message] + qr
+        // Not followable (#726), or unknown yet: what does not depend on it.
+        case .unavailable, .hidden: return [.message] + qr
         // The viewer's own profile, reached by id: nothing to do here but
         // open it.
-        case .edit: [.openProfile]
+        case .edit: return [.openProfile]
         }
+    }
+
+    /// Whether the top bar carries the ••• menu: everywhere but the viewer's
+    /// own profile, which only opens it. Pure, for tests.
+    nonisolated static func showsMoreMenu(for followButton: ProfileViewModel.FollowButton) -> Bool {
+        followButton != .edit
     }
 
     /// The item that takes the toolbar's free width (#1542, the owner): Follow
@@ -388,9 +401,8 @@ final class ProfileCardViewController: UIViewController {
     /// What the bars last showed: they are rebuilt only when it changes, so
     /// a phase or a refresh that leaves them alone does not redraw them.
     private struct BarState: Equatable {
-        var bell: Bool
         var muted: Bool
-        var qr: Bool
+        var more: Bool
         var toolbar: [ToolbarItem]
     }
 
@@ -398,20 +410,21 @@ final class ProfileCardViewController: UIViewController {
 
     private func applyBars() {
         let state = BarState(
-            bell: showsMuteBell, muted: !viewModel.muteScopes.isEmpty,
-            qr: viewModel.shareCard != nil || viewModel.profile == nil,
-            toolbar: Self.toolbarItems(for: followButtonState)
+            muted: !viewModel.muteScopes.isEmpty,
+            more: Self.showsMoreMenu(for: followButtonState),
+            toolbar: Self.toolbarItems(
+                for: followButtonState, showsBell: showsMuteBell,
+                showsQR: viewModel.shareCard != nil || viewModel.profile == nil
+            )
         )
         guard state != shownBars else { return }
         shownBars = state
+        // The ••• menu, top left (#1562).
         var leading: [UIBarButtonItem] = []
-        if state.bell { leading.append(makeMuteBellItem()) }
-        if state.qr {
-            leading.append(UIBarButtonItem(
-                image: UIImage(systemName: "qrcode"),
-                primaryAction: UIAction { [weak self] _ in self?.presentShareSheet() }
-            ))
-            leading.last?.accessibilityLabel = "QR Code"
+        if state.more {
+            let more = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: makeMoreMenu())
+            more.accessibilityLabel = "More"
+            leading.append(more)
         }
         navigationItem.setLeftBarButtonItems(leading, animated: view.window != nil)
 
@@ -429,8 +442,15 @@ final class ProfileCardViewController: UIViewController {
             switch kind {
             case .follow:
                 items.append(followItem(title: "Follow", prominent: true))
-            case .following:
-                items.append(followItem(title: "Following", prominent: false))
+            case .bell:
+                items.append(makeMuteBellItem())
+            case .qr:
+                let qr = UIBarButtonItem(
+                    image: UIImage(systemName: "qrcode"),
+                    primaryAction: UIAction { [weak self] _ in self?.presentShareSheet() }
+                )
+                qr.accessibilityLabel = "QR Code"
+                items.append(qr)
             case .requested:
                 items.append(followItem(title: "Requested", prominent: false))
             case .openProfile:
@@ -443,13 +463,6 @@ final class ProfileCardViewController: UIViewController {
                 items.append(UIBarButtonItem(title: "Message", primaryAction: UIAction { [weak self] _ in
                     self?.messageTapped()
                 }))
-            case .more:
-                // With an item stretched, ••• simply closes the row; without
-                // one, it keeps the trailing edge.
-                if wide == nil { items.append(.flexibleSpace()) }
-                let more = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: makeMoreMenu())
-                more.accessibilityLabel = "More"
-                items.append(more)
             }
         }
         setToolbarItems(items, animated: view.window != nil)
@@ -537,8 +550,25 @@ final class ProfileCardViewController: UIViewController {
 
     /// The profile's ••• menu (`ProfileMenuBuilder`), the same state and
     /// handlers. The QR is the bar's, never in it.
+    #if DEBUG
+    /// The ••• menu's rows, flattened. Tests.
+    var debugMoreMenuTitles: [String] {
+        func titles(_ elements: [UIMenuElement]) -> [String] {
+            elements.flatMap { element -> [String] in
+                guard let menu = element as? UIMenu, menu.title.isEmpty else { return [element.title] }
+                return titles(menu.children)
+            }
+        }
+        return titles(moreMenuElements())
+    }
+    #endif
+
     private func moreMenuElements() -> [UIMenuElement] {
-        ProfileMenuBuilder.moreMenuElements(
+        // Following has left the toolbar (#1562): Unfollow leads the menu.
+        let unfollow: [UIMenuElement] = followButtonState == .following
+            ? PostCardMenu.sections(for: [.unfollow { [weak self] in self?.followTapped() }], author: nil)
+            : []
+        return unfollow + ProfileMenuBuilder.moreMenuElements(
             ProfileMenuBuilder.MoreMenuState(
                 canShare: viewModel.shareCard != nil,
                 mapPin: viewModel.mapPinButton,
