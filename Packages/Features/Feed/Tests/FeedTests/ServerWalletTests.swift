@@ -47,6 +47,45 @@ struct ServerWalletTests {
         #expect(service.likes(of: MockAuthService.accountID) == 275)
     }
 
+    /// ⚠️ A TEEN'S GEM SPEND IS REFUSED WITH NOTHING DEBITED (#1475, #1495):
+    /// the store, over the edge to a wallet that answers WAL-3001, reports
+    /// the refusal and keeps the gems, the shots and the items as they were.
+    @Test func aTeensGemSpendIsRefusedWithNothingDebited() async throws {
+        let dataset = MockSocialDataset()
+        let bff = MockBFF()
+        let service = MockWalletService(
+            store: MockCounterStore(dataset: dataset), dataset: dataset, startingLikes: 250,
+            isGemSpendingRestricted: { _ in true }
+        )
+        service.register(on: bff)
+        let client = ConnectClientFactory.makeAuthenticated(
+            host: "https://mock.bff.local", tokenProvider: WalletMemberToken(), httpClient: bff
+        )
+        let viewer = ViewerSession(authSession: WalletSession()) { _ in [ProfileID(MockSocialDataset.viewerProfileID)] }
+        let store = WalletStore(
+            defaults: UserDefaults(suiteName: "server-wallet-\(UUID().uuidString)")!,
+            scope: StorageScope(owner: .member(account: MockAuthService.accountID, profile: MockSocialDataset.viewerProfileID))
+        )
+        store.server = ServerWallet(walletClient: Wallet_V1_WalletServiceClient(client: client), viewer: viewer)
+        #expect(await store.refreshFromServer())
+        #expect(store.gemSpendingRestricted, "the wallet did not say spending is restricted")
+        await store.refreshItemsFromServer()
+        let gems = store.snapshot().gems
+        #expect(gems > 0, "the premise: gems to spend")
+
+        let item = await store.purchaseItem("theme.violet", price: 50, idempotencyKey: "teen-item-0001")
+        #expect(item == .unavailable, "the refusal was not the outcome: \(item)")
+        #expect(store.snapshot().gems == gems, "gems were debited")
+        #expect(store.ownedItems?.contains("theme.violet") != true, "the refused item is owned")
+
+        let tier = try #require(store.stakePackTiers.first)
+        let pack = await store.buyStakePack(tier, idempotencyKey: "teen-pack-0001")
+        #expect(pack == .unavailable, "the refusal was not the outcome: \(pack)")
+        #expect(store.snapshot().gems == gems, "gems were debited")
+        #expect(store.stakeShots == 0, "shots were loaded")
+        #expect(service.gems(of: MockAuthService.accountID) == Int64(gems), "the server charged")
+    }
+
     /// A settled stake is the server's verdict alone: no gems in shadow
     /// mode (#903); a comment stake is left out of the post list.
     @Test func aSettledStakeIsItsVerdictAlone() {
