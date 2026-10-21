@@ -1788,6 +1788,9 @@ final class SoundSheetViewController: UIViewController {
     }
 
     private var isAutoplayScheduled = false
+    /// The lift a committed long press opens from, while the flight takes
+    /// off (#1543) — the grid's rule (`ForYouGridPage.previewLaunch`).
+    var previewLaunch: PreviewLaunch?
 
     /// The tile, described for the shared flight (`presentSnapFeedHero`): its
     /// hero, and the window it opens through (a text post) or closes through
@@ -1809,7 +1812,9 @@ final class SoundSheetViewController: UIViewController {
         }
         // The standard tile hides whole for a flight; the sheet's own knows
         // its own way (#1280).
-        let conceal: (Bool) -> Void = { concealed in
+        let conceal: (Bool) -> Void = { [weak self] concealed in
+            // The lift the flight took off from goes with the tile (#1543).
+            if concealed, !fromGallery, let launch = self?.previewLaunch, launch.postID == id { launch.conceal() }
             switch cell() {
             case let own as SoundSheetTileCell: own.setConcealed(concealed)
             case let standard?: standard.isHidden = concealed
@@ -1819,7 +1824,15 @@ final class SoundSheetViewController: UIViewController {
         let standard = tile.drawsStandardTile ? tile.post : nil
         let pipeline = imagePipeline
         let frame: (UICoordinateSpace) -> CGRect? = { [weak self] space in
-            fromGallery ? gallery?.tileFrame(for: id, in: space) : self?.tileFrame(for: id, in: kind, space: space)
+            if fromGallery { return gallery?.tileFrame(for: id, in: space) }
+            // ⚠️ A COMMITTED PREVIEW IS WHERE THE FLIGHT TAKES OFF (#1543):
+            // the card leaves from the lift as captured at the commit
+            // (`PreviewLaunch`), never back through the tile; once the
+            // capture has expired, the tile is the answer.
+            if let launch = self?.previewLaunch, launch.postID == id, let lift = launch.frame(in: space) {
+                return lift
+            }
+            return self?.tileFrame(for: id, in: kind, space: space)
         }
         let cover = cell()?.renderedCover
         let presenter: UIViewController = gallery ?? self
@@ -2114,11 +2127,12 @@ extension SoundSheetViewController: UICollectionViewDelegate {
         contextMenuConfiguration configuration: UIContextMenuConfiguration,
         dismissalPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-        tilePreview(at: indexPath)
+        // A committed lift fades where it is, under its flight (#1543).
+        previewLaunch?.dismissalTarget() ?? tilePreview(at: indexPath)
     }
 
-    /// Tapping the lift opens the post — the tap's own open, once UIKit has
-    /// put the tile back (the grid's rule).
+    /// Tapping the lift opens the post: a picture flies from the lift itself
+    /// (#1543), words go back into their tile first (the grid's rule).
     func collectionView(
         _ collectionView: UICollectionView,
         willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
@@ -2127,6 +2141,17 @@ extension SoundSheetViewController: UICollectionViewDelegate {
         guard let raw = configuration.identifier as? String else { return }
         let id = PostID(raw)
         guard let kind = sections.first(where: { $0.ids.contains(id) || $0.all.contains(id) })?.kind else { return }
+        // From the lift, not back through the tile (#1543): the flight leaves
+        // from the lift captured now (`heroOrigin`'s frame) — a
+        // post with a picture to fly, as `heroOrigin`'s `hasHero` reads it.
+        if let preview = animator.previewViewController as? ForYouPostPreviewViewController,
+           preview.post.id == id, preview.post.kind != .text,
+           tileCell(for: id, in: kind)?.renderedCover != nil, let launch = PreviewLaunch(preview) {
+            previewLaunch = launch
+            animator.preferredCommitStyle = .dismiss
+            DispatchQueue.main.async { [weak self] in self?.openFromPreview(id, kind: kind) }
+            return
+        }
         animator.preferredCommitStyle = .dismiss
         animator.addCompletion { [weak self] in
             DispatchQueue.main.async { self?.openFromPreview(id, kind: kind) }

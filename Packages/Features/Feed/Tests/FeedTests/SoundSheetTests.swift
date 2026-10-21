@@ -511,6 +511,34 @@ struct SoundSheetTests {
         #expect(card.layer.cornerCurve == .continuous, "the card landed a circle's corner on a squircle")
     }
 
+    /// ⚠️ FROM THE LIFT (#1543): a committed long press's flight takes off
+    /// from where the viewer sees the preview, never back through the tile,
+    /// and concealing the tile takes the lift with it.
+    @Test func aCommittedPreviewIsTheFlightsOrigin() throws {
+        let controller = sheet(tiles: 3)
+        let navigation = try laidOut(controller)
+        let window = UIWindow(frame: navigation.view.frame)
+        window.isHidden = true
+        window.addSubview(navigation.view)
+        let post = Self.galleryPost("p1", kind: .photo)
+        let origin = controller.heroOrigin(for: Self.tile(for: post), post: post, stream: [post], source: .sheet(.recent))
+
+        let preview = ForYouPostPreviewViewController(
+            post: post, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), width: 361
+        )
+        let lift = CGRect(x: 24, y: 180, width: 345, height: 460)
+        let (held, drawn) = TileHeroOriginTests.mountLift(preview, drawnAt: lift, in: window)
+        controller.previewLaunch = try #require(PreviewLaunch(preview))
+        held.removeFromSuperview()
+        #expect(origin.frame(window) == lift, "the flight did not leave from the lift")
+        origin.setConcealed(true)
+        #expect(drawn.alpha == 0, "the lift draws over the card")
+        origin.setConcealed(false)
+
+        controller.previewLaunch = nil
+        #expect(origin.frame(window) != lift, "a later close lands on the lift's ghost")
+    }
+
     /// A TEXT tile opens as a window out of the tile and closes back onto it
     /// — For You's Following cards' arrangement — and a MEDIA tile keeps its
     /// flight but carries the same window for a close from a words page.
