@@ -385,6 +385,18 @@ struct SnapSwipeChainTests {
         CGPoint(x: feed.view.bounds.midX - 40, y: feed.view.bounds.midY)
     }
 
+    /// The stage a drag would get, asked with no keyboard up.
+    ///
+    /// ⚠️ THE KEYBOARD'S STATE IS THE PROCESS'S (#1532's run): the feed
+    /// tracks it from the global keyboard notifications, so a suite running
+    /// beside this one that raises a text field's keyboard vetoed the chain
+    /// here (`sideListMayOpen`) — a flake under load. Set and asked in one
+    /// turn, nothing can land in between.
+    private static func stage(_ feed: SnapFeedViewController, for direction: SwipeDirection, at point: CGPoint) -> SwipeStage? {
+        feed.debugSetKeyboardOnScreen(false)
+        return feed.swipeStage(for: direction, at: point)
+    }
+
     private static func isPanel(_ stage: SwipeStage?) -> Bool {
         if case .panel = stage { return true }
         return false
@@ -399,8 +411,8 @@ struct SnapSwipeChainTests {
     /// not the chain's (the dismissal's).
     @Test func aMediaPostsLeftwardOpensTheList() async throws {
         let feed = try await tests.openableFeedForChain(["p1", "p2"], router: ProfileRouter())
-        #expect(Self.isPanel(feed.swipeStage(for: .leftward, at: center(of: feed))))
-        #expect(feed.swipeStage(for: .rightward, at: center(of: feed)) == nil)
+        #expect(Self.isPanel(Self.stage(feed, for: .leftward, at: center(of: feed))))
+        #expect(Self.stage(feed, for: .rightward, at: center(of: feed)) == nil)
     }
 
     /// ⚠️ A TEXT POST HAS NO LIST (#1525, the owner): leftward pushes the
@@ -408,7 +420,7 @@ struct SnapSwipeChainTests {
     @Test func aTextPostsLeftwardPushesTheAuthor() async throws {
         let router = ProfileRouter()
         let feed = try await tests.openableFeedForChain(["t1", "p2"], text: ["t1"], router: router)
-        let stage = feed.swipeStage(for: .leftward, at: center(of: feed))
+        let stage = Self.stage(feed, for: .leftward, at: center(of: feed))
         #expect(!Self.isPanel(stage), "a text post opened the side list")
         let profile = try #require(Self.pushed(stage))
         #expect(profile.title == "author-t1", "not the post's author")
@@ -422,9 +434,9 @@ struct SnapSwipeChainTests {
         feed.settlePager(onIndex: feed.orderedIDs.count - 1)
         let shown = try #require(feed.activePostID)
         #expect(shown != PostID("p1"), "guard: the card moved off the anchor")
-        let profile = try #require(Self.pushed(feed.swipeStage(for: .leftward, at: CGPoint(x: 60, y: feed.view.bounds.midY))))
+        let profile = try #require(Self.pushed(Self.stage(feed, for: .leftward, at: CGPoint(x: 60, y: feed.view.bounds.midY))))
         #expect(profile.title == "author-\(shown.rawValue)", "not the shown post's author")
-        #expect(Self.isPanel(feed.swipeStage(for: .rightward, at: center(of: feed))), "rightward does not close the list")
+        #expect(Self.isPanel(Self.stage(feed, for: .rightward, at: center(of: feed))), "rightward does not close the list")
         _ = sideList
     }
 
@@ -448,7 +460,7 @@ struct SnapSwipeChainTests {
     /// No router that makes a profile: no push stage at all.
     @Test func noDestinationNoPushStage() async throws {
         let feed = try await tests.openableFeedForChain(["t1"], text: ["t1"], router: nil)
-        #expect(feed.swipeStage(for: .leftward, at: center(of: feed)) == nil)
+        #expect(Self.stage(feed, for: .leftward, at: center(of: feed)) == nil)
     }
 }
 
