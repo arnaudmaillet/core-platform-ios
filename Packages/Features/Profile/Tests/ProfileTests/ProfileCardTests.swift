@@ -74,12 +74,17 @@ struct ProfileCardTests {
     /// followable; the viewer's own profile only opens it.
     @Test func theToolbarFollowsTheRelationship() {
         typealias Item = ProfileCardViewController.ToolbarItem
-        #expect(ProfileCardViewController.toolbarItems(for: .follow) == [Item.follow, .message, .more])
-        #expect(ProfileCardViewController.toolbarItems(for: .following) == [Item.following, .message, .more])
-        #expect(ProfileCardViewController.toolbarItems(for: .requested) == [Item.requested, .message, .more])
-        #expect(ProfileCardViewController.toolbarItems(for: .unavailable) == [Item.message, .more])
-        #expect(ProfileCardViewController.toolbarItems(for: .hidden) == [Item.message, .more])
+        // ⚠️ THE OWNER'S BARS (#1562): Follow / the bell, Message, the QR.
+        #expect(ProfileCardViewController.toolbarItems(for: .follow) == [Item.follow, .message, .qr])
+        #expect(ProfileCardViewController.toolbarItems(for: .following) == [Item.bell, .message, .qr])
+        #expect(ProfileCardViewController.toolbarItems(for: .following, showsBell: false) == [Item.message, .qr],
+                "a viewer who cannot mute got a bell")
+        #expect(ProfileCardViewController.toolbarItems(for: .requested) == [Item.requested, .message, .qr])
+        #expect(ProfileCardViewController.toolbarItems(for: .unavailable) == [Item.message, .qr])
+        #expect(ProfileCardViewController.toolbarItems(for: .hidden, showsQR: false) == [Item.message])
         #expect(ProfileCardViewController.toolbarItems(for: .edit) == [Item.openProfile])
+        #expect(ProfileCardViewController.showsMoreMenu(for: .following))
+        #expect(!ProfileCardViewController.showsMoreMenu(for: .edit))
     }
 
     /// The free width (#1542): Follow while not following, Message once
@@ -129,23 +134,26 @@ struct ProfileCardTests {
         #expect(!ProfileCardViewController.showsMuteBell(followButton: .following, canMute: false, isGuest: false))
     }
 
-    /// Not followed: the QR alone on the left, ✕ on the right; the header
-    /// keeps no tray (its actions are the bars').
-    @Test func notFollowedTheTopBarIsTheQRAndClose() async throws {
+    /// Not followed: the ••• alone on the left (#1562), ✕ on the right; the
+    /// header keeps no tray (its actions are the bars').
+    @Test func notFollowedTheTopBarIsTheMenuAndClose() async throws {
         let host = Host()
         let card = try await makeCard(following: false, host: host)
-        #expect(card.navigationItem.leftBarButtonItems?.count == 1, "the QR alone")
+        #expect(card.navigationItem.leftBarButtonItems?.map(\.accessibilityLabel) == ["More"], "not the ••• alone")
+        #expect(card.toolbarItems?.contains { $0.accessibilityLabel == "QR Code" } == true, "the QR is not in the toolbar")
         #expect(card.navigationItem.rightBarButtonItem != nil, "no ✕")
         #expect(!card.headerView.showsActionTray, "the header kept its tray")
         #expect(card.wideButton?.configuration?.title == "Follow", "Follow is not the stretched item")
     }
 
-    /// Followed: Following keeps its width, Message takes the rest (#1542).
+    /// Followed: Message takes the free width (#1542), Following is gone
+    /// from the toolbar (#1562) and its Unfollow leads the ••• menu.
     @Test func followedMessageIsTheStretchedItem() async throws {
         let host = Host()
         let card = try await makeCard(following: true, host: host)
         #expect(card.wideButton?.configuration?.title == "Message")
-        #expect(card.toolbarItems?.contains { $0.title == "Following" } == true)
+        #expect(card.toolbarItems?.contains { $0.title == "Following" } != true, "Following stayed in the toolbar")
+        #expect(card.debugMoreMenuTitles.first == "Unfollow", "no Unfollow at the head of the ••• menu")
     }
 
     // MARK: - The detent
