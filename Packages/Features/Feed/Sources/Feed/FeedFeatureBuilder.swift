@@ -61,6 +61,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// pill offers its "+" only to someone the viewer does not follow yet, and
     /// follows them through `socialGraph`. Nil (or a nil `socialGraph`): no "+".
     private let followRelations: (any SocialGraphReading)?
+    /// A post menu's Mute and Block (#1498 §3). Nil: neither row is offered.
+    private let moderation: (any SocialGraphModerating)?
     /// The app's one follow-change channel, so the pill's "+" agrees with a
     /// follow or unfollow made on any other surface. Nil: each feed keeps the
     /// answers it asked for, and re-asks on a return.
@@ -105,6 +107,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         reporting: (any ContentReporting)? = nil,
         socialGraph: (any SocialGraphWriting)? = nil,
         followRelations: (any SocialGraphReading)? = nil,
+        moderation: (any SocialGraphModerating)? = nil,
         followEvents: FollowGraphEvents? = nil,
         /// Reads the numbers the timeline does not carry, so a card can show
         /// reach. Optional: without it the cards simply hide their counter,
@@ -139,6 +142,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         self.reporting = reporting
         self.socialGraph = socialGraph
         self.followRelations = followRelations
+        self.moderation = moderation
         self.followEvents = followEvents
         self.makeProfileSwitcher = makeProfileSwitcher
         self.repository = repository
@@ -357,6 +361,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // no overflow control rather than one that offers dead actions.
             reporting: reporting,
             socialGraph: socialGraph,
+            moderation: moderation,
             // The cards' like chips stake from the SAME wallet the badge and
             // the feed's rail spend from — one instance app-wide.
             wallet: wallet,

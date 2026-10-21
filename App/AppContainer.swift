@@ -957,6 +957,8 @@ final class AppContainer {
         // And whether the viewer follows an author already — the snap feed's
         // author pill offers "+" only to someone they do not.
         followRelations: profileRepository,
+        // And a post menu's Mute and Block (#1498 §3), the profile's own.
+        moderation: profileRepository,
         // And hear a follow made on any other surface, so that "+" and the
         // profile's button never disagree.
         followEvents: followGraphEvents,

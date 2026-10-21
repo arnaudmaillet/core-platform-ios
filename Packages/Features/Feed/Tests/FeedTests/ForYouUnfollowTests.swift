@@ -54,6 +54,25 @@ struct ForYouUnfollowTests {
         #expect(!model.isHidden(PostID("b1")))
     }
 
+    /// Mute and Block (#1498 §3): every post by the author leaves, on every
+    /// surface, and Mute's Undo brings them back in place.
+    @Test func aMutedAuthorsPostsLeaveAndComeBackInPlace() async {
+        let (model, resets) = await loaded([
+            post("a1", by: "sofia"), post("b1", by: "marcus"), post("a2", by: "sofia")
+        ])
+        let shown = model.followingPosts.map(\.id.rawValue)
+        let discover = model.discoverPosts.map(\.id.rawValue)
+        let before = resets()
+        model.hideAuthor(ProfileID("sofia"))
+        #expect(model.followingPosts.map(\.id.rawValue) == ["b1"])
+        #expect(!model.discoverPosts.contains { $0.authorID == ProfileID("sofia") }, "Discover still shows them")
+        #expect(resets() > before, "the pages were not told the corpus changed")
+
+        model.showAuthor(ProfileID("sofia"))
+        #expect(model.followingPosts.map(\.id.rawValue) == shown, "not back in place")
+        #expect(model.discoverPosts.map(\.id.rawValue) == discover)
+    }
+
     @Test func theAuthorsPostsLeaveTheSurface() async {
         let (model, _) = await loaded([
             post("a1", by: "sofia"), post("b1", by: "marcus"), post("a2", by: "sofia")

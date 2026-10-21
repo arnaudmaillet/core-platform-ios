@@ -146,3 +146,20 @@ public enum FollowRelation: Equatable, Sendable {
 public protocol SocialGraphReading: Sendable {
     func followRelation(to profileID: ProfileID) async throws -> FollowRelation
 }
+
+/// Mutes and blocks on the viewer's behalf, from a surface that shows an
+/// author: a post menu's "@handle ▸" (#1498 §3).
+///
+/// The same reason as `SocialGraphWriting`: a feed acts on the person without
+/// importing the Profile feature that owns the mute and block models. Only the
+/// two answers a post menu needs; the profile screen keeps the rest (the mute's
+/// other scopes, the block lists).
+public protocol SocialGraphModerating: Sendable {
+    /// Mutes (`true`) or unmutes the author's POSTS: they no longer show. Their
+    /// stories and messages keep whatever mute they had.
+    func setPostsMuted(_ muted: Bool, for profileID: ProfileID) async throws
+    /// Blocks `profileID` alone, or every profile on its account
+    /// (`wholeAccount`), and returns the profiles actually blocked — always
+    /// `profileID` on success — so a surface can clear each one's posts.
+    func block(_ profileID: ProfileID, wholeAccount: Bool) async throws -> [ProfileID]
+}
