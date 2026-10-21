@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNetworking
+import CoreStorage
 import EntityStore
 import Foundation
 import PostGrid
@@ -578,12 +579,19 @@ public final class ForYouViewModel {
 
     /// The vertical feed's own list for a post opened from the "For you"
     /// section or its gallery (#1343): the discovery pool on a cursor of its
-    /// own, past everything the grid holds.
+    /// own, past everything the grid holds, then the grid's posts (#1511).
     private(set) lazy var ownFeed = ForYouOwnFeed(
         repository: repository,
-        isAvailable: { [weak self] in self?.hasDiscovery ?? false }
+        isAvailable: { [weak self] in self?.hasDiscovery ?? false },
+        // What the vertical feed recorded as viewed (#1344): a post handed
+        // out and never viewed comes back first next time (#1511).
+        viewedSince: { since in
+            Set(PostViewHistoryStore.shared.views
+                .filter { ($0.viewedAt ?? .distantPast) >= since }
+                .map { PostID($0.postID) })
+        }
     ) { [weak self] in
-        Set((self?.discoverPosts ?? []).map(\.id))
+        self?.discoverPosts ?? []
     }
 
     /// FRIENDS' posts: mutual follows.
