@@ -788,6 +788,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         #if DEBUG
         playback.debugCurrentPage = { [weak self] in self?.mediaCard.currentPage ?? 0 }
+        playback.debugPostID = { [weak self] in self?.representedID?.rawValue ?? "nil" }
         #endif
         chrome.onScrubPreviewRequested = { [weak self] fraction in
             self?.playback.updateScrubPreview(fraction)
@@ -2910,6 +2911,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The page's playback surface, for a test that needs to ask the pool about
     /// it. Playback ownership is the pool's, so a test has to name the surface.
     var debugRenderSurface: VideoRenderView { mediaCard.renderView }
+
+    /// Whether the page's playhead feed runs (#1532). Tests.
+    var debugIsFeedingPlayhead: Bool { playback.isFeedingPlayhead }
 
     /// Whether the centred glyph is up — the page's own account of "the viewer
     /// stopped this", which is the half of the gesture a screenshot can see.

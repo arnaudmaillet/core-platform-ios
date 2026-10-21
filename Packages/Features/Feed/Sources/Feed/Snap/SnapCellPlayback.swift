@@ -46,6 +46,15 @@ final class SnapCellPlayback: NSObject {
     #if DEBUG
     /// The collection page the viewer is on, for the `-media-log` traces.
     var debugCurrentPage: () -> Int = { 0 }
+    /// The post the page shows, for the same traces (#1532).
+    var debugPostID: () -> String = { "?" }
+
+    /// A trace line naming the page's post and the surface it reads.
+    private func traceFeed(_ event: String) {
+        guard ProcessInfo.processInfo.arguments.contains("-media-log") else { return }
+        let view = surface()
+        print(String(format: "[page-play] %.3f ", CACurrentMediaTime()) + "\(event) post=\(debugPostID()) surface=\(view.map { String(UInt(bitPattern: ObjectIdentifier($0).hashValue), radix: 16) } ?? "nil") feed=\(String(UInt(bitPattern: ObjectIdentifier(self).hashValue), radix: 16))")
+    }
     #endif
 
     init(surface: @escaping () -> VideoRenderView?, isActive: @escaping () -> Bool) {
@@ -148,6 +157,9 @@ final class SnapCellPlayback: NSObject {
     func startPlayheadFeed() {
         publishPlayhead()
         guard playheadLink == nil else { return }
+        #if DEBUG
+        traceFeed("start")
+        #endif
         let link = CADisplayLink(target: self, selector: #selector(publishPlayhead))
         // Thirty is smooth for a bar this size and half the work of sixty; the
         // range lets the system drop it further when the display does.
@@ -161,6 +173,9 @@ final class SnapCellPlayback: NSObject {
     /// the app, holding its target alive — so every exit from the feeding
     /// state comes through here.
     func stopPlayheadFeed() {
+        #if DEBUG
+        if playheadLink != nil { traceFeed("stop") }
+        #endif
         playheadLink?.invalidate()
         playheadLink = nil
         onPlayhead?(nil, 0)
@@ -196,11 +211,12 @@ final class SnapCellPlayback: NSObject {
             let now = CACurrentMediaTime()
             if now - lastPlayheadTrace > 1 {
                 lastPlayheadTrace = now
-                print(String(format: "[page-play] %.3f playhead=%@ seconds=%@ page=%d",
+                print(String(format: "[page-play] %.3f playhead=%@ seconds=%@ page=%d post=%@ surface=%@",
                              now,
                              head.map { String(format: "%.3f", $0.fraction) } ?? "nil",
                              head.map { String(format: "%.1f", $0.seconds) } ?? "nil",
-                             debugCurrentPage()))
+                             debugCurrentPage(), debugPostID(),
+                             String(UInt(bitPattern: ObjectIdentifier(view).hashValue), radix: 16)))
             }
         }
         #endif

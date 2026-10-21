@@ -393,6 +393,22 @@ struct SnapMediaPageBarTests {
         #expect(try #require(view.debugSegmentAlpha(2)) < 0.5)   // the track, not the fill
     }
 
+    /// ⚠️ A CLIP AFTER A CAROUSEL STILL DRAWS ITS BAR (#1532). The page's
+    /// strip went from a run of nine back to a lone clip: the run was rebuilt,
+    /// and the played part, kept by page index, was drawn into page 0's old
+    /// detached segment — an empty track for the whole clip.
+    @Test func aClipAfterACarouselStillDrawsItsBar() throws {
+        let view = clipBar(pages: 9, current: 0, clips: [0], playhead: 0.4)
+        #expect(view.debugFillFrame(0) != nil, "guard: the carousel's clip page drew its bar")
+
+        view.configure(count: 1, current: 0, clipPages: [0])
+        view.setPlayhead(0.5)
+        view.layoutIfNeeded()
+        let bar = try #require(view.debugSegmentFrame(0))
+        let played = try #require(view.debugFillFrame(0), "the lone clip's bar draws nothing")
+        #expect(abs(played.width - bar.width * 0.5) < 1)
+    }
+
     // MARK: - A fill that appears (#1305)
 
     /// Keeps each test's window alive while it looks: off a window the fill
