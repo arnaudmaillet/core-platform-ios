@@ -145,6 +145,10 @@ final class ForYouPostPreviewViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // ⚠️ THE LIFT IS DRAWN THROUGH A PORTAL (#1564): UIKit keeps this view
+        // in a container at alpha 0, so every emote in it read as unseen and
+        // stayed a blank square. Its emotes are on show while it is.
+        EmoteVisibility.treatAsOnShow(view)
         let isText = post.kind == .text
         view.backgroundColor = isText
             ? PostGridListRowCell.cardFillColor
