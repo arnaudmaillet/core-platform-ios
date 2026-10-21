@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import MediaCore
 import PostGrid
 import Testing
@@ -429,71 +430,60 @@ struct SnapMediaPageBarTests {
         return view
     }
 
-    /// The played part GROWS IN when it appears — it used to be drawn at its
-    /// whole width in one frame (the owner, 2026-10-17) — and lands on the
-    /// live playhead.
-    @Test func aFillThatAppearsGrowsIn() throws {
+    /// ⚠️ THE INDICATOR APPEARS AT ONCE, AT ITS POSITION (#1537, the owner
+    /// 2026-10-21): no growth from the bar's start (#1305 is reversed), even
+    /// inside a transition, even once the chrome shows.
+    @Test func theIndicatorAppearsAtOnceWithoutGrowing() throws {
         let view = clipBarOnScreen(playhead: nil)
         #expect(view.debugFillFrame(0) == nil)
-
         view.setPlayhead(0.5)
-        #expect(view.debugFillIsGrowing(0), "the fill popped in")
+        #expect(view.debugFillIsAnimating(0) == false, "the indicator grew in")
         let bar = try #require(view.debugSegmentFrame(0))
         #expect(abs(try #require(view.debugFillFrame(0)).width - bar.width * 0.5) < 1,
-                "the growth does not end on the playhead")
-        // The track itself still never animates on its own.
-        #expect(view.debugSegmentIsAnimating(0) == false)
-    }
-
-    /// ⚠️ EVEN INSIDE A TRANSITION. The fill first appears while the post is
-    /// opening, under `performWithoutAnimation`; a UIKit animation there was
-    /// applied at once and the fill popped in on the simulator anyway.
-    @Test func aFillThatAppearsDuringATransitionStillGrows() {
-        let view = clipBarOnScreen(playhead: nil)
+                "not at the playhead on its first frame")
         UIView.performWithoutAnimation { view.setPlayhead(0.7) }
-        #expect(view.debugFillIsGrowing(0), "the transition swallowed the growth")
+        #expect(view.debugFillIsAnimating(0) == false)
     }
 
-    /// ⚠️ NOT WHILE NOBODY CAN SEE IT. The fill first appears with the chrome
-    /// at alpha 0 under the opening flight; grown then, it had finished
-    /// before the chrome faded in, and the viewer saw the pop anyway. It
-    /// waits, and grows on the first beat the strip shows.
-    @Test func aFillThatAppearsUnseenGrowsOnceItShows() throws {
-        let view = clipBarOnScreen(playhead: nil)
-        let chrome = UIView(frame: view.frame)
-        view.superview?.addSubview(chrome)
-        chrome.addSubview(view)
-        chrome.alpha = 0
-
-        view.setPlayhead(0.5)
-        #expect(view.debugFillIsGrowing(0) == false, "the fill grew where nobody could see it")
-
-        chrome.alpha = 1
-        view.setPlayhead(0.51)
-        #expect(view.debugFillIsGrowing(0), "the fill never grew once it showed")
-        let bar = try #require(view.debugSegmentFrame(0))
-        #expect(abs(try #require(view.debugFillFrame(0)).width - bar.width * 0.51) < 1)
-    }
-
-    /// The feed's next ticks move the end of the growth; they do not restart
-    /// it, and a fill already drawn does not grow again.
-    @Test func aFillAlreadyDrawnFollowsThePlayheadWithoutGrowing() throws {
+    /// ⚠️ THE INDICATOR IS DIMMER AT REST (#1537, the owner: "too visible"),
+    /// and comes up to full ink when the bar is handled.
+    @Test func theIndicatorIsDimmerAtRestAndFullWhenHandled() throws {
         let view = clipBarOnScreen(playhead: 0.4)
-        view.layer.removeAllAnimationsDeep()
-        view.setPlayhead(0.45)
-        #expect(view.debugFillIsGrowing(0) == false, "a drawn fill grew again")
-        let bar = try #require(view.debugSegmentFrame(0))
-        #expect(abs(try #require(view.debugFillFrame(0)).width - bar.width * 0.45) < 1)
+        #expect(view.debugFillInk(0) == SnapMediaPageBarView.restingFillInk, "the indicator is full ink at rest")
+        view.debugScrub(.began, atX: 100)
+        #expect(view.debugFillInk(0) == 1, "a handled bar's indicator is not full ink")
+        view.debugScrub(.ended, atX: 100)
     }
 
-    /// Under a finger the fill is the thumb's, 1:1: it never eases in.
-    @Test func aScrubNeverGrowsTheFill() throws {
-        let view = clipBarOnScreen(playhead: 0.3)
-        view.layer.removeAllAnimationsDeep()
-        view.debugScrub(.began, atX: 100)
-        view.debugScrub(.changed, atX: 185)
-        #expect(view.debugFillFrame(0) != nil)
-        #expect(view.debugFillIsGrowing(0) == false, "the fill eased behind the finger")
+    /// ⚠️ LOADING SHOWS THE PULSE, AND THE TWO CROSS-FADE (#1537): the
+    /// indicator gives way to the centre pulse while the clip loads, and comes
+    /// back, at its position, when it is ready.
+    @Test func loadingCrossFadesThePulseAndTheIndicator() throws {
+        let view = clipBarOnScreen(playhead: 0.4)
+        UIView.performWithoutAnimation { view.setLoading(true) }
+        view.layoutIfNeeded()
+        #expect(view.debugPulsePresence == 1, "no pulse while loading")
+        #expect(view.debugFillAlpha(0) == 0, "the indicator stayed over the pulse")
+
+        UIView.performWithoutAnimation { view.setLoading(false) }
+        view.layoutIfNeeded()
+        #expect(view.debugPulsePresence == 0, "the pulse outlived the loading")
+        #expect(try #require(view.debugFillAlpha(0)) > 0.9, "the indicator did not come back")
+    }
+
+    /// The pulse loops while loading — and never under Reduce Motion or Power
+    /// Saving, where the bar stays a still, dim track (#580). Here the host's
+    /// own setting decides which half is checked.
+    @Test func thePulseLoopsOnlyWhereMotionIsAllowed() {
+        let view = clipBarOnScreen(playhead: nil)
+        view.setLoading(true)
+        view.layoutIfNeeded()
+        if MotionPreference.stillsDecoration {
+            #expect(!view.debugPulseIsLooping, "an endless pulse under reduced motion")
+        } else {
+            #expect(view.debugPulseIsLooping, "the pulse does not loop")
+        }
+        view.setLoading(false)
     }
 
     /// ⚠️ NIL IS AN ANSWER. A clip whose length is not known yet draws NO bar

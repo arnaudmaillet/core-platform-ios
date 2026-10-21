@@ -783,6 +783,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         playback.onPlayhead = { [weak self] fraction, seconds in
             self?.chrome.setMediaPlayhead(fraction, seconds: seconds)
         }
+        playback.onLoading = { [weak self] loading in
+            self?.chrome.setMediaLoading(loading)
+        }
         playback.onScrubPreviewLoading = { [weak self] loading in
             self?.chrome.setScrubPreviewLoading(loading)
         }

@@ -149,6 +149,33 @@ struct SnapCellPlaybackTests {
         #expect(published.last?.seconds == 0)
     }
 
+    /// ⚠️ LOADING, PAST A GRACE (#1537): a clip with no length shows the
+    /// pulse after a short grace — a page joining a playing tile knows its
+    /// length at once and never flashes it — and a stalled one after ~0.5 s.
+    @Test func loadingWaitsOutAGraceForItsKind() {
+        #expect(!SnapCellPlayback.isLoading(waitingFor: nil, lengthKnown: false))
+        #expect(!SnapCellPlayback.isLoading(waitingFor: 0.05, lengthKnown: false))
+        #expect(SnapCellPlayback.isLoading(waitingFor: 0.2, lengthKnown: false))
+        #expect(!SnapCellPlayback.isLoading(waitingFor: 0.3, lengthKnown: true), "a short stall flashed the pulse")
+        #expect(SnapCellPlayback.isLoading(waitingFor: 0.6, lengthKnown: true))
+    }
+
+    /// The feed says loading for a clip whose length stays unknown, and stops
+    /// saying it when the feed stops.
+    @Test func theFeedReportsLoadingAndStopsWithIt() async {
+        let (playback, _, _) = await Self.playingPage()
+        var reports: [Bool] = []
+        playback.onLoading = { reports.append($0) }
+        playback.startPlayheadFeed()
+        // The stub's clip has no length: past the grace, loading.
+        try? await Task.sleep(for: .milliseconds(Int(SnapCellPlayback.unknownLengthGrace * 1000) + 120))
+        playback.publishPlayhead()
+        #expect(playback.isReportingLoading, "a clip with no length is not loading")
+        playback.stopPlayheadFeed()
+        #expect(!playback.isReportingLoading)
+        #expect(reports == [true, false])
+    }
+
     @Test func aSecondStartKeepsOneFeedAndOneStopEndsIt() async {
         let (playback, _, _) = await Self.playingPage()
         var published = 0
