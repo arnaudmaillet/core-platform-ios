@@ -142,6 +142,23 @@ struct FeedViewModelTests {
         #expect(router.routes == [.profile(ProfileID("prof-99"), stub: nil)])
     }
 
+    /// ⚠️ THE TOOLBAR PILL OPENS THE PROFILE CARD (#1524); the viewer's own
+    /// pill says it is theirs, and the router pushes their profile.
+    @Test func thePillRoutesToTheProfileCard() {
+        let router = SpyRouter()
+        let viewModel = FeedViewModel(repository: FakeFeedProvider(), router: router)
+        viewModel.didTapAuthorPill(ProfileID("prof-99"), isViewer: false)
+        #expect(router.routes == [.profileCard(ProfileID("prof-99"), stub: nil)])
+
+        viewModel.didTapAuthorPill(ProfileID("me"), isViewer: true)
+        guard case .profileCard(let id, let stub) = router.routes.last else {
+            Issue.record("not a card route: \(router.routes)")
+            return
+        }
+        #expect(id == ProfileID("me") && stub?.isSelf == true, "one's own pill did not say so")
+        #expect(router.routes.last?.profileCardResolution == .pushProfile(.profile(ProfileID("me"), stub: stub)))
+    }
+
     @Test func tappingCommentsRoutesToComments() {
         let router = SpyRouter()
         let viewModel = FeedViewModel(repository: FakeFeedProvider(), router: router)

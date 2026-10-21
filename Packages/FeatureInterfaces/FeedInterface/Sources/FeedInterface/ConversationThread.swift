@@ -183,6 +183,8 @@ public protocol ConversationThreadDriving: AnyObject {
     func forward(_ messageID: String)
     func delete(_ messageID: String)
     func didTapIdentity()
+    /// The toolbar's peer pill (#1524): the peer's profile card.
+    func didTapIdentityPill()
     /// Pins the conversation, or unpins it. A no-op while there is nothing to
     /// pin (`onPinnedChange` said nil).
     func togglePinned()
@@ -233,6 +235,8 @@ public extension ConversationThreadDriving {
     func retry(_ messageID: String) {}
     /// Drivers with no profile to push.
     func peerProfileDestination() -> UIViewController? { nil }
+    /// Drivers with no card: the profile, as the other ways to it.
+    func didTapIdentityPill() { didTapIdentity() }
 }
 
 @MainActor

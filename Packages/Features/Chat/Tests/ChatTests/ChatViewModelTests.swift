@@ -246,6 +246,24 @@ struct ChatViewModelTests {
         #expect(router.routes == [.profile(ProfileID("peer-9"), stub: nil)])
     }
 
+    /// The toolbar's peer pill opens the peer's profile CARD (#1524); the
+    /// header's other ways in still push the profile.
+    @Test func thePeerPillRoutesToTheProfileCard() {
+        let router = SpyRouter()
+        let directory = ConversationDirectory()
+        directory.remember([conversation("c1", others: ["peer-9"])])
+        let viewModel = ConversationViewModel(
+            conversationID: ConversationID("c1"),
+            repository: StubChatProvider(),
+            directory: directory,
+            router: router
+        )
+        viewModel.viewDidLoad()
+
+        viewModel.didTapIdentityPill()
+        #expect(router.routes == [.profileCard(ProfileID("peer-9"), stub: nil)])
+    }
+
     @Test func identityTapResolvesThePeerOnColdEntry() async {
         let router = SpyRouter()
         let viewModel = ConversationViewModel(

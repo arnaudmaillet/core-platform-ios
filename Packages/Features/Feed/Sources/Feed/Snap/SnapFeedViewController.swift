@@ -2197,7 +2197,12 @@ final class SnapFeedViewController: UIViewController {
         close.accessibilityLabel = "Close comments"
         close.addAction(UIAction { [weak self] _ in self?.dismissComments() }, for: .primaryActionTriggered)
         closeCommentsItem = UIBarButtonItem(customView: close)
-        authorIdentityView.onAuthorTapped = { [weak self] id in self?.viewModel.didTapAuthor(id) }
+        // ⚠️ THE PILL OPENS THE PROFILE CARD (#1524), not the profile: the
+        // viewer's own pill still pushes theirs.
+        authorIdentityView.onAuthorTapped = { [weak self] id in
+            guard let self else { return }
+            viewModel.didTapAuthorPill(id, isViewer: followStore.relation(for: id) == .viewer)
+        }
         // The "+" follows, in place (`followAuthor`). The followed and friends
         // marks take no tap of their own — a tap on them is a tap on the pill,
         // which opens the profile — so there is no unfollow here: that is the
