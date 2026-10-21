@@ -1294,9 +1294,18 @@ final class SnapFeedViewController: UIViewController {
         // by the owner; the top bar rides the card and kept its look). The
         // navigation bar goes now — it is the destination's header — and the
         // toolbar's style follows only once the close commits.
+        //
+        // ⚠️ AT THE RELEASE, NOT AT THE LANDING (#1510, the owner 2026-10-21):
+        // decided from the completion, both bars stayed dark over the
+        // shrinking card for the whole close animation and switched at the
+        // landing. A committed release is the close; the completion stays as
+        // the backstop for a gesture that never reports one. The first report
+        // decides.
         if let coordinator = transitionCoordinator, coordinator.isInteractive {
             handBackChromeTheme(interactive: true) { decided in
-                coordinator.animate(alongsideTransition: nil) { decided(!$0.isCancelled) }
+                let decision = GrabDecision(decided)
+                coordinator.notifyWhenInteractionChanges { decision.report(committed: !$0.isCancelled) }
+                coordinator.animate(alongsideTransition: nil) { decision.report(committed: !$0.isCancelled) }
             }
         } else {
             handBackChromeTheme(interactive: false) { _ in }
@@ -5176,6 +5185,19 @@ final class SnapFeedViewController: UIViewController {
             guard let self else { return }
             self.isHandingChromeBack = false
             if committed { self.releaseChromeTheme(from: nav) }
+        }
+    }
+
+    /// A grab's outcome, reported by the first of its release and its
+    /// completion (#1510) — once.
+    @MainActor
+    final class GrabDecision {
+        private var decided: ((Bool) -> Void)?
+        init(_ decided: @escaping (Bool) -> Void) { self.decided = decided }
+        func report(committed: Bool) {
+            let decided = self.decided
+            self.decided = nil
+            decided?(committed)
         }
     }
 

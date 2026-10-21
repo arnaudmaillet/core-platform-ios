@@ -130,6 +130,23 @@ struct HeroPushHardeningFeedTests {
         #expect(nav.navigationBar.overrideUserInterfaceStyle == (commits ? .unspecified : .dark))
     }
 
+    /// ⚠️ THE RELEASE DECIDES, THE COMPLETION ONLY BACKS IT UP (#1510): the
+    /// bars switched at the landing when the completion decided. The first
+    /// report wins; a release never reported leaves it to the completion.
+    @Test(arguments: [true, false])
+    func theFirstReportDecidesAGrab(commits: Bool) {
+        var outcomes: [Bool] = []
+        let released = SnapFeedViewController.GrabDecision { outcomes.append($0) }
+        released.report(committed: commits)      // the release
+        released.report(committed: commits)      // the completion
+        #expect(outcomes == [commits], "a grab was decided twice, or not at the release")
+
+        outcomes = []
+        let unreleased = SnapFeedViewController.GrabDecision { outcomes.append($0) }
+        unreleased.report(committed: commits)    // the completion alone
+        #expect(outcomes == [commits], "the completion no longer backs a grab with no release")
+    }
+
     /// An ordinary disappearance hands everything back at once.
     @Test func aPlainDisappearanceHandsTheToolbarBackAtOnce() {
         let feed = Self.feed()
