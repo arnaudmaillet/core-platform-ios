@@ -907,8 +907,16 @@ final class SoundSheetViewController: UIViewController {
     static func gridSection(
         _ environment: NSCollectionLayoutEnvironment, bottom: CGFloat
     ) -> NSCollectionLayoutSection {
+        // ⚠️ A COLUMN ON THE PIXEL GRID (#1507): thirds of the row, each
+        // snapped by UIKit, came out a pixel wide apiece at 2x — the iPhone
+        // SE's right margin was 9 where the gutter is 10. Floored to a device
+        // pixel, the columns leave at most a pixel or two at the trailing edge.
         let item = NSCollectionLayoutItem(layoutSize: .init(
-            widthDimension: .fractionalWidth(1 / CGFloat(columns)), heightDimension: .fractionalHeight(1)
+            widthDimension: .absolute(columnWidth(
+                width: environment.container.effectiveContentSize.width,
+                scale: environment.traitCollection.displayScale
+            )),
+            heightDimension: .fractionalHeight(1)
         ))
         let group = NSCollectionLayoutGroup.horizontal(
             layoutSize: .init(widthDimension: .fractionalWidth(1),
@@ -920,6 +928,14 @@ final class SoundSheetViewController: UIViewController {
         section.interGroupSpacing = gutter
         section.contentInsets = .init(top: 0, leading: gutter, bottom: bottom, trailing: gutter)
         return section
+    }
+
+    /// A grid column's width on a sheet `width` wide, floored to a device
+    /// pixel at `scale` (none given: a point).
+    static func columnWidth(width: CGFloat, scale: CGFloat) -> CGFloat {
+        let column = max(0, width - CGFloat(columns + 1) * gutter) / CGFloat(columns)
+        let pixels = max(1, scale)
+        return (column * pixels).rounded(.down) / pixels
     }
 
     /// A grid tile's height on a sheet `width` wide: three columns and four

@@ -1170,7 +1170,13 @@ struct SoundSheetTests {
         let recent = try tileIDs(in: .recent, of: controller)
         let grid = try recent.prefix(4).map { try frame(of: .tile(PostID($0), .recent), in: controller) }
         #expect(abs(grid[0].minX - gutter) < 0.5, "grid left margin \(grid[0].minX)")
-        #expect(abs(width - grid[2].maxX - gutter) < 0.5, "grid right margin \(width - grid[2].maxX)")
+        // ⚠️ ON THE PIXEL GRID (#1507): each column is floored to a device
+        // pixel, so the trailing margin may hold up to a pixel per column —
+        // none at 3x on a 402-point sheet, a half point on the iPhone SE.
+        let scale = controller.traitCollection.displayScale > 0 ? controller.traitCollection.displayScale : 3
+        let trailing = width - grid[2].maxX - gutter
+        #expect(trailing >= -0.01 && trailing <= CGFloat(Sheet.columns) / scale + 0.01,
+                "grid right margin \(width - grid[2].maxX) at \(scale)x")
         #expect(abs(grid[1].minX - grid[0].maxX - gutter) < 0.5, "gap between grid tiles")
         #expect(abs(grid[3].minY - grid[0].maxY - gutter) < 0.5, "gap between grid rows")
         #expect(abs(grid[0].height - Sheet.tileHeight(width: width)) < 0.5)
