@@ -46,6 +46,11 @@ public final class MediaSurface {
         get { coverSlot.onLoaded }
         set { coverSlot.onLoaded = newValue }
     }
+    /// Told when the cover's load failed (#1553).
+    public var onCoverFailed: (() -> Void)? {
+        get { coverSlot.onFailed }
+        set { coverSlot.onFailed = newValue }
+    }
     /// The surface's label in the playback logs (DEBUG).
     public var debugLabel: String?
 
