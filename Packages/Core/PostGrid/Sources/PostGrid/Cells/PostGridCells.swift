@@ -2739,6 +2739,7 @@ public final class PostGridTileCell: UICollectionViewCell {
         let media = MediaSurface(cover: imageView, in: contentView, coverSize: .full)
         media.debugLabel = "tile"
         media.onCoverLoaded = { [weak self] in self?.onCoverLoaded?() }
+        media.onCoverFailed = { [weak self] in self?.onCoverFailed?() }
         return media
     }()
 
@@ -2841,6 +2842,7 @@ public final class PostGridTileCell: UICollectionViewCell {
         onReuse?()
         onReuse = nil
         onCoverLoaded = nil
+        onCoverFailed = nil
         endVideoPreview()
         media.reset()
         // The viewer's stake was the last post's; the next host reads its own.
@@ -2901,6 +2903,9 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// whose cover arrives while the grid is sitting still would fail the gate
     /// once and never be asked again — it would simply never play.
     public var onCoverLoaded: (() -> Void)?
+    /// The cover could not be loaded: a host's waiting skeleton stills
+    /// (#1553).
+    public var onCoverFailed: (() -> Void)?
 
     /// Reveals the video surface once a player has been attached. The still
     /// stays underneath as the poster, so the first frame replaces it rather

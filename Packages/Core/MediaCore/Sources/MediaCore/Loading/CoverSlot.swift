@@ -26,6 +26,9 @@ public final class CoverSlot {
     /// Told when a cover that had to be fetched has landed — the autoplay
     /// waits on a cover to stand behind its first frame.
     public var onLoaded: (() -> Void)?
+    /// Told when the cover's load failed: a host showing a skeleton while it
+    /// waits stills it (#1553) rather than shimmering forever.
+    public var onFailed: (() -> Void)?
     /// Told whenever the cover changes picture, so a live surface keeps it as
     /// its poster.
     public var onChange: ((UIImage) -> Void)?
@@ -70,6 +73,7 @@ public final class CoverSlot {
         } failed: { [weak self] in
             guard let self, ladder.isCurrent(token) else { return }
             ladder.fail(token: token)
+            onFailed?()
         }
     }
 

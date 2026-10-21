@@ -42,11 +42,15 @@ struct SnapSideListTests {
         let gap = SnapSideList.Geometry.gap
         #expect(geometry.pagerTransform(progress: 0) == .identity)
 
-        let card = Self.card(geometry)
+        // The scaled page, cropped top and bottom by `pageInset`, IS the card.
+        let page = Self.card(geometry)
+        let inset = geometry.pageInset(progress: 1) * geometry.cardScale
+        let card = page.insetBy(dx: 0, dy: inset)
+        #expect(abs(card.minY - geometry.cardFrame.minY) < 0.01 && abs(card.height - geometry.cardFrame.height) < 0.01,
+                "the crop does not make the card: \(card) \(geometry.cardFrame)")
         let list = geometry.listFrame(progress: 1)
         #expect(card.minY >= bars.top + gap - 0.01, "the card runs under the top bar: \(card)")
         #expect(card.maxY <= size.height - bars.bottom - gap + 0.01, "the card runs under the toolbar: \(card)")
-        #expect(abs(card.width / card.height - size.width / size.height) < 0.001, "the card does not keep the page's aspect")
         #expect(abs(card.minX - gap) < 0.01, "the card's leading gap: \(card)")
         #expect(abs(list.minX - card.maxX - gap) < 0.01, "the gap between card and list: \(card) \(list)")
         #expect(abs(size.width - list.maxX - gap) < 0.01, "the list's trailing gap: \(list)")
@@ -60,13 +64,38 @@ struct SnapSideListTests {
         }
     }
 
-    /// The list is wider than the old ninth on an 18 Pro (about 70 pt), and
-    /// never narrower than its minimum on an SE.
-    @Test func theListTakesTheWidthTheCardLeaves() {
-        let pro = SnapSideList.Geometry(size: Self.devices[0].size, bars: Self.devices[0].bars)
-        #expect(pro.listWidth > 60 && pro.listWidth < 100, "\(pro.listWidth)")
-        let se = SnapSideList.Geometry(size: Self.devices[1].size, bars: Self.devices[1].bars)
-        #expect(se.listWidth >= SnapSideList.Geometry.minimumListWidth)
+    /// ⚠️ WHOLE TILES, 10 ON AN 18 PRO (#1545): the tiles and their spacing
+    /// fill the height between the bars exactly — none cut at rest — square
+    /// by default, 3:4 behind the flag; a shorter screen holds fewer, still
+    /// whole.
+    @Test(arguments: [0, 1])
+    func theListHoldsWholeTiles(_ device: Int) {
+        let (size, bars) = Self.devices[device]
+        for shape in [SnapSideList.Geometry.TileShape.square, .portrait] {
+            let geometry = SnapSideList.Geometry(size: size, bars: bars, tileShape: shape)
+            let count = CGFloat(geometry.tileCount)
+            let tile = geometry.tileSize
+            let filled = count * tile.height + (count - 1) * SnapSideList.Geometry.tileSpacing
+            #expect(abs(filled - geometry.listFrame(progress: 1).height) < 0.01, "the tiles do not fill the list: \(filled)")
+            #expect(abs(tile.width - (shape == .square ? tile.height : tile.height * 3 / 4)) < 0.01)
+            #expect(geometry.listWidth == tile.width)
+        }
+        let square = SnapSideList.Geometry(size: size, bars: bars)
+        if device == 0 { #expect(square.tileCount == 10, "an 18 Pro holds \(square.tileCount)") }
+        if device == 1 { #expect(square.tileCount < 10, "an SE holds as many as an 18 Pro") }
+    }
+
+    /// ⚠️ THE CARD IS WIDER (#1545): wider than the page fitted to the height
+    /// between the bars was (#1509), and widest with the 3:4 tiles.
+    @Test func theCardIsWiderThanAPageFittedToTheHeight() {
+        let (size, bars) = Self.devices[0]
+        let square = SnapSideList.Geometry(size: size, bars: bars)
+        let portrait = SnapSideList.Geometry(size: size, bars: bars, tileShape: .portrait)
+        let fittedWidth = size.width * square.openArea.height / size.height
+        #expect(square.cardFrame.width > fittedWidth + 20, "\(square.cardFrame.width) vs \(fittedWidth)")
+        #expect(portrait.cardFrame.width > square.cardFrame.width + 10)
+        #expect(square.pageInset(progress: 0) == 0, "closed, the page is cropped")
+        #expect(square.pageInset(progress: 1) > 0, "the page overruns the bars and is not cropped")
     }
 
     /// ⚠️ THE CORNERS GO FROM THE DEVICE'S TO THE CARD'S (#1509), in screen
@@ -84,9 +113,11 @@ struct SnapSideListTests {
     /// toolbar covers, and back up on close.
     @Test func theOverlayMovesDownByTheToolbarsBand() {
         let geometry = SnapSideList.Geometry(size: Self.devices[0].size, bars: Self.devices[0].bars)
+        let band = Self.devices[0].bars.bottom
         #expect(geometry.overlayOffset(progress: 0) == 0)
-        #expect(geometry.overlayOffset(progress: 0.5) == Self.devices[0].bars.bottom / 2)
-        #expect(geometry.overlayOffset(progress: 1) == Self.devices[0].bars.bottom)
+        // Less what the card crops off the page's bottom (#1545).
+        #expect(abs(geometry.overlayOffset(progress: 0.5) - (band / 2 - geometry.pageInset(progress: 0.5))) < 0.01)
+        #expect(abs(geometry.overlayOffset(progress: 1) - (band - geometry.pageInset(progress: 1))) < 0.01)
     }
 
     /// Past half way, or flung, it opens; short of it, it springs back.
@@ -165,7 +196,8 @@ struct SnapSideListTests {
 
         sideList.settle(open: true, animated: false)
         #expect(pager.transform != .identity, "the page did not shrink")
-        #expect(pager.layer.cornerRadius > 0, "the open card is square")
+        // The card's crop and corners are its mask's (#1545).
+        #expect((pager.mask?.layer.cornerRadius ?? 0) > 0, "the open card is square")
         #expect(pager.transform.a < 1 && pager.transform.a == pager.transform.d, "not one uniform scale")
         #expect(feed.view.transform == .identity, "the screen itself moved")
         #expect(!sideList.listView.isHidden)
@@ -174,6 +206,7 @@ struct SnapSideListTests {
 
         sideList.settle(open: false, animated: false)
         #expect(pager.transform == .identity)
+        #expect(pager.mask == nil, "the page stayed cropped after the close")
         #expect(feed.collectionView.visibleCells.compactMap { ($0 as? SnapFeedCell)?.sideListOverlayOffset }.allSatisfy { $0 == 0 },
                 "an overlay stayed down after the close")
         #expect(sideList.listView.isHidden)

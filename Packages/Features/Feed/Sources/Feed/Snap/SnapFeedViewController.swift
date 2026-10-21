@@ -5841,6 +5841,8 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // nothing else on the screen.
         updateViewportPlayback()
         updatePagingFooter(for: scrollView)
+        // The card's crop is in the pager's own space, which its scroll moves.
+        if scrollView === collectionView { sideList?.pagerDidScroll() }
         // The bar pills ride the scroll too — two alphas a frame, and the
         // content they draw only at the midpoint. Unlike activation, this
         // moves nothing on the page.

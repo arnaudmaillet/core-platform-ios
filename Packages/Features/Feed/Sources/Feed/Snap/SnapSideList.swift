@@ -20,11 +20,15 @@ enum SnapSideList {
     /// Pure, for tests.
     ///
     /// ⚠️ BETWEEN THE BARS (#1509, the owner's screenshot 2026-10-21): the
-    /// card used to be scaled by the WIDTH alone and centred, so it ran
-    /// under both bars — the back button on its top edge, the author pill
-    /// and the actions over its bottom. It is now the page scaled UNIFORMLY
-    /// to fit the height between the top bar and the bottom toolbar, a gap
-    /// from each, and the list takes the width left.
+    /// card and the list sit between the top bar and the bottom toolbar, a
+    /// gap from each, never under them.
+    ///
+    /// ⚠️ THE LIST FIRST (#1545, the owner 2026-10-21): it holds a whole
+    /// number of tiles — 10 on an iPhone 18 Pro — exactly between the bars,
+    /// so none is ever cut at rest; the card takes the width left. The card
+    /// is the page scaled UNIFORMLY to that width (no re-layout of the page),
+    /// and what overruns the height between the bars is cropped off its top
+    /// and bottom (`pageInset`): the card's ratio changes, never the page's.
     struct Geometry: Equatable {
         /// The screen's bounds.
         let size: CGSize
@@ -35,6 +39,21 @@ enum SnapSideList {
         /// The device's own corner radius (`ScreenGeometry`): the page's
         /// corners when closed.
         var deviceCornerRadius: CGFloat = 0
+        /// The tiles' shape (#1545): square by default, 3:4 behind
+        /// `-side-list-narrow-tiles`, the owner's two options to try.
+        var tileShape: TileShape = .square
+
+        enum TileShape: Equatable {
+            /// Square: a wider card than before, tiles still readable.
+            case square
+            /// 3:4, narrower: the widest card.
+            case portrait
+
+            /// The launch flag's choice.
+            static var current: TileShape {
+                ProcessInfo.processInfo.arguments.contains("-side-list-narrow-tiles") ? .portrait : .square
+            }
+        }
 
         /// Between the card, the list, the bars and the screen's edges.
         static let gap: CGFloat = 6
@@ -46,6 +65,48 @@ enum SnapSideList {
         static var tileCornerRadius: CGFloat { cornerRadius }
         /// The list never narrower than this, whatever the bars leave.
         static let minimumListWidth: CGFloat = 44
+        /// Between two tiles.
+        static let tileSpacing: CGFloat = 6
+        /// The tile height the count aims at: 10 tiles on an iPhone 18 Pro.
+        static let targetTileHeight: CGFloat = 62
+        /// The most tiles the list shows at once.
+        static let maximumTiles = 10
+
+        /// How many whole tiles the list shows: as many of about
+        /// `targetTileHeight` as fill the height between the bars, at most
+        /// `maximumTiles` — fewer on a shorter screen, never a cut one.
+        var tileCount: Int {
+            let height = openArea.height
+            guard height > 0 else { return 1 }
+            let fitting = ((height + Self.tileSpacing) / (Self.targetTileHeight + Self.tileSpacing)).rounded()
+            return min(max(Int(fitting), 1), Self.maximumTiles)
+        }
+
+        /// The width of a tile per point of its height.
+        private var tileAspect: CGFloat { tileShape == .square ? 1 : 3 / 4 }
+
+        /// The list's height — the card's: the height between the bars, or
+        /// less where the page scaled to the width the list leaves is
+        /// shorter than that (an SE). Solved, since a shorter list makes
+        /// narrower tiles and so a wider, taller card: `L = min(open,
+        /// H · (W − 3g − a·(L − (n−1)s)/n) / W)`, linear in `L`.
+        var listHeight: CGFloat {
+            let open = openArea.height
+            guard size.width > 0, size.height > 0, open > 0 else { return open }
+            let count = CGFloat(tileCount), spacing = Self.tileSpacing
+            let perPoint = tileAspect / count
+            let solved = size.height * (size.width - 3 * Self.gap + perPoint * (count - 1) * spacing)
+                / (size.width + size.height * perPoint)
+            return min(open, solved)
+        }
+
+        /// One tile: `tileCount` of them and their spacing fill the list's
+        /// height exactly.
+        var tileSize: CGSize {
+            let count = CGFloat(tileCount)
+            let height = max(0, (listHeight - Self.tileSpacing * (count - 1)) / count)
+            return CGSize(width: max(height * tileAspect, Self.minimumListWidth), height: height)
+        }
 
         /// The open card's room: between the bars, a gap from each.
         var openArea: CGRect {
@@ -54,24 +115,33 @@ enum SnapSideList {
             return CGRect(x: 0, y: top, width: size.width, height: max(0, bottom - top))
         }
 
-        /// The card's scale when open: the page fitted to the height between
-        /// the bars, kept narrow enough to leave the list its minimum.
+        /// The list's width: one tile's.
+        var listWidth: CGFloat { tileSize.width }
+
+        /// The card's scale when open: the page scaled to the width the list
+        /// leaves (the screen less the list and 3 gaps).
         var cardScale: CGFloat {
             guard size.width > 0, size.height > 0 else { return 1 }
-            let fitsHeight = openArea.height / size.height
-            let leavesList = (size.width - Self.minimumListWidth - 3 * Self.gap) / size.width
-            return max(0.01, min(fitsHeight, leavesList))
+            return max(0.01, (size.width - listWidth - 3 * Self.gap) / size.width)
         }
 
-        /// The open card, on screen: a gap from the leading edge, centred
-        /// between the bars.
+        /// The open card, on screen: a gap from the leading edge, as tall as
+        /// the scaled page allows within the bars, centred between them.
         var cardFrame: CGRect {
-            let width = size.width * cardScale, height = size.height * cardScale
+            let width = size.width * cardScale
+            let height = min(size.height * cardScale, openArea.height)
             return CGRect(x: Self.gap, y: openArea.midY - height / 2, width: width, height: height)
         }
 
-        /// The width the card leaves: the screen less the card and 3 gaps.
-        var listWidth: CGFloat { max(Self.minimumListWidth, size.width - cardFrame.width - 3 * Self.gap) }
+        /// How much of the page's top and bottom the card crops at
+        /// `progress`, in the PAGE's own points: what the uniformly scaled
+        /// page overruns the card's height by, halved — none closed.
+        func pageInset(progress: CGFloat) -> CGFloat {
+            let scale = 1 - (1 - cardScale) * progress
+            let visible = size.height + (cardFrame.height - size.height) * progress
+            let overrun = max(0, size.height * scale - visible) / 2
+            return overrun / max(scale, 0.01)
+        }
 
         /// The pager's transform: scaled about its centre, then moved onto
         /// the open card's frame.
@@ -99,9 +169,11 @@ enum SnapSideList {
 
         /// How far the page's overlay moves down, in the page's own space
         /// (#1509): by the band the bottom toolbar covers, which holds
-        /// nothing once the page is a card between the bars.
+        /// nothing once the page is a card between the bars — less what the
+        /// card crops off the page's bottom (#1545), so nothing moves under
+        /// the crop.
         func overlayOffset(progress: CGFloat) -> CGFloat {
-            bars.bottom * progress
+            max(0, bars.bottom * progress - pageInset(progress: progress))
         }
 
         /// The finger's travel for a full open.
@@ -118,35 +190,21 @@ enum SnapSideList {
 }
 
 extension SnapSideList {
-    /// Where the list's scroll comes to rest, and what it shows at its edges
-    /// (#1527). Pure, read off the tiles' frames in the list's content space,
-    /// for tests.
+    /// Where the list's scroll comes to rest (#1527, #1545). Pure, read off
+    /// the tiles' frames in the list's content space, for tests.
     ///
-    /// ⚠️ A TILE IS NEVER LEFT CUT BY AN EDGE AT REST (the owner,
-    /// 2026-10-21): a drag going down settles with the top tile whole at the
-    /// top edge, one going up with the bottom tile whole at the bottom edge,
-    /// and a tap on a cut tile scrolls just enough to show it whole. While a
-    /// tile IS cut — mid-scroll — that edge wears a soft blur, gone again
-    /// once the tile is whole.
+    /// ⚠️ ONE RULE (#1545, the owner 2026-10-21: "un seul suffit"): the list
+    /// holds a whole number of tiles exactly (`Geometry.tileCount`), so a
+    /// tile's top on the top edge leaves the bottom tile whole on the bottom
+    /// edge too — no by-direction pair, and no edge blur: nothing is cut at
+    /// rest.
     enum Snapping {
-        /// Which way the list's content travels under the finger.
-        enum Direction: Equatable {
-            /// Towards later tiles: the offset grows.
-            case down
-            /// Towards earlier tiles.
-            case up
-        }
-
-        /// The offset a scroll released towards `direction` settles on, the
-        /// tile edge nearest the offset it would have stopped at (`proposed`)
-        /// — a tile's top on the top edge going down, its bottom on the
-        /// bottom edge going up — kept within the content.
-        static func target(
-            proposed: CGFloat, direction: Direction, tiles: [CGRect], viewport: CGFloat, contentHeight: CGFloat
-        ) -> CGFloat {
+        /// The offset a released scroll settles on: the tile top nearest the
+        /// offset it would have stopped at (`proposed`), kept within the
+        /// content.
+        static func target(proposed: CGFloat, tiles: [CGRect], viewport: CGFloat, contentHeight: CGFloat) -> CGFloat {
             let maxOffset = max(0, contentHeight - viewport)
-            let candidates = tiles.map { direction == .down ? $0.minY : $0.maxY - viewport }
-            guard let nearest = candidates.min(by: { abs($0 - proposed) < abs($1 - proposed) }) else {
+            guard let nearest = tiles.map(\.minY).min(by: { abs($0 - proposed) < abs($1 - proposed) }) else {
                 return min(max(0, proposed), maxOffset)
             }
             return min(max(0, nearest), maxOffset)
@@ -160,29 +218,6 @@ extension SnapSideList {
             if tile.minY < offset || tile.height > viewport { return tile.minY == offset ? nil : tile.minY }
             if tile.maxY > offset + viewport { return tile.maxY - viewport }
             return nil
-        }
-
-        /// How much of a tile each edge hides at `offset`, in points: zero
-        /// when the edge falls between tiles or on a tile's own edge.
-        static func cuts(offset: CGFloat, viewport: CGFloat, tiles: [CGRect]) -> (top: CGFloat, bottom: CGFloat) {
-            let bottomEdge = offset + viewport
-            let top = tiles.first { $0.minY < offset && offset < $0.maxY }.map { offset - $0.minY } ?? 0
-            let bottom = tiles.first { $0.minY < bottomEdge && bottomEdge < $0.maxY }.map { $0.maxY - bottomEdge } ?? 0
-            return (top, bottom)
-        }
-
-        /// The edge blur's height.
-        static let blurHeight: CGFloat = 40
-        /// How far a tile goes past an edge before that edge's blur is full:
-        /// it eases in over the first points of the cut and out over the
-        /// last, following the scroll — never popping.
-        static let blurRamp: CGFloat = 24
-
-        /// An edge's blur strength (0…1) for a tile cut by `cut` points.
-        static func blurStrength(cut: CGFloat) -> CGFloat {
-            let linear = min(1, max(0, cut / blurRamp))
-            // Smoothstep: no visible corner where it starts or saturates.
-            return linear * linear * (3 - 2 * linear)
         }
     }
 }
@@ -235,7 +270,8 @@ final class SnapSideListController: NSObject, SwipePanel {
         guard let host else { return SnapSideList.Geometry(size: .zero) }
         return SnapSideList.Geometry(
             size: host.view.bounds.size, bars: host.sideListBars,
-            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: host.view)
+            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: host.view),
+            tileShape: .current
         )
     }
 
@@ -251,19 +287,52 @@ final class SnapSideListController: NSObject, SwipePanel {
         let geometry = geometry
         let pager = host.collectionView!
         pager.transform = geometry.pagerTransform(progress: value)
-        let scale = 1 - (1 - geometry.cardScale) * value
-        // On screen, divided by the scale the layer wears. Closed, nothing
-        // to round: the page is the screen.
-        pager.layer.cornerRadius = value > 0 ? geometry.screenCornerRadius(progress: value) / max(scale, 0.01) : 0
-        pager.layer.cornerCurve = .continuous
+        applyCardShape(geometry, progress: value)
         host.setSideListOverlayOffset(geometry.overlayOffset(progress: value))
-        // A hairline, so a light page reads as a card on a light ground.
-        pager.layer.borderWidth = value > 0 ? 0.5 / max(scale, 0.01) : 0
-        pager.layer.borderColor = UIColor.separator.resolvedColor(with: host.traitCollection).cgColor
-        // Its tiles start below the top bar and end above the bottom one:
-        // the list's own safe area, which UIKit insets it by.
+        listView.tileSize = geometry.tileSize
         listView.frame = geometry.listFrame(progress: value)
         if value > 0 { listView.isHidden = false }
+    }
+
+    /// The card's shape (#1545): the scaled page cropped top and bottom to
+    /// the card's height, its corners rounded — a mask VIEW in the pager's
+    /// own space (where its scroll moves it), so the open and close springs
+    /// animate it with the transform — and a hairline around it on screen,
+    /// so a light page reads as a card on a light ground.
+    private func applyCardShape(_ geometry: SnapSideList.Geometry, progress value: CGFloat) {
+        guard let host, let pager = host.collectionView else { return }
+        guard value > 0 else {
+            pager.mask = nil
+            cardOutline.removeFromSuperview()
+            return
+        }
+        let scale = 1 - (1 - geometry.cardScale) * value
+        let inset = geometry.pageInset(progress: value)
+        let radius = geometry.screenCornerRadius(progress: value)
+        cardMask.backgroundColor = .black
+        cardMask.layer.cornerCurve = .continuous
+        cardMask.frame = pager.bounds.insetBy(dx: 0, dy: inset)
+        cardMask.layer.cornerRadius = radius / max(scale, 0.01)
+        if pager.mask !== cardMask { pager.mask = cardMask }
+        // On screen: the transformed pager's frame, less the crop.
+        if cardOutline.superview !== host.view {
+            cardOutline.isUserInteractionEnabled = false
+            cardOutline.layer.borderWidth = 0.5
+            cardOutline.layer.cornerCurve = .continuous
+            host.view.insertSubview(cardOutline, aboveSubview: pager)
+        }
+        cardOutline.frame = pager.frame.insetBy(dx: 0, dy: inset * scale)
+        cardOutline.layer.cornerRadius = radius
+        cardOutline.layer.borderColor = UIColor.separator.resolvedColor(with: host.traitCollection).cgColor
+    }
+
+    private let cardMask = UIView()
+    private let cardOutline = UIView()
+
+    /// The pager scrolled: its crop is in its own space, and moves with it.
+    func pagerDidScroll() {
+        guard progress > 0, !isSettling else { return }
+        UIView.performWithoutAnimation { applyCardShape(geometry, progress: progress) }
     }
 
     // MARK: The drag (`SwipePanel`, driven by the screen's arbiter)
@@ -365,17 +434,18 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
     var autoplay: SnapSideListAutoplay?
     private var outlined: PostID?
     var onSelect: ((FeedEntry) -> Void)?
-    /// The soft blur over the top and bottom edges while a tile is cut
-    /// there (#1527). The system's material, set once on screen.
-    private let topBlur = ProgressiveFrostView(maskColors: [.black, .clear], maskLocations: [0, 1])
-    private let bottomBlur = ProgressiveFrostView(maskColors: [.clear, .black], maskLocations: [0, 1])
-    /// The way the content last moved, for a release with no speed.
-    private var lastDirection: SnapSideList.Snapping.Direction = .down
-    private var lastOffset: CGFloat = 0
+    /// One tile, from the geometry (#1545): a whole number of them fills
+    /// the list exactly. Zero: not placed yet — a 3:4 tile of the width.
+    var tileSize: CGSize = .zero {
+        didSet { if tileSize != oldValue { collection.collectionViewLayout.invalidateLayout() } }
+    }
+    /// The skeletons over the tiles whose media is on its way (#1553), by
+    /// cell.
+    private var bones: [ObjectIdentifier: UIView] = [:]
 
-    static let tileSpacing: CGFloat = 6
-    /// Portrait, as a post's media is.
-    static let tileAspect: CGFloat = 4 / 3
+    static var tileSpacing: CGFloat { SnapSideList.Geometry.tileSpacing }
+    /// Before the geometry places the list: portrait, as a post's media is.
+    static let fallbackTileAspect: CGFloat = 4 / 3
 
     init(imagePipeline: ImagePipeline) {
         self.imagePipeline = imagePipeline
@@ -393,10 +463,6 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         collection.frame = bounds
         collection.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(collection)
-        for blur in [topBlur, bottomBlur] {
-            blur.isHidden = true
-            addSubview(blur)
-        }
         accessibilityIdentifier = "snap.sideList"
     }
 
@@ -408,25 +474,6 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         collection.reloadData()
         collection.layoutIfNeeded()
         reconcilePlayback()
-        updateEdgeBlurs()
-    }
-
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        // On screen, never in `init`: a blur made there stalls a headless
-        // test host (see `ProgressiveFrostView`'s users).
-        guard window != nil else { return }
-        for blur in [topBlur, bottomBlur] where blur.effect == nil {
-            blur.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
-        }
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        let height = min(SnapSideList.Snapping.blurHeight, bounds.height / 2)
-        topBlur.frame = CGRect(x: 0, y: 0, width: bounds.width, height: height)
-        bottomBlur.frame = CGRect(x: 0, y: bounds.height - height, width: bounds.width, height: height)
-        updateEdgeBlurs()
     }
 
     /// The tiles' frames, in the content's space.
@@ -436,26 +483,13 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         }
     }
 
-    /// Each edge's blur, as strong as the tile it cuts is cut.
-    private func updateEdgeBlurs() {
-        // The tiles on screen only: this runs every frame of a scroll.
-        let onScreen = collection.collectionViewLayout.layoutAttributesForElements(in: collection.bounds)?
-            .filter { $0.representedElementCategory == .cell }.map(\.frame) ?? []
-        let cuts = SnapSideList.Snapping.cuts(
-            offset: collection.contentOffset.y, viewport: collection.bounds.height, tiles: onScreen
-        )
-        topBlur.setRampStrength(SnapSideList.Snapping.blurStrength(cut: cuts.top))
-        bottomBlur.setRampStrength(SnapSideList.Snapping.blurStrength(cut: cuts.bottom))
-    }
-
-    /// Settles a released scroll on a whole tile (#1527): the one it was
-    /// going to stop on, by the way it was going.
+    /// Settles a released scroll on whole tiles (#1545): a tile's top on
+    /// the top edge, the one it was going to stop nearest.
     func scrollViewWillEndDragging(
         _ scrollView: UIScrollView, withVelocity velocity: CGPoint, targetContentOffset: UnsafeMutablePointer<CGPoint>
     ) {
-        let direction: SnapSideList.Snapping.Direction = velocity.y > 0 ? .down : velocity.y < 0 ? .up : lastDirection
         targetContentOffset.pointee.y = SnapSideList.Snapping.target(
-            proposed: targetContentOffset.pointee.y, direction: direction, tiles: tileFrames,
+            proposed: targetContentOffset.pointee.y, tiles: tileFrames,
             viewport: scrollView.bounds.height, contentHeight: scrollView.contentSize.height
         )
     }
@@ -480,10 +514,6 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         reconcilePlayback()
-        let offset = scrollView.contentOffset.y
-        if scrollView.isDragging, offset != lastOffset { lastDirection = offset > lastOffset ? .down : .up }
-        lastOffset = offset
-        updateEdgeBlurs()
     }
 
     func collectionView(
@@ -539,8 +569,24 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
                 with: ForYouRepository.galleryPost(from: entry), imagePipeline: imagePipeline,
                 showsInfo: entry.post.attachments.isEmpty
             )
-            // A cover landing late is when a still tile may start.
-            tile.onCoverLoaded = { [weak self] in self?.reconcilePlayback() }
+            // A cover landing late is when a still tile may start, and when
+            // its skeleton gives way (#1553).
+            tile.onCoverLoaded = { [weak self, weak tile] in
+                guard let self else { return }
+                if let tile { removeBone(from: tile, animated: true) }
+                reconcilePlayback()
+            }
+            tile.onCoverFailed = { [weak self, weak tile] in
+                guard let self, let tile else { return }
+                stillBone(on: tile)
+            }
+            // A media tile whose cover is not drawn yet wears a skeleton; a
+            // resident one, or a text tile (its words), none.
+            if !entry.post.attachments.isEmpty, tile.renderedCover == nil {
+                showBone(on: tile)
+            } else {
+                removeBone(from: tile, animated: false)
+            }
         }
         cell.contentView.layer.cornerRadius = SnapSideList.Geometry.tileCornerRadius
         cell.contentView.layer.cornerCurve = .continuous
@@ -552,8 +598,53 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         _ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout,
         sizeForItemAt indexPath: IndexPath
     ) -> CGSize {
+        if tileSize.width > 0, tileSize.height > 0 { return tileSize }
         let width = collectionView.bounds.width
-        return CGSize(width: width, height: (width * Self.tileAspect).rounded())
+        return CGSize(width: width, height: (width * Self.fallbackTileAspect).rounded())
+    }
+
+    // MARK: Skeletons (#1553)
+
+    /// The app's shimmering bone over `tile`, on its own shape. It stills
+    /// itself under Reduce Motion and Power Saving (`SkeletonBoneView`).
+    private func showBone(on tile: PostGridTileCell) {
+        let key = ObjectIdentifier(tile)
+        let bone = bones[key] ?? {
+            let bone = SkeletonBoneView(rounding: .fixed(SnapSideList.Geometry.tileCornerRadius))
+            bones[key] = bone
+            return bone
+        }()
+        bone.alpha = 1
+        bone.frame = tile.contentView.bounds
+        bone.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        if bone.superview !== tile.contentView { tile.contentView.addSubview(bone) }
+    }
+
+    /// The cover landed: the bone fades to the picture.
+    private func removeBone(from tile: PostGridTileCell, animated: Bool) {
+        guard let bone = bones.removeValue(forKey: ObjectIdentifier(tile)) else { return }
+        guard animated, window != nil, !UIAccessibility.isReduceMotionEnabled else {
+            return bone.removeFromSuperview()
+        }
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.allowUserInteraction]) {
+            bone.alpha = 0
+        } completion: { _ in bone.removeFromSuperview() }
+    }
+
+    /// The cover failed: a still bone, never an endless shimmer — the
+    /// emotes' rule (#1504).
+    private func stillBone(on tile: PostGridTileCell) {
+        let key = ObjectIdentifier(tile)
+        guard let bone = bones[key], bone is SkeletonBoneView else { return }
+        let still = UIView(frame: bone.frame)
+        still.autoresizingMask = bone.autoresizingMask
+        still.isUserInteractionEnabled = false
+        still.backgroundColor = .tertiarySystemFill
+        still.layer.cornerRadius = SnapSideList.Geometry.tileCornerRadius
+        still.layer.cornerCurve = .continuous
+        bone.superview?.insertSubview(still, aboveSubview: bone)
+        bone.removeFromSuperview()
+        bones[key] = still
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -562,13 +653,17 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
     }
 
     #if DEBUG
-    /// The list's scroll offset, and each edge blur's strength. Tests.
+    /// The list's scroll offset. Tests.
     var debugOffset: CGFloat {
         get { collection.contentOffset.y }
-        set { collection.contentOffset.y = newValue; updateEdgeBlurs() }
+        set { collection.contentOffset.y = newValue }
     }
-    var debugBlurStrengths: (top: CGFloat, bottom: CGFloat) { (topBlur.rampStrength, bottomBlur.rampStrength) }
     var debugTileFrames: [CGRect] { tileFrames }
+    /// Whether `cell` wears a skeleton, and whether it shimmers. Tests.
+    func debugBone(on cell: PostGridTileCell) -> (shown: Bool, shimmers: Bool) {
+        guard let bone = bones[ObjectIdentifier(cell)], bone.superview != nil else { return (false, false) }
+        return (true, bone is SkeletonBoneView)
+    }
 
     /// The tiles on screen. Tests.
     var debugTileCells: [PostGridTileCell] { collection.visibleCells.compactMap { $0 as? PostGridTileCell } }
