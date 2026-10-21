@@ -647,7 +647,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             shareTargeting: shareTargeting,
             makeRelationshipsViewController: makeRelationshipsFactory(),
             identityStub: identityStub,
-            actions: .init(openProfile: openProfile, push: push)
+            actions: .init(openProfile: openProfile, push: push),
+            videoPlayback: videoPlayback
         )
         return card.wrappedInSheet()
     }

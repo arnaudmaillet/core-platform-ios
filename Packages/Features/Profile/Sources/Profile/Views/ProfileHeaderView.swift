@@ -95,6 +95,23 @@ final class ProfileHeaderView: UIView {
         bannerView.setVideoPlaying(playing, pool: bannerVideoPool)
     }
 
+    /// ⚠️ THE ONE RULE FOR A PROFILE'S MOVING PICTURES (#944, #1399, #1541),
+    /// wherever the header is drawn — the profile, its card: the banner's
+    /// loop plays while its host is on show (or leaving), the banner on
+    /// screen and decorative motion allowed; the poster otherwise (Reduce
+    /// Motion, Power Saving, idle calm, #580), and its skeleton while the
+    /// profile loads (`setRedacted`). The avatar keeps its own (#1424): its
+    /// rounds, its last frame as the still. A host supplies the one thing
+    /// the header cannot know — whether it is on show.
+    func bannerShouldPlay(hostShowing: Bool) -> Bool {
+        hostShowing && window != nil && isBannerOnScreen && !MotionPreference.stillsDecoration
+    }
+
+    /// Applies the rule above.
+    func updateBannerVideo(hostShowing: Bool) {
+        setBannerVideoPlaying(bannerShouldPlay(hostShowing: hostShowing))
+    }
+
     /// Whether the banner shows on screen at all: in its window, faded in,
     /// and below the bar.
     var isBannerOnScreen: Bool {

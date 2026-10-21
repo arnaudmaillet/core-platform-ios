@@ -2785,8 +2785,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// poster under Reduce Motion, Power Saving and idle calm (#580), and as
     /// soon as the banner has scrolled away.
     private var bannerVideoShouldPlay: Bool {
-        (isShownOnScreen || isLeavingScreen) && view.window != nil && headerView.isBannerOnScreen
-            && !MotionPreference.stillsDecoration
+        view.window != nil && headerView.bannerShouldPlay(hostShowing: isShownOnScreen || isLeavingScreen)
     }
 
     #if DEBUG
