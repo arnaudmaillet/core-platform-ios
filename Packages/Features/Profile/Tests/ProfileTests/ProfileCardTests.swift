@@ -1,6 +1,7 @@
 import CoreModels
 import Foundation
 import MediaCore
+import MediaPlayback
 import Testing
 import UIKit
 @testable import Profile
@@ -92,6 +93,29 @@ struct ProfileCardTests {
         #expect(Card.wideItem(in: Card.toolbarItems(for: .edit)) == nil)
     }
 
+    // MARK: - The moving pictures (#1541)
+
+    /// The card's header plays its video banner on the app's pool, by the
+    /// header's one rule — never while its host is not on show; and the
+    /// rule is the same object the profile asks.
+    @Test func theCardsBannerPlaysByTheHeadersRule() {
+        let pool = VideoPlaybackController(source: CardVideoSource(), poolSize: 1)
+        let card = ProfileCardViewController(
+            viewModel: ProfileViewModel(
+                repository: CardProfileProvider(Self.ada, following: false), source: .profile(ProfileID("prof-1"))
+            ),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            shareTargeting: nil,
+            makeRelationshipsViewController: nil,
+            identityStub: nil,
+            actions: .init(openProfile: {}, push: { _ in }),
+            videoPlayback: pool
+        )
+        #expect(card.headerView.bannerVideoPool === pool, "the card's banner has no pool to play on")
+        #expect(!card.headerView.bannerShouldPlay(hostShowing: false), "a banner plays for a host not on show")
+        #expect(!card.headerView.bannerShouldPlay(hostShowing: true), "a banner off any window plays")
+    }
+
     // MARK: - The top bar
 
     /// The bell while the viewer follows — a member, a profile that can be
@@ -173,4 +197,9 @@ struct ProfileCardTests {
         #expect(ProfileCardViewController.climb(bandAvatarDetent: nil) == 0)
         #expect(ProfileCardViewController.visibleHeight(headerHeight: 600.2, climb: 214) == 387)
     }
+}
+
+/// A video source that resolves nothing: the pool is all a test reads.
+private struct CardVideoSource: VideoSource {
+    func playableURL(for url: URL) async throws -> URL { url }
 }

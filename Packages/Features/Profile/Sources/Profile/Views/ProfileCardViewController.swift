@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import MediaCore
+import MediaPlayback
 import PostGrid
 import ProfileInterface
 import ShareSheet
@@ -77,7 +78,8 @@ final class ProfileCardViewController: UIViewController {
             (ProfileRelationshipsViewModel.Subject, RelationshipDirection) -> UIViewController
         )?,
         identityStub: ProfileIdentityStub?,
-        actions: Actions
+        actions: Actions,
+        videoPlayback: VideoPlaybackController? = nil
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
@@ -85,6 +87,9 @@ final class ProfileCardViewController: UIViewController {
         self.makeRelationshipsViewController = makeRelationshipsViewController
         self.actions = actions
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
+        // The video banner plays here as on the profile (#1541), on the app's
+        // one pool.
+        headerView.bannerVideoPool = videoPlayback
         // The origin's answer when it had one, as the profile seeds it.
         followButtonState = identityStub?.isFollowing.map { $0 ? .following : .follow } ?? .hidden
         super.init(nibName: nil, bundle: nil)
@@ -123,6 +128,36 @@ final class ProfileCardViewController: UIViewController {
         bindViewModel()
         applyBars()
         viewModel.viewDidLoad()
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(decorativeMotionDidChange), name: .decorativeMotionDidChange, object: nil
+        )
+    }
+
+    // MARK: - The moving pictures (#1541)
+
+    /// On show, or leaving (the banner plays on through the dismissal, as
+    /// the profile's does, #1399).
+    private var isShowing = false
+
+    /// The header's one rule (`ProfileHeaderView.bannerShouldPlay`).
+    private func updateBannerVideo() {
+        headerView.updateBannerVideo(hostShowing: isShowing)
+    }
+
+    @objc private func decorativeMotionDidChange() {
+        updateBannerVideo()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        isShowing = true
+        updateBannerVideo()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        isShowing = false
+        updateBannerVideo()
     }
 
     override func viewSafeAreaInsetsDidChange() {
@@ -259,6 +294,8 @@ final class ProfileCardViewController: UIViewController {
             headerView.isHidden = false
             headerView.configure(with: model)
             headerView.setRedacted(false, animated: view.window != nil)
+            // The banner's clip arrives with the profile.
+            updateBannerVideo()
         case .failed, .notFound:
             // A plain card, as the profile's plain page (#1406): no banner,
             // no header for no one.
