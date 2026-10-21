@@ -1,11 +1,13 @@
 import Testing
 import UIKit
+import EmoteKit
 import MediaCore
 @testable import Maps
 
-/// A map marker's emote face RESTS under idle calm (#580/#650), as it always
-/// has: the owner kept the map at rest when emotes in text started playing
-/// through it (#1072) — a map holds far more of them than any caption.
+/// ⚠️ A MAP MARKER'S EMOTE FACE PLAYS THROUGH IDLE CALM (#1504, the owner
+/// 2026-10-21, reversing the map part of #1072): it follows the one emote
+/// contract (`EmoteMapIcons.playbackPolicy`) — still under Reduce Motion,
+/// Animate Emojis off, Power Saving and Low Power, never for idleness.
 ///
 /// ⚠️ IDLE CALM IS INJECTED (`AnimatedIconView.isIdleCalm`), never the app-wide
 /// `IdleCalm`, and the test is SYNCHRONOUS: the seam is process-wide while set.
@@ -24,7 +26,7 @@ struct PinCardIdleCalmTests {
         return .sheet(AnimatedIconSheet(sheet: image, frameCount: frames, columns: frames, frameDuration: 0.1))
     }
 
-    @Test func aMarkersEmoteFaceRestsUnderIdleCalm() throws {
+    @Test func aMarkersEmoteFacePlaysThroughIdleCalm() throws {
         let original = AnimatedIconView.isIdleCalm
         let forced = AnimatedIconView.forcedPolicy
         AnimatedIconView.isIdleCalm = { true }
@@ -38,15 +40,12 @@ struct PinCardIdleCalmTests {
         card.setIcon((movingArt(), 0))
         let face = try #require(card.debugIconFace as? AnimatedIconView)
         #expect(card.debugIconFaceIsVisible)
-        #expect(!face.isAnimating, "a map marker's emote face played through idle calm")
-
-        // Witness: the same face plays when the app's policy lets it, so the
-        // rest above is the policy's and not a face that never moves.
-        AnimatedIconView.forcedPolicy = .full
-        let awake = PinCardView(frame: CGRect(x: 0, y: 0, width: 56, height: 56))
-        awake.setFace(.icon)
-        awake.setIcon((movingArt(), 0))
-        let awakeFace = try #require(awake.debugIconFace as? AnimatedIconView)
-        #expect(awakeFace.isAnimating, "witness: the face never plays")
+        // The face states the emote policy; idleness is not one of its gates.
+        #expect(card.debugIconPlaybackPolicy == EmoteMapIcons.playbackPolicy)
+        // The host may run with Reduce Motion or Low Power on: only then is
+        // the face still, and never for idleness.
+        if EmoteMapIcons.playbackPolicy == .full {
+            #expect(face.isAnimating, "a map marker's emote face rested under idle calm")
+        }
     }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import MediaCore
+import UIKit
 
 /// Emotes as the map's icon faces.
 ///
@@ -60,4 +61,19 @@ public final class EmoteMapIcons: AnimatedIconProviding {
     public nonisolated static func faceID(forCaption caption: String, catalog: EmoteCatalog = .shared) -> String? {
         EmoteParser.matches(in: caption, catalog: catalog).first?.emote.id
     }
+}
+
+// MARK: - The one emote contract on the map (#1504)
+
+public extension EmoteMapIcons {
+    /// What a marker's emote face plays under: the one contract every emote
+    /// follows (#1504, the owner 2026-10-21) — still under Reduce Motion,
+    /// Animate Emojis off, Power Saving, Low Power Mode and overheating; and,
+    /// unlike the map's decoration, THROUGH idle calm (the owner reversed the
+    /// map part of #1072). A face sets it on its player
+    /// (`AnimatedIconView.playbackPolicy`).
+    static var playbackPolicy: AnimatedIconView.MotionPolicy { EmoteMotion.policy }
+
+    /// What a face re-reads `playbackPolicy` on.
+    static var policyNotifications: [Notification.Name] { EmoteMotion.policyNotifications }
 }
