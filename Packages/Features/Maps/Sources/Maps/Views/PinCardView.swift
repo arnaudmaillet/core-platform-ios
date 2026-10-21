@@ -1,5 +1,6 @@
 import CoreNavigation
 import DesignSystem
+import EmoteKit
 import MediaCore
 import MediaPlayback
 import UIKit
@@ -328,6 +329,15 @@ final class PinCardView: UIView {
         // stand-in out at the WINDOW's frame, so a filling icon was blown up to
         // several hundred points as the window opened.
         iconFaceView.isHidden = true
+        // ⚠️ AN EMOTE FACE PLAYS UNDER THE ONE EMOTE CONTRACT (#1504, the owner
+        // 2026-10-21): Animate Emojis and Low Power still it, and it plays
+        // through idle calm like every emote — no longer the map's decoration.
+        iconFaceView.playbackPolicy = EmoteMapIcons.playbackPolicy
+        for name in EmoteMapIcons.policyNotifications {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(emotePolicyMayHaveChanged), name: name, object: nil
+            )
+        }
         contentView.addSubview(iconFaceView)
 
         // Above every face: a locked marker is its face, darkened, under a
@@ -690,8 +700,13 @@ final class PinCardView: UIView {
         // A reveal may have borrowed the disc as the icon's container; re-facing
         // or re-dressing the card takes it back.
         textFaceView.alpha = 1
-        textFaceView.isHidden = !(face == .text || iconIsBare)
+        // ⚠️ A BARE EMOTE FACE IS NOT SHOWN AT ALL (#1504, the owner
+        // 2026-10-21): no author's disc standing in, no skeleton — the marker
+        // appears once its emote is there (`applyIconPresence`), and never if
+        // it does not come. The disc is the TEXT face's alone.
+        textFaceView.isHidden = face != .text
         iconFaceView.isHidden = face != .icon
+        applyIconPresence(awaiting: iconIsBare)
         // ⚠️ AN ICON'S FACE IS THE ICON, and the cover under it is not part of
         // it. The rule was never written down because at rest it cannot be
         // seen: the card is 44pt and the mark fills it exactly.
@@ -717,7 +732,8 @@ final class PinCardView: UIView {
         // A DRESSED icon — an emote, a GIF — wears no border of any kind, the
         // flag's included: it is a mark on the map, with no card to frame. Its
         // badge stays; that says where it is, not what it is.
-        let bordersSuppressed = face == .icon && !iconIsBare
+        // A bare emote face is not shown: no border either.
+        let bordersSuppressed = face == .icon
         let wearsFlagBorder = dress.borderFlag != nil && !bordersSuppressed
         ringView.isHidden = bordersSuppressed || wearsFlagBorder
         flagBorder.isHidden = !wearsFlagBorder
@@ -741,31 +757,53 @@ final class PinCardView: UIView {
         // design) does the floor supply its own disc.
         let cardRadius = layer.cornerRadius
         let floorRadius = cardRadius > 0 ? cardRadius : min(bounds.width, bounds.height) / 2
-        textFaceView.floorCornerRadius = (iconIsBare || face == .text) ? floorRadius : 0
-        // ⚠️ ONLY the square card overrides the ring. Everywhere else the ring
-        // already wears whatever `setCornerRadius` last wrote — in a reveal
-        // window that is the mask's radius, growing toward the page's — and
-        // re-asserting `face.cornerRadius` here would undo it one line later.
-        if iconIsBare, cardRadius == 0 {
-            applyRingShape(radius: floorRadius, curve: .circular)
-            // The veil darkens the floor's disc, not the square around it.
-            lockVeil.layer.cornerRadius = floorRadius
-        } else {
-            lockVeil.layer.cornerRadius = 0
-            // The card's LIVE radius, not the face's constant: in a reveal
-            // window that is the mask's, and asserting the face's would undo
-            // what `setCornerRadius` wrote one line earlier. At rest the two
-            // are the same value, so the dressed icon still goes back to 0.
-            // Circular for every face now: a disc's, and the media tile's
-            // matched corner (`PinCardView.cornerCurve`).
-            applyRingShape(radius: cardRadius, curve: face == .text ? .circular : Self.cornerCurve)
-        }
+        textFaceView.floorCornerRadius = face == .text ? floorRadius : 0
+        lockVeil.layer.cornerRadius = 0
+        // The card's LIVE radius, not the face's constant: in a reveal window
+        // that is the mask's, and asserting the face's would undo what
+        // `setCornerRadius` wrote one line earlier. Circular for every face: a
+        // disc's, and the media tile's matched corner (`PinCardView.cornerCurve`).
+        // (A bare emote face no longer wears the text floor's disc and ring,
+        // #1504: it is not shown until its art is there.)
+        applyRingShape(radius: cardRadius, curve: face == .text ? .circular : Self.cornerCurve)
     }
 
     /// Read back rather than remembered elsewhere — the same reason
     /// `textAvatar` exists: it is what keeps the flying card and the marker the
     /// same picture.
     private(set) var wornIcon: (art: AnimatedIconArt, phase: Int)?
+
+    /// Whether the card is an emote face still waiting for its art — and so
+    /// not shown, and not tappable (#1504).
+    var isAwaitingIcon: Bool { face == .icon && wornIcon == nil }
+
+    /// How long a marker takes to appear once its emote has landed.
+    static let iconArrivalDuration: TimeInterval = 0.2
+
+    /// ⚠️ AN EMOTE MARKER APPEARS WITH ITS EMOTE (#1504, the owner
+    /// 2026-10-21): the whole card stays transparent while its art is on its
+    /// way — the map shows nothing there rather than a stand-in — and fades
+    /// in when it lands. The card's OWN alpha: the arrival's pop animates the
+    /// annotation view's, and nothing else writes this one.
+    private func applyIconPresence(awaiting: Bool) {
+        let target: CGFloat = awaiting ? 0 : 1
+        guard alpha != target else { return }
+        layer.removeAnimation(forKey: "opacity")
+        guard !awaiting, window != nil, !UIAccessibility.isReduceMotionEnabled else {
+            alpha = target
+            return
+        }
+        UIView.animate(withDuration: Self.iconArrivalDuration, delay: 0, options: [.allowUserInteraction]) {
+            self.alpha = target
+        }
+    }
+
+    /// Reduce Motion, Animate Emojis, Power Saving or Low Power changed.
+    @objc private func emotePolicyMayHaveChanged() {
+        iconFaceView.playbackPolicy = EmoteMapIcons.playbackPolicy
+    }
+
+    var debugIconPlaybackPolicy: AnimatedIconView.MotionPolicy? { iconFaceView.playbackPolicy }
 
     /// Re-installs playback after anything that strips animations: a foreground
     /// transition does, and so does a motion-policy change.
@@ -1106,9 +1144,9 @@ final class PinCardView: UIView {
             // artwork had not resolved COVERED the departing page in one step
             // instead of crossfading over it. That is the arrival reading
             // itself: what the viewer sees must be what the blend moves.
-            let isBare = wornIcon == nil
-            iconFaceView.alpha = isBare ? 1 : blend
-            textFaceView.alpha = isBare ? blend : 1
+            // (A bare emote face draws nothing, #1504: the icon is the unit.)
+            iconFaceView.alpha = blend
+            textFaceView.alpha = 1
         }
     }
 

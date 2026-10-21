@@ -5,6 +5,11 @@ import MediaCore
 
 /// The icon face's FLOOR: a marker is never blank.
 ///
+/// ⚠️ SINCE #1504 (the owner 2026-10-21) A BARE EMOTE FACE IS NOT SHOWN AT
+/// ALL: the marker appears with its emote, and never draws a stand-in — no
+/// author's disc, no skeleton. "Never blank" now means "never a drawn
+/// placeholder": an unshown card that is not tappable either.
+///
 /// `Face.of` promises `.icon` on the strength of an ID — an id the catalogue
 /// may not be able to honour. A cold cache, a decode failure, a
 /// memory-pressure eviction, or a fleet build where the id resolves to nothing
@@ -37,32 +42,32 @@ struct PinCardIconFloorTests {
         return .sheet(AnimatedIconSheet(sheet: image, frameCount: 1, columns: 1, frameDuration: 0.1))
     }
 
-    @Test func anIconWithNoArtDrawsTheTextDisc() {
+    @Test func anIconWithNoArtIsNotShown() {
         let card = makeCard(.icon)
         #expect(card.wornIcon == nil)
-        #expect(card.debugTextFaceIsVisible, "a bare icon must fall back to the disc, not to nothing")
-        // The ring belongs to the disc, not to the face: a bare icon should
-        // read as the text marker it is standing in for, ring included. The
-        // "ringless" half of the icon contract is about a DRESSED icon, and
-        // `PinCardBlendTests` now asserts it on one.
-        #expect(!card.ringView.isHidden, "the floor wears the text marker's ring")
-        // ⚠️ And the ring must take the DISC's shape. It draws on the card's
-        // rectangle, which under `.icon` is a square — so left alone it framed
-        // the round floor in a squircle.
-        #expect(card.ringView.layer.cornerRadius == card.bounds.height / 2)
-        #expect(card.ringView.layer.cornerCurve == .circular)
+        #expect(card.isAwaitingIcon)
+        #expect(card.alpha == 0, "a bare emote marker must not be drawn (#1504)")
+        #expect(!card.debugTextFaceIsVisible, "no author's disc standing in")
+        #expect(card.ringView.isHidden)
     }
 
-    /// The floor is a floor, not a layer: an icon's alpha is its shape, so a
-    /// disc left underneath would show through it as the circle the product
-    /// asked not to see.
-    @Test func theDiscGoesTheInstantArtLands() {
+    /// Art landing — at once off a window — shows the marker.
+    @Test func theMarkerAppearsWithItsArt() {
         let card = makeCard(.icon)
-        #expect(card.debugTextFaceIsVisible)
         card.setIcon((art(), 0))
-        #expect(!card.debugTextFaceIsVisible, "art landed; the floor must go")
+        #expect(!card.isAwaitingIcon)
+        #expect(card.alpha == 1)
         #expect(card.debugIconFaceIsVisible)
-        // And the ring goes back to the icon's own square geometry.
+    }
+
+    /// The disc never comes back for an icon, with or without art.
+    @Test func theDiscNeverStandsInForAnIcon() {
+        let card = makeCard(.icon)
+        #expect(!card.debugTextFaceIsVisible)
+        card.setIcon((art(), 0))
+        #expect(!card.debugTextFaceIsVisible)
+        #expect(card.debugIconFaceIsVisible)
+        // And the ring keeps the icon's own square geometry.
         #expect(card.ringView.isHidden)
         #expect(card.ringView.layer.cornerRadius == PinCardView.Face.icon.cornerRadius)
     }
@@ -74,18 +79,18 @@ struct PinCardIconFloorTests {
         let pinOrder = PinCardView(frame: CGRect(x: 0, y: 0, width: Self.side, height: Self.side))
         pinOrder.setFace(.icon)
         pinOrder.setIcon(nil)
-        #expect(pinOrder.debugTextFaceIsVisible, "face-then-strip must land on the floor")
+        #expect(pinOrder.alpha == 0, "face-then-strip must leave the bare marker unshown")
 
         let clusterOrder = PinCardView(frame: CGRect(x: 0, y: 0, width: Self.side, height: Self.side))
         clusterOrder.setIcon(nil)
         clusterOrder.setFace(.icon)
-        #expect(clusterOrder.debugTextFaceIsVisible, "strip-then-face must land on the floor too")
+        #expect(clusterOrder.alpha == 0, "strip-then-face too")
 
         let recycled = PinCardView(frame: CGRect(x: 0, y: 0, width: Self.side, height: Self.side))
         recycled.setIcon((art(), 0))
         recycled.setFace(.icon)
         recycled.setIcon(nil)
-        #expect(recycled.debugTextFaceIsVisible, "a recycled view stripped after facing must not be blank")
+        #expect(recycled.alpha == 0, "a recycled view stripped after facing must not draw its old art")
     }
 
     /// The whole point of not moving the face: everything read from outside
@@ -112,7 +117,7 @@ struct PinCardIconFloorTests {
         let standIn = PinCardView(frame: CGRect(x: 0, y: 0, width: Self.side, height: Self.side))
         standIn.setFace(.icon)
         standIn.setIcon(nil)
-        #expect(standIn.debugTextFaceIsVisible, "a bare stand-in must draw the disc")
+        #expect(standIn.alpha == 0, "a bare stand-in draws nothing either")
 
         let dressed = PinCardView(frame: CGRect(x: 0, y: 0, width: Self.side, height: Self.side))
         dressed.setFace(.icon)
@@ -159,52 +164,18 @@ struct PinCardIconFloorTests {
         #expect(bareLayer.shadowOpacity > 0, "the floor flies with its lift")
     }
 
-    /// ⚠️ VISIBLE IS NOT ROUND, and the difference is the whole fallback.
-    ///
-    /// The first version of these tests asserted only that the text face was
-    /// not hidden. That was true, and the marker still drew a flat coloured
-    /// SQUARE: the face carried no radius of its own and relied on the CARD's,
-    /// which under `.icon` is 0 by design. Only the simulator showed it. This
-    /// pins the shape.
-    @Test func theFloorIsRoundEvenThoughTheCardIsNot() {
-        let card = makeCard(.icon)
-        card.layoutIfNeeded()
-        #expect(card.layer.cornerRadius == 0, "the icon face stays square — that is the contract")
-
-        let textFace = card.debugTextFace
-        textFace.layoutIfNeeded()
-        #expect(!textFace.isHidden)
-        #expect(textFace.layer.cornerRadius == textFace.bounds.height / 2,
-                "the floor must round ITSELF; the card will not do it under .icon")
-        #expect(textFace.layer.masksToBounds, "a radius that clips nothing is a square")
-        // ⚠️ A superellipse at half the side is not a circle.
-        #expect(textFace.layer.cornerCurve == .circular)
-    }
-
     // MARK: - The blend, which is what a differing-post dismissal rides
 
-    /// ⚠️ The unit the VIEWER SEES must be the unit the blend moves.
-    ///
-    /// `theOperandUnderneathIsNeverPartlyDrawn` pins that the departure picture
-    /// stays opaque, and that stayed true while this was broken: the `.icon`
-    /// branch faded `iconFaceView` and never touched `textFaceView`, so a bare
-    /// icon's disc sat at alpha 1 for the whole flight while an invisible face
-    /// faded in behind it. A dismissal landing on a marker whose artwork had not
-    /// resolved therefore COVERED the departing page in one step instead of
-    /// crossfading over it — the arrival reading itself.
-    @Test func aBareIconFadesItsDiscAcrossTheBlend() {
+    /// The blend moves the icon whether or not it has art: art landing mid-
+    /// flight is drawn at the blend's current value.
+    @Test func theBlendMovesTheIcon() {
         let card = makeCard(.icon)
         card.setDeparturePicture(UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image {
             UIColor.black.setFill(); $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
         })
-        let textFace = card.debugTextFace
-
-        card.setBlend(0)
-        #expect(textFace.alpha == 0, "at blend 0 the arrival must not be drawn at all")
         card.setBlend(0.5)
-        #expect(abs(textFace.alpha - 0.5) < 0.001, "it has to cross fade, not switch")
-        card.setBlend(1)
-        #expect(textFace.alpha == 1)
+        #expect(abs(card.debugIconFace.alpha - 0.5) < 0.001)
+        #expect(card.debugTextFace.alpha == 1, "the disc is not in an icon's blend")
     }
 
     /// The dressed case keeps fading the icon, and the disc stays out of it.
@@ -222,21 +193,15 @@ struct PinCardIconFloorTests {
         #expect(textFace.alpha == 1, "the floor is not in the flight when there is art")
     }
 
-    /// Art landing MID-FLIGHT has to re-point the channel, or the blend keeps
-    /// fading a view nobody can see.
-    @Test func artLandingMidBlendMovesTheChannel() {
+    /// Art landing MID-FLIGHT is drawn at the blend's current value.
+    @Test func artLandingMidBlendKeepsTheChannel() {
         let card = makeCard(.icon)
         card.setDeparturePicture(UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image {
             UIColor.black.setFill(); $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
         })
         card.setBlend(0.5)
-        let textFace = card.debugTextFace
-        let iconFace = card.debugIconFace
-        #expect(abs(textFace.alpha - 0.5) < 0.001)
-
         card.setIcon((art(), 0))
-        #expect(abs(iconFace.alpha - 0.5) < 0.001, "the icon takes over the blend at its current value")
-        #expect(textFace.alpha == 1)
+        #expect(abs(card.debugIconFace.alpha - 0.5) < 0.001, "the icon takes over the blend at its current value")
     }
 
     // MARK: - The reveal's container channel
@@ -297,19 +262,18 @@ struct PinCardIconFloorTests {
         #expect(popped.debugTextFace.isHidden, "and neither must the chevron's")
     }
 
-    /// ⚠️ The floor is still there for a BARE icon, which is the case the disc
-    /// genuinely belongs to: no artwork has landed, so the marker has to be
-    /// something.
-    @Test func aBareIconStandsOnTheDisc() {
+    @Test func aBareIconAppearsWhenItsArtLands() {
         let card = makeCard(.icon)
-        #expect(card.debugTextFaceIsVisible, "an icon with no art stands on the floor")
+        #expect(card.alpha == 0, "an icon with no art is not shown")
+        #expect(!card.debugTextFaceIsVisible)
 
         card.setIcon((art(), 0))
-        #expect(!card.debugTextFaceIsVisible, "and steps off it the instant art lands")
+        #expect(card.alpha == 1, "and appears the instant art lands")
+        #expect(!card.debugTextFaceIsVisible)
 
         card.setContentOpacity(0.5)
         card.setFace(.icon)
-        #expect(!card.debugTextFaceIsVisible, "re-facing cannot put it back either")
+        #expect(!card.debugTextFaceIsVisible, "re-facing cannot put the disc back either")
     }
 
     /// The mark's size is authored, not derived from the window.

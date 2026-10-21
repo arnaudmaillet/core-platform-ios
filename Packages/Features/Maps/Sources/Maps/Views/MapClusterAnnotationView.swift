@@ -111,6 +111,14 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
     /// real art lands. Routing every write through here is what makes "no
     /// shadow under an icon, the text marker's lift under a bare one" true at
     /// every instant rather than at one.
+    /// ⚠️ AN EMOTE MARKER WAITING FOR ITS EMOTE IS NOT THERE (#1504): it
+    /// draws nothing (`PinCardView.isAwaitingIcon`), so it takes no tap either —
+    /// a touch on the empty map there must not open a post.
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        guard !card.isAwaitingIcon else { return false }
+        return super.point(inside: point, with: event)
+    }
+
     func applyIconArt(_ art: (art: AnimatedIconArt, phase: Int)?) {
         card.setIcon(art)
         PinCardView.applyPinShadow(to: layer, face: card.face, hasArt: art != nil)
@@ -204,12 +212,13 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
                 return
             }
             iconTask = Task { [weak self] in
+                // No art to be had: the marker stays unshown (#1504).
                 guard let art = try? await iconCatalog.art(for: icon) else { return }
                 guard let self, self.representedIcon == icon else { return }
                 self.applyIconArt((art, phase))
             }
             // No `return`: fall through to the avatar load, which dresses the
-            // FLOOR under an icon that has not arrived — and may never.
+            // text face; an icon marker is not shown until its art lands (#1504).
         }
         // A text group wears the face of the post that leads it — the same
         // representative whose thumbnail a media group would show.

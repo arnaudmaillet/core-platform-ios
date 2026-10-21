@@ -201,6 +201,14 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
     /// real art lands. Routing every write through here is what makes "no
     /// shadow under an icon, the text marker's lift under a bare one" true at
     /// every instant rather than at one.
+    /// ⚠️ AN EMOTE MARKER WAITING FOR ITS EMOTE IS NOT THERE (#1504): it
+    /// draws nothing (`PinCardView.isAwaitingIcon`), so it takes no tap either —
+    /// a touch on the empty map there must not open a post.
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        guard !card.isAwaitingIcon else { return false }
+        return super.point(inside: point, with: event)
+    }
+
     func applyIconArt(_ art: (art: AnimatedIconArt, phase: Int)?) {
         card.setIcon(art)
         PinCardView.applyPinShadow(to: layer, face: card.face, hasArt: art != nil)
@@ -296,6 +304,7 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
             }
             let id = pin.postID
             iconTask = Task { [weak self] in
+                // No art to be had: the marker stays unshown (#1504).
                 guard let art = try? await iconCatalog.art(for: iconID) else { return }
                 guard let self, self.representedID == id else { return }
                 self.applyIconArt((art, phase))

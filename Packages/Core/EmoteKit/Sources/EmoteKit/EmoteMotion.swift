@@ -22,9 +22,10 @@ import UIKit
 /// already played through it (#926); every EmoteKit surface now does, each
 /// stating this policy on its player (`playbackPolicy`).
 ///
-/// ⚠️ **NOT THE MAP.** Its emote markers keep `AnimatedIconView`'s own
-/// policy and rest with the decoration: there are far more of them (the
-/// owner's decision on #1072, the #580 cost).
+/// ⚠️ **THE MAP TOO, SINCE #1504.** Its emote markers rested with the
+/// decoration (the owner's #1072, for their number); the owner reversed that
+/// on 2026-10-21: a marker's emote face plays under this policy as well
+/// (`EmoteMapIcons.playbackPolicy`), Animate Emojis included.
 @MainActor
 enum EmoteMotion {
     /// What every emote surface plays under: a label, the composer, a tile
