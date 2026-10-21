@@ -559,7 +559,7 @@ final class EmoteAttachmentView: UIView {
         player.playbackPolicy = policy
         let side = EmoteEngine.pixelSide(forPoints: bounds.width, scale: window?.screen.scale ?? 3)
         var answered = false
-        request = engine.requestArt(for: emote, pixelSide: side, motion: motion) { [weak self] art in
+        request = engine.requestArt(for: emote, pixelSide: side, motion: motion, urgent: true) { [weak self] art in
             answered = true
             guard let self else { return }
             self.request = nil

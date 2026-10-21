@@ -84,12 +84,14 @@ struct EmoteSeedTests {
         #expect(TestBitmap.cell(image, plan: plan, frame: 0).inked > 64 * 64 / 8, "\(id)'s first frame is blank")
     }
 
-    /// Only the seeded bucket and the loop are seeded; anything else bakes.
+    /// Only the seeded buckets — 64, and 48 drawn from it (#1504) — and the
+    /// loop are seeded; anything else bakes.
     @Test func onlyTheSeededBucketAndTheLoopAreSeeded() throws {
         let joy = try #require(catalog.emote(id: "noto:1f602"))
         let seeds = EmoteSeeds.bundled
         #expect(seeds.covers(joy, pixelSide: 64, motion: .loop))
-        #expect(!seeds.covers(joy, pixelSide: 48, motion: .loop))
+        #expect(seeds.covers(joy, pixelSide: 48, motion: .loop), "a footnote caption's bucket missed the seeds")
+        #expect(!seeds.covers(joy, pixelSide: 96, motion: .loop))
         #expect(!seeds.covers(joy, pixelSide: 64, motion: .still))
         let unseeded = try #require(catalog.emote(id: "noto:1f976"))
         #expect(!seeds.covers(unseeded, pixelSide: 64, motion: .loop))

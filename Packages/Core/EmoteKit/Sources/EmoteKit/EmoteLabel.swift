@@ -465,8 +465,9 @@ open class EmoteLabel: UILabel {
             return
         }
         var answered = false
+        // Urgent: a label only asks for what is on screen (#1504).
         let request = engine.requestArt(
-            for: player.emote, pixelSide: player.side, motion: player.motion
+            for: player.emote, pixelSide: player.side, motion: player.motion, urgent: true
         ) { [weak self, weak player] art in
             answered = true
             guard let self, let player, self.players[index] === player else { return }
@@ -493,6 +494,7 @@ open class EmoteLabel: UILabel {
 
     private func present(_ art: AnimatedIconArt, in player: EmotePlayer, index: Int) {
         player.art = art
+        engine.noteShown(player.emote, pixelSide: player.side, motion: player.motion)
         let animates = player.motion == .loop && art.frameCount > 1
         if animates, !player.holdsSlot {
             guard engine.acquirePlaybackSlot(waiter: self) else {

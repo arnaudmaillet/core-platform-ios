@@ -40,9 +40,12 @@ import UIKit
 public final class EmoteEngine {
     public static let shared: EmoteEngine = {
         let engine = EmoteEngine(seeds: .bundled, registry: .shared)
+        engine.hotSet = EmoteHotSet(defaults: .standard)
         // The disk's index, read off the main thread before the first emote
         // asks: it says which sheets are a read away (`skeletonDelay`).
         engine.openDiskInBackground()
+        // And the emotes shown last, into memory before anything asks (#1504).
+        Task { await engine.warmHotSet() }
         return engine
     }()
 
@@ -89,8 +92,13 @@ public final class EmoteEngine {
     public var maxPlayingTiles = 96
 
     /// How long a bake waits before starting, so a request cancelled within it
-    /// (a page swiped past) never loads or draws anything.
+    /// (a page swiped past) never loads or draws anything. An URGENT request
+    /// — an emote in a label already on screen (#1504) — skips it.
     var bakeDelay = Duration.milliseconds(150)
+
+    /// The emotes shown most recently, warmed into memory at launch
+    /// (`warmHotSet`, #1504). Nil keeps no list: a test's engine.
+    var hotSet: EmoteHotSet?
 
     /// How long a place waiting on art that is only READ (a seed, a sheet on
     /// disk, a map icon) stays empty before its skeleton shows (#987). A read
@@ -191,11 +199,15 @@ public final class EmoteEngine {
     /// icon catalogue). Never called after the request is cancelled.
     ///
     /// A cached answer is delivered BEFORE this returns.
+    ///
+    /// `urgent`: the emote is on screen now (#1504) — a bake starts without
+    /// `bakeDelay`, which only spares work for a place flicked past.
     @discardableResult
     public func requestArt(
         for emote: Emote,
         pixelSide: Int,
         motion: Motion,
+        urgent: Bool = false,
         completion: @escaping @MainActor (AnimatedIconArt?) -> Void
     ) -> EmoteRequest {
         if let art = cachedArt(for: emote, pixelSide: pixelSide, motion: motion) {
@@ -213,7 +225,7 @@ public final class EmoteEngine {
         job.waiters[token] = completion
         pending[key] = job
         job.task = Task { [weak self] in
-            let art = await self?.produce(emote, pixelSide: pixelSide, motion: motion)
+            let art = await self?.produce(emote, pixelSide: pixelSide, motion: motion, urgent: urgent)
             self?.finish(key: key, job: job, art: art)
         }
         return EmoteRequest(engine: self, key: key, token: token)
@@ -261,6 +273,39 @@ public final class EmoteEngine {
         Task.detached(priority: .utility) { diskCache.open() }
     }
 
+    // MARK: - The hot set (#1504)
+
+    /// A place showed this emote's art: it joins the hot set the next launch
+    /// warms.
+    func noteShown(_ emote: Emote, pixelSide: Int, motion: Motion) {
+        hotSet?.note(emote.id, pixelSide: pixelSide, still: motion == .still)
+    }
+
+    /// Reads the hot set's sheets — a seed or a disk read, never a bake — off
+    /// the main actor, and makes them resident, so the first screen of a warm
+    /// launch installs them in its layout pass: no empty square, no skeleton.
+    func warmHotSet() async {
+        guard let entries = hotSet?.entries, !entries.isEmpty else { return }
+        let seeds = seeds
+        let diskCache = diskCache
+        for entry in entries {
+            guard let emote = catalog.emote(id: entry.id) else { continue }
+            let motion: Motion = entry.still ? .still : .loop
+            guard cachedArt(for: emote, pixelSide: entry.pixelSide, motion: motion) == nil else { continue }
+            let side = entry.pixelSide
+            let stem = EmoteDiskCache.fileStem(emoteID: emote.id, side: side, still: entry.still)
+            let art = await Task.detached(priority: .utility) { () -> AnimatedIconArt? in
+                if let seeds, seeds.covers(emote, pixelSide: side, motion: motion) {
+                    return seeds.art(for: emote, pixelSide: side, motion: motion)
+                }
+                return diskCache?.load(stem: stem)
+            }.value
+            if let art {
+                memory.insert(art, for: Self.key(emote, pixelSide: side, motion: motion), cost: art.byteCost)
+            }
+        }
+    }
+
     /// Whether a bake for this emote is running.
     func isBaking(_ emote: Emote, pixelSide: Int, motion: Motion) -> Bool {
         pending[Self.key(emote, pixelSide: pixelSide, motion: motion)] != nil
@@ -301,7 +346,7 @@ public final class EmoteEngine {
         waiters.forEach { $0(art) }
     }
 
-    private func produce(_ emote: Emote, pixelSide: Int, motion: Motion) async -> AnimatedIconArt? {
+    private func produce(_ emote: Emote, pixelSide: Int, motion: Motion, urgent: Bool) async -> AnimatedIconArt? {
         if let artProvider { return await artProvider(emote, pixelSide, motion) }
         if case .icon(let id) = emote.source {
             guard let art = try? await iconCatalog?.art(for: id) else { return nil }
@@ -330,7 +375,7 @@ public final class EmoteEngine {
         }
         // A beat before any work: a caption flicked past in the meantime
         // cancels its request and costs nothing at all.
-        if bakeDelay > .zero { try? await Task.sleep(for: bakeDelay) }
+        if !urgent, bakeDelay > .zero { try? await Task.sleep(for: bakeDelay) }
         guard !Task.isCancelled, let animation = await animationProvider(emote), !Task.isCancelled else { return nil }
         let plan = EmoteBakePlan.make(seconds: animation.duration, side: pixelSide, still: motion == .still)
         stats.bakesStarted += 1
