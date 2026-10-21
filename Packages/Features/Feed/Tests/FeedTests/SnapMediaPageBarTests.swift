@@ -455,6 +455,59 @@ struct SnapMediaPageBarTests {
         view.debugScrub(.ended, atX: 100)
     }
 
+    // MARK: - The thin bar and its cursor (#1544)
+
+    /// At rest a clip's bar is thinner than the strip's footprint, and its
+    /// cursor is the bar's own height: it melts into the indicator's end.
+    @Test func atRestTheBarIsThinAndItsCursorMeltsIn() throws {
+        let view = clipBarOnScreen(playhead: 0.4)
+        view.debugFinishTweens()
+        let track = try #require(view.debugTrackHeight(0))
+        #expect(track == SnapMediaPageBarView.clipTrackHeight)
+        #expect(track < SnapMediaPageBarView.thickness, "the bar is no thinner than the strip")
+        #expect(view.debugCursorSize == CGSize(width: track, height: track), "the cursor stands out at rest")
+    }
+
+    /// Handled, the bar grows taller and the cursor becomes a vertical pill;
+    /// released, the bar thins back and the cursor is a disc; at rest, the
+    /// disc shrinks back to the bar's height — never to nothing.
+    @Test func handledTheBarGrowsAndTheCursorBecomesAPill() throws {
+        let view = clipBarOnScreen(playhead: 0.4)
+        view.debugScrub(.began, atX: 150)
+        view.debugFinishTweens()
+        #expect(view.debugTrackHeight(0) == SnapMediaPageBarView.handledTrackHeight)
+        #expect(view.debugCursorSize == SnapMediaPageBarView.handledCursorSize)
+
+        view.debugScrub(.ended, atX: 150)
+        view.debugFinishTweens()
+        #expect(view.debugTrackHeight(0) == SnapMediaPageBarView.clipTrackHeight)
+        let disc = SnapMediaPageBarView.cursorDiameter
+        #expect(view.debugCursorSize == CGSize(width: disc, height: disc), "no disc after the release")
+
+        view.debugElapseWake()
+        view.debugFinishTweens()
+        let track = SnapMediaPageBarView.clipTrackHeight
+        #expect(view.debugCursorSize == CGSize(width: track, height: track), "the disc did not shrink into the bar")
+        #expect(abs(view.debugContainerOpacity - SnapMediaPageBarView.restingOpacity) < 0.001)
+    }
+
+    /// The growth is progressive: mid-way, the bar is between its heights.
+    @Test func theBarGrowsProgressively() throws {
+        let view = clipBarOnScreen(playhead: 0.4)
+        view.debugScrub(.began, atX: 150)
+        let first = try #require(view.debugTrackHeight(0))
+        #expect(first < SnapMediaPageBarView.handledTrackHeight, "the bar jumped to its handled height")
+        view.debugScrub(.ended, atX: 150)
+    }
+
+    /// A carousel keeps its segments at the strip's own thickness, and draws
+    /// no cursor.
+    @Test func aCarouselKeepsItsThickness() {
+        let view = bar(pages: 4)
+        #expect(view.debugTrackHeight(1) == SnapMediaPageBarView.thickness)
+        #expect(view.debugCursorSize == nil)
+    }
+
     /// ⚠️ LOADING SHOWS THE PULSE, AND THE TWO CROSS-FADE (#1537): the
     /// indicator gives way to the centre pulse while the clip loads, and comes
     /// back, at its position, when it is ready.
