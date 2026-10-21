@@ -112,6 +112,11 @@ public struct MockBackend: Sendable {
                 socialServices.mayReadPost(
                     postID, readers: dataset.profileIDs(inAccount: account), privacy: false
                 )
+            },
+            // Gems are adults only (#1475): the demo account under 18
+            // (`-mock-birthdate`) is refused every spend, as the fleet's is.
+            isGemSpendingRestricted: { account in
+                account == MockAuthService.accountID && (accountLifecycle.viewerAge ?? 18) < 18
             }
         )
         wallet.register(on: bff)

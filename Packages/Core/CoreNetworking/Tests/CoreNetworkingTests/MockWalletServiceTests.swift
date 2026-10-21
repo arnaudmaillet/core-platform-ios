@@ -25,12 +25,17 @@ struct MockWalletServiceTests {
     private let dataset = MockSocialDataset()
     private let clock = Clock()
 
-    private func make() -> (Wallet_V1_WalletServiceClient, Engagement_V1_EngagementServiceClient, MockCounterStore) {
+    private func make(
+        gemSpendingRestricted: Bool = false
+    ) -> (Wallet_V1_WalletServiceClient, Engagement_V1_EngagementServiceClient, MockCounterStore) {
         let bff = MockBFF()
         let store = MockCounterStore(dataset: dataset)
         MockEngagementService(store: store).register(on: bff)
         let clock = clock
-        MockWalletService(store: store, dataset: dataset, now: { clock.now }).register(on: bff)
+        MockWalletService(
+            store: store, dataset: dataset, now: { clock.now },
+            isGemSpendingRestricted: { _ in gemSpendingRestricted }
+        ).register(on: bff)
         let client = ConnectClientFactory.makeAuthenticated(
             host: "https://mock.bff.local", tokenProvider: MemberToken(), httpClient: bff
         )
@@ -192,6 +197,49 @@ struct MockWalletServiceTests {
         let catalog = try #require(await wallet.listCatalog(request: Wallet_V1_ListCatalogRequest(), headers: [:]).message)
         #expect(catalog.items.first { $0.itemID == "banner.animated" }?.price == 500)
         #expect(catalog.items.first { $0.itemID == "theme.red" }?.family == .theme)
+    }
+
+    /// ⚠️ GEMS ARE ADULTS ONLY (#1475, #1495): a supervised teen's pack and
+    /// item are refused before anything is charged (WAL-3001,
+    /// PERMISSION_DENIED), and the wallet says spending is restricted.
+    @Test func aRestrictedAccountsSpendIsRefusedWithNothingDebited() async throws {
+        let (wallet, _, _) = make(gemSpendingRestricted: true)
+
+        var pack = Wallet_V1_BuyStakePackRequest()
+        pack.accountID = MockAuthService.accountID
+        pack.packID = "shots_3"
+        pack.idempotencyKey = newKey()
+        let packError = try #require(await wallet.buyStakePack(request: pack, headers: [:]).error)
+        #expect(packError.code == .permissionDenied)
+        #expect(packError.message?.contains("WAL-3001") == true)
+
+        var item = Wallet_V1_PurchaseItemRequest()
+        item.accountID = MockAuthService.accountID
+        item.itemID = "theme.violet"
+        item.expectedPrice = 50
+        item.idempotencyKey = newKey()
+        let itemError = try #require(await wallet.purchaseItem(request: item, headers: [:]).error)
+        #expect(itemError.code == .permissionDenied)
+        #expect(itemError.message?.contains("WAL-3001") == true)
+
+        var read = Wallet_V1_GetWalletRequest()
+        read.accountID = MockAuthService.accountID
+        let after = try #require(await wallet.getWallet(request: read, headers: [:]).message)
+        #expect(after.gems == 100, "gems were debited")
+        #expect(after.stakeShots == 0, "a pack was loaded")
+        #expect(after.gemSpendingRestricted)
+        var owned = Wallet_V1_ListOwnedItemsRequest()
+        owned.accountID = MockAuthService.accountID
+        let items = try #require(await wallet.listOwnedItems(request: owned, headers: [:]).message).items.map(\.itemID)
+        #expect(items == ["theme.pink"], "the refused item is owned")
+    }
+
+    /// An adult's wallet is not restricted.
+    @Test func anAdultsWalletIsNotRestricted() async throws {
+        let (wallet, _, _) = make()
+        var read = Wallet_V1_GetWalletRequest()
+        read.accountID = MockAuthService.accountID
+        #expect(try #require(await wallet.getWallet(request: read, headers: [:]).message).gemSpendingRestricted == false)
     }
 
     @Test func aBatchOverADayOldExpires() async throws {

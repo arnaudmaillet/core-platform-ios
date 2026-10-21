@@ -418,6 +418,10 @@ public final class MockWalletService: @unchecked Sendable {
     /// read (taken down, deleted, withheld — `MockSocialServices.mayReadPost`)
     /// is not stakeable, and the points come back (#1409).
     private let mayStakeOnPost: @Sendable (_ account: String, _ postID: String) -> Bool
+    /// Whether `account` may not spend gems: adults only (#1475, WAL-3001) —
+    /// a supervised teen's pack or item is refused with nothing debited,
+    /// and its wallet says so (`gem_spending_restricted`).
+    private let isGemSpendingRestricted: @Sendable (_ account: String) -> Bool
 
     public init(
         store: MockCounterStore,
@@ -427,9 +431,11 @@ public final class MockWalletService: @unchecked Sendable {
         demoPositions: [String] = [],
         keepsDemoStakesActive: Bool = false,
         now: @escaping @Sendable () -> Date = { Date() },
-        mayStakeOnPost: @escaping @Sendable (_ account: String, _ postID: String) -> Bool = { _, _ in true }
+        mayStakeOnPost: @escaping @Sendable (_ account: String, _ postID: String) -> Bool = { _, _ in true },
+        isGemSpendingRestricted: @escaping @Sendable (_ account: String) -> Bool = { _ in false }
     ) {
         self.mayStakeOnPost = mayStakeOnPost
+        self.isGemSpendingRestricted = isGemSpendingRestricted
         self.demoPositions = demoPositions
         self.keepsDemoStakesActive = keepsDemoStakesActive
         self.store = store
@@ -545,6 +551,7 @@ public final class MockWalletService: @unchecked Sendable {
     /// (packs don't stack). A replayed key answers the first answer.
     func buyStakePack(_ request: Wallet_V1_BuyStakePackRequest, caller: String?) -> Result<Wallet_V1_BuyStakePackResponse, ConnectError> {
         if let refusal = Self.refusal(request.accountID, caller: caller) { return .failure(refusal) }
+        if let refusal = spendingRefusal(request.accountID) { return .failure(refusal) }
         guard Self.isValidKey(request.idempotencyKey) else {
             return .failure(ConnectError(code: .invalidArgument, message: "WAL-9002: idempotency_key"))
         }
@@ -582,6 +589,7 @@ public final class MockWalletService: @unchecked Sendable {
     /// charge nothing. A replayed key answers the first answer.
     func purchaseItem(_ request: Wallet_V1_PurchaseItemRequest, caller: String?) -> Result<Wallet_V1_PurchaseItemResponse, ConnectError> {
         if let refusal = Self.refusal(request.accountID, caller: caller) { return .failure(refusal) }
+        if let refusal = spendingRefusal(request.accountID) { return .failure(refusal) }
         guard Self.isValidKey(request.idempotencyKey) else {
             return .failure(ConnectError(code: .invalidArgument, message: "WAL-9002: idempotency_key"))
         }
@@ -635,6 +643,13 @@ public final class MockWalletService: @unchecked Sendable {
         guard let caller else { return ConnectError(code: .unauthenticated, message: "sign in for a wallet") }
         guard account == caller else { return ConnectError(code: .permissionDenied, message: "another account's wallet") }
         return nil
+    }
+
+    /// Adults only (WAL-3001): the server's answer to a restricted account's
+    /// spend, before anything is read or charged.
+    private func spendingRefusal(_ account: String) -> ConnectError? {
+        guard isGemSpendingRestricted(account) else { return nil }
+        return ConnectError(code: .permissionDenied, message: "WAL-3001: gem spending is for adults only")
     }
 
     private static func isValidKey(_ key: String) -> Bool {
@@ -776,6 +791,7 @@ public final class MockWalletService: @unchecked Sendable {
         wallet.stakePackPrice = Self.stakePackPrice
         wallet.stakePackShots = Self.stakePackShots
         wallet.pointsPerShot = Int32(Self.likesPerShot)
+        wallet.gemSpendingRestricted = isGemSpendingRestricted(id)
         switch claimStateLocked(account, at: moment) {
         case .available(let amount):
             wallet.claimAvailable = true
