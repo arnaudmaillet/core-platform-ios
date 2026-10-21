@@ -815,6 +815,8 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // On screen again (a return, a cancelled grab): the bars may be lent.
+        hasHandedChromeBack = false
         // A RETURN (a pop back from a profile, a sheet gone), never the first
         // arrival: that one is the opening's, whose owner hides the dock
         // through UIKit as it pushes.
@@ -5052,6 +5054,11 @@ final class SnapFeedViewController: UIViewController {
     /// do live under `UINavigationBar`, which is why only the bottom half was
     /// wrong. See `toolbarGlassHost` for where the style goes instead.
     private func applyChromeTheme(hasMedia: Bool) {
+        // ⚠️ NOTHING IS LENT ONCE THE SCREEN IS LEAVING OR GONE (#1500): a
+        // page settling, the author pill re-hosted or an appearance callback
+        // landing after the hand-back re-styled the presenter's bars, and
+        // nothing handed them back again. Undecided grab: wait (#1325).
+        guard !isHandingChromeBack, !hasHandedChromeBack else { return }
         let style = SnapChromeTheme.style(hasMedia: hasMedia)
         // In one frame, not dissolved like the bars: the variants differ by
         // one half-opacity layer over 62pt.
@@ -5064,6 +5071,7 @@ final class SnapFeedViewController: UIViewController {
             overrideUserInterfaceStyle = style
             return
         }
+        lentChromeNavigation = nav
         let host = toolbarGlassHost()
         if let previous = themedToolbarGlassHost, previous !== host {
             previous.overrideUserInterfaceStyle = .unspecified
@@ -5152,6 +5160,12 @@ final class SnapFeedViewController: UIViewController {
     /// Internal so a test can decide.
     func handBackChromeTheme(interactive: Bool, whenDecided: (@escaping (Bool) -> Void) -> Void) {
         guard interactive else { return releaseChromeTheme() }
+        // ⚠️ THE STACK NOW, NOT AT THE DECISION (#1500). A committed grab
+        // reports from the transition's completion, after the pop: the feed
+        // has no `navigationController` any more, and the release found no
+        // bars to hand back — the presenter's header stayed dark after a
+        // rightward grab (filmed by the owner, 2026-10-21).
+        let nav = navigationController ?? lentChromeNavigation
         // ⚠️ BOTH BARS, NOT ONLY THE BOTTOM ONE (#1325). The header was handed
         // back at the grab's first frame, on the reading that it is the
         // destination's — and it turned light over the media page for the
@@ -5161,18 +5175,28 @@ final class SnapFeedViewController: UIViewController {
         whenDecided { [weak self] committed in
             guard let self else { return }
             self.isHandingChromeBack = false
-            if committed { self.releaseChromeTheme() }
+            if committed { self.releaseChromeTheme(from: nav) }
         }
     }
 
     /// A grab is undecided: nothing re-themes or hands back meanwhile.
     private var isHandingChromeBack = false
+    /// The bars are handed back and the screen is leaving or gone: nothing
+    /// lends them again until it appears (#1500).
+    private var hasHandedChromeBack = false
+    /// The stack whose bars `applyChromeTheme` styled, so the hand-back
+    /// reaches them once the feed is off it.
+    private weak var lentChromeNavigation: UINavigationController?
 
-    private func releaseChromeTheme() {
+    /// Hands every lent style back — to `nav`'s bars, or the stack's.
+    private func releaseChromeTheme(from nav: UINavigationController? = nil) {
+        let nav = nav ?? navigationController ?? lentChromeNavigation
+        hasHandedChromeBack = true
+        lentChromeNavigation = nil
         themedToolbarGlassHost?.overrideUserInterfaceStyle = .unspecified
         themedToolbarGlassHost = nil
-        navigationController?.toolbar.overrideUserInterfaceStyle = .unspecified
-        navigationController?.navigationBar.overrideUserInterfaceStyle = .unspecified
+        nav?.toolbar.overrideUserInterfaceStyle = .unspecified
+        nav?.navigationBar.overrideUserInterfaceStyle = .unspecified
         overrideUserInterfaceStyle = .unspecified
         statusBarBlur?.returnStyle(from: self)
         styledBottomEdgeBlur?.returnStyle(from: self)
