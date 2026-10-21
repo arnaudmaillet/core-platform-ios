@@ -1285,6 +1285,21 @@ final class SnapChromeView: UIView {
 
     // MARK: - The action column (#695)
 
+    /// Moves the whole overlay down by `offset` — the side list's pose
+    /// (#1509) — the action column included (#1549): mounted in the cell's
+    /// content, outside this view, it does not ride this view's transform,
+    /// and the like pill and the sound bubble stayed behind.
+    func setOverlayOffset(_ offset: CGFloat) {
+        let shift = offset == 0 ? CGAffineTransform.identity : CGAffineTransform(translationX: 0, y: offset)
+        transform = shift
+        if columnLayer.superview !== self { columnLayer.transform = shift }
+    }
+
+    /// The action column's own shift. Tests.
+    var debugActionColumnOffset: CGFloat {
+        columnLayer.superview === self ? transform.ty : columnLayer.transform.ty
+    }
+
     /// Mounts the column ABOVE this chrome in `host` (the cell's content
     /// view), so the engagement fade leaves it on screen. The buttons stay on
     /// their stations: same frames, by construction.

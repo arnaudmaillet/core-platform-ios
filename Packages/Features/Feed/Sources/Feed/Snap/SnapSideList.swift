@@ -167,13 +167,23 @@ enum SnapSideList {
             deviceCornerRadius + (Self.cornerRadius - deviceCornerRadius) * progress
         }
 
+        /// The gap kept under the overlay's lowest element once open (#1549,
+        /// the owner 2026-10-21): the overlay's own horizontal margin (the
+        /// caption's and the strip's leading inset), so it reads even all
+        /// round.
+        static let overlayBottomMargin: CGFloat = Spacing.lg
+
         /// How far the page's overlay moves down, in the page's own space
-        /// (#1509): by the band the bottom toolbar covers, which holds
+        /// (#1509): into the band the bottom toolbar covers, which holds
         /// nothing once the page is a card between the bars — less what the
-        /// card crops off the page's bottom (#1545), so nothing moves under
-        /// the crop.
+        /// card crops off the page's bottom (#1545), and stopping
+        /// `overlayBottomMargin` short of the card's foot (#1549). The
+        /// overlay's lowest element rests at the toolbar band plus the
+        /// strip's gap (`SnapChromeView.pageBarToolbarGap`) above the page's
+        /// bottom.
         func overlayOffset(progress: CGFloat) -> CGFloat {
-            max(0, bars.bottom * progress - pageInset(progress: progress))
+            let travel = bars.bottom + SnapChromeView.pageBarToolbarGap - Self.overlayBottomMargin
+            return max(0, travel * progress - pageInset(progress: progress))
         }
 
         /// The finger's travel for a full open.
@@ -435,6 +445,45 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
     /// (no pool, tests).
     var autoplay: SnapSideListAutoplay?
     private var outlined: PostID?
+    /// The stopped mark on the tile of the post on show, when its clip was
+    /// paused from the list (#1550): the card's own component, sized to the
+    /// tile.
+    private let tileMark: PausedClipMarkView = {
+        let mark = PausedClipMarkView()
+        mark.contentMode = .scaleAspectFit
+        return mark
+    }()
+    private var pausedMarkID: PostID?
+    /// The mark's glyph, as a share of the tile's width.
+    static let tileMarkScale: CGFloat = 0.42
+
+    /// Shows or takes down the stopped mark on `id`'s tile (#1550).
+    func setPausedMark(_ visible: Bool, on id: PostID?) {
+        pausedMarkID = visible ? id : nil
+        guard visible, let id, let index = entries.firstIndex(where: { $0.post.id == id }),
+              let cell = collection.cellForItem(at: IndexPath(item: index, section: 0)) else {
+            tileMark.setVisible(false)
+            return
+        }
+        attachMark(to: cell)
+        tileMark.setVisible(true)
+    }
+
+    /// On the CELL, above its content: a tile's looping clip mounts its
+    /// surface in the content after the mark, and covered it.
+    private func attachMark(to cell: UICollectionViewCell) {
+        let side = cell.bounds.width * Self.tileMarkScale
+        tileMark.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+        tileMark.center = CGPoint(x: cell.bounds.midX, y: cell.bounds.midY)
+        if tileMark.superview !== cell { cell.addSubview(tileMark) }
+        cell.bringSubviewToFront(tileMark)
+    }
+
+    /// Whether `id`'s tile wears the stopped mark. Tests.
+    func debugShowsPausedMark(on id: PostID) -> Bool {
+        pausedMarkID == id && tileMark.isShowing && tileMark.superview != nil
+    }
+
     /// How much each tile wears the ring, 0…1 (#1546): the post on show's
     /// alone at rest, two sharing it while the card moves between them.
     private var ringWeights: [PostID: CGFloat] = [:]
@@ -638,6 +687,13 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         cell.contentView.layer.cornerRadius = SnapSideList.Geometry.tileCornerRadius
         cell.contentView.layer.cornerCurve = .continuous
         style(cell, at: indexPath)
+        // The stopped mark follows its post's tile through reuse (#1550).
+        if entries[indexPath.item].post.id == pausedMarkID {
+            attachMark(to: cell)
+            tileMark.setVisible(true, animated: false)
+        } else if tileMark.superview === cell {
+            tileMark.removeFromSuperview()
+        }
         return cell
     }
 
