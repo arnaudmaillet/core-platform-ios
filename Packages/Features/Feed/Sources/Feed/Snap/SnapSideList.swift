@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import MediaCore
 import PostGrid
@@ -16,39 +17,89 @@ import UIKit
 enum SnapSideList {
     /// Where everything sits at a `progress` from 0 (closed) to 1 (open).
     /// Pure, for tests.
+    ///
+    /// ⚠️ BETWEEN THE BARS (#1509, the owner's screenshot 2026-10-21): the
+    /// card used to be scaled by the WIDTH alone and centred, so it ran
+    /// under both bars — the back button on its top edge, the author pill
+    /// and the actions over its bottom. It is now the page scaled UNIFORMLY
+    /// to fit the height between the top bar and the bottom toolbar, a gap
+    /// from each, and the list takes the width left.
     struct Geometry: Equatable {
         /// The screen's bounds.
         let size: CGSize
+        /// What the bars cover: `top` from the screen's top to the top bar's
+        /// bottom, `bottom` from the bottom toolbar's top to the screen's
+        /// bottom (safe areas included).
+        var bars: UIEdgeInsets = .zero
+        /// The device's own corner radius (`ScreenGeometry`): the page's
+        /// corners when closed.
+        var deviceCornerRadius: CGFloat = 0
 
-        /// Between the card, the list and the screen's edges.
+        /// Between the card, the list, the bars and the screen's edges.
         static let gap: CGFloat = 6
-        /// The card's corners when open, on screen.
-        static let cornerRadius: CGFloat = 22
+        /// The list's tiles' corner.
+        static let tileCornerRadius: CGFloat = 6
+        /// The card's corners when open, on screen: concentric with the
+        /// list's tiles, a gap out (#1509).
+        static var cornerRadius: CGFloat { tileCornerRadius + gap }
+        /// The list never narrower than this, whatever the bars leave.
+        static let minimumListWidth: CGFloat = 44
 
-        /// About a ninth of the screen, as Kuaishou's strip is.
-        var listWidth: CGFloat { max(44, (size.width / 9).rounded()) }
-
-        /// The card's scale when open: the screen less the list and the gaps.
-        var cardScale: CGFloat {
-            guard size.width > 0 else { return 1 }
-            return (size.width - listWidth - 3 * Self.gap) / size.width
+        /// The open card's room: between the bars, a gap from each.
+        var openArea: CGRect {
+            let top = bars.top + Self.gap
+            let bottom = size.height - bars.bottom - Self.gap
+            return CGRect(x: 0, y: top, width: size.width, height: max(0, bottom - top))
         }
 
-        /// The pager's transform: scaled about its centre, then moved so the
-        /// card keeps one gap from the leading edge.
+        /// The card's scale when open: the page fitted to the height between
+        /// the bars, kept narrow enough to leave the list its minimum.
+        var cardScale: CGFloat {
+            guard size.width > 0, size.height > 0 else { return 1 }
+            let fitsHeight = openArea.height / size.height
+            let leavesList = (size.width - Self.minimumListWidth - 3 * Self.gap) / size.width
+            return max(0.01, min(fitsHeight, leavesList))
+        }
+
+        /// The open card, on screen: a gap from the leading edge, centred
+        /// between the bars.
+        var cardFrame: CGRect {
+            let width = size.width * cardScale, height = size.height * cardScale
+            return CGRect(x: Self.gap, y: openArea.midY - height / 2, width: width, height: height)
+        }
+
+        /// The width the card leaves: the screen less the card and 3 gaps.
+        var listWidth: CGFloat { max(Self.minimumListWidth, size.width - cardFrame.width - 3 * Self.gap) }
+
+        /// The pager's transform: scaled about its centre, then moved onto
+        /// the open card's frame.
         func pagerTransform(progress: CGFloat) -> CGAffineTransform {
             let scale = 1 - (1 - cardScale) * progress
-            let shift = (Self.gap - size.width * (1 - cardScale) / 2) * progress
-            return CGAffineTransform(translationX: shift, y: 0).scaledBy(x: scale, y: scale)
+            let shiftX = (cardFrame.midX - size.width / 2) * progress
+            let shiftY = (cardFrame.midY - size.height / 2) * progress
+            return CGAffineTransform(translationX: shiftX, y: shiftY).scaledBy(x: scale, y: scale)
         }
 
-        /// The list beside the card, as tall as the open card, sliding in
-        /// from beyond the trailing edge.
+        /// The list beside the card, its top and bottom on the card's,
+        /// sliding in from beyond the trailing edge.
         func listFrame(progress: CGFloat) -> CGRect {
-            let height = size.height * cardScale
-            let openX = size.width - Self.gap - listWidth
+            let card = cardFrame
+            let openX = card.maxX + Self.gap
             let x = size.width + (openX - size.width) * progress
-            return CGRect(x: x, y: (size.height - height) / 2, width: listWidth, height: height)
+            return CGRect(x: x, y: card.minY, width: listWidth, height: card.height)
+        }
+
+        /// The page's corner ON SCREEN (#1509): the device's when closed,
+        /// the card's when open, interpolated in between — never square.
+        func screenCornerRadius(progress: CGFloat) -> CGFloat {
+            deviceCornerRadius + (Self.cornerRadius - deviceCornerRadius) * progress
+        }
+
+        /// How far the page's overlay moves down, in the page's own space
+        /// (#1509): by the band the bottom toolbar covers, which holds
+        /// nothing once the page is a card between the bars.
+        func overlayOffset(progress: CGFloat) -> CGFloat {
+            bars.bottom * progress
         }
 
         /// The finger's travel for a full open.
@@ -100,7 +151,13 @@ final class SnapSideListController: NSObject, UIGestureRecognizerDelegate {
         view.addSubview(listView)
     }
 
-    private var geometry: SnapSideList.Geometry { SnapSideList.Geometry(size: host?.view.bounds.size ?? .zero) }
+    private var geometry: SnapSideList.Geometry {
+        guard let host else { return SnapSideList.Geometry(size: .zero) }
+        return SnapSideList.Geometry(
+            size: host.view.bounds.size, bars: host.sideListBars,
+            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: host.view)
+        )
+    }
 
     /// Re-applies the pose (a rotation, a first layout).
     func relayout() {
@@ -115,8 +172,11 @@ final class SnapSideListController: NSObject, UIGestureRecognizerDelegate {
         let pager = host.collectionView!
         pager.transform = geometry.pagerTransform(progress: value)
         let scale = 1 - (1 - geometry.cardScale) * value
-        pager.layer.cornerRadius = SnapSideList.Geometry.cornerRadius * value / max(scale, 0.01)
+        // On screen, divided by the scale the layer wears. Closed, nothing
+        // to round: the page is the screen.
+        pager.layer.cornerRadius = value > 0 ? geometry.screenCornerRadius(progress: value) / max(scale, 0.01) : 0
         pager.layer.cornerCurve = .continuous
+        host.setSideListOverlayOffset(geometry.overlayOffset(progress: value))
         // A hairline, so a light page reads as a card on a light ground.
         pager.layer.borderWidth = value > 0 ? 0.5 / max(scale, 0.01) : 0
         pager.layer.borderColor = UIColor.separator.resolvedColor(with: host.traitCollection).cgColor
@@ -208,6 +268,15 @@ final class SnapSideListController: NSObject, UIGestureRecognizerDelegate {
             if let active = host?.activePostID { listView.outline(active) }
         }
     }
+
+    #if DEBUG
+    /// Opens the list as a released drag would: loads it, springs open.
+    func debugOpen() {
+        loadIfNeeded()
+        host?.setContentScrollEnabled(false)
+        settle(open: true)
+    }
+    #endif
 
     /// The post on show changed: outlined in the list when it is one of its.
     func activePostDidChange(_ id: PostID?) {

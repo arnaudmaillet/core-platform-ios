@@ -424,6 +424,9 @@ final class SnapFeedViewController: UIViewController {
     private var commentsEngagementIsResting = false
     /// The side list (#1425): nil on a screen that opted out.
     private(set) var sideList: SnapSideListController?
+    /// How far the pages' overlays sit down while the side list is open
+    /// (#1509): the band the bottom toolbar covers, in the page's space.
+    var sideListOverlayOffset: CGFloat = 0
     /// Whether this screen installs the side list — every vertical feed does
     /// (#1473); a test sets its own before the view loads.
     var installsSideList = true
@@ -931,6 +934,15 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        #if DEBUG
+        // `-snap-side-list-open` (QA, #1509): the side list opens a beat
+        // after the feed lands, to film or measure its open pose.
+        if ProcessInfo.processInfo.arguments.contains("-snap-side-list-open"), let sideList, !sideList.isEngaged {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                self?.sideList?.debugOpen()
+            }
+        }
+        #endif
         // The backstop, on a return only: whatever a transition left, a feed
         // on screen has no dock under it.
         //
@@ -5547,6 +5559,8 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         if let snapCell = cell as? SnapFeedCell, let id = snapCell.representedPostID {
             snapCell.setPostUnavailable(unavailablePostIDs.contains(id))
         }
+        // A page coming on while the side list is open wears its pose (#1509).
+        (cell as? SnapFeedCell)?.setSideListOverlayOffset(sideListOverlayOffset)
         viewModel.willDisplayItem(at: indexPath.item)
         // Recompute the active index (a new page may have become active), then —
         // crucially — activate THIS cell if it's the active one. The dispatcher
@@ -7013,6 +7027,33 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             await viewModel.insert(entry, after: anchor)
             guard let index = orderedIDs.firstIndex(of: entry.post.id) else { return }
             collectionView.scrollToItem(at: IndexPath(item: index, section: 0), at: .top, animated: true)
+        }
+    }
+
+    /// What the bars cover, for the side list's card to fit between them
+    /// (#1509): the top bar's bottom and the bottom toolbar's top, read off
+    /// the bars themselves when they are on screen, the safe area otherwise.
+    var sideListBars: UIEdgeInsets {
+        var top = view.safeAreaInsets.top
+        var bottom = view.safeAreaInsets.bottom
+        if let nav = navigationController {
+            let bar = nav.navigationBar
+            if !nav.isNavigationBarHidden, bar.window != nil, !bar.isHidden {
+                top = max(top, bar.convert(bar.bounds, to: view).maxY)
+            }
+            let toolbar = nav.toolbar!
+            if !nav.isToolbarHidden, toolbar.window != nil, !toolbar.isHidden {
+                bottom = max(bottom, view.bounds.maxY - toolbar.convert(toolbar.bounds, to: view).minY)
+            }
+        }
+        return UIEdgeInsets(top: max(0, top), left: 0, bottom: max(0, bottom), right: 0)
+    }
+
+    /// Moves every page's overlay down by `offset` (the side list's pose).
+    func setSideListOverlayOffset(_ offset: CGFloat) {
+        sideListOverlayOffset = offset
+        for case let cell as SnapFeedCell in collectionView.visibleCells {
+            cell.setSideListOverlayOffset(offset)
         }
     }
 
