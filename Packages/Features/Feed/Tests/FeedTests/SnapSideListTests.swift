@@ -273,8 +273,11 @@ struct SnapSideListTests {
     /// ⚠️ THE POST ON SHOW FIRST, THEN SIMILAR POSTS (#1509): current posts
     /// of the feed's kind, none already in it, once each — and the same
     /// list again for the same anchor.
-    @Test func theListIsThePostOnShowThenOthersOfTheFeedsKind() async {
-        let feed = feed(sideList: true)
+    @Test func theListIsThePostOnShowThenOthersOfTheFeedsKind() async throws {
+        // A feed whose first page has LANDED: with a seed alone, the empty
+        // first page could land between the seed and the ask and take the
+        // post on show's kind with it (a 1-in-3 flake).
+        let feed = try await openableFeed(["p1"], others: [])
         var asked = 0
         feed.sideListEntries = {
             asked += 1
@@ -350,6 +353,44 @@ struct SnapSideListTests {
         #expect(feed.activePostID == PostID("p1"), "the card left the post on show")
         #expect(sideList.listView.outlinedPostID == PostID("p1"))
         #expect(!feed.orderedIDs.contains(PostID("p2")), "the feed's own posts are mixed into the list")
+    }
+
+    /// ⚠️ THE RING FOLLOWS THE CARD'S SCROLL (#1546): half way between two
+    /// posts, their tiles share it half and half; back on the first, it is
+    /// the first's alone.
+    @Test func theRingCrossFadesWithTheCardsScroll() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
+        let sideList = try await open(feed)
+        let pager = try #require(feed.collectionView)
+        sideList.listView.layoutIfNeeded()
+        let page = pager.bounds.height
+        pager.contentOffset.y = page / 2
+        feed.scrollViewDidScroll(pager)
+        let first = try #require(sideList.listView.debugRing(at: 0))
+        let second = try #require(sideList.listView.debugRing(at: 1))
+        #expect(abs(first.weight - 0.5) < 0.01 && abs(second.weight - 0.5) < 0.01, "not shared half way: \(first) \(second)")
+        let half = SnapSideListView.hairlineWidth + (SnapSideListView.ringWidth - SnapSideListView.hairlineWidth) / 2
+        #expect(abs(first.width - half) < 0.01, "the ring's width does not follow: \(first.width)")
+
+        pager.contentOffset.y = 0
+        feed.scrollViewDidScroll(pager)
+        #expect(sideList.listView.debugRing(at: 0)?.weight == 1)
+        #expect(sideList.listView.debugRing(at: 1)?.weight == 0, "a cancelled swipe left the ring shared")
+    }
+
+    /// ⚠️ A TILE'S TAP SHOWS ITS POST AT ONCE (#1548): no scroll through the
+    /// posts in between — the pager is on it in the same turn — and the
+    /// card's order is still the list's.
+    @Test func aTilesTapShowsItsPostAtOnce() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2", "m3", "m4"])
+        let sideList = try await open(feed)
+        let order = feed.orderedIDs
+        let last = try #require(sideList.listView.entries.last)
+        feed.showSideListEntry(last)
+        #expect(feed.activePostID == last.post.id, "the card is not on the tapped post at once")
+        #expect(!feed.collectionView.isDecelerating && feed.collectionView.layer.animationKeys() == nil,
+                "the card scrolled to it")
+        #expect(feed.orderedIDs == order, "the card's order changed")
     }
 
     /// ⚠️ A RIGHTWARD CLOSE MID-LIST KEEPS THE POST ON SHOW (#1509): the feed

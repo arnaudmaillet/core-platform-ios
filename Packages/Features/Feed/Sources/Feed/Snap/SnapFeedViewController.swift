@@ -5842,7 +5842,10 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         updateViewportPlayback()
         updatePagingFooter(for: scrollView)
         // The card's crop is in the pager's own space, which its scroll moves.
-        if scrollView === collectionView { sideList?.pagerDidScroll() }
+        if scrollView === collectionView {
+            sideList?.pagerDidScroll()
+            updateSideListRing(scrollView)
+        }
         // The bar pills ride the scroll too — two alphas a frame, and the
         // content they draw only at the midpoint. Unlike activation, this
         // moves nothing on the page.
@@ -7180,12 +7183,37 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         settlePager(onIndex: index)
     }
 
+    /// ⚠️ THE RING FOLLOWS THE CARD'S SCROLL (#1546, the owner 2026-10-21):
+    /// between two posts, the two tiles' rings share the way — half each
+    /// half way — so the ring fades across under the finger and back on a
+    /// cancelled swipe. A jump with no finger (a tile's tap) fades it.
+    private func updateSideListRing(_ scrollView: UIScrollView) {
+        guard let sideList, sideList.isOpen, viewModel.isInSideListSession else { return }
+        let page = scrollView.bounds.height
+        guard page > 0, !orderedIDs.isEmpty else { return }
+        let position = min(max(scrollView.contentOffset.y / page, 0), CGFloat(orderedIDs.count - 1))
+        let lower = Int(position.rounded(.down))
+        let fraction = position - CGFloat(lower)
+        var weights: [PostID: CGFloat] = [:]
+        if orderedIDs.indices.contains(lower) { weights[orderedIDs[lower]] = 1 - fraction }
+        if fraction > 0, orderedIDs.indices.contains(lower + 1) {
+            weights[orderedIDs[lower + 1], default: 0] += fraction
+        }
+        let byFinger = scrollView.isTracking || scrollView.isDecelerating
+        sideList.listView.setRing(weights, animated: !byFinger)
+    }
+
     /// A post picked in the list: the card moves to it — the list's own
     /// item, nothing injected into the feed (#1509).
+    ///
+    /// ⚠️ AT ONCE (#1548, the owner 2026-10-21): no scroll through the posts
+    /// in between, the card shows the chosen one in the next frame. The
+    /// pager stays in the list's order, so a swipe from there reaches its
+    /// real neighbours.
     func showSideListEntry(_ entry: FeedEntry) {
         guard viewModel.isInSideListSession,
               let index = orderedIDs.firstIndex(of: entry.post.id) else { return }
-        collectionView.scrollToItem(at: IndexPath(item: index, section: 0), at: .top, animated: true)
+        settlePager(onIndex: index)
     }
 
     /// ⚠️ PAST THE LIST'S LAST TILE (#1509): a swipe up closes the list with
