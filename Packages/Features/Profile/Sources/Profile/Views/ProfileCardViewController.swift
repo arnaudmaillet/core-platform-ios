@@ -187,6 +187,13 @@ final class ProfileCardViewController: UIViewController {
         headerView.onWebsiteTapped = { url in UIApplication.shared.open(url) }
         // The header re-measures itself when its content changes.
         headerView.onPicturesSettled = { [weak self] in self?.remeasure() }
+        // And when the text size changes under it: at XXXL the bio grew under
+        // the toolbar, the sheet still at the old height (#1542's check).
+        // A turn later: the header's labels take their new fonts in the same
+        // trait pass, after this callback.
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (card: Self, _) in
+            DispatchQueue.main.async { [weak card] in card?.remeasure() }
+        }
     }
 
     /// Lays the header out at the sheet's width, climbs it to the profile's
@@ -331,6 +338,16 @@ final class ProfileCardViewController: UIViewController {
         }
     }
 
+    /// The item that takes the toolbar's free width (#1542, the owner): Follow
+    /// while the viewer does not follow — `[——Follow——][Message][•••]` — and
+    /// Message otherwise — `[Following][——Message——][•••]`. Nil: nothing
+    /// stretches (the viewer's own profile). Pure, for tests.
+    nonisolated static func wideItem(in items: [ToolbarItem]) -> ToolbarItem? {
+        if items.contains(.follow) { return .follow }
+        if items.contains(.message) { return .message }
+        return nil
+    }
+
     /// What the bars last showed: they are rebuilt only when it changes, so
     /// a phase or a refresh that leaves them alone does not redraw them.
     private struct BarState: Equatable {
@@ -362,7 +379,16 @@ final class ProfileCardViewController: UIViewController {
         navigationItem.setLeftBarButtonItems(leading, animated: view.window != nil)
 
         var items: [UIBarButtonItem] = []
+        let wide = Self.wideItem(in: state.toolbar)
         for kind in state.toolbar {
+            // Each in its own bubble: the zero-width fixed space keeps UIKit
+            // from joining two items in one shared platter (the sound
+            // sheet's toolbar).
+            if !items.isEmpty { items.append(.fixedSpace()) }
+            if kind == wide {
+                items.append(wideItem(for: kind))
+                continue
+            }
             switch kind {
             case .follow:
                 items.append(followItem(title: "Follow", prominent: true))
@@ -381,7 +407,9 @@ final class ProfileCardViewController: UIViewController {
                     self?.messageTapped()
                 }))
             case .more:
-                items.append(.flexibleSpace())
+                // With an item stretched, ••• simply closes the row; without
+                // one, it keeps the trailing edge.
+                if wide == nil { items.append(.flexibleSpace()) }
                 let more = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: makeMoreMenu())
                 more.accessibilityLabel = "More"
                 items.append(more)
@@ -389,6 +417,56 @@ final class ProfileCardViewController: UIViewController {
         }
         setToolbarItems(items, animated: view.window != nil)
     }
+
+    /// The stretched item: a custom view, since there is no flexible-width
+    /// bar item and a `.prominent` title item's `width` is ignored on iOS 27.
+    /// It hugs nothing and asks, at the lowest priority, for more room than
+    /// any bar has, so the bar gives it exactly what the other items leave
+    /// (measured for the sound sheet's "Use this sound", #304). Its own glass
+    /// capsule is its background: the item hides the shared one.
+    private func wideItem(for kind: ToolbarItem) -> UIBarButtonItem {
+        var configuration: UIButton.Configuration
+        let action: UIAction
+        switch kind {
+        case .follow:
+            configuration = .prominentGlass()
+            configuration.baseBackgroundColor = Palette.prominentGlassTint
+            configuration.baseForegroundColor = .white
+            configuration.title = "Follow"
+            action = UIAction { [weak self] _ in self?.followTapped() }
+        default:
+            configuration = .glass()
+            configuration.baseForegroundColor = .label
+            configuration.title = "Message"
+            action = UIAction { [weak self] _ in self?.messageTapped() }
+        }
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
+            return attributes
+        }
+        let button = UIButton(configuration: configuration, primaryAction: action)
+        button.accessibilityIdentifier = "profileCard.wide"
+        button.setContentHuggingPriority(.init(1), for: .horizontal)
+        let fill = button.widthAnchor.constraint(equalToConstant: 10_000)
+        fill.priority = .init(2)
+        // 999, never required: the bar's first pass pins its item wrapper to
+        // the raw intrinsic size.
+        let height = button.heightAnchor.constraint(equalToConstant: Self.barBubbleHeight)
+        height.priority = .init(999)
+        NSLayoutConstraint.activate([fill, height])
+        let item = UIBarButtonItem(customView: button)
+        item.hidesSharedBackground = true
+        wideButton = button
+        return item
+    }
+
+    /// The bar's glass bubbles' height on iOS 27 (iPhone 18 Pro), which the
+    /// stretched capsule matches (`SoundSheetViewController.barBubbleHeight`).
+    static let barBubbleHeight: CGFloat = 48
+
+    /// The stretched item's button — what a test reads.
+    private(set) weak var wideButton: UIButton?
 
     private func followItem(title: String, prominent: Bool) -> UIBarButtonItem {
         let item = UIBarButtonItem(title: title, primaryAction: UIAction { [weak self] _ in
