@@ -402,6 +402,7 @@ final class SnapSideListController: NSObject, SwipePanel {
             loadTask = nil
             loadedAnchor = anchor
             listView.show(entries)
+            listView.autoplay?.focus(anchor)
             listView.outline(anchor)
             // Settled open before the list came: it drives the card now.
             if isOpen { host?.beginSideListSessionIfNeeded() }
@@ -419,6 +420,7 @@ final class SnapSideListController: NSObject, SwipePanel {
 
     /// The post on show changed: outlined in the list when it is one of its.
     func activePostDidChange(_ id: PostID?) {
+        listView.autoplay?.focus(id)
         listView.outline(id)
     }
 }

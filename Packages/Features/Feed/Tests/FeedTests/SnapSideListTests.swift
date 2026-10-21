@@ -270,6 +270,41 @@ struct SnapSideListTests {
         #expect(list.autoplay?.playback.isPlaying(PostID("v0")) != true, "a tile kept playing once closed")
     }
 
+    /// ⚠️ THE POST ON SHOW'S TILE PLAYS FIRST, ON ITS OWN PLAYER (#1547): it
+    /// is the list's claim (the coordinator's focus, which sorts first and is
+    /// never stopped for room), under the list's own scope — never joined to
+    /// the card's; closed, the claim goes with the list.
+    @Test func thePostOnShowsTilePlaysFirstOnItsOwnPlayer() async throws {
+        let pool = VideoPlaybackController(source: StubSource(), poolSize: 6)
+        let list = SnapSideListView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        let autoplay = SnapSideListAutoplay(pool: pool, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        list.autoplay = autoplay
+        list.frame = CGRect(x: 0, y: 0, width: 80, height: 600)
+        list.layoutIfNeeded()
+        list.show((0..<6).map { Self.clip("v\($0)") })
+        let cells = list.debugTileCells
+        for _ in 0..<600 where !cells.allSatisfy({ $0.renderedCover != nil }) {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        try #require(cells.allSatisfy { $0.renderedCover != nil }, "guard: the covers landed")
+        var waited = 0
+        while !GridVideoPlaybackCoordinator.allowsAutoplay(), waited < 400 {
+            waited += 1
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(autoplay.playback.playbackScope(for: PostID("v3")) == "side-list:v3", "a tile plays under the post's own scope")
+
+        autoplay.focus(PostID("v3"))
+        list.setPlaying(true)
+        #expect(autoplay.playback.focusedID == PostID("v3"))
+        // The loan is taken in the same turn; the player binds a moment later.
+        #expect(autoplay.playback.loanedCell(PostID("v3")) != nil, "the post on show's tile did not get a player")
+
+        list.setPlaying(false)
+        #expect(autoplay.playback.focusedID == nil, "the claim outlived the list")
+        #expect(autoplay.playback.loanedCell(PostID("v3")) == nil, "the tile kept its player once closed")
+    }
+
     /// ⚠️ THE POST ON SHOW FIRST, THEN SIMILAR POSTS (#1509): current posts
     /// of the feed's kind, none already in it, once each — and the same
     /// list again for the same anchor.
