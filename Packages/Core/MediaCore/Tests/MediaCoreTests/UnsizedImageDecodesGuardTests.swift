@@ -22,6 +22,7 @@ struct UnsizedImageDecodesGuardTests {
         "PostShelfSection.swift": "rail covers, hero sources",
         "SnapFeedViewController.swift": "the lock-screen artwork of the post playing",
         "SoundSheetAutoplay.swift": "sound sheet covers, hero sources",
+        "SnapSideListAutoplay.swift": "the side list's tile covers, the standard tile's own full bucket (#1509)",
         "SoundSheetTileCell.swift": "sound sheet covers, hero sources",
         "SoundSheetViewController.swift": "the sound's cover, shown large",
         "PlaceProfileViewController.swift": "the place page's banner, full width",

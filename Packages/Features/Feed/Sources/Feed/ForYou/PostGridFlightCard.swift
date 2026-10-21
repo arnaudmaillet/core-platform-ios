@@ -144,6 +144,9 @@ final class PostGridFlightCard: UIView {
     private let likes = PostMetricLabel(
         symbol: LikesSymbol.glyph, font: metaFont, color: .white, shadowed: true
     )
+    /// The brick's gradient behind its count (#1509), so the twin draws it
+    /// too and the landing swaps nothing. Built with the count.
+    private var countGradient: PostTileCountGradientView?
 
     /// Whether the card's own picture IS the post — every tile and row. False
     /// for a source that draws something else in the post's place: a friend's
@@ -286,6 +289,10 @@ final class PostGridFlightCard: UIView {
         // had, on the other side, so every landing swapped one set of
         // furniture for another in the frame the card was removed.
         guard style.showsCounters else { return }
+        let gradient = PostTileCountGradientView()
+        gradient.isUserInteractionEnabled = false
+        restingChromeView.addSubview(gradient)
+        countGradient = gradient
         likes.set(post.reactionCount)
         if viewerStake > 0 { likes.setGlyph(systemName: LikesSymbol.glyph, color: LikesSymbol.tint) }
         likes.constrain(in: restingChromeView) { parent in
@@ -319,7 +326,10 @@ final class PostGridFlightCard: UIView {
         overlay.autoresizingMask = []
         restingChromeView.insertSubview(overlay, at: 0)
         restingOverlayView = overlay
-        if (overlay as? PostCardCaptionOverlay)?.likeReadout != nil { likes.isHidden = true }
+        if (overlay as? PostCardCaptionOverlay)?.likeReadout != nil {
+            likes.isHidden = true
+            countGradient?.isHidden = true
+        }
         if bounds.width > 0, bounds.height > 0 {
             UIView.performWithoutAnimation { poseRestingChrome() }
         }
@@ -356,6 +366,8 @@ final class PostGridFlightCard: UIView {
     /// before it has bounds has nothing to pose onto yet.
     private func poseRestingChrome() {
         restingChromeView.frame = bounds
+        countGradient?.frame = PostTileCountGradientView.frame(in: restingChromeView.bounds)
+        if likes.isHidden { countGradient?.isHidden = true }
         guard let overlay = restingOverlayView, bounds.width > 0, bounds.height > 0 else { return }
         overlay.frame = restingChromeView.bounds
         overlay.layoutIfNeeded()

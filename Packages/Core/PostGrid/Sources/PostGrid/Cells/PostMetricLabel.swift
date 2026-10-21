@@ -107,6 +107,23 @@ public final class PostMetricLabel: UIView {
         applyValue()
     }
 
+    /// Re-sets the text's face, the glyph following it — a tile's compact
+    /// register when it is narrow (#1509). A glyph sized apart
+    /// (`glyphPointSize`) keeps its own size.
+    public func setFont(_ font: UIFont) {
+        guard label.font != font else { return }
+        label.font = font
+        if icon.contentMode != .center {
+            icon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(font: font, scale: .small)
+        }
+    }
+
+    /// The space between the glyph and the number.
+    public var glyphSpacing: CGFloat {
+        get { (subviews.first as? UIStackView)?.spacing ?? 4 }
+        set { (subviews.first as? UIStackView)?.spacing = newValue }
+    }
+
     private func applyValue() {
         isHidden = value == nil && !keepsGlyphWhenEmpty
         label.text = value.map(PostMetadata.count)
