@@ -38,11 +38,12 @@ enum SnapSideList {
 
         /// Between the card, the list, the bars and the screen's edges.
         static let gap: CGFloat = 6
-        /// The list's tiles' corner.
-        static let tileCornerRadius: CGFloat = 6
-        /// The card's corners when open, on screen: concentric with the
-        /// list's tiles, a gap out (#1509).
-        static var cornerRadius: CGFloat { tileCornerRadius + gap }
+        /// The card's corners when open, on screen (#1509).
+        static let cornerRadius: CGFloat = 12
+        /// ⚠️ THE LIST'S TILES WEAR THE CARD'S CORNER (the owner,
+        /// 2026-10-21): the same radius side by side, where they used to be
+        /// concentric with it (6 pt, a gap in).
+        static var tileCornerRadius: CGFloat { cornerRadius }
         /// The list never narrower than this, whatever the bars leave.
         static let minimumListWidth: CGFloat = 44
 
@@ -112,6 +113,76 @@ enum SnapSideList {
         func settlesOpen(progress: CGFloat, velocityX: CGFloat) -> Bool {
             let projected = progress - velocityX / travel * 0.15
             return projected > 0.5
+        }
+    }
+}
+
+extension SnapSideList {
+    /// Where the list's scroll comes to rest, and what it shows at its edges
+    /// (#1527). Pure, read off the tiles' frames in the list's content space,
+    /// for tests.
+    ///
+    /// ⚠️ A TILE IS NEVER LEFT CUT BY AN EDGE AT REST (the owner,
+    /// 2026-10-21): a drag going down settles with the top tile whole at the
+    /// top edge, one going up with the bottom tile whole at the bottom edge,
+    /// and a tap on a cut tile scrolls just enough to show it whole. While a
+    /// tile IS cut — mid-scroll — that edge wears a soft blur, gone again
+    /// once the tile is whole.
+    enum Snapping {
+        /// Which way the list's content travels under the finger.
+        enum Direction: Equatable {
+            /// Towards later tiles: the offset grows.
+            case down
+            /// Towards earlier tiles.
+            case up
+        }
+
+        /// The offset a scroll released towards `direction` settles on, the
+        /// tile edge nearest the offset it would have stopped at (`proposed`)
+        /// — a tile's top on the top edge going down, its bottom on the
+        /// bottom edge going up — kept within the content.
+        static func target(
+            proposed: CGFloat, direction: Direction, tiles: [CGRect], viewport: CGFloat, contentHeight: CGFloat
+        ) -> CGFloat {
+            let maxOffset = max(0, contentHeight - viewport)
+            let candidates = tiles.map { direction == .down ? $0.minY : $0.maxY - viewport }
+            guard let nearest = candidates.min(by: { abs($0 - proposed) < abs($1 - proposed) }) else {
+                return min(max(0, proposed), maxOffset)
+            }
+            return min(max(0, nearest), maxOffset)
+        }
+
+        /// The offset that shows `tile` whole from `offset`, moving as little
+        /// as possible: its top on the top edge when the top edge cuts it,
+        /// its bottom on the bottom edge when the bottom one does. Nil: it is
+        /// whole already. A tile taller than the list shows its top.
+        static func reveal(_ tile: CGRect, offset: CGFloat, viewport: CGFloat) -> CGFloat? {
+            if tile.minY < offset || tile.height > viewport { return tile.minY == offset ? nil : tile.minY }
+            if tile.maxY > offset + viewport { return tile.maxY - viewport }
+            return nil
+        }
+
+        /// How much of a tile each edge hides at `offset`, in points: zero
+        /// when the edge falls between tiles or on a tile's own edge.
+        static func cuts(offset: CGFloat, viewport: CGFloat, tiles: [CGRect]) -> (top: CGFloat, bottom: CGFloat) {
+            let bottomEdge = offset + viewport
+            let top = tiles.first { $0.minY < offset && offset < $0.maxY }.map { offset - $0.minY } ?? 0
+            let bottom = tiles.first { $0.minY < bottomEdge && bottomEdge < $0.maxY }.map { $0.maxY - bottomEdge } ?? 0
+            return (top, bottom)
+        }
+
+        /// The edge blur's height.
+        static let blurHeight: CGFloat = 40
+        /// How far a tile goes past an edge before that edge's blur is full:
+        /// it eases in over the first points of the cut and out over the
+        /// last, following the scroll — never popping.
+        static let blurRamp: CGFloat = 24
+
+        /// An edge's blur strength (0…1) for a tile cut by `cut` points.
+        static func blurStrength(cut: CGFloat) -> CGFloat {
+            let linear = min(1, max(0, cut / blurRamp))
+            // Smoothstep: no visible corner where it starts or saturates.
+            return linear * linear * (3 - 2 * linear)
         }
     }
 }
@@ -313,6 +384,13 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
     var autoplay: SnapSideListAutoplay?
     private var outlined: PostID?
     var onSelect: ((FeedEntry) -> Void)?
+    /// The soft blur over the top and bottom edges while a tile is cut
+    /// there (#1527). The system's material, set once on screen.
+    private let topBlur = ProgressiveFrostView(maskColors: [.black, .clear], maskLocations: [0, 1])
+    private let bottomBlur = ProgressiveFrostView(maskColors: [.clear, .black], maskLocations: [0, 1])
+    /// The way the content last moved, for a release with no speed.
+    private var lastDirection: SnapSideList.Snapping.Direction = .down
+    private var lastOffset: CGFloat = 0
 
     static let tileSpacing: CGFloat = 6
     /// Portrait, as a post's media is.
@@ -334,6 +412,10 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         collection.frame = bounds
         collection.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(collection)
+        for blur in [topBlur, bottomBlur] {
+            blur.isHidden = true
+            addSubview(blur)
+        }
         accessibilityIdentifier = "snap.sideList"
     }
 
@@ -345,6 +427,56 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         collection.reloadData()
         collection.layoutIfNeeded()
         reconcilePlayback()
+        updateEdgeBlurs()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // On screen, never in `init`: a blur made there stalls a headless
+        // test host (see `ProgressiveFrostView`'s users).
+        guard window != nil else { return }
+        for blur in [topBlur, bottomBlur] where blur.effect == nil {
+            blur.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let height = min(SnapSideList.Snapping.blurHeight, bounds.height / 2)
+        topBlur.frame = CGRect(x: 0, y: 0, width: bounds.width, height: height)
+        bottomBlur.frame = CGRect(x: 0, y: bounds.height - height, width: bounds.width, height: height)
+        updateEdgeBlurs()
+    }
+
+    /// The tiles' frames, in the content's space.
+    private var tileFrames: [CGRect] {
+        (0..<collection.numberOfItems(inSection: 0)).compactMap {
+            collection.layoutAttributesForItem(at: IndexPath(item: $0, section: 0))?.frame
+        }
+    }
+
+    /// Each edge's blur, as strong as the tile it cuts is cut.
+    private func updateEdgeBlurs() {
+        // The tiles on screen only: this runs every frame of a scroll.
+        let onScreen = collection.collectionViewLayout.layoutAttributesForElements(in: collection.bounds)?
+            .filter { $0.representedElementCategory == .cell }.map(\.frame) ?? []
+        let cuts = SnapSideList.Snapping.cuts(
+            offset: collection.contentOffset.y, viewport: collection.bounds.height, tiles: onScreen
+        )
+        topBlur.setRampStrength(SnapSideList.Snapping.blurStrength(cut: cuts.top))
+        bottomBlur.setRampStrength(SnapSideList.Snapping.blurStrength(cut: cuts.bottom))
+    }
+
+    /// Settles a released scroll on a whole tile (#1527): the one it was
+    /// going to stop on, by the way it was going.
+    func scrollViewWillEndDragging(
+        _ scrollView: UIScrollView, withVelocity velocity: CGPoint, targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+        let direction: SnapSideList.Snapping.Direction = velocity.y > 0 ? .down : velocity.y < 0 ? .up : lastDirection
+        targetContentOffset.pointee.y = SnapSideList.Snapping.target(
+            proposed: targetContentOffset.pointee.y, direction: direction, tiles: tileFrames,
+            viewport: scrollView.bounds.height, contentHeight: scrollView.contentSize.height
+        )
     }
 
     /// The list is open (its tiles may play) or closed (they give their
@@ -367,6 +499,10 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         reconcilePlayback()
+        let offset = scrollView.contentOffset.y
+        if scrollView.isDragging, offset != lastOffset { lastDirection = offset > lastOffset ? .down : .up }
+        lastOffset = offset
+        updateEdgeBlurs()
     }
 
     func collectionView(
@@ -381,8 +517,17 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
             guard let path = collection.indexPath(for: cell) else { continue }
             style(cell, at: path)
         }
-        if let id, let index = entries.firstIndex(where: { $0.post.id == id }) {
-            collection.scrollToItem(at: IndexPath(item: index, section: 0), at: .centeredVertically, animated: true)
+        // ⚠️ JUST ENOUGH TO SHOW IT WHOLE (#1527): a tile cut by an edge —
+        // tapped, or reached by paging the card — comes fully into view on
+        // that edge; a whole one does not move. It used to be centred, which
+        // left its neighbours cut.
+        if let id, let index = entries.firstIndex(where: { $0.post.id == id }),
+           let tile = collection.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame,
+           let offset = SnapSideList.Snapping.reveal(
+               tile, offset: collection.contentOffset.y, viewport: collection.bounds.height
+           ) {
+            let maxOffset = max(0, collection.contentSize.height - collection.bounds.height)
+            collection.setContentOffset(CGPoint(x: 0, y: min(max(0, offset), maxOffset)), animated: true)
         }
     }
 
@@ -406,7 +551,7 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: PostGridTileCell.reuseID, for: indexPath)
         if let tile = cell as? PostGridTileCell {
-            tile.cornerRadius = 6
+            tile.cornerRadius = SnapSideList.Geometry.tileCornerRadius
             let entry = entries[indexPath.item]
             // A text post's tile is its words; a picture speaks for itself.
             tile.configure(
@@ -416,7 +561,7 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
             // A cover landing late is when a still tile may start.
             tile.onCoverLoaded = { [weak self] in self?.reconcilePlayback() }
         }
-        cell.contentView.layer.cornerRadius = 6
+        cell.contentView.layer.cornerRadius = SnapSideList.Geometry.tileCornerRadius
         cell.contentView.layer.cornerCurve = .continuous
         style(cell, at: indexPath)
         return cell
@@ -436,6 +581,14 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
     }
 
     #if DEBUG
+    /// The list's scroll offset, and each edge blur's strength. Tests.
+    var debugOffset: CGFloat {
+        get { collection.contentOffset.y }
+        set { collection.contentOffset.y = newValue; updateEdgeBlurs() }
+    }
+    var debugBlurStrengths: (top: CGFloat, bottom: CGFloat) { (topBlur.rampStrength, bottomBlur.rampStrength) }
+    var debugTileFrames: [CGRect] { tileFrames }
+
     /// The tiles on screen. Tests.
     var debugTileCells: [PostGridTileCell] { collection.visibleCells.compactMap { $0 as? PostGridTileCell } }
 
