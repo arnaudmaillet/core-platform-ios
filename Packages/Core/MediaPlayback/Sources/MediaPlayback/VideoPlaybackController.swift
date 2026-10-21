@@ -1747,6 +1747,13 @@ public final class VideoPlaybackController {
         return Double(player.rate)
     }
 
+    /// Whether the player `view` shows is asked to play and is waiting for
+    /// media to do so — buffering at the start, or stalled mid-clip (#1537).
+    /// Not a viewer's pause.
+    public func isWaitingToPlay(in view: VideoRenderView) -> Bool {
+        watchedPlayer(in: view)?.timeControlStatus == .waitingToPlayAtSpecifiedRate
+    }
+
     public func isAdvancing(in view: VideoRenderView) -> Bool {
         guard let player = watchedPlayer(in: view) else { return false }
         return player.timeControlStatus != .paused

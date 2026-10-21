@@ -38,6 +38,27 @@ final class SnapCellPlayback: NSObject {
     /// The playhead to draw: a fraction (nil when there is none to report)
     /// and the clip's length in seconds — `SnapChromeView.setMediaPlayhead`.
     var onPlayhead: ((Double?, Double) -> Void)?
+    /// The watched clip is loading — its length not known yet, or its player
+    /// stalled — past a short grace (#1537): the bar shows its pulse.
+    var onLoading: ((Bool) -> Void)?
+    /// When the clip started waiting (no length, or stalled), nil while it plays.
+    private var waitingSince: CFTimeInterval?
+    /// What `onLoading` last said.
+    private var reportedLoading = false
+
+    /// How long a clip whose length is unknown waits before the pulse shows:
+    /// a page joining a playing tile knows it at once, and must not flash it.
+    nonisolated static let unknownLengthGrace: CFTimeInterval = 0.15
+    /// How long a stalled clip waits before the pulse shows (the owner's ~0.5 s).
+    nonisolated static let stallGrace: CFTimeInterval = 0.5
+
+    /// Whether the bar shows the loading pulse: the clip has been waiting
+    /// (`waitingFor`, nil when it is not) past the grace for its kind. Pure,
+    /// for tests.
+    nonisolated static func isLoading(waitingFor elapsed: CFTimeInterval?, lengthKnown: Bool) -> Bool {
+        guard let elapsed else { return false }
+        return elapsed >= (lengthKnown ? stallGrace : unknownLengthGrace)
+    }
     /// The scrub card is waiting for a frame, or has stopped waiting.
     var onScrubPreviewLoading: ((Bool) -> Void)?
     /// The scrub card's frame has landed.
@@ -179,6 +200,8 @@ final class SnapCellPlayback: NSObject {
         playheadLink?.invalidate()
         playheadLink = nil
         onPlayhead?(nil, 0)
+        waitingSince = nil
+        reportLoading(false)
     }
 
     /// Whether the display link is running — for tests.
@@ -221,9 +244,27 @@ final class SnapCellPlayback: NSObject {
         }
         #endif
         onPlayhead?(head?.fraction, head?.seconds ?? 0)
+        // Loading (#1537): no length yet, or the player waiting for media.
+        let now = CACurrentMediaTime()
+        let waiting = head == nil || (pool?.isWaitingToPlay(in: view) ?? false)
+        if waiting {
+            if waitingSince == nil { waitingSince = now }
+        } else {
+            waitingSince = nil
+        }
+        reportLoading(Self.isLoading(waitingFor: waitingSince.map { now - $0 }, lengthKnown: head != nil))
     }
 
-    // MARK: - The scrub preview
+    private func reportLoading(_ loading: Bool) {
+        guard loading != reportedLoading else { return }
+        reportedLoading = loading
+        onLoading?(loading)
+    }
+
+    /// Whether the feed reports the clip loading. Tests.
+    var isReportingLoading: Bool { reportedLoading }
+
+        // MARK: - The scrub preview
 
     /// Fetches the frame the scrub card is pointing at, at a rate a decoder can
     /// actually keep.

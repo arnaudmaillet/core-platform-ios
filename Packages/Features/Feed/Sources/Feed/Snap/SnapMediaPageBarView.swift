@@ -99,6 +99,16 @@ final class SnapMediaPageBarView: UIView {
     /// reason.
     static let restingOpacity: CGFloat = 0.45
 
+    /// ⚠️ THE INDICATOR'S INK AT REST (#1537, the owner 2026-10-21: "too
+    /// visible"): the played part is dimmer than full white while nobody
+    /// handles the bar, and comes up to full with the strip when it wakes.
+    /// Still clearly over the track's `restingAlpha`.
+    static let restingFillInk: CGFloat = 0.6
+
+    /// Whether the strip is up (a touch, a scrub): the indicator's full ink.
+    private var isAwake = false
+    private var fillInk: UIColor { UIColor.white.withAlphaComponent(isAwake ? 1 : Self.restingFillInk) }
+
     /// How long the strip stays up after the last thing that woke it.
     ///
     /// Long enough to finish a thought — reading where you are after a swipe,
@@ -278,6 +288,7 @@ final class SnapMediaPageBarView: UIView {
         wakeTimer?.invalidate()
         wakeTimer = nil
         alpha = Self.restingOpacity
+        isAwake = false
         pageCount = count
         isHidden = !hasStrip
         guard hasStrip else { return }
@@ -395,19 +406,23 @@ final class SnapMediaPageBarView: UIView {
         wakeTimer = Timer.scheduledTimer(withTimeInterval: Self.wakeDuration, repeats: false) {
             [weak self] _ in self?.rest()
         }
-        guard alpha < 1 else { return }
+        guard alpha < 1 || !isAwake else { return }
+        isAwake = true
         UIView.animate(withDuration: 0.18, delay: 0,
                        options: [.allowUserInteraction, .beginFromCurrentState]) {
             self.alpha = 1
+            self.fills.values.forEach { $0.backgroundColor = self.fillInk }
         }
     }
 
     private func rest() {
         wakeTimer?.invalidate()
         wakeTimer = nil
+        isAwake = false
         UIView.animate(withDuration: 0.45, delay: 0,
                        options: [.allowUserInteraction, .beginFromCurrentState]) {
             self.alpha = Self.restingOpacity
+            self.fills.values.forEach { $0.backgroundColor = self.fillInk }
         }
     }
 
@@ -596,91 +611,131 @@ final class SnapMediaPageBarView: UIView {
         // fill is already faint enough that the change cannot be seen.
         let watched = index == Int(position.rounded())
         let isBar = clipPages.contains(index) && clipness > 0 && watched
+        layoutPulse(onPage: index, isBar: isBar, clipness: clipness)
         guard isBar, let playhead = drawnPlayhead else {
             fills[index]?.isHidden = true
-            growthPending = false
             return
         }
         let fill = fills[index] ?? {
             let view = UIView()
-            view.backgroundColor = .white
+            view.backgroundColor = fillInk
             view.isUserInteractionEnabled = false
             view.isHidden = true
             segments[index].addSubview(view)
             fills[index] = view
             return view
         }()
-        let appearing = fill.isHidden
         fill.isHidden = false
-        fill.alpha = clipness * proximity(toPage: index)
+        // The ink follows the strip's state (`restingFillInk`); a wake or a
+        // rest animating it lands on this same value.
+        fill.backgroundColor = fillInk
+        // ⚠️ AT ONCE, AT ITS POSITION (#1537, the owner 2026-10-21): the
+        // indicator no longer grows in from the bar's start (#1305). Its only
+        // motion is the cross-fade with the loading pulse (`setLoading`).
+        fill.alpha = clipness * proximity(toPage: index) * indicatorPresence
         let played = max(min(CGFloat(playhead), 1), 0) * width
-        let target = CGRect(x: 0, y: 0, width: played, height: bounds.height)
+        fill.frame = CGRect(x: 0, y: 0, width: played, height: bounds.height)
         fill.layer.cornerRadius = min(bounds.height, played) / 2
-        // ⚠️ A FILL THAT APPEARS GROWS IN; IT DOES NOT POP IN. Landing on a
-        // clip, or its length becoming known, used to draw the played part at
-        // its whole width in one frame (the owner, 2026-10-17, #1305). It now
-        // grows from the bar's leading end. Not under a finger: a scrub is
-        // 1:1, and an ease behind the thumb is the stutter `heldPlayhead`
-        // exists to remove.
-        fill.frame = target
-        if appearing { growthPending = played > 0.5 }
-        // ⚠️ THE GROWTH WAITS UNTIL IT CAN BE SEEN. The fill first appears
-        // while the post is still opening, with the whole chrome at alpha 0
-        // under the flight (measured: `SnapChromeView` a=0.0): grown then, it
-        // had finished before anyone could see it, and the chrome faded in
-        // on a fill already at full length — the pop, unchanged. So it is
-        // held, and starts on the first beat the strip is actually showing.
-        guard growthPending, !isVeiled else { return }
-        growthPending = false
-        guard !isDraggingPlayhead else { return }
-        // ⚠️ CORE ANIMATION, NOT `UIView.animate`. This runs from the feed and
-        // from layout passes the post's opening wraps in
-        // `performWithoutAnimation` (measured: `areAnimationsEnabled` false
-        // when the fill first appears); a UIKit block there is applied at
-        // once. An explicit layer animation is not subject to that switch.
-        //
-        // ⚠️ AND ADDITIVE. The feed assigns the frame 30 times a second while
-        // this runs; an additive animation is an OFFSET from the model value
-        // decaying to zero, so each new frame moves the end the ease is
-        // converging on instead of cutting it short. The growth lands on the
-        // live playhead, not on where it was when it began.
-        let grow = CABasicAnimation(keyPath: "bounds.size.width")
-        grow.fromValue = -played
-        grow.toValue = 0
-        let slide = CABasicAnimation(keyPath: "position.x")
-        slide.fromValue = -played / 2
-        slide.toValue = 0
-        let growth = CAAnimationGroup()
-        growth.animations = [grow, slide]
-        growth.duration = Self.fillGrowDuration
-        growth.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        grow.isAdditive = true
-        slide.isAdditive = true
-        fill.layer.add(growth, forKey: Self.fillGrowthKey)
     }
 
-    private static let fillGrowthKey = "fill.growth"
+    // MARK: - Loading (#1537)
 
-    /// A fill appeared and has not grown yet — see `layoutFill`.
-    private var growthPending = false
+    /// Whether the watched clip is loading: its length unknown, or the player
+    /// stalled. The bar then shows the pulse instead of the indicator.
+    private(set) var isLoading = false
+    /// The indicator's and the pulse's presence, cross-faded (1 / 0 at rest).
+    private var indicatorPresence: CGFloat = 1
+    /// A light stroke that stretches from the bar's centre to its ends while
+    /// fading, looping — TikTok's loading line (the owner's choice).
+    private let pulseView = UIView()
+    private let pulseStroke = CALayer()
+    private static let pulseKey = "bar.pulse"
+    /// The cross-fade between the pulse and the indicator.
+    static let loadingFadeDuration: TimeInterval = 0.2
+    /// One stretch of the pulse.
+    static let pulseDuration: CFTimeInterval = 0.9
 
-    /// Whether the strip is out of sight: off a window, or under an ancestor
-    /// that is hidden or fully transparent (the chrome during a flight).
-    private var isVeiled: Bool {
-        guard window != nil else { return true }
-        // Up to the window, not including it: the views are what a flight
-        // veils, and a window's own visibility is not this strip's concern.
-        var view: UIView? = self
-        while let current = view, !(current is UIWindow) {
-            if current.isHidden || current.alpha < 0.02 { return true }
-            view = current.superview
+    /// The watched clip started or stopped loading: the pulse and the
+    /// indicator cross-fade.
+    func setLoading(_ loading: Bool) {
+        guard loading != isLoading else { return }
+        isLoading = loading
+        let presence: CGFloat = loading ? 0 : 1
+        indicatorPresence = presence
+        let fade = { [self] in
+            pulseView.alpha = 1 - presence
+            for (index, fill) in fills where !fill.isHidden {
+                fill.alpha = clipPresence(ofPage: index) * presence
+            }
         }
-        return false
+        if window != nil, UIView.areAnimationsEnabled {
+            UIView.animate(withDuration: Self.loadingFadeDuration, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState], animations: fade) { [weak self] _ in
+                guard let self, !self.isLoading else { return }
+                self.pulseStroke.removeAnimation(forKey: Self.pulseKey)
+            }
+        } else {
+            fade()
+            if !loading { pulseStroke.removeAnimation(forKey: Self.pulseKey) }
+        }
+        layoutSegments()
     }
 
-    /// How long a fill that appears takes to grow to the playhead — short
-    /// enough to read as the bar arriving, not as the clip catching up.
-    static let fillGrowDuration: TimeInterval = 0.45
+    /// The opacity a page's fill wears before presence: its clipness and
+    /// proximity, as `layoutFill` reckons them.
+    private func clipPresence(ofPage index: Int) -> CGFloat {
+        clipPageProximity * proximity(toPage: index)
+    }
+
+    /// Places the pulse in the watched clip's segment while loading, and runs
+    /// its loop — or a still, dim track under Reduce Motion or Power Saving
+    /// (no endless animation, #580).
+    private func layoutPulse(onPage index: Int, isBar: Bool, clipness: CGFloat) {
+        guard isBar, isLoading || pulseView.alpha > 0.001 else {
+            if segments.indices.contains(index), pulseView.superview === segments[index] { pulseView.isHidden = true }
+            return
+        }
+        let segment = segments[index]
+        if pulseView.superview !== segment {
+            pulseView.removeFromSuperview()
+            pulseView.isUserInteractionEnabled = false
+            pulseView.clipsToBounds = true
+            if pulseStroke.superlayer == nil {
+                pulseStroke.backgroundColor = UIColor.white.cgColor
+                pulseView.layer.addSublayer(pulseStroke)
+            }
+            segment.addSubview(pulseView)
+            if !isLoading { pulseView.alpha = 0 }
+        }
+        pulseView.isHidden = false
+        pulseView.frame = segment.bounds
+        pulseView.layer.cornerRadius = segment.bounds.height / 2
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        pulseStroke.frame = pulseView.bounds
+        pulseStroke.cornerRadius = pulseView.bounds.height / 2
+        CATransaction.commit()
+        let moves = isLoading && window != nil && !MotionPreference.stillsDecoration
+        if moves, pulseStroke.animation(forKey: Self.pulseKey) == nil {
+            let stretch = CABasicAnimation(keyPath: "transform.scale.x")
+            stretch.fromValue = 0.02
+            stretch.toValue = 1
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = 0.9
+            fade.toValue = 0
+            let loop = CAAnimationGroup()
+            loop.animations = [stretch, fade]
+            loop.duration = Self.pulseDuration
+            loop.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            loop.repeatCount = .infinity
+            loop.isRemovedOnCompletion = false
+            pulseStroke.add(loop, forKey: Self.pulseKey)
+        } else if !moves {
+            pulseStroke.removeAnimation(forKey: Self.pulseKey)
+            // Still: a dim track — the bar says "not yet" without moving.
+            pulseStroke.opacity = isLoading ? 0.35 : 0
+        }
+        if moves { pulseStroke.opacity = 1 }
+    }
 
     /// 1 on the page itself, 0 a page away, linear between — the tent above.
     private func proximity(toPage index: Int) -> CGFloat {
@@ -1031,10 +1086,26 @@ final class SnapMediaPageBarView: UIView {
 
     /// The played part of a clip's bar, as a rectangle in the strip's own
     /// coordinates — nil when the page draws no bar.
-    /// Whether a clip's fill is growing in (#1305).
-    func debugFillIsGrowing(_ index: Int) -> Bool {
+    /// Whether a clip's fill is animating — never since #1537. Tests.
+    func debugFillIsAnimating(_ index: Int) -> Bool {
         guard let fill = fills[index] else { return false }
         return (fill.layer.animationKeys() ?? []).isEmpty == false
+    }
+
+    /// The indicator's ink (its white's alpha) on `index`. Tests.
+    func debugFillInk(_ index: Int) -> CGFloat? {
+        var white: CGFloat = 0, ink: CGFloat = 0
+        guard fills[index]?.backgroundColor?.getWhite(&white, alpha: &ink) == true else { return nil }
+        return ink
+    }
+
+    /// The loading pulse: shown (its presence), and looping. Tests.
+    var debugPulsePresence: CGFloat { pulseView.isHidden || pulseView.superview == nil ? 0 : pulseView.alpha }
+    var debugPulseIsLooping: Bool { pulseStroke.animation(forKey: Self.pulseKey) != nil }
+    /// The indicator's alpha on `index`, or nil when it draws none. Tests.
+    func debugFillAlpha(_ index: Int) -> CGFloat? {
+        guard let fill = fills[index], !fill.isHidden else { return nil }
+        return fill.alpha
     }
 
     func debugFillFrame(_ index: Int) -> CGRect? {

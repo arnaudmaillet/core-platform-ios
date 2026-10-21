@@ -1049,6 +1049,11 @@ final class SnapChromeView: UIView {
         mediaPageBar.setPosition(position)
     }
 
+    /// The watched clip is loading or not (#1537): the bar's pulse.
+    func setMediaLoading(_ loading: Bool) {
+        mediaPageBar.setLoading(loading)
+    }
+
     /// How far through the clip the page is showing, when there is one whose
     /// length is known — the strip draws it inside the segment it has grown
     /// into a bar.
