@@ -59,6 +59,8 @@ final class ConversationThreadViewController: UIViewController {
     /// input row rides the keyboard, widening into the pin's width — the pin
     /// stays where it was.
     private let composeBar = CommentsInputBar()
+    /// The leftward swipe's push of the peer's profile (#1525).
+    private(set) var swipeArbiter: SwipeStageArbiter?
 
     /// The conversation's pin as the driver last reported it — nil while
     /// there is nothing to pin (a draft).
@@ -199,6 +201,10 @@ final class ConversationThreadViewController: UIViewController {
             configureToolbar()
             contextMenu.install(on: collectionView)
             contextMenu.menuProvider = { [weak self] indexPath in self?.menu(at: indexPath) }
+            // A leftward swipe pushes the peer's profile (#1525).
+            let arbiter = SwipeStageArbiter(host: self)
+            arbiter.install(in: view)
+            swipeArbiter = arbiter
         }
         configureNavigationItem()
         configureStatusLabel()
@@ -1670,4 +1676,36 @@ extension ConversationThreadViewController {
 
     /// The pill's relation badge. Tests.
     var debugPeerFollowBadge: SnapAuthorIdentityView.FollowBadge { peerPill.followBadge }
+}
+
+// MARK: - The swipe chain (#1525)
+
+extension ConversationThreadViewController: SwipeStageHosting {
+    /// ⚠️ A LEFTWARD SWIPE PUSHES THE PEER'S PROFILE (#1525, the owner
+    /// 2026-10-21), following the finger — anywhere on the thread but where a
+    /// view owns horizontal drags or text selection: the composer (its text
+    /// view, its emote strip) and any horizontal strip in the stream. One
+    /// peer only: a group has no push stage.
+    func swipeStage(for direction: SwipeDirection, at origin: CGPoint) -> SwipeStage? {
+        guard direction == .leftward, !Self.ownsHorizontalDrag(at: origin, in: view, composer: composeBar),
+              let profile = driver.peerProfileDestination() else { return nil }
+        return .push { profile }
+    }
+
+    var swipeNavigationController: UINavigationController? { navigationController }
+
+    func swipePushDidEnd(committed: Bool) {}
+
+    /// Whether the touch at `point` lands on something that keeps its own
+    /// horizontal drag: the composer, a text view (selection), or a scroll
+    /// view that scrolls sideways.
+    static func ownsHorizontalDrag(at point: CGPoint, in view: UIView, composer: UIView) -> Bool {
+        guard let hit = view.hitTest(point, with: nil) else { return false }
+        for current in sequence(first: hit, next: { $0.superview }) {
+            if current === composer || current is UITextView { return true }
+            if let scroll = current as? UIScrollView, scroll.contentSize.width > scroll.bounds.width + 1 { return true }
+            if current === view { break }
+        }
+        return false
+    }
 }

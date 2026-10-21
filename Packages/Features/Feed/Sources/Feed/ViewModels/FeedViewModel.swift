@@ -8,6 +8,7 @@ import EntityStore
 import FeedInterface
 import Foundation
 import MediaCore
+import UIKit
 
 /// The slice of the realtime client the feed consumes; a seam for tests.
 public protocol FeedRealtimeSubscribing: Sendable {
@@ -327,6 +328,13 @@ public final class FeedViewModel {
     /// can compose its navigation chrome before the push animates.
     public func didTapAuthor(_ id: ProfileID) {
         router?.route(to: .profile(id, stub: authorStubs[id]))
+    }
+
+    /// The author's profile, made but NOT pushed — what a leftward swipe
+    /// pushes following the finger (#1525). Nil without a router that makes
+    /// one.
+    public func authorProfileDestination(_ id: ProfileID) -> UIViewController? {
+        router?.destination(for: .profile(id, stub: authorStubs[id]))
     }
 
     /// The comment button tapped — open the post's comments via routing. On the

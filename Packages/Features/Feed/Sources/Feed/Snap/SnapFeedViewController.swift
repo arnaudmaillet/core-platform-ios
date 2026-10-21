@@ -424,6 +424,8 @@ final class SnapFeedViewController: UIViewController {
     private var commentsEngagementIsResting = false
     /// The side list (#1425): nil on a screen that opted out.
     private(set) var sideList: SnapSideListController?
+    /// The screen's horizontal swipe chain (#1525) — see `swipeStage`.
+    private(set) var swipeArbiter: SwipeStageArbiter?
     /// How far the pages' overlays sit down while the side list is open
     /// (#1509): the band the bottom toolbar covers, in the page's space.
     var sideListOverlayOffset: CGFloat = 0
@@ -570,6 +572,11 @@ final class SnapFeedViewController: UIViewController {
             let sideList = SnapSideListController(host: self, imagePipeline: imagePipeline, videoPlayback: videoPlayback)
             sideList.install(in: view)
             self.sideList = sideList
+            // The leftward swipe chain (#1525): the side list on a media
+            // post, then the shown post's author.
+            let arbiter = SwipeStageArbiter(host: self)
+            arbiter.install(in: view)
+            swipeArbiter = arbiter
         }
         configureNavigationItem()
         configureToolbarItems()
@@ -7020,6 +7027,59 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         )
     }
 
+    // MARK: - The swipe chain (#1525)
+
+    /// ⚠️ THE LEFTWARD SWIPE CHAIN (#1525, the owner 2026-10-21):
+    /// - a **media** post, the list closed: the side list opens (the
+    ///   carousel's own photos first — `sideListMayOpen`);
+    /// - a **text** post: no list (media posts only, the owner) — the
+    ///   author's profile is pushed, following the finger;
+    /// - the list **open**: a leftward drag pushes the author of the post on
+    ///   the CARD (the list's current item, not the anchor); a rightward one
+    ///   closes the list.
+    func swipeStage(for direction: SwipeDirection, at origin: CGPoint) -> SwipeStage? {
+        guard let sideList, !sideList.isSettling else { return nil }
+        if sideList.isOpen {
+            switch direction {
+            case .rightward: return .panel(sideList)
+            case .leftward:
+                // Not from the list itself (its tiles scroll and tap).
+                guard !sideList.listView.frame.contains(origin) else { return nil }
+                return authorPushStage()
+            }
+        }
+        guard direction == .leftward, sideListMayOpen(from: origin) else { return nil }
+        guard let model = activePostID.flatMap({ modelsByID[$0] }) else { return nil }
+        return model.mediaURL != nil ? .panel(sideList) : authorPushStage()
+    }
+
+    /// The push of the shown post's author — made now, so a screen with no
+    /// router (or no author) answers no stage at all.
+    private func authorPushStage() -> SwipeStage? {
+        guard let author = activePostID.flatMap({ modelsByID[$0] })?.authorID,
+              let profile = viewModel.authorProfileDestination(author) else { return nil }
+        return .push { profile }
+    }
+
+    var swipeNavigationController: UINavigationController? { navigationController }
+
+    /// ⚠️ BACK FROM THE PROFILE, THE POST IS FULL SCREEN (#1525, the owner):
+    /// a committed push closes the list behind the profile, without
+    /// animation — the post on show stays the current page, placed after
+    /// the anchor (#1509).
+    func swipePushDidEnd(committed: Bool) {
+        // The pager pages again — unless the list, still open after a
+        // cancelled push, keeps it frozen as its own settle does.
+        if !(sideList?.isEngaged ?? false) { setContentScrollEnabled(true) }
+        guard committed, let sideList, sideList.isOpen || sideList.isEngaged else { return }
+        sideList.settle(open: false, animated: false)
+    }
+
+    /// The pager holds still under the finger's push.
+    func swipePushWillBegin() {
+        setContentScrollEnabled(false)
+    }
+
     /// ⚠️ THE POST ON SHOW, THEN SIMILAR POSTS (#1509): the list is
     /// `[the post on show] + current posts of the feed's kind (#1421), none
     /// already in the feed, in a random order` — the "similar" half behind
@@ -7421,3 +7481,5 @@ extension SnapFeedViewController: ArrivalInvariantReporting {
     }
 }
 #endif
+
+extension SnapFeedViewController: SwipeStageHosting {}

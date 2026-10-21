@@ -73,10 +73,10 @@ struct PlainPushDismissalTests {
         stack.builder.presentSnapFeedHero(
             postIDs: [PostID("t1")], from: stack.presenter, origin: origin(hasHero: false)
         )
-        // The side list's own pan (#1473) is not the dismissal's.
+        // The swipe chain (#1473, #1525) is not the dismissal's.
         let pan = stack.nav.viewControllers.last?.view.gestureRecognizers?
             .compactMap { $0 as? UIPanGestureRecognizer }
-            .first { !($0.delegate is SnapSideListController) }
+            .first { !($0.delegate is SwipeStageArbiter) }
 
         #expect(pan?.delegate != nil, "the dismissal was released before the first touch")
         #expect(pan?.delegate === (stack.nav.leasedDelegate as? InteractiveSlideDismissal))
