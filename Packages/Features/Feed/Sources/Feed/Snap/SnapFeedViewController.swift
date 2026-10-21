@@ -436,6 +436,9 @@ final class SnapFeedViewController: UIViewController {
     var sideListCache: [PostID: [FeedEntry]] = [:]
     /// The post the side list was opened from, while it drives the card.
     var sideListAnchor: PostID?
+    /// The post on show's clip, paused from its side-list tile (#1550);
+    /// nil when none.
+    var sideListPausedPost: PostID?
     /// Whether this screen installs the side list — every vertical feed does
     /// (#1473); a test sets its own before the view loads.
     var installsSideList = true
@@ -1591,6 +1594,13 @@ final class SnapFeedViewController: UIViewController {
                 // The comments engagement's two verbs, cell → screen: the
                 // pill opens the panel, a strip tap while engaged closes it.
                 cell.onRequestComments = { [weak self] id in self?.presentComments(for: id) }
+                // With the side list open, a tap on the card closes it
+                // (#1550): the clip pauses from its tile instead.
+                cell.interceptsMediaTap = { [weak self] in
+                    guard let sideList = self?.sideList, sideList.isOpen, !sideList.isSettling else { return false }
+                    sideList.settle(open: false)
+                    return true
+                }
                 cell.onRequestCommentsClose = { [weak self] in self?.dismissComments() }
                 // The boost spend: wallet verdict here (the cell holds no
                 // balance), theatre back on the cell that asked.
@@ -4530,6 +4540,12 @@ final class SnapFeedViewController: UIViewController {
         // after the change that went missing.
         if let index { reconcileRestingInterface(activeIndex: index) }
         sideList?.activePostDidChange(activePostID)
+        // A clip paused from its tile is left behind by a page change: the
+        // mark goes with it (#1550).
+        if let paused = sideListPausedPost, paused != activePostID {
+            sideListPausedPost = nil
+            sideList?.listView.setPausedMark(false, on: nil)
+        }
     }
 
     // MARK: - Viewing history (#1344)
@@ -7211,9 +7227,42 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// pager stays in the list's order, so a swipe from there reaches its
     /// real neighbours.
     func showSideListEntry(_ entry: FeedEntry) {
+        // ⚠️ THE POST ON SHOW'S OWN TILE PAUSES IT (#1550): while the list
+        // is open, the card closes the list on a tap, so the clip is paused
+        // and resumed from its tile, which wears the stopped mark.
+        if entry.post.id == activePostID {
+            toggleSideListPlayback()
+            return
+        }
         guard viewModel.isInSideListSession,
               let index = orderedIDs.firstIndex(of: entry.post.id) else { return }
         settlePager(onIndex: index)
+    }
+
+    /// Toggles the post on show's clip from the list: the stopped mark on
+    /// its tile, none on the card.
+    private func toggleSideListPlayback() {
+        guard let id = activePostID, let cell = activeSnapCell, cell.canTogglePlayback,
+              let paused = cell.togglePlayback(markOnPage: false) else { return }
+        sideListPausedPost = paused ? id : nil
+        sideList?.listView.setPausedMark(paused, on: id)
+    }
+
+    /// The stopped mark moves between the card and the tile as the list
+    /// opens and closes (#1550); paging to another post takes it down.
+    private func handOverPausedMark(listOpen: Bool) {
+        guard let id = activePostID, let cell = activeSnapCell else { return }
+        if listOpen {
+            if cell.showsPausedMark {
+                cell.setPausedMarkVisible(false)
+                sideListPausedPost = id
+            }
+            sideList?.listView.setPausedMark(sideListPausedPost == id, on: id)
+        } else {
+            if sideListPausedPost == id { cell.setPausedMarkVisible(true) }
+            sideListPausedPost = nil
+            sideList?.listView.setPausedMark(false, on: nil)
+        }
     }
 
     /// ⚠️ PAST THE LIST'S LAST TILE (#1509): a swipe up closes the list with
@@ -7260,6 +7309,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// stands aside while the list is open.
     func sideListDidSettle(open: Bool) {
         (collectionView as? SnapFeedCollectionView)?.allowsBackwardPaging = open
+        handOverPausedMark(listOpen: open)
         if open {
             beginSideListSessionIfNeeded()
         } else {

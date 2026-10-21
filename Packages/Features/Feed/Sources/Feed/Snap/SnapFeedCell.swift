@@ -2653,6 +2653,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// the arbitration is unit-testable — the simulator injects no touches, and
     /// this decision is the whole of what a tap means here.
     func tapMedia(at point: CGPoint) {
+        // The screen's say first (#1550): with the side list open, a tap on
+        // the card closes the list rather than pausing.
+        if interceptsMediaTap?() == true { return }
         // While engaged, the strip is the only cell territory the panel
         // doesn't cover — a tap there means "expand back", not play/pause.
         // Unless the post is TEXT-ONLY: its engagement is the permanent
@@ -2860,10 +2863,28 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// page's song is the feed's (#1148).
     var canTogglePlayback: Bool { playsVideo && !isPostUnavailable }
 
-    func togglePlayback() {
-        guard canTogglePlayback, let paused = playback.toggle() else { return }
-        setPauseGlyphVisible(paused)
+    /// Toggles the clip. `markOnPage`: the stopped mark on the picture, as
+    /// a tap on it shows; false when it is drawn elsewhere — the side list's
+    /// tile (#1550). Returns whether the clip is now paused.
+    @discardableResult
+    func togglePlayback(markOnPage: Bool = true) -> Bool? {
+        guard canTogglePlayback, let paused = playback.toggle() else { return nil }
+        setPauseGlyphVisible(markOnPage && paused)
+        return paused
     }
+
+    /// A tap on the page, asked of the screen first: true when it took it
+    /// (#1550: the side list open closes, and the clip is left alone).
+    var interceptsMediaTap: (() -> Bool)?
+
+    /// The stopped mark on the picture, shown or taken down from outside —
+    /// the side list hands it over as it opens and back as it closes.
+    func setPausedMarkVisible(_ visible: Bool) {
+        setPauseGlyphVisible(visible)
+    }
+
+    /// Whether the picture wears the stopped mark.
+    var showsPausedMark: Bool { mediaCard.showsPausedMark }
 
     /// Puts the stopped mark on the picture in front of the viewer, or takes it
     /// away. The card decides WHERE that is — its own bounds for a single
@@ -3128,7 +3149,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// like column, progress — moved down by the band the bottom toolbar
     /// covers, which a card between the bars shows empty. The media stays.
     func setSideListOverlayOffset(_ offset: CGFloat) {
-        chrome.transform = offset == 0 ? .identity : CGAffineTransform(translationX: 0, y: offset)
+        chrome.setOverlayOffset(offset)
     }
 
     /// The overlay's offset now. Tests.

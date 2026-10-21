@@ -115,9 +115,14 @@ struct SnapSideListTests {
         let geometry = SnapSideList.Geometry(size: Self.devices[0].size, bars: Self.devices[0].bars)
         let band = Self.devices[0].bars.bottom
         #expect(geometry.overlayOffset(progress: 0) == 0)
-        // Less what the card crops off the page's bottom (#1545).
-        #expect(abs(geometry.overlayOffset(progress: 0.5) - (band / 2 - geometry.pageInset(progress: 0.5))) < 0.01)
-        #expect(abs(geometry.overlayOffset(progress: 1) - (band - geometry.pageInset(progress: 1))) < 0.01)
+        // ⚠️ THE OVERLAY'S FOOT KEEPS ITS SIDE MARGIN (#1549): open, the
+        // lowest element (the band plus the strip's gap above the page's
+        // bottom at rest) lands `overlayBottomMargin` above the card's foot —
+        // the page's bottom less the crop.
+        let foot = geometry.size.height - geometry.pageInset(progress: 1)
+        let lowest = geometry.size.height - band - SnapChromeView.pageBarToolbarGap + geometry.overlayOffset(progress: 1)
+        #expect(abs(foot - lowest - SnapSideList.Geometry.overlayBottomMargin) < 0.01, "the foot's gap: \(foot - lowest)")
+        #expect(geometry.overlayOffset(progress: 0.5) < geometry.overlayOffset(progress: 1))
     }
 
     /// Past half way, or flung, it opens; short of it, it springs back.
@@ -204,9 +209,19 @@ struct SnapSideListTests {
         #expect(!feed.isReadyForInteractiveDismissal, "a dismissal could begin while the list is open")
         #expect(pager.allowsBackwardPaging, "the pager does not page back while open")
 
+        // ⚠️ THE ACTION COLUMN LOWERS WITH THE REST (#1549): the like pill
+        // and the sound bubble live outside the chrome, in the cell.
+        for case let cell as SnapFeedCell in feed.collectionView.visibleCells {
+            #expect(cell.debugChrome.debugActionColumnOffset == cell.sideListOverlayOffset,
+                    "the like and the sound bubble stayed behind")
+        }
+
         sideList.settle(open: false, animated: false)
         #expect(pager.transform == .identity)
         #expect(pager.mask == nil, "the page stayed cropped after the close")
+        for case let cell as SnapFeedCell in feed.collectionView.visibleCells {
+            #expect(cell.debugChrome.debugActionColumnOffset == 0, "the action column stayed down")
+        }
         #expect(feed.collectionView.visibleCells.compactMap { ($0 as? SnapFeedCell)?.sideListOverlayOffset }.allSatisfy { $0 == 0 },
                 "an overlay stayed down after the close")
         #expect(sideList.listView.isHidden)
@@ -426,6 +441,43 @@ struct SnapSideListTests {
         #expect(!feed.collectionView.isDecelerating && feed.collectionView.layer.animationKeys() == nil,
                 "the card scrolled to it")
         #expect(feed.orderedIDs == order, "the card's order changed")
+    }
+
+    /// ⚠️ WITH THE LIST OPEN, A TAP ON THE CARD CLOSES IT (#1550) — it
+    /// takes the tap, so the clip is not toggled; closed, a tap is the
+    /// page's again.
+    @Test func withTheListOpenATapOnTheCardClosesIt() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
+        let sideList = try await open(feed)
+        let cell = try #require(feed.collectionView.visibleCells.compactMap { $0 as? SnapFeedCell }.first)
+        #expect(cell.interceptsMediaTap?() == true, "the card's tap did not go to the list")
+        #expect(sideList.isSettling || !sideList.isOpen, "the list did not close")
+        sideList.settle(open: false, animated: false)
+        #expect(cell.interceptsMediaTap?() == false, "a closed list still takes the card's taps")
+    }
+
+    /// The post on show's own tile toggles its clip in place (#1550): the
+    /// card stays on it.
+    @Test func thePostOnShowsTileDoesNotJump() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
+        let sideList = try await open(feed)
+        let shown = try #require(sideList.listView.entries.first)
+        feed.showSideListEntry(shown)
+        #expect(feed.activePostID == shown.post.id)
+    }
+
+    /// The stopped mark sits on the tile's centre, the card's component at
+    /// the tile's size, and comes down on request (#1550).
+    @Test func theTileWearsTheStoppedMark() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
+        let sideList = try await open(feed)
+        let list = sideList.listView
+        list.layoutIfNeeded()
+        let id = try #require(list.entries.first?.post.id)
+        list.setPausedMark(true, on: id)
+        #expect(list.debugShowsPausedMark(on: id), "no mark on the tile")
+        list.setPausedMark(false, on: id)
+        #expect(!list.debugShowsPausedMark(on: id), "the mark stayed")
     }
 
     /// ⚠️ A RIGHTWARD CLOSE MID-LIST KEEPS THE POST ON SHOW (#1509): the feed
