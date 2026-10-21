@@ -12,15 +12,19 @@ import Testing
 struct ForYouOwnFeedTests {
     private final class Pool: ForYouProviding, @unchecked Sendable {
         var pages: [String: ForYouPage] = [:]
+        /// Pages that throw (a timeout, offline) until taken out.
+        var failing: Set<String> = []
         private(set) var reads: [String] = []
         func firstPage() async throws -> ForYouPage { ForYouPage(posts: [], nextPageToken: nil) }
         func page(after token: String) async throws -> ForYouPage { ForYouPage(posts: [], nextPageToken: nil) }
         func discoveryFirstPage() async throws -> ForYouPage? {
             reads.append("")
+            if failing.contains("") { throw URLError(.timedOut) }
             return pages[""]
         }
         func discoveryPage(after token: String) async throws -> ForYouPage? {
             reads.append(token)
+            if failing.contains(token) { throw URLError(.timedOut) }
             return pages[token]
         }
     }
@@ -119,5 +123,90 @@ struct ForYouOwnFeedTests {
         await settle { !feed.debugReadAhead.isEmpty }
         let third = try #require(feed.begin(with: Self.post("tap3")))
         #expect(third.dropFirst().first?.id.rawValue == "a0")
+    }
+
+    // MARK: - Only the server ends the list (#1496)
+
+    /// ⚠️ AFTER THE END, A NEW PASS: every post served stayed served, and the
+    /// next opening held the tapped post alone, at its end at once.
+    @Test func anOpeningAfterTheEndStartsANewPass() async throws {
+        let pool = Pool()
+        pool.pages[""] = Self.page(["o1", "o2", "o3"], next: nil)
+        let feed = ForYouOwnFeed(repository: pool) { [] }
+        feed.prepare()
+        await settle { !feed.debugReadAhead.isEmpty }
+        let first = try #require(feed.begin(with: Self.post("tap1")))
+        #expect(first.map(\.id.rawValue) == ["tap1", "o1", "o2", "o3"])
+        #expect(await feed.next(after: PostID("o3")) == nil, "the true end is the end")
+        feed.end()
+
+        let second = try #require(feed.begin(with: Self.post("o2")))
+        #expect(second.map(\.id.rawValue) == ["o2"], "the tapped post first")
+        let rest = await feed.next(after: PostID("o2"))
+        #expect(rest?.map(\.rawValue) == ["o1", "o3"], "the new pass is not the pool from its start: \(rest ?? [])")
+    }
+
+    /// While unseen posts remain, an opening still carries on (#1347): no
+    /// new pass before the server has said "no more".
+    @Test func anOpeningBeforeTheEndCarriesOn() async throws {
+        let pool = Pool()
+        // Pages of a window's size: one read stops at the first.
+        pool.pages[""] = Self.page((0..<ForYouOwnFeed.windowSize).map { "a\($0)" }, next: "t2")
+        pool.pages["t2"] = Self.page((0..<ForYouOwnFeed.windowSize).map { "b\($0)" }, next: nil)
+        let feed = ForYouOwnFeed(repository: pool) { [] }
+        feed.prepare()
+        await settle { !feed.debugReadAhead.isEmpty }
+        _ = try #require(feed.begin(with: Self.post("tap1")))
+        feed.end()
+        await settle { !feed.debugReadAhead.isEmpty }
+        let second = try #require(feed.begin(with: Self.post("tap2")))
+        #expect(second.dropFirst().first?.id.rawValue == "b0", "the opening started over")
+    }
+
+    /// ⚠️ A FAILED PAGE IS NOT THE END: one timeout used to end the list
+    /// until a refresh. It answers "nothing yet", and the next ask reads the
+    /// same page again.
+    @Test func aFailedPageNeverEndsTheFeed() async throws {
+        let pool = Pool()
+        pool.pages[""] = Self.page(["o1"], next: "t2")
+        pool.pages["t2"] = Self.page(["o2"], next: nil)
+        let feed = ForYouOwnFeed(repository: pool) { [] }
+        let window = try #require(feed.begin(with: Self.post("tap")))
+        #expect(window.map(\.id.rawValue) == ["tap"])
+        #expect(await feed.next(after: PostID("tap"))?.map(\.rawValue) == ["o1", "o2"])
+
+        let failing = Pool()
+        failing.pages[""] = Self.page(["o1"], next: "t2")
+        failing.pages["t2"] = Self.page(["o2"], next: nil)
+        failing.failing = ["t2"]
+        let other = ForYouOwnFeed(repository: failing) { [] }
+        _ = try #require(other.begin(with: Self.post("tap")))
+        #expect(await other.next(after: PostID("tap"))?.map(\.rawValue) == ["o1"])
+        let blip = await other.next(after: PostID("o1"))
+        #expect(blip == [], "a failed page ended the feed: \(String(describing: blip))")
+        failing.failing = []
+        #expect(await other.next(after: PostID("o1"))?.map(\.rawValue) == ["o2"], "the retry did not read the same page")
+        #expect(await other.next(after: PostID("o2")) == nil)
+    }
+
+    /// Excluded pages with a token left are "nothing yet", not the end: the
+    /// read gave up after its page bound while the server still had more.
+    @Test func excludedPagesWithATokenNeverEndTheFeed() async throws {
+        let pool = Pool()
+        // More excluded pages than the read ahead and one more read can page
+        // through together: the first ask comes back empty-handed.
+        let excludedPages = 2 * ForYouOwnFeed.maxPagesPerRead + 1
+        for index in 0..<excludedPages {
+            let token = index == 0 ? "" : "t\(index)"
+            pool.pages[token] = Self.page(["g\(index)"], next: "t\(index + 1)")
+        }
+        pool.pages["t\(excludedPages)"] = Self.page(["o1"], next: nil)
+        let grid = Set((0..<excludedPages).map { PostID("g\($0)") })
+        let feed = ForYouOwnFeed(repository: pool) { grid }
+        _ = try #require(feed.begin(with: Self.post("tap")))
+        let short = await feed.next(after: PostID("tap"))
+        #expect(short == [], "the page bound ended the feed: \(String(describing: short))")
+        #expect(await feed.next(after: PostID("tap"))?.map(\.rawValue) == ["o1"])
+        #expect(await feed.next(after: PostID("o1")) == nil)
     }
 }
