@@ -57,6 +57,29 @@ struct MockSupervisionTests {
         #expect(again.count == 1, "a code is used once")
     }
 
+    /// ⚠️ ONE'S OWN CODE IS ACC-3006 WHATEVER ITS LETTERS (#1529): a "ZZ…"
+    /// code the viewer issued used to answer ACC-3001, "unknown", first.
+    @Test func onesOwnZZCodeIsStillOnesOwn() async throws {
+        let accounts = client(MockSupervisionService(
+            dataset: MockSocialDataset(), viewerAge: { 40 }, autoAcceptDelay: nil, drawCode: { "ZZ12345678" }
+        ))
+        var create = Account_V1_CreateSupervisionInviteRequest()
+        create.accountID = MockAuthService.accountID
+        create.role = .supervisor
+        let invite = try await accounts.createSupervisionInvite(request: create).result.get()
+        var accept = Account_V1_AcceptSupervisionInviteRequest()
+        accept.accountID = MockAuthService.accountID
+        accept.code = invite.code
+        let error = await accounts.acceptSupervisionInvite(request: accept).result.failure
+        #expect(error?.message?.hasPrefix("ACC-3006") == true, "not one's own code: \(String(describing: error?.message))")
+    }
+
+    /// A drawn code never starts with "ZZ", the mock's "unknown code" prefix.
+    @Test func aDrawnCodeNeverStartsWithZZ() {
+        let codes = (0..<20_000).map { _ in MockSupervisionService.randomInviteCode() }
+        #expect(codes.allSatisfy { $0.count == 10 && !$0.hasPrefix("ZZ") })
+    }
+
     /// The side follows the age: none on file fits neither (ACC-3002).
     @Test func theSideFollowsTheAge() async throws {
         let age = Age(nil)
