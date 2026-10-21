@@ -107,6 +107,36 @@ struct EmoteLabelTests {
         #expect(emote.layer.animation(forKey: "bounds") == nil)
     }
 
+    /// ⚠️ A PREVIEW IS DRAWN THROUGH A PORTAL (#1564): a context menu keeps
+    /// its lift in a container at alpha 0, and its labels' emotes stayed
+    /// blank squares. Under a root declared on show, they are placed.
+    @Test func aLabelUnderADeclaredRootIsOnShowThroughAnInvisibleContainer() throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let portalSource = UIView(frame: window.bounds)
+        portalSource.alpha = 0
+        window.addSubview(portalSource)
+        let root = UIView(frame: window.bounds)
+        portalSource.addSubview(root)
+        let label = EmoteLabel()
+        label.engine = engine
+        label.font = font
+        label.setEmoteText("hot 🔥")
+        root.addSubview(label)
+        label.frame = CGRect(x: 10, y: 10, width: 320, height: 40)
+        label.layoutIfNeeded()
+        #expect(EmoteVisibility.verdict(for: label) == .invisible, "guard: the container hides it")
+        #expect(label.placedEmoteCount == 0)
+
+        EmoteVisibility.treatAsOnShow(root)
+        #expect(EmoteVisibility.verdict(for: label) == .visible, "a declared root is not on show")
+        label.setNeedsLayout()
+        label.layoutIfNeeded()
+        #expect(label.placedEmoteCount == 1, "the preview's emote stayed a blank square")
+    }
+
     @Test func eachVisibleEmoteGetsAPlayerOverItsGlyph() throws {
         let engine = try warmEngine(["noto:1f525", "lol"])
         let (label, window) = hostedLabel("hot 🔥 take :lol:", engine: engine)

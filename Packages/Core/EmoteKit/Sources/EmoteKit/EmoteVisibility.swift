@@ -11,7 +11,21 @@ import UIKit
 /// page showing 6 held 20 — a longer list would have left VISIBLE emotes
 /// static.
 @MainActor
-enum EmoteVisibility {
+public enum EmoteVisibility {
+    /// Views whose subtree is ON SHOW whatever the walk up from it finds
+    /// (#1564): a context menu draws its lifted preview through a portal
+    /// from a container it keeps at alpha 0, so every label in the preview
+    /// read as unseen, placed nothing, and its emotes stayed blank squares.
+    /// The preview's root says so here; held weakly.
+    private static let onShowRoots = NSHashTable<UIView>.weakObjects()
+
+    /// Declares `root`'s subtree on show while it is in a window, whatever
+    /// its ancestors' alpha — for a view UIKit draws elsewhere (a context
+    /// menu's preview).
+    public static func treatAsOnShow(_ root: UIView) {
+        onShowRoots.add(root)
+    }
+
     /// Below this, UIKit itself treats a view as invisible (hit-testing).
     static let alphaThreshold: CGFloat = 0.01
 
@@ -84,6 +98,11 @@ enum EmoteVisibility {
         var layer = source(of: current.layer, presented: presented, into: &result)
         var rect = layer.bounds
         while true {
+            // A declared root: what is drawn through its portal is seen.
+            if onShowRoots.contains(current), !current.isHidden {
+                result.visible = true
+                return result
+            }
             if current.isHidden {
                 result.blockedByHidden = true
                 return result
