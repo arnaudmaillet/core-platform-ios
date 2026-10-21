@@ -1564,4 +1564,12 @@ final class GradientView: UIView {
     func setLocations(_ locations: [NSNumber]) {
         gradientLayer.locations = locations
     }
+
+    /// Re-tunes the gradient's colours, unanimated.
+    func setColors(_ colors: [UIColor]) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        gradientLayer.colors = colors.map(\.cgColor)
+        CATransaction.commit()
+    }
 }

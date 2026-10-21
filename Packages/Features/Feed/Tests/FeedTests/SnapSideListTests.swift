@@ -73,7 +73,7 @@ struct SnapSideListTests {
     @Test func theCornersGoFromTheDevicesToTheCards() {
         let geometry = SnapSideList.Geometry(size: Self.devices[0].size, bars: Self.devices[0].bars, deviceCornerRadius: 55)
         let card = SnapSideList.Geometry.cornerRadius
-        #expect(card == SnapSideList.Geometry.tileCornerRadius + SnapSideList.Geometry.gap, "not concentric with the tiles")
+        #expect(card == SnapSideList.Geometry.tileCornerRadius, "the tiles' corner is not the card's (#1527)")
         #expect(geometry.screenCornerRadius(progress: 0) == 55)
         #expect(abs(geometry.screenCornerRadius(progress: 0.5) - (55 + card) / 2) < 0.01)
         #expect(geometry.screenCornerRadius(progress: 1) == card)

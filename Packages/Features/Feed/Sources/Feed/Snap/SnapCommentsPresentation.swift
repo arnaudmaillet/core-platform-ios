@@ -479,11 +479,16 @@ final class ProgressiveFrostView: UIVisualEffectView {
     /// physical length instead of stretching it. A fixed fraction cannot do
     /// that, and a stale one shears the ramp.
     private let topRampLength: CGFloat?
+    private let maskColors: [UIColor]
+    /// The ramp's strength (0…1): the mask's opacity scaled — the way to
+    /// fade the band, since an effect view's own alpha stops its blur.
+    private(set) var rampStrength: CGFloat = 1
 
     /// `maskColors`/`maskLocations` describe the mask's OPACITY ramp
     /// top→bottom: opaque = full material, clear = none.
     init(maskColors: [UIColor], maskLocations: [NSNumber], topRampLength: CGFloat? = nil) {
         fadeMask = GradientView(colors: maskColors, locations: maskLocations)
+        self.maskColors = maskColors
         self.topRampLength = topRampLength
         super.init(effect: nil)
         isUserInteractionEnabled = false
@@ -513,6 +518,17 @@ final class ProgressiveFrostView: UIVisualEffectView {
     /// mute the media the layout exists to show.
     func setVeilOpacity(_ opacity: CGFloat) {
         veil.alpha = min(max(0, opacity), 1)
+    }
+
+    /// Fades the whole band (#1527) by its mask, hidden at zero so a band at
+    /// rest costs nothing.
+    func setRampStrength(_ strength: CGFloat) {
+        let clamped = min(max(0, strength), 1)
+        guard clamped != rampStrength || isHidden != (clamped == 0) else { return }
+        rampStrength = clamped
+        isHidden = clamped == 0
+        guard clamped > 0 else { return }
+        fadeMask.setColors(maskColors.map { $0.withAlphaComponent($0.cgColor.alpha * clamped) })
     }
 
     override func layoutSubviews() {
