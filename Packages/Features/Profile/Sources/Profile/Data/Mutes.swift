@@ -169,3 +169,22 @@ extension ProfileRepository: ProfileMuting {
             .sorted { ($0.mutedAt ?? .distantPast) > ($1.mutedAt ?? .distantPast) }
     }
 }
+
+// A post menu's Mute and Block (#1498 §3), declared in CoreModels so a feed
+// can reach them without importing this package.
+extension ProfileRepository: SocialGraphModerating {
+    public func setPostsMuted(_ muted: Bool, for profileID: ProfileID) async throws {
+        var scopes = try await muteScopes(for: profileID)
+        guard scopes.posts != muted else { return }
+        scopes.posts = muted
+        try await setMuteScopes(scopes, for: profileID)
+    }
+
+    public func block(_ profileID: ProfileID, wholeAccount: Bool) async throws -> [ProfileID] {
+        guard wholeAccount else {
+            try await setBlocked(true, for: profileID)
+            return [profileID]
+        }
+        return try await blockAccount(behind: profileID)
+    }
+}

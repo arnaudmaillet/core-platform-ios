@@ -117,6 +117,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// its own pool (`GetDiscoveryFeed`) — anyone's posts — so Unfollow is
     /// offered only where `ForYouViewModel.isFollowed` says so.
     private let socialGraph: (any SocialGraphWriting)?
+    /// The menu's Mute and Block (#1498 §3); nil offers neither.
+    private let moderation: (any SocialGraphModerating)?
     /// The balance and the sheet behind it, for the header every screen this
     /// one pushes wears (`PushedScreenHeader`). This screen's OWN badge is the
     /// shell's (`setTrailingAccessoryItem`); these reach the pushed ones, which
@@ -197,6 +199,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         router: (any Router)? = nil,
         reporting: (any ContentReporting)? = nil,
         socialGraph: (any SocialGraphWriting)? = nil,
+        moderation: (any SocialGraphModerating)? = nil,
         wallet: WalletStore? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         showsBalance: @escaping @MainActor () -> Bool = { true },
@@ -216,6 +219,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         self.router = router
         self.reporting = reporting
         self.socialGraph = socialGraph
+        self.moderation = moderation
         page = ForYouGridPage(imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback)
         friendsRow = FriendsStoriesRow(imagePipeline: imagePipeline)
         friendsRow.videoPlayback = videoPlayback
@@ -917,6 +921,13 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             })
         }
         actions.append(.hide { [weak self] in self?.hidePost(context.post.id) })
+        if moderation != nil {
+            let handle = context.post.authorHandle ?? ""
+            actions.append(.mute { [weak self] in self?.mute(context.authorID, handle: handle) })
+            actions.append(.block { [weak self] in
+                self?.confirmBlock(context.authorID, handle: handle, from: context.anchor)
+            })
+        }
         if reporting != nil {
             actions.append(.report { [weak self] in
                 self?.presentReportReasons(for: context)
@@ -934,6 +945,84 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             commit: {},
             undo: { [weak self] in self?.viewModel.unhidePost(id) }
         )
+    }
+
+    /// Mute from a post's menu (#1498 §3): the profile's mute of their POSTS
+    /// (#689), their stories and messages untouched. The posts leave once the
+    /// graph has accepted, with Undo — a compensating unmute, as Unfollow's.
+    private func mute(_ id: ProfileID, handle: String) {
+        guard let moderation else { return }
+        let name = handle.isEmpty ? "this author" : "@\(handle)"
+        Task { [weak self] in
+            do {
+                try await moderation.setPostsMuted(true, for: id)
+                guard let self else { return }
+                viewModel.hideAuthor(id)
+                Feedback.undoable(
+                    "Muted \(name)'s posts", symbol: "speaker.slash", from: self,
+                    commit: {},
+                    undo: { [weak self] in self?.unmute(id, name: name) }
+                )
+            } catch {
+                self?.presentFailure("Couldn't mute \(name)")
+            }
+        }
+    }
+
+    /// Mute's Undo: the compensating unmute.
+    private func unmute(_ id: ProfileID, name: String) {
+        guard let moderation else { return }
+        Task { [weak self] in
+            do {
+                try await moderation.setPostsMuted(false, for: id)
+                self?.viewModel.showAuthor(id)
+            } catch {
+                self?.presentFailure("Couldn't unmute \(name)")
+            }
+        }
+    }
+
+    /// Block asks first, in the profile's words (`ProfileCardViewController
+    /// .confirmBlock`): this profile, or the whole account.
+    private func confirmBlock(_ id: ProfileID, handle: String, from anchor: UIView) {
+        let name = handle.isEmpty ? "this user" : "@\(handle)"
+        let sheet = UIAlertController(
+            title: "Block \(name)?",
+            message: "They won't be able to find your profile or message you, and you'll stop seeing their posts. They aren't notified.\n\nBlocking the account also blocks any other profiles it owns.",
+            preferredStyle: .actionSheet
+        )
+        sheet.addAction(UIAlertAction(title: "Block \(name)", style: .destructive) { [weak self] _ in
+            self?.block(id, name: name, wholeAccount: false)
+        })
+        sheet.addAction(UIAlertAction(title: "Block Account & All Profiles", style: .destructive) { [weak self] _ in
+            self?.block(id, name: name, wholeAccount: true)
+        })
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        sheet.popoverPresentationController?.sourceView = anchor
+        present(sheet, animated: true)
+    }
+
+    /// Not optimistic, as the profile's block: a safety action is never shown
+    /// done and then rolled back. Once accepted, their posts leave and the
+    /// follow edge, which a block severs, goes with them.
+    private func block(_ id: ProfileID, name: String, wholeAccount: Bool) {
+        guard let moderation else { return }
+        Task { [weak self] in
+            do {
+                // Every profile blocked, the account's other ones included.
+                let blocked = try await moderation.block(id, wholeAccount: wholeAccount)
+                guard let self else { return }
+                for profile in blocked {
+                    viewModel.hideAuthor(profile)
+                    viewModel.removeAuthor(profile)
+                }
+                let count = blocked.count
+                let message = count > 1 ? "Blocked \(name) and \(count - 1) more" : "Blocked \(name)"
+                Feedback.success(message, symbol: "hand.raised", from: self)
+            } catch {
+                self?.presentFailure("Couldn't block \(name)")
+            }
+        }
     }
 
     /// Follows from a post's menu (#1498): said when it is accepted, said

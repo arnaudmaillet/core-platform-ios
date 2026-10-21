@@ -560,14 +560,14 @@ public final class ForYouViewModel {
     /// (BACKEND_GAPS §14), and the timeline is the whole population this
     /// screen sees; followed and not.
     public var discoverPosts: [GalleryPost] {
-        (hasDiscovery ? discovery ?? [] : corpus ?? []).filter { !hiddenIDs.contains($0.id) }
+        (hasDiscovery ? discovery ?? [] : corpus ?? []).filter(isShown)
     }
 
     /// The loaded posts of one circle, in display order —
     /// from the FOLLOWING timeline, never from Discover's pool: a followed
     /// author's posts the discovery pool happened to rank are not the rows.
     private func posts(in circle: Circle) -> [GalleryPost] {
-        (corpus ?? []).filter { self.circle(of: $0.authorID) == circle && !hiddenIDs.contains($0.id) }
+        (corpus ?? []).filter { self.circle(of: $0.authorID) == circle && self.isShown($0) }
     }
 
     /// FOLLOWING's posts: the people the viewer follows who are not friends.
@@ -869,6 +869,35 @@ public final class ForYouViewModel {
 
     /// Whether `id` is hidden this session. Tests.
     func isHidden(_ id: PostID) -> Bool { hiddenIDs.contains(id) }
+
+    // MARK: - Muted and blocked authors (#1498 §3)
+
+    /// Authors muted or blocked from a post's menu this session: their posts
+    /// leave every surface at once, before the next page (which the server
+    /// filters) could say so.
+    private var hiddenAuthors: Set<ProfileID> = []
+
+    /// Takes every post by `authorID` off this screen — the menu's Mute and
+    /// Block. Undone by `showAuthor` (Mute's Undo).
+    public func hideAuthor(_ authorID: ProfileID) {
+        guard hiddenAuthors.insert(authorID).inserted else { return }
+        onCorpusReset?()
+        publish()
+    }
+
+    /// Mute's Undo.
+    public func showAuthor(_ authorID: ProfileID) {
+        guard hiddenAuthors.remove(authorID) != nil else { return }
+        onCorpusReset?()
+        publish()
+    }
+
+    /// Whether a post survives Hide This Post, Mute and Block.
+    private func isShown(_ post: GalleryPost) -> Bool {
+        guard !hiddenIDs.contains(post.id) else { return false }
+        guard let author = post.authorID else { return true }
+        return !hiddenAuthors.contains(author)
+    }
 
     // MARK: - Publishing
 

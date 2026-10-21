@@ -73,6 +73,29 @@ struct MuteTests {
         #expect(try await repository.muteScopes(for: target) == .none)
     }
 
+    /// A post menu's Mute (#1498 §3) is the POSTS scope alone: their
+    /// stories and messages keep whatever mute they had, and the undo lifts
+    /// the posts only.
+    @Test func aPostMenusMuteTouchesThePostsScopeOnly() async throws {
+        let repository = makeRepository()
+        let target = ProfileID("prof-3")
+        try await repository.setMuteScopes(MuteScopes(messages: true), for: target)
+
+        try await repository.setPostsMuted(true, for: target)
+        #expect(try await repository.muteScopes(for: target) == MuteScopes(posts: true, messages: true))
+
+        try await repository.setPostsMuted(false, for: target)
+        #expect(try await repository.muteScopes(for: target) == MuteScopes(messages: true))
+    }
+
+    /// A post menu's Block of one profile blocks it, and names it.
+    @Test func aPostMenusBlockBlocksTheProfile() async throws {
+        let repository = makeRepository()
+        let target = ProfileID("prof-4")
+        #expect(try await repository.block(target, wholeAccount: false) == [target])
+        #expect(try await repository.followRelation(to: target) == .blocked)
+    }
+
     /// The muted list is hydrated, newest first, and Unmute drops the row.
     @Test func theMutedListUnmutes() async throws {
         let repository = makeRepository()
