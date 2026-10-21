@@ -81,7 +81,13 @@ struct SnapLikePillLayoutTests {
         let middle = count.minY - heart.maxY
         let bottom = pill.maxY - count.maxY
         let gaps = [top, middle, bottom]
-        #expect((gaps.max() ?? 0) - (gaps.min() ?? 0) < 1, "uneven gaps top \(top), middle \(middle), bottom \(bottom)")
+        // ⚠️ ON THE SCREEN'S PIXEL GRID (#1507): the pill's, the heart's and
+        // the count's edges each snap to a device pixel, so the gaps agree to
+        // within three of them — a point at 3x, as before, and a point and a
+        // half at 2x, where the iPhone SE measured exactly 1.0.
+        let scale = chrome.traitCollection.displayScale > 0 ? chrome.traitCollection.displayScale : 3
+        #expect((gaps.max() ?? 0) - (gaps.min() ?? 0) < 3 / scale,
+                "uneven gaps top \(top), middle \(middle), bottom \(bottom) at \(scale)x")
         #expect(pill.contains(count), "the count \(count) left the pill \(pill)")
     }
 

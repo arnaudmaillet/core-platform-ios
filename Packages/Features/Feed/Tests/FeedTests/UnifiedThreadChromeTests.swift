@@ -101,8 +101,12 @@ struct UnifiedThreadChromeTests {
     }
 
     /// Many comments over three days: enough to scroll past the chips.
-    private static let longAcrossDays: [CommentEntry] = (0..<36).map { index in
-        entry("l\(index)", ageInDays: Double(index / 12) * 1.1 + Double(index % 12) * 0.01)
+    /// ⚠️ EACH DAY TALLER THAN ANY SCREEN (#1507): at twelve comments a day,
+    /// the oldest day was shorter than the iPhone SE's stream, so at the
+    /// thread's end the day before it sat under the top — the premise of
+    /// `scrollingToADayLandsItsChipUnderTheTop` held on a tall screen only.
+    private static let longAcrossDays: [CommentEntry] = (0..<60).map { index in
+        entry("l\(index)", ageInDays: Double(index / 20) * 1.1 + Double(index % 20) * 0.005)
     }
 
     /// ⚠️ A MEDIA POST'S COMMENTS GROUP BY DAY TOO (#757): every snap page's
