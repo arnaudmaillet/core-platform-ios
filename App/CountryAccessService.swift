@@ -136,8 +136,9 @@ final class CountryAccessService: CountryAccess {
     func unlock(_ code: String) async -> CountryUnlockOutcome {
         guard let standing = standing(of: code) else { return .unknownCountry }
         guard !isUnlocked(code) else { return .alreadyUnlocked }
-        // The sheet refuses first (#401); never spend a teen's gems regardless.
-        guard !purchasesRestricted else { return .insufficientGems(needed: standing.price, have: wallet.snapshot().gems) }
+        // The sheet refuses first (#401); never spend a teen's gems regardless,
+        // nor an account the wallet says may not spend them (WAL-3001, #1517).
+        guard !purchasesRestricted, !wallet.gemSpendingRestricted else { return .insufficientGems(needed: standing.price, have: wallet.snapshot().gems) }
         // A guest's unlock is gated before it gets here (`.unlockCountry`);
         // a guest has no account to keep the country in.
         guard isMember() else { return .insufficientGems(needed: standing.price, have: 0) }

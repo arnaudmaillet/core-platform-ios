@@ -646,8 +646,10 @@ public final class MockWalletService: @unchecked Sendable {
     }
 
     /// Adults only (WAL-3001): the server's answer to a restricted account's
-    /// spend, before anything is read or charged.
-    private func spendingRefusal(_ account: String) -> ConnectError? {
+    /// spend, before anything is read or charged. Also asked by the services
+    /// that spend through `spendGems` (a country unlock, #1517), so they
+    /// refuse the way the wallet does.
+    func spendingRefusal(_ account: String) -> ConnectError? {
         guard isGemSpendingRestricted(account) else { return nil }
         return ConnectError(code: .permissionDenied, message: "WAL-3001: gem spending is for adults only")
     }
@@ -670,8 +672,13 @@ public final class MockWalletService: @unchecked Sendable {
     /// Spends `amount` gems for another service (the wallet's `SpendGems`,
     /// #1475: a country unlock, a visa), written to the history as `kind`;
     /// the gems left, or nil when there are not enough.
+    ///
+    /// ⚠️ ADULTS ONLY HERE TOO (#1517): a restricted account is never
+    /// debited. A caller asks `spendingRefusal` first to answer WAL-3001;
+    /// this is the floor under a caller that forgot.
     func spendGems(account: String, amount: Int64, kind: Wallet_V1_TransactionKind, ref: String) -> Int64? {
-        lock.withLock {
+        guard !isGemSpendingRestricted(account) else { return nil }
+        return lock.withLock {
             var wallet = accountLocked(account)
             guard amount >= 0, wallet.gems >= amount else { return nil }
             wallet.gems -= amount

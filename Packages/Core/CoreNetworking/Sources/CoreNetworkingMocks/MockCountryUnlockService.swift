@@ -62,7 +62,17 @@ public final class MockCountryUnlockService: @unchecked Sendable {
             guard code.count == 2, code.allSatisfy({ $0.isASCII && $0.isLetter }) else {
                 return .failure(ConnectError(code: .invalidArgument, message: "GEO-9001: country_code"))
             }
-            return .success(lock.withLock { unlockLocked(request.accountID, code: code, price: request.expectedPrice) })
+            return lock.withLock {
+                // Adults only (WAL-3001, #1517), as the wallet's own spends:
+                // a restricted account's unlock is refused with nothing
+                // debited. A country already open spends nothing, so it is
+                // still answered.
+                if !unlockedLocked(request.accountID).contains(code),
+                   let refusal = wallet.spendingRefusal(request.accountID) {
+                    return .failure(refusal)
+                }
+                return .success(unlockLocked(request.accountID, code: code, price: request.expectedPrice))
+            }
         }
     }
 
