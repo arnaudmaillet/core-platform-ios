@@ -3114,8 +3114,19 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
     }
 
+    /// The side list's pose (#1509): the page's overlay — caption, ticker,
+    /// like column, progress — moved down by the band the bottom toolbar
+    /// covers, which a card between the bars shows empty. The media stays.
+    func setSideListOverlayOffset(_ offset: CGFloat) {
+        chrome.transform = offset == 0 ? .identity : CGAffineTransform(translationX: 0, y: offset)
+    }
+
+    /// The overlay's offset now. Tests.
+    var sideListOverlayOffset: CGFloat { chrome.transform.ty }
+
     override func prepareForReuse() {
         super.prepareForReuse()
+        setSideListOverlayOffset(0)
         isActive = false
         // A recycled cell owns nothing: the next post to land here is told
         // whether it has the screen, and a stale `true` would make that
