@@ -254,6 +254,20 @@ public final class GridVideoPlaybackCoordinator {
     /// 2026-10-11). Power Saving still stops them (`allowsAutoplay`).
     var autoplayAllowed: () -> Bool = { GridVideoPlaybackCoordinator.allowsAutoplay() }
 
+    /// Plays this coordinator's tiles under their OWN scope (`tag:post`), so
+    /// a tile never joins the player of the same post shown elsewhere
+    /// (`VideoPlaybackController.play`'s join). The side list sets it
+    /// (#1547): its tile of the post on show joined the card's player, re-capped
+    /// it to the tiles' bit rate — a rung switch the card showed as a jump —
+    /// and its own reconcile could resume a card paused from that tile. Nil:
+    /// the post's own scope, shared as before.
+    public var playbackScopeTag: String?
+
+    /// The scope a tile of `id` plays under.
+    public func playbackScope(for id: PostID) -> String {
+        playbackScopeTag.map { "\($0):\(id.rawValue)" } ?? id.rawValue
+    }
+
     public init(pool: VideoPlaybackController, maxConcurrent: Int = 6) {
         self.pool = pool
         self.maxConcurrent = maxConcurrent
@@ -1328,6 +1342,7 @@ public final class GridVideoPlaybackCoordinator {
             pool.setPaused(paused, in: renderView)
             return
         }
+        let scope = playbackScope(for: id)
         startTasks[id] = Task { [weak self, pool] in
             // ⚠️ A START STOPPED BEFORE IT RAN PLAYS NOTHING (#884). A stop in
             // the same turn as its start — a grid covered as it appears, a
@@ -1338,7 +1353,7 @@ public final class GridVideoPlaybackCoordinator {
             guard !Task.isCancelled else { return }
             // Scoped to the POST: two rows carrying the same file are two
             // playbacks and must not share a clock. See `playingScope`.
-            await pool.play(url, in: renderView, peakBitRate: cap, scope: id.rawValue)
+            await pool.play(url, in: renderView, peakBitRate: cap, scope: scope)
             // A candidate that arrives already paused — its carousel is resting
             // on another page — is started and held on its first frame, which is
             // what makes the frame there to show at all.

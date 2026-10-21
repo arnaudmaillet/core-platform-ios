@@ -530,3 +530,18 @@ struct GridVideoPlaybackCoordinatorTests {
         #expect(pool.itemCreations == 1)
     }
 }
+
+/// A coordinator's tiles play under the post's own scope by default, and
+/// under a tagged one when the surface asks (#1547), so they never join
+/// the same post's player elsewhere.
+@MainActor
+struct GridPlaybackScopeTests {
+    @Test func tilesShareThePostsScopeUnlessTagged() {
+        let pool = VideoPlaybackController(source: FixedVideoSource(url: FileManager.default.temporaryDirectory.appendingPathComponent("stub.mp4")), poolSize: 1)
+        let coordinator = GridVideoPlaybackCoordinator(pool: pool)
+        #expect(coordinator.playbackScope(for: PostID("p1")) == "p1")
+        coordinator.playbackScopeTag = "side-list"
+        #expect(coordinator.playbackScope(for: PostID("p1")) == "side-list:p1")
+    }
+}
+

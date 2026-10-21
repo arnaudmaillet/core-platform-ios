@@ -37,12 +37,31 @@ final class SnapSideListAutoplay {
         self.pool = pool
         self.imagePipeline = imagePipeline
         playback = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: Self.concurrentPlayers)
+        // ⚠️ THE TILES NEVER SHARE THE CARD'S PLAYER (#1547): the post on
+        // show's tile joined it, capped it to a tile's rung — the card's
+        // picture jumped as the list opened, and again as it closed — and
+        // could resume a clip the viewer paused. A tile has its own.
+        playback.playbackScopeTag = "side-list"
     }
+
+    /// The post on show's tile plays first (#1547, the owner: the card,
+    /// then its tile, then the rest the pool allows): a claim on the
+    /// budget whatever its place in the list.
+    func focus(_ id: PostID?) {
+        focusedPost = id
+        if isActive { playback.focus(id) }
+    }
+
+    /// The post on show, claimed while the list is open.
+    private var focusedPost: PostID?
 
     /// Open (the tiles may play) or closed (every tile gives its player back
     /// now).
     func setActive(_ active: Bool) {
         isActive = active
+        // ⚠️ THE CLAIM ONLY WHILE OPEN: a focused post is never stopped, so a
+        // claim kept past the close would leave its tile playing unseen.
+        playback.focus(active ? focusedPost : nil)
         playback.setSurfaceVisible(active)
     }
 
