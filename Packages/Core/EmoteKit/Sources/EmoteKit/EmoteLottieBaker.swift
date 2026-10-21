@@ -36,7 +36,8 @@ import Synchronization
 /// and the two commits it waits out (below).
 ///
 /// ⚠️ **ONE JOB AT A TIME, AT UTILITY QoS.** A bake is invisible work: the
-/// label shows the system glyph until its sheet lands. One thread keeps the
+/// emote's square holds its skeleton until its sheet lands — never the
+/// system glyph (#1504). One thread keeps the
 /// drawing to one core and below everything the user is waiting on.
 ///
 /// ⚠️ **EVERY COMMIT WAITS FOR THE MAIN THREAD TO SLEEP (#1001).** The tree

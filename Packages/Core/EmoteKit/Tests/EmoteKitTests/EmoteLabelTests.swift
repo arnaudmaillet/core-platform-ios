@@ -60,8 +60,9 @@ struct EmoteLabelTests {
     /// ⚠️ A FLIGHT IN THE AIR STILLS EVERY EMOTE (the owner, 2026-10-15): a
     /// flight poses its cards inside its own animation, and an emote placed
     /// then flew in from the label's corner, drawn twice by the copies on
-    /// both ends. The glyphs draw plain while it is up; the emotes come back
-    /// when it lands — in the flight's own window only.
+    /// both ends. While it is up the emotes HOLD THE FRAME they were on
+    /// (#922) — never the glyph (#1504) — and play on when it lands, in the
+    /// flight's own window only.
     @Test func aFlightInTheAirStillsTheEmotesUntilItLands() throws {
         let engine = try warmEngine(["noto:1f525", "lol"])
         let (label, window) = hostedLabel("hot 🔥 take :lol:", engine: engine)
@@ -77,12 +78,14 @@ struct EmoteLabelTests {
 
         let flight = FlightActivity.begin(in: window)
         label.layoutIfNeeded()
-        #expect(label.placedEmoteCount == 0, "an emote played through a flight")
-        #expect(label.coveredMarkIndices.isEmpty, "a glyph stayed erased with no emote over it")
+        let views = label.artViews.compactMap { $0 as? AnimatedIconView }
+        #expect(views.count == 2 && views.allSatisfy(\.isPaused), "an emote played through a flight")
+        #expect(label.coveredMarkIndices == [0, 1], "a glyph drawn under a flight (#1504)")
 
         flight.release()
         label.layoutIfNeeded()
         #expect(label.placedEmoteCount == 2, "the emotes did not come back at the landing")
+        #expect(views.allSatisfy { !$0.isPaused }, "the emotes did not play on at the landing")
     }
 
     /// An emote placed inside an animation block — as a flight lays its
@@ -122,17 +125,17 @@ struct EmoteLabelTests {
         #expect(label.emoteFrames[0].minX < label.emoteFrames[1].minX)
     }
 
-    /// The glyph the label drew is exactly where the animation goes: its ink
-    /// lies inside the player's square.
+    /// The glyph the label would draw is exactly where the animation goes:
+    /// its ink lies inside the player's square. Read with `animatesEmotes`
+    /// off — the one case a glyph is drawn (#1504).
     @Test func theSquareCoversTheDrawnGlyph() async throws {
-        // No art to be had: once that is known, nothing covers the glyph.
-        let engine = EmoteEngine(diskCache: nil)
-        engine.artProvider = { _, _, _ in nil }
+        let engine = try warmEngine(["noto:1f525"])
         let (label, window) = hostedLabel("go 🔥 go", engine: engine)
         defer { window.isHidden = true }
-        try #require(await settle { label.pendingEmoteCount == 0 })
         let frame = try #require(label.emoteFrames.first)
-        #expect(label.showingEmoteCount == 0)
+        label.animatesEmotes = false
+        label.layoutIfNeeded()
+        #expect(label.placedEmoteCount == 0)
 
         let ink = try #require(Self.colouredInk(of: label))
         #expect(frame.insetBy(dx: -1, dy: -1).contains(ink), "ink \(ink) outside \(frame)")
@@ -185,7 +188,8 @@ struct EmoteLabelTests {
         label.lineBreakMode = .byTruncatingTail
         label.layoutIfNeeded()
         #expect(label.placedEmoteCount == 1)
-        #expect(label.coveredMarkIndices == [0])
+        // No glyph for either (#1504): the truncated one is not drawn at all.
+        #expect(label.coveredMarkIndices == [0, 1])
     }
 
     @Test func nothingHappensOffScreen() throws {
@@ -277,7 +281,7 @@ struct EmoteLabelTests {
         EmoteVisibilityMonitor.shared.tick()
         #expect(engine.animatedCount == 0)
         #expect(label.placedEmoteCount == 0)
-        #expect(label.coveredMarkIndices.isEmpty, "a label that gave its players back must draw its glyphs")
+        #expect(label.coveredMarkIndices == [0, 1], "an unseen label drew its glyphs (#1504)")
 
         container.isHidden = false
         EmoteVisibilityMonitor.shared.tick()
@@ -372,7 +376,7 @@ struct EmoteLabelTests {
     }
 
     /// Laid out outside the window (an off-screen page that does not clip):
-    /// never takes a slot at all, and still draws its glyph.
+    /// never takes a slot at all, and draws no glyph either (#1504).
     @Test func aLabelOutsideTheWindowNeverTakesASlot() throws {
         let engine = try warmEngine(["noto:1f525"])
         let container = UIView(frame: CGRect(x: 1000, y: 0, width: 400, height: 400))
@@ -380,7 +384,7 @@ struct EmoteLabelTests {
         defer { window.isHidden = true }
         #expect(engine.animatedCount == 0)
         #expect(label.placedEmoteCount == 0)
-        #expect(Self.colouredInk(of: label) != nil, "its glyph is still drawn")
+        #expect(Self.colouredInk(of: label) == nil, "a glyph drawn off screen (#1504)")
     }
 
     /// The monitor's own timer does it, with no test calling `tick()`, and
@@ -673,18 +677,65 @@ struct EmoteLabelTests {
         #expect(EmoteVisibilityMonitor.shared.registeredCount == before - 1)
     }
 
-    /// Reduce Motion: an emoji is left to the system (nothing placed, nothing
-    /// baked); a house emote shows its first frame.
+    /// ⚠️ REDUCE MOTION: EVERY EMOTE IS ITS OWN ART, STILL (#1504) — an
+    /// emoji too, never the system glyph. A frozen emote is still the emote.
     @Test func reduceMotionShowsStills() throws {
         AnimatedIconView.forcedPolicy = .still
         defer { AnimatedIconView.forcedPolicy = nil }
         let engine = try warmEngine(["noto:1f525", "lol"])
         let (label, window) = hostedLabel("🔥 :lol:", engine: engine)
         defer { window.isHidden = true }
-        #expect(label.placedEmoteCount == 1)
-        #expect(label.coveredMarkIndices == [1])
+        #expect(label.placedEmoteCount == 2, "an emoji was left to the system glyph")
+        #expect(label.showingEmoteCount == 2)
+        #expect(label.coveredMarkIndices == [0, 1])
+        #expect(Self.colouredInk(of: label) == nil, "a system glyph under Reduce Motion")
         #expect(engine.animatedCount == 0, "a still must not hold an animation slot")
         #expect(engine.stats.bakesStarted == 0)
+    }
+
+    /// ⚠️ NO GLYPH, ON ANY PATH (#1504): a label nobody sees yet — laid out
+    /// before it joins a window — draws no glyph either; its squares are
+    /// empty until it is seen.
+    @Test func anUnseenLabelDrawsNoGlyph() throws {
+        let engine = EmoteEngine(diskCache: nil)
+        let label = EmoteLabel(frame: CGRect(x: 0, y: 0, width: 300, height: 40))
+        label.engine = engine
+        label.font = font
+        label.textColor = .black
+        label.setEmoteText("🔥 😂")
+        label.layoutIfNeeded()
+        #expect(label.placedEmoteCount == 0)
+        #expect(label.coveredMarkIndices == [0, 1])
+        #expect(Self.colouredInk(of: label) == nil, "a glyph drawn off screen")
+    }
+
+    /// ⚠️ A LABEL LAID OUT BEFORE IT JOINS A WINDOW STARTS ITS EMOTES WHEN IT
+    /// JOINS (#1504), on the next turn — not on the monitor's tick, a quarter
+    /// of a second later, which is what the owner filmed as a glyph.
+    @Test func aLabelJoiningAWindowStartsItsEmotesWithoutTheMonitor() async throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let label = EmoteLabel(frame: CGRect(x: 10, y: 10, width: 300, height: 40))
+        label.engine = engine
+        label.font = font
+        label.setEmoteText("hot 🔥")
+        label.layoutIfNeeded()
+        #expect(label.placedEmoteCount == 0)
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        // Faded in by its host: unseen at the first layout in the window.
+        container.alpha = 0
+        container.addSubview(label)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        window.addSubview(container)
+        label.layoutIfNeeded()
+        #expect(label.placedEmoteCount == 0, "the premise: unseen at the first layout")
+        container.alpha = 1
+        // One turn of the main queue — far less than the monitor's tick.
+        await Task.yield()
+        try await Task.sleep(for: .milliseconds(20))
+        label.layoutIfNeeded()
+        #expect(label.showingEmoteCount == 1, "the label waited on the monitor to start its emotes")
     }
 
     /// Swapping the class is the whole adoption: plain `text` is marked on

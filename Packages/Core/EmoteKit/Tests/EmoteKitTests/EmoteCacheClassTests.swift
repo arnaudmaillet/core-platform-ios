@@ -185,10 +185,11 @@ final class EmoteCacheClassTests {
         #expect(second.stats.diskHits == 0)
     }
 
-    /// The glyph stills a text view draws before the art are a UI asset cache
-    /// too (#894): a byte-budgeted `MemoryCache` of the class, announced to the
-    /// shared registry, so the coordinator trims them instead of `NSCache`'s
-    /// own guesses. A still is drawn once per glyph and size.
+    /// The blank squares a text view reserves for its emotes are a UI asset
+    /// cache too (#894): a byte-budgeted `MemoryCache` of the class, announced
+    /// to the shared registry, so the coordinator trims them instead of
+    /// `NSCache`'s own guesses. A square is drawn once per size. (No glyph
+    /// stills any more: an animated emote is never its glyph, #1504.)
     @Test func glyphStillsAreAUIAssetCache() throws {
         let stills = EmoteAttachment.stills
         #expect(stills.namespace.priorityClass == .persistent)
@@ -196,13 +197,12 @@ final class EmoteCacheClassTests {
         #expect(stills.memoryBudget == EmoteAttachment.stillsBudget)
         #expect(UIAssetCaches.shared.caches.contains { $0 === stills }, "the stills are not announced to the registry")
 
-        let heart = try #require(EmoteCatalog.shared.emote(id: "noto:2764_fe0f"))
         let side: CGFloat = 23.25
-        let first = EmoteAttachment.still(of: heart, side: side)
+        let first = EmoteAttachment.blank(side: side)
         #expect(stills.usage.bytes > 0)
-        #expect(EmoteAttachment.still(of: heart, side: side) === first, "the same still was drawn twice")
+        #expect(EmoteAttachment.blank(side: side) === first, "the same square was drawn twice")
 
         stills.removeAll()
-        #expect(EmoteAttachment.still(of: heart, side: side) !== first, "a cleared still was still served")
+        #expect(EmoteAttachment.blank(side: side) !== first, "a cleared square was still served")
     }
 }
