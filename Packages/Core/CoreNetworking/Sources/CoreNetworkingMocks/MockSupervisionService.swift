@@ -55,6 +55,7 @@ public final class MockSupervisionService: @unchecked Sendable {
     private let dataset: MockSocialDataset
     private let viewerAge: @Sendable () -> Int?
     private let autoAcceptDelay: TimeInterval?
+    private let drawCode: @Sendable () -> String
     private var links: [Link] = []
     private var invites: [String: Invite] = [:]
     private var failedAccepts = 0
@@ -81,16 +82,19 @@ public final class MockSupervisionService: @unchecked Sendable {
     ///     birth (`MockAccountLifecycle.viewerAge`).
     ///   - autoAcceptDelay: how old a code the viewer made is when the other
     ///     side takes it up; nil never (tests that count links).
+    ///   - drawCode: the codes the viewer's invites get (tests pin one).
     public init(
         dataset: MockSocialDataset,
         viewerAge: @escaping @Sendable () -> Int?,
         seed: Seed? = nil,
         autoAcceptDelay: TimeInterval? = MockSupervisionService.defaultAutoAcceptDelay,
-        now: Date = Date()
+        now: Date = Date(),
+        drawCode: @escaping @Sendable () -> String = MockSupervisionService.randomInviteCode
     ) {
         self.dataset = dataset
         self.viewerAge = viewerAge
         self.autoAcceptDelay = autoAcceptDelay
+        self.drawCode = drawCode
         switch seed {
         case .supervised:
             links = [Self.link(.supervisor, index: Self.supervisorIndices[0], since: now.addingTimeInterval(-86_400 * 21))]
@@ -219,8 +223,7 @@ public final class MockSupervisionService: @unchecked Sendable {
         guard viewerSide == request.role else {
             return .failure(ConnectError(code: .failedPrecondition, message: "ACC-3002: Supervision pairs an adult with a teen aged 13 to 17."))
         }
-        let alphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
-        let code = String((0..<10).map { _ in alphabet.randomElement()! })
+        let code = drawCode()
         let now = Date()
         let invite = Invite(role: request.role, createdAt: now, expiresAt: now.addingTimeInterval(86_400))
         lock.withLock { invites[code] = invite }
@@ -228,6 +231,17 @@ public final class MockSupervisionService: @unchecked Sendable {
         view.code = code
         view.expiresAt = Google_Protobuf_Timestamp(date: invite.expiresAt)
         return .success(view)
+    }
+
+    /// A fresh invite code: 10 Crockford characters, never starting with
+    /// "ZZ" — the prefix that stands for an unknown or expired code on the
+    /// other side (#1529).
+    public static func randomInviteCode() -> String {
+        let alphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+        while true {
+            let code = String((0..<10).map { _ in alphabet.randomElement()! })
+            if !code.hasPrefix("ZZ") { return code }
+        }
     }
 
     private func accept(_ request: Account_V1_AcceptSupervisionInviteRequest) -> Result<Account_V1_SupervisionView, ConnectError> {
@@ -238,12 +252,15 @@ public final class MockSupervisionService: @unchecked Sendable {
             if failedAccepts >= Self.maxFailedAccepts {
                 return .failure(ConnectError(code: .resourceExhausted, message: "ACC-3007: Too many invalid codes. Please try again in an hour."))
             }
+            // ⚠️ THE VIEWER'S OWN CODE FIRST (#1529): an issued code is never
+            // "unknown". Checked after the "ZZ" prefix, a random code that
+            // drew it (1 in 1024) answered ACC-3001 to its own maker.
+            if invites[code] != nil {
+                return .failure(ConnectError(code: .failedPrecondition, message: "ACC-3006: You cannot supervise your own account."))
+            }
             guard code.count == 10, !code.hasPrefix("ZZ") else {
                 failedAccepts += 1
                 return .failure(ConnectError(code: .notFound, message: "ACC-3001: This code is not valid or has expired."))
-            }
-            if invites[code] != nil {
-                return .failure(ConnectError(code: .failedPrecondition, message: "ACC-3006: You cannot supervise your own account."))
             }
             guard let side else {
                 return .failure(ConnectError(code: .failedPrecondition, message: "ACC-3002: Supervision pairs an adult with a teen aged 13 to 17."))
