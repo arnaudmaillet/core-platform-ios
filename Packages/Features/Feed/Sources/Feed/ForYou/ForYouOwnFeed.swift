@@ -6,8 +6,9 @@ import PostGrid
 /// The vertical feed's OWN list, for a post opened from For You's "For you"
 /// section or from its "View all" gallery (#1343, the owner 2026-10-17): the
 /// tapped post, then posts read from the discovery pool on a cursor of their
-/// own — never the grid's list continued from the tap, and nothing the grid
-/// has already shown.
+/// own — never the grid's list continued from the tap. What lies past the
+/// grid comes first; the grid's own posts follow once the pool is spent
+/// (#1511), so a grid that has loaded the whole pool never cuts a feed short.
 ///
 /// One cursor for the screen's life: `begin(with:)` hands the feed its first
 /// window (the tapped post and what was read ahead), `next(after:)` pages on,
@@ -23,8 +24,10 @@ import PostGrid
 @MainActor
 final class ForYouOwnFeed {
     private let repository: any ForYouProviding
-    /// The posts the grid holds right now: never served again.
-    private let excluded: () -> Set<PostID>
+    /// The posts the grid holds right now, in its order: skipped while the
+    /// pool past them lasts, served after it (#1511).
+    private let grid: () -> [GalleryPost]
+    private func excluded() -> Set<PostID> { Set(grid().map(\.id)) }
 
     /// How many posts a window carries ahead of the tapped one.
     static let windowSize = 12
@@ -42,6 +45,17 @@ final class ForYouOwnFeed {
     private var readAhead: [GalleryPost] = []
     private var readAheadTask: Task<Void, Never>?
 
+    /// What this opening handed the feed, in order, and when it began —
+    /// what `end()` checks against the viewer's history.
+    private var opening: [GalleryPost] = []
+    private var openedAt: Date?
+    /// Handed out but never viewed: the next opening serves these first.
+    private var returned: [GalleryPost] = []
+    /// The posts viewed since a moment — the history every vertical feed
+    /// records into (#1344). Nil: everything handed out counts as seen.
+    private let viewedSince: ((Date) -> Set<PostID>)?
+    private let now: () -> Date
+
     /// Whether the pool exists at all (discovery wired). Without it there is
     /// no own list, and the caller keeps the grid's window.
     private let isAvailable: () -> Bool
@@ -49,11 +63,15 @@ final class ForYouOwnFeed {
     init(
         repository: any ForYouProviding,
         isAvailable: @escaping () -> Bool = { true },
-        excluded: @escaping () -> Set<PostID>
+        viewedSince: ((Date) -> Set<PostID>)? = nil,
+        now: @escaping () -> Date = Date.init,
+        grid: @escaping () -> [GalleryPost]
     ) {
         self.repository = repository
         self.isAvailable = isAvailable
-        self.excluded = excluded
+        self.viewedSince = viewedSince
+        self.now = now
+        self.grid = grid
     }
 
     /// Reads the next opening's window ahead, so a tap opens on posts already
@@ -86,37 +104,71 @@ final class ForYouOwnFeed {
         // remain the cursor carries on (#1347); once the server has said
         // "no more", the opening reads the pool from its start again — still
         // past the grid's posts — with only the tapped one served.
-        if cursor == .end, readAhead.isEmpty, readAheadTask == nil {
+        // Posts handed out and never viewed are not spent.
+        if cursor == .end, readAhead.isEmpty, readAheadTask == nil, returned.isEmpty {
             cursor = .start
             served = []
         }
-        let hidden = excluded().union([tapped.id])
-        let ahead = readAhead.filter { !hidden.contains($0.id) }
+        // ⚠️ WHAT WAS NEVER VIEWED COMES FIRST (#1511, the owner 2026-10-21,
+        // filmed): the window is handed out ahead of the viewer, so a post
+        // only glimpsed (a swipe not carried through) counted as served, and
+        // the next opening skipped it. As on TikTok or Reels, only a post
+        // viewed is spent.
+        let back = returned.filter { $0.id != tapped.id }
+        returned = []
+        let hidden = excluded().union([tapped.id]).union(back.map(\.id))
+        let ahead = back + readAhead.filter { !hidden.contains($0.id) }
         readAhead = []
         served.insert(tapped.id)
+        served.formUnion(ahead.map(\.id))
+        opening = [tapped] + ahead
+        openedAt = now()
         guard !ahead.isEmpty else {
             prepare()
             return [tapped]
         }
-        served.formUnion(ahead.map(\.id))
         return [tapped] + ahead
     }
 
-    /// The feed's next posts after its window — the continuation. Nil once
-    /// the server has said the pool is spent; `[]` when nothing could be read
-    /// right now (a failed page, a run of excluded pages with a token left),
-    /// so the feed asks again rather than ending (#1496). The session's cursor
-    /// carries on; the next opening reads ahead a fresh one.
+    /// The feed's next posts after its window — the continuation: the pool
+    /// past the grid, and the grid's posts whenever a read finds none
+    /// (#1511). Nil once the server has said the pool is spent and the grid's
+    /// posts are served; `[]` when nothing could be read right now (a failed
+    /// page, a run of excluded pages with a token left), so the feed asks
+    /// again rather than ending (#1496). The session's cursor carries on; the
+    /// next opening reads ahead a fresh one.
     func next(after _: PostID) async -> [PostID]? {
         // A read ahead still on its way is the next window: waited for, never
         // read twice on the same cursor.
         if let pending = readAheadTask { await pending.value }
-        var posts = readAhead.filter { !served.contains($0.id) && !excluded().contains($0.id) }
+        let hidden = served.union(excluded())
+        var posts = readAhead.filter { !hidden.contains($0.id) }
         readAhead = []
         if posts.isEmpty { posts = await read(Self.windowSize, skipping: served) }
-        guard !posts.isEmpty else { return cursor == .end ? nil : [] }
-        served.formUnion(posts.map(\.id))
-        return posts.map(\.id)
+        guard posts.isEmpty else {
+            served.formUnion(posts.map(\.id))
+            opening += posts
+            return posts.map(\.id)
+        }
+        // ⚠️ THEN THE GRID'S POSTS, BEFORE THE END (#1511, the owner
+        // 2026-10-21): the grid pages the same pool, and once it held all of
+        // it nothing lay past it — a tile tapped at the grid's foot opened a
+        // feed of two posts. With nothing past the grid in hand, the opening
+        // carries on through the grid's posts it has not served, in the
+        // grid's order, once each.
+        //
+        // ⚠️ NOT ONLY ONCE THE POOL IS SPENT: a new pass starts at the pool's
+        // head, which is the grid's, and its reads came back empty — "nothing
+        // yet" — for several asks. The feed held the tapped post alone, and
+        // the first upward swipe closed it (#761; filmed by the owner). What
+        // lies past the grid still comes as the reads find it.
+        let tail = Array(grid().filter { !served.contains($0.id) }.prefix(Self.windowSize))
+        guard tail.isEmpty else {
+            served.formUnion(tail.map(\.id))
+            opening += tail
+            return tail.map(\.id)
+        }
+        return cursor == .end ? nil : []
     }
 
     /// The feed closed: the next opening carries on from where this one
@@ -124,10 +176,28 @@ final class ForYouOwnFeed {
     ///
     /// ⚠️ THE CURSOR CARRIES ON, it does not start over (the owner,
     /// 2026-10-17, filmed): starting over replayed the same posts after the
-    /// tapped one on every opening. What was served stays served, so the
-    /// next window is posts the viewer has not been shown yet.
+    /// tapped one on every opening. What was viewed stays served, so the
+    /// next window is posts the viewer has not been shown yet — starting with
+    /// those this opening handed out past the furthest one viewed (#1511).
     func end() {
+        returnUnviewed()
         prepare()
+    }
+
+    /// Puts back what this opening handed out past the furthest post the
+    /// viewer viewed. Without a history, everything handed out is spent.
+    private func returnUnviewed() {
+        defer {
+            opening = []
+            openedAt = nil
+        }
+        guard let viewedSince, let openedAt, !opening.isEmpty else { return }
+        let viewed = viewedSince(openedAt)
+        // The tapped post is the first page on screen, viewed or not.
+        let furthest = opening.lastIndex { viewed.contains($0.id) } ?? 0
+        let unviewed = Array(opening[(furthest + 1)...])
+        served.subtract(unviewed.map(\.id))
+        returned = unviewed
     }
 
     /// A new corpus (a refresh): the pool starts over.
@@ -137,6 +207,9 @@ final class ForYouOwnFeed {
         readAhead = []
         cursor = .start
         served = []
+        opening = []
+        openedAt = nil
+        returned = []
         prepare()
     }
 
