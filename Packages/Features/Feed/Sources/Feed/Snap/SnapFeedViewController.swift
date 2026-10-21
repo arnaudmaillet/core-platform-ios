@@ -1301,6 +1301,11 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+            print(String(format: "[page-play] %.3f screen willDisappear", CACurrentMediaTime()))
+        }
+        #endif
         // The side list's tiles stop with the screen (#1509).
         sideList?.listView.setPlaying(false)
         assertNoTabBarAfterAbandonedDismissal()
@@ -1362,6 +1367,11 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-media-log") {
+            print(String(format: "[page-play] %.3f screen didDisappear", CACurrentMediaTime()))
+        }
+        #endif
         settleToolbarAfterDisappearance()
         isOnScreen = false
         refreshVisibility()

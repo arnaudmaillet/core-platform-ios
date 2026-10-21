@@ -282,6 +282,13 @@ final class SnapMediaPageBarView: UIView {
         isHidden = !hasStrip
         guard hasStrip else { return }
         if segments.count != count {
+            // ⚠️ THE FILLS GO WITH THE SEGMENTS THEY LIVE IN (#1532). Kept by
+            // page index, a fill outlived its segment: a clip's page after a
+            // nine-photo carousel drew its played part into page 0's OLD,
+            // detached segment — an empty bar for the whole clip, whatever
+            // the player said. A new run mints its own fills.
+            fills.values.forEach { $0.removeFromSuperview() }
+            fills = [:]
             segments.forEach { $0.removeFromSuperview() }
             segments = (0..<count).map { _ in
                 let view = UIView()
@@ -1031,7 +1038,8 @@ final class SnapMediaPageBarView: UIView {
     }
 
     func debugFillFrame(_ index: Int) -> CGRect? {
-        guard let fill = fills[index], !fill.isHidden, fill.alpha > 0.01 else { return nil }
+        guard let fill = fills[index], !fill.isHidden, fill.alpha > 0.01,
+              fill.isDescendant(of: self) else { return nil }
         return fill.convert(fill.bounds, to: self)
     }
     #endif
