@@ -154,6 +154,10 @@ final class ForYouGridPage: UIView {
     private var nextPageAskedAtLength: CGFloat?
     /// A row's author was tapped — its disc, its name or its handle.
     var onAuthorTapped: ((GalleryPost) -> Void)?
+    /// A text post's top comments as already in hand (the post screen's
+    /// first page, prefetched): what its long press's preview shows under
+    /// the caption (#1498). Nil, or nothing cached: the caption alone.
+    var topComments: ((PostID) -> [CommentEntry]?)?
     /// What a row's "..." should offer. Asked at press time, per row.
     ///
     /// The page holds no opinion about the answer: which rows exist depends on
@@ -3743,19 +3747,24 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // 2026-10-18): only a press that starts on the media (a carousel's
         // page on screen) lifts it; the header, the caption, the action row
         // and a text-only card lift nothing. A grid tile IS its media.
-        if let row = collectionView.cellForItem(at: indexPath) as? PostGridListRowCell {
+        //
+        // ⚠️ A TEXT CARD LIFTS WHOLE (#1498, the owner 2026-10-20): it has no
+        // media, and its preview is the post screen in small — the band, the
+        // caption, the top comments.
+        let post = posts[index]
+        if let row = collectionView.cellForItem(at: indexPath) as? PostGridListRowCell, post.kind != .text {
             guard let media = row.mediaHeroRect,
                   media.contains(collectionView.convert(point, to: row)) else { return nil }
         }
-        let post = posts[index]
         let width = max(0, bounds.width - LeadRowMetrics.sideMargin * 2)
         let pipeline = imagePipeline
         let pool = videoPool
+        let comments = post.kind == .text ? topComments?(post.id) ?? [] : []
         return UIContextMenuConfiguration(
             identifier: post.id.rawValue as NSString,
             previewProvider: {
                 ForYouPostPreviewViewController(
-                    post: post, imagePipeline: pipeline, width: width, videoPlayback: pool
+                    post: post, imagePipeline: pipeline, width: width, videoPlayback: pool, comments: comments
                 )
             },
             actionProvider: { [weak self] _ in self?.tileMenu(for: post, at: indexPath) }
@@ -3828,7 +3837,9 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         guard let indexPath = collectionView.indexPathForItem(at: point),
               let row = collectionView.cellForItem(at: indexPath) as? PostGridListRowCell else { return false }
         let local = collectionView.convert(point, to: row)
-        if let media = row.mediaHeroRect, media.contains(local) { return false }
+        // A text card has no media, and lifts whole (#1498).
+        guard let media = row.mediaHeroRect else { return false }
+        if media.contains(local) { return false }
         var view = row.hitTest(local, with: nil)
         while let current = view, current !== row {
             if current is UIControl { return false }
@@ -3850,7 +3861,11 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // targeted view while the lift is up, and the card's header, text
         // and actions must stay where they are.
         if let row = cell as? PostGridListRowCell {
-            guard let media = row.mediaPreviewView else { return nil }
+            // A text card lifts whole (#1498).
+            guard let media = row.mediaPreviewView else {
+                parameters.visiblePath = UIBezierPath(roundedRect: card.bounds, cornerRadius: PostGridListRowCell.cardCornerRadius)
+                return UITargetedPreview(view: card, parameters: parameters)
+            }
             parameters.visiblePath = UIBezierPath(
                 roundedRect: media.bounds, cornerRadius: PostGridListRowCell.mediaCornerRadius
             )

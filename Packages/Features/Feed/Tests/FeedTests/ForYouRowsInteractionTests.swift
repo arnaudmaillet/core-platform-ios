@@ -312,11 +312,78 @@ struct PreviewAuthorBandTests {
         #expect(abs(preview.debugBand.frame.maxX - (preview.view.bounds.width - ForYouPostPreviewViewController.footInset)) < 0.5)
     }
 
-    /// A text post keeps the card's own overlay — its preview is the next slice.
-    @Test func aTextPostKeepsTheCardsOverlay() {
+    /// A text post's preview is its own (`TextCardPreviewTests`): no media
+    /// foot, no card overlay.
+    @Test func aTextPostHasItsOwnPreview() {
         let text = GalleryPost(id: PostID("t"), kind: .text, isRepost: false, thumbnailURL: nil, caption: "Words", publishedAtMS: 1)
         let preview = laidOut(text)
-        #expect(preview.view.subviews.contains { $0 is PostCardCaptionOverlay })
+        #expect(preview.debugTextCard != nil)
+        #expect(!preview.view.subviews.contains { $0 is PostCardCaptionOverlay })
         #expect(preview.debugBand.superview == nil)
+    }
+}
+
+/// A text card's long press (#1498, the owner 2026-10-20): the author band,
+/// the caption, then the top comments that fit, in the post screen's rows.
+@MainActor
+struct TextCardPreviewTests {
+    private static let text = GalleryPost(
+        id: PostID("t"), kind: .text, isRepost: false, thumbnailURL: nil,
+        caption: "Third coffee. Still deciding whether the rewrite was a good idea.",
+        publishedAtMS: Int64(Date().timeIntervalSince1970 * 1000),
+        authorID: ProfileID("yuki"), authorName: "Yuki Shirakawa", authorHandle: "yuki.snow", reactionCount: 234
+    )
+
+    private static func comment(_ index: Int, reply: Bool = false) -> CommentEntry {
+        CommentEntry(
+            id: "c\(index)", authorID: ProfileID("a\(index)"), authorName: "Kenji \(index)", authorHandle: "k\(index)",
+            body: "The second one \(index)", createdAt: Date().addingTimeInterval(-600),
+            parentID: reply ? "c0" : nil
+        )
+    }
+
+    private func preview(comments: [CommentEntry]) -> ForYouPostPreviewViewController {
+        let preview = ForYouPostPreviewViewController(
+            post: Self.text, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), width: 360, comments: comments
+        )
+        preview.loadViewIfNeeded()
+        preview.view.frame = CGRect(origin: .zero, size: preview.preferredContentSize)
+        return preview
+    }
+
+    /// No comments: the band and the caption alone, the lift sized to them.
+    @Test func withoutCommentsTheCaptionAlone() throws {
+        let preview = preview(comments: [])
+        let card = try #require(preview.debugTextCard)
+        #expect(card.rows.isEmpty)
+        #expect(card.band.superview === preview.view && card.caption.superview === preview.view)
+        #expect(card.rule.superview == nil)
+        #expect(card.caption.frame.minY >= card.band.frame.maxY, "the caption is not under the band")
+        #expect(preview.preferredContentSize.height < 360 * TextCardPreview.maxHeightShare, "the lift did not fit its words")
+        #expect(card.likes.postLikeCount == 234 && card.likes.frame.maxX <= 360 - TextCardPreview.inset + 0.5)
+    }
+
+    /// With comments: top-level ones, in order, as many as fit — never one
+    /// cut in half — under the caption; replies are not shown.
+    @Test func theTopCommentsThatFitAndNeverHalfOfOne() throws {
+        let many = (0..<30).map { Self.comment($0) } + [Self.comment(99, reply: true)]
+        let preview = preview(comments: many)
+        let card = try #require(preview.debugTextCard)
+        #expect(!card.rows.isEmpty && card.rows.count < 30, "\(card.rows.count) rows: not as many as fit")
+        let maxHeight = (360 * TextCardPreview.maxHeightShare).rounded()
+        #expect(preview.preferredContentSize.height <= maxHeight)
+        for row in card.rows {
+            #expect(row.frame.maxY <= preview.preferredContentSize.height, "a comment cut in half: \(row.frame)")
+            #expect(row.frame.minY >= card.caption.frame.maxY, "a comment over the caption")
+        }
+        #expect(zip(card.rows, card.rows.dropFirst()).allSatisfy { $0.frame.maxY <= $1.frame.minY + 0.5 }, "rows overlap")
+        #expect(card.rule.superview === preview.view)
+    }
+
+    /// Two comments that fit: both shown, the lift sized to them.
+    @Test func aFewCommentsAllShown() throws {
+        let preview = preview(comments: [Self.comment(1), Self.comment(2)])
+        let card = try #require(preview.debugTextCard)
+        #expect(card.rows.count == 2)
     }
 }
