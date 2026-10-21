@@ -3,6 +3,7 @@ import MediaCore
 import CoreModels
 import CoreNavigation
 import DesignSystem
+import EmoteKit
 import EntityStore
 import FeedInterface
 import MediaPlayback
@@ -422,6 +423,8 @@ final class SnapFeedViewController: UIViewController {
     /// never aborted (the pager lock can only land once the page has
     /// settled — disabling it mid-drag would freeze the user's scroll).
     private var commentsEngagementIsResting = false
+    /// The next captions' emotes, warmed at each settle (#1504).
+    private let emotePrefetch = EmotePrefetch()
     /// The side list (#1425): nil on a screen that opted out.
     private(set) var sideList: SnapSideListController?
     /// The screen's horizontal swipe chain (#1525) — see `swipeStage`.
@@ -4457,6 +4460,7 @@ final class SnapFeedViewController: UIViewController {
         // again (`warmSettledWindow`).
         if !(isOnScreen && isForeground) {
             videoLookahead?.stop()
+            emotePrefetch.cancelAll()
             // The stay's pictures too: what only this feed wanted is cancelled.
             imageLookahead?.revoke()
             imageLookahead = nil
@@ -5565,6 +5569,7 @@ final class SnapFeedViewController: UIViewController {
         if orderedIDs.indices.contains(active + 1) {
             prewarmRestingComments(for: orderedIDs[active + 1])
         }
+        warmCaptionEmotes(around: active)
         #if DEBUG
         // What the settle actually warmed. The window itself is pure and tested
         // on its own; this is how a test reaches the WIRING — that the settle
@@ -5576,6 +5581,20 @@ final class SnapFeedViewController: UIViewController {
     #if DEBUG
     private(set) var debugLastWarmedWindow: [Int] = []
     #endif
+
+    /// ⚠️ THE NEXT CAPTIONS' EMOTES, BEFORE THEY ARRIVE (#1504): the two pages
+    /// ahead of the settled one, warmed at the bucket the caption on screen
+    /// draws at, so a caption swiped in installs its emotes at once — no
+    /// skeleton. What leaves the window is let go.
+    private func warmCaptionEmotes(around active: Int) {
+        guard let side = (lifecycleCell(at: active) as? SnapFeedCell)?.captionEmotePixelSide else { return }
+        let ahead = (active + 1)...(active + 2)
+        let captions = ahead.compactMap { index -> String? in
+            guard orderedIDs.indices.contains(index) else { return nil }
+            return modelsByID[orderedIDs[index]]?.caption
+        }
+        emotePrefetch.warm(captions, pixelSide: side)
+    }
 
 }
 

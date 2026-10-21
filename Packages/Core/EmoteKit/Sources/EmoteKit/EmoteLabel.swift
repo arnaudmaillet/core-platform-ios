@@ -47,6 +47,18 @@ import UIKit
 open class EmoteLabel: UILabel {
     /// The engine art comes from. The app's shared one unless a test says
     /// otherwise.
+    /// The bucket this label's emotes last used — what a prefetch of the
+    /// next text in the same place asks for (`EmotePrefetch`, #1504).
+    private var lastEmotePixelSide: Int?
+
+    /// The bucket an emote in this label is drawn at: the one its emotes last
+    /// used, else the label's font's (an emoji's ink is about 1.2 em).
+    public var emotePixelSide: Int {
+        if let lastEmotePixelSide { return lastEmotePixelSide }
+        let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 3
+        return EmoteEngine.pixelSide(forPoints: font.pointSize * 1.2, scale: scale)
+    }
+
     public var engine: EmoteEngine = .shared {
         didSet { resetPlayers() }
     }
@@ -421,6 +433,7 @@ open class EmoteLabel: UILabel {
             // system glyph (#1504).
             let square = placement.square.offsetBy(dx: origin.x, dy: origin.y)
             let side = EmoteEngine.pixelSide(forPoints: square.width, scale: scale)
+            lastEmotePixelSide = side
             live.insert(index)
             let player: EmotePlayer
             if let existing = players[index], existing.matches(emote: emote, side: side, motion: motion) {

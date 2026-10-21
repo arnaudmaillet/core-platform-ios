@@ -2,8 +2,10 @@ import MediaCore
 import UIKit
 
 /// One emote in the panel, the strip, the suggestion row or the feed's
-/// shortcut rail: its animated art when there is some — a skeleton while it
-/// is on its way (`EmoteSkeleton`, #987) — and its system glyph otherwise.
+/// shortcut rail: its art — a skeleton while it is on its way
+/// (`EmoteSkeleton`, #987), a still frame of its own art when animations are
+/// off, a still skeleton if none comes. ⚠️ NEVER THE SYSTEM GLYPH (#1504,
+/// the owner 2026-10-21: one contract for every animated emote).
 ///
 /// ## What is dressed, and what it costs
 ///
@@ -26,8 +28,9 @@ import UIKit
 /// Only a PLAYING tile holds one of `EmoteEngine.maxPlayingTiles` slots: a
 /// still tile is a posed layer with no animation on it, which costs the
 /// render server nothing. A tile denied a slot stays still until its next
-/// start. Under Reduce Motion an emoji stays its glyph and a house emote
-/// shows its first frame.
+/// start. Under Reduce Motion (or Power Saving, Low Power Mode, Animate
+/// Emojis off) every emote, an emoji included, shows a still frame of its
+/// own art (`EmoteEngine.Motion.still`).
 ///
 /// ## Nothing behind the emote
 ///
@@ -42,7 +45,6 @@ public final class EmoteTileView: UIView {
     /// caption serves the picker too, and the reverse.
     static let pixelSide = 64
 
-    private let glyphLabel = UILabel()
     let player = AnimatedIconView(frame: .zero)
     private var request: EmoteRequest?
     private var holdsSlot = false
@@ -78,10 +80,14 @@ public final class EmoteTileView: UIView {
         super.init(frame: frame)
         isUserInteractionEnabled = false
         backgroundColor = .clear
-        glyphLabel.textAlignment = .center
-        glyphLabel.adjustsFontSizeToFitWidth = false
-        glyphLabel.backgroundColor = .clear
-        addSubview(glyphLabel)
+        // A tile its owner does not re-dress (the strip, the feed's rail)
+        // follows the policy on its own; the keyboard's re-dress theirs
+        // (`playsAsContent`). Dropped with the tile.
+        for name in EmoteMotion.policyNotifications {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(policyMayHaveChanged), name: name, object: nil
+            )
+        }
         player.isHidden = true
         addSubview(player)
     }
@@ -92,12 +98,6 @@ public final class EmoteTileView: UIView {
     override public func layoutSubviews() {
         super.layoutSubviews()
         let box = square
-        let side = box.width
-        glyphLabel.frame = box
-        // Apple Color Emoji draws ~1.2 em tall: a font of 0.8 of the side
-        // fills the square the way the animation does.
-        let size = (side * 0.8).rounded()
-        if glyphLabel.font?.pointSize != size { glyphLabel.font = .systemFont(ofSize: size) }
         player.frame = box
         skeleton.frame = box
     }
@@ -116,27 +116,26 @@ public final class EmoteTileView: UIView {
         self.engine = engine
         self.prefersAnimation = prefersAnimation
         isPlaying = playing
-        glyphLabel.text = emote.glyph
-        glyphLabel.isHidden = false
         accessibilityLabel = emote.name
 
         let policy = playsAsContent ? EmoteMotion.keyboardPolicy : EmoteMotion.policy
+        dressedPolicy = policy
         // The player follows the same answer: through idle calm either way
         // (#1072), and the keyboard's own way under Low Power (#926).
         player.playbackPolicy = policy
+        // ⚠️ STILL IS THE EMOTE'S OWN ART ON ONE FRAME (#1504), an emoji's
+        // too — never its system glyph, as in a label.
         let motion: EmoteEngine.Motion = policy == .still ? .still : .loop
-        if motion == .still && emote.isUnicodeEmoji { return }
         if let art = engine.cachedArt(for: emote, pixelSide: Self.pixelSide, motion: motion) {
             present(art, motion: motion)
             return
         }
-        guard prefersAnimation || !emote.isUnicodeEmoji else { return }
-        // ⚠️ NO GLYPH BEHIND AN ANIMATED EMOTE ON ITS WAY (#731): the slot
-        // holds a skeleton (#987) — no system glyph standing in, which would
-        // flash between the two — and the art bounces in over it
-        // (`EmoteSkeleton.reveal`, #1071). The glyph comes back only if no
-        // art does.
-        glyphLabel.isHidden = true
+        // ⚠️ NO GLYPH BEHIND AN EMOTE ON ITS WAY (#731, #1504): the slot
+        // holds a skeleton (#987) and the art bounces in over it
+        // (`EmoteSkeleton.reveal`, #1071). A tile its owner does not want
+        // moving (`prefersAnimation` off: the strip's tail) still gets its
+        // art — the request simply waits `EmoteEngine.bakeDelay`, so a tile
+        // flicked past costs nothing.
         var answered = false
         request = engine.requestArt(for: emote, pixelSide: Self.pixelSide, motion: motion) { [weak self] art in
             answered = true
@@ -145,8 +144,9 @@ public final class EmoteTileView: UIView {
             if let art {
                 self.present(art, motion: motion)
             } else {
-                self.skeleton.hide(fading: true)
-                self.glyphLabel.isHidden = false
+                // No art to be had: a still skeleton — never the glyph (#1504).
+                self.skeleton.frame = self.square
+                self.skeleton.showFailed(in: self, below: self.player, engine: engine)
             }
         }
         guard !answered else { return }
@@ -161,8 +161,22 @@ public final class EmoteTileView: UIView {
     /// reads, rather than catching the half-second bounce in flight. Internal
     /// for tests.
     var bounceInCount: Int { skeleton.revealCount }
-    /// Whether the system glyph shows. Internal for tests.
-    var showsGlyph: Bool { !glyphLabel.isHidden }
+    /// The policy the tile was last dressed under.
+    private var dressedPolicy: AnimatedIconView.MotionPolicy?
+
+    /// Reduce Motion, Power Saving, Low Power or Animate Emojis changed: a
+    /// tile on screen whose owner does not re-dress it does so itself.
+    /// Internal for tests, which call it rather than post a process-wide
+    /// notification every live emote of a parallel suite would hear.
+    @objc func policyMayHaveChanged() {
+        guard !playsAsContent, window != nil, let emote, let engine,
+              EmoteMotion.policy != dressedPolicy else { return }
+        configure(emote, engine: engine, prefersAnimation: prefersAnimation, playing: isPlaying)
+    }
+
+    /// Whether the square holds a failed load's still skeleton (#1504).
+    /// Internal for tests.
+    var showsFailedSkeleton: Bool { skeleton.isShowing && skeleton.isFailed }
     /// Whether a skeleton holds the square (#987). Internal for tests.
     var showsSkeleton: Bool { skeleton.isShowing }
 
@@ -171,12 +185,14 @@ public final class EmoteTileView: UIView {
     private func present(_ art: AnimatedIconArt, motion: EmoteEngine.Motion) {
         player.setArt(art, phase: posterFrame(of: art), paused: true)
         player.isHidden = false
-        glyphLabel.isHidden = true
         isShowingArt = true
         // Over a skeleton, the arrival every emote place plays (#1071): the
         // bounce this tile introduced (#731), now shared.
         skeleton.reveal(player)
-        artMoves = motion == .loop && art.frameCount > 1
+        // A tile its owner does not want moving (`prefersAnimation` off: the
+        // strip's tail) wears its art on its poster frame — never the glyph
+        // (#1504), and never a playing slot.
+        artMoves = motion == .loop && art.frameCount > 1 && (prefersAnimation || !(emote?.isUnicodeEmoji ?? true))
         if isPlaying { play() }
     }
 
@@ -263,7 +279,6 @@ public final class EmoteTileView: UIView {
         skeleton.hide()
         player.setArt(nil)
         player.isHidden = true
-        glyphLabel.isHidden = false
         isShowingArt = false
         artMoves = false
         releaseSlot()

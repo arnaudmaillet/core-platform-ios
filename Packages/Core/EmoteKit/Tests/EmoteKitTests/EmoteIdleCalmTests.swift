@@ -67,8 +67,9 @@ struct EmoteIdleCalmTests {
     @Test func idleCalmDoesNotStillEmotes() {
         #expect(EmoteMotion.policy(for: Conditions()) == .full)
         #expect(EmoteMotion.policy(for: Conditions(idleCalm: true)) == .full)
-        // Low Power keeps its half rate, resting or not.
-        #expect(EmoteMotion.policy(for: Conditions(lowPower: true, idleCalm: true)) == .reduced)
+        // Low Power stills every emote, resting or not (#1504: one contract,
+        // the keyboard's).
+        #expect(EmoteMotion.policy(for: Conditions(lowPower: true, idleCalm: true)) == .still)
     }
 
     enum Gate: String, CaseIterable, CustomTestStringConvertible {

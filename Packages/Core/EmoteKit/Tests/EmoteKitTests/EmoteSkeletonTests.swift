@@ -164,19 +164,18 @@ struct EmoteSkeletonTests {
         defer { window.isHidden = true }
         tile.configure(try emote("noto:1f525"), engine: engine, prefersAnimation: true)
         #expect(tile.showsSkeleton, "no skeleton for art on its way")
-        #expect(!tile.showsGlyph)
         let square = tile.skeleton.frame
         #expect(square.width == 44 && square.height == 44, "the skeleton is not the tile's square: \(square)")
 
         gate.open()
         try #require(await settle { tile.isShowingArt }, "the art never came")
         #expect(!tile.showsSkeleton)
-        #expect(!tile.showsGlyph, "a glyph showed after the art")
         #expect(tile.player.frame == square, "the art moved: \(tile.player.frame) vs \(square)")
         #expect(await settle { !holdsABone(tile) }, "a bone outlived its art")
     }
 
-    @Test func aTileFallsBackToTheGlyphWhenTheLoadFails() async throws {
+    /// A failed load holds a still skeleton — never the glyph (#1504).
+    @Test func aTileHoldsAStillSkeletonWhenTheLoadFails() async throws {
         let gate = ArtGate()
         defer { gate.open() }
         let engine = gatedEngine(gate, answers: false)
@@ -185,8 +184,7 @@ struct EmoteSkeletonTests {
         tile.configure(try emote("noto:1f525"), engine: engine, prefersAnimation: true)
         try #require(tile.showsSkeleton)
         gate.open()
-        #expect(await settle { tile.showsGlyph }, "no glyph after a failed load")
-        #expect(!tile.showsSkeleton)
+        #expect(await settle { tile.showsFailedSkeleton }, "no still skeleton after a failed load")
         #expect(!tile.isShowingArt)
     }
 
@@ -455,7 +453,6 @@ struct EmoteSkeletonTests {
         defer { window.isHidden = true }
         tile.configure(try emote("noto:1f602"), engine: engine, prefersAnimation: true)
         #expect(!tile.showsSkeleton, "a seeded emote's skeleton came before its grace")
-        #expect(!tile.showsGlyph, "a glyph while a seed is read")
         #expect(await settle { tile.showsSkeleton }, "a late read never got its skeleton")
         gate.open()
         #expect(await settle { tile.isShowingArt })

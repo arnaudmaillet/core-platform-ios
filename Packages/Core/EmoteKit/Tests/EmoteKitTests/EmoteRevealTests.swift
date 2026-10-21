@@ -115,7 +115,7 @@ struct EmoteRevealTests {
             tile.configure(emote, engine: engine, prefersAnimation: true)
             return Place(
                 skeleton: tile.skeleton, art: { tile.player }, host: tile, window: window,
-                showsArt: { tile.isShowingArt }, showsFailure: { tile.showsGlyph },
+                showsArt: { tile.isShowingArt }, showsFailure: { tile.showsFailedSkeleton },
                 giveUp: { tile.reset() }
             )
         }
