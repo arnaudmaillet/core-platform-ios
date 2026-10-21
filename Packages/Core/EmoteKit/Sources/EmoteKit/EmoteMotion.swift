@@ -4,8 +4,15 @@ import MediaCore
 import UIKit
 
 /// How an emote may move right now (`policy`): still under Reduce Motion
-/// (iOS or the app's), Animate Emojis off, Power Saving and overheating; at
-/// half rate under Low Power Mode; at its own rate otherwise.
+/// (iOS or the app's), Animate Emojis off, Power Saving, Low Power Mode and
+/// overheating; at its own rate otherwise.
+///
+/// ⚠️ **ONE CONTRACT FOR EVERY ANIMATED EMOTE** (#1504, the owner
+/// 2026-10-21): a skeleton while its art is on its way, the animation once
+/// it is there, a still frame of its OWN art when animations are off or
+/// power is saved (iOS Low Power Mode included, as the keyboard already
+/// did), a still skeleton if no art comes — never the system glyph, in a
+/// label, the composer or a tile.
 ///
 /// ⚠️ **EMOTES IN TEXT PLAY THROUGH IDLE CALM** (#1072, the owner's
 /// decision of 2026-10-13). Idle calm (#580/#650) rests the app's decoration
@@ -32,8 +39,13 @@ enum EmoteMotion {
     /// The policy for `conditions`. Idle calm is read into them only so a
     /// test can say it does NOT count.
     static func policy(for conditions: Conditions) -> AnimatedIconView.MotionPolicy {
-        if conditions.reducesMotion || !conditions.animatesEmotes || conditions.overheated { return .still }
-        return conditions.lowPower ? .reduced : .full
+        // Low Power is still, not `.reduced` (#1504): the same answer as the
+        // keyboard's, so an emote never moves in one place and rests in the
+        // next.
+        if conditions.reducesMotion || conditions.lowPower || !conditions.animatesEmotes || conditions.overheated {
+            return .still
+        }
+        return .full
     }
 
     /// Where every surface but the keyboard reads its conditions. Swappable

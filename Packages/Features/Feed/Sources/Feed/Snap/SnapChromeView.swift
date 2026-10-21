@@ -34,6 +34,10 @@ final class SnapChromeView: UIView {
     /// place, at the caption's own size (`composedCaption` marks them).
     private let captionLabel = EmoteLabel()
 
+    /// The bucket the caption's emotes are drawn at — what the screen warms
+    /// the next captions at (#1504).
+    var captionEmotePixelSide: Int { captionLabel.emotePixelSide }
+
     /// The danmaku band, floating over the media directly above the caption.
     /// Content reaches it only through `updateCommentStreams` — never through
     /// `configure` — so the flight replica renders an empty, invisible band

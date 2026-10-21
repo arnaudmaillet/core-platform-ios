@@ -29,22 +29,20 @@ struct EmoteTileArrivalTests {
         let (tile, window) = hostedTile()
         defer { window.isHidden = true }
         tile.configure(lol, engine: engine, prefersAnimation: true)
-        #expect(!tile.showsGlyph, "a glyph stands in for the art on its way")
         #expect(!tile.isShowingArt)
         // A bake on a starved runner can take a while: many looks, no clock.
         #expect(await settle(looks: 8_000) { tile.isShowingArt }, "the art never came")
         #expect(tile.bounceInCount == 1, "the art landed without its bounce")
-        #expect(!tile.showsGlyph)
     }
 
-    /// No art after all: the glyph is all there is, so it shows.
-    @Test func aTileWithNoArtFallsBackToItsGlyph() async throws {
+    /// No art after all: a still skeleton — never the glyph (#1504).
+    @Test func aTileWithNoArtHoldsAStillSkeleton() async throws {
         let engine = slowEngine(false)
         let lol = try #require(engine.catalog.emote(id: "noto:1f525"))
         let (tile, window) = hostedTile()
         defer { window.isHidden = true }
         tile.configure(lol, engine: engine, prefersAnimation: true)
-        #expect(await settle(looks: 8_000) { tile.showsGlyph }, "an emote with no art showed nothing")
+        #expect(await settle(looks: 8_000) { tile.showsFailedSkeleton }, "an emote with no art showed no still skeleton")
         #expect(!tile.isShowingArt)
     }
 

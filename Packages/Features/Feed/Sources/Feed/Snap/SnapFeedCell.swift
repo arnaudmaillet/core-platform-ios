@@ -48,6 +48,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private let mediaBackdrop = SnapMediaBackdropView()
     private let chrome = SnapChromeView()
 
+    /// The bucket the caption's emotes are drawn at (#1504).
+    var captionEmotePixelSide: Int { chrome.captionEmotePixelSide }
+
     /// A large centred play glyph shown while the active video is user-paused.
 
     private var representedID: PostID?

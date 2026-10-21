@@ -60,6 +60,14 @@ struct EmoteKeyboardMotionTests {
         for emote in engine.catalog.all {
             engine.insert(art, for: emote, pixelSide: EmoteTileView.pixelSide, motion: .loop)
         }
+        // A still emote is its own art on one frame (#1504): the hosted
+        // tile's, and no other, so the loops stay resident.
+        if let fire = engine.catalog.emote(id: "noto:1f525") {
+            engine.insert(
+                EmoteStripTests.sheetArt(frames: 1, step: 0.1), for: fire,
+                pixelSide: EmoteTileView.pixelSide, motion: .still
+            )
+        }
         return engine
     }
 
@@ -103,8 +111,8 @@ struct EmoteKeyboardMotionTests {
         #expect(!stilled.isAnimating, "witness: Reduce Motion left a strip tile playing")
     }
 
-    /// Low Power Mode stills a keyboard tile — while the app's decoration
-    /// would still play (at its halved rate).
+    /// Low Power Mode stills a keyboard tile — and every other emote now
+    /// (#1504), while the app's decoration plays at its halved rate.
     @Test func lowPowerStillsAKeyboardTile() throws {
         EmoteMotion.keyboardConditions = { Conditions(lowPower: true) }
         defer { EmoteMotion.keyboardConditions = { .current } }
@@ -120,7 +128,10 @@ struct EmoteKeyboardMotionTests {
         let (tile, window) = try hostedTile(warmEngine(), asContent: true)
         defer { window.isHidden = true }
         #expect(!tile.isAnimating)
-        #expect(tile.showsGlyph, "an emoji's still is its system glyph")
+        // ⚠️ AN EMOJI'S STILL IS ITS OWN ART ON ONE FRAME, never the glyph
+        // (#1504, the owner 2026-10-21).
+        #expect(tile.isShowingArt, "an emoji's still is not its own art")
+        #expect(tile.player.playbackPolicy == .still)
     }
 
     // MARK: - The panel
@@ -233,6 +244,34 @@ struct EmoteKeyboardMotionTests {
         let tiles = strip.displayedTiles
         try #require(tiles.count == 4)
         #expect(tiles.allSatisfy { !$0.isAnimating }, "\(condition) left the :query strip playing")
+    }
+
+    /// ⚠️ ONE CONTRACT (#1504): Low Power stills a label's or a rail's emote
+    /// as it stills the keyboard's.
+    @Test func lowPowerStillsEveryEmote() {
+        #expect(EmoteMotion.policy(for: Conditions(lowPower: true)) == .still)
+        #expect(EmoteMotion.keyboardPolicy(for: Conditions(lowPower: true)) == .still)
+    }
+
+    /// A tile no owner re-dresses (the feed's rail, the strip) follows a
+    /// policy change on its own (#1504): Reduce Motion on stills it in place.
+    @Test func aTileNoOwnerRedressesFollowsThePolicyOnItsOwn() throws {
+        var conditions = Conditions()
+        EmoteMotion.conditions = { conditions }
+        defer { EmoteMotion.conditions = { .current } }
+        // Held here: a tile keeps its engine weakly (the app's is shared).
+        let engine = warmEngine()
+        let (tile, window) = try hostedTile(engine, asContent: false)
+        defer { window.isHidden = true }
+        #expect(tile.player.playbackPolicy == .full, "guard: dressed playing")
+
+        conditions.reducesMotion = true
+        // What the tile's observer runs: called, not posted — a process-wide
+        // post re-dressed the live emotes of suites running beside this one.
+        tile.policyMayHaveChanged()
+        #expect(tile.player.playbackPolicy == .still, "the tile kept playing after the policy changed")
+        #expect(!tile.isAnimating)
+        withExtendedLifetime(engine) {}
     }
 
     /// A change while the strip shows re-dresses its tiles in place: Low
