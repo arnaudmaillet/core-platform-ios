@@ -104,6 +104,10 @@ final class ForYouPostListViewController: UIViewController {
     var authorMenuActions: ((ForYouGridPage.AuthorMenuContext) -> [PostCardMenuAction])? {
         didSet { page.authorMenuActions = authorMenuActions }
     }
+    /// Whether an author is the viewer — see `ForYouGridPage.isViewer`.
+    var isViewer: ((ProfileID) -> Bool)? {
+        didSet { page.isViewer = isViewer }
+    }
     /// What is on screen and worth warming — see `ForYouGridPage.onWarmRequested`.
     var onWarmRequested: (([GalleryPost]) -> Void)? {
         didSet { page.onWarmRequested = onWarmRequested }

@@ -36,6 +36,24 @@ struct ForYouUnfollowTests {
         return (model, { resets })
     }
 
+    /// "Hide This Post" (#1498): the post leaves the surface, and its Undo
+    /// puts it back where it was.
+    @Test func aHiddenPostLeavesAndComesBackInPlace() async {
+        let (model, resets) = await loaded([
+            post("a1", by: "sofia"), post("b1", by: "marcus"), post("a2", by: "sofia")
+        ])
+        let shown = model.followingPosts.map(\.id.rawValue)
+        let before = resets()
+        model.hidePost(PostID("b1"))
+        #expect(model.followingPosts.map(\.id.rawValue) == shown.filter { $0 != "b1" })
+        #expect(model.isHidden(PostID("b1")))
+        #expect(resets() > before, "the pages were not told the corpus changed")
+
+        model.unhidePost(PostID("b1"))
+        #expect(model.followingPosts.map(\.id.rawValue) == shown, "not back in its place")
+        #expect(!model.isHidden(PostID("b1")))
+    }
+
     @Test func theAuthorsPostsLeaveTheSurface() async {
         let (model, _) = await loaded([
             post("a1", by: "sofia"), post("b1", by: "marcus"), post("a2", by: "sofia")

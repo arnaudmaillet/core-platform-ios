@@ -560,14 +560,14 @@ public final class ForYouViewModel {
     /// (BACKEND_GAPS §14), and the timeline is the whole population this
     /// screen sees; followed and not.
     public var discoverPosts: [GalleryPost] {
-        hasDiscovery ? discovery ?? [] : corpus ?? []
+        (hasDiscovery ? discovery ?? [] : corpus ?? []).filter { !hiddenIDs.contains($0.id) }
     }
 
     /// The loaded posts of one circle, in display order —
     /// from the FOLLOWING timeline, never from Discover's pool: a followed
     /// author's posts the discovery pool happened to rank are not the rows.
     private func posts(in circle: Circle) -> [GalleryPost] {
-        (corpus ?? []).filter { self.circle(of: $0.authorID) == circle }
+        (corpus ?? []).filter { self.circle(of: $0.authorID) == circle && !hiddenIDs.contains($0.id) }
     }
 
     /// FOLLOWING's posts: the people the viewer follows who are not friends.
@@ -842,6 +842,33 @@ public final class ForYouViewModel {
     public func post(for id: PostID) -> GalleryPost? {
         discovery?.first { $0.id == id } ?? corpus?.first { $0.id == id }
     }
+
+    // MARK: - Hide This Post (#1498)
+
+    /// Posts hidden this session ("Hide This Post"). Filtered where the
+    /// surfaces read their posts, so a page that lands later (a refresh, the
+    /// network after the cache) cannot bring one back.
+    private var hiddenIDs: Set<PostID> = []
+
+    /// Takes `id` off every surface of this screen for the session — the
+    /// menu's "Hide This Post", undone by `unhidePost`. A re-derivation, so
+    /// the pages are told first (`onCorpusReset`); the post comes back in its
+    /// own place on Undo, since nothing was removed from the corpus.
+    public func hidePost(_ id: PostID) {
+        guard hiddenIDs.insert(id).inserted else { return }
+        onCorpusReset?()
+        publish()
+    }
+
+    /// The hide's Undo.
+    public func unhidePost(_ id: PostID) {
+        guard hiddenIDs.remove(id) != nil else { return }
+        onCorpusReset?()
+        publish()
+    }
+
+    /// Whether `id` is hidden this session. Tests.
+    func isHidden(_ id: PostID) -> Bool { hiddenIDs.contains(id) }
 
     // MARK: - Publishing
 
