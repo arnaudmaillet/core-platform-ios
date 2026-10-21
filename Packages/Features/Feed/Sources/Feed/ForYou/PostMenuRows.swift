@@ -85,13 +85,13 @@ struct PostMenuRows {
     /// The system share sheet with the post's words and its picture's link —
     /// what the post screen shares (`SnapFeedViewController.presentShareSheet`).
     static func presentShareSheet(for post: GalleryPost, from anchor: UIView) {
-        guard let screen = screen(of: anchor) else { return }
+        guard let host = screen(of: anchor) else { return }
         var items: [Any] = []
         if !post.caption.isEmpty { items.append(post.caption) }
         if let url = post.videoURL ?? post.thumbnailURL { items.append(url) }
         guard !items.isEmpty else { return }
         let sheet = UIActivityViewController(activityItems: items, applicationActivities: nil)
         sheet.popoverPresentationController?.sourceView = anchor
-        screen.present(sheet, animated: true)
+        host.present(sheet, animated: true)
     }
 }
