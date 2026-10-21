@@ -38,8 +38,9 @@ struct EmoteRevealTests {
         let window: UIWindow
         /// Whether the art (not the glyph) holds the square.
         let showsArt: () -> Bool
-        /// Whether the system glyph holds the square.
-        let showsGlyph: () -> Bool
+        /// Whether the square shows what a failed load leaves: a still
+        /// skeleton in a label or the composer (#1504), the glyph in a tile.
+        let showsFailure: () -> Bool
         /// Gives the place up, as a reuse or an edit does.
         let giveUp: () -> Void
     }
@@ -80,7 +81,7 @@ struct EmoteRevealTests {
             return Place(
                 skeleton: skeleton, art: { player }, host: label, window: window,
                 showsArt: { label.showingEmoteCount + label.posterEmoteCount == 1 },
-                showsGlyph: { label.coveredMarkIndices.isEmpty },
+                showsFailure: { label.skeletons.first?.isFailed == true },
                 giveUp: {
                     label.setEmoteText("only words now")
                     label.layoutIfNeeded()
@@ -98,7 +99,7 @@ struct EmoteRevealTests {
             let view = try #require(field.emoteViews.first)
             return Place(
                 skeleton: view.skeleton, art: { view.artView }, host: view, window: window,
-                showsArt: { view.isShowingArt || view.showsPosterArt }, showsGlyph: { view.showsStill },
+                showsArt: { view.isShowingArt || view.showsPosterArt }, showsFailure: { view.skeleton.isFailed },
                 giveUp: {
                     field.plainText = ""
                     field.layoutIfNeeded()
@@ -114,7 +115,7 @@ struct EmoteRevealTests {
             tile.configure(emote, engine: engine, prefersAnimation: true)
             return Place(
                 skeleton: tile.skeleton, art: { tile.player }, host: tile, window: window,
-                showsArt: { tile.isShowingArt }, showsGlyph: { tile.showsGlyph },
+                showsArt: { tile.isShowingArt }, showsFailure: { tile.showsGlyph },
                 giveUp: { tile.reset() }
             )
         }
@@ -331,8 +332,8 @@ struct EmoteRevealTests {
         }
     }
 
-    /// A failed load falls back to the glyph with no bounce and no scale: the
-    /// skeleton only fades.
+    /// A failed load falls back with no bounce and no scale: a still skeleton
+    /// in a label or the composer (#1504), the glyph in a tile.
     @Test(arguments: Surface.allCases)
     func aFailedLoadFallsBackWithNoBounce(_ surface: Surface) async throws {
         let gate = ArtGate()
@@ -343,7 +344,7 @@ struct EmoteRevealTests {
         try #require(place.skeleton.isShowing)
         freeze(place.window)
         gate.open()
-        try #require(await settle { place.showsGlyph() }, "no glyph after a failed load")
+        try #require(await settle { place.showsFailure() }, "no fallback after a failed load")
         #expect(place.skeleton.revealCount == 0)
         #expect(!place.showsArt())
         if let art = place.art() {

@@ -15,8 +15,9 @@ import UIKit
 /// lays out, wraps, scrolls and moves the caret around like any character.
 /// Its view (`EmoteAttachmentView`, overlaid where TextKit put it) holds a
 /// skeleton while the art is on its way (`EmoteSkeleton`, #987) and plays
-/// the art once it lands and a playback slot is free; the still glyph shows
-/// only when no art can be had, or motion is off. The budgets are the label's:
+/// the art once it lands and a playback slot is free — never the system glyph
+/// (#1504): one still frame of the art when motion is off, a still skeleton
+/// when no art can be had. The budgets are the label's:
 /// the app-wide `EmoteEngine.maxAnimatedEmotes`, and stills under Reduce
 /// Motion, Power Saving, idle calm or thermal pressure (`EmoteMotion`).
 ///
@@ -403,8 +404,7 @@ open class EmoteTextView: UITextView {
             live.insert(key)
             let view = emoteViewsByAttachment[key] ?? {
                 let made = EmoteAttachmentView(
-                    emote: attachment.emote, engine: engine, still: attachment.stillImage,
-                    side: attachment.bounds.width
+                    emote: attachment.emote, engine: engine, side: attachment.bounds.width
                 )
                 emoteViewsByAttachment[key] = made
                 addSubview(made)
@@ -445,8 +445,6 @@ final class EmoteAttachment: NSTextAttachment {
     /// The text it was typed as: the emoji, or the `:code:` with its case.
     let source: String
     let engine: EmoteEngine
-    /// The glyph drawn to the square: what shows before the art.
-    private(set) var stillImage: UIImage?
 
     init(emote: Emote, source: String, font: UIFont, engine: EmoteEngine) {
         self.emote = emote
@@ -457,7 +455,6 @@ final class EmoteAttachment: NSTextAttachment {
         // The line box exactly, so an emote never makes its line taller than
         // the text's: from the descender to the ascender.
         bounds = CGRect(x: 0, y: font.descender, width: side, height: side)
-        stillImage = Self.still(of: emote, side: side)
         // TextKit only reserves the square: the field's own view for the
         // emote draws over it (`EmoteTextView.placeEmoteViews`).
         image = Self.blank(side: side)
@@ -469,26 +466,6 @@ final class EmoteAttachment: NSTextAttachment {
     /// An emote's square on a line set in `font`: the line box.
     static func side(for font: UIFont) -> CGFloat {
         font.ascender - font.descender
-    }
-
-    /// The emote's glyph, drawn to fill `side` — the still shown before the
-    /// art, and instead of it when motion is off.
-    static func still(of emote: Emote, side: CGFloat) -> UIImage {
-        let key = "\(emote.glyph)@\(side)"
-        if let cached = stills.value(for: key) { return cached }
-        let size = CGSize(width: side, height: side)
-        let image = UIGraphicsImageRenderer(size: size).image { _ in
-            // An emoji's ink is about its point size wide.
-            let font = UIFont.systemFont(ofSize: side * 0.82)
-            let glyph = emote.glyph as NSString
-            let measured = glyph.size(withAttributes: [.font: font])
-            glyph.draw(
-                at: CGPoint(x: (side - measured.width) / 2, y: (side - measured.height) / 2),
-                withAttributes: [.font: font]
-            )
-        }
-        keep(image, for: key)
-        return image
     }
 
     /// A transparent square: what TextKit draws for the emote.
@@ -505,11 +482,11 @@ final class EmoteAttachment: NSTextAttachment {
         stills.insert(image, for: key, cost: cost)
     }
 
-    /// The glyph stills and blank squares drawn so far, in the UI assets class
-    /// (#971) like the emote sheets: within a budget, and trimmed by the device
-    /// cache rather than by `NSCache`'s own guesses (#894). A glyph at one line
-    /// height is some twenty kilobytes at 3x, so 8 MB holds a few hundred:
-    /// every emote a screen sets, at its sizes. Thread-safe (`MemoryCache`).
+    /// The blank squares drawn so far, in the UI assets class (#971) like the
+    /// emote sheets: within a budget, and trimmed by the device cache rather
+    /// than by `NSCache`'s own guesses (#894). Thread-safe (`MemoryCache`).
+    /// (The glyph stills it also held are gone with #1504: an animated emote
+    /// is never drawn as its system glyph.)
     static let stillsBudget = MemoryBudget.fixed(bytes: 8 * CacheBytes.mebibyte)
     static let stills: MemoryCache<String, UIImage> = {
         let cache: MemoryCache<String, UIImage> = UIAssetCaches.memoryCache("UIAssets.emoteStills", budget: stillsBudget)
@@ -522,13 +499,13 @@ final class EmoteAttachment: NSTextAttachment {
 
 /// What TextKit places for one emote: a skeleton while its art is on its way
 /// (#987), the art once it lands — playing if a slot is free, on its poster
-/// frame if not — and the still glyph only when there is no art to be had or
-/// motion is off. Plays only while in a window.
+/// frame if not, one still frame when motion is off — and a still skeleton
+/// when there is no art to be had. Never the system glyph (#1504). Plays only
+/// while in a window.
 @MainActor
 final class EmoteAttachmentView: UIView {
     let emote: Emote
     private let engine: EmoteEngine
-    private let still = UIImageView()
     private let player = AnimatedIconView(frame: .zero)
     private var request: EmoteRequest?
     private var holdsSlot = false
@@ -537,20 +514,16 @@ final class EmoteAttachmentView: UIView {
     /// What holds the square while the art is on its way (#987).
     let skeleton = EmoteSkeleton()
 
-    init(emote: Emote, engine: EmoteEngine, still image: UIImage?, side: CGFloat) {
+    init(emote: Emote, engine: EmoteEngine, side: CGFloat) {
         self.emote = emote
         self.engine = engine
         super.init(frame: CGRect(x: 0, y: 0, width: side, height: side))
         isUserInteractionEnabled = false
         accessibilityElementsHidden = true
-        still.image = image
-        still.contentMode = .scaleAspectFit
         player.isHidden = true
-        for view in [still, player] as [UIView] {
-            view.frame = bounds
-            view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            addSubview(view)
-        }
+        player.frame = bounds
+        player.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(player)
         let center = NotificationCenter.default
         // Not idle calm: an emote plays through it (#1072).
         for name in EmoteMotion.policyNotifications {
@@ -581,8 +554,8 @@ final class EmoteAttachmentView: UIView {
         guard request == nil, !isShowingArt, window != nil else { return }
         let policy = EmoteMotion.policy
         let motion: EmoteEngine.Motion = policy == .still ? .still : .loop
-        // Motion off: an emoji's still IS the glyph already showing.
-        if motion == .still, emote.isUnicodeEmoji { return }
+        // Motion off: the emote's own art on one frame, an emoji's too —
+        // never the system glyph (#1504).
         player.playbackPolicy = policy
         let side = EmoteEngine.pixelSide(forPoints: bounds.width, scale: window?.screen.scale ?? 3)
         var answered = false
@@ -590,12 +563,14 @@ final class EmoteAttachmentView: UIView {
             answered = true
             guard let self else { return }
             self.request = nil
-            guard let art, self.window != nil else {
-                // No art after all: the glyph is all there is (#987).
-                self.skeleton.hide(fading: true)
-                self.still.isHidden = false
+            guard let art else {
+                // No art after all: a still skeleton, never the glyph (#1504).
+                if self.window != nil {
+                    self.skeleton.showFailed(in: self, below: self.player, engine: self.engine)
+                }
                 return
             }
+            guard self.window != nil else { return }
             self.present(art)
         }
         guard !answered else { return }
@@ -603,7 +578,6 @@ final class EmoteAttachmentView: UIView {
         // is being made the emote's place holds a skeleton (#987) — no still
         // glyph, which would flash between the two — and the art bounces in
         // over it when it lands (`EmoteSkeleton.reveal`, #1071).
-        still.isHidden = true
         skeleton.frame = bounds
         skeleton.show(
             in: self, below: player,
@@ -620,7 +594,6 @@ final class EmoteAttachmentView: UIView {
                 waitingArt = art
                 player.setArt(art, phase: art.posterFrame(), paused: true)
                 player.isHidden = false
-                still.isHidden = true
                 skeleton.reveal(player)
                 return
             }
@@ -629,7 +602,6 @@ final class EmoteAttachmentView: UIView {
         waitingArt = nil
         player.setArt(art)
         player.isHidden = false
-        still.isHidden = true
         isShowingArt = true
         // Over a skeleton, the arrival every emote place plays (#1071).
         skeleton.reveal(player)
@@ -648,7 +620,6 @@ final class EmoteAttachmentView: UIView {
         waitingArt = nil
         player.setArt(nil)
         player.isHidden = true
-        still.isHidden = false
         isShowingArt = false
         if holdsSlot {
             holdsSlot = false
@@ -669,14 +640,13 @@ final class EmoteAttachmentView: UIView {
 
     // MARK: - Test seams
 
-    var showsStill: Bool { !still.isHidden }
     /// Whether a skeleton holds the square (#987).
     var showsSkeleton: Bool { skeleton.isShowing }
     /// The art on show, held on its poster frame for want of a slot (#731).
     var showsPosterArt: Bool { waitingArt != nil && !player.isHidden }
     /// What the view holds, in a word each — for a test's failure message.
     var debugState: String {
-        "still=\(showsStill) art=\(isShowingArt) poster=\(showsPosterArt) skeleton=\(showsSkeleton) "
+        "art=\(isShowingArt) poster=\(showsPosterArt) skeleton=\(showsSkeleton) "
             + "pending=\(request != nil) "
             + "window=\(window != nil) slot=\(holdsSlot) bounces=\(bounceInCount) size=\(bounds.size)"
     }

@@ -165,16 +165,17 @@ struct EmoteTextViewTests {
         defer { window.isHidden = true }
         try #require(await settle { field.emoteViews.count == 2 })
         #expect(field.emoteViews.allSatisfy { $0.isShowingArt })
-        #expect(field.emoteViews.allSatisfy { !$0.showsStill })
     }
 
-    /// An emote with no art to be had keeps its glyph once that is known.
+    /// ⚠️ AN EMOTE WITH NO ART TO BE HAD KEEPS A STILL SKELETON (#1504) —
+    /// never the system glyph.
     @Test func anEmoteWithNoArtShowsItsStill() async throws {
         let engine = EmoteEngine(diskCache: nil, animationProvider: { _ in nil })
-        let (field, window) = hostedField("cold :lol:", engine: engine)
+        let (field, window) = hostedField("cold 🔥", engine: engine)
         defer { window.isHidden = true }
         try #require(await settle { field.emoteViews.count == 1 })
-        #expect(await settle { field.emoteViews.allSatisfy { $0.showsStill } }, "no art, and no glyph either")
+        #expect(await settle { field.emoteViews.allSatisfy { $0.showsSkeleton && $0.skeleton.isFailed } },
+                "no art, and no still skeleton either")
         #expect(!field.emoteViews.contains { $0.isShowingArt })
     }
 
@@ -194,7 +195,6 @@ struct EmoteTextViewTests {
         defer { window.isHidden = true }
         try #require(await settle { field.emoteViews.count == 1 })
         let view = try #require(field.emoteViews.first)
-        #expect(!view.showsStill, "the glyph stands in for the art on its way")
         #expect(!view.isShowingArt)
         // ⚠️ THE FIELD'S VIEW, READ AFRESH EVERY LOOK: a layout pass may place
         // the emote again in a new view (the old one leaves the window and
@@ -225,11 +225,11 @@ struct EmoteTextViewTests {
         try #require(await settle { field.emoteViews.count == 8 })
         #expect(field.emoteViews.filter { $0.isShowingArt }.count == 3)
         #expect(field.emoteViews.filter { $0.showsPosterArt }.count == 5, "past the budget, not the art's poster")
-        #expect(field.emoteViews.filter { $0.showsStill }.isEmpty, "a glyph behind an animated emote")
     }
 
-    /// Under Reduce Motion an emoji keeps its still glyph and a house emote
-    /// shows its still art; nothing holds an animation slot.
+    /// ⚠️ Under Reduce Motion every emote shows its own art, still — an
+    /// emoji too, never its system glyph (#1504); nothing holds an animation
+    /// slot.
     ///
     /// ⚠️ SYNCHRONOUS, AND IT MUST STAY SO: `forcedPolicy` is process-wide and
     /// the other suites of this target run beside this one on the main
@@ -245,7 +245,7 @@ struct EmoteTextViewTests {
         defer { window.isHidden = true }
         try #require(field.emoteViews.count == 2)
         let views = field.emoteViews
-        #expect(views[0].showsStill && !views[0].isShowingArt, "the emoji left its glyph")
+        #expect(views[0].isShowingArt, "the emoji fell back to its glyph")
         #expect(views[1].isShowingArt, "the house emote shows no art")
         #expect(engine.animatedCount == 0, "a still must not hold an animation slot")
     }

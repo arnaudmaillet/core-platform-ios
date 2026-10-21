@@ -50,7 +50,7 @@ struct EmoteIdleCalmTests {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 200))
         window.isHidden = false
         let fire = try #require(engine.catalog.emote(id: "noto:1f525"))
-        let view = EmoteAttachmentView(emote: fire, engine: engine, still: nil, side: 22)
+        let view = EmoteAttachmentView(emote: fire, engine: engine, side: 22)
         view.frame.origin = CGPoint(x: 20, y: 20)
         window.addSubview(view)
         return (view, window)

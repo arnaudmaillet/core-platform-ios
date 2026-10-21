@@ -19,12 +19,14 @@ import UIKit
 ///   inline, the tile's square — so the swap moves nothing.
 /// - **No glyph in between.** The art goes in over the skeleton in the same
 ///   pass, and the two trade places in one arrival (`reveal`, #1071).
-/// - **A failed load falls back to the system glyph.** No art to be had (a
-///   missing file, no icon catalogue, a bake that failed) takes the skeleton
-///   away and shows the emote's static glyph for as long as the emote stays
-///   on screen: never a skeleton forever. Shown again later (scrolled back,
-///   a new screen), the emote asks once more, as it always has — a failure
-///   may have been passing, and the icon catalogue arrives after launch.
+/// - **A failed load keeps a STILL skeleton, never the glyph (#1504, the
+///   owner 2026-10-21: an animated emote has no static equivalent).** No art
+///   to be had (a missing file, no icon catalogue, a bake that failed) leaves
+///   the square to a bone with no shimmer (`showFailed`) for as long as the
+///   emote stays on screen — nothing sweeps at rest (#580). Shown again later
+///   (scrolled back, a new screen), the emote asks once more, as it always
+///   has — a failure may have been passing, and the icon catalogue arrives
+///   after launch.
 /// - **The shimmer is decoration.** Reduce Motion (iOS or the app's),
 ///   Power Saving and idle calm leave a still square (`Conditions`), as on
 ///   every skeleton. And it lives only as long as the skeleton — while art is
@@ -39,9 +41,8 @@ import UIKit
 /// spring — while the skeleton fades and shrinks a little from under it. Both
 /// carry one begin time, so they start in the same frame, on the same square.
 ///
-/// - **Only over a skeleton.** Art in memory, art read before the skeleton's
-///   grace was up, and a failed load (the glyph, `hide(fading:)`) never
-///   bounce.
+/// - **Only over a skeleton.** Art in memory and art read before the
+///   skeleton's grace was up never bounce.
 /// - **The shimmer's gates.** Under any of them (`Conditions.stillsShimmer`:
 ///   Reduce Motion, Power Saving, idle calm) the art takes the square at once
 ///   and the skeleton goes with no fade: a straight swap.
@@ -151,6 +152,8 @@ final class EmoteSkeleton {
     /// Whether the skeleton is on show (not counting one fading out:
     /// `leavingBone`).
     var isShowing: Bool { bone != nil }
+    /// Whether the bone on show is a failed load's still one (`showFailed`).
+    private(set) var isFailed = false
     /// Whether a show is waiting out its delay.
     private(set) var isScheduled = false
     /// The bone on show. Tests.
@@ -184,6 +187,7 @@ final class EmoteSkeleton {
         endReveal()
         generation += 1
         isScheduled = false
+        isFailed = false
         guard let bone else { return }
         self.bone = nil
         guard fading, bone.window != nil, !MotionPreference.reducesMotion else {
@@ -197,6 +201,21 @@ final class EmoteSkeleton {
             bone.removeFromSuperview()
             if self?.leavingBone === bone { self?.leavingBone = nil }
         }
+    }
+
+    /// No art to be had (#1504): a STILL bone holds the square, at once, for
+    /// as long as the place does — never the glyph, and nothing sweeping at
+    /// rest (#580). A shimmering bone on show is swapped for a still one.
+    func showFailed(in host: UIView, below sibling: UIView, engine: EmoteEngine) {
+        endReveal()
+        generation += 1
+        isScheduled = false
+        self.engine = engine
+        guard !isFailed || bone == nil else { return }
+        bone?.removeFromSuperview()
+        bone = nil
+        isFailed = true
+        install(in: host, below: sibling, engine: engine, still: true)
     }
 
     /// Hands the square over to `art` — the art's view, dressed and shown, a
@@ -220,6 +239,7 @@ final class EmoteSkeleton {
         guard let bone else { return false }
         endReveal()
         self.bone = nil
+        isFailed = false
         let conditions = engine?.skeletonConditions() ?? .current
         guard bone.window != nil, art.window != nil, art.superview === bone.superview,
               !conditions.stillsShimmer else {
@@ -297,10 +317,11 @@ final class EmoteSkeleton {
         }
     }
 
-    private func install(in host: UIView, below sibling: UIView, engine: EmoteEngine) {
+    private func install(in host: UIView, below sibling: UIView, engine: EmoteEngine, still: Bool = false) {
         let bone = SkeletonBoneView(rounding: .fixed(0))
         bone.accessibilityElementsHidden = true
-        bone.stillsMotion = { [weak engine] in
+        // Set before the bone joins the window, which is when it reads it.
+        bone.stillsMotion = still ? { true } : { [weak engine] in
             engine?.skeletonConditions().stillsShimmer ?? MotionPreference.stillsDecoration
         }
         Self.place(bone, in: frame)

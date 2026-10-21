@@ -131,8 +131,9 @@ struct EmoteSkeletonTests {
         #expect(await settle { !holdsABone(label) }, "a bone outlived its art")
     }
 
-    /// THE FALLBACK RULE: no art to be had takes the skeleton away and draws
-    /// the system glyph, for good — never a skeleton forever.
+    /// ⚠️ THE FAILURE RULE (#1504, the owner 2026-10-21): no art to be had
+    /// keeps a STILL skeleton in the square — never the system glyph, and
+    /// nothing sweeping at rest (#580).
     @Test func aLabelFallsBackToTheGlyphWhenTheLoadFails() async throws {
         let gate = ArtGate()
         defer { gate.open() }
@@ -141,14 +142,16 @@ struct EmoteSkeletonTests {
         try #require(label.skeletonCount == 1)
         gate.open()
         try #require(await settle { label.pendingEmoteCount == 0 }, "the failed load never answered")
-        #expect(label.skeletonCount == 0, "a skeleton for art that will never come")
-        #expect(label.coveredMarkIndices.isEmpty)
-        #expect(EmoteLabelTests.colouredInk(of: label) != nil, "no glyph after a failed load")
-        // Laid out again, it stays the glyph: the failure is not re-asked.
+        #expect(label.skeletonCount == 1, "no skeleton after a failed load")
+        let bone = try #require(label.skeletons.first?.boneView)
+        #expect(!bone.isSweeping && !bone.showsBand, "a failed load's skeleton shimmers at rest")
+        #expect(label.coveredMarkIndices == [0])
+        #expect(EmoteLabelTests.colouredInk(of: label) == nil, "a glyph after a failed load")
+        // Laid out again, it stays the still skeleton: not re-asked here.
         label.setNeedsLayout()
         label.layoutIfNeeded()
-        #expect(label.skeletonCount == 0)
-        #expect(await settle { !holdsABone(label) })
+        #expect(label.skeletonCount == 1)
+        #expect(label.pendingEmoteCount == 0, "the failure was asked again in place")
     }
 
     // MARK: - Pending, arrival, failure: tiles
@@ -210,17 +213,16 @@ struct EmoteSkeletonTests {
         try #require(await settle { field.emoteViews.count == 1 })
         let view = try #require(field.emoteViews.first)
         #expect(view.showsSkeleton, "no skeleton for art on its way: \(view.debugState)")
-        #expect(!view.showsStill, "a glyph under the skeleton")
         #expect(view.skeleton.frame == view.bounds)
         let frame = view.frame
 
         gate.open()
         try #require(await settle { view.isShowingArt }, "the art never came: \(view.debugState)")
         #expect(!view.showsSkeleton)
-        #expect(!view.showsStill)
         #expect(view.frame == frame, "the emote moved")
     }
 
+    /// ⚠️ A still skeleton, never the glyph (#1504).
     @Test func theComposerFallsBackToTheGlyphWhenTheLoadFails() async throws {
         let gate = ArtGate()
         defer { gate.open() }
@@ -230,8 +232,9 @@ struct EmoteSkeletonTests {
         let view = try #require(field.emoteViews.first)
         try #require(view.showsSkeleton)
         gate.open()
-        #expect(await settle { view.showsStill }, "no glyph after a failed load: \(view.debugState)")
-        #expect(!view.showsSkeleton)
+        #expect(await settle { view.skeleton.isFailed }, "no still skeleton after a failed load: \(view.debugState)")
+        #expect(view.showsSkeleton)
+        #expect(!view.isShowingArt)
     }
 
     // MARK: - Motion gates

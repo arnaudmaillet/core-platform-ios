@@ -17,11 +17,16 @@ import UIKit
 /// Text with no emotes takes `UILabel`'s own path, untouched. Text with emotes
 /// is drawn through `EmoteTextLayout`, which also says where each emote's glyph
 /// landed. Over each visible glyph the label places an `AnimatedIconView` —
-/// the map's sprite-sheet player — and stops drawing the glyph underneath.
-/// While its art is on its way the emote's square holds a skeleton
-/// (`EmoteSkeleton`, #987) rather than the glyph, so the glyph never flashes
-/// between the two; when no art can be had, and whenever an emote cannot
-/// animate, the glyph is simply the system emoji.
+/// the map's sprite-sheet player.
+///
+/// ⚠️ **AN ANIMATED EMOTE HAS NO STATIC EQUIVALENT (#1504, the owner
+/// 2026-10-21).** The label never draws the system glyph of an emote it
+/// animates, not for a frame: the square shows the emote's own art (moving,
+/// or one still frame under Reduce Motion), its skeleton while the art is on
+/// its way (`EmoteSkeleton`, #987), a still skeleton when no art can be had,
+/// the frame it was on while a flight is in the air (#922) — and nothing at
+/// all while the label cannot be seen. Only `animatesEmotes` off draws the
+/// glyphs.
 ///
 /// ## What it costs
 ///
@@ -37,8 +42,7 @@ import UIKit
 /// - **Bounded.** At most `EmoteEngine.maxAnimatedEmotes` animate at once,
 ///   app-wide; the rest hold their art's poster frame until a slot frees.
 /// - **Reduce Motion** (and serious thermal pressure): no animation at all.
-///   Emoji stay the system's own still glyph and nothing is baked; a house
-///   emote shows its first frame.
+///   Every emote shows one still frame of its own art (#1504).
 @MainActor
 open class EmoteLabel: UILabel {
     /// The engine art comes from. The app's shared one unless a test says
@@ -47,11 +51,13 @@ open class EmoteLabel: UILabel {
         didSet { resetPlayers() }
     }
 
-    /// Off switch for a surface that wants the static glyphs only.
+    /// Off switch for a surface that wants the static glyphs only — the one
+    /// case the label draws them (#1504).
     public var animatesEmotes = true {
         didSet {
             guard animatesEmotes != oldValue else { return }
             resetPlayers()
+            updateCoveredMarks()
             updateVisibilityMonitoring()
         }
     }
@@ -61,8 +67,8 @@ open class EmoteLabel: UILabel {
     private let textLayout = EmoteTextLayout()
     /// Per mark index.
     private var players: [Int: EmotePlayer] = [:]
-    /// Mark indices whose glyph is currently NOT drawn, because an animation
-    /// covers it.
+    /// Mark indices whose glyph is NOT drawn: every emote's, whatever its
+    /// square holds (#1504), unless the label does not animate emotes.
     private var coveredMarks: Set<Int> = []
     /// The visibility the last layout or monitor tick saw — what a tick
     /// compares against, so it acts only on a CHANGE.
@@ -221,6 +227,7 @@ open class EmoteLabel: UILabel {
         resetPlayers()
         marks = EmoteText.marks(in: super.attributedText)
         if !marks.isEmpty { setNeedsLayout() }
+        updateCoveredMarks()
         updateVisibilityMonitoring()
     }
 
@@ -305,6 +312,10 @@ open class EmoteLabel: UILabel {
             resetPlayers()
         } else if !marks.isEmpty {
             setNeedsLayout()
+            // ⚠️ JOINING A WINDOW IS A FIRST DISPLAY (#1504): asked again on
+            // the next turn, when the hierarchy it joined has settled, rather
+            // than on the monitor's next tick a quarter of a second later.
+            recheckNextTurn()
         }
         updateVisibilityMonitoring()
     }
@@ -377,12 +388,22 @@ open class EmoteLabel: UILabel {
     /// Places, starts, moves and removes the players for the current layout.
     private func placeEmotes() {
         let textBox = emoteTextRect(forBounds: bounds)
-        // ⚠️ NOT WHILE A FLIGHT IS IN THE AIR (`FlightActivity`): the glyphs
-        // are drawn plain, and the emotes come back when it lands.
-        let verdict: EmoteVisibility.Verdict = hasEmotes && animatesEmotes && !FlightActivity.isActive(for: self)
+        // ⚠️ NOT WHILE A FLIGHT IS IN THE AIR (`FlightActivity`): what is
+        // placed holds the frame it was on (#922) — never the glyph (#1504) —
+        // and plays on when the flight lands.
+        if hasEmotes, animatesEmotes, FlightActivity.isActive(for: self) {
+            players.values.forEach { $0.view.pause() }
+            updateCoveredMarks()
+            return
+        }
+        let verdict: EmoteVisibility.Verdict = hasEmotes && animatesEmotes
             ? EmoteVisibility.verdict(for: self) : .invisible
         lastSeenVisible = verdict == .visible
         if verdict == .awaitingPresentation { recheckNextTurn() }
+        // A label laid out in a window and judged unseen — under a fade, a
+        // presentation not yet rendered — asks again next turn, rather than
+        // waiting on the monitor's tick (#1504). Its square stays empty.
+        if verdict == .invisible, window != nil, hasEmotes, animatesEmotes { recheckNextTurn() }
         guard lastSeenVisible, configureLayout(for: textBox, lines: numberOfLines) else {
             resetPlayers()
             return
@@ -396,8 +417,8 @@ open class EmoteLabel: UILabel {
 
         for (index, mark) in marks.enumerated() {
             guard let placement = placements[index], let emote = engine.catalog.emote(id: mark.id) else { continue }
-            // An emoji's still IS the system glyph: nothing to bake or place.
-            if motion == .still && emote.isUnicodeEmoji { continue }
+            // Under `.still` an emoji is its own art on one frame, never the
+            // system glyph (#1504).
             let square = placement.square.offsetBy(dx: origin.x, dy: origin.y)
             let side = EmoteEngine.pixelSide(forPoints: square.width, scale: scale)
             live.insert(index)
@@ -427,6 +448,9 @@ open class EmoteLabel: UILabel {
             if player.awaitsSlot, let art = player.art {
                 // Art that arrived while every playback slot was taken.
                 present(art, in: player, index: index)
+            } else if player.view.isPaused, !player.awaitsSlot, player.isShowing {
+                // Held through a flight: plays on from that very frame.
+                player.view.resume()
             }
         }
         for index in Array(players.keys) where !live.contains(index) {
@@ -450,9 +474,9 @@ open class EmoteLabel: UILabel {
             if let art {
                 self.present(art, in: player, index: index)
             } else {
-                // No art to be had: the glyph, while the emote stays on
-                // screen (#987).
-                player.skeleton.hide(fading: true)
+                // No art to be had: a still skeleton, while the emote stays
+                // on screen — never the glyph (#1504).
+                player.skeleton.showFailed(in: self, below: player.view, engine: self.engine)
             }
             self.updateCoveredMarks()
         }
@@ -488,6 +512,8 @@ open class EmoteLabel: UILabel {
         }
         player.awaitsSlot = false
         player.view.setArt(art)
+        // Art landing mid-flight holds its first frame until the landing.
+        if FlightActivity.isActive(for: self) { player.view.pause() }
         player.view.isHidden = false
         player.isShowing = true
         // Over a skeleton, the arrival every emote place plays (#1071).
@@ -509,7 +535,10 @@ open class EmoteLabel: UILabel {
     }
 
     private func resetPlayers() {
-        guard !players.isEmpty || !coveredMarks.isEmpty else { return }
+        // ⚠️ ON PLAYERS ONLY: every emote's glyph stays covered (#1504), so a
+        // guard on the covered marks too re-laid an unseen label out on every
+        // pass — a layout loop.
+        guard !players.isEmpty else { return }
         let dropped = players.values
         players.removeAll()
         dropped.forEach(release)
@@ -519,10 +548,11 @@ open class EmoteLabel: UILabel {
 
     /// Redraws the text only when the set of covered glyphs changed — a label
     /// whose emotes are all already playing is not redrawn by a layout pass.
-    /// A glyph is covered by art on show, and by art on its way (its square
-    /// is the skeleton's, #987); only an emote with no art draws its glyph.
+    /// Every emote's glyph is covered, whatever its square holds — art, a
+    /// skeleton, a still one, nothing while unseen (#1504); only a label that
+    /// does not animate emotes draws them.
     private func updateCoveredMarks() {
-        let covered = Set(players.compactMap { $0.value.coversGlyph ? $0.key : nil })
+        let covered: Set<Int> = hasEmotes && animatesEmotes ? Set(marks.indices) : []
         guard covered != coveredMarks else { return }
         coveredMarks = covered
         setNeedsDisplay()
@@ -547,13 +577,13 @@ open class EmoteLabel: UILabel {
                            name: FlightActivity.didChangeNotification, object: nil)
     }
 
-    /// A flight took off — the emotes give their places back, the glyphs
-    /// draw plain — or the last one landed, and they are placed again, at
-    /// rest (`FlightActivity`).
+    /// A flight took off — the emotes hold the frame they were on — or the
+    /// last one landed, and they play on from it (`FlightActivity`).
     @objc private func flightActivityChanged(_ note: Notification) {
         guard hasEmotes, let window, note.object as? UIWindow === window else { return }
         if FlightActivity.isActive(for: self) {
-            resetPlayers()
+            // Held on the frame they were on (#922), never the glyph (#1504).
+            players.values.forEach { $0.view.pause() }
         } else {
             lastSeenVisible = false
             setNeedsLayout()
@@ -623,10 +653,6 @@ final class EmotePlayer {
     var holdsSlot = false
     /// What holds the square while the art is on its way (#987).
     let skeleton = EmoteSkeleton()
-
-    /// Whether the glyph under this emote must not be drawn: art is on show,
-    /// or on its way.
-    var coversGlyph: Bool { isShowing || request != nil }
 
     init(emote: Emote, side: Int, motion: EmoteEngine.Motion) {
         self.emote = emote
