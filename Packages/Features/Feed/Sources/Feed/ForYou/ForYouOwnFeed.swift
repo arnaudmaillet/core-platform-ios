@@ -11,9 +11,15 @@ import PostGrid
 ///
 /// One cursor for the screen's life: `begin(with:)` hands the feed its first
 /// window (the tapped post and what was read ahead), `next(after:)` pages on,
-/// and the next opening carries on from where the last one stopped — only a
-/// refresh starts the pool over (`reset`). A provider with no discovery answers
-/// nothing, and the caller keeps the grid's own window — what it did before.
+/// and the next opening carries on from where the last one stopped — a
+/// refresh starts the pool over (`reset`), and so does an opening that finds
+/// the pool spent (#1496). A provider with no discovery answers nothing, and
+/// the caller keeps the grid's own window — what it did before.
+///
+/// ⚠️ ONLY THE SERVER ENDS THE LIST (#1496, the owner 2026-10-20): an empty
+/// `next_page_token`. A page that failed, or a read that ran out of pages
+/// while a token remains, is "nothing yet" — `next(after:)` answers `[]`, the
+/// feed keeps its place and asks again on its next approach — never `nil`.
 @MainActor
 final class ForYouOwnFeed {
     private let repository: any ForYouProviding
@@ -53,7 +59,9 @@ final class ForYouOwnFeed {
     /// Reads the next opening's window ahead, so a tap opens on posts already
     /// in hand rather than waiting on the network. Idempotent.
     func prepare() {
-        guard readAhead.isEmpty, readAheadTask == nil else { return }
+        // A spent pool reads nothing ahead: the next opening starts a new
+        // pass (`begin`), which a read already on its way would hold back.
+        guard readAhead.isEmpty, readAheadTask == nil, cursor != .end else { return }
         readAheadTask = Task { [weak self] in
             guard let self else { return }
             defer { readAheadTask = nil }
@@ -72,6 +80,16 @@ final class ForYouOwnFeed {
     /// feed's continuation brings the own posts as soon as they are read.
     func begin(with tapped: GalleryPost) -> [GalleryPost]? {
         guard isAvailable() else { return nil }
+        // ⚠️ A SPENT POOL STARTS A NEW PASS (#1496, the owner 2026-10-20):
+        // every post served stayed served past the end, so the next opening
+        // held the tapped post alone, at its end at once. While unseen posts
+        // remain the cursor carries on (#1347); once the server has said
+        // "no more", the opening reads the pool from its start again — still
+        // past the grid's posts — with only the tapped one served.
+        if cursor == .end, readAhead.isEmpty, readAheadTask == nil {
+            cursor = .start
+            served = []
+        }
         let hidden = excluded().union([tapped.id])
         let ahead = readAhead.filter { !hidden.contains($0.id) }
         readAhead = []
@@ -85,8 +103,10 @@ final class ForYouOwnFeed {
     }
 
     /// The feed's next posts after its window — the continuation. Nil once
-    /// the pool is spent. The session's cursor carries on; the next opening
-    /// reads ahead a fresh one.
+    /// the server has said the pool is spent; `[]` when nothing could be read
+    /// right now (a failed page, a run of excluded pages with a token left),
+    /// so the feed asks again rather than ending (#1496). The session's cursor
+    /// carries on; the next opening reads ahead a fresh one.
     func next(after _: PostID) async -> [PostID]? {
         // A read ahead still on its way is the next window: waited for, never
         // read twice on the same cursor.
@@ -94,7 +114,7 @@ final class ForYouOwnFeed {
         var posts = readAhead.filter { !served.contains($0.id) && !excluded().contains($0.id) }
         readAhead = []
         if posts.isEmpty { posts = await read(Self.windowSize, skipping: served) }
-        guard !posts.isEmpty else { return nil }
+        guard !posts.isEmpty else { return cursor == .end ? nil : [] }
         served.formUnion(posts.map(\.id))
         return posts.map(\.id)
     }
@@ -121,17 +141,26 @@ final class ForYouOwnFeed {
     }
 
     /// Up to `count` posts from the pool, past the grid's and `skipping`.
+    ///
+    /// ⚠️ A FAILED PAGE LEAVES THE CURSOR WHERE IT WAS (#1496): it used to be
+    /// read as the end of the pool, and one timeout ended the list until a
+    /// refresh. The read stops; the next one asks for the same page.
     private func read(_ count: Int, skipping: Set<PostID>) async -> [GalleryPost] {
         var found: [GalleryPost] = []
         var pages = 0
         while found.count < count, pages < Self.maxPagesPerRead, cursor != .end {
             pages += 1
             let page: ForYouPage?
-            switch cursor {
-            case .start: page = try? await repository.discoveryFirstPage()
-            case .token(let token): page = try? await repository.discoveryPage(after: token)
-            case .end: page = nil
+            do {
+                switch cursor {
+                case .start: page = try await repository.discoveryFirstPage()
+                case .token(let token): page = try await repository.discoveryPage(after: token)
+                case .end: page = nil
+                }
+            } catch {
+                return found
             }
+            // No discovery behind the provider: there is no pool to page.
             guard let page else {
                 cursor = .end
                 break
