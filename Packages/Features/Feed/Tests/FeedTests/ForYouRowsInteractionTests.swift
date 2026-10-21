@@ -145,14 +145,18 @@ struct ForYouRowsInteractionTests {
 
     // MARK: - Long press
 
-    /// The menu leads with Open, then the host's rows; the preview's commit
-    /// opens exactly what a tap on the card opens.
+    /// The post menu (#1498 §3): the post's rows, then the host's about the
+    /// author under "@handle", with no "Open"; the preview's commit opens
+    /// exactly what a tap on the card opens.
     @Test func aCardsPreviewCommitsToTheCardsOpen() throws {
         let lead = makeLead()
         let cards = [post("c0", by: "bo"), post("c1", by: "cy")]
         lead.render(railsState(friends: [], following: cards))
-        lead.shelf.cardMenuElements = { _ in [UIAction(title: "View Profile") { _ in }] }
-        #expect(lead.shelf.debugCardMenuTitles(at: 1) == ["Open", "View Profile"])
+        lead.shelf.cardAuthorMenuActions = { _, _ in [.viewProfile {}] }
+        let titles = lead.shelf.debugCardMenuTitles(at: 1)
+        #expect(!titles.contains("Open"))
+        #expect(titles.contains("Comment") && titles.contains("Share"))
+        #expect(titles.last?.hasPrefix("@") == true, "the author's rows are not under their handle")
 
         var opened: [Int] = []
         lead.shelf.onCardTapped = { opened.append($0) }

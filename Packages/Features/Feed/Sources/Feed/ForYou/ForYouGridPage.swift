@@ -165,6 +165,8 @@ final class ForYouGridPage: UIView {
     /// view has neither. It supplies the context and renders whatever comes
     /// back — including nothing, which hides the control.
     var authorMenuActions: ((AuthorMenuContext) -> [PostCardMenuAction])?
+    /// Select Text's session on this page's list cards (#1498 §4).
+    private let captionSelection = CaptionSelectionSession()
     /// Whether this author is the viewer — whose own post's menu names no
     /// profile to view (#1498). Nil: the page cannot tell, and offers it.
     var isViewer: ((ProfileID) -> Bool)?
@@ -986,6 +988,7 @@ final class ForYouGridPage: UIView {
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.addGestureRecognizer(offMediaHold)
+        captionSelection.install(on: collectionView)
         refreshControl.addAction(UIAction { [weak self] _ in self?.onRefresh?() }, for: .valueChanged)
         collectionView.refreshControl = refreshControl
         collectionView.pin(to: self)
@@ -3618,6 +3621,10 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         }
     }
 
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        captionSelection.end()
+    }
+
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         positionPagingFooter()
         schedulePinnedSectionCheck()
@@ -3812,7 +3819,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         let anchor: UIView = collectionView.cellForItem(at: indexPath) ?? self
         let rows = post.authorID.map { menuActions(for: post, authorID: $0, anchor: anchor) }
             ?? postRows(for: post, anchor: anchor)
-        return PostCardMenu.menu(for: rows, author: menuAuthor(of: post)) ?? UIMenu(children: [])
+        return PostCardMenu.menu(for: rows, author: PostMenuRows.author(of: post)) ?? UIMenu(children: [])
     }
 
     /// Every row a post's menu offers on this page: the post's own
@@ -3830,71 +3837,52 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         return rows + hostRows
     }
 
-    /// The post's own rows (#1498 §3): Save, Repost, Comment and Like in the
-    /// palette — each in its state, each doing what the card's control does —
-    /// then Share, Copy Text and Copy Link. Repost and Copy Link are shown
-    /// disabled until they exist (#801; no post URL yet), the owner's choice.
+    /// The post's own rows (#1498 §3), from this page's seams
+    /// (`PostMenuRows`): Comment opens the post on its comments, and Save
+    /// redraws the card's star.
     func postRows(for post: GalleryPost, anchor: UIView) -> [PostCardMenuAction] {
-        var rows: [PostCardMenuAction] = []
         let id = post.id
-        if let bookmarks {
-            rows.append(.save(isOn: bookmarks.isSaved(id.rawValue)) { [weak self, weak anchor] in
-                guard let self, let anchor else { return }
-                MemberGates.perform(.save, from: anchor) { [weak self] in
-                    _ = bookmarks.toggle(id.rawValue)
-                    Feedback.toggled()
-                    (self?.cell(for: id) as? PostGridListRowCell)?.isBookmarked = bookmarks.isSaved(id.rawValue)
+        return PostMenuRows(
+            bookmarks: bookmarks,
+            staking: staking,
+            repost: repostHandler(for: post),
+            comment: { [weak self] in self?.openPost(rawID: id.rawValue, showingComments: true) },
+            savedDidChange: { [weak self] saved in
+                (self?.cell(for: id) as? PostGridListRowCell)?.isBookmarked = saved
+            },
+            // In place, where a list card draws the caption; a tile draws
+            // none, and offers no row (#1498 §4).
+            selectText: (cell(for: id) as? PostGridListRowCell)?.canSelectCaption == true
+                ? { [weak self] in
+                    guard let self, let card = cell(for: id) as? PostGridListRowCell else { return }
+                    captionSelection.begin(in: card)
                 }
-            })
-        }
-        rows.append(.repost(isOn: false, perform: repostHandler(for: post)))
-        rows.append(.comment { [weak self] in self?.openPost(rawID: id.rawValue, showingComments: true) })
-        if let staking, let amounts = staking.stakeMenu(for: id, from: anchor) {
-            rows.append(.like(isOn: staking.viewerStake(on: id) > 0, amounts: amounts))
-        }
-        rows.append(.share { [weak self, weak anchor] in
-            guard let self else { return }
-            presentShareSheet(for: post, from: anchor ?? self)
-        })
-        let caption = post.caption.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !caption.isEmpty {
-            rows.append(.copyText { [weak self] in
-                UIPasteboard.general.string = caption
-                if let screen = self?.hostScreen { Feedback.success("Text copied", symbol: "doc.on.doc", from: screen) }
-            })
-        }
-        rows.append(.copyLink(perform: nil))
-        return rows
+                : nil
+        ).rows(for: post, anchor: anchor)
     }
 
-    /// Who the author submenu is named after.
-    private func menuAuthor(of post: GalleryPost) -> PostCardMenuAuthor? {
-        guard let handle = post.authorHandle, !handle.isEmpty else { return nil }
-        return PostCardMenuAuthor(handle: handle)
+    /// A long press's menu showing ends a caption selection; one asked for
+    /// from the menu begins once it has gone (`CaptionSelectionSession`).
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willDisplayContextMenu configuration: UIContextMenuConfiguration,
+        animator: (any UIContextMenuInteractionAnimating)?
+    ) {
+        captionSelection.menuWillDisplay()
     }
 
-    /// The screen this page is on, for what it presents.
-    private var hostScreen: UIViewController? {
-        var responder: UIResponder? = self
-        while let current = responder {
-            if let controller = current as? UIViewController { return controller }
-            responder = current.next
-        }
-        return nil
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willEndContextMenuInteraction configuration: UIContextMenuConfiguration,
+        animator: (any UIContextMenuInteractionAnimating)?
+    ) {
+        captionSelection.menuWillEnd(animator: animator)
     }
 
-    /// The system share sheet with the post's words and its picture's link —
-    /// what the post screen shares (`SnapFeedViewController.presentShareSheet`).
-    private func presentShareSheet(for post: GalleryPost, from anchor: UIView) {
-        guard let screen = hostScreen else { return }
-        var items: [Any] = []
-        if !post.caption.isEmpty { items.append(post.caption) }
-        if let url = post.videoURL ?? post.thumbnailURL { items.append(url) }
-        guard !items.isEmpty else { return }
-        let sheet = UIActivityViewController(activityItems: items, applicationActivities: nil)
-        sheet.popoverPresentationController?.sourceView = anchor
-        screen.present(sheet, animated: true)
-    }
+    #if DEBUG
+    /// Whether a caption selection is up. Tests.
+    var debugIsSelectingCaption: Bool { captionSelection.isActive }
+    #endif
 
     /// Opens the post with this id, wherever it now sits.
     private func openPost(rawID: String, showingComments: Bool = false) {

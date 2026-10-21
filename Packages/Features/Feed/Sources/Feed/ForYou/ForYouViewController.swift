@@ -344,7 +344,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // "For you ›" and a chunk's "View all" are one way in to one screen.
         lead.onListTitleTapped = { [weak self] in self?.pushDiscoverGallery() }
         friendsRow.storyMenuElements = { [weak self] story in self?.storyMenuElements(for: story) ?? [] }
-        shelf.cardMenuElements = { [weak self] post in self?.cardMenuElements(for: post) ?? [] }
         // A text card is the list's card: its band opens the author and its
         // "..." offers the list's rows.
         shelf.onCardAuthorTapped = { [weak self] post in self?.openAuthor(of: post) }
@@ -1046,21 +1045,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     // MARK: - The rows' long press
 
-    /// What a long press on a Following card offers under its preview, after
-    /// the row's own "Open": the author's profile, then the card's "..." rows
-    /// (Unfollow, Report) in their own section — the same rows, gated on the
-    /// same seams, as the list's cards.
-    private func cardMenuElements(for post: GalleryPost) -> [UIMenuElement] {
-        guard let authorID = post.authorID else { return [] }
-        // The author rows under "@handle" (#1498), View Profile among them.
-        let rows = authorMenuActions(
-            for: ForYouGridPage.AuthorMenuContext(post: post, authorID: authorID, anchor: shelf)
-        )
-        let author = post.authorHandle.flatMap { $0.isEmpty ? nil : PostCardMenuAuthor(handle: $0) }
-        return PostCardMenu.sections(for: rows, author: author)
-    }
-
-    /// The same for a friend's face: their profile, and Unfollow. No Report —
+    /// A friend's face: their profile, and Unfollow. No Report —
     /// a face is a person, not a post, and a post is reported from the post.
     private func storyMenuElements(for story: ForYouViewModel.FriendStory) -> [UIMenuElement] {
         let author = story.authorID

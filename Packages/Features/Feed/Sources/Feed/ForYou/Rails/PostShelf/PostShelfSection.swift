@@ -192,9 +192,6 @@ final class PostShelfSection: UIView {
     /// A card was tapped, on a shelf with no hero context (`openCard`): its
     /// index into `cards`.
     var onCardTapped: ((Int) -> Void)?
-    /// What a long press on a card offers under the preview, after "Open" —
-    /// the host's rows (View Profile, Unfollow, Report).
-    var cardMenuElements: ((GalleryPost) -> [UIMenuElement])?
     /// A TEXT card's author band was tapped — the host opens their profile,
     /// as the list's cards do.
     var onCardAuthorTapped: ((GalleryPost) -> Void)?
@@ -425,7 +422,7 @@ final class PostShelfSection: UIView {
             cell.onAuthorTapped = { [weak self] in self?.onCardAuthorTapped?(post) }
             cell.authorMenuActions = { [weak self, weak cell] in
                 guard let self, let cell else { return [] }
-                return cardAuthorMenuActions?(post, cell.authorMenuAnchor) ?? []
+                return menuActions(for: post, anchor: cell.authorMenuAnchor)
             }
         }
         cell.isHidden = post.id == concealedCard
@@ -708,8 +705,8 @@ final class PostShelfSection: UIView {
     /// Whether a text card draws a "...", asked of the provider the card asks
     /// — the stand-in must match it, or the control pops in the last frame.
     private func showsAuthorMenu(for post: GalleryPost) -> Bool {
-        guard post.authorID != nil, let cardAuthorMenuActions else { return false }
-        return !cardAuthorMenuActions(post, UIView()).isEmpty
+        guard post.authorID != nil else { return false }
+        return !menuActions(for: post, anchor: UIView()).isEmpty
     }
 
     func isCardOnScreen(_ id: PostID) -> Bool {
@@ -900,10 +897,29 @@ final class PostShelfSection: UIView {
 
     // MARK: - The long press
 
+    /// One menu for the long press and the card's "..." (#1498 §3): the
+    /// post's rows (`PostMenuRows`), then the host's about the author, under
+    /// "@handle". No "Open": a tap on the preview opens the card.
     func cardMenu(for post: GalleryPost) -> UIMenu {
+        let anchor: UIView = cardCell(for: post.id) ?? self
+        let rows = menuActions(for: post, anchor: anchor)
+        return PostCardMenu.menu(for: rows, author: PostMenuRows.author(of: post)) ?? UIMenu(children: [])
+    }
+
+    /// Every row a card's menu offers: the post's own — Comment opens the
+    /// card, as its comments chip does — then the host's about the author.
+    func menuActions(for post: GalleryPost, anchor: UIView) -> [PostCardMenuAction] {
         let id = post.id
-        let open = RowGeometry.openAction { [weak self] in self?.open(id) }
-        return UIMenu(children: [open] + (cardMenuElements?(post) ?? []))
+        let rows = PostMenuRows(
+            bookmarks: bookmarks,
+            staking: staking,
+            comment: { [weak self] in self?.open(id) },
+            savedDidChange: { [weak self] saved in
+                (self?.cardCell(for: id) as? PostGridListRowCell)?.isBookmarked = saved
+            }
+        ).rows(for: post, anchor: anchor)
+        guard post.authorID != nil else { return rows }
+        return rows + (cardAuthorMenuActions?(post, anchor) ?? [])
     }
 
     /// The card the lift is made of, on its own curve: the list's card for
@@ -1002,7 +1018,13 @@ final class PostShelfSection: UIView {
     /// The menu a long press on card `index` would show — its rows' titles.
     func debugCardMenuTitles(at index: Int) -> [String] {
         guard cards.indices.contains(index) else { return [] }
-        return cardMenu(for: cards[index]).children.map(\.title)
+        func titles(_ elements: [UIMenuElement]) -> [String] {
+            elements.flatMap { element -> [String] in
+                guard let menu = element as? UIMenu, menu.title.isEmpty else { return [element.title] }
+                return titles(menu.children)
+            }
+        }
+        return titles(cardMenu(for: cards[index]).children)
     }
 
     /// Whether card `index` has a face to fly — what a scripted open waits on.
