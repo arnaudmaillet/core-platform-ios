@@ -81,6 +81,17 @@ struct ProfileCardTests {
         #expect(ProfileCardViewController.toolbarItems(for: .edit) == [Item.openProfile])
     }
 
+    /// The free width (#1542): Follow while not following, Message once
+    /// following (or asked, or not followable); nothing on the viewer's own.
+    @Test func thePrimaryActionTakesTheFreeWidth() {
+        typealias Card = ProfileCardViewController
+        #expect(Card.wideItem(in: Card.toolbarItems(for: .follow)) == .follow)
+        #expect(Card.wideItem(in: Card.toolbarItems(for: .following)) == .message)
+        #expect(Card.wideItem(in: Card.toolbarItems(for: .requested)) == .message)
+        #expect(Card.wideItem(in: Card.toolbarItems(for: .unavailable)) == .message)
+        #expect(Card.wideItem(in: Card.toolbarItems(for: .edit)) == nil)
+    }
+
     // MARK: - The top bar
 
     /// The bell while the viewer follows — a member, a profile that can be
@@ -102,7 +113,15 @@ struct ProfileCardTests {
         #expect(card.navigationItem.leftBarButtonItems?.count == 1, "the QR alone")
         #expect(card.navigationItem.rightBarButtonItem != nil, "no ✕")
         #expect(!card.headerView.showsActionTray, "the header kept its tray")
-        #expect(card.toolbarItems?.contains { $0.title == "Follow" && $0.style == .prominent } == true)
+        #expect(card.wideButton?.configuration?.title == "Follow", "Follow is not the stretched item")
+    }
+
+    /// Followed: Following keeps its width, Message takes the rest (#1542).
+    @Test func followedMessageIsTheStretchedItem() async throws {
+        let host = Host()
+        let card = try await makeCard(following: true, host: host)
+        #expect(card.wideButton?.configuration?.title == "Message")
+        #expect(card.toolbarItems?.contains { $0.title == "Following" } == true)
     }
 
     // MARK: - The detent
