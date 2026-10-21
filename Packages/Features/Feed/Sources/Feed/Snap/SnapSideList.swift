@@ -435,6 +435,9 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
     /// (no pool, tests).
     var autoplay: SnapSideListAutoplay?
     private var outlined: PostID?
+    /// How much each tile wears the ring, 0…1 (#1546): the post on show's
+    /// alone at rest, two sharing it while the card moves between them.
+    private var ringWeights: [PostID: CGFloat] = [:]
     var onSelect: ((FeedEntry) -> Void)?
     /// One tile, from the geometry (#1545): a whole number of them fills
     /// the list exactly. Zero: not placed yet — a 3:4 tile of the width.
@@ -526,10 +529,10 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
 
     func outline(_ id: PostID?) {
         outlined = id
-        for cell in collection.visibleCells {
-            guard let path = collection.indexPath(for: cell) else { continue }
-            style(cell, at: path)
-        }
+        // Settled on `id`: the ring is its alone — what the card's scroll
+        // left there already, so nothing visibly changes.
+        ringWeights = id.map { [$0: 1] } ?? [:]
+        restyleVisibleCells(animated: false)
         // ⚠️ JUST ENOUGH TO SHOW IT WHOLE (#1527): a tile cut by an edge —
         // tapped, or reached by paging the card — comes fully into view on
         // that edge; a whole one does not move. It used to be centred, which
@@ -544,14 +547,56 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         }
     }
 
-    private func style(_ cell: UICollectionViewCell, at path: IndexPath) {
-        let isOutlined = entries.indices.contains(path.item) && entries[path.item].post.id == outlined
+    /// Each tile's share of the ring, from the card's scroll (#1546).
+    /// `animated`: a jump with no finger behind it, faded rather than cut.
+    func setRing(_ weights: [PostID: CGFloat], animated: Bool) {
+        guard weights != ringWeights else { return }
+        ringWeights = weights
+        restyleVisibleCells(animated: animated)
+    }
+
+    private func restyleVisibleCells(animated: Bool) {
+        for cell in collection.visibleCells {
+            guard let path = collection.indexPath(for: cell) else { continue }
+            style(cell, at: path, animated: animated)
+        }
+    }
+
+    /// The ring's width at full strength, and the hairline's at none.
+    static let ringWidth: CGFloat = 2
+    static let hairlineWidth: CGFloat = 0.5
+
+    private func style(_ cell: UICollectionViewCell, at path: IndexPath, animated: Bool = false) {
+        let weight = entries.indices.contains(path.item) ? ringWeights[entries[path.item].post.id] ?? 0 : 0
         // The post on show: a 2 pt border in the app's tint, concentric with
         // the tile's corner (#1509). The rest: a hairline, so a text tile (a
-        // card on the page's own ground) still reads as a tile.
-        cell.contentView.layer.borderWidth = isOutlined ? 2 : 0.5
-        cell.contentView.layer.borderColor = (isOutlined ? Palette.tint : UIColor.separator)
+        // card on the page's own ground) still reads as a tile. In between —
+        // the card moving between two posts — a blend of the two (#1546).
+        let width = Self.hairlineWidth + (Self.ringWidth - Self.hairlineWidth) * weight
+        // The design system's blend (`HeroInk.blend`), resolved for this list.
+        let color = HeroInk.blend(page: .separator, picture: Palette.tint, onPicture: weight)
             .resolvedColor(with: traitCollection).cgColor
+        let layer = cell.contentView.layer
+        if animated, window != nil, !UIAccessibility.isReduceMotionEnabled {
+            for (key, value) in [("borderWidth", width as Any), ("borderColor", color as Any)] {
+                let fade = CABasicAnimation(keyPath: key)
+                fade.fromValue = layer.presentation()?.value(forKeyPath: key) ?? layer.value(forKeyPath: key)
+                fade.toValue = value
+                fade.duration = 0.2
+                fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                layer.add(fade, forKey: "ring." + key)
+            }
+        }
+        layer.borderWidth = width
+        layer.borderColor = color
+    }
+
+    /// A tile's ring: its border's width and how much of the tint it is.
+    /// Tests.
+    func debugRing(at index: Int) -> (width: CGFloat, weight: CGFloat)? {
+        guard entries.indices.contains(index),
+              let cell = collection.cellForItem(at: IndexPath(item: index, section: 0)) else { return nil }
+        return (cell.contentView.layer.borderWidth, ringWeights[entries[index].post.id] ?? 0)
     }
 
     /// Whether `id`'s tile wears the indicator border. Tests.
