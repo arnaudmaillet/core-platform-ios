@@ -385,12 +385,6 @@ struct CountryShopViewControllerTests {
         #expect(shop.dataSource.snapshot().sectionIdentifiers.first == .boosts)
     }
 
-    /// The Explore header's door: an existing, unrestricted symbol.
-    @Test func theShopDoorIsAStorefront() {
-        #expect(CountryShopEntry.symbolName == "storefront")
-        #expect(UIImage(systemName: CountryShopEntry.symbolName) != nil)
-    }
-
     // MARK: - Prices on the app's button (#935)
 
     private func laidOut(_ shop: CountryShopViewController) {

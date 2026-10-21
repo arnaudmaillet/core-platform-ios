@@ -4,8 +4,8 @@ import UIKit
 import CoreModels
 import CoreNavigation
 
-/// Every country, and unlocking them: the Shop behind the Explore header's
-/// storefront and the wallet sheet's Shop item.
+/// Every country, and unlocking them: the Shop behind the Rewards sheet's
+/// Shop tile (#1494) and the stake menu's empty-pack row.
 ///
 /// ```
 ///  ┌──────────────────────────────────────┐
@@ -79,7 +79,7 @@ public final class CountryShopViewController: UIViewController {
         /// sheet is up, so the eye lands on it.
         case boosts
     }
-    /// Nil: opened to browse (the Explore header, the points sheet).
+    /// Nil: opened to browse (the Rewards sheet's Shop tile).
     public private(set) var focus: Focus?
     /// The focus is shown once, on the first appearance.
     private var hasShownFocus = false

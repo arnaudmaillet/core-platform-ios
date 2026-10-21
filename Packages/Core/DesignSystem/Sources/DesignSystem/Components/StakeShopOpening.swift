@@ -5,8 +5,8 @@ import UIKit
 ///
 /// Adopted by the shell's tab bar controller, which owns the one way to build
 /// the Shop (`AppContainer.makeStakeShopScreen`, the same
-/// `CountryShopViewController.storefront` the Explore header and the points
-/// sheet push). It is found UP THE RESPONDER CHAIN from the control the menu was
+/// `CountryShopViewController.storefront` the Rewards sheet's Shop tile
+/// pushes). It is found UP THE RESPONDER CHAIN from the control the menu was
 /// raised on (`StakeShop.openAction(from:)`), so the rail, the composer and
 /// every card reach it without a closure threaded through each screen that
 /// draws them: a view's chain climbs its view controllers, then each

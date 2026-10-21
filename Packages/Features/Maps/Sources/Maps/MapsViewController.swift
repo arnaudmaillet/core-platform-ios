@@ -820,13 +820,10 @@ final class MapsViewController: UIViewController {
         #endif
     }
 
-    /// Whether this map sells countries — the Explore header shows the shop's
-    /// door only then.
-    var sellsCountries: Bool { countryAccess != nil }
-
-    /// The Shop, PUSHED over the map — opened by the Explore header's
-    /// storefront (`MapCountryShopHosting`). A row takes you to its country:
-    /// back to the map, then there.
+    /// The Shop, PUSHED over the map — the QA hooks' way in since the
+    /// Explore header lost its storefront (#1494): the Rewards sheet's Shop
+    /// tile and the stake menu are the Shop's doors. A row takes you to its
+    /// country: back to the map, then there.
     func presentCountryShop() {
         guard let countryAccess, presentedViewController == nil, let navigationController,
               navigationController.topViewController === self, transitionCoordinator == nil else { return }
@@ -3639,8 +3636,6 @@ private final class MapNotificationBag: @unchecked Sendable {
     func add(_ token: any NSObjectProtocol) { tokens.append(token) }
     deinit { tokens.forEach(NotificationCenter.default.removeObserver) }
 }
-
-extension MapsViewController: MapCountryShopHosting {}
 
 #if DEBUG
 // MARK: - QA wrappers
