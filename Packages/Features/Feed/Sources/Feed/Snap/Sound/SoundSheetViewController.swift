@@ -2067,9 +2067,9 @@ extension SoundSheetViewController: UICollectionViewDelegate {
 
     /// ⚠️ THE SOUND SHEET'S TILES LIFT TOO (the owner, 2026-10-17: every
     /// tile). The lift is the grid's (`ForYouPostPreviewViewController`, the
-    /// clip playing inside it); the menu is Open alone — the sheet has no
-    /// road to a profile and no author rows of its own, and it is a sheet
-    /// over the post, where the post itself carries them.
+    /// clip playing inside it); the menu is the post's own rows (#1498 §3),
+    /// with no author rows — the sheet has no road to a profile, and it is a
+    /// sheet over the post, where the post itself carries them.
     func collectionView(
         _ collectionView: UICollectionView,
         contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
@@ -2088,8 +2088,15 @@ extension SoundSheetViewController: UICollectionViewDelegate {
             previewProvider: {
                 ForYouPostPreviewViewController(post: post, imagePipeline: pipeline, width: width, videoPlayback: pool)
             },
-            actionProvider: { [weak self] _ in
-                UIMenu(children: [RowGeometry.openAction { [weak self] in self?.openFromPreview(id, kind: kind) }])
+            actionProvider: { [weak self, weak collectionView] _ in
+                // The post's own rows (#1498 §3). No author submenu: the sheet
+                // has no road to a profile, and it sits over the post, which
+                // carries them; no Comment or Like, which the post's own
+                // screen holds. A tap on the preview opens the post.
+                let anchor: UIView? = collectionView?.cellForItem(at: indexPath) ?? self?.view
+                guard let anchor else { return nil }
+                let rows = PostMenuRows(bookmarks: PostBookmarkStore.shared).rows(for: post, anchor: anchor)
+                return PostCardMenu.menu(for: rows, author: nil)
             }
         )
     }
