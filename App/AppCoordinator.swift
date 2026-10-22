@@ -657,7 +657,15 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
 
     private func setRoot(_ viewController: UIViewController) {
         guard window.rootViewController != nil, !(window.rootViewController is LaunchViewController) else {
-            window.rootViewController = viewController
+            // Laid out at once, as the dissolve below does: a launch route
+            // (`applyLaunchArguments`, a tapped notification) pushes right
+            // after this, and a shell still at 0×0 hands the pushed screen a
+            // zero width — a profile's header never converged there, and the
+            // app hung on the launch spinner (#1633).
+            UIView.performWithoutAnimation {
+                window.rootViewController = viewController
+                window.layoutIfNeeded()
+            }
             return
         }
         // ⚠️ THE SWAP RUNS INSIDE `performWithoutAnimation`, for the reason
