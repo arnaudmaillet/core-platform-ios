@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import EmoteKit
 import MediaCore
@@ -405,8 +406,24 @@ final class PreviewLaunch {
     /// How long the capture answers: the flight's departure asks within a
     /// frame or two of the commit; a close, much later, must land on the tile.
     static let lifetime: CFTimeInterval = 1
+    /// The lift's rounding, on a continuous curve: UIKit draws it, and names
+    /// it nowhere. Measured 2026-10-22 on iOS 27 (a text card's lift at 3x):
+    /// the edge goes straight ~33 pt from the corner, 1.53 × 22.
+    static let cornerRadius: CGFloat = 22
+
+    /// The last lift committed, for a surface that opens the post without
+    /// being handed it — a window opening out of it (`TextRevealInstaller`).
+    private static weak var latest: PreviewLaunch?
+
+    /// The lift `postID` was committed from, while its capture answers.
+    static func pending(for postID: PostID, now: CFTimeInterval = CACurrentMediaTime()) -> PreviewLaunch? {
+        guard let latest, latest.postID == postID, now < latest.expiry else { return nil }
+        return latest
+    }
 
     let postID: PostID
+    /// Whether the post is words, which a window shows in place.
+    private let isText: Bool
     private let frameInWindow: CGRect
     private weak var window: UIWindow?
     private weak var lift: UIView?
@@ -421,6 +438,7 @@ final class PreviewLaunch {
         guard let lift = preview.viewIfLoaded, let window = lift.window,
               let drawing = Self.drawing(of: lift, in: window) else { return nil }
         postID = preview.post.id
+        isText = preview.post.kind == .text
         frameInWindow = drawing.convert(drawing.bounds, to: window)
         self.window = window
         self.lift = lift
@@ -432,11 +450,13 @@ final class PreviewLaunch {
             still.isUserInteractionEnabled = false
             window.addSubview(still)
             hold = still
-            // A post that never opens must not leave the still behind.
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.lifetime) { [weak still] in
-                still?.removeFromSuperview()
+            // A post that never opens must not leave the still behind — one
+            // a window opened from (`takeStill`) is its own.
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.lifetime) { [weak still, weak window] in
+                if let still, still.superview === window { still.removeFromSuperview() }
             }
         }
+        Self.latest = self
     }
 
     /// Where the lift was, in `space` — nil once the capture has expired.
@@ -463,6 +483,28 @@ final class PreviewLaunch {
             view: blank, parameters: parameters,
             target: UIPreviewTarget(container: window, center: CGPoint(x: frameInWindow.midX, y: frameInWindow.midY))
         )
+    }
+
+    /// The window a post opens through, leaving from this lift: its frame,
+    /// its corner, and its still as what the window starts as — handed over,
+    /// so it goes on holding the lift's place inside the opening.
+    func revealLaunch(now: CFTimeInterval = CACurrentMediaTime()) -> RevealLaunch? {
+        guard now < expiry, window != nil else { return nil }
+        return RevealLaunch(
+            frame: { [weak self] space in self?.frame(in: space) },
+            cornerRadius: Self.cornerRadius,
+            pageFit: isText ? .clipped : .covering,
+            makeStandIn: { [weak self] in self?.takeStill() }
+        )
+    }
+
+    /// The still, taken out of the window for the window opening from it.
+    private func takeStill() -> UIView? {
+        guard let hold, let window else { return nil }
+        self.hold = nil
+        // The page's own ground (`SnapFeedViewController.resolvedGround`).
+        let ground: UIColor = isText ? .systemBackground : .black
+        return LiftStandInView(still: hold, at: frameInWindow, in: window, ground: ground)
     }
 
     /// Hides the lift wherever it is drawn: the card flying out of it is the
@@ -497,4 +539,53 @@ final class PreviewLaunch {
         }
         return nil
     }
+}
+
+/// The lift's still as a window's stand-in (#1543): it stays WHERE THE LIFT
+/// WAS while the window grows around it on the page's ground, clipped to
+/// the window's corner, and the page fades in over it.
+///
+/// ⚠️ On the page's ground, not clear: a clear window showed the list
+/// through it for ~0.4 s, the lift sitting still on top, until the page's
+/// fade-in — nothing seemed to open (filmed 2026-10-22).
+///
+/// ⚠️ Never the still itself: a reveal sets its stand-in's frame to the
+/// window's, and a snapshot stretches to its frame — the lift's words
+/// swelled with the window (filmed 2026-10-22).
+@MainActor
+final class LiftStandInView: UIView, RevealStandInShaping {
+    private let still: UIView
+    private let stillFrame: CGRect
+    private weak var space: UIWindow?
+
+    init(still: UIView, at frame: CGRect, in window: UIWindow, ground: UIColor) {
+        self.still = still
+        stillFrame = frame
+        space = window
+        super.init(frame: frame)
+        backgroundColor = ground
+        clipsToBounds = true
+        layer.cornerCurve = .continuous
+        isUserInteractionEnabled = false
+        still.removeFromSuperview()
+        addSubview(still)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // In the window's space, where the lift was; this view's own origin
+        // when it is not in one yet.
+        guard let space, window != nil else {
+            still.frame = CGRect(origin: .zero, size: stillFrame.size)
+            return
+        }
+        still.frame = convert(stillFrame, from: space)
+    }
+
+    func setCornerRadius(_ radius: CGFloat) { layer.cornerRadius = radius }
+
+    func setContentOpacity(_ alpha: CGFloat) { still.alpha = alpha }
 }

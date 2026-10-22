@@ -3822,23 +3822,22 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     ) {
         guard let raw = configuration.identifier as? String else { return }
         // ⚠️ FROM THE LIFT, NOT BACK THROUGH THE TILE (#1543, the owner
-        // 2026-10-21, Instagram's way): a media post's flight takes off from
-        // the preview the viewer tapped — the lift, captured now while UIKit
-        // still draws it (`PreviewLaunch`), is the hero's origin
-        // (`hero(for:in:)`), and the post opens now, rather than after UIKit
-        // has put it back into its tile. Its clip plays on: the lift is
-        // already a surface of the tile's own player
-        // (`ForYouPostPreviewViewController`).
+        // 2026-10-21, Instagram's way): the post opens out of the preview the
+        // viewer tapped — the lift, captured now while UIKit still draws it
+        // (`PreviewLaunch`) — and opens now, rather than after UIKit has put
+        // it back into its tile. A media post's flight leaves from it
+        // (`hero(for:in:)`), its clip playing on: the lift is already a
+        // surface of the tile's own player. Words open through their window,
+        // which leaves from it too (`TextRevealInstaller`).
         if let preview = animator.previewViewController as? ForYouPostPreviewViewController,
-           preview.post.id.rawValue == raw, heroAppearance(for: preview.post.id) != nil,
-           let launch = PreviewLaunch(preview) {
+           preview.post.id.rawValue == raw, let launch = PreviewLaunch(preview) {
             previewLaunch = launch
             animator.preferredCommitStyle = .dismiss
             DispatchQueue.main.async { [weak self] in self?.openPost(rawID: raw) }
             return
         }
-        // A text card (no hero: it opens through its window) and any other
-        // lift: back into its card, then the tap's own open.
+        // A lift UIKit's drawing of could not be found: back into its card,
+        // then the tap's own open.
         animator.preferredCommitStyle = .dismiss
         animator.addCompletion { [weak self] in
             DispatchQueue.main.async { self?.openPost(rawID: raw) }

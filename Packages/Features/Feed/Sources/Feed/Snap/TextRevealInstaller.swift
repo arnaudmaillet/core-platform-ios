@@ -219,7 +219,14 @@ enum TextRevealInstaller {
             // launch argument says: asking anyway slid the page 448pt sideways
             // under a 44pt disc that was covering it.
             matchesAnchor: matchesAnchor && origin.alignsPageToSource,
-            pageFit: origin.pageFit
+            pageFit: origin.pageFit,
+            // ⚠️ OUT OF THE LIFT the viewer tapped, when they long-pressed
+            // (#1543): every surface's window funnels through here, so the
+            // lift is looked up rather than handed down by each of them.
+            launch: { [weak feed] in
+                guard let id = (feed as? SnapFeedViewController)?.activePostID else { return nil }
+                return PreviewLaunch.pending(for: id)?.revealLaunch()
+            }
         )
     }
 }
