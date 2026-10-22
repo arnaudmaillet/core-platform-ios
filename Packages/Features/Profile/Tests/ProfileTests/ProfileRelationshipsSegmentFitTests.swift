@@ -232,7 +232,9 @@ struct ProfileRelationshipsTabSyncTests {
 
         let all = lists()
         #expect(all.count == 3, "Followers, Following and Friends")
-        #expect(all.allSatisfy { $0.topEdgeEffect.isHidden })
+        // A titled header (#1591): each list wears the soft blur over the
+        // bar; the pager spanning them stays clear, or two bands would stack.
+        #expect(all.allSatisfy { !$0.topEdgeEffect.isHidden && $0.topEdgeEffect.style == .soft })
         #expect(paging.topEdgeEffect.isHidden)
     }
 }

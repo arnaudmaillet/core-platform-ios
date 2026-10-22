@@ -572,8 +572,10 @@ final class PostDetailViewController: UIViewController {
         let isCommentList = mode == .commentsOnly
         collectionView.alwaysBounceVertical = true
         collectionView.bounces = true
-        // No effect under the bar: the rows run up under the pills untouched — see
-        // `prefersClearTopEdge`.
+        // ⚠️ CLEAR, THE ONE TITLED EXCEPTION (#1591): this list is also the
+        // snap feed's EMBEDDED comment stream (`commentsContentVC`), where a
+        // soft blur would draw a band over the panel. Its title only shows
+        // when pushed alone, which #1577 removes.
         collectionView.prefersClearTopEdge()
         collectionView.keyboardDismissMode = .interactive
         // A bare tap on the stream retires the keyboard (the drag path

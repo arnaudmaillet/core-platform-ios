@@ -652,12 +652,15 @@ struct SearchFilterTrayTests {
         #expect(list.topEdgeEffect.isHidden)
     }
 
-    @Test func theFilterSheetRunsUnderItsBarWithNoSystemEffect() throws {
+    /// The filter sheet is TITLED ("Filters"): the soft blur covers its bar
+    /// (#1591, `applyTopEdge(for:)`).
+    @Test func theTitledFilterSheetWearsTheSoftBlur() throws {
         let host = Host()
         let sheet = SearchFilterSheetViewController(groups: host.filterGroups) { _, _ in }
         sheet.loadViewIfNeeded()
         let groups = try #require(sheet.view.subviews.compactMap { $0 as? UIScrollView }.first)
-        #expect(groups.topEdgeEffect.isHidden)
+        #expect(!groups.topEdgeEffect.isHidden)
+        #expect(groups.topEdgeEffect.style == .soft)
     }
 
     @Test func cancellingAfterNoChangeChangesNothing() async {

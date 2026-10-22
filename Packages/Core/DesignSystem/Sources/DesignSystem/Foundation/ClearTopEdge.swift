@@ -90,4 +90,34 @@ public extension UIScrollView {
         topEdgeEffect.isHidden = false
         topEdgeEffect.style = .soft
     }
+
+    /// ⚠️ THE ONE RULE FOR A SCREEN'S TOP EDGE (#1591, the owner 2026-10-22):
+    /// **a header with a TITLE always wears the soft blur over its bar**, the
+    /// way Notifications and Settings do — rows read cleanly as they pass
+    /// under the title. An untitled header (For You, the inbox, Explore, a
+    /// conversation, Search) stays clear, as decided on 2026-09-22.
+    ///
+    /// It supersedes the exception list above for titled screens: each
+    /// screen states what its header IS, and the edge follows. A screen whose
+    /// title is set in one view controller and whose list lives in another
+    /// (Relationships: the title on the pager's host, the rows in each page)
+    /// states it where the list is configured.
+    ///
+    /// `TitledHeaderTopEdgeGuardTests` fails on a file that sets a title and
+    /// clears its top edge without a reason on its list.
+    func applyTopEdge(for header: HeaderTopEdge) {
+        switch header {
+        case .titled: prefersSoftTopEdge()
+        case .untitled: prefersClearTopEdge()
+        }
+    }
+}
+
+/// What a screen's header shows — what decides its top edge (#1591).
+public enum HeaderTopEdge: Sendable {
+    /// A title in the bar: the soft blur covers the bar.
+    case titled
+    /// No title (pills only, or a root whose content is its own header):
+    /// clear.
+    case untitled
 }

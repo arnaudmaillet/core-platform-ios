@@ -70,9 +70,9 @@ final class TextPostDraftsViewController: UIViewController {
             frame: .zero, collectionViewLayout: UICollectionViewCompositionalLayout.list(using: configuration)
         )
         collectionView.backgroundColor = .systemBackground
-        // No effect under the bar: the rows run up under the pills untouched — see
-        // `prefersClearTopEdge`.
-        collectionView.prefersClearTopEdge()
+        // A titled header: the soft blur covers the bar (#1591) — see
+        // `applyTopEdge(for:)`.
+        collectionView.applyTopEdge(for: .titled)
         collectionView.delegate = self
         collectionView.pin(to: view)
 
