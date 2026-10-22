@@ -678,6 +678,21 @@ final class MapsViewController: UIViewController {
             }
             return
         }
+        // ⚠️ NOT UNDER A FINGER (#1594): a grab of the screen over the map
+        // brings it back on the release that commits — see `MapPreviewResume`.
+        let coordinator = transitionCoordinator
+        MapPreviewResume.whenSettled(
+            isInteractive: coordinator?.isInteractive ?? false,
+            notifyWhenInteractionEnds: { ended in
+                coordinator?.notifyWhenInteractionChanges { context in ended(context.isCancelled) }
+            },
+            resume: { [weak self] in self?.resumePreviews() }
+        )
+    }
+
+    /// The map's previews back on: the surface shown, playback refreshed, the
+    /// idle preroll armed.
+    private func resumePreviews() {
         videoCoordinator.setSurfaceVisible(true)
         idlePrerollRested = false
         refreshVideoPlayback()
