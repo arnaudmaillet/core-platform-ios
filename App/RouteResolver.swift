@@ -113,6 +113,8 @@ final class RouteResolver: Router {
             return
         }
         repeatProfiles.stoppedWaiting(destination)
+        // A route at cold launch arrives before the window's first layout.
+        navigation.layOutWindowIfUnsized()
         // The overwhelmingly common case takes the plain path, untouched. This
         // app drives pushes through custom navigation delegates — zoom
         // transitions, the pop-gesture enabler — and `setViewControllers` is a

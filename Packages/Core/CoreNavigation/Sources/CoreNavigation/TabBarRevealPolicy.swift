@@ -437,6 +437,26 @@ public extension UINavigationController {
 
 @MainActor
 public extension UINavigationController {
+    /// Gives the stack its size before a push, when its window has not laid
+    /// it out yet.
+    ///
+    /// ⚠️ A ROUTE AT COLD LAUNCH PUSHES INTO A 0×0 STACK (#1633). The shell is
+    /// installed as the window's root and the launch route (a tapped
+    /// notification, a universal link, `-open-profile`) fires before the
+    /// window's first layout pass: the tab bar controller, the stack and the
+    /// pushed screen all stood at zero size. A profile's header has no
+    /// solution at zero width — its height flipped between two answers every
+    /// pass, and the push, inside the tab bar's hide animation, never left
+    /// layout: the app sat on the launch spinner for good. Laying out the
+    /// window first gives every screen its real width before it is pushed.
+    func layOutWindowIfUnsized() {
+        guard view.bounds.isEmpty else { return }
+        view.window?.layoutIfNeeded()
+    }
+}
+
+@MainActor
+public extension UINavigationController {
     /// Whether a push or pop of THIS stack is running — not merely any
     /// transition `transitionCoordinator` reports.
     ///
