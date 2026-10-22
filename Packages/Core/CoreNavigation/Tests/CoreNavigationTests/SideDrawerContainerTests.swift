@@ -164,6 +164,25 @@ struct SideDrawerContainerTests {
         }
     }
 
+    /// ⚠️ A LAYOUT PASS DURING A SETTLE LEAVES THE BLUR ALONE (#1570, the
+    /// owner's recording): a close sets `progress` to 0 before its spring, and
+    /// a layout pass mid-close used to drop the blur to none for a frame.
+    @Test func aLayoutPassDuringACloseKeepsTheBlur() {
+        hosting { container, _, _ in
+            container.open(animated: false)
+            #expect(container.mainScreenBlurStrength == 1)
+            container.close(animated: true)
+            container.view.setNeedsLayout()
+            container.view.layoutIfNeeded()
+            #expect(container.mainScreenBlurStrength > 0.5, "the blur dropped out mid-close")
+        }
+    }
+
+    /// The lightest native material (#1570).
+    @Test func theBlurIsTheLightestMaterial() {
+        #expect(SideDrawerContainerViewController.blurStyle == .systemUltraThinMaterial)
+    }
+
     /// The strength is the reveal, clamped: full past open (the rubber band),
     /// none at all with Reduce Transparency.
     @Test func theBlurStaysFullPastOpenAndOffWithReduceTransparency() {

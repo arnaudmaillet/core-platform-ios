@@ -182,7 +182,11 @@ public final class SideDrawerContainerViewController: UIViewController {
     /// with the drawer open. Between `mainHost` and `dimView`, moved with
     /// them, so it blurs the LIVE main screen (video, map, glass bars) and the
     /// dim keeps the tap and VoiceOver's close on top.
-    private let blurView = ProgressBlurView(style: .systemThinMaterial)
+    ///
+    /// ⚠️ THE LIGHTEST NATIVE MATERIAL (#1570, the owner 2026-10-22): the
+    /// thin material read far too strong over the main screen.
+    static let blurStyle: UIBlurEffect.Style = .systemUltraThinMaterial
+    private let blurView = ProgressBlurView(style: blurStyle)
     /// Drives the blur through a settle, frame by frame from the main
     /// screen's presentation: a blur's strength does not animate inside the
     /// spring's `UIView.animate`.
@@ -269,7 +273,12 @@ public final class SideDrawerContainerViewController: UIViewController {
             blurView.layer.cornerRadius = radius
         }
         // A width change (rotation, a resize) moves the drawer's edge.
-        applyProgress(progress)
+        // ⚠️ NOT THE BLUR DURING A SETTLE (#1570, the owner's recording at
+        // 2.05 s): a settle sets `progress` to its TARGET before animating,
+        // and a layout pass in the middle of a close (the status bar flips
+        // at half way) set the blur to that target — none — for a frame,
+        // before the next link tick put it back. The link drives it then.
+        applyProgress(progress, drivesBlur: blurLink == nil)
     }
 
     // The children's appearance is forwarded by hand: the main screen's
