@@ -57,6 +57,9 @@ public final class NotificationsViewModel {
     private let router: (any Router)?
     private let pageSize: Int32
     private let now: @Sendable () -> Date
+    /// The viewer's calendar, asked at every build: a time-zone change
+    /// re-sections on the next one (#1571).
+    private let calendar: @Sendable () -> Calendar
 
     private var items: [NotificationItem] = []
     private var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
@@ -73,7 +76,8 @@ public final class NotificationsViewModel {
     /// The last page failed: it waits for "Try Again".
     private var pageFailed = false
     /// "Show more" was pressed this visit.
-    private var isNewExpanded = false
+    /// The sections whose "Show more" the viewer pressed this visit.
+    private var expandedSections: Set<NotificationSection.Kind> = []
     /// The drawer is open and settled.
     private var isRevealed = false
     /// The server has been told this visit's rows are read.
@@ -95,12 +99,14 @@ public final class NotificationsViewModel {
         repository: any NotificationsProviding,
         router: (any Router)? = nil,
         pageSize: Int32 = 20,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        calendar: @escaping @Sendable () -> Calendar = { Calendar.current }
     ) {
         self.repository = repository
         self.router = router
         self.pageSize = pageSize
         self.now = now
+        self.calendar = calendar
     }
 
     // MARK: - Inputs
@@ -152,7 +158,7 @@ public final class NotificationsViewModel {
         items = []
         nextPageToken = nil
         pageFailed = false
-        isNewExpanded = false
+        expandedSections = []
         hasMarkedThisVisit = false
         showsDeviceRows = false
         updatePageFooter()
@@ -179,8 +185,8 @@ public final class NotificationsViewModel {
     /// The list has gone. What was new this visit is old from now on.
     public func didConceal() {
         isRevealed = false
-        let wasExpanded = isNewExpanded
-        isNewExpanded = false
+        let wasExpanded = !expandedSections.isEmpty
+        expandedSections = []
         if hasMarkedThisVisit {
             hasMarkedThisVisit = false
             items = items.map { $0.markedRead() }
@@ -230,10 +236,9 @@ public final class NotificationsViewModel {
         loadPages(after: token)
     }
 
-    /// "Show more": the rest of the new rows, in place.
-    public func showMore() {
-        guard !isNewExpanded else { return }
-        isNewExpanded = true
+    /// "Show more": the rest of `kind`'s rows, in place.
+    public func showMore(in kind: NotificationSection.Kind) {
+        guard expandedSections.insert(kind).inserted else { return }
         emitContent()
     }
 
@@ -357,7 +362,7 @@ public final class NotificationsViewModel {
     private func emitContent() {
         guard !items.isEmpty else { return }
         phase = .content(NotificationSectionBuilder.sections(
-            from: items, newExpanded: isNewExpanded, now: now()
+            from: items, expanded: expandedSections, now: now(), calendar: calendar()
         ))
     }
 }

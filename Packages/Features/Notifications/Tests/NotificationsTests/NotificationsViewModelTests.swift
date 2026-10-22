@@ -51,6 +51,21 @@ private func item(
     )
 }
 
+/// The clock and calendar every test reads: `item`'s dates are minutes
+/// before 03:46 UTC on 2 January 1970.
+private let testNow = Date(timeIntervalSince1970: 100_000)
+private let testCalendar: Calendar = {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "UTC")!
+    return calendar
+}()
+
+/// A view model on the test clock and calendar.
+@MainActor
+private func makeViewModel(_ provider: StubProvider) -> NotificationsViewModel {
+    NotificationsViewModel(repository: provider, now: { testNow }, calendar: { testCalendar })
+}
+
 @MainActor
 struct NotificationsViewModelTests {
     private func settle() async {
@@ -62,9 +77,10 @@ struct NotificationsViewModelTests {
         phase?.content ?? []
     }
 
-    @Test func loadsIntoNewAndEarlier() async {
-        let viewModel = NotificationsViewModel(repository: StubProvider([
-            item(id: "n1", minutesAgo: 1), item(id: "n2", read: true, minutesAgo: 2)
+    @Test func loadsIntoSectionsByDay() async {
+        let viewModel = makeViewModel(StubProvider([
+            item(id: "n1", minutesAgo: 1), item(id: "n2", read: true, minutesAgo: 2),
+            item(id: "y1", minutesAgo: 5 * 60),
         ]))
         var last: NotificationsViewModel.Phase?
         viewModel.onPhaseChange = { last = $0 }
@@ -73,9 +89,9 @@ struct NotificationsViewModelTests {
         await settle()
 
         let loaded = sections(last)
-        #expect(loaded.map(\.kind) == [.new, .earlier])
-        #expect(loaded[0].rows.map(\.id) == ["n1"])
-        #expect(loaded[1].rows.map(\.id) == ["n2"])
+        #expect(loaded.map(\.kind) == [.new, .yesterday])
+        #expect(loaded[0].rows.map(\.id) == ["n1", "n2"], "read or not, today's rows are New")
+        #expect(loaded[1].rows.map(\.id) == ["y1"])
     }
 
     @Test func emptyWhenNoNotifications() async {
@@ -150,8 +166,8 @@ struct NotificationsViewModelTests {
     }
 
     @Test func showMoreRevealsTheRestOfTheNewRows() async {
-        let items = (0..<10).map { item(id: "n\($0)", minutesAgo: Double($0)) }
-        let viewModel = NotificationsViewModel(repository: StubProvider(items))
+        let items = (0..<10).map { item(id: "n\($0)", minutesAgo: Double($0)) } + [item(id: "y", minutesAgo: 5 * 60)]
+        let viewModel = makeViewModel(StubProvider(items))
         var last: NotificationsViewModel.Phase?
         viewModel.onPhaseChange = { last = $0 }
         viewModel.viewDidLoad()
@@ -160,16 +176,16 @@ struct NotificationsViewModelTests {
         #expect(sections(last).first?.rows.count == 6)
         #expect(sections(last).first?.hiddenCount == 4)
 
-        viewModel.showMore()
+        viewModel.showMore(in: .new)
         #expect(sections(last).first?.rows.count == 10)
         #expect(sections(last).first?.hiddenCount == 0)
     }
 
-    /// Looking at the list tells the server — once — but the rows stay in
-    /// "New" until the drawer closes, so nothing moves under the viewer.
-    @Test func revealMarksSeenAndConcealMovesTheRowsToEarlier() async {
+    /// Looking at the list tells the server — once — and the rows stay in
+    /// "New", on every visit (#1571: closing and reopening emptied it).
+    @Test func newSurvivesACloseAndAReopen() async {
         let provider = StubProvider([item(id: "n1"), item(id: "n2", minutesAgo: 1)])
-        let viewModel = NotificationsViewModel(repository: provider)
+        let viewModel = makeViewModel(provider)
         var last: NotificationsViewModel.Phase?
         viewModel.onPhaseChange = { last = $0 }
         viewModel.viewDidLoad()
@@ -178,14 +194,20 @@ struct NotificationsViewModelTests {
         viewModel.didReveal()
         await settle()
         #expect(await provider.markAllReadCalls == 1)
-        #expect(sections(last).map(\.kind) == [.new], "still new while the drawer is open")
+        #expect(sections(last).map(\.kind) == [.new])
 
         viewModel.didReveal()
         await settle()
         #expect(await provider.markAllReadCalls == 1, "once per visit")
 
         viewModel.didConceal()
-        #expect(sections(last).map(\.kind) == [.earlier])
+        #expect(sections(last).map(\.kind) == [.new], "New emptied on close")
+        viewModel.willReveal()
+        await settle()
+        viewModel.didReveal()
+        await settle()
+        #expect(sections(last).map(\.kind) == [.new], "New emptied on reopen")
+        #expect(sections(last).first?.rows.map(\.id) == ["n1", "n2"])
     }
 
     /// A drawer opened over a skeleton marks nothing until there is something
@@ -228,13 +250,13 @@ struct NotificationsViewModelTests {
     }
 
     @Test func concealFoldsShowMoreBack() async {
-        let items = (0..<10).map { item(id: "n\($0)", minutesAgo: Double($0)) }
-        let viewModel = NotificationsViewModel(repository: StubProvider(items))
+        let items = (0..<10).map { item(id: "n\($0)", minutesAgo: Double($0)) } + [item(id: "y", minutesAgo: 5 * 60)]
+        let viewModel = makeViewModel(StubProvider(items))
         var last: NotificationsViewModel.Phase?
         viewModel.onPhaseChange = { last = $0 }
         viewModel.viewDidLoad()
         await settle()
-        viewModel.showMore()
+        viewModel.showMore(in: .new)
         viewModel.didConceal()
         #expect(sections(last).first?.hiddenCount == 4)
     }

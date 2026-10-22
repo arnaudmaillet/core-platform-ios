@@ -96,6 +96,12 @@ struct NotificationsLocalCacheTests {
             guard case .content(let sections) = phase else { return [] }
             return sections.flatMap { $0.rows.map(\.id) }
         }
+        /// Every row loaded: shown, or held behind a section's "Show more"
+        /// (#1571 — every section collapses, not only "New").
+        var count: Int {
+            guard case .content(let sections) = phase else { return 0 }
+            return sections.reduce(0) { $0 + $1.rows.count + $1.hiddenCount }
+        }
     }
 
     private func drawer(_ network: PagedDrawer, _ cache: NotificationsLocalCache) -> (NotificationsViewModel, Shown) {
@@ -123,7 +129,7 @@ struct NotificationsLocalCacheTests {
         // (`reload`, `loadPages`), so its rows on screen mean its write is
         // queued — and `waitForPendingWrites` waits for it.
         let read = min(pages * 20, network.total)
-        #expect(await settle { shown.ids.count == read })
+        #expect(await settle { shown.count == read })
         cache.waitForPendingWrites()
     }
 
@@ -140,15 +146,14 @@ struct NotificationsLocalCacheTests {
             Issue.record("expected the stored rows, got \(shown.phase)")
             return
         }
-        let rows = sections.flatMap(\.rows)
-        #expect(rows.count == 20)
+        #expect(sections.reduce(0) { $0 + $1.rows.count + $1.hiddenCount } == 20)
         #expect(viewModel.pageFooter == .loading, "the stored cursor says there is more")
         // Offline: the failed load leaves them.
         #expect(await settle { await network.asks.count >= 2 })
         // "Nothing more happens": the failed load leaves the stored rows, so
         // there is no landing to wait for, only time for one to be wrong.
         try? await Task.sleep(for: .milliseconds(100))
-        #expect(shown.ids.count == 20)
+        #expect(shown.count == 20)
     }
 
     @Test func aStoredRowComesBackWhole() async throws {
@@ -173,7 +178,7 @@ struct NotificationsLocalCacheTests {
         let (viewModel, shown) = drawer(network, cache)
         await network.goOffline(true)
         viewModel.viewDidLoad()
-        #expect(shown.ids.count >= 1)
+        #expect(shown.count >= 1)
         #expect(await settle { await network.asks.count >= 7 })
         await network.goOffline(false)
         viewModel.loadNextPageIfNeeded()
@@ -209,7 +214,7 @@ struct NotificationsLocalCacheTests {
         let shown = Shown()
         viewModel.onPhaseChange = { shown.phase = $0 }
         viewModel.viewDidLoad()
-        #expect(shown.ids.count == 20)
+        #expect(shown.count == 20)
         await network.goOffline(true)
         center.post(name: .viewerDidChange, object: nil)
         #expect(shown.ids.isEmpty)
