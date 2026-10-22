@@ -1668,7 +1668,10 @@ final class AppContainer {
         router: routeResolver,
         imagePipeline: imagePipeline,
         // The drawer's last 100 notifications (#897).
-        localStore: localStore
+        localStore: localStore,
+        // Pauses past 8 h and "until I turn it back on" (#1575): the mock
+        // accepts them; the fleet will once backend #971 lands.
+        allowsLongPushPauses: environment == .mock
     )
 
     // MARK: - Chat

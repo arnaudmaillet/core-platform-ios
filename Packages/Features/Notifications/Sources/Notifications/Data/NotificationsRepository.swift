@@ -162,11 +162,18 @@ public protocol NotificationsProviding: Sendable {
     func markRead(_ items: [NotificationItem]) async throws
     /// The viewer's unread notification count, for the tab badge.
     func unreadCount() async throws -> Int
+    /// Whether push is paused (#1575): the server's "pause all".
+    func pushPause() async throws -> PushPause
+    /// Pauses push (or resumes it, `.off`); returns what the server now holds.
+    func setPushPause(_ pause: PushPause) async throws -> PushPause
 }
 
 extension NotificationsProviding {
     /// A provider with no per-row read (a test's fake) marks nothing.
     public func markRead(_ items: [NotificationItem]) async throws {}
+    /// A provider with no preferences (a test's fake) never pauses.
+    public func pushPause() async throws -> PushPause { .off }
+    public func setPushPause(_ pause: PushPause) async throws -> PushPause { pause }
 
     /// The first page's rows.
     public func loadNotifications(limit: Int32) async throws -> [NotificationItem] {
@@ -262,6 +269,33 @@ public actor NotificationsRepository: NotificationsProviding, ViewerScoped {
         request.profileID = viewer.rawValue
         let response = await notificationClient.markAllRead(request: request, headers: [:])
         if let error = response.error {
+            throw NotificationsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+        }
+    }
+
+    public func pushPause() async throws -> PushPause {
+        let viewer = try await resolveViewerProfileID()
+        var request = Notification_V1_GetNotificationPreferencesRequest()
+        request.profileID = viewer.rawValue
+        let response = await notificationClient.getNotificationPreferences(request: request, headers: [:])
+        switch response.result {
+        case .success(let body): return PushPause(pausedUntilMs: body.pausedUntilMs, now: Date())
+        case .failure(let error):
+            throw NotificationsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+        }
+    }
+
+    /// Only the pause is sent: the update is partial on the server, so the
+    /// categories and quiet hours Settings holds are left as they are.
+    public func setPushPause(_ pause: PushPause) async throws -> PushPause {
+        let viewer = try await resolveViewerProfileID(forWrite: "setPushPause")
+        var request = Notification_V1_UpdateNotificationPreferencesRequest()
+        request.profileID = viewer.rawValue
+        request.pausedUntilMs = pause.pausedUntilMs
+        let response = await notificationClient.updateNotificationPreferences(request: request, headers: [:])
+        switch response.result {
+        case .success(let body): return PushPause(pausedUntilMs: body.pausedUntilMs, now: Date())
+        case .failure(let error):
             throw NotificationsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }

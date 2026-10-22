@@ -51,6 +51,7 @@ final class NotificationSettingsViewController: UIViewController {
 
     private let manager: any NotificationPreferencesManaging
     private let now: () -> Date
+    private var hasAppeared = false
     private var phase: Phase = .loading {
         didSet { applySnapshot() }
     }
@@ -103,6 +104,21 @@ final class NotificationSettingsViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         readSystemPermission()
+        // The pause is ONE preference with the Notifications screen's mute
+        // toolbar (#1575): a change made there shows here on the way back.
+        if hasAppeared { refreshQuietly() }
+        hasAppeared = true
+    }
+
+    /// Re-reads the preferences under what is shown: no skeleton, and a
+    /// failure keeps the rows (the next change or appearance tries again).
+    private func refreshQuietly() {
+        guard case .loaded = phase, !isSaving else { return }
+        Task { [weak self] in
+            guard let self, let next = try? await manager.notificationPreferences() else { return }
+            guard case .loaded = phase, !isSaving else { return }
+            phase = .loaded(next)
+        }
     }
 
     private func readSystemPermission() {
@@ -151,6 +167,20 @@ final class NotificationSettingsViewController: UIViewController {
         return formatter
     }()
 
+    /// Today: a time. Another day — the Notifications toolbar pauses for 24 h
+    /// or a week (#1575) — the day too. Years ahead: the toolbar's "until I
+    /// turn it back on", sent as a far deadline until backend #971 names one.
+    static func pauseFooter(until: Date?, now: Date, calendar: Calendar = .current) -> String {
+        guard let until else { return "Stops every push for a while, up to 8 hours." }
+        if until.timeIntervalSince(now) >= 10 * 365 * 24 * 3_600 {
+            return "Paused until you turn it back on."
+        }
+        if calendar.isDate(until, inSameDayAs: now) {
+            return "Paused until \(timeFormatter.string(from: until))."
+        }
+        return "Paused until \(until.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))."
+    }
+
     static func header(_ section: Section) -> String? {
         switch section {
         case .system, .pause: nil
@@ -166,10 +196,10 @@ final class NotificationSettingsViewController: UIViewController {
         case .system:
             return Self.systemFooter(permission: systemPermission)
         case .pause:
-            if case .loaded(let preferences) = phase, let until = preferences.pausedUntil {
-                return "Paused until \(Self.timeFormatter.string(from: until))."
+            if case .loaded(let preferences) = phase {
+                return Self.pauseFooter(until: preferences.pausedUntil, now: now())
             }
-            return "Stops every push for a while, up to 8 hours."
+            return Self.pauseFooter(until: nil, now: now())
         case .push:
             return "Applies to this profile."
         case .email:
