@@ -54,10 +54,11 @@ struct NotificationsMuteTests {
         let mute = model(server)
         await mute.load()
         let target = mute.mainTarget()
-        #expect(target == .until(clock.now.addingTimeInterval(8 * 3_600)))
+        #expect(target == .until(clock.now.addingTimeInterval(28_800)))
         _ = try await mute.set(target)
         #expect(await server.sent == [target])
-        #expect(target.pausedUntilMs == Int64(clock.now.timeIntervalSince1970 * 1_000) + 8 * 3_600_000)
+        let expectedMs: Int64 = Int64(clock.now.timeIntervalSince1970 * 1_000) + 28_800_000
+        #expect(target.pausedUntilMs == expectedMs)
         #expect(mute.pause.isPaused)
     }
 
@@ -72,12 +73,13 @@ struct NotificationsMuteTests {
         #expect(!mute.pause.isPaused)
     }
 
-    @Test(arguments: [
-        (NotificationsMuteModel.Choice.hour, 3_600.0),
-        (.eightHours, 8 * 3_600.0),
-        (.day, 24 * 3_600.0),
-        (.week, 7 * 24 * 3_600.0),
-    ])
+    /// ⚠️ Typed and pre-computed: Xcode 26 (CI) times out inferring a tuple
+    /// literal mixed with arithmetic in `@Test(arguments:)` (#999's family).
+    nonisolated static let choiceDurations: [(NotificationsMuteModel.Choice, TimeInterval)] = [
+        (.hour, 3_600), (.eightHours, 28_800), (.day, 86_400), (.week, 604_800),
+    ]
+
+    @Test(arguments: choiceDurations)
     func eachChoiceSendsItsDeadline(choice: NotificationsMuteModel.Choice, seconds: TimeInterval) async {
         let mute = model(PauseServer())
         await mute.load()
@@ -99,7 +101,7 @@ struct NotificationsMuteTests {
         let mute = model(PauseServer(.until(deadline)))
         await mute.load()
         #expect(mute.target(for: .hour) == .until(deadline.addingTimeInterval(3_600)))
-        #expect(mute.target(for: .week) == .until(deadline.addingTimeInterval(7 * 24 * 3_600)))
+        #expect(mute.target(for: .week) == .until(deadline.addingTimeInterval(604_800)))
         #expect(mute.choices.contains(.indefinite))
     }
 
@@ -108,7 +110,7 @@ struct NotificationsMuteTests {
     @Test func whileIndefiniteATimedChoiceSetsAnEnd() async {
         let mute = model(PauseServer(.indefinite))
         await mute.load()
-        #expect(mute.target(for: .day) == .until(clock.now.addingTimeInterval(24 * 3_600)))
+        #expect(mute.target(for: .day) == .until(clock.now.addingTimeInterval(86_400)))
         #expect(!mute.choices.contains(.indefinite))
     }
 
@@ -122,7 +124,7 @@ struct NotificationsMuteTests {
         await oneHourLeft.load()
         #expect(oneHourLeft.choices == [.hour], "1 h + 1 h fits, 1 h + 8 h does not")
 
-        let nearlyFull = model(PauseServer(.until(clock.now.addingTimeInterval(7.5 * 3_600))), long: false)
+        let nearlyFull = model(PauseServer(.until(clock.now.addingTimeInterval(27_000))), long: false)
         await nearlyFull.load()
         #expect(nearlyFull.choices.isEmpty)
         #expect(model(PauseServer()).choices == NotificationsMuteModel.Choice.allCases, "the mock offers them all")
@@ -130,7 +132,7 @@ struct NotificationsMuteTests {
 
     /// The time left counts down, and the pause ends on its own.
     @Test func theTimeLeftCountsDownAndThePauseEnds() async {
-        let deadline = clock.now.addingTimeInterval(7 * 3_600 + 42 * 60)
+        let deadline = clock.now.addingTimeInterval(27_720)
         let mute = model(PauseServer(.until(deadline)))
         await mute.load()
         #expect(NotificationsMuteModel.timeLeft(mute.pause, now: clock.now) == "7 h 42")
@@ -154,11 +156,11 @@ struct NotificationsMuteTests {
     @Test func theTimeLeftReads() {
         let now = clock.now
         let left = { (seconds: TimeInterval) in NotificationsMuteModel.timeLeft(.until(now.addingTimeInterval(seconds)), now: now) }
-        #expect(left(8 * 3_600) == "8 h")
-        #expect(left(3_600 + 5 * 60) == "1 h 05")
+        #expect(left(28_800) == "8 h")
+        #expect(left(3_900) == "1 h 05")
         #expect(left(30) == "1 min")
-        #expect(left(2 * 24 * 3_600 + 3 * 3_600) == "2 d 3 h")
-        #expect(left(7 * 24 * 3_600) == "7 d")
+        #expect(left(183_600) == "2 d 3 h")
+        #expect(left(604_800) == "7 d")
         #expect(NotificationsMuteModel.timeLeft(.indefinite, now: now) == "∞")
         #expect(NotificationsMuteModel.timeLeft(.off, now: now) == nil)
     }
@@ -197,7 +199,7 @@ struct NotificationsMuteTests {
         #expect(controller.debugMuteButtonTitle == "Mute")
         #expect(controller.debugMuteTimerText == nil, "not muted: the timer glyph")
 
-        let (mutedWindow, muted) = hosting(PauseServer(.until(clock.now.addingTimeInterval(7 * 3_600 + 42 * 60))))
+        let (mutedWindow, muted) = hosting(PauseServer(.until(clock.now.addingTimeInterval(27_720))))
         defer { mutedWindow.rootViewController = nil; mutedWindow.isHidden = true }
         await settle { muted.debugMuteButtonTitle == "Unmute" }
         #expect(muted.debugMuteButtonTitle == "Unmute")
