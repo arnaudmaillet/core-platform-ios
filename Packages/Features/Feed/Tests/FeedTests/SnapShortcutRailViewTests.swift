@@ -351,10 +351,11 @@ struct SnapShortcutRailViewTests {
         let ticker = try #require(chrome.subviews.compactMap { $0 as? SnapCommentTickerView }.first)
 
         // Trailing column: as wide as the ticker band is TALL (the square
-        // contract), clear of the edge strip (#1592: the strip, then the gap)
-        // off the margin (no window → zero safe area → margins guide == bounds).
+        // contract), Spacing.md off the margin, where it always stood (the
+        // owner, 2026-10-22) (no window → zero safe area → margins guide ==
+        // bounds).
         #expect(rail.frame.width == ticker.frame.height)
-        #expect(rail.frame.maxX == 390 - PagedScreenDismissalPolicy.trailingClearance)
+        #expect(rail.frame.maxX == 390 - Spacing.md)
         // Vertical span: under the nav bar down THROUGH the ticker band —
         // the wheel's bubbles overlap the band on the glass pedestal. The
         // top sits at base clearance PLUS the sub-step excess the chrome

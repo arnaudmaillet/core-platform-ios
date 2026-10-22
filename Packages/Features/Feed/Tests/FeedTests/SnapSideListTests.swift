@@ -822,8 +822,27 @@ struct SnapSwipeChainTests {
         #expect(Self.isPanel(Self.stage(feed, for: .leftward, at: center(of: feed))), "mid-screen no longer opens the list")
     }
 
+    /// ⚠️ THE TRAILING COLUMN IS THE EDGE (the owner, 2026-10-22): a leftward
+    /// drag born on the like bubble's leading edge — inboard of the strip —
+    /// pushes the author, as one born in the strip does.
+    @Test func aLeftwardDragFromTheTrailingColumnPushesTheAuthor() async throws {
+        let feed = try await tests.openableFeedForChain(["p1", "p2"], router: ProfileRouter())
+        let chrome = try #require(
+            feed.collectionView.visibleCells
+                .compactMap { $0.contentView.subviews.compactMap { $0 as? SnapChromeView }.first }.first,
+            "guard: a page's chrome"
+        )
+        let boost = chrome.debugBoostButton
+        // Its leading edge: inboard of the strip, still on the column.
+        let point = boost.convert(CGPoint(x: boost.bounds.minX + 3, y: boost.bounds.midY), to: feed.view)
+        #expect(!feed.isInTrailingEdge(point), "guard: the bubble's leading edge is inboard of the strip")
+        #expect(feed.isOnTrailingColumn(point))
+        let profile = try #require(Self.pushed(Self.stage(feed, for: .leftward, at: point)), "the column opened the list")
+        #expect(profile.title == "author-p1")
+    }
+
     /// The emote rail never takes an edge drag: wherever it is, the edge
-    /// strip is tested first, and the rail stands clear of it.
+    /// strip — and the column itself — is tested first.
     @Test func theEdgeWinsOverTheRail() async throws {
         let feed = try await tests.openableFeedForChain(["p1", "p2"], router: ProfileRouter())
         let height = feed.view.bounds.height
