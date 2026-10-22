@@ -8,8 +8,11 @@ import UIKit
 /// sections and says where the item goes.
 ///
 /// **The screen provides**: its sections (identifier, title, optional count)
-/// and their tops in its scroll view, at every scroll (`update`); and what a
-/// tap does (`onSelect`, handed the section's index).
+/// and their tops in its scroll view, at every scroll (`update`) — or, for a
+/// list that already works out its own pinned section because it names it
+/// to several hosts (`ForYouGridPage`, the inbox's pages), that section
+/// (`show(pinned:)`); and what a tap does (`onSelect`, handed the section's
+/// index).
 ///
 /// **The binding owns**: which section is pinned (the headers' own rule,
 /// `SectionHeaderPillButton.pinnedSection`); minting the item
@@ -19,15 +22,18 @@ import UIKit
 /// keeping the screen's other items.
 ///
 /// **Placement is the screen's**:
-/// - `.leading`: after the back chevron (`leftItemsSupplementBackButton`), or
-///   first when there is none, then the screen's own leading items
+/// - `.leading`: after the back chevron (`leftItemsSupplementBackButton`) and
+///   the screen's items that come first (`leadingPrefix`, the inbox's bell),
+///   or first when there are none, then the screen's other leading items
 ///   (`leadingItems`);
 /// - `.trailing`: before the screen's own trailing items (`trailingItems`),
 ///   through `setOwnTrailingBarItems` — a bar toast that holds the trailing
 ///   group gives them back with the section item in place.
 ///
 /// A screen never edits the item arrays itself while bound: it sets
-/// `leadingItems` / `trailingItems` here instead.
+/// `leadingPrefix` / `leadingItems` / `trailingItems` here instead — or, while
+/// it shows a bar of another kind (the inbox's search), suspends the binding
+/// (`isSuspended`), which places again when it resumes.
 @MainActor
 public final class PinnedSectionBarBinding {
     /// One section, as the screen describes it.
@@ -55,11 +61,21 @@ public final class PinnedSectionBarBinding {
     public private(set) var pinned: (index: Int, section: Section)?
     /// The item naming it while it is pinned.
     public private(set) var item: UIBarButtonItem?
-    /// The screen's own items on the same side, kept around the section item.
+    /// The screen's own items on the same side, kept around the section item:
+    /// `leadingPrefix` before it, `leadingItems` after it.
+    public var leadingPrefix: [UIBarButtonItem] = [] { didSet { schedulePlacement() } }
     public var leadingItems: [UIBarButtonItem] = [] { didSet { schedulePlacement() } }
     public var trailingItems: [UIBarButtonItem] = [] { didSet { schedulePlacement() } }
     /// A tap on the item: scroll section `index`'s header under the bar.
     public var onSelect: ((Int) -> Void)?
+    /// While true the binding keeps its state and writes nothing to the bar:
+    /// the screen shows a bar of another kind. Resuming places at once.
+    public var isSuspended = false {
+        didSet {
+            guard isSuspended != oldValue, !isSuspended else { return }
+            schedulePlacement()
+        }
+    }
 
     private weak var viewController: UIViewController?
     private let scope: String
@@ -86,9 +102,15 @@ public final class PinnedSectionBarBinding {
     public func update(sections: [Section], sectionTops: [CGFloat], pinLine: CGFloat) {
         let index = SectionHeaderPillButton.pinnedSection(sectionTops: sectionTops, pinLine: pinLine)
             .flatMap { sections.indices.contains($0) ? $0 : nil }
-        let next = index.map { ($0, sections[$0]) }
-        guard next?.1 != pinned?.section || next?.0 != pinned?.index else { return }
-        let sectionChanged = next?.1 != pinned?.section
+        show(pinned: index.map { ($0, sections[$0]) })
+    }
+
+    /// The pinned section, as a list that works it out itself says it — nil
+    /// back at the top. The same bar rules as `update`: a new item only for
+    /// a new section or count, placed once per turn, never mid-transition.
+    public func show(pinned next: (index: Int, section: Section)?) {
+        guard next?.section != pinned?.section || next?.index != pinned?.index else { return }
+        let sectionChanged = next?.section != pinned?.section
         pinned = next
         guard sectionChanged else { return }
         item = next.map { _, section in
@@ -116,7 +138,7 @@ public final class PinnedSectionBarBinding {
     /// The items the bound side shows now.
     public var placedItems: [UIBarButtonItem] {
         switch placement {
-        case .leading: (item.map { [$0] } ?? []) + leadingItems
+        case .leading: leadingPrefix + (item.map { [$0] } ?? []) + leadingItems
         case .trailing: trailingItems + (item.map { [$0] } ?? [])
         }
     }
@@ -124,7 +146,7 @@ public final class PinnedSectionBarBinding {
     /// ONCE, on the next turn: a scroll can publish twice in one turn, and a
     /// second `set…BarButtonItems` cuts the first one's animation short.
     private func schedulePlacement() {
-        guard let viewController else { return }
+        guard let viewController, !isSuspended else { return }
         guard viewController.viewIfLoaded?.window != nil else {
             place(animated: false)
             return
@@ -148,10 +170,13 @@ public final class PinnedSectionBarBinding {
     }
 
     private func place(animated: Bool) {
-        guard let viewController else { return }
+        guard let viewController, !isSuspended else { return }
         let items = placedItems
         switch placement {
         case .leading:
+            // An identical group is not handed back: re-setting the same
+            // items rebuilt the glass mid-transition (the profile's guard).
+            guard !(viewController.navigationItem.leftBarButtonItems ?? []).elementsEqual(items, by: ===) else { return }
             viewController.navigationItem.setLeftBarButtonItems(items, animated: animated)
         case .trailing:
             // ⚠️ Through the toasts' door: while a toast holds the trailing
@@ -160,11 +185,56 @@ public final class PinnedSectionBarBinding {
         }
     }
 
-    #if DEBUG
-    /// Places now, skipping the turn and the transition wait. Tests.
-    public func debugPlaceNow() {
+    /// Places now, unanimated, skipping the turn and the transition wait: for
+    /// a screen rebuilding its whole bar in one go (the inbox handing its bar
+    /// back from search, inside the bar's own crossfade).
+    public func placeNow() {
         placementScheduled = false
         place(animated: false)
     }
+
+    #if DEBUG
+    /// `placeNow`, for tests.
+    public func debugPlaceNow() { placeNow() }
     #endif
+}
+
+/// The pinned-section rule for a list that names its section to a host
+/// rather than to a bar of its own (the inbox's pages, each telling the
+/// screen in front): which section's header has gone under the pin line —
+/// the headers' own rule (`SectionHeaderPillButton.pinnedSection`) — told
+/// only when it changes, since a scroll asks every frame. What the host then
+/// shows through `PinnedSectionBarBinding.show(pinned:)` (#1573).
+@MainActor
+public final class PinnedSectionTracker<Value: Equatable> {
+    /// What is pinned now; nil at the top, or over an unnamed section.
+    public private(set) var pinned: Value?
+    /// Where `pinned` sits in the list — what a tap scrolls to.
+    public private(set) var index: Int?
+    /// `pinned` changed.
+    public var onChange: ((Value?) -> Void)?
+
+    public init() {}
+
+    /// Re-reads the list: `sectionTops` in content coordinates, `pinLine`
+    /// `contentOffset.y + adjustedContentInset.top`; `value` names section
+    /// `i`, or answers nil for one the bar does not name.
+    public func update(sectionTops: [CGFloat], pinLine: CGFloat, value: (Int) -> Value?) {
+        let found = SectionHeaderPillButton.pinnedSection(sectionTops: sectionTops, pinLine: pinLine)
+            .flatMap { index in value(index).map { (index, $0) } }
+        index = found?.0
+        let next = found?.1
+        guard next != pinned else { return }
+        pinned = next
+        onChange?(next)
+    }
+
+    /// `update` for a table: its sections' tops and pin line read off it.
+    public func update(in tableView: UITableView, value: (Int) -> Value?) {
+        update(
+            sectionTops: (0..<tableView.numberOfSections).map { tableView.rect(forSection: $0).minY },
+            pinLine: tableView.contentOffset.y + tableView.adjustedContentInset.top,
+            value: value
+        )
+    }
 }

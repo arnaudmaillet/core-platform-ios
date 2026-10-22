@@ -567,86 +567,51 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// with a zero-sized view would now be cargo.
     private func applyRestingBar() {
         navigationItem.rightBarButtonItems = [searchItem, trailingAccessoryItem].compactMap { $0 }
-        navigationItem.leftBarButtonItems = restingLeadingItems
+        // The leading group is the contract's: the bell, then the section.
+        sectionBinding.leadingPrefix = [leadingAccessoryItem].compactMap { $0 }
+        sectionBinding.isSuspended = false
+        sectionBinding.placeNow()
         navigationItem.titleView = nil
-    }
-
-    private var restingLeadingItems: [UIBarButtonItem] {
-        [leadingAccessoryItem, sectionItem].compactMap { $0 }
     }
 
     // MARK: - The pinned section (#1301)
 
-    /// The section the page in front has scrolled into, as last published.
-    private var pinnedSection: InboxPinnedSection?
-
     /// Its name after the bell — the conversation's day item, exactly (#750,
     /// #755; the owner, 2026-10-17): a system-titled glass bubble in the bar's
-    /// own type, interactive. ⚠️ ONE ITEM PER SECTION AND COUNT, EACH WITH ITS
-    /// OWN IDENTIFIER: a title edited in place swaps in a frame, while a new
-    /// item under a new identifier gets UIKit's Liquid Glass morph — "New · 4"
-    /// becoming "Recent · 18" is that morph.
+    /// own type, interactive, one item per section and count so "New · 4"
+    /// becoming "Recent · 18" is UIKit's Liquid Glass morph. Minted, placed
+    /// once per turn and held past a push by the contract
+    /// (`PinnedSectionBarBinding`, #1573); the bell is its `leadingPrefix`.
     ///
     /// ⚠️ ONLY THE LEADING GROUP. Toasts own the trailing one while they show
     /// (`NavigationBarToasts`, #1066); rewriting the whole resting bar on every
     /// change would put the magnifier back over a toast.
-    private var sectionItem: UIBarButtonItem?
-
-    private func makeSectionItem(_ section: InboxPinnedSection) -> UIBarButtonItem {
+    private lazy var sectionBinding: PinnedSectionBarBinding = {
+        let binding = PinnedSectionBarBinding(
+            viewController: self, placement: .leading, scope: "inbox", countNoun: "unread"
+        )
         // What tapping the header's pill did: that section's first row under
         // the bar.
-        SectionBarItem.make(title: section.title, count: section.count, countNoun: "unread", scope: "inbox") {
-            [weak self] in self?.activeSurface?.scrollToPinnedSection()
-        }
-    }
+        binding.onSelect = { [weak self] _ in self?.activeSurface?.scrollToPinnedSection() }
+        return binding
+    }()
 
     /// Names `section` after the bell, or takes the name away. While search
-    /// holds the bar it is only remembered: the resting bar picks it up on the
-    /// way back.
+    /// holds the bar it is only remembered (the binding is suspended): the
+    /// resting bar picks it up on the way back.
     private func applyPinnedSection(_ section: InboxPinnedSection?) {
-        guard section != pinnedSection else { return }
-        pinnedSection = section
-        sectionItem = section.map(makeSectionItem)
-        guard isViewLoaded, !isSearching else { return }
-        scheduleSectionPlacement()
+        // The page in front scrolls to its own section on a tap, so the
+        // index is the section's place in the inbox's two.
+        sectionBinding.show(pinned: section.map { pinned in
+            (pinned.section == .new ? 0 : 1, .init(id: pinned.title, title: pinned.title, count: pinned.count))
+        })
     }
-
-    /// Puts the leading group where the state says, ONCE, on the next turn —
-    /// the day item's placement (#756): a scroll can publish a section twice
-    /// in one turn, and a second `setLeftBarButtonItems` cut the first one's
-    /// animation short.
-    private func scheduleSectionPlacement() {
-        guard view.window != nil else {
-            navigationItem.leftBarButtonItems = restingLeadingItems
-            return
-        }
-        guard !sectionPlacementScheduled else { return }
-        sectionPlacementScheduled = true
-        DispatchQueue.main.async { [weak self] in self?.placeSectionAfterTransition() }
-    }
-
-    /// ⚠️ NOT DURING A PUSH (#756): items set while the bar is in its push
-    /// transition land with it, unanimated, when it ends. A placement due
-    /// mid-transition waits for its end, then animates.
-    private func placeSectionAfterTransition() {
-        if let coordinator = transitionCoordinator,
-           coordinator.animate(alongsideTransition: nil, completion: { [weak self] _ in
-               // Off the completion's turn, which still belongs to the transition.
-               DispatchQueue.main.async { self?.placeSectionAfterTransition() }
-           }) {
-            return
-        }
-        sectionPlacementScheduled = false
-        guard !isSearching else { return }
-        navigationItem.setLeftBarButtonItems(restingLeadingItems, animated: true)
-    }
-
-    private var sectionPlacementScheduled = false
 
     #if DEBUG
     /// The bar's section item while it is shown — what a test reads.
     var debugSectionItem: UIBarButtonItem? {
-        guard let sectionItem, navigationItem.leftBarButtonItems?.contains(where: { $0 === sectionItem }) == true
+        guard let sectionItem = sectionBinding.item,
+              navigationItem.leftBarButtonItems?.contains(where: { $0 === sectionItem }) == true
         else { return nil }
         return sectionItem
     }
@@ -657,6 +622,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     /// `[ field ————————————————— ][ Cancel ]`
     private func applySearchingBar() {
+        // The section stays known, not shown, until the resting bar is back.
+        sectionBinding.isSuspended = true
         navigationItem.leftBarButtonItems = []
         navigationItem.rightBarButtonItems = [cancelItem]
         navigationItem.titleView = searchField
