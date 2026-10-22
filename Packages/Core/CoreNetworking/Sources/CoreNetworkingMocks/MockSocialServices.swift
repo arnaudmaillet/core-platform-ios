@@ -1107,7 +1107,10 @@ public final class MockSocialServices: @unchecked Sendable {
         view.handle = author.handle
         view.displayName = author.displayName
         view.avatarURL = author.avatarURL
-        view.avatarFrameID = Self.demoFrameID(for: author.profileID) ?? ""
+        // ⚠️ NO DEMO FRAMES (#1589, the owner 2026-10-22): a frame is BOUGHT
+        // (#943). Handing one to about an author in four drew rainbow
+        // "Aurora" rings nobody chose. Only the viewer's DEBUG
+        // `-avatar-frame` wears one.
         // An animated avatar has no photo: its author's banner is its own
         // (#1444). A video banner still wins.
         if !author.bannerURL.isEmpty { view.bannerURL = author.bannerURL }
@@ -1127,17 +1130,6 @@ public final class MockSocialServices: @unchecked Sendable {
         // The viewer's other profiles answer here too.
         if let settings = lock.withLock({ feedSettings[author.profileID] }) { view.feedSettings = settings }
         return .success(view)
-    }
-
-    /// The frames the backend's default catalogue sells (#943, backend #913).
-    static let demoFrames = ["frame.gold", "frame.neon", "frame.aurora"]
-
-    /// About one author in four wears a frame (#943), the same one on every
-    /// launch: chosen from the id's characters, not its (seeded) hash.
-    static func demoFrameID(for profileID: String) -> String? {
-        let sum = profileID.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
-        guard sum % 4 == 0 else { return nil }
-        return demoFrames[(sum / 4) % demoFrames.count]
     }
 
     /// DEBUG `-avatar-frame <id>`: the frame the viewer wears.
