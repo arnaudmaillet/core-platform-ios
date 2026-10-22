@@ -210,6 +210,10 @@ final class PostShelfSection: UIView {
     /// The lift a committed long press opens from, while the flight takes
     /// off (#1543) — the grid's rule (`ForYouGridPage.previewLaunch`).
     var previewLaunch: PreviewLaunch?
+    /// A text card's long press shows its top comments (#1498), as the
+    /// grid's does (`ForYouGridPage.topComments`). Nil: none — the owner,
+    /// 2026-10-22: a Following text card previewed bare beside For You's.
+    var topComments: ((PostID) -> [CommentEntry]?)?
     /// The part of the screen the viewer can see, in THIS view's space, for
     /// autoplay: a card under the navigation bar is not one they are looking
     /// at. Nil (no host yet) plays nothing.
@@ -988,7 +992,27 @@ final class PostShelfSection: UIView {
         scrollView === mediaView || scrollView === textView
     }
 
+    /// The lifted preview of `post`: the card at the list's width, a text
+    /// card with its top comments (#1498). Captured now, built when lifted.
+    private func previewMaker(for post: GalleryPost) -> () -> UIViewController {
+        let width = max(0, bounds.width - LeadRowMetrics.sideMargin * 2)
+        let pipeline = imagePipeline
+        let pool = videoPool
+        let comments = post.kind == .text ? topComments?(post.id) ?? [] : []
+        return {
+            ForYouPostPreviewViewController(
+                post: post, imagePipeline: pipeline, width: width, videoPlayback: pool, comments: comments
+            )
+        }
+    }
+
     #if DEBUG
+    /// The preview a long press on card `index` lifts. Tests.
+    func debugCardPreview(at index: Int) -> ForYouPostPreviewViewController? {
+        guard cards.indices.contains(index) else { return nil }
+        return previewMaker(for: cards[index])() as? ForYouPostPreviewViewController
+    }
+
     /// Where card `index` (into `cards`) sits — its row and its index path
     /// there.
     func debugCardPlace(at index: Int) -> (row: UICollectionView, indexPath: IndexPath)? {
@@ -1191,14 +1215,10 @@ extension PostShelfSection: UICollectionViewDelegate {
         guard let indexPath = indexPaths.first,
               let id = cardID(in: collectionView, at: indexPath),
               let post = cards.first(where: { $0.id == id }) else { return nil }
-        let width = max(0, bounds.width - LeadRowMetrics.sideMargin * 2)
-        let pipeline = imagePipeline
-        let pool = videoPool
+        let makePreview = previewMaker(for: post)
         return UIContextMenuConfiguration(
             identifier: RowMenuTarget.card(id).identifier,
-            previewProvider: {
-                ForYouPostPreviewViewController(post: post, imagePipeline: pipeline, width: width, videoPlayback: pool)
-            },
+            previewProvider: makePreview,
             actionProvider: { [weak self] _ in self?.cardMenu(for: post) }
         )
     }
