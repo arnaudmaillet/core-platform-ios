@@ -425,7 +425,9 @@ final class SnapChromeView: UIView {
         )
         railTopConstraint = railTop
         shortcutRail.constrain(in: self) { parent in
-            shortcutRail.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
+            shortcutRail.trailingAnchor.constraint(
+                equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -SnapActionColumn.trailingInset
+            )
             shortcutRail.widthAnchor.constraint(equalTo: bandSeat.heightAnchor)
             railTop
             shortcutRail.bottomAnchor.constraint(equalTo: bandSeat.bottomAnchor)
@@ -452,7 +454,9 @@ final class SnapChromeView: UIView {
         boostButton.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
         boostStation.isUserInteractionEnabled = false
         boostStation.constrain(in: self) { parent in
-            boostStation.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
+            boostStation.trailingAnchor.constraint(
+                equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -SnapActionColumn.trailingInset
+            )
             boostStation.widthAnchor.constraint(equalTo: bandSeat.heightAnchor)
             boostStation.topAnchor.constraint(equalTo: bandSeat.topAnchor)
             // The like pill (#669) runs down to `gap` above the lower bubble,

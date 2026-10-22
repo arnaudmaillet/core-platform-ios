@@ -7152,6 +7152,11 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     func sideListMayOpen(from origin: CGPoint) -> Bool {
         guard !collectionView.isDecelerating, !isKeyboardOnScreen, !orderedIDs.isEmpty else { return false }
         guard commentsEngagedID == nil || commentsEngagementIsResting else { return false }
+        // ⚠️ THE EDGE FIRST (#1592, the owner): the trailing strip wins over
+        // everything under it — the rail stands clear of it by layout
+        // (`SnapActionColumn.trailingInset`), and a drag born there is the
+        // screen's whatever lies beneath.
+        if isInTrailingEdge(origin) { return true }
         let point = collectionView.convert(origin, from: view)
         if let hit = collectionView.hitTest(point, with: nil) {
             for current in sequence(first: hit, next: { $0.superview }) {
@@ -7160,10 +7165,14 @@ extension SnapFeedViewController: ZoomTransitionDestination {
                 }
             }
         }
-        if view.bounds.maxX - origin.x <= PagedScreenDismissalPolicy.trailingEdgeZone { return true }
         return MediaCarouselTouchRouting.dragPassesThroughCarousel(
             at: point, in: collectionView, towardsPageDelta: 1
         )
+    }
+
+    /// Whether `origin` (in this view) lies in the trailing edge strip.
+    func isInTrailingEdge(_ origin: CGPoint) -> Bool {
+        view.bounds.maxX - origin.x <= PagedScreenDismissalPolicy.trailingEdgeZone
     }
 
     // MARK: - The swipe chain (#1525)
@@ -7175,7 +7184,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     ///   author's profile is pushed, following the finger;
     /// - the list **open**: a leftward drag pushes the author of the post on
     ///   the CARD (the list's current item, not the anchor); a rightward one
-    ///   closes the list.
+    ///   closes the list;
+    /// - from the **right edge** (#1592, the owner 2026-10-22), any post: the
+    ///   author's profile at once, skipping the list.
     func swipeStage(for direction: SwipeDirection, at origin: CGPoint) -> SwipeStage? {
         guard let sideList, !sideList.isSettling else { return nil }
         if sideList.isOpen {
@@ -7188,6 +7199,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             }
         }
         guard direction == .leftward, sideListMayOpen(from: origin) else { return nil }
+        if isInTrailingEdge(origin) { return authorPushStage() }
         guard let model = activePostID.flatMap({ modelsByID[$0] }) else { return nil }
         return model.mediaURL != nil ? .panel(sideList) : authorPushStage()
     }
