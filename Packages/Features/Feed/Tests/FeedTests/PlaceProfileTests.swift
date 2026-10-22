@@ -385,16 +385,15 @@ struct PlaceProfileTests {
         #expect(profile.debugSectionTitles.list == "Recent")
     }
 
-    /// ⚠️ A DISMISSAL FROM THE MAP LANDS ON ACTIVITY, WITH THE POST THE VIEWER
-    /// WAS ON AT ITS HEAD — whatever that post's kind, and whatever tab the
-    /// page was on.
+    /// ⚠️ A DISMISSAL FROM THE MAP LANDS ON POPULAR'S FIRST CARD (#1596, the
+    /// owner 2026-10-22) — the page's first section, whatever post the viewer
+    /// was on and whatever its kind — and Recent keeps its order.
     ///
-    /// It used to depend on the route: a media marker's feed closed onto the
-    /// first DISCOVER tile, a text marker's onto the Activity row. Pinned here
-    /// through the landing's one entry point (`cardCloseGeometry`, which both
-    /// routes now reach), for a photograph, a clip and words.
+    /// It used to put the post the viewer was on at the head of Recent and
+    /// land there. Pinned through the landing's one entry point
+    /// (`cardCloseGeometry`), for a photograph, a clip and words.
     @Test(arguments: [GalleryPost.Kind.photo, .video, .text])
-    func aDismissalFromTheMapLandsOnActivityWithThePostFirst(kind: GalleryPost.Kind) async {
+    func aDismissalFromTheMapLandsOnPopularsFirstCard(kind: GalleryPost.Kind) async throws {
         let profile = makeProfile(posts: [
             post("post-1", kind: .photo, reactions: 50),
             post("post-2", kind: .photo, reactions: 90),
@@ -403,24 +402,20 @@ struct PlaceProfileTests {
         laidOut(profile)
         profile.beginLoading()
         for _ in 0..<50 where profile.renderedActivity.isEmpty { await Task.yield() }
-        #expect(profile.renderedActivity.first?.id == PostID("post-2"),
-                "precondition: the order put post-2 first")
+        let recentBefore = profile.renderedActivity.map(\.id)
+        let first = try #require(profile.renderedPopular.first?.id)
+        #expect(first == PostID("post-2"), "precondition: the most popular post leads the row")
 
         // The viewer paged on to the least popular post before closing.
         profile.activePostID = { PostID("post-3") }
         let feed = UIViewController()
         feed.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
-        _ = profile.cardCloseGeometry(dismissing: feed)
-        #expect(profile.debugLandingAnchor == PostID("post-3"))
-        #expect(profile.renderedActivity.first?.id == PostID("post-3"),
-                "the post the viewer was on is not at the head of the list")
-        #expect(Set(profile.renderedActivity.map(\.id)).count == 3, "no second copy")
-
-        // Asked again — a swipe asks twice — it stays put rather than swapping back.
-        _ = profile.cardCloseGeometry(dismissing: feed)
-        #expect(profile.renderedActivity.first?.id == PostID("post-3"))
+        let geometry = try #require(profile.cardCloseGeometry(dismissing: feed), "no window to close through")
+        let landing = try #require(geometry.sourceFrame(profile.view), "the window measures nothing")
+        let card = try #require(profile.debugShelf.cardFrame(for: first, in: profile.view))
+        #expect(landing == card, "the window does not land on Popular's first card")
+        #expect(profile.renderedActivity.map(\.id) == recentBefore, "Recent was re-planned for the landing")
     }
-
 
     /// The gallery's rule, on its own: the ranking minus what a grid cannot
     /// draw, in that order.

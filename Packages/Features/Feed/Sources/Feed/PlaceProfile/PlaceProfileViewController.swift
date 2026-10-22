@@ -2199,15 +2199,50 @@ extension PlaceProfileViewController: CardCloseLanding {
         case nil:
             break
         }
-        guard let landed = activePostID?() else { return nil }
         // Measured in the bounds the pop will run in: this page is off-stack
         // and unsized when the driver asks, and the feed's own stack is the
         // one it is about to join.
         let bounds = feed.navigationController?.view.bounds ?? feed.view.bounds
+        // ⚠️ HOME TO POPULAR'S FIRST CARD (#1596, the owner 2026-10-22): a
+        // flight that arrived from a MARKER lands on the page's FIRST section
+        // — the place's most popular post — and never re-plans Recent to put
+        // the post read at its head (the old rule, kept below as the fallback
+        // for a page with no Popular card).
+        if let origin = popularLandingOrigin(sizedTo: bounds) {
+            debugLogLanding("landing on Popular's first card")
+            return TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
+        }
+        guard let landed = activePostID?() else { return nil }
         guard let origin = activityCardRevealOrigin(sizedTo: bounds, settled: landed)
         else { return nil }
         debugLogLanding("landing \(landed.rawValue) at the head of Recent")
         return TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
+    }
+
+    /// The window onto Popular's first card, with the page staged at its top
+    /// so the shelf is on screen: the card's own window — the one its flight
+    /// left by (`PostShelfOrigins`), a media card's or a text card's. Nil when
+    /// the shelf has no card.
+    func popularLandingOrigin(sizedTo bounds: CGRect) -> TextRevealOrigin? {
+        loadViewIfNeeded()
+        guard let first = shelf.cards.first else { return nil }
+        let stage: () -> Void = { [weak self] in
+            guard let self else { return }
+            if view.bounds.size != bounds.size, bounds.size != .zero { view.frame = bounds }
+            view.layoutIfNeeded()
+            activityPage.restAtTop()
+            view.layoutIfNeeded()
+        }
+        stage()
+        guard shelf.cardFrame(for: first.id, in: shelf) != nil else {
+            debugLogLanding("no realized Popular card for \(first.id.rawValue)")
+            return nil
+        }
+        return first.kind == .text
+            ? PostShelfOrigins.textCardReveal(for: first, shelf: shelf, page: activityPage, closeStaged: stage)
+            : PostShelfOrigins.cardReveal(
+                for: first, cover: shelf.cardCover(for: first.id), shelf: shelf, page: activityPage, closeStaged: stage
+            )
     }
 
     func clearLandingConcealment() {
