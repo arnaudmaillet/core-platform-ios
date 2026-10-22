@@ -93,9 +93,14 @@ final class ProfileRelationshipListViewController: UIViewController {
         // a list that happens to be narrower than its content cannot start
         // competing for the pan that pages.
         collectionView.alwaysBounceHorizontal = false
-        // A titled header: the soft blur covers the bar (#1591) — see
-        // `applyTopEdge(for:)`.
-        collectionView.applyTopEdge(for: .titled)
+        // ⚠️ CLEAR HERE: THE PAGER CARRIES THE BLUR (the owner, 2026-10-22:
+        // "le blur … n'a pas été corrigé"). This list sits INSIDE the pager's
+        // horizontal scroll view, and UIKit drew no edge effect for it even
+        // set soft and named the screen's content scroll view — measured: the
+        // rows scrolled under a sharp bar. The pager's own scroll view, right
+        // under the bar, wears the titled header's soft blur
+        // (`ProfileRelationshipsViewController.configurePager`).
+        collectionView.prefersClearTopEdge()
         collectionView.pin(to: view)
 
         refreshControl.addAction(
