@@ -1083,13 +1083,25 @@ final class ForYouGridPage: UIView {
         // content offset while the content above the first stretch grows, so
         // the rows arriving on a list already laid out slid in UNDER the
         // navigation bar and the screen opened scrolled past them — filmed.
+        //
+        // ⚠️ AND NOT BY AN ASSIGNMENT ALONE (#1610): the new configuration makes
+        // UIKit adjust the offset itself, ANIMATED
+        // (`_applyAutomaticAdjustedContentOffset` → a scroll animation), and
+        // that animation went on stepping the offset frame by frame after the
+        // assignment below — a place page opened alone, whose first page lands
+        // once it is on screen, scrolled itself ~300pt down (logged: 0 → 2.3 →
+        // 9.3 → … → 289). The top is set through `setContentOffset(_:animated:
+        // false)`, which also STOPS that animation; a plain assignment does
+        // not.
         let top = -collectionView.adjustedContentInset.top
         let wasAtTop = collectionView.contentOffset.y <= top + 1
         leadHeight = height
         DiscoverListLayout.setLeadHeight(height, on: layout)
         guard wasAtTop else { return }
         collectionView.layoutIfNeeded()
-        collectionView.contentOffset.y = -collectionView.adjustedContentInset.top
+        collectionView.setContentOffset(
+            CGPoint(x: collectionView.contentOffset.x, y: -collectionView.adjustedContentInset.top), animated: false
+        )
     }
 
     /// The reconcile ran — every scroll tick (throttled), every visibility

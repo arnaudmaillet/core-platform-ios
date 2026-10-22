@@ -2926,6 +2926,8 @@ extension PlaceProfileViewController {
     /// scrolled to an arbitrary row, which looks like a scroll position rather
     /// than like a bug.
     var debugLandingAnchor: PostID { anchorID }
+    /// Where the list rests, from its top (#1610).
+    var debugActivityOffset: CGFloat { activityPage.verticalOffset }
     var debugLikes: Int64 { likesTotal }
     /// How many hydrations reached the page — a refresh that brought the same
     /// members must leave it where it was.
