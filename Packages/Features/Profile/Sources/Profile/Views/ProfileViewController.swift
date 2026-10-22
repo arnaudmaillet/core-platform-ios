@@ -210,6 +210,11 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     }()
     private lazy var barIdentityItem: UIBarButtonItem? = barIdentityPill.map { UIBarButtonItem(customView: $0.view) }
     private let relationshipSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
+    /// Keeps History's day in its own bubble, inboard of the trailing group.
+    private let sectionSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
+    /// The identity pill as the LEADING group shows it (#1590), nil while
+    /// the tray is on screen.
+    private var shownBarPill: UIBarButtonItem?
     /// The relationship capsule: Follow / Following.
     ///
     /// **A stock titled item — deliberately not `UIBarButtonItem(customView:)`,
@@ -1449,7 +1454,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     }
     /// The bar's identity pill, if it shows one.
     var debugBarRelationshipItem: UIBarButtonItem? {
-        ownTrailingBarItems.first { $0 === barIdentityItem }
+        (navigationItem.leftBarButtonItems ?? []).first { $0 === barIdentityItem }
     }
     var debugBarIdentityPill: (any PersonBarItem)? { barIdentityPill }
     /// The bell, if the bar shows it.
@@ -1785,10 +1790,11 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
 
     // MARK: - History's day in the bar (#1344)
 
-    /// The leading group: the bell, then the day History has scrolled into.
+    /// The leading group: the tab root's bell, then — once the tray has
+    /// scrolled away — the identity pill (#1590, the owner 2026-10-22: the
+    /// profile's info goes LEFT; History's day went right).
     private var leadingItems: [UIBarButtonItem] {
-        // No day to name over a page for no one (#1406): its gallery is gone.
-        [leadingAccessoryItem, viewModel.namesNoOne ? nil : sectionItem].compactMap { $0 }
+        [leadingAccessoryItem, shownBarPill].compactMap { $0 }
     }
 
     /// The day the page in front has scrolled into, as last published.
@@ -1800,8 +1806,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// OWN IDENTIFIER: a new item under a new identifier gets UIKit's Liquid
     /// Glass morph, a title edited in place swaps in a frame.
     ///
-    /// ⚠️ ONLY THE LEADING GROUP: toasts own the trailing one while they show
-    /// (#1066).
+    /// ⚠️ TRAILING since #1590, the innermost of the screen's own trailing
+    /// items — through `setOwnTrailingBarItems`, so a bar toast that takes the
+    /// group (#1066) gives it back with the day in place.
     private var sectionItem: UIBarButtonItem?
 
     private func makeSectionItem(_ section: PostGridPinnedSection) -> UIBarButtonItem {
@@ -1823,13 +1830,14 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         scheduleSectionPlacement()
     }
 
-    /// Puts the leading group where the state says, ONCE, on the next turn —
-    /// the inbox's placement (#756): a scroll can publish a day twice in one
-    /// turn, and a second `setLeftBarButtonItems` cut the first one's
-    /// animation short.
+    /// Puts both groups where the state says — the pill leading, the day
+    /// trailing — ONCE, on the next turn: the inbox's placement (#756). A
+    /// scroll can publish a day twice in one turn, and a second write cut the
+    /// first one's animation short.
     private func scheduleSectionPlacement() {
         guard view.window != nil else {
             navigationItem.leftBarButtonItems = leadingItems
+            updateActionBarItem(followButtonState)
             return
         }
         guard !sectionPlacementScheduled else { return }
@@ -1849,7 +1857,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             return
         }
         sectionPlacementScheduled = false
-        navigationItem.setLeftBarButtonItems(leadingItems, animated: true)
+        if !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leadingItems, by: ===) {
+            navigationItem.setLeftBarButtonItems(leadingItems, animated: true)
+        }
+        updateActionBarItem(followButtonState, animated: true)
     }
 
     private var sectionPlacementScheduled = false
@@ -1857,10 +1868,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     #if DEBUG
     /// The bar's day item while it is shown — what a test reads.
     var debugSectionItem: UIBarButtonItem? {
-        guard let sectionItem, navigationItem.leftBarButtonItems?.contains(where: { $0 === sectionItem }) == true
-        else { return nil }
+        guard let sectionItem, ownTrailingBarItems.contains(where: { $0 === sectionItem }) else { return nil }
         return sectionItem
     }
+
+    /// History publishing the day it scrolled into. Tests.
+    func debugApplyPinnedSection(_ section: PostGridPinnedSection?) { applyPinnedSection(section) }
 
     /// What a tap on the day item does. Tests.
     func debugTapSectionItem() {
@@ -1987,9 +2000,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
 
         // No content-source filter on any profile (#772): its sources are
         // pages at the foot, your own as anyone else's (#696).
-        //   tab root  [bell] … [coins][switcher gear]
-        //   pushed    [back] … [coins][author / Follow][bell] (the middle
-        //             one once the tray has scrolled away)
+        //   tab root  [bell] … [day][coins][switcher gear]
+        //   pushed    [back][pill] … [day][coins][bell] (the pill once the
+        //             tray has scrolled away, the day on History — #1590)
         // Written only when it changed — the same "say nothing" rule as the
         // trailing run below, for the same torn-capsule reason.
         let leading = leadingItems
@@ -2143,7 +2156,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // `[pill][coins]` before (#1451), the pill only once the tray has
         // scrolled away — never a Follow item: following from the bar is the
         // pill's "+".
+        // ⚠️ THE PILL GOES LEADING (#1590): computed here, where the relation
+        // is read, and placed by the leading group's own once-per-turn write.
         let pill = namesNoOne ? nil : barIdentityItem(for: followButtonState)
+        if pill !== shownBarPill {
+            shownBarPill = pill
+            scheduleSectionPlacement()
+        }
         if namesNoOne {
             // Nothing to mute, follow or spend on.
         } else if showsMuteBell {
@@ -2159,11 +2178,11 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             if showsMuteBell { items.append(muteBellSpacer) }
             items.append(trailingAccessoryItem)
         }
-        // The identity pill outboard of the balance (#1451): it takes the
-        // bar's free width.
-        if let pill {
-            if !items.isEmpty { items.append(relationshipSpacer) }
-            items.append(pill)
+        // History's day, innermost (#1590). No day over a page for no one
+        // (#1406): its gallery is gone.
+        if let sectionItem, !namesNoOne {
+            if !items.isEmpty { items.append(sectionSpacer) }
+            items.append(sectionItem)
         }
         // The load-bearing guard. A pop's `viewWillAppear` resolves to exactly
         // the item set already on the bar, and handing that same set back is
@@ -2245,20 +2264,36 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         }
     }
 
-    /// The bar's width less the back button and the other trailing items,
-    /// with the bar's margins and gaps between them.
+    /// The bar's width less the back button and the trailing group — the
+    /// balance, the bell, History's day — with the bar's margins and gaps.
     private func barIdentityWidthBudget() -> CGFloat {
         let barWidth = navigationController?.navigationBar.bounds.width ?? view.bounds.width
         var others: CGFloat = Self.barControlSide // the back button
         if let accessory = trailingAccessoryItem?.customView {
-            others += accessory.intrinsicContentSize.width
+            // A badge laid out by constraints has no intrinsic width: fit it.
+            let intrinsic = accessory.intrinsicContentSize.width
+            others += intrinsic > 0
+                ? intrinsic
+                : accessory.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
         }
         if showsMuteBell { others += Self.barControlSide }
-        let gaps = Spacing.md * 4 + Spacing.lg * 2
+        if let title = sectionItem?.title {
+            // The day's glass bubble: its title and the bubble's own padding.
+            let font = UIFont.appFont(forTextStyle: .body)
+            others += ceil((title as NSString).size(withAttributes: [.font: font]).width) + Spacing.lg * 2
+        }
+        // ⚠️ LEADING, THE BAR KEEPS MORE AIR (#1590): between the two groups
+        // UIKit reserves the title's slot, and a pill sized to the trailing
+        // gaps alone made it fold the balance and the bell into an overflow
+        // "•••" on an SE.
+        let gaps = Spacing.md * 4 + Spacing.lg * 2 + Self.leadingGroupAir
         return barWidth - others - gaps
     }
 
     private static let barControlSide: CGFloat = 44
+    /// The extra room the bar keeps between a leading pill and the trailing
+    /// group (#1590), measured on an SE.
+    static let leadingGroupAir: CGFloat = 40
 
     /// Whether the header's action tray is out of sight: under the
     /// navigation bar, by the header's coming position (`travelled` — the

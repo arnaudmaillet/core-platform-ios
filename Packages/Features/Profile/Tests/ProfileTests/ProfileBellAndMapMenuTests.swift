@@ -301,9 +301,9 @@ struct ProfileBellAndMapMenuTests {
 
 /// Once the header's action tray has scrolled out of sight, the bar carries
 /// the profile's identity: the post page's person pill, its relation a badge
-/// on the face whose "+" follows — never a Follow item. Left to right
-/// `[pill][balance]`, and `[pill][balance][bell]` once followed. Never while
-/// the tray shows, never on the viewer's own profile.
+/// on the face whose "+" follows — never a Follow item. ⚠️ LEADING since
+/// #1590: `[‹][pill] … [balance]`, and `… [balance][bell]` once followed.
+/// Never while the tray shows, never on the viewer's own profile.
 extension ProfileBellAndMapMenuTests {
     private func pill(_ screen: ProfileViewController) throws -> any PersonBarItem {
         try #require(screen.debugBarIdentityPill, "no pill was built")
@@ -320,11 +320,12 @@ extension ProfileBellAndMapMenuTests {
         #expect(try pill(screen).followBadge == .follow, "no + on a profile not followed")
         let items = try #require(screen.navigationItem.rightBarButtonItems)
         #expect(!items.contains { $0.title == "Follow" }, "a Follow item in the bar")
-        // On screen [pill][coins]: `[0]` is the corner.
-        #expect(items.count == 3)
+        // Trailing is the balance alone; the pill leads, after the chevron.
+        #expect(items.count == 1)
         #expect(items[0].accessibilityLabel == "Balance", "the balance is not in the corner")
-        #expect(items[2] === item, "the pill is not outboard of the balance")
-        #expect(items[1].customView == nil && items[1].title == nil, "no space keeps each its own bubble")
+        #expect(!items.contains { $0 === item }, "the pill stayed trailing")
+        #expect(screen.navigationItem.leftBarButtonItems?.last === item, "the pill does not lead")
+        #expect(screen.navigationItem.leftItemsSupplementBackButton, "the pill would replace the chevron")
         #expect(screen.debugMuteBellItem == nil)
 
         screen.debugSetTrayScrolledAway(false)
@@ -339,10 +340,10 @@ extension ProfileBellAndMapMenuTests {
         screen.debugSetTrayScrolledAway(true)
         let item = try #require(screen.debugBarRelationshipItem)
         let items = try #require(screen.navigationItem.rightBarButtonItems)
-        #expect(items.count == 5)
+        #expect(items.count == 3)
         #expect(items[0] === screen.debugMuteBellItem, "the bell lost the corner")
         #expect(items[2].accessibilityLabel == "Balance")
-        #expect(items[4] === item, "the pill is not the outboard end")
+        #expect(screen.navigationItem.leftBarButtonItems?.last === item, "the pill does not lead")
         #expect(try pill(screen).followBadge == .following)
         let shown = (try pill(screen).view as? SnapAuthorIdentityView)?.debugShownLines ?? []
         #expect(shown.contains("Lena Fischer") && shown.contains("@lena"), "\(shown)")
@@ -381,6 +382,54 @@ extension ProfileBellAndMapMenuTests {
         #expect(screen.debugBarRelationshipItem == nil, "the pill showed at rest")
         screen.debugApplyHeaderOffset(-40)
         #expect(screen.debugBarRelationshipItem == nil, "the pill showed on a pull")
+    }
+
+    /// ⚠️ HISTORY'S DAY GOES TRAILING (#1590), innermost of the screen's
+    /// own trailing items, beside the pill now leading.
+    @Test func historysDayIsTheInnermostTrailingItem() async throws {
+        let (screen, viewModel, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .following && viewModel.canModerate })
+        try #require(await settle { screen.debugMuteBellItem != nil })
+        screen.debugSetTrayScrolledAway(true)
+        screen.debugApplyPinnedSection(PostGridPinnedSection(index: 1, title: "Yesterday"))
+        let day = try #require(screen.debugSectionItem, "the day is not trailing")
+        let items = try #require(screen.navigationItem.rightBarButtonItems)
+        #expect(items.last === day, "the day is not the innermost trailing item")
+        #expect(items[0] === screen.debugMuteBellItem, "the bell lost the corner")
+        #expect(!(screen.navigationItem.leftBarButtonItems ?? []).contains { $0 === day }, "the day stayed leading")
+        #expect(screen.debugBarRelationshipItem != nil, "the pill left the leading group")
+
+        screen.debugApplyPinnedSection(nil)
+        #expect(screen.debugSectionItem == nil, "the day stayed after the list went back to the top")
+    }
+
+    /// The pill's room is the bar's width less the chevron and the trailing
+    /// group — History's day included (#1590), on an SE and an 18 Pro.
+    @Test(arguments: [375.0, 402.0])
+    func thePillsWidthIsTheBarsRoom(width: CGFloat) async throws {
+        let (screen, viewModel, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .following && viewModel.canModerate })
+        try #require(await settle { screen.debugMuteBellItem != nil })
+        screen.view.frame = CGRect(x: 0, y: 0, width: width, height: 874)
+        screen.debugSetTrayScrolledAway(true)
+        let free = (try pill(screen).view as? SnapAuthorIdentityView)?.widthCap ?? 0
+        #expect(free > 0 && free < width - 88, "the pill is not capped by the bar's room at \(width)")
+        screen.debugApplyPinnedSection(PostGridPinnedSection(index: 1, title: "Yesterday"))
+        screen.debugSetTrayScrolledAway(false)
+        screen.debugSetTrayScrolledAway(true)
+        let withDay = (try pill(screen).view as? SnapAuthorIdentityView)?.widthCap ?? 0
+        #expect(withDay < free, "the day's bubble did not take its room from the pill at \(width)")
+    }
+
+    /// Your own profile: the day goes trailing too, inboard of the balance
+    /// and the gear.
+    @Test func theOwnProfilesDayIsTrailingToo() async throws {
+        let (screen, viewModel, _) = makeScreen(relationship: .me, own: true)
+        try #require(await settle { viewModel.isOwnProfile })
+        screen.debugApplyPinnedSection(PostGridPinnedSection(index: 0, title: "Today"))
+        let day = try #require(screen.debugSectionItem)
+        #expect(screen.navigationItem.rightBarButtonItems?.last === day)
+        #expect(screen.debugBarRelationshipItem == nil)
     }
 
     @Test func theOwnProfileWearsNothing() async throws {
