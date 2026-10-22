@@ -5,6 +5,7 @@ import Foundation
 import MediaCore
 import MediaPlayback
 import PostGrid
+import DesignSystem
 import Testing
 import UIKit
 @testable import Feed
@@ -782,6 +783,29 @@ struct SnapSwipeChainTests {
         #expect(!sideList.isOpen)
         #expect(feed.activePostID == shown, "the post on show did not stay")
         #expect(feed.orderedIDs == [PostID("p1"), shown, PostID("p2")])
+    }
+
+    /// ⚠️ FROM THE RIGHT EDGE, THE PROFILE AT ONCE (#1592, the owner): a
+    /// leftward drag born in the trailing strip pushes the author even on a
+    /// media post with the list closed; one born mid-screen still opens the
+    /// list.
+    @Test func aLeftwardDragFromTheRightEdgePushesTheAuthor() async throws {
+        let feed = try await tests.openableFeedForChain(["p1", "p2"], router: ProfileRouter())
+        let edge = CGPoint(x: feed.view.bounds.maxX - PagedScreenDismissalPolicy.trailingEdgeZone + 4, y: feed.view.bounds.midY)
+        let profile = try #require(Self.pushed(Self.stage(feed, for: .leftward, at: edge)), "the edge opened the list")
+        #expect(profile.title == "author-p1")
+        #expect(Self.isPanel(Self.stage(feed, for: .leftward, at: center(of: feed))), "mid-screen no longer opens the list")
+    }
+
+    /// The emote rail never takes an edge drag: wherever it is, the edge
+    /// strip is tested first, and the rail stands clear of it.
+    @Test func theEdgeWinsOverTheRail() async throws {
+        let feed = try await tests.openableFeedForChain(["p1", "p2"], router: ProfileRouter())
+        let height = feed.view.bounds.height
+        for y in stride(from: height * 0.2, through: height * 0.8, by: height * 0.1) {
+            let edge = CGPoint(x: feed.view.bounds.maxX - 6, y: y)
+            #expect(Self.pushed(Self.stage(feed, for: .leftward, at: edge)) != nil, "refused at y \(y)")
+        }
     }
 
     /// No router that makes a profile: no push stage at all.
