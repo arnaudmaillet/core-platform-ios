@@ -557,6 +557,12 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             let kind = index + 1 < arguments.count ? arguments[index + 1] : "suspended"
             container.router.route(to: .profile(ProfileID(kind == "hidden" ? "prof-hidden" : "prof-suspended"), stub: nil))
         }
+        // `-open-place <CC>` (#1599): a country's place page, as its share
+        // link opens it (#985) — the one way to reach a place page on a
+        // simulator, whose mock markers are single posts.
+        if let index = arguments.firstIndex(of: "-open-place"), index + 1 < arguments.count {
+            container.router.route(to: .place(.country(code: arguments[index + 1].uppercased())))
+        }
         // `-open-hashtag <tag>`: a tag's posts (#524), as a tapped `#tag` opens them.
         if let index = arguments.firstIndex(of: "-open-hashtag"), index + 1 < arguments.count {
             container.router.route(to: .hashtag(arguments[index + 1]))

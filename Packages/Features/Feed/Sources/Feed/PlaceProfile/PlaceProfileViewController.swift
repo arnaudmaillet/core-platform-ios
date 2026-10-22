@@ -688,6 +688,8 @@ final class PlaceProfileViewController: UIViewController {
         // `coverScreenFraction` of the screen — or, should the identity
         // outgrow it (Dynamic Type), down to the identity's clearance.
         let content = contentTop + height(of: identityView) + Self.identityClearance
+        // No banner (#1599): the header is the identity's own height.
+        guard showsBanner else { return content }
         return max(content, (view.bounds.height * Self.coverScreenFraction).rounded())
     }
 
@@ -703,7 +705,14 @@ final class PlaceProfileViewController: UIViewController {
     /// The identity row's top, from the header's: 40% of the screen, never
     /// under the chrome.
     private var contentTop: CGFloat {
-        max((view.bounds.height * Self.contentScreenFraction).rounded(), view.safeAreaInsets.top + Spacing.md)
+        // No banner (#1599): the identity starts right under the bar — the
+        // navigation bar's foot, which the safe area does not reach on a
+        // page that runs under it.
+        guard showsBanner else {
+            let barFoot = navigationController.map { $0.navigationBar.frame.maxY } ?? 0
+            return max(view.safeAreaInsets.top, barFoot) + Spacing.md
+        }
+        return max((view.bounds.height * Self.contentScreenFraction).rounded(), view.safeAreaInsets.top + Spacing.md)
     }
     private var contentTopConstraint: NSLayoutConstraint?
 
@@ -1231,6 +1240,11 @@ final class PlaceProfileViewController: UIViewController {
     /// under the other measured 2.3:1 in either ink). The rank's bubble wears
     /// its own fixed ink.
     private var nameTone = HeroInk.defaultTone
+    /// The header height the pages were last inset by (#1599).
+    private var laidOutHeaderHeight: CGFloat = 0
+    /// Whether the page wears a banner (#1599): not when the place's most
+    /// popular post is words.
+    private(set) var showsBanner = true
     private var counterTones: [HeroInk.Tone] = [HeroInk.defaultTone]
     private var heroInkReadFor: [CGRect] = []
     #if DEBUG
@@ -1256,6 +1270,8 @@ final class PlaceProfileViewController: UIViewController {
     }
 
     private func readHeroInk(force: Bool) {
+        // No picture to read (#1599): the page's ink, set with the banner.
+        guard showsBanner else { return }
         // In the box's space AT REST, what the ground is read in: the type
         // rides the box's foot, and in the box's own space a pull-down (the
         // box stretching up) moved it down its ground and read the ground
@@ -1455,12 +1471,20 @@ final class PlaceProfileViewController: UIViewController {
         bannerHeightConstraint?.constant = bannerHeight
         placeHeroFade()
         let header = headerHeight
+        // ⚠️ A LIST AT REST AT ITS TOP STAYS THERE when the header changes
+        // height under it (#1599): the banner going for a text-only place, a
+        // page opened alone growing its header as its first posts land. The
+        // offset was the old header's; left alone the list opened scrolled
+        // by the difference, the identity under the bar.
+        let restedAtTop = activityPage.verticalOffset.magnitude < 1 && header != laidOutHeaderHeight
+        laidOutHeaderHeight = header
         for hosted in hostedPages {
             hosted.setHostedInsets(top: header, bottom: view.safeAreaInsets.bottom)
             // Room to hold ANY position the header can be in, so a tab
             // switch moves the chrome by nothing.
             hosted.setMinimumScrollTravel(contentFloor)
         }
+        if restedAtTop { activityPage.restAtTop() }
         // Derived from the safe area and the banner's fraction, so a rotation
         // or a size change is a different answer. Idempotent — a plain
         // assignment — and deliberately NOT re-measuring `restingBarCover`,
@@ -1472,6 +1496,38 @@ final class PlaceProfileViewController: UIViewController {
         updateLeadHeight()
         // The foot chrome may have moved at rest (the tab bar collapsing).
         chromeDidMove()
+        applySnapDetents()
+    }
+
+    /// ⚠️ THREE DETENTS, THE PROFILE'S (#1599, the owner 2026-10-22): a
+    /// release while the header is on screen rests at the top, with the
+    /// identity just under the bar (a CATCHING detent: a release crossing it
+    /// stops there), or with the first post under the bar — the profile's
+    /// `ProfileScrollDetents`, through the same `ScrollDetents` the grid runs.
+    private func applySnapDetents() {
+        let detents = Self.snapDetents(
+            identityTop: contentTop, safeTop: view.safeAreaInsets.top, firstPost: contentFloor
+        )
+        activityPage.snapDetents = detents.all
+        activityPage.catchDetents = detents.catching
+    }
+
+    /// The detents in the header's travelled space (0 at rest): the top, the
+    /// identity's top meeting the bar's foot, the first post under the bar.
+    /// A detent that would not lie strictly between its neighbours is left
+    /// out (a short header, a huge text size).
+    static func snapDetents(
+        identityTop: CGFloat, safeTop: CGFloat, firstPost: CGFloat
+    ) -> (all: [CGFloat], catching: [CGFloat]) {
+        var all: [CGFloat] = [0]
+        let identity = (identityTop - safeTop).rounded()
+        var catching: [CGFloat] = []
+        if identity > 0, identity < firstPost {
+            all.append(identity)
+            catching.append(identity)
+        }
+        if firstPost > 0 { all.append(firstPost) }
+        return (all, catching)
     }
 
     /// Moves the header from the active page's offset, and fades the
@@ -1641,7 +1697,39 @@ final class PlaceProfileViewController: UIViewController {
         let pinned = Set(members.map(\.id))
         extraPosts.removeAll { pinned.contains($0.id) }
         renderCorpus(reset: isRefresh)
-        renderBanner(for: Self.bannerPost(in: Self.gallery(members)))
+        setShowsBanner(Self.showsBanner(for: members))
+        renderBanner(for: showsBanner ? Self.bannerPost(in: Self.gallery(members)) : nil)
+    }
+
+    /// ⚠️ NO BANNER WHEN THE TOP POST IS WORDS (#1599, the owner 2026-10-22):
+    /// the place's most popular post is a text-only one, so the page shows
+    /// no picture at all — not the photograph of a post that is not its
+    /// best — and the identity moves up under the bar (`contentTop`,
+    /// `bannerHeight`). Its ink follows the page then: there is no picture
+    /// to read.
+    private func setShowsBanner(_ shows: Bool) {
+        guard shows != showsBanner else { return }
+        showsBanner = shows
+        bannerView.isHidden = !shows
+        bannerRamp.isHidden = !shows
+        if !shows {
+            let pageInk: HeroInk.Tone = traitCollection.userInterfaceStyle == .dark ? .light : .dark
+            nameTone = pageInk
+            counterTones = counterTones.map { _ in pageInk }
+            applyHeroLegibility()
+        }
+        // The header changed height: the list starts again at its top, under
+        // the new header (never while the viewer is moving it).
+        view.setNeedsLayout()
+        guard isViewLoaded else { return }
+        view.layoutIfNeeded()
+        activityPage.restAtTop()
+    }
+
+    /// Whether a place with these posts wears a banner: not when its most
+    /// popular post — `ranked`'s first — is text-only.
+    static func showsBanner(for posts: [GalleryPost]) -> Bool {
+        ranked(posts).first.map { $0.kind != .text } ?? true
     }
 
     /// The pins, then the place's later pages in the server's order (#643),
@@ -1726,7 +1814,8 @@ final class PlaceProfileViewController: UIViewController {
             // page's top post does — and the first page, landing under a
             // header that grew with it, starts the list at its top.
             if (renderedMembers ?? []).isEmpty, !fresh.isEmpty {
-                renderBanner(for: Self.bannerPost(in: Self.gallery(extraPosts)))
+                setShowsBanner(Self.showsBanner(for: extraPosts))
+                renderBanner(for: showsBanner ? Self.bannerPost(in: Self.gallery(extraPosts)) : nil)
                 if extraPosts.count == fresh.count, view.window != nil { activityPage.restAtTop() }
             }
             // Nothing new but more behind: no row reaches the end to ask, so
@@ -2597,6 +2686,10 @@ extension PlaceProfileViewController {
     var debugHeaderConstant: CGFloat { headerTopConstraint?.constant ?? 0 }
     /// The dock line, as the coordinator computed it for this layout.
     var debugHeaderTravel: CGFloat { headerTravel }
+    /// The detents the list rests on (#1599).
+    var debugSnapDetents: (all: [CGFloat], catching: [CGFloat]) {
+        (activityPage.snapDetents, activityPage.catchDetents)
+    }
     var debugIdentityAlpha: CGFloat { bannerBox.alpha }
     var debugBannerHeight: CGFloat { bannerHeightConstraint?.constant ?? 0 }
     var debugLandingOcclusion: UIEdgeInsets { landingOcclusion }
