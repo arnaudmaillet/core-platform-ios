@@ -7,8 +7,9 @@ import UIKit
 /// sentence with its time, what it was about — a text post's opening under the
 /// sentence, a media post's still at the trailing edge.
 ///
-/// No separators and no unread tint: rows are set apart by air, and whether a
-/// row is new is said by the SECTION it is in (`NotificationSection`).
+/// No separators and no unread tint: rows are set apart by air. A row not
+/// seen yet wears a pink dot on its leading edge, centred on the avatar
+/// (#1572); seeing it takes the dot away, never the row.
 ///
 /// Pictures follow the app's avatar contract (`avatar-rendering-contract`):
 /// the initials are the rendered state, the picture dissolves in over them when
@@ -26,12 +27,16 @@ final class NotificationCell: UICollectionViewListCell {
         static let thumbnailSide: CGFloat = 44
         static let thumbnailRadius: CGFloat = 10
         static let verticalPadding: CGFloat = 10
+        /// The unseen dot (#1572).
+        static let unseenDotDiameter: CGFloat = 8
     }
 
     private let avatar = NotificationAvatarView()
     private let sentenceLabel = UILabel()
     private let excerptLabel = UILabel()
     private let thumbnailView = UIImageView()
+    /// "Not seen yet" (#1572): the brand's pink, never a raw hue.
+    private let unseenDot = UIView()
     private lazy var textColumn = UIStackView(arrangedSubviews: [sentenceLabel, excerptLabel])
 
     private var imagePipeline: ImagePipeline?
@@ -45,6 +50,11 @@ final class NotificationCell: UICollectionViewListCell {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Whether the row wears the unseen dot. Tests.
+    var showsUnseenDot: Bool { !unseenDot.isHidden }
+    /// The dot's colour as drawn under the cell's traits. Tests.
+    var unseenDotResolvedColor: UIColor? { unseenDot.backgroundColor?.resolvedColor(with: unseenDot.traitCollection) }
 
     override func prepareForReuse() {
         super.prepareForReuse()
@@ -62,7 +72,8 @@ final class NotificationCell: UICollectionViewListCell {
         excerptLabel.isHidden = model.excerpt == nil
         avatar.configure(faces: model.faces, action: model.action, imagePipeline: imagePipeline)
         loadThumbnail(model.thumbnailURL)
-        accessibilityLabel = model.accessibilityText
+        unseenDot.isHidden = model.isRead
+        accessibilityLabel = model.isRead ? model.accessibilityText : "Unread, " + model.accessibilityText
     }
 
     /// "**Ava Moreau and 3 others** liked your post. 2h" — the people bold,
@@ -151,7 +162,19 @@ final class NotificationCell: UICollectionViewListCell {
         textColumn.setContentHuggingPriority(.defaultLow, for: .horizontal)
         textColumn.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
+        unseenDot.backgroundColor = Palette.tint
+        unseenDot.layer.cornerRadius = Metrics.unseenDotDiameter / 2
+        unseenDot.isUserInteractionEnabled = false
+        unseenDot.isHidden = true
+        unseenDot.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(unseenDot)
+
         NSLayoutConstraint.activate([
+            // In the leading margin, centred on the avatar.
+            unseenDot.widthAnchor.constraint(equalToConstant: Metrics.unseenDotDiameter),
+            unseenDot.heightAnchor.constraint(equalToConstant: Metrics.unseenDotDiameter),
+            unseenDot.centerXAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Spacing.lg / 2),
+            unseenDot.centerYAnchor.constraint(equalTo: avatar.centerYAnchor),
             avatar.widthAnchor.constraint(equalToConstant: Metrics.avatarArea),
             avatar.heightAnchor.constraint(equalToConstant: Metrics.avatarArea),
             thumbnailView.widthAnchor.constraint(equalToConstant: Metrics.thumbnailSide),

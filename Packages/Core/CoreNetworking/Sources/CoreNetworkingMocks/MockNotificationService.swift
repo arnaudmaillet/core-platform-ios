@@ -138,6 +138,12 @@ public final class MockNotificationService: @unchecked Sendable {
             response.success = true
             return .success(response)
         }
+        bff.register(path: "/notification.v1.NotificationService/MarkRead") { [self] (request: Notification_V1_MarkReadRequest) in
+            readState.markRead(request.notificationID)
+            var response = Notification_V1_CommandResponse()
+            response.success = true
+            return .success(response)
+        }
         bff.register(path: "/notification.v1.NotificationService/GetNotificationPreferences") { [self] (request: Notification_V1_GetNotificationPreferencesRequest) in
             .success(preferencesLock.withLock { preferences[request.profileID] } ?? Self.defaultPreferences())
         }
@@ -181,7 +187,9 @@ public final class MockNotificationService: @unchecked Sendable {
         }
         bff.register(path: "/notification.v1.NotificationService/GetUnreadCount") { [self] (_: Notification_V1_GetUnreadCountRequest) in
             var response = Notification_V1_GetUnreadCountResponse()
-            response.unreadCount = readState.allRead ? 0 : Int64(Self.specs.filter { !$0.isRead }.count)
+            response.unreadCount = readState.allRead ? 0 : Int64(Self.specs.enumerated().filter { offset, spec in
+                !spec.isRead && !readState.isRead("notif-\(offset)")
+            }.count)
             return .success(response)
         }
     }
@@ -189,8 +197,12 @@ public final class MockNotificationService: @unchecked Sendable {
     private final class ReadState: @unchecked Sendable {
         private let lock = NSLock()
         private var cleared = false
+        /// Rows read one by one (`MarkRead`, #1572).
+        private var readIDs: Set<String> = []
         var allRead: Bool { lock.withLock { cleared } }
         func markAllRead() { lock.withLock { cleared = true } }
+        func markRead(_ id: String) { _ = lock.withLock { readIDs.insert(id) } }
+        func isRead(_ id: String) -> Bool { lock.withLock { cleared || readIDs.contains(id) } }
     }
 
     private func list(_ request: Notification_V1_ListNotificationsRequest) -> Result<Notification_V1_ListNotificationsResponse, ConnectError> {
@@ -203,7 +215,6 @@ public final class MockNotificationService: @unchecked Sendable {
         guard !authors.isEmpty, !viewerPosts.isEmpty else {
             return .success(Notification_V1_ListNotificationsResponse())
         }
-        let allRead = readState.allRead
 
         let posts: [Notification_V1_NotificationView] = Self.specs.enumerated().map { offset, spec in
             var view = Notification_V1_NotificationView()
@@ -219,7 +230,7 @@ public final class MockNotificationService: @unchecked Sendable {
             view.subjectKind = .post
             view.subjectID = viewerPosts[spec.post % viewerPosts.count].postID
             view.createdAtMs = nowMs - spec.minutesAgo * minute
-            view.isRead = spec.isRead || allRead
+            view.isRead = spec.isRead || readState.isRead(view.notificationID)
             return view
         }
 
@@ -236,7 +247,7 @@ public final class MockNotificationService: @unchecked Sendable {
             view.subjectKind = .account
             view.subjectID = dataset.accountID(for: authors[notice.senderIndex].profileID)
             view.createdAtMs = nowMs - notice.minutesAgo * minute
-            view.isRead = allRead
+            view.isRead = readState.isRead(view.notificationID)
             return view
         }
         let notifications: [Notification_V1_NotificationView] = notices.isEmpty

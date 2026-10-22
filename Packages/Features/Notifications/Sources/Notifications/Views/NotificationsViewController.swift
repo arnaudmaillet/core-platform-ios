@@ -9,8 +9,9 @@ import UIKit
 ///
 /// It does not know it lives in a drawer. The drawer container forwards real
 /// appearance callbacks, and those are what drive the visit: `viewWillAppear`
-/// refreshes, `viewDidAppear` marks the new rows seen, `viewDidDisappear` moves
-/// them to "Earlier" (see `NotificationsViewModel`).
+/// refreshes, `viewDidAppear` starts reporting the rows the viewer SEES (each
+/// one's pink dot read once it is half on screen, #1572), `viewDidDisappear`
+/// ends the visit (see `NotificationsViewModel`).
 final class NotificationsViewController: UIViewController {
     private enum Item: Hashable {
         case row(String)
@@ -83,6 +84,7 @@ final class NotificationsViewController: UIViewController {
         super.viewDidAppear(animated)
         isOnScreen = true
         viewModel.didReveal()
+        reportSeenRows()
         #if DEBUG
         debugShowMoreIfRequested()
         #endif
@@ -270,7 +272,9 @@ final class NotificationsViewController: UIViewController {
         if snapshot.indexOfItem(.pageFooter) != nil {
             snapshot.reconfigureItems([.pageFooter])
         }
-        dataSource.apply(snapshot, animatingDifferences: isOnScreen && !previous.isEmpty)
+        dataSource.apply(snapshot, animatingDifferences: isOnScreen && !previous.isEmpty) { [weak self] in
+            self?.reportSeenRows()
+        }
         updateSectionItem()
     }
 
@@ -290,6 +294,34 @@ final class NotificationsViewController: UIViewController {
         }
     }
     #endif
+}
+
+// MARK: - Rows seen (#1572)
+
+extension NotificationsViewController {
+    /// A row counts as seen once this much of it is on screen.
+    static let seenFraction: CGFloat = 0.5
+
+    /// The rows at least `seenFraction` inside the visible band — the list's
+    /// bounds less the bars' insets. Only while the drawer is fully open: a
+    /// peek or a slide is not a look.
+    var seenRowIDs: [String] {
+        guard isOnScreen else { return [] }
+        let band = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
+        return collectionView.indexPathsForVisibleItems.compactMap { indexPath in
+            guard case .row(let id) = dataSource.itemIdentifier(for: indexPath),
+                  let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame,
+                  frame.height > 0 else { return nil }
+            let shown = frame.intersection(band).height
+            return shown / frame.height >= Self.seenFraction ? id : nil
+        }
+    }
+
+    /// Hands the rows on screen to the view model, which reads each once.
+    private func reportSeenRows() {
+        let ids = seenRowIDs
+        if !ids.isEmpty { viewModel.didSee(rowIDs: ids) }
+    }
 }
 
 // MARK: - The section in the bar (#1573)
@@ -338,6 +370,7 @@ extension NotificationsViewController {
 extension NotificationsViewController: UICollectionViewDelegate {
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         updateSectionItem()
+        reportSeenRows()
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {

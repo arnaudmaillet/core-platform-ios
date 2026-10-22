@@ -8,12 +8,19 @@ public protocol NotificationsFeatureBuilding {
     /// The notifications list, as the shell's left drawer shows it. Tapping a
     /// row routes to its subject (a post or a profile) via the injected
     /// `Router`. It carries its own title; the host wraps it in a navigation
-    /// controller. Its appearance callbacks drive "seen": it marks the new
-    /// rows read once it has APPEARED, so a host must forward them for real
-    /// (a drawer that only peeks marks nothing).
+    /// controller. Its appearance callbacks drive "seen": it marks a row read
+    /// once the row has been on screen with the list APPEARED, so a host must
+    /// forward them for real (a drawer that only peeks marks nothing). Each
+    /// time rows are read it posts `.notificationsReadDidChange`.
     func makeNotificationsViewController() -> UIViewController
 
     /// The viewer's unread count for the tab badge. Best-effort: returns 0 when
     /// it can't be read, so the badge never blocks or errors.
     func unreadCount() async -> Int
+}
+
+extension Notification.Name {
+    /// Rows were marked read on the server (#1572): the unread count fell,
+    /// so a badge reads it again. Posted on the main queue.
+    public static let notificationsReadDidChange = Notification.Name("NotificationsReadDidChange")
 }
