@@ -205,11 +205,10 @@ struct ProfileRelationshipsTabSyncTests {
         #expect(controller.tabBar.selectedIndex == 0)
     }
 
-    /// ⚠️ Every list hides the system's edge effect under the header, and so
-    /// does the pager over them — its own scroll view spans the header and draws
-    /// its own effect. Left alone, iOS 27 cut the header off at a hard line with
-    /// a hairline (measured on this screen). See `prefersClearTopEdge`.
-    @Test("Every list, and the pager over them, hides the effect under the header")
+    /// ⚠️ The pager wears the titled header's soft blur and the lists nested in
+    /// it stay clear (#1591): UIKit draws no edge effect for a list inside the
+    /// pager's scroll view.
+    @Test("The pager wears the header's blur, the lists none")
     func everyListFadesUnderTheHeader() {
         let controller = makeController()
         let paging = controller.pager.pagingScrollView
@@ -232,10 +231,11 @@ struct ProfileRelationshipsTabSyncTests {
 
         let all = lists()
         #expect(all.count == 3, "Followers, Following and Friends")
-        // A titled header (#1591): each list wears the soft blur over the
-        // bar; the pager spanning them stays clear, or two bands would stack.
-        #expect(all.allSatisfy { !$0.topEdgeEffect.isHidden && $0.topEdgeEffect.style == .soft })
-        #expect(paging.topEdgeEffect.isHidden)
+        // A titled header (#1591): the soft blur over the bar is the PAGER's —
+        // UIKit drew none for the lists nested in it (the owner, 2026-10-22,
+        // filmed) — and the lists stay clear, or two bands would stack.
+        #expect(!paging.topEdgeEffect.isHidden && paging.topEdgeEffect.style == .soft)
+        #expect(all.allSatisfy { $0.topEdgeEffect.isHidden })
     }
 }
 

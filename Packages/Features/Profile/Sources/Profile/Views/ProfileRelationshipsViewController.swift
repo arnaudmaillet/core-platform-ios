@@ -103,7 +103,9 @@ final class ProfileRelationshipsViewController: UIViewController {
         // viewport of skeleton rows before the push began —
         // `-presentation-budget` blamed this screen for ~200 ms of it. A page
         // is made when the pager is about to show it (charter P3).
-        self.pager = HorizontalPagerView(lazyPages: pages.map { page in { page.view } }, initialIndex: start)
+        self.pager = HorizontalPagerView(
+            lazyPages: pages.map { page in { page.view } }, initialIndex: start, prefersClearTopEdge: false
+        )
         super.init(nibName: nil, bundle: nil)
         // The profile underneath hides the tab bar on push; this screen is one
         // level deeper and must not bring it back.
@@ -159,6 +161,11 @@ final class ProfileRelationshipsViewController: UIViewController {
         }
 
         pager.pin(to: view)
+        // ⚠️ THE TITLED HEADER'S SOFT BLUR, ON THE PAGER (#1591; the owner,
+        // 2026-10-22, filmed: only the status band blurred). The lists are
+        // nested in this scroll view and UIKit draws no edge effect for
+        // them; this one sits right under the bar, and covers it.
+        pager.pagingScrollView.applyTopEdge(for: .titled)
 
         // Tap → page. Animated, so the lens rides the same progress stream a
         // finger produces rather than jumping.
