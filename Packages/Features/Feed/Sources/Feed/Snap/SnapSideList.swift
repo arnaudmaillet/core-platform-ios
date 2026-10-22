@@ -608,6 +608,18 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         reconcilePlayback()
     }
 
+    /// ⚠️ RESTYLED AS IT COMES ON SCREEN (the owner, 2026-10-22: at either
+    /// end of the list, the tile the card paged onto wore no ring). The list
+    /// PREFETCHES: a cell is made — and ringed for the post on show then —
+    /// before it is visible, and `setRing` restyles visible cells only, so
+    /// the tile scrolled in by the card's next page kept the ring of when it
+    /// was made: none.
+    func collectionView(
+        _ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath
+    ) {
+        style(cell, at: indexPath)
+    }
+
     func collectionView(
         _ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath
     ) {
@@ -815,6 +827,8 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
 
     /// The tiles on screen. Tests.
     var debugTileCells: [PostGridTileCell] { collection.visibleCells.compactMap { $0 as? PostGridTileCell } }
+    /// The strip itself. Tests.
+    var debugCollection: UICollectionView { collection }
 
     /// Selects the item at `index`, for a QA hook or a test.
     func debugSelect(_ index: Int) {
