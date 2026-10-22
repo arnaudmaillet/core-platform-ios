@@ -253,15 +253,17 @@ struct SnapUnavailablePostTests {
     /// and the outbox's answer puts the points back. A readable post's
     /// stake still lands.
     @Test func aLikeAlreadySentOnATakenDownPostComesBackThroughTheOutbox() async throws {
-        let backend = MockBackend()
-        let gone = try #require(backend.dataset.posts.first { $0.authorProfileID == "prof-5" }?.postID)
-        let kept = try #require(backend.dataset.posts.first { $0.authorProfileID == "prof-6" }?.postID)
-        backend.socialServices.takeDown(gone)
-
         let suite = "snap-unavailable-outbox-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
         defer { defaults.removePersistentDomain(forName: suite) }
+        // ⚠️ ITS OWN SERVER WALLET: on the test host's standard defaults the
+        // mock's wallet kept across runs and ran dry (`points: 0` after a
+        // day of local lanes), and the readable post's stake was refused.
+        let backend = MockBackend(persistence: defaults)
+        let gone = try #require(backend.dataset.posts.first { $0.authorProfileID == "prof-5" }?.postID)
+        let kept = try #require(backend.dataset.posts.first { $0.authorProfileID == "prof-6" }?.postID)
+        backend.socialServices.takeDown(gone)
         let scope = StorageScope(owner: .member(account: MockAuthService.accountID, profile: MockSocialDataset.viewerProfileID))
         let wallet = WalletStore(defaults: defaults, scope: scope)
         let outbox = LikeOutbox(defaults: defaults, scope: scope)
