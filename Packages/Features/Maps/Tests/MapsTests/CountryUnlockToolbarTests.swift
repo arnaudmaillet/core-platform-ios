@@ -35,14 +35,16 @@ struct CountryUnlockToolbarTests {
         view.subviews + view.subviews.flatMap(descendants)
     }
 
-    /// ⚠️ THE BAR SHOWS, FOR ITS CLOSE ITEM top-left (#1600), and the content
-    /// starts behind it — the sound sheet's arrangement.
-    @Test func theSheetShowsItsBarForAClosingItemTopLeft() throws {
+    /// ⚠️ THE BAR SHOWS, FOR ITS CLOSE ITEM top-RIGHT (#1600, moved right by
+    /// the owner 2026-10-22), and the content starts behind it — the sound
+    /// sheet's arrangement.
+    @Test func theSheetShowsItsBarForAClosingItemTopRight() throws {
         let (sheet, navigation) = try makeSheet()
         #expect(!navigation.isNavigationBarHidden)
-        let close = try #require(sheet.navigationItem.leftBarButtonItem)
+        let close = try #require(sheet.navigationItem.rightBarButtonItem)
         #expect(close.accessibilityIdentifier == "countryUnlock.close")
-        #expect(sheet.navigationItem.rightBarButtonItems?.isEmpty ?? true, "something besides the close item in the bar")
+        #expect(sheet.navigationItem.rightBarButtonItems?.count == 1, "something besides the close item in the bar")
+        #expect(sheet.navigationItem.leftBarButtonItems?.isEmpty ?? true, "an item top-left")
     }
 
     @Test func theContentStartsBehindTheBar() throws {

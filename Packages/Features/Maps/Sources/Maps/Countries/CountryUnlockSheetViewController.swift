@@ -8,7 +8,7 @@ import CoreNavigation
 /// ```
 ///  ┌──────────────────────────────────────┐
 ///  │ ▔▔                                   │
-///  │ (✕)        Spain  Europe            │  ← the bar's close item
+///  │            Spain  Europe        (✕) │  ← the bar's close item
 ///  │ ╭────╮      #4      12K              │
 ///  │ │ 🇪🇸 │   Ranking  Likes             │
 ///  │ ╰────╯                               │
@@ -34,7 +34,8 @@ import CoreNavigation
 /// sound sheet's: the screen is presented as the root of a navigation
 /// controller that shows its toolbar (`wrappedInSheet`), and the prominent
 /// capsule fills the toolbar. Its BAR shows too, for the close item
-/// top-left, with the content starting behind it (#1600).
+/// top-RIGHT (the owner, 2026-10-22: the sound sheet's side), with the
+/// content starting behind it (#1600).
 final class CountryUnlockSheetViewController: UIViewController {
     /// The country was unlocked; the sheet is on its way out.
     var onUnlocked: ((String) -> Void)?
@@ -113,12 +114,13 @@ final class CountryUnlockSheetViewController: UIViewController {
         // Its own prominent capsule is its background: no bubble in a bubble.
         unlockItem.hidesSharedBackground = true
         toolbarItems = [unlockItem]
-        // ✕ top-LEFT (the owner's placement; the sound sheet's is trailing).
+        // ✕ top-RIGHT, the sound sheet's side (the owner, 2026-10-22: it was
+        // left in #1600, "la croix … doit être à droite").
         let close = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
             (self?.navigationController ?? self)?.dismiss(animated: true)
         })
         close.accessibilityIdentifier = "countryUnlock.close"
-        navigationItem.leftBarButtonItem = close
+        navigationItem.rightBarButtonItem = close
 
         balanceLabel.font = .appFont(forTextStyle: .footnote)
         balanceLabel.textColor = .secondaryLabel
