@@ -1,3 +1,4 @@
+import DesignSystem
 import MapKit
 import MapsInterface
 import Testing
@@ -34,9 +35,27 @@ struct CountryUnlockToolbarTests {
         view.subviews + view.subviews.flatMap(descendants)
     }
 
-    @Test func theSheetIsANavigationControllerShowingItsToolbarNotItsBar() throws {
+    /// ⚠️ THE BAR SHOWS, FOR ITS CLOSE ITEM top-left (#1600), and the content
+    /// starts behind it — the sound sheet's arrangement.
+    @Test func theSheetShowsItsBarForAClosingItemTopLeft() throws {
+        let (sheet, navigation) = try makeSheet()
+        #expect(!navigation.isNavigationBarHidden)
+        let close = try #require(sheet.navigationItem.leftBarButtonItem)
+        #expect(close.accessibilityIdentifier == "countryUnlock.close")
+        #expect(sheet.navigationItem.rightBarButtonItems?.isEmpty ?? true, "something besides the close item in the bar")
+    }
+
+    @Test func theContentStartsBehindTheBar() throws {
+        let (sheet, navigation) = try makeSheet()
+        navigation.view.frame = CGRect(x: 0, y: 0, width: 402, height: 500)
+        navigation.view.layoutIfNeeded()
+        let identity = try #require(Self.descendants(of: sheet.view).first { $0 is PlaceIdentityView })
+        let top = identity.convert(identity.bounds, to: sheet.view).minY
+        #expect(top < navigation.navigationBar.frame.maxY, "the content was pushed below the bar (top \(top))")
+    }
+
+    @Test func theSheetIsANavigationControllerShowingItsToolbar() throws {
         let (_, navigation) = try makeSheet()
-        #expect(navigation.isNavigationBarHidden)
         #expect(!navigation.isToolbarHidden)
         #expect(navigation.modalPresentationStyle == .pageSheet)
         #expect(navigation.sheetPresentationController?.detents.count == 1)
