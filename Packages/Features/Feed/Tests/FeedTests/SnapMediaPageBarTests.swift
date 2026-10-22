@@ -477,6 +477,9 @@ struct SnapMediaPageBarTests {
         view.debugFinishTweens()
         #expect(view.debugTrackHeight(0) == SnapMediaPageBarView.handledTrackHeight)
         #expect(view.debugCursorSize == SnapMediaPageBarView.handledCursorSize)
+        // The pill is as wide as the disc it grows out of (the owner, 2026-10-22).
+        #expect(view.debugCursorSize?.width == SnapMediaPageBarView.cursorDiameter)
+        #expect((view.debugCursorSize?.height ?? 0) > SnapMediaPageBarView.cursorDiameter, "the pill is not upright")
 
         view.debugScrub(.ended, atX: 150)
         view.debugFinishTweens()

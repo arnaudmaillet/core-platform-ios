@@ -118,8 +118,10 @@ final class SnapMediaPageBarView: UIView {
     static let handledTrackHeight: CGFloat = 8
     /// The cursor after a release, until the strip rests: a disc.
     static let cursorDiameter: CGFloat = 8
-    /// The cursor while handled: a small vertical pill.
-    static let handledCursorSize = CGSize(width: 4, height: 14)
+    /// The cursor while handled: a vertical pill AS WIDE AS THE DISC — the
+    /// owner after the device check, 2026-10-22: at 4 pt it read thinner
+    /// than the cursor it grows out of and shrinks back into.
+    static let handledCursorSize = CGSize(width: cursorDiameter, height: 14)
     /// How long the bar and its cursor take to grow when touched, and to
     /// shrink back on release.
     static let handleDuration: TimeInterval = 0.2
