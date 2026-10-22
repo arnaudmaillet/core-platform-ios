@@ -49,6 +49,8 @@ final class MapFilterBarView: UIView {
     private enum Item: Hashable {
         case primary(MapFilter)
         case favorite(ProfileID)
+        /// A docked PLACE (#1598): an action, never a filter — a tap flies.
+        case place(String)
     }
 
     /// The morphing icon primaries. "All" is not among them — it is the
@@ -142,8 +144,7 @@ final class MapFilterBarView: UIView {
             // The pill is natively interactive — its own tracking supplies
             // press feedback; the recognized tap routes into selection.
             cell.onTap = { [weak self] in
-                guard let self else { return }
-                self.didTap(self.filter(for: item))
+                self?.tapped(item)
             }
         }
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) {
@@ -166,13 +167,32 @@ final class MapFilterBarView: UIView {
                 accessibilityLabel: favorite.title
             )
             return (content, MapFilter.profile(id) == selectedFilter)
+        case .place(let url):
+            guard let place = placesByURL[url] else { return nil }
+            let content = MapPillButton.Content(
+                title: place.name,
+                symbolName: "mappin.circle", selectedSymbolName: "mappin.circle.fill",
+                accessibilityLabel: "\(place.name), pinned place"
+            )
+            return (content, false)
         }
     }
 
-    private func filter(for item: Item) -> MapFilter {
+    private func tapped(_ item: Item) {
+        // A docked place is an action, not a selection: it flies.
+        if case .place(let url) = item {
+            if let entry = placesByURL[url] { onPlaceTapped?(entry) }
+            return
+        }
+        didTap(filter(for: item))
+    }
+
+    private func filter(for item: Item) -> MapFilter? {
         switch item {
         case .primary(let filter): filter
         case .favorite(let id): .profile(id)
+        // Never asked: a place's tap is routed before (`onPlaceTapped`).
+        case .place: nil
         }
     }
 
@@ -182,8 +202,40 @@ final class MapFilterBarView: UIView {
         snapshot.appendSections([.main])
         snapshot.appendItems(Self.primaries.map { .primary($0.filter) })
         snapshot.appendItems(favorites.map { .favorite($0.profileID) })
+        // The docked places after the people (#1598), in pin order.
+        snapshot.appendItems(renderedPlaces.map { .place($0.url) })
         dataSource.apply(snapshot, animatingDifferences: animatingDifferences)
     }
+
+    // MARK: - Docked places (#1598)
+
+    /// A docked place's pill was tapped: fly the map there.
+    var onPlaceTapped: ((MapDockedPlacesStore.Entry) -> Void)?
+    private var placesByURL: [String: MapDockedPlacesStore.Entry] = [:]
+    private(set) var renderedPlaces: [MapDockedPlacesStore.Entry] = []
+
+    /// The docked places, in pin order — a diff, a no-op when unchanged.
+    func setDockedPlaces(_ places: [MapDockedPlacesStore.Entry]) {
+        // One pill per place: a diffable snapshot traps on a repeated item.
+        var seen = Set<String>()
+        let unique = places.filter { seen.insert($0.url).inserted }
+        guard unique != renderedPlaces else { return }
+        renderedPlaces = unique
+        placesByURL = Dictionary(unique.map { ($0.url, $0) }, uniquingKeysWith: { first, _ in first })
+        applySnapshot(favorites: renderedFavorites ?? [], animatingDifferences: window != nil)
+    }
+
+    #if DEBUG
+    /// The docked places' pills, in the carousel's order.
+    var debugDockedPlaceURLs: [String] {
+        dataSource.snapshot().itemIdentifiers.compactMap {
+            if case .place(let url) = $0 { url } else { nil }
+        }
+    }
+
+    /// A docked place's pill tapped, as its cell routes it.
+    func debugTapPlace(_ url: String) { tapped(.place(url)) }
+    #endif
 
     // MARK: - Favorites
 

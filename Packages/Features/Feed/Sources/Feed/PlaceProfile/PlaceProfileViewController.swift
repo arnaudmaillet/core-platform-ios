@@ -166,16 +166,28 @@ final class PlaceProfileViewController: UIViewController {
     /// The header's follow-this-place toggle, when the caller's subject has a
     /// followable identity (`ClusterGalleryFollowing`); nil hides the button.
     private let following: ClusterGalleryFollowing?
-    /// The trailing items, rightmost first: the balance, when there is a
-    /// wallet, then the QR code and the star (the owner, 2026-10-16, #1304:
-    /// the tray under the identity is gone, its two controls are here).
+    /// The bar's one trailing item: the balance, when there is a wallet. The
+    /// star and the QR code moved back under the identity (#1598).
     private var walletItem: UIBarButtonItem?
-    /// Follows the place — pins it, as the map's "pinned" filter reads it:
-    /// the outline star, filled (`SaveStar`) once followed. Nil without a
-    /// follow seam.
-    private var starItem: UIBarButtonItem?
-    /// The place's share link as a QR code. Nil without a share link.
-    private var qrItem: UIBarButtonItem?
+    /// The row under the identity, the profile's tray for a place (#1598, the
+    /// owner 2026-10-22): `[Add Pin to Map] [star] [QR code]`, each shown
+    /// only with its seam.
+    private let actionRow = UIStackView()
+    /// Pins the place to the map's dock (`dockPin`): a pill there, a tap
+    /// flies the map back here.
+    private let dockPinButton = AppButton(
+        aspect: .pill(.quiet), size: .header, content: PlaceProfileViewController.dockPinContent(docked: false)
+    )
+    /// Follows the place — as the map's "pinned" filter reads it: the outline
+    /// star, filled in its gold (`SaveStar`) once followed.
+    private let starButton = AppButton(
+        aspect: .pill(.quiet), size: .icon, content: .symbol(SaveStar.symbol(saved: false))
+    )
+    /// The place's share link as a QR code.
+    private let qrButton = AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("qrcode"))
+    /// The map dock's pin for this place; nil, no pin capsule.
+    private let dockPin: ClusterGalleryFollowing?
+    private var isDocked = false
     /// What the QR code carries; nil, no bubble.
     private let shareURL: URL?
     /// The viewer's spendable balance, in the same face it wears on the map,
@@ -690,7 +702,7 @@ final class PlaceProfileViewController: UIViewController {
         }
         // `coverScreenFraction` of the screen — or, should the identity
         // outgrow it (Dynamic Type), down to the identity's clearance.
-        let content = contentTop + height(of: identityView) + Self.identityClearance
+        let content = contentTop + height(of: identityView) + actionRowBlock + Self.identityClearance
         // No banner (#1599): the header is the identity's own height.
         guard showsBanner else { return content }
         return max(content, (view.bounds.height * Self.coverScreenFraction).rounded())
@@ -749,6 +761,7 @@ final class PlaceProfileViewController: UIViewController {
         self.placeName = placeName
         self.rank = rank
         self.shareURL = identity?.shareURL
+        self.dockPin = identity?.dockPin
         self.identityView = PlaceIdentityView(
             flag: identity?.flag,
             name: Self.heroTitleComponents(of: placeName).name,
@@ -1112,6 +1125,8 @@ final class PlaceProfileViewController: UIViewController {
         applyHeroLegibility()
         identityView.translatesAutoresizingMaskIntoConstraints = false
         headerHost.addSubview(identityView)
+        actionRow.translatesAutoresizingMaskIntoConstraints = false
+        headerHost.addSubview(actionRow)
 
         // ⚠️ Stretchy banner, the profile's own mechanism: the host is moved
         // by its TOP CONSTRAINT rather than a transform precisely so this
@@ -1154,12 +1169,111 @@ final class PlaceProfileViewController: UIViewController {
             // identity, over the picture's lower part. The foot keeps the old
             // selector slot's clearance, derived from the bar, not typed (see
             // `debugIdentityClearance`).
-            // The identity's foot ends the header: its controls are in the
-            // bar now (#1304).
+            // The action row under the identity, on its column (#1598).
+            actionRow.topAnchor.constraint(
+                equalTo: identityView.bottomAnchor, constant: hasActions ? Self.actionRowGap : 0
+            ),
+            actionRow.leadingAnchor.constraint(equalTo: identityView.leadingAnchor),
+            actionRow.trailingAnchor.constraint(equalTo: identityView.trailingAnchor),
+            actionRow.heightAnchor.constraint(equalToConstant: hasActions ? Self.actionBubbleSize : 0),
+            // The row's foot ends the header (the identity's, without one).
             headerHost.bottomAnchor.constraint(
-                equalTo: identityView.bottomAnchor, constant: Self.identityClearance
+                equalTo: actionRow.bottomAnchor, constant: Self.identityClearance
             ),
         ])
+    }
+
+    /// The profile's tray metrics: 44pt bubbles, `Spacing.lg` under the
+    /// identity (the profile's air after its top row).
+    static let actionBubbleSize: CGFloat = 44
+    private static let actionRowGap = Spacing.lg
+
+    /// Whether the row has anything to show: a pin, a star or a QR code.
+    private var hasActions: Bool { dockPin != nil || following != nil || shareURL != nil }
+
+    /// The row's share of the header: its gap and its height, or nothing.
+    private var actionRowBlock: CGFloat { hasActions ? Self.actionRowGap + Self.actionBubbleSize : 0 }
+
+    /// Builds the row: the pin capsule takes the width the bubbles leave, the
+    /// bubbles are circles — the profile's Follow · QR · ⋯ tray.
+    private func configureActionRow() {
+        actionRow.axis = .horizontal
+        actionRow.alignment = .fill
+        actionRow.distribution = .fill
+        actionRow.spacing = Spacing.sm
+        actionRow.isHidden = !hasActions
+        if dockPin != nil {
+            dockPinButton.accessibilityIdentifier = "place.dockPin"
+            dockPinButton.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+            dockPinButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            dockPinButton.addAction(UIAction { [weak self] _ in self?.dockPinTapped() }, for: .primaryActionTriggered)
+            actionRow.addArrangedSubview(dockPinButton)
+            renderDockState(dockPin?.isFollowing() ?? false, animated: false)
+        }
+        if following != nil {
+            starButton.accessibilityIdentifier = "place.star"
+            starButton.addAction(UIAction { [weak self] _ in self?.starTapped() }, for: .primaryActionTriggered)
+            actionRow.addArrangedSubview(starButton)
+            renderFollowState(following?.isFollowing() ?? false, animated: false)
+        }
+        if shareURL != nil {
+            qrButton.accessibilityIdentifier = "place.qrCode"
+            qrButton.accessibilityLabel = "QR code"
+            qrButton.addAction(UIAction { [weak self] _ in self?.presentQRCode() }, for: .primaryActionTriggered)
+            actionRow.addArrangedSubview(qrButton)
+        }
+        if dockPin == nil {
+            // No capsule to take the width: the bubbles stand at the leading
+            // edge, a spacer takes the rest.
+            let spacer = UIView()
+            spacer.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+            actionRow.addArrangedSubview(spacer)
+        }
+        for bubble in [starButton, qrButton] where bubble.superview != nil {
+            // 999, the profile's: on the narrowest devices a bubble shaving a
+            // point beats an unsatisfiable-constraints break.
+            let diameter = bubble.widthAnchor.constraint(equalToConstant: Self.actionBubbleSize)
+            diameter.priority = UILayoutPriority(999)
+            NSLayoutConstraint.activate([diameter, bubble.heightAnchor.constraint(equalTo: bubble.widthAnchor)])
+        }
+    }
+
+    /// The pin's two states: an offer, then the fact.
+    static func dockPinContent(docked: Bool) -> AppButton.Content {
+        docked
+            ? AppButton.Content(title: "Pinned to Map", symbol: "mappin.circle.fill")
+            : AppButton.Content(title: "Add Pin to Map", symbol: "mappin")
+    }
+
+    private func dockPinTapped() {
+        MemberGates.perform(.followPlace, from: self) { [weak self] in
+            guard let self, let dockPin = self.dockPin else { return }
+            let docked = dockPin.toggle()
+            // A control in the content changes at once, its toast beside it
+            // (`Feedback`, #1447) — one id, so a quick re-tap replaces it.
+            self.renderDockState(docked, animated: true)
+            self.confirmDock(self, docked)
+        }
+    }
+
+    /// Shows the pin's toast; a seam so tests can see it fired.
+    var confirmDock: (UIViewController, Bool) -> Void = { screen, docked in
+        Feedback.success(
+            PlaceProfileViewController.dockToast(docked: docked),
+            symbol: docked ? "mappin.circle.fill" : "mappin.slash",
+            from: screen, id: "place.dockPin"
+        )
+    }
+
+    /// The toast confirming a pin or an unpin.
+    static func dockToast(docked: Bool) -> String {
+        docked ? "Pinned to the map's dock" : "Removed from the map's dock"
+    }
+
+    private func renderDockState(_ docked: Bool, animated: Bool) {
+        isDocked = docked
+        dockPinButton.setContent(Self.dockPinContent(docked: docked), animated: animated)
+        dockPinButton.accessibilityLabel = docked ? "Unpin from Map" : "Add Pin to Map"
     }
 
     /// The air between the tray and the first post: the profile's own under
@@ -1184,7 +1298,7 @@ final class PlaceProfileViewController: UIViewController {
             let activity = UIActivityViewController(
                 activityItems: [ShareItemSource(card: card, icon: image), image], applicationActivities: nil
             )
-            activity.popoverPresentationController?.sourceItem = self.qrItem
+            activity.popoverPresentationController?.sourceItem = self.qrButton
             self.present(activity, animated: true)
         }
         present(sheet, animated: true)
@@ -1261,12 +1375,20 @@ final class PlaceProfileViewController: UIViewController {
     static let scrimTarget: CGFloat = 0.06
 
     /// The veil's frame: the type's blocks, the full width, rising well above
-    /// them so its gradient starts out of sight of the name.
-    static func scrimFrame(around blocks: [CGRect], width: CGFloat) -> CGRect {
+    /// them so its gradient starts out of sight of the name — and, under an
+    /// action row (#1598), running on past the row's foot so it fades out
+    /// there instead of ending in an edge across the row.
+    static func scrimFrame(around blocks: [CGRect], through floor: CGFloat? = nil, width: CGFloat) -> CGRect {
         guard let first = blocks.first else { return .zero }
         let union = blocks.dropFirst().reduce(first) { $0.union($1) }
-        return CGRect(x: 0, y: union.minY - 72, width: width, height: union.height + 72 + Spacing.lg)
+        let solidFoot = union.maxY + Spacing.lg
+        let bottom = floor.map { max($0, solidFoot) + scrimFadeOut } ?? solidFoot
+        return CGRect(x: 0, y: union.minY - scrimFadeIn, width: width, height: bottom - (union.minY - scrimFadeIn))
     }
+
+    /// The veil's ramps: in above the name; out under the action row.
+    static let scrimFadeIn: CGFloat = 72
+    static let scrimFadeOut: CGFloat = 48
 
     /// Whether the page wears a banner (#1599): not when the place's most
     /// popular post is words.
@@ -1322,7 +1444,9 @@ final class PlaceProfileViewController: UIViewController {
         let brightest = blocks.compactMap { bannerView.groundPixels(behind: $0) }.joined()
             .map { HeroInk.luminance(red: CGFloat($0.x), green: CGFloat($0.y), blue: CGFloat($0.z)) }
             .max() ?? 0
-        identityScrim.frame = Self.scrimFrame(around: blocks, width: bannerBox.bounds.width)
+        let rowFoot = actionRow.isHidden ? nil : restingFrame(of: actionRow).maxY
+        identityScrim.frame = Self.scrimFrame(around: blocks, through: rowFoot, width: bannerBox.bounds.width)
+        identityScrim.setRamps(fadeIn: Self.scrimFadeIn, fadeOut: rowFoot == nil ? 0 : Self.scrimFadeOut)
         identityScrim.alpha = Self.scrimAlpha(brightestGround: brightest)
         #if DEBUG
         HeroInk.debugTraceGround(nameGround, name: "place-name", picked: name)
@@ -1581,6 +1705,7 @@ final class PlaceProfileViewController: UIViewController {
         // from under its own caption.
         bannerBox.alpha = alpha
         identityView.alpha = alpha
+        actionRow.alpha = alpha
     }
 
     /// The identity fade's ramp: opaque until the last stretch of travel,
@@ -1985,23 +2110,17 @@ final class PlaceProfileViewController: UIViewController {
     // MARK: - The navigation bar
 
     /// The bar, left to right: back chevron · selector (docked only) ·
-    /// dynamic space · star · QR code · points balance (#1304).
+    /// dynamic space · points balance. The star and the QR code are the row
+    /// under the identity again (#1598).
     private func configureNavigationItems() {
-        configureFollowButton()
-        configureQRItem()
+        configureActionRow()
         configureWalletBadge()
         applyTrailingItems()
     }
 
-    /// ⚠️ INDEX 0 IS THE RIGHTMOST: the balance keeps the corner, the QR code
-    /// and the star stand inboard of it (#1304).
-    ///
-    /// ⚠️ EACH IN ITS OWN BUBBLE. `sharesBackground = false` is UIKit's
-    /// opt-out from the one glass pill a trailing group otherwise draws
-    /// around everything in it. Left sharing, a balance and a pin read as
-    /// one segmented control with a divider nobody drew.
+    /// ⚠️ IN ITS OWN BUBBLE: `sharesBackground = false` (#1304).
     private func applyTrailingItems() {
-        let items = [walletItem, qrItem, starItem].compactMap { $0 }
+        let items = [walletItem].compactMap { $0 }
         for item in items { item.sharesBackground = false }
         navigationItem.rightBarButtonItems = items
     }
@@ -2064,43 +2183,22 @@ final class PlaceProfileViewController: UIViewController {
         )
     }
 
-    /// The bar's star: following a place pins it (the map's "pinned" filter
-    /// reads the same store). It was the tray's Pin capsule until the tray
-    /// went (the owner, 2026-10-16, #1304), and its pin is a star now.
-    private func configureFollowButton() {
-        guard following != nil else { return }
-        let item = UIBarButtonItem(image: nil, style: .plain, target: self, action: #selector(starTapped))
-        item.sharesBackground = false
-        starItem = item
-        renderFollowState(following?.isFollowing() ?? false)
-    }
-
-    @objc private func starTapped() {
+    /// The row's star: following a place pins it to the map's "pinned"
+    /// filter (the same store).
+    private func starTapped() {
         MemberGates.perform(.followPlace, from: self) { [weak self] in
             guard let self, let following = self.following else { return }
-            self.renderFollowState(following.toggle())
+            self.renderFollowState(following.toggle(), animated: true)
         }
     }
 
-    /// The place's QR code in the bar, beside the star.
-    private func configureQRItem() {
-        guard shareURL != nil else { return }
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: "qrcode"), style: .plain, target: self, action: #selector(qrTapped)
-        )
-        item.accessibilityLabel = "QR code"
-        item.sharesBackground = false
-        qrItem = item
-    }
-
-    @objc private func qrTapped() { presentQRCode() }
-
     /// The star's two states: outline while the viewer does not follow the
     /// place, filled in the save star's gold once they do (`SaveStar`).
-    private func renderFollowState(_ isFollowing: Bool) {
+    private func renderFollowState(_ isFollowing: Bool, animated: Bool) {
         followState = isFollowing
-        starItem?.image = SaveStar.image(saved: isFollowing)
-        starItem?.accessibilityLabel = isFollowing ? "Unfollow this place" : "Follow this place"
+        starButton.setContent(.symbol(SaveStar.symbol(saved: isFollowing)), animated: animated)
+        starButton.inkColor = isFollowing ? SaveStar.tint : nil
+        starButton.accessibilityLabel = isFollowing ? "Unfollow this place" : "Follow this place"
     }
 
     // MARK: - Opening a tile
@@ -2723,6 +2821,13 @@ extension PlaceProfileViewController {
     var debugHeaderTravel: CGFloat { headerTravel }
     /// The veil under the identity (#1597).
     var debugIdentityScrimAlpha: CGFloat { identityScrim.isHidden ? 0 : identityScrim.alpha }
+    /// The veil's own opacity (its gradient, not its alpha) at a point of
+    /// the screen's height.
+    func debugIdentityScrimOpacity(atScreenY y: CGFloat) -> CGFloat {
+        let local = view.convert(CGPoint(x: 0, y: y), to: identityScrim).y
+        guard local >= 0, local <= identityScrim.bounds.height else { return 0 }
+        return identityScrim.debugOpacity(atY: local)
+    }
     /// The detents the list rests on (#1599).
     var debugSnapDetents: (all: [CGFloat], catching: [CGFloat]) {
         (activityPage.snapDetents, activityPage.catchDetents)
@@ -2744,8 +2849,12 @@ extension PlaceProfileViewController {
     var debugIdentity: PlaceIdentityView { identityView }
     /// The bar's trailing items, rightmost first (#1304).
     var debugTrailingItems: [UIBarButtonItem] { navigationItem.rightBarButtonItems ?? [] }
-    var debugStarItem: UIBarButtonItem? { starItem }
-    var debugQRItem: UIBarButtonItem? { qrItem }
+    /// The row's controls, each nil when its seam is (#1598).
+    var debugStarButton: AppButton? { starButton.superview == nil ? nil : starButton }
+    var debugQRButton: AppButton? { qrButton.superview == nil ? nil : qrButton }
+    var debugDockPinButton: AppButton? { dockPinButton.superview == nil ? nil : dockPinButton }
+    var debugActionRowFrame: CGRect { actionRow.convert(actionRow.bounds, to: view) }
+    var debugIsDocked: Bool { isDocked }
     /// The share sheet the QR bubble opens.
     func debugMakeShareSheet() -> ShareSheetViewController? { makeShareSheet() }
     /// The banner's fade, in the view's space.
@@ -2859,8 +2968,9 @@ extension PlaceProfileViewController {
     /// but its stated reason is history: the selector is at the foot of the
     /// screen. Re-decide it rather than inheriting it.
     var debugIdentityClearance: CGFloat {
-        // From the identity's foot, the header's last content (#1304).
-        headerHost.bounds.height - identityView.frame.maxY
+        // From the action row's foot, the header's last content (#1598) —
+        // the identity's own when the row is empty.
+        headerHost.bounds.height - actionRow.frame.maxY
     }
     /// Drives the active page to a travel offset through the same path a
     /// finger's scroll reports through.
@@ -3040,10 +3150,46 @@ private final class IdentityScrimView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
-        let gradient = layer as? CAGradientLayer
-        gradient?.colors = [UIColor.black.withAlphaComponent(0).cgColor, UIColor.black.cgColor, UIColor.black.cgColor]
-        gradient?.locations = [0, 0.45, 1]
+        setRamps(fadeIn: 0, fadeOut: 0)
     }
+
+    private var ramps: (fadeIn: CGFloat, fadeOut: CGFloat) = (0, 0)
+
+    /// Clear to black over `fadeIn` at the top, black to clear over
+    /// `fadeOut` at the foot (none: a hard foot), in points.
+    func setRamps(fadeIn: CGFloat, fadeOut: CGFloat) {
+        ramps = (fadeIn, fadeOut)
+        applyRamps()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        applyRamps()
+    }
+
+    /// The ramps are in points, not fractions: the frame changes with the
+    /// type's size.
+    private func applyRamps() {
+        let height = max(bounds.height, 1)
+        let top = min(ramps.fadeIn / height, 1)
+        let foot = max(1 - ramps.fadeOut / height, top)
+        let clear = UIColor.black.withAlphaComponent(0).cgColor, black = UIColor.black.cgColor
+        let gradient = layer as? CAGradientLayer
+        gradient?.colors = [clear, black, black, ramps.fadeOut > 0 ? clear : black]
+        gradient?.locations = [0, top, foot, 1].map { NSNumber(value: Double($0)) }
+    }
+
+    #if DEBUG
+    /// The veil's opacity at `y`, in its own space: what the gradient draws.
+    func debugOpacity(atY y: CGFloat) -> CGFloat {
+        let height = max(bounds.height, 1)
+        let top = min(ramps.fadeIn / height, 1) * height
+        let foot = max(1 - ramps.fadeOut / height, top / height) * height
+        if y < top { return top > 0 ? y / top : 1 }
+        if y <= foot || ramps.fadeOut == 0 { return 1 }
+        return max(0, 1 - (y - foot) / (height - foot))
+    }
+    #endif
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }

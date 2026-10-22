@@ -516,23 +516,24 @@ struct PlaceProfileTests {
             toggle: { followed.toggle(); return followed }
         ))
         laidOut(profile)
-        let star = try #require(profile.debugStarItem)
-        let tap = { (star.target as? NSObject)?.perform(star.action) }
-        #expect(star.image == SaveStar.image(saved: false))
+        let star = try #require(profile.debugStarButton)
+        #expect(star.content.symbol == SaveStar.symbol(saved: false))
+        #expect(star.inkColor == nil, "an outline star wears the control's ink")
         #expect(star.accessibilityLabel == "Follow this place")
 
-        _ = tap()
+        star.sendActions(for: .primaryActionTriggered)
         #expect(followed, "the toggle reached the caller's store")
-        #expect(star.image == SaveStar.image(saved: true))
+        #expect(star.content.symbol == SaveStar.symbol(saved: true))
+        #expect(star.inkColor == SaveStar.tint, "a followed place's star is the save star's gold")
         #expect(star.accessibilityLabel == "Unfollow this place")
 
-        _ = tap()
+        star.sendActions(for: .primaryActionTriggered)
         #expect(!followed)
-        #expect(star.image == SaveStar.image(saved: false))
+        #expect(star.content.symbol == SaveStar.symbol(saved: false))
     }
 
-    /// A guest's place page wears no balance (#1146): the QR code and the
-    /// star stay.
+    /// A guest's place page wears no balance (#1146): the bar is empty, the
+    /// QR code and the star stay in the row.
     @Test func aGuestsPlacePageHasNoBalance() throws {
         let profile = PlaceProfileViewController(
             postIDs: [], placeName: "Paris • City Cluster",
@@ -548,21 +549,21 @@ struct PlaceProfileTests {
             loadPosts: { [] }, openPost: { _, _, _ in }
         )
         laidOut(profile)
-        let items = profile.debugTrailingItems
-        #expect(!items.contains { $0.customView is WalletBadgeButton }, "a guest's place page shows the balance")
-        #expect(items.count == 2)
+        #expect(profile.debugTrailingItems.isEmpty, "a guest's place page shows the balance")
+        #expect(profile.debugStarButton != nil && profile.debugQRButton != nil)
     }
 
-    /// ⚠️ THE TRAY IS GONE (#1304): its two controls are bar items, left of
-    /// the balance — rightmost first: balance, QR code, star — each in its
-    /// own bubble, each only with its seam.
-    @Test func theBarHoldsTheBalanceThenTheQRCodeThenTheStar() throws {
+    /// ⚠️ THE STAR AND THE QR CODE LEFT THE BAR (#1598, the owner 2026-10-22):
+    /// the bar holds the balance alone, the row under the identity reads
+    /// `[Add Pin to Map] [star] [QR code]` — each only with its seam.
+    @Test func theRowHoldsThePinThenTheStarThenTheQRCode() throws {
         let profile = PlaceProfileViewController(
             postIDs: [], placeName: "Paris • City Cluster",
             identity: PlaceIdentity(
                 flag: nil,
                 subtitle: "France",
-                shareURL: URL(string: "https://core-platform.click/place/city:paris")
+                shareURL: URL(string: "https://core-platform.click/place/city:paris"),
+                dockPin: ClusterGalleryFollowing(isFollowing: { false }, toggle: { true })
             ),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             videoPlayback: nil,
@@ -572,12 +573,27 @@ struct PlaceProfileTests {
         )
         laidOut(profile)
         let items = profile.debugTrailingItems
-        try #require(items.count == 3)
+        try #require(items.count == 1)
         #expect(items[0].customView is WalletBadgeButton, "the balance left the corner")
-        #expect(items[1] === profile.debugQRItem)
-        #expect(items[1].image == UIImage(systemName: "qrcode"))
-        #expect(items[2] === profile.debugStarItem)
-        #expect(items.allSatisfy { !$0.sharesBackground })
+
+        let pin = try #require(profile.debugDockPinButton)
+        let star = try #require(profile.debugStarButton)
+        let qr = try #require(profile.debugQRButton)
+        let frames = [pin, star, qr].map { $0.convert($0.bounds, to: profile.view) }
+        #expect(frames[0].maxX <= frames[1].minX && frames[1].maxX <= frames[2].minX, "\(frames)")
+        #expect(pin.content.title == "Add Pin to Map")
+        #expect(qr.content.symbol == "qrcode")
+        // The profile's tray: 44pt circles, the capsule takes the rest.
+        for bubble in frames.dropFirst() {
+            #expect(abs(bubble.width - 44) < 0.5 && abs(bubble.height - 44) < 0.5, "\(bubble)")
+        }
+        #expect(frames[0].width > 44)
+        // Under the identity, on its column, inside the header.
+        let row = profile.debugActionRowFrame
+        #expect(row.minY >= profile.debugIdentityFrame.maxY)
+        #expect(abs(row.minX - profile.debugIdentityFrame.minX) < 0.5)
+        #expect(abs(row.maxX - profile.debugIdentityFrame.maxX) < 0.5)
+        #expect(abs(profile.debugHeaderBottom - row.maxY - Spacing.xl) < 0.5)
 
         // The QR code opens the PROFILE'S share sheet, shared, with no row
         // of people (the page has no source of them).
@@ -587,13 +603,47 @@ struct PlaceProfileTests {
 
         let starOnly = makeProfile(following: ClusterGalleryFollowing(isFollowing: { false }, toggle: { true }))
         laidOut(starOnly)
-        #expect(starOnly.debugQRItem == nil, "a QR code with no link")
-        #expect(starOnly.debugStarItem != nil)
+        #expect(starOnly.debugQRButton == nil, "a QR code with no link")
+        #expect(starOnly.debugDockPinButton == nil, "a pin with no dock")
+        #expect(starOnly.debugStarButton != nil)
         let bare = makeProfile(following: nil)
         laidOut(bare)
-        #expect(bare.debugStarItem == nil && bare.debugQRItem == nil)
-        // No tray: the first post stands its gap under the identity itself.
+        #expect(bare.debugStarButton == nil && bare.debugQRButton == nil && bare.debugDockPinButton == nil)
+        // No row: the first post stands its gap under the identity itself.
         #expect(abs(bare.debugIdentityClearance - Spacing.xl) < 0.5)
+        #expect(abs(bare.debugHeaderBottom - bare.debugIdentityFrame.maxY - Spacing.xl) < 0.5)
+    }
+
+    /// The pin toggles the map dock's store, says which state it is in, and
+    /// confirms each change with a toast.
+    @Test func thePinTogglesTheDock() throws {
+        var docked = false
+        let profile = PlaceProfileViewController(
+            postIDs: [], placeName: "Paris • City Cluster",
+            identity: PlaceIdentity(
+                flag: nil, subtitle: "France",
+                dockPin: ClusterGalleryFollowing(isFollowing: { docked }, toggle: { docked.toggle(); return docked })
+            ),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            videoPlayback: nil,
+            loadPosts: { [] }, openPost: { _, _, _ in }
+        )
+        var toasts: [String] = []
+        profile.confirmDock = { _, docked in toasts.append(PlaceProfileViewController.dockToast(docked: docked)) }
+        laidOut(profile)
+        let pin = try #require(profile.debugDockPinButton)
+        #expect(pin.content == PlaceProfileViewController.dockPinContent(docked: false))
+        pin.sendActions(for: .primaryActionTriggered)
+        #expect(docked, "the toggle reached the dock's store")
+        #expect(profile.debugIsDocked)
+        #expect(pin.content == PlaceProfileViewController.dockPinContent(docked: true))
+        #expect(pin.accessibilityLabel == "Unpin from Map")
+        pin.sendActions(for: .primaryActionTriggered)
+        #expect(!docked)
+        #expect(pin.content.title == "Add Pin to Map")
+        // A toast confirms each change (#1447's order: the content control
+        // first, its toast beside it).
+        #expect(toasts == ["Pinned to the map's dock", "Removed from the map's dock"])
     }
 
     /// ⚠️ THE HAND-OVER TEST IS GONE BECAUSE THE HAND-OVER IS. There were two
