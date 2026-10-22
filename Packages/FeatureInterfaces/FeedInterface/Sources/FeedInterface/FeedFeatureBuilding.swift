@@ -5,8 +5,9 @@ import UIKit
 
 /// How the post-detail screen presents.
 public enum PostDetailMode: Sendable, Equatable {
-    /// The full post (header, media, engagement) above its comments — used when
-    /// arriving at a post you can't already see (e.g. from a notification).
+    /// The full post (header, media, engagement) above its comments. No route
+    /// opens it any more (#1577: one post screen, the vertical feed); its
+    /// removal is the next slice.
     case full
     /// Comments + compose bar only, no post header/media — used from the snap
     /// feed, where the post is already full-screen. Text-only snap pages use
@@ -66,10 +67,13 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
     func makeForYouViewController(
         onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
     ) -> UIViewController
-    /// The detail screen for a single post. `.full` for the `.post` route (e.g.
-    /// from a notification); `.commentsOnly` for the `.comments` route (the snap
-    /// feed's comment button).
-    func makePostDetailViewController(for postID: PostID, mode: PostDetailMode) -> UIViewController
+    /// ONE POST SCREEN (#1577, the owner 2026-10-22): the vertical full-screen
+    /// feed on `postID`, its comments up when `opensComments` — what the
+    /// `.post` and `.comments` routes push (a tapped push notification,
+    /// `-open-post`). A plain push with no flight: the platform's own edge pop
+    /// dismisses it (`ownsInteractiveDismissal: false`, the `.postStream`
+    /// route's reason).
+    func makePostFeedViewController(for postID: PostID, opensComments: Bool) -> UIViewController
     /// A full-screen snap feed seeded with a fixed, ordered set of posts rather
     /// than the following timeline — the surface a Maps pin/cluster tap expands
     /// into. Reuses the entire snap feed (video pool, likes, comments, active-

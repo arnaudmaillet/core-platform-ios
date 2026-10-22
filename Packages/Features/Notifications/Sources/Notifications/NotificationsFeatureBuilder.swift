@@ -19,6 +19,9 @@ public struct NotificationsFeatureBuilder: NotificationsFeatureBuilding {
     /// (#1575): only where the server accepts them (the mock, until backend
     /// #971 reaches the fleet).
     private let allowsLongPushPauses: Bool
+    /// Opens a post notification's post above the drawer (#1577); nil routes
+    /// it.
+    private let openPost: (@MainActor (NotificationPostOpening) -> Void)?
 
     /// `localStore`: the drawer opens on its last rows, offline and at a cold
     /// start (#897). Nil keeps them in memory.
@@ -27,9 +30,11 @@ public struct NotificationsFeatureBuilder: NotificationsFeatureBuilding {
         router: (any Router)? = nil,
         imagePipeline: ImagePipeline? = nil,
         localStore: LocalStore? = nil,
-        allowsLongPushPauses: Bool = false
+        allowsLongPushPauses: Bool = false,
+        openPost: (@MainActor (NotificationPostOpening) -> Void)? = nil
     ) {
         self.allowsLongPushPauses = allowsLongPushPauses
+        self.openPost = openPost
         self.repository = repository
         self.router = router
         self.imagePipeline = imagePipeline
@@ -41,7 +46,8 @@ public struct NotificationsFeatureBuilder: NotificationsFeatureBuilding {
         viewModel.deviceCache = deviceCache
         return NotificationsViewController(
             viewModel: viewModel, imagePipeline: imagePipeline,
-            muteModel: NotificationsMuteModel(repository: repository, allowsLongPauses: allowsLongPushPauses)
+            muteModel: NotificationsMuteModel(repository: repository, allowsLongPauses: allowsLongPushPauses),
+            openPost: openPost
         )
     }
 

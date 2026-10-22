@@ -62,7 +62,24 @@ final class NotificationCell: UICollectionViewListCell {
         thumbnailTask = nil
         thumbnailURL = nil
         thumbnailView.image = nil
+        thumbnailView.alpha = 1
         avatar.prepareForReuse()
+    }
+
+    // MARK: - The thumbnail as a flight origin (#1577)
+
+    /// What the row's still draws now; nil when it shows none (a text post)
+    /// or has not loaded it yet.
+    var heroCover: UIImage? { thumbnailView.isHidden ? nil : thumbnailView.image }
+
+    /// The still's frame in `space`.
+    func heroFrame(in space: UICoordinateSpace) -> CGRect {
+        thumbnailView.convert(thumbnailView.bounds, to: space)
+    }
+
+    /// Hides the still while the flight carries its picture.
+    func setHeroConcealed(_ concealed: Bool) {
+        thumbnailView.alpha = concealed ? 0 : 1
     }
 
     func configure(with model: NotificationDisplayModel, imagePipeline: ImagePipeline?) {

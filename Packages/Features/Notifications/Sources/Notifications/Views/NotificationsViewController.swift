@@ -1,5 +1,7 @@
+import CoreModels
 import DesignSystem
 import MediaCore
+import NotificationsInterface
 import UIKit
 
 /// The notifications list, as the shell's left drawer shows it: "New" (the six
@@ -59,12 +61,60 @@ final class NotificationsViewController: UIViewController {
     var muteTimerItem: UIBarButtonItem?
     var muteTick: Timer?
 
-    /// - Parameter muteModel: the mute toolbar; nil shows none.
-    init(viewModel: NotificationsViewModel, imagePipeline: ImagePipeline?, muteModel: NotificationsMuteModel? = nil) {
+    /// The shell's opener for a post notification (#1577); nil routes it.
+    private let openPost: (@MainActor (NotificationPostOpening) -> Void)?
+
+    /// - Parameters:
+    ///   - muteModel: the mute toolbar; nil shows none.
+    ///   - openPost: opens a post notification's post above the drawer
+    ///     (#1577); nil routes it (`.post`), the drawer closing.
+    init(
+        viewModel: NotificationsViewModel, imagePipeline: ImagePipeline?, muteModel: NotificationsMuteModel? = nil,
+        openPost: (@MainActor (NotificationPostOpening) -> Void)? = nil
+    ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.muteModel = muteModel
+        self.openPost = openPost
         super.init(nibName: nil, bundle: nil)
+        if openPost != nil {
+            viewModel.opensPost = { [weak self] row, post in self?.openPostAboveDrawer(row: row, post: post) ?? false }
+        }
+    }
+
+    // MARK: - A post, above the drawer (#1577)
+
+    /// Hands the post to the shell's opener, with the row's still as the
+    /// flight's origin when it shows one. False when the list is not on
+    /// screen or already covered: the route goes instead.
+    private func openPostAboveDrawer(row: String, post: PostID) -> Bool {
+        guard let openPost, view.window != nil, presentedViewController == nil else { return false }
+        let thumbnail: NotificationPostOpening.Thumbnail? = cell(forRow: row).flatMap { cell in
+            guard cell.heroCover != nil else { return nil }
+            return NotificationPostOpening.Thumbnail(
+                cover: cell.heroCover,
+                cornerRadius: NotificationCell.Metrics.thumbnailRadius,
+                // Read live: the row is looked up again each time, since a
+                // recycled cell is another row's.
+                frame: { [weak self] space in self?.thumbnailFrame(row: row, in: space) },
+                setConcealed: { [weak self] concealed in self?.cell(forRow: row)?.setHeroConcealed(concealed) }
+            )
+        }
+        openPost(NotificationPostOpening(postID: post.rawValue, presenter: self, thumbnail: thumbnail))
+        return true
+    }
+
+    private func cell(forRow id: String) -> NotificationCell? {
+        guard let path = dataSource.indexPath(for: .row(id)) else { return nil }
+        return collectionView.cellForItem(at: path) as? NotificationCell
+    }
+
+    /// The row's still in `space`; nil once the row has left the list's
+    /// visible part.
+    private func thumbnailFrame(row: String, in space: UICoordinateSpace) -> CGRect? {
+        guard let rowCell = cell(forRow: row) else { return nil }
+        guard collectionView.bounds.intersects(rowCell.convert(rowCell.bounds, to: collectionView)) else { return nil }
+        return rowCell.heroFrame(in: space)
     }
 
     @available(*, unavailable)

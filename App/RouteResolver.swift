@@ -282,8 +282,12 @@ final class RouteResolver: Router {
             push(searchFeature().makeHashtagViewController(tag: tag), using: navigator)
 
         case .post(let postID):
-            let detail = feedFeature().makePostDetailViewController(for: postID, mode: .full)
-            push(detail, using: navigator)
+            // ONE POST SCREEN (#1577): the vertical feed on that post — a tapped
+            // push notification, `-open-post`. A plain push the platform's own
+            // edge pop dismisses, as `.postStream` explains.
+            let feed = feedFeature().makePostFeedViewController(for: postID, opensComments: false)
+            feed.hidesBottomBarWhenPushed = true
+            push(feed, using: navigator)
 
         case .postStream(let postIDs):
             // The unified feed, not the single-post detail screen. Same
@@ -314,8 +318,10 @@ final class RouteResolver: Router {
             push(feed, using: navigator)
 
         case .comments(let postID):
-            let comments = feedFeature().makePostDetailViewController(for: postID, mode: .commentsOnly)
-            push(comments, using: navigator)
+            // The same screen, its comments up (#1577).
+            let feed = feedFeature().makePostFeedViewController(for: postID, opensComments: true)
+            feed.hidesBottomBarWhenPushed = true
+            push(feed, using: navigator)
 
         case .conversation(let conversationID):
             let thread = chatFeature().makeConversationViewController(for: conversationID)
