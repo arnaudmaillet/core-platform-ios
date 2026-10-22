@@ -20,6 +20,9 @@ public struct MockBackend: Sendable {
     /// Held so tests (and the app's DEBUG arguments) can reach its seams —
     /// a takedown (#447), a back-dated deletion.
     public let socialServices: MockSocialServices
+    /// Held so the app can reach its clear (#1574), which the contract does
+    /// not carry yet (backend #971).
+    public let notificationService: MockNotificationService
     public let bff: MockBFF
 
     /// `mediaCatalog` defaults to `.synthetic` so tests and previews stay
@@ -179,7 +182,8 @@ public struct MockBackend: Sendable {
             isTakenDown: { socialServices.isTakenDown($0) }
         ).register(on: bff)
         // Supervision notices ride on `-mock-supervision` (#1106).
-        MockNotificationService(dataset: dataset, supervisionSeed: MockSupervisionService.launchSeed).register(on: bff)
+        let notificationService = MockNotificationService(dataset: dataset, supervisionSeed: MockSupervisionService.launchSeed)
+        notificationService.register(on: bff)
         // Comments matching a post owner's hidden words are dropped (#404),
         // and one outside the owner's "Who Can Comment" is refused (#397).
         MockCommentService(
@@ -240,6 +244,7 @@ public struct MockBackend: Sendable {
         self.postStore = postStore
         self.moderationService = moderationService
         self.socialServices = socialServices
+        self.notificationService = notificationService
         self.bff = bff
     }
 

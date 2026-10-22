@@ -12,6 +12,8 @@ public enum NotificationsError: Error, Equatable, Sendable {
     /// not come from the network. Defaulted, so every `.transport(message:)`
     /// still builds and every `case .transport:` still matches.
     case transport(message: String, failure: NetworkFailure? = nil)
+    /// The server cannot do this yet: clearing (#1574) waits for backend #971.
+    case unsupported
 }
 
 extension NotificationsError: NetworkFailureCarrying {
@@ -150,6 +152,36 @@ public struct NotificationsPage: Equatable, Sendable {
     }
 }
 
+/// How far a clear reaches (#1574): everything up to the newest notification
+/// the viewer was shown — one that arrives after it survives.
+public struct NotificationsClearBound: Equatable, Sendable {
+    public let newestID: String
+    public let newestCreatedAt: Date
+
+    public init(newestID: String, newestCreatedAt: Date) {
+        self.newestID = newestID
+        self.newestCreatedAt = newestCreatedAt
+    }
+
+    /// The newest of `items`; nil when there are none.
+    public init?(newestOf items: [NotificationItem]) {
+        guard let newest = items.max(by: { $0.createdAt < $1.createdAt }) else { return nil }
+        self.init(newestID: newest.id, newestCreatedAt: newest.createdAt)
+    }
+
+    /// Whether a clear to this bound takes `item`.
+    public func reaches(_ item: NotificationItem) -> Bool {
+        item.id == newestID || item.createdAt <= newestCreatedAt
+    }
+}
+
+/// Deletes a profile's notifications up to a bound on the server (#1574).
+///
+/// ⚠️ A SEAM, UNTIL THE CONTRACT HAS THE RPC: notification.v1 has no clear
+/// yet (backend #971). The app hands the mock's in mock mode; nil elsewhere,
+/// and the trash is not offered.
+public typealias NotificationsClearing = @Sendable (_ profileID: String, _ bound: NotificationsClearBound) async throws -> Void
+
 /// What the notifications UI consumes; implemented by `NotificationsRepository`,
 /// faked in view-model tests.
 public protocol NotificationsProviding: Sendable {
@@ -162,6 +194,9 @@ public protocol NotificationsProviding: Sendable {
     func markRead(_ items: [NotificationItem]) async throws
     /// The viewer's unread notification count, for the tab badge.
     func unreadCount() async throws -> Int
+    /// Deletes the viewer's notifications up to `bound` on the server
+    /// (#1574): the trash's commit, once its Undo toast has run out.
+    func clearAll(through bound: NotificationsClearBound) async throws
     /// Whether push is paused (#1575): the server's "pause all".
     func pushPause() async throws -> PushPause
     /// Pauses push (or resumes it, `.off`); returns what the server now holds.
@@ -171,6 +206,8 @@ public protocol NotificationsProviding: Sendable {
 extension NotificationsProviding {
     /// A provider with no per-row read (a test's fake) marks nothing.
     public func markRead(_ items: [NotificationItem]) async throws {}
+    /// A provider with no clear (a test's fake) clears nothing.
+    public func clearAll(through bound: NotificationsClearBound) async throws {}
     /// A provider with no preferences (a test's fake) never pauses.
     public func pushPause() async throws -> PushPause { .off }
     public func setPushPause(_ pause: PushPause) async throws -> PushPause { pause }
@@ -190,6 +227,9 @@ public actor NotificationsRepository: NotificationsProviding, ViewerScoped {
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let postClient: (any Post_V1_PostServiceClientInterface)?
     private let authSession: any AuthSessionProviding
+    /// The server's clear (#1574): the mock's until backend #971; nil
+    /// answers `.unsupported`.
+    private let clear: NotificationsClearing?
 
     /// Who is signed in, and as which profile — shared with every other
     /// repository (`ViewerSession`), so a switch or a sign-out reaches all of them.
@@ -221,8 +261,10 @@ public actor NotificationsRepository: NotificationsProviding, ViewerScoped {
         authSession: any AuthSessionProviding,
         viewer: (any ViewerProviding)? = nil,
         lookupCapacity: Int = NotificationsRepository.lookupCapacity,
+        clear: NotificationsClearing? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
+        self.clear = clear
         self.actorCache = LookupCache(capacity: lookupCapacity, failureLifetime: Self.failedLookupLifetime)
         self.previewCache = LookupCache(capacity: lookupCapacity, failureLifetime: Self.failedLookupLifetime)
         self.now = now
@@ -271,6 +313,12 @@ public actor NotificationsRepository: NotificationsProviding, ViewerScoped {
         if let error = response.error {
             throw NotificationsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
+    }
+
+    public func clearAll(through bound: NotificationsClearBound) async throws {
+        guard let clear else { throw NotificationsError.unsupported }
+        let viewer = try await resolveViewerProfileID(forWrite: "clearAll")
+        try await clear(viewer.rawValue, bound)
     }
 
     public func pushPause() async throws -> PushPause {

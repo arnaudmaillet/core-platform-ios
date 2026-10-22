@@ -128,6 +128,22 @@ public final class MockNotificationService: @unchecked Sendable {
         return preferences
     }
 
+    /// Deletes `profileID`'s notifications created at or before `throughMs`,
+    /// and the one named `newestID` (#1574) — ahead of the contract: the
+    /// fleet's clear is backend #971, and the app reaches this directly in
+    /// mock mode (`NotificationsClearing`). The rows' times are relative to
+    /// now here, so what the bound reaches is resolved once, by id: a row
+    /// newer than the bound survives, then and later.
+    public func clear(profileID: String, newestID: String, throughMs: Int64) {
+        var request = Notification_V1_ListNotificationsRequest()
+        request.profileID = profileID
+        guard case .success(let shown) = list(request) else { return }
+        let reached = shown.notifications
+            .filter { $0.notificationID == newestID || $0.createdAtMs <= throughMs }
+            .map(\.notificationID)
+        readState.clear(reached)
+    }
+
     public func register(on bff: MockBFF) {
         bff.register(path: "/notification.v1.NotificationService/ListNotifications") { [self] (request: Notification_V1_ListNotificationsRequest) in
             list(request)
@@ -189,7 +205,7 @@ public final class MockNotificationService: @unchecked Sendable {
         bff.register(path: "/notification.v1.NotificationService/GetUnreadCount") { [self] (_: Notification_V1_GetUnreadCountRequest) in
             var response = Notification_V1_GetUnreadCountResponse()
             response.unreadCount = readState.allRead ? 0 : Int64(Self.specs.enumerated().filter { offset, spec in
-                !spec.isRead && !readState.isRead("notif-\(offset)")
+                !spec.isRead && !readState.isRead("notif-\(offset)") && !readState.isCleared("notif-\(offset)")
             }.count)
             return .success(response)
         }
@@ -204,6 +220,10 @@ public final class MockNotificationService: @unchecked Sendable {
         func markAllRead() { lock.withLock { cleared = true } }
         func markRead(_ id: String) { _ = lock.withLock { readIDs.insert(id) } }
         func isRead(_ id: String) -> Bool { lock.withLock { cleared || readIDs.contains(id) } }
+        /// Rows deleted by a clear (#1574).
+        private var clearedIDs: Set<String> = []
+        func clear(_ ids: [String]) { lock.withLock { clearedIDs.formUnion(ids) } }
+        func isCleared(_ id: String) -> Bool { lock.withLock { clearedIDs.contains(id) } }
     }
 
     private func list(_ request: Notification_V1_ListNotificationsRequest) -> Result<Notification_V1_ListNotificationsResponse, ConnectError> {
@@ -251,8 +271,9 @@ public final class MockNotificationService: @unchecked Sendable {
             view.isRead = readState.isRead(view.notificationID)
             return view
         }
-        let notifications: [Notification_V1_NotificationView] = notices.isEmpty
-            ? posts : (posts + notices).sorted { $0.createdAtMs > $1.createdAtMs }
+        let notifications: [Notification_V1_NotificationView] = (notices.isEmpty
+            ? posts : (posts + notices).sorted { $0.createdAtMs > $1.createdAtMs })
+            .filter { !readState.isCleared($0.notificationID) }
 
         // Paged (#608): at most `limit` from where `page_token` left off, with
         // a token while there are more. The token is an offset here — opaque
