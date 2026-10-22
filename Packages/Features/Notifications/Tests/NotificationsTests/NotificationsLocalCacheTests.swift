@@ -165,6 +165,19 @@ struct NotificationsLocalCacheTests {
         #expect(stored.nextCursor == nil)
     }
 
+    /// A row seen is stored read (#1572): the next launch's first frame has
+    /// no dot on it, before the server answers.
+    @Test func aRowSeenIsStoredRead() async throws {
+        let (_, cache) = try launch()
+        let unread = (0..<3).map { item($0, read: false) }
+        cache.storeFirstPage(NotificationsPage(items: unread, nextPageToken: nil), as: cache.viewer)
+        cache.markRead([unread[1]], as: cache.viewer)
+        cache.waitForPendingWrites()
+        let stored = try #require(cache.stored())
+        #expect(stored.items.map(\.id) == ["n0", "n1", "n2"], "the list's order moved")
+        #expect(stored.items.map(\.isRead) == [false, true, false])
+    }
+
     @Test func theLast100AreKeptAndPagingGoesOnFromTheStoredCursor() async throws {
         let network = PagedDrawer(total: 200)
         try await firstLaunch(network, pages: 6)

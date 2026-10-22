@@ -10,7 +10,7 @@ import UIKit
 /// The mechanics are CoreNavigation's `SideDrawerContainerViewController` (see
 /// its header for why a custom container: UIKit has no sidebar that shows on
 /// an iPhone). This object is the shell's half: what goes in the drawer, WHEN
-/// the edge may open it, and what opening it means for the bell.
+/// the edge may open it.
 ///
 /// ## Where the left edge belongs to the drawer
 ///
@@ -32,12 +32,7 @@ final class NotificationsDrawer {
     ///   - list: the notifications screen. Wrapped in its own navigation
     ///     controller here, for its large title; routes it emits go through
     ///     the router onto the TAB stacks, never onto this one.
-    ///   - onDidOpen: the drawer settled open — the viewer has seen the list.
-    init(
-        tabBarController: UITabBarController,
-        list: UIViewController,
-        onDidOpen: @escaping () -> Void
-    ) {
+    init(tabBarController: UITabBarController, list: UIViewController) {
         self.tabBarController = tabBarController
         let navigation = ChevronBackNavigationController(rootViewController: list)
         navigation.navigationBar.prefersLargeTitles = true
@@ -48,7 +43,6 @@ final class NotificationsDrawer {
         BottomEdgeBlurView.install(in: navigation)
         container = SideDrawerContainerViewController(main: tabBarController, drawer: navigation)
         container.dimmingAccessibilityLabel = "Close notifications"
-        container.onDidOpen = onDidOpen
         // A guest has no notifications: the edge swipe stays shut for them (the
         // bell asks them to sign up instead). The bell's own `open()` is left
         // ungated, so it opens the drawer once they have.

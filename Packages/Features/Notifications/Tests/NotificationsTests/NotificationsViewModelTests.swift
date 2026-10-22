@@ -2,6 +2,8 @@ import CoreModels
 import CoreNavigation
 import CoreNetworking
 import Foundation
+import Synchronization
+import NotificationsInterface
 import Testing
 @testable import Notifications
 
@@ -9,6 +11,7 @@ private actor StubProvider: NotificationsProviding {
     private var items: [NotificationItem]
     private let loadError: Error?
     private(set) var markAllReadCalls = 0
+    private(set) var markedReadIDs: [String] = []
     private(set) var loadCalls = 0
 
     init(_ items: [NotificationItem], loadError: Error? = nil) {
@@ -25,6 +28,11 @@ private actor StubProvider: NotificationsProviding {
         markAllReadCalls += 1
         items = items.map { $0.markedRead() }
     }
+    func markRead(_ read: [NotificationItem]) async throws {
+        let ids = Set(read.map(\.id))
+        markedReadIDs += read.map(\.id)
+        items = items.map { ids.contains($0.id) ? $0.markedRead() : $0 }
+    }
     func unreadCount() async throws -> Int { items.filter { !$0.isRead }.count }
 }
 
@@ -35,6 +43,11 @@ private final class SpyRouter: Router {
 }
 
 private struct LoadError: Error {}
+
+private final class PostCount: Sendable {
+    let value = Mutex(0)
+    var count: Int { value.withLock { $0 } }
+}
 
 /// Rows about DIFFERENT posts, so nothing folds unless a test asks for it.
 private func item(
@@ -181,7 +194,7 @@ struct NotificationsViewModelTests {
         #expect(sections(last).first?.hiddenCount == 0)
     }
 
-    /// Looking at the list tells the server — once — and the rows stay in
+    /// Rows seen are read on the server — once each — and the rows stay in
     /// "New", on every visit (#1571: closing and reopening emptied it).
     @Test func newSurvivesACloseAndAReopen() async {
         let provider = StubProvider([item(id: "n1"), item(id: "n2", minutesAgo: 1)])
@@ -192,13 +205,14 @@ struct NotificationsViewModelTests {
         await settle()
 
         viewModel.didReveal()
+        viewModel.didSee(rowIDs: ["n1", "n2"])
         await settle()
-        #expect(await provider.markAllReadCalls == 1)
+        #expect(await provider.markedReadIDs == ["n1", "n2"])
         #expect(sections(last).map(\.kind) == [.new])
 
-        viewModel.didReveal()
+        viewModel.didSee(rowIDs: ["n1", "n2"])
         await settle()
-        #expect(await provider.markAllReadCalls == 1, "once per visit")
+        #expect(await provider.markedReadIDs == ["n1", "n2"], "once per row")
 
         viewModel.didConceal()
         #expect(sections(last).map(\.kind) == [.new], "New emptied on close")
@@ -210,28 +224,90 @@ struct NotificationsViewModelTests {
         #expect(sections(last).first?.rows.map(\.id) == ["n1", "n2"])
     }
 
-    /// A drawer opened over a skeleton marks nothing until there is something
-    /// to have seen — and then marks it.
-    @Test func aRevealBeforeTheLoadWaitsForIt() async {
-        let provider = StubProvider([item(id: "n1")])
-        let viewModel = NotificationsViewModel(repository: provider)
+    /// ⚠️ #1572: opening the list reads NOTHING — only the rows seen lose
+    /// their dot, and not before the visit ends.
+    @Test func onlyTheRowsSeenAreRead() async {
+        let provider = StubProvider([item(id: "n1"), item(id: "n2", minutesAgo: 1), item(id: "n3", minutesAgo: 2)])
+        let viewModel = makeViewModel(provider)
+        var last: NotificationsViewModel.Phase?
+        viewModel.onPhaseChange = { last = $0 }
         viewModel.viewDidLoad()
-        viewModel.didReveal()
-        #expect(await provider.markAllReadCalls == 0)
         await settle()
-        #expect(await provider.markAllReadCalls == 1)
+
+        viewModel.didReveal()
+        await settle()
+        #expect(await provider.markAllReadCalls == 0, "opening read everything")
+        #expect(await provider.markedReadIDs.isEmpty)
+
+        viewModel.didSee(rowIDs: ["n1"])
+        await settle()
+        #expect(await provider.markedReadIDs == ["n1"])
+        #expect(sections(last).first?.rows.allSatisfy { !$0.isRead } == true, "a dot went mid-visit")
+
+        viewModel.didConceal()
+        let read = Dictionary(uniqueKeysWithValues: (sections(last).first?.rows ?? []).map { ($0.id, $0.isRead) })
+        #expect(read == ["n1": true, "n2": false, "n3": false])
+
+        // The next visit reloads: the unseen rows still carry their dot.
+        viewModel.willReveal()
+        await settle()
+        let reloaded = (sections(last).first?.rows ?? []).filter { !$0.isRead }.map(\.id)
+        #expect(reloaded == ["n2", "n3"])
     }
 
-    /// A peek (will-appear without did-appear) never marks anything.
+    /// The badge follows once the server has the rows (#1572).
+    @Test func readingRowsTellsTheBadge() async {
+        let provider = StubProvider([item(id: "n1")])
+        let viewModel = makeViewModel(provider)
+        let center = NotificationCenter()
+        viewModel.notificationCenter = center
+        let posts = PostCount()
+        let token = center.addObserver(forName: .notificationsReadDidChange, object: nil, queue: nil) { _ in
+            posts.value.withLock { $0 += 1 }
+        }
+        defer { center.removeObserver(token) }
+        viewModel.viewDidLoad()
+        await settle()
+        viewModel.didReveal()
+        await settle()
+        #expect(posts.count == 0, "opening told the badge")
+        viewModel.didSee(rowIDs: ["n1"])
+        await settle()
+        #expect(posts.count == 1)
+    }
+
+    /// Seeing a folded row reads every notification folded into it.
+    @Test func seeingAFoldedRowReadsItsMembers() async {
+        let post = PostID("shared")
+        let provider = StubProvider([
+            item(id: "a", post: post, sender: "p1"), item(id: "b", post: post, sender: "p2", minutesAgo: 1),
+        ])
+        let viewModel = makeViewModel(provider)
+        var last: NotificationsViewModel.Phase?
+        viewModel.onPhaseChange = { last = $0 }
+        viewModel.viewDidLoad()
+        await settle()
+        #expect(sections(last).first?.rows.map(\.id) == ["a"])
+
+        viewModel.didReveal()
+        viewModel.didSee(rowIDs: ["a"])
+        await settle()
+        #expect(await provider.markedReadIDs.sorted() == ["a", "b"])
+    }
+
+    /// Rows on screen during a peek (will-appear without did-appear) are not
+    /// seen.
     @Test func aPeekMarksNothing() async {
         let provider = StubProvider([item(id: "n1")])
         let viewModel = NotificationsViewModel(repository: provider)
         viewModel.viewDidLoad()
         await settle()
         viewModel.willReveal()
+        viewModel.didSee(rowIDs: ["n1"])
         await settle()
         viewModel.didConceal()
         await settle()
+        #expect(await provider.markedReadIDs.isEmpty)
         #expect(await provider.markAllReadCalls == 0)
     }
 

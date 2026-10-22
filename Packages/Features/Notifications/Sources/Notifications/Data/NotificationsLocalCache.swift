@@ -68,6 +68,20 @@ final class NotificationsLocalCache: Sendable {
         }
     }
 
+    /// Rewrites these rows as read where they are stored (#1572): the rows
+    /// seen read so on the next launch's first frame, before the server
+    /// answers.
+    func markRead(_ items: [NotificationItem], as viewer: LocalStoreViewer?) {
+        let writes = items.compactMap { item -> LocalEntityWrite? in
+            guard let payload = try? JSONEncoder().encode(Record(item.markedRead())) else { return nil }
+            return LocalEntityWrite(
+                key: LocalEntityKey(type: Self.entityType, id: item.id), payload: payload, format: Self.format,
+                lifetime: Self.lifetime
+            )
+        }
+        write { store in try store.write(writes, as: viewer) }
+    }
+
     /// Waits for every write queued so far. Tests only.
     func waitForPendingWrites() {
         queue.sync {}

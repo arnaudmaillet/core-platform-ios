@@ -148,6 +148,23 @@ enum NotificationGrouping {
         return result
     }
 
+    /// The notifications row `id` stands for: itself, and every unread or
+    /// read sibling folded into it — the same action on the same post, in the
+    /// same section and read state (#1572: seeing the row reads them all).
+    static func members(
+        ofRow id: String,
+        in items: [NotificationItem],
+        section: (NotificationItem) -> NotificationSection.Kind?
+    ) -> [NotificationItem] {
+        guard let lead = items.first(where: { $0.id == id }) else { return [] }
+        guard let post = lead.postSubjectID else { return [lead] }
+        let leadSection = section(lead)
+        return items.filter {
+            $0.action == lead.action && $0.postSubjectID == post && $0.isRead == lead.isRead
+                && section($0) == leadSection
+        }
+    }
+
     /// One row standing for both. The newer row leads (its sender, time and
     /// id); the count is the distinct people both rows NAME, plus whoever each
     /// counted without naming.

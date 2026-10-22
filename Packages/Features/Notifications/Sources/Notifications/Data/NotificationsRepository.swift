@@ -157,11 +157,17 @@ public protocol NotificationsProviding: Sendable {
     /// nil, otherwise the one that token starts (#608).
     func loadNotifications(limit: Int32, after pageToken: String?) async throws -> NotificationsPage
     func markAllRead() async throws
+    /// Marks these rows read on the server, one by one (`MarkRead`) — the
+    /// rows the viewer has SEEN (#1572), not everything loaded.
+    func markRead(_ items: [NotificationItem]) async throws
     /// The viewer's unread notification count, for the tab badge.
     func unreadCount() async throws -> Int
 }
 
 extension NotificationsProviding {
+    /// A provider with no per-row read (a test's fake) marks nothing.
+    public func markRead(_ items: [NotificationItem]) async throws {}
+
     /// The first page's rows.
     public func loadNotifications(limit: Int32) async throws -> [NotificationItem] {
         try await loadNotifications(limit: limit, after: nil).items
@@ -257,6 +263,21 @@ public actor NotificationsRepository: NotificationsProviding, ViewerScoped {
         let response = await notificationClient.markAllRead(request: request, headers: [:])
         if let error = response.error {
             throw NotificationsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+        }
+    }
+
+    public func markRead(_ items: [NotificationItem]) async throws {
+        guard !items.isEmpty else { return }
+        let viewer = try await resolveViewerProfileID(forWrite: "markRead")
+        for item in items {
+            var request = Notification_V1_MarkReadRequest()
+            request.profileID = viewer.rawValue
+            request.notificationID = item.id
+            request.createdAtMs = Int64(item.createdAt.timeIntervalSince1970 * 1_000)
+            let response = await notificationClient.markRead(request: request, headers: [:])
+            if let error = response.error {
+                throw NotificationsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+            }
         }
     }
 

@@ -5,23 +5,23 @@ import CoreNetworking
 import DesignSystem
 import Foundation
 import LocalStore
+import NotificationsInterface
 
-/// The notifications list: loads, splits into "New" and "Earlier", holds the
-/// "Show more" state, marks the new rows seen, and routes a tap.
+/// The notifications list: loads, splits into sections by day, holds the
+/// "Show more" state, reads the rows the viewer sees, and routes a tap.
 ///
-/// ## When a notification counts as read
+/// ## When a notification counts as read (#1572)
 ///
-/// When the viewer has LOOKED at the list — the drawer settled open with the
-/// list loaded (`didReveal`) — the server is told at once, so the bell's badge
-/// clears while the drawer is still open. The rows, though, stay where they
-/// were for the rest of that visit: nothing moves out of "New" under the
-/// viewer's eye. They move to "Earlier" when the drawer closes
-/// (`didConceal`), which is also when "Show more" folds back. A peek that
-/// never settles open marks nothing.
+/// When the viewer has SEEN it: its row at least half on screen while the
+/// drawer is settled open (`didReveal` … `didConceal`, rows reported by
+/// `didSee`). The server is told at once, per id (`MarkRead`), so the bell's
+/// badge falls while the drawer is still open (`.notificationsReadDidChange`).
+/// The pink dot, though, stays for the rest of that visit — nothing changes
+/// under the viewer's eye — and is gone on the next. A row never scrolled to,
+/// or folded behind "Show more", keeps its dot; opening the drawer reads
+/// nothing by itself, and a peek that never settles open sees nothing.
 ///
-/// Everything behind "Show more" is marked too — the only write the contract
-/// has is "mark ALL read" — and that is the right call anyway: the section
-/// header said how many there were, which is what "seen" means for a badge.
+/// Rows never leave the list for being read: sections are by day.
 ///
 /// ## Pages (#608)
 ///
@@ -61,7 +61,10 @@ public final class NotificationsViewModel {
     /// re-sections on the next one (#1571).
     private let calendar: @Sendable () -> Calendar
 
-    private var items: [NotificationItem] = []
+    private var items: [NotificationItem] = [] {
+        // New rows can fold into a row already looked at.
+        didSet { lookedAtRowIDs = [] }
+    }
     private var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
     private var recovery: RecoveryObservation?
     /// The monitor whose recoveries reload this store — the shared one; a
@@ -80,8 +83,12 @@ public final class NotificationsViewModel {
     private var expandedSections: Set<NotificationSection.Kind> = []
     /// The drawer is open and settled.
     private var isRevealed = false
-    /// The server has been told this visit's rows are read.
-    private var hasMarkedThisVisit = false
+    /// The rows SEEN this visit (#1572), told to the server once each; their
+    /// dots stay for the visit and go on the next.
+    private var seenThisVisit: Set<String> = []
+    /// The rows `didSee` already resolved since the rows last changed: it
+    /// runs at every scroll frame, and a row looked at again costs nothing.
+    private var lookedAtRowIDs: Set<String> = []
     /// Where viewer changes are heard — the default center; a test hands its
     /// own, since posting on the shared one reaches every suite at once.
     var notificationCenter: NotificationCenter = .default
@@ -159,7 +166,7 @@ public final class NotificationsViewModel {
         nextPageToken = nil
         pageFailed = false
         expandedSections = []
-        hasMarkedThisVisit = false
+        seenThisVisit = []
         showsDeviceRows = false
         updatePageFooter()
         phase = .loading
@@ -176,20 +183,54 @@ public final class NotificationsViewModel {
         reload()
     }
 
-    /// The list has settled on screen: the viewer is looking at it.
+    /// The list has settled on screen: the viewer is looking at it. Nothing
+    /// is marked for being loaded — only for being seen (`didSee`).
     public func didReveal() {
         isRevealed = true
-        markSeenIfLooking()
     }
 
-    /// The list has gone. What was new this visit is old from now on.
+    /// ⚠️ READ PER ROW, ONCE SEEN (#1572, the owner 2026-10-22): rows the
+    /// viewer had on screen — at least half visible, the drawer fully open —
+    /// are told to the server (`MarkRead`, per id, the rows folded into them
+    /// included). A row never scrolled to keeps its dot. The dots of the rows
+    /// seen stay for the rest of the visit, so the viewer can still spot what
+    /// was new, and go on the next.
+    public func didSee(rowIDs: [String]) {
+        guard isRevealed else { return }
+        let newRows = rowIDs.filter { lookedAtRowIDs.insert($0).inserted }
+        guard !newRows.isEmpty else { return }
+        let viewerCalendar = calendar()
+        let instant = now()
+        let section = { (item: NotificationItem) in
+            NotificationSection.Kind.of(item.createdAt, now: instant, calendar: viewerCalendar)
+        }
+        var fresh: [NotificationItem] = []
+        for id in newRows {
+            for member in NotificationGrouping.members(ofRow: id, in: items, section: section)
+            where !member.isRead && seenThisVisit.insert(member.id).inserted {
+                fresh.append(member)
+            }
+        }
+        guard !fresh.isEmpty else { return }
+        deviceCache?.markRead(fresh, as: deviceCache?.viewer)
+        let repository = repository
+        let center = notificationCenter
+        Task {
+            guard (try? await repository.markRead(fresh)) != nil else { return }
+            center.post(name: .notificationsReadDidChange, object: nil)
+        }
+    }
+
+    /// The list has gone. The rows seen this visit are read from now on.
     public func didConceal() {
         isRevealed = false
+        lookedAtRowIDs = []
         let wasExpanded = !expandedSections.isEmpty
         expandedSections = []
-        if hasMarkedThisVisit {
-            hasMarkedThisVisit = false
-            items = items.map { $0.markedRead() }
+        if !seenThisVisit.isEmpty {
+            let seen = seenThisVisit
+            seenThisVisit = []
+            items = items.map { seen.contains($0.id) ? $0.markedRead() : $0 }
             emitContent()
         } else if wasExpanded {
             emitContent()
@@ -299,7 +340,6 @@ public final class NotificationsViewModel {
                 }
             }
             self.load = nil
-            self.markSeenIfLooking()
         }
     }
 
@@ -346,17 +386,6 @@ public final class NotificationsViewModel {
 
     private func updatePageFooter() {
         pageFooter = nextPageToken == nil ? .none : (pageFailed ? .retry : .loading)
-    }
-
-    /// Tells the server the new rows were seen — once per visit, only while
-    /// the viewer is looking, and only once there is something loaded to have
-    /// looked AT (a reveal over a skeleton waits for the load).
-    private func markSeenIfLooking() {
-        guard isRevealed, load == nil, !hasMarkedThisVisit,
-              items.contains(where: { !$0.isRead }) else { return }
-        hasMarkedThisVisit = true
-        let repository = repository
-        Task { try? await repository.markAllRead() }
     }
 
     private func emitContent() {

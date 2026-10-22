@@ -72,12 +72,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// Internal (not private) only for the +QA hooks.
     private(set) lazy var notificationsDrawer: NotificationsDrawer = NotificationsDrawer(
         tabBarController: tabBarController,
-        list: container.notificationsFeature.makeNotificationsViewController(),
-        onDidOpen: { [weak self] in
-            // Opening the list is what reads it (the list tells the server
-            // itself); the bells stop saying "unread" at once.
-            self?.notificationsBell.setUnread(false)
-        }
+        list: container.notificationsFeature.makeNotificationsViewController()
     )
     /// What the window shows: the drawer container, holding the tab bar
     /// controller as its main screen.
@@ -219,6 +214,13 @@ final class MainTabCoordinator: NSObject, Coordinator {
             self, selector: #selector(activeProfileChanged),
             name: .activeProfileDidChange, object: nil
         )
+        // ⚠️ Opening the drawer reads nothing (#1572): a row is read once
+        // SEEN, and the list says so after the server has it — the bells
+        // follow then, not when the drawer opens.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(notificationsReadDidChange),
+            name: .notificationsReadDidChange, object: nil
+        )
         // Warm the switcher up front. `makeMenu` is synchronous by design — it
         // reads the last `reload` — so without this the first long-press builds
         // its menu from an empty snapshot and offers only "Add Profile", with
@@ -343,6 +345,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
         #if DEBUG
         installQAHooks()
         #endif
+    }
+
+    @objc private func notificationsReadDidChange() {
+        refreshUnreadBadge()
     }
 
     @objc private func activeProfileChanged() {

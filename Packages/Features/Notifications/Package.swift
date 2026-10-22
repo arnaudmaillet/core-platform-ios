@@ -40,6 +40,8 @@ let package = Package(
             name: "NotificationsTests",
             dependencies: [
                 "Notifications",
+                // `.notificationsReadDidChange` (#1572).
+                "NotificationsInterface",
                 "AuthInterface",
                 "CoreNavigation",
                 "CoreNetworking",
