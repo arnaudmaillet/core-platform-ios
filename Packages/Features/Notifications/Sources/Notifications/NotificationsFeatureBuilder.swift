@@ -19,6 +19,9 @@ public struct NotificationsFeatureBuilder: NotificationsFeatureBuilding {
     /// (#1575): only where the server accepts them (the mock, until backend
     /// #971 reaches the fleet).
     private let allowsLongPushPauses: Bool
+    /// The bar offers the trash (#1574): only where the server can clear
+    /// (the mock, until backend #971 reaches the fleet).
+    private let allowsClearAll: Bool
     /// Opens a post notification's post above the drawer (#1577); nil routes
     /// it.
     private let openPost: (@MainActor (NotificationPostOpening) -> Void)?
@@ -31,9 +34,11 @@ public struct NotificationsFeatureBuilder: NotificationsFeatureBuilding {
         imagePipeline: ImagePipeline? = nil,
         localStore: LocalStore? = nil,
         allowsLongPushPauses: Bool = false,
+        allowsClearAll: Bool = false,
         openPost: (@MainActor (NotificationPostOpening) -> Void)? = nil
     ) {
         self.allowsLongPushPauses = allowsLongPushPauses
+        self.allowsClearAll = allowsClearAll
         self.openPost = openPost
         self.repository = repository
         self.router = router
@@ -47,6 +52,7 @@ public struct NotificationsFeatureBuilder: NotificationsFeatureBuilding {
         return NotificationsViewController(
             viewModel: viewModel, imagePipeline: imagePipeline,
             muteModel: NotificationsMuteModel(repository: repository, allowsLongPauses: allowsLongPushPauses),
+            offersClearAll: allowsClearAll,
             openPost: openPost
         )
     }

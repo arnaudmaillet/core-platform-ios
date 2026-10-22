@@ -23,6 +23,14 @@ import NotificationsInterface
 ///
 /// Rows never leave the list for being read: sections are by day.
 ///
+/// ## Clear all (#1574)
+///
+/// The trash hides every row at once and asks nothing of the server: the
+/// clear is PENDING while its Undo toast runs. Undo shows them again, as they
+/// were. Only the toast running out commits — one call, bounded by the newest
+/// row the viewer was shown, so a notification that arrives meanwhile is
+/// neither hidden nor deleted.
+///
 /// ## Pages (#608)
 ///
 /// The list loads a first page, then the next one as the viewer nears the
@@ -101,6 +109,13 @@ public final class NotificationsViewModel {
     var deviceCache: NotificationsLocalCache?
     /// The rows shown are the device's and no load has answered since.
     private var showsDeviceRows = false
+    /// A clear waiting for its Undo toast to run out (#1574): the rows it
+    /// reaches are hidden, and nothing has been asked of the server yet.
+    private var pendingClear: NotificationsClearBound?
+    /// The server's clear, once committed. Tests await it.
+    private(set) var clearCall: Task<Void, Never>?
+    /// The server refused the clear: the rows are back, and the list says so.
+    public var onClearFailed: (() -> Void)?
 
     public init(
         repository: any NotificationsProviding,
@@ -168,6 +183,8 @@ public final class NotificationsViewModel {
         expandedSections = []
         seenThisVisit = []
         showsDeviceRows = false
+        // The clear was the previous viewer's: its toast commits nothing.
+        pendingClear = nil
         updatePageFooter()
         phase = .loading
         // Not from the device: the wipe it gets on this same change may not
@@ -308,6 +325,64 @@ public final class NotificationsViewModel {
         }
     }
 
+    // MARK: - Clear all (#1574)
+
+    /// Whether the trash has something to clear: rows on show, and no clear
+    /// already pending.
+    public var canClearAll: Bool { pendingClear == nil && !shownItems.isEmpty }
+
+    /// The trash: every row shown is hidden at once, nothing is deleted yet.
+    /// False when there is nothing to clear.
+    @discardableResult
+    public func clearAll() -> Bool {
+        guard canClearAll, let bound = NotificationsClearBound(newestOf: shownItems) else { return false }
+        pendingClear = bound
+        emitContent()
+        return true
+    }
+
+    /// Undo: the rows come back as they were, dots included. Nothing was
+    /// asked of the server.
+    public func undoClearAll() {
+        guard pendingClear != nil else { return }
+        pendingClear = nil
+        emitContent()
+    }
+
+    /// The toast ran out: the rows the clear reaches leave for good, and the
+    /// server deletes them — once, up to the newest row the viewer was shown.
+    /// Older pages went with them. Refused, the list reloads what the server
+    /// still holds.
+    public func commitClearAll() {
+        guard let bound = pendingClear else { return }
+        pendingClear = nil
+        items.removeAll(where: bound.reaches)
+        nextPageToken = nil
+        pageFailed = false
+        updatePageFooter()
+        deviceCache?.storeFirstPage(NotificationsPage(items: items, nextPageToken: nil), as: deviceCache?.viewer)
+        if items.isEmpty { phase = .empty } else { emitContent() }
+        let repository = repository
+        let center = notificationCenter
+        clearCall = Task { [weak self] in
+            do {
+                try await repository.clearAll(through: bound)
+                // The bell's badge follows (#1574): it reloads its count.
+                center.post(name: .notificationsReadDidChange, object: nil)
+            } catch {
+                guard let self else { return }
+                self.onClearFailed?()
+                self.reload()
+            }
+        }
+    }
+
+    /// The rows on show: all of them, but those a pending clear reaches.
+    private var shownItems: [NotificationItem] {
+        guard let pendingClear else { return items }
+        return items.filter { !pendingClear.reaches($0) }
+    }
+
     // MARK: - Loading
 
     private func reload() {
@@ -396,9 +471,15 @@ public final class NotificationsViewModel {
     }
 
     private func emitContent() {
-        guard !items.isEmpty else { return }
+        let shown = shownItems
+        guard !shown.isEmpty else {
+            // Rows hidden by a pending clear (#1574): the list is empty to the
+            // viewer.
+            if !items.isEmpty { phase = .empty }
+            return
+        }
         phase = .content(NotificationSectionBuilder.sections(
-            from: items, expanded: expandedSections, now: now(), calendar: calendar()
+            from: shown, expanded: expandedSections, now: now(), calendar: calendar()
         ))
     }
 }

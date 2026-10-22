@@ -1624,8 +1624,23 @@ final class AppContainer {
         // The subject post's still (or a text post's opening) for each row.
         postClient: Post_V1_PostServiceClient(client: authenticatedRPCClient),
         authSession: sessionManager,
-        viewer: viewerSession
+        viewer: viewerSession,
+        clear: notificationsClear
     )
+
+    /// The server's clear of the drawer (#1574): the mock's, reached
+    /// directly — notification.v1 carries no clear until backend #971. Nil on
+    /// the fleet, where the trash is not offered.
+    private var notificationsClear: NotificationsClearing? {
+        guard environment == .mock else { return nil }
+        let service = mockBackend.notificationService
+        return { profileID, bound in
+            service.clear(
+                profileID: profileID, newestID: bound.newestID,
+                throughMs: Int64(bound.newestCreatedAt.timeIntervalSince1970 * 1_000)
+            )
+        }
+    }
 
     /// Push notifications (#651): this install's registration, what a tap
     /// opens, the app icon's badge. See `PushNotifications`.
@@ -1672,6 +1687,9 @@ final class AppContainer {
         // Pauses past 8 h and "until I turn it back on" (#1575): the mock
         // accepts them; the fleet will once backend #971 lands.
         allowsLongPushPauses: environment == .mock,
+        // The trash (#1574), where the server can clear: the mock, until
+        // backend #971.
+        allowsClearAll: notificationsClear != nil,
         // A post notification opens the vertical feed above the drawer (#1577).
         openPost: { [unowned self] opening in NotificationPostFeed.open(opening, feed: self.feedFeature) }
     )

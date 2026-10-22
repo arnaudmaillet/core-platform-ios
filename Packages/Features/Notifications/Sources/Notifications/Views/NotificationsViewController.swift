@@ -64,19 +64,37 @@ final class NotificationsViewController: UIViewController {
     /// The shell's opener for a post notification (#1577); nil routes it.
     private let openPost: (@MainActor (NotificationPostOpening) -> Void)?
 
+    /// The trash, trailing (#1574): clears the list behind an Undo toast.
+    /// Nil where the server cannot clear.
+    private let clearItem: UIBarButtonItem?
+    /// The trash's look is the toast's to reveal (#1447): from the tap until
+    /// its toast takes the bar, it stays as it was.
+    private var holdsClearItemLook = false
+
     /// - Parameters:
     ///   - muteModel: the mute toolbar; nil shows none.
+    ///   - offersClearAll: the trash in the bar (#1574), where the server
+    ///     can clear.
     ///   - openPost: opens a post notification's post above the drawer
     ///     (#1577); nil routes it (`.post`), the drawer closing.
     init(
         viewModel: NotificationsViewModel, imagePipeline: ImagePipeline?, muteModel: NotificationsMuteModel? = nil,
+        offersClearAll: Bool = false,
         openPost: (@MainActor (NotificationPostOpening) -> Void)? = nil
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.muteModel = muteModel
         self.openPost = openPost
+        clearItem = offersClearAll ? UIBarButtonItem(image: UIImage(systemName: "trash")) : nil
         super.init(nibName: nil, bundle: nil)
+        if let clearItem {
+            clearItem.accessibilityLabel = "Clear All"
+            clearItem.isEnabled = false
+            clearItem.primaryAction = UIAction(image: UIImage(systemName: "trash")) { [weak self] _ in
+                self?.clearTapped()
+            }
+        }
         if openPost != nil {
             viewModel.opensPost = { [weak self] row, post in self?.openPostAboveDrawer(row: row, post: post) ?? false }
         }
@@ -133,9 +151,56 @@ final class NotificationsViewController: UIViewController {
             guard let self, !sections.isEmpty else { return }
             apply(sections)
         }
+        viewModel.onClearFailed = { [weak self] in
+            guard let self else { return }
+            Feedback.failure("Couldn't clear your notifications", from: self)
+        }
+        if let clearItem { setOwnTrailingBarItems([clearItem], animated: false) }
         render(.loading)
         viewModel.viewDidLoad()
         installMuteToolbar()
+    }
+
+    // MARK: - Clear all (#1574)
+
+    /// The list empties at once — content changes under the finger — and
+    /// the trash turns into its Undo toast. Nothing is deleted until the
+    /// toast runs out on its own.
+    private func clearTapped() {
+        holdsClearItemLook = true
+        guard viewModel.clearAll() else {
+            holdsClearItemLook = false
+            return
+        }
+        let viewModel = viewModel
+        Feedback.undoable(
+            "Notifications cleared",
+            symbol: "trash.fill",
+            from: self,
+            id: "notifications.clear",
+            revealing: { [weak self] in self?.releaseClearItemLook() },
+            // Released here too: however the toast went, the trash follows
+            // the list again.
+            commit: { [weak self] in
+                viewModel.commitClearAll()
+                self?.releaseClearItemLook()
+            },
+            undo: { [weak self] in
+                viewModel.undoClearAll()
+                self?.releaseClearItemLook()
+            }
+        )
+    }
+
+    private func releaseClearItemLook() {
+        holdsClearItemLook = false
+        updateClearItem()
+    }
+
+    /// Enabled while there is something to clear.
+    private func updateClearItem() {
+        guard let clearItem, !holdsClearItemLook else { return }
+        clearItem.isEnabled = viewModel.canClearAll
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -266,6 +331,7 @@ final class NotificationsViewController: UIViewController {
     // MARK: - Render
 
     private func render(_ phase: NotificationsViewModel.Phase) {
+        updateClearItem()
         switch phase {
         case .loading:
             // A pull-to-refresh keeps its own indicator and its rows; only a
@@ -429,6 +495,9 @@ extension NotificationsViewController {
     #if DEBUG
     /// The bar's section item while it is shown — what a test reads.
     var debugSectionItemTitle: String? { sectionBinding.item?.title }
+    /// The trash (#1574), for tests.
+    var debugClearItem: UIBarButtonItem? { clearItem }
+    func debugTapClear() { clearTapped() }
     #endif
 }
 

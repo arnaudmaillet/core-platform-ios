@@ -60,20 +60,56 @@ private struct OfflineTransport: HTTPClientInterface {
 struct NotificationsRepositoryTests {
     private func makeRepository(
         withPosts: Bool = true,
-        offlineFor offlinePath: String? = nil
+        offlineFor offlinePath: String? = nil,
+        clears: Bool = false
     ) -> NotificationsRepository {
         let dataset = MockSocialDataset()
         let bff = MockBFF()
         MockSocialServices(dataset: dataset).register(on: bff) // viewer, senders, posts
-        MockNotificationService(dataset: dataset).register(on: bff)
+        let service = MockNotificationService(dataset: dataset)
+        service.register(on: bff)
         let transport: any HTTPClientInterface = offlinePath.map { OfflineTransport(bff: bff, pathContains: $0) } ?? bff
         let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: transport)
+        // The app's mock-mode clear (#1574), reaching the mock directly.
+        let clear: NotificationsClearing? = clears ? { @Sendable profileID, bound in
+            service.clear(
+                profileID: profileID, newestID: bound.newestID,
+                throughMs: Int64(bound.newestCreatedAt.timeIntervalSince1970 * 1_000)
+            )
+        } : nil
         return NotificationsRepository(
             notificationClient: Notification_V1_NotificationServiceClient(client: client),
             profileClient: Profile_V1_ProfileServiceClient(client: client),
             postClient: withPosts ? Post_V1_PostServiceClient(client: client) : nil,
-            authSession: AuthenticatedSessionStub()
+            authSession: AuthenticatedSessionStub(),
+            clear: clear
         )
+    }
+
+    /// Clear all (#1574), against the mock: the rows up to the bound go, the
+    /// unread count follows, and a row newer than the bound survives.
+    @Test func aClearDeletesUpToItsBoundAndTheCountFollows() async throws {
+        let repository = makeRepository(clears: true)
+        let before = try await repository.loadNotifications(limit: 100)
+        try #require(before.count > 3, "guard: rows to clear")
+        // Bounded by the third row: the two newer ones are "arrivals".
+        let bound = NotificationsClearBound(newestID: before[2].id, newestCreatedAt: before[2].createdAt)
+
+        try await repository.clearAll(through: bound)
+
+        let after = try await repository.loadNotifications(limit: 100)
+        #expect(after.map(\.id) == before.prefix(2).map(\.id), "only the rows newer than the bound remain")
+        let unread = try await repository.unreadCount()
+        #expect(unread == after.filter { !$0.isRead }.count)
+    }
+
+    /// Without a server clear (the fleet, until backend #971) it says so.
+    @Test func aClearWithoutTheServersIsUnsupported() async throws {
+        let repository = makeRepository()
+        let bound = NotificationsClearBound(newestID: "notif-0", newestCreatedAt: Date())
+        await #expect(throws: NotificationsError.unsupported) {
+            try await repository.clearAll(through: bound)
+        }
     }
 
     @Test func loadsAndHydratesSenders() async throws {
