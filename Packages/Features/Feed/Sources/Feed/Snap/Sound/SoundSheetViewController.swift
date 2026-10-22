@@ -2131,8 +2131,8 @@ extension SoundSheetViewController: UICollectionViewDelegate {
         previewLaunch?.dismissalTarget() ?? tilePreview(at: indexPath)
     }
 
-    /// Tapping the lift opens the post: a picture flies from the lift itself
-    /// (#1543), words go back into their tile first (the grid's rule).
+    /// Tapping the lift opens the post out of the lift itself (#1543): a
+    /// picture's flight, or words' window (`TextRevealInstaller`).
     func collectionView(
         _ collectionView: UICollectionView,
         willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
@@ -2141,12 +2141,10 @@ extension SoundSheetViewController: UICollectionViewDelegate {
         guard let raw = configuration.identifier as? String else { return }
         let id = PostID(raw)
         guard let kind = sections.first(where: { $0.ids.contains(id) || $0.all.contains(id) })?.kind else { return }
-        // From the lift, not back through the tile (#1543): the flight leaves
-        // from the lift captured now (`heroOrigin`'s frame) — a
-        // post with a picture to fly, as `heroOrigin`'s `hasHero` reads it.
+        // From the lift, not back through the tile (#1543), captured now
+        // (`heroOrigin`'s frame, or its window's).
         if let preview = animator.previewViewController as? ForYouPostPreviewViewController,
-           preview.post.id == id, preview.post.kind != .text,
-           tileCell(for: id, in: kind)?.renderedCover != nil, let launch = PreviewLaunch(preview) {
+           preview.post.id == id, let launch = PreviewLaunch(preview) {
             previewLaunch = launch
             animator.preferredCommitStyle = .dismiss
             DispatchQueue.main.async { [weak self] in self?.openFromPreview(id, kind: kind) }

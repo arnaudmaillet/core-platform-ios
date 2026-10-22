@@ -45,6 +45,9 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
     var onHeightChange: (() -> Void)?
     /// A friend's face was tapped.
     var onStoryTapped: ((ForYouViewModel.FriendStory) -> Void)?
+    /// The lift a committed long press opens from, while the window opens
+    /// out of it (#1543, `TextRevealInstaller`).
+    var previewLaunch: PreviewLaunch?
     /// The title was tapped: the host pushes the friends' list.
     var onTitleTapped: (() -> Void)? {
         didSet { header.onTap = onTitleTapped }
@@ -450,12 +453,14 @@ extension FriendsStoriesRow: UICollectionViewDelegate {
         contextMenuConfiguration configuration: UIContextMenuConfiguration,
         dismissalPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-        targetedPreview(at: indexPath)
+        // A committed lift fades where it is, under its window (#1543).
+        previewLaunch?.dismissalTarget() ?? targetedPreview(at: indexPath)
     }
 
     /// Tapping the lifted preview opens the friend's post — the same open as
-    /// a tap on the face, through the same flight (`.dismiss`, then our hero:
-    /// see `PostShelfSection`'s commit).
+    /// a tap on the face, through the same window, out of the lift itself
+    /// (#1543): captured now (`PreviewLaunch`), it fades in place under the
+    /// window opening from it (`TextRevealInstaller`).
     func collectionView(
         _ collectionView: UICollectionView,
         willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
@@ -463,6 +468,12 @@ extension FriendsStoriesRow: UICollectionViewDelegate {
     ) {
         guard case .story(let id)? = RowMenuTarget(configuration.identifier) else { return }
         animator.preferredCommitStyle = .dismiss
+        if let preview = animator.previewViewController as? ForYouPostPreviewViewController,
+           let launch = PreviewLaunch(preview) {
+            previewLaunch = launch
+            DispatchQueue.main.async { [weak self] in self?.open(id) }
+            return
+        }
         animator.addCompletion { [weak self] in
             DispatchQueue.main.async { self?.open(id) }
         }

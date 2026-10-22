@@ -215,6 +215,10 @@ public struct RevealGeometry {
     public let matchesAnchor: Bool
     /// How the page meets its window — see `RevealPageFit`.
     public let pageFit: RevealPageFit
+    /// Where the OPENING leaves from when it is not the source — a long
+    /// press's lift the viewer tapped (#1543) — asked once, as the opening
+    /// stages. `nil`, every other time: the source.
+    public let launch: () -> RevealLaunch?
 
     public init(
         sourceFrame: @escaping (UICoordinateSpace) -> CGRect?,
@@ -237,7 +241,8 @@ public struct RevealGeometry {
         willStageDismissal: @escaping () -> Void = {},
         dismissalDidEnd: @escaping (Bool) -> Void = { _ in },
         matchesAnchor: Bool = true,
-        pageFit: RevealPageFit = .clipped
+        pageFit: RevealPageFit = .clipped,
+        launch: @escaping () -> RevealLaunch? = { nil }
     ) {
         self.sourceFrame = sourceFrame
         self.sourceCornerRadius = sourceCornerRadius
@@ -260,6 +265,79 @@ public struct RevealGeometry {
         self.dismissalDidEnd = dismissalDidEnd
         self.matchesAnchor = matchesAnchor
         self.pageFit = pageFit
+        self.launch = launch
+    }
+
+    /// The geometry the OPENING runs on: this one, or — when it leaves from a
+    /// lift — the same reveal with the lift as its source.
+    ///
+    /// The lift is not the source's shape: a long press's preview of a text
+    /// card (its band, caption and top comments) or of a friend's face. So
+    /// the opening is the marker's — the lift's still under the page fading
+    /// in, nothing aligned, no veil, no borrowed band — on the lift's frame
+    /// and corner, the page meeting the window as the lift says. The close
+    /// is untouched: it lands on the source, as it always did.
+    func opening() -> RevealGeometry {
+        guard let lift = launch() else { return self }
+        let sourceFrame = sourceFrame
+        return RevealGeometry(
+            sourceFrame: { space in lift.frame(space) ?? sourceFrame(space) },
+            sourceCornerRadius: lift.cornerRadius,
+            sourceCornerCurve: lift.cornerCurve,
+            sourceFill: sourceFill,
+            sourceCaptionEnd: nil,
+            installDestinationVeil: installDestinationVeil,
+            setDestinationVeilOpacity: setDestinationVeilOpacity,
+            installDestinationAuthorBand: installDestinationAuthorBand,
+            setDestinationAuthorBandOpacity: setDestinationAuthorBandOpacity,
+            setDestinationGround: setDestinationGround,
+            anchorFrame: anchorFrame,
+            sourceCaptionTop: 0,
+            makeDismissStandIn: makeDismissStandIn,
+            makePresentStandIn: lift.makeStandIn,
+            setSourceConcealed: setSourceConcealed,
+            depthView: depthView,
+            presentationDidEnd: presentationDidEnd,
+            willStageDismissal: willStageDismissal,
+            dismissalDidEnd: dismissalDidEnd,
+            matchesAnchor: false,
+            pageFit: lift.pageFit
+        )
+    }
+}
+
+/// Where a reveal's OPENING leaves from when that is not its source: the lift
+/// of a long press the viewer tapped (#1543), which the post opens out of
+/// rather than going back into its card first.
+@MainActor
+public struct RevealLaunch {
+    /// The lift's rect in the given space — `nil` falls back to the source's.
+    public let frame: (UICoordinateSpace) -> CGRect?
+    /// The lift's own rounding, and its curve.
+    public let cornerRadius: CGFloat
+    public let cornerCurve: CALayerCornerCurve
+    /// What the opening starts as: the lift itself, drawn — see
+    /// `RevealGeometry.makePresentStandIn`.
+    public let makeStandIn: () -> UIView?
+    /// How the page meets the window: `.covering` for a picture, which
+    /// fills it; `.clipped` for words, seen in place at their own size
+    /// through a window that grows — scaled to cover a lift's rect, a text
+    /// page's type swelled past its size and shrank back as the window grew
+    /// (filmed 2026-10-22).
+    public let pageFit: RevealPageFit
+
+    public init(
+        frame: @escaping (UICoordinateSpace) -> CGRect?,
+        cornerRadius: CGFloat,
+        cornerCurve: CALayerCornerCurve = .continuous,
+        pageFit: RevealPageFit = .covering,
+        makeStandIn: @escaping () -> UIView?
+    ) {
+        self.frame = frame
+        self.cornerRadius = cornerRadius
+        self.cornerCurve = cornerCurve
+        self.pageFit = pageFit
+        self.makeStandIn = makeStandIn
     }
 }
 
@@ -268,7 +346,7 @@ public struct RevealGeometry {
 /// ⚠️ THE ONE THING ALL THREE ANSWER: whether the page moves at all. Two of
 /// them scale it, and the reason both exist is that "do not truncate the media"
 /// means different geometry depending on what the window is becoming.
-public enum RevealPageFit {
+public enum RevealPageFit: Sendable {
     /// The page holds still and the window shows part of it. Right when the
     /// window is a CARD-shaped slice of a page laid out the same way, which is
     /// what makes the hand-off at the end exact — and wrong the moment the
@@ -1340,6 +1418,9 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         container.addSubview(toView)
         container.layoutIfNeeded()
 
+        // From a long press's lift when the viewer tapped one (#1543) —
+        // asked after the layout, once the page knows which post it shows.
+        let geometry = self.geometry.opening()
         let anchor = geometry.anchorFrame(container)
         let sourceRect = geometry.sourceFrame(container) ?? RevealStage.centredFallback(in: container)
 

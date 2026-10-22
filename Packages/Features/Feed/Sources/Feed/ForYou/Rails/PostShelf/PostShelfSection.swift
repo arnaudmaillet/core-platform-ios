@@ -1225,20 +1225,18 @@ extension PostShelfSection: UICollectionViewDelegate {
     /// preview into a destination UIKit presents itself): the flight hands
     /// the card's player to the page, and the close lands back on the card.
     ///
-    /// ⚠️ A MEDIA card's flight takes off FROM THE LIFT (#1543): captured now
-    /// (`PreviewLaunch`), the lift fading in place under it. A text card
-    /// settles back into its card first, and opens one turn past the
-    /// completion, once UIKit has put the card back.
+    /// ⚠️ The post opens FROM THE LIFT (#1543): captured now
+    /// (`PreviewLaunch`), the lift fading in place under a media card's
+    /// flight or a text card's window (`TextRevealInstaller`).
     func collectionView(
         _ collectionView: UICollectionView,
         willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
         animator: UIContextMenuInteractionCommitAnimating
     ) {
         guard case .card(let id)? = RowMenuTarget(configuration.identifier) else { return }
-        // From the lift, not back through the card (#1543) — a media card's;
-        // a text card still opens through its window, after the lift is home.
+        // From the lift, not back through the card (#1543).
         if let preview = animator.previewViewController as? ForYouPostPreviewViewController,
-           preview.post.id == id, mediaCardCell(for: id) != nil, let launch = PreviewLaunch(preview) {
+           preview.post.id == id, let launch = PreviewLaunch(preview) {
             previewLaunch = launch
             animator.preferredCommitStyle = .dismiss
             DispatchQueue.main.async { [weak self] in self?.open(id) }
