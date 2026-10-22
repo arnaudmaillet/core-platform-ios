@@ -131,16 +131,27 @@ struct PlaceHeroInkTests {
         #expect(profile.debugInkReadCount == reads)
     }
 
-    /// No page under the type (#1372): the DIMMED picture picks the ink,
-    /// whatever the appearance — black over white, white over black.
+    /// ⚠️ ALWAYS LIGHT (#1597, the owner 2026-10-22): white type over any
+    /// picture, whatever the appearance — a bright one gets a veil under the
+    /// type instead of black ink; a dark one none.
     @Test(arguments: [UIUserInterfaceStyle.light, .dark])
-    func theDimmedPicturePicksTheInk(style: UIUserInterfaceStyle) {
-        for (picture, side) in [(Picture.white, HeroInk.Tone.dark), (.black, .light)] {
+    func theTypeIsAlwaysLightAndABrightPictureGetsAVeil(style: UIUserInterfaceStyle) {
+        for (picture, veiled) in [(Picture.white, true), (.black, false)] {
             let profile = place(picture, style: style)
-            #expect(profile.debugHeroInkTones.name == side, "\(picture)")
-            #expect(profile.debugHeroInkTones.likes == side, "\(picture)")
-            #expect(profile.debugHeroNameInk == side.primary, "\(picture)")
+            #expect(profile.debugHeroInkTones.name == .light, "\(picture)")
+            #expect(profile.debugHeroInkTones.likes == .light, "\(picture)")
+            #expect(profile.debugHeroNameInk == HeroInk.Tone.light.primary, "\(picture)")
+            #expect((profile.debugIdentityScrimAlpha > 0.5) == veiled, "\(picture) veil \(profile.debugIdentityScrimAlpha)")
         }
+    }
+
+    /// The veil's rule: none over a dark enough ground, and as dark as a
+    /// bright one needs.
+    @Test func theVeilIsAsDarkAsTheGroundNeeds() {
+        #expect(PlaceProfileViewController.scrimAlpha(brightestGround: 0.03) == 0)
+        #expect(PlaceProfileViewController.scrimAlpha(brightestGround: 1) > 0.9)
+        #expect(PlaceProfileViewController.scrimAlpha(brightestGround: 0.5)
+                < PlaceProfileViewController.scrimAlpha(brightestGround: 0.9))
     }
 
     /// The ink is read through the dim: a light grey that takes black ink
