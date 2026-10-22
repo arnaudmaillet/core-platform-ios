@@ -99,6 +99,72 @@ struct PinnedSectionBarBindingTests {
                 "back at the top, the screen's item went too")
     }
 
+    /// A list that works out its own pinned section hands it over: the same
+    /// item rules as `update` — one per section and count, nothing at the top.
+    @Test func aListsOwnPinnedSectionIsShown() throws {
+        let binding = PinnedSectionBarBinding(viewController: UIViewController(), placement: .leading, scope: "test")
+        binding.show(pinned: (1, sections[1]))
+        let first = try #require(binding.item)
+        #expect(first.title == "Yesterday")
+        binding.show(pinned: (1, sections[1]))
+        #expect(binding.item === first, "the same section re-minted the item")
+        binding.show(pinned: (0, sections[0]))
+        #expect(binding.item?.title == "New · 3")
+        binding.show(pinned: nil)
+        #expect(binding.item == nil && binding.pinned == nil)
+    }
+
+    /// Leading with items that come first (the inbox's bell): prefix, then
+    /// the section, then the screen's other items.
+    @Test func aLeadingPrefixStaysFirst() throws {
+        let screen = UIViewController()
+        let binding = PinnedSectionBarBinding(viewController: screen, placement: .leading, scope: "test")
+        let bell = UIBarButtonItem(systemItem: .bookmarks)
+        let own = UIBarButtonItem(systemItem: .edit)
+        binding.leadingPrefix = [bell]
+        binding.leadingItems = [own]
+        binding.update(sections: sections, sectionTops: tops, pinLine: 300)
+        binding.debugPlaceNow()
+        let items = try #require(screen.navigationItem.leftBarButtonItems)
+        #expect(items.count == 3 && items[0] === bell && items[1] === binding.item && items[2] === own)
+    }
+
+    /// Suspended (a bar of another kind — the inbox's search) the binding
+    /// writes nothing but keeps up; resumed, it places what is pinned now.
+    @Test func aSuspendedBindingWritesNothingAndCatchesUpOnResume() throws {
+        let screen = UIViewController()
+        let binding = PinnedSectionBarBinding(viewController: screen, placement: .leading, scope: "test")
+        let bell = UIBarButtonItem(systemItem: .bookmarks)
+        binding.leadingPrefix = [bell]
+        binding.isSuspended = true
+        screen.navigationItem.leftBarButtonItems = []
+        binding.update(sections: sections, sectionTops: tops, pinLine: 700)
+        binding.placeNow()
+        #expect((screen.navigationItem.leftBarButtonItems ?? []).isEmpty, "a suspended binding wrote the bar")
+        binding.isSuspended = false
+        let items = try #require(screen.navigationItem.leftBarButtonItems)
+        #expect(items.count == 2 && items[0] === bell && items[1].title == "Yesterday")
+    }
+
+    /// The tracker: the pinned value against the pin line, its index, told
+    /// only on a change, and nothing over a section the host does not name.
+    @Test func theTrackerTellsOnlyAChange() {
+        let tracker = PinnedSectionTracker<String>()
+        var told: [String?] = []
+        tracker.onChange = { told.append($0) }
+        let names: (Int) -> String? = { ["new", nil, "week"][$0] }
+        tracker.update(sectionTops: tops, pinLine: 0, value: names)
+        #expect(tracker.pinned == nil && told.isEmpty)
+        tracker.update(sectionTops: tops, pinLine: 300, value: names)
+        tracker.update(sectionTops: tops, pinLine: 350, value: names)
+        #expect(tracker.pinned == "new" && tracker.index == 0)
+        tracker.update(sectionTops: tops, pinLine: 700, value: names)
+        #expect(tracker.pinned == nil, "an unnamed section was named")
+        tracker.update(sectionTops: tops, pinLine: 1_300, value: names)
+        #expect(tracker.pinned == "week" && tracker.index == 2)
+        #expect(told == ["new", nil, "week"])
+    }
+
     /// Trailing: before the screen's own trailing items.
     @Test func trailingGoesBeforeTheScreensItems() throws {
         hosting { screen in

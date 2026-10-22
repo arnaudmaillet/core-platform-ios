@@ -171,9 +171,16 @@ final class ForYouPostListViewController: UIViewController {
         page.onNearEnd = { [weak self] in self?.onNearEnd?() }
         page.onRefresh = { [weak self] in self?.onRefresh?() }
         page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
-        // The pinned section in the bar, after the back chevron (#1378).
-        navigationItem.leftItemsSupplementBackButton = true
-        page.onPinnedSectionChanged = { [weak self] section in self?.applyPinnedSection(section) }
+        // The pinned section in the bar, after the back chevron (#1378), through
+        // the one contract (#1573).
+        let binding = PinnedSectionBarBinding(
+            viewController: self, placement: .leading, scope: "postList.\(kind.rawValue)", countNoun: "new"
+        )
+        binding.onSelect = { [weak self] _ in self?.page.scrollToPinnedSection() }
+        sectionBinding = binding
+        page.onPinnedSectionChanged = { [weak binding] section in
+            binding?.show(pinned: section.map { ($0.index, .init(id: $0.title, title: $0.title, count: $0.count)) })
+        }
     }
 
     // MARK: - The pinned section (#1378)
@@ -181,55 +188,20 @@ final class ForYouPostListViewController: UIViewController {
     /// The section the list has scrolled into, named after the back chevron
     /// — the Messages inbox's item (#1301), one look (`SectionBarItem`):
     /// `[‹][New · 3] … [points][search]`, nothing back at the top, and no
-    /// capsule pinned under the bar (the headers leave as they pin).
+    /// capsule pinned under the bar (the headers leave as they pin). Minted,
+    /// placed once per turn and held past a push by the contract
+    /// (`PinnedSectionBarBinding`, #1573).
     ///
     /// ⚠️ ONLY THE LEADING GROUP: toasts own the trailing one while they show
     /// (`NavigationBarToasts`, #1066), and when they need room they keep the
     /// first leading item only — this one, after the chevron.
-    private var sectionItem: UIBarButtonItem?
-
-    private func applyPinnedSection(_ section: PostGridPinnedSection?) {
-        sectionItem = section.map { section in
-            SectionBarItem.make(
-                title: section.title, count: section.count, countNoun: "new", scope: "postList.\(kind.rawValue)"
-            ) { [weak self] in self?.page.scrollToPinnedSection() }
-        }
-        scheduleSectionPlacement()
-    }
-
-    /// Puts the leading group where the state says, ONCE, on the next turn:
-    /// a scroll can publish twice in one turn, and a second
-    /// `setLeftBarButtonItems` cuts the first one's animation short.
-    private func scheduleSectionPlacement() {
-        guard view.window != nil else {
-            navigationItem.leftBarButtonItems = sectionItem.map { [$0] } ?? []
-            return
-        }
-        guard !sectionPlacementScheduled else { return }
-        sectionPlacementScheduled = true
-        DispatchQueue.main.async { [weak self] in self?.placeSectionAfterTransition() }
-    }
-
-    /// ⚠️ NOT DURING A PUSH OR A POP (#756): items set mid-transition land
-    /// with it, unanimated, at its end. A placement due then waits for the
-    /// end, then animates.
-    private func placeSectionAfterTransition() {
-        if let coordinator = transitionCoordinator,
-           coordinator.animate(alongsideTransition: nil, completion: { [weak self] _ in
-               DispatchQueue.main.async { self?.placeSectionAfterTransition() }
-           }) {
-            return
-        }
-        sectionPlacementScheduled = false
-        navigationItem.setLeftBarButtonItems(sectionItem.map { [$0] } ?? [], animated: true)
-    }
-
-    private var sectionPlacementScheduled = false
+    private var sectionBinding: PinnedSectionBarBinding?
 
     #if DEBUG
     /// The bar's section item while it is shown — what a test reads.
     var debugSectionItem: UIBarButtonItem? {
-        guard let sectionItem, navigationItem.leftBarButtonItems?.contains(where: { $0 === sectionItem }) == true
+        guard let sectionItem = sectionBinding?.item,
+              navigationItem.leftBarButtonItems?.contains(where: { $0 === sectionItem }) == true
         else { return nil }
         return sectionItem
     }

@@ -53,16 +53,15 @@ final class MessageRequestsViewController: UIViewController {
 
     /// The section the list has scrolled into, which the inbox names in its
     /// bar (#1301). Re-read on every scroll and every render.
-    private let pinnedTracker = InboxPinnedSectionTracker()
+    private let pinnedTracker = PinnedSectionTracker<InboxPinnedSection>()
 
     private func updatePinnedSection() {
         // A list off screen behind the skeleton or a status names nothing.
         let isShowing = !tableView.isHidden
-        pinnedTracker.update(
-            in: tableView,
-            headedSection: { isShowing ? dataSource.headedSection(at: $0) : nil },
-            count: { renderedSections.unreadMessages(in: $0) }
-        )
+        pinnedTracker.update(in: tableView) { index in
+            guard isShowing, let section = dataSource.headedSection(at: index) else { return nil }
+            return InboxPinnedSection(section: section, count: renderedSections.unreadMessages(in: section))
+        }
     }
 
     private(set) var chrome = InboxSurfaceChrome() {

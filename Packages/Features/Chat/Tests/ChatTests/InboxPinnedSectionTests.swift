@@ -35,14 +35,16 @@ struct InboxPinnedSectionTests {
         return (table, source)
     }
 
+    /// The lists' own read (`PinnedSectionTracker`, #1573): a headed section
+    /// named with its unread count.
     private func read(
-        _ tracker: InboxPinnedSectionTracker, _ table: UITableView, headed: Bool = true
+        _ tracker: PinnedSectionTracker<InboxPinnedSection>, _ table: UITableView, headed: Bool = true
     ) {
-        tracker.update(
-            in: table,
-            headedSection: { headed ? [InboxListSection.new, .earlier][$0] : nil },
-            count: { $0 == .new ? 8 : 0 }
-        )
+        tracker.update(in: table) { index in
+            guard headed else { return nil }
+            let section = [InboxListSection.new, .earlier][index]
+            return InboxPinnedSection(section: section, count: section == .new ? 8 : 0)
+        }
     }
 
     /// Nothing at the top; "New" once the list moves past its header;
@@ -50,7 +52,7 @@ struct InboxPinnedSectionTests {
     @Test func theStuckSectionFollowsTheScroll() {
         let (table, source) = table()
         _ = source
-        let tracker = InboxPinnedSectionTracker()
+        let tracker = PinnedSectionTracker<InboxPinnedSection>()
         var published: [InboxPinnedSection?] = []
         tracker.onChange = { published.append($0) }
 
@@ -78,7 +80,7 @@ struct InboxPinnedSectionTests {
     @Test func anUnheadedListNamesNothing() {
         let (table, source) = table()
         _ = source
-        let tracker = InboxPinnedSectionTracker()
+        let tracker = PinnedSectionTracker<InboxPinnedSection>()
         table.contentOffset.y = 900
         read(tracker, table, headed: false)
         #expect(tracker.pinned == nil)
@@ -94,7 +96,7 @@ struct InboxPinnedSectionTests {
         let pinLine = table.contentOffset.y + table.adjustedContentInset.top
         #expect(pinLine == table.rectForRow(at: IndexPath(row: 0, section: 1)).minY)
 
-        let tracker = InboxPinnedSectionTracker()
+        let tracker = PinnedSectionTracker<InboxPinnedSection>()
         read(tracker, table)
         #expect(tracker.pinned?.section == .earlier, "the bar did not name the section scrolled to")
     }
