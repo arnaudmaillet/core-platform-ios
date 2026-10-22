@@ -74,6 +74,55 @@ struct PlaceProfileTests {
         profile.viewDidLayoutSubviews()
     }
 
+    /// ⚠️ THREE DETENTS, THE PROFILE'S (#1599): the top, the identity under
+    /// the bar (catching), the first post under the bar.
+    @Test func theDetentsAreTheTopTheIdentityAndTheFirstPost() {
+        let detents = PlaceProfileViewController.snapDetents(identityTop: 350, safeTop: 62, firstPost: 600)
+        #expect(detents.all == [0, 288, 600])
+        #expect(detents.catching == [288])
+        // An identity at or past the first post's detent is not one of its own.
+        let short = PlaceProfileViewController.snapDetents(identityTop: 700, safeTop: 62, firstPost: 600)
+        #expect(short.all == [0, 600] && short.catching.isEmpty)
+    }
+
+    /// Laid out, the list rests on the page's three detents.
+    @Test func theListRestsOnThePagesDetents() {
+        let profile = makeProfile()
+        laidOut(profile)
+        let detents = profile.debugSnapDetents
+        #expect(detents.all.count == 3, "\(detents.all)")
+        #expect(detents.all.first == 0)
+        #expect(detents.catching.count == 1)
+    }
+
+    /// ⚠️ NO BANNER WHEN THE TOP POST IS WORDS (#1599): the most popular post
+    /// decides; a media post anywhere else does not bring the picture back.
+    @Test func aPlaceWhoseTopPostIsWordsHasNoBanner() {
+        #expect(!PlaceProfileViewController.showsBanner(for: [
+            post("words", kind: .text, reactions: 900), post("photo", kind: .photo, reactions: 10),
+        ]))
+        #expect(PlaceProfileViewController.showsBanner(for: [
+            post("words", kind: .text, reactions: 10), post("photo", kind: .photo, reactions: 900),
+        ]))
+        #expect(PlaceProfileViewController.showsBanner(for: []), "no posts yet: the cover's place is kept")
+    }
+
+    /// …and the page re-lays out without it: the identity right under the
+    /// bar, the header no taller than the identity.
+    @Test func withoutABannerTheIdentityMovesUp() async {
+        let profile = makeProfile(posts: [
+            post("words", kind: .text, reactions: 900), post("photo", kind: .photo, reactions: 10),
+        ])
+        laidOut(profile)
+        let coverHeight = profile.debugBannerHeight
+        profile.beginLoading()
+        for _ in 0..<50 where profile.showsBanner { await Task.yield() }
+        laidOut(profile)
+        #expect(!profile.showsBanner)
+        #expect(profile.debugBannerHeight < coverHeight * 0.6,
+                "the header kept the cover's height: \(profile.debugBannerHeight) of \(coverHeight)")
+    }
+
     /// A COVER, as a profile's poster: the banner runs down 80% of the
     /// screen (user, 5 October 2026), the identity row at its foot — well
     /// below where the poster's old 200pt stage put it.
