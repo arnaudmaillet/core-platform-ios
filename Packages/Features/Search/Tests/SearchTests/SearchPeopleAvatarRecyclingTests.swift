@@ -1,5 +1,6 @@
 import DesignSystem
 import Foundation
+import Synchronization
 import MediaCore
 import Testing
 import UIKit
@@ -13,7 +14,8 @@ import UIKit
 /// lands first is arranged, never raced against a clock.
 @MainActor
 struct SearchPeopleAvatarRecyclingTests {
-    // Ten minutes, not one: CI starves this package, and a 1-minute limit fired there.
+    // Ten minutes, not one: CI starves this package, and a 1-minute limit
+    // fired there. The waits below are bounded in looks and fail first.
     @Test(.timeLimit(.minutes(10)))
     func aRecycledCellNeverShowsThePreviousPersonsAvatar() async throws {
         let fetcher = GatedAvatarFetcher()
@@ -30,32 +32,51 @@ struct SearchPeopleAvatarRecyclingTests {
 
         // Ada's picture arrives first — late, for a row that has moved on.
         await fetcher.release(ada)
-        _ = try await pipeline.image(for: ada)
-        await landed.next { await fetcher.release(grace) }
+        // ⚠️ BOUNDED, AND SAYING WHICH STAGE STALLED (#1606): this test hung
+        // its 600 s limit twice on CI with nothing to say where. Each wait
+        // now counts LOOKS (the runner's starvation spends none of them —
+        // `settle(until:)`'s rule), and a stage that never answers fails
+        // here, at its own line, in well under a minute of work.
+        let adaFetched = Flag()
+        Task.detached { if (try? await pipeline.image(for: ada)) != nil { adaFetched.set() } }
+        try #require(await Self.settle { adaFetched.isSet },
+                     "STALLED: Ada's late picture never decoded (the fetcher released it)")
+        #expect(landed.images.isEmpty, "Ada's late picture landed on a row that had moved on")
+
+        await fetcher.release(grace)
+        try #require(await Self.settle { !landed.images.isEmpty },
+                     "STALLED: Grace's picture was released but never landed on the row")
 
         #expect(landed.images.count == 1)
         #expect(landed.images.first === pipeline.cachedImage(for: grace, size: .avatar))
     }
+
+    /// Waits for STATE, in looks (3,000 × 10 ms), never wall-clock time: a
+    /// starved runner spends none of the budget.
+    private static func settle(until condition: @MainActor () -> Bool) async -> Bool {
+        for _ in 0..<3_000 {
+            await Task.yield()
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
 }
 
-/// Records the pictures a row was given, and lets a test wait for the next.
+/// A flag a detached task raises.
+private final class Flag: Sendable {
+    private let value = Mutex(false)
+    var isSet: Bool { value.withLock { $0 } }
+    func set() { value.withLock { $0 = true } }
+}
+
+/// Records the pictures a row was given.
 @MainActor
 private final class LandedAvatars {
     private(set) var images: [UIImage] = []
-    private var waiter: CheckedContinuation<Void, Never>?
 
     func land(_ image: UIImage) {
         images.append(image)
-        waiter?.resume()
-        waiter = nil
-    }
-
-    /// Runs `trigger`, then returns once the next picture has landed.
-    func next(_ trigger: @escaping @Sendable () async -> Void) async {
-        await withCheckedContinuation { continuation in
-            waiter = continuation
-            Task { await trigger() }
-        }
     }
 }
 
