@@ -257,7 +257,7 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// owns) on any page.
     func yieldsLeftwardDrag(velocity: CGPoint, originX: CGFloat, windowWidth: CGFloat) -> Bool {
         guard yieldsLeftwardDrags, velocity.x < 0, abs(velocity.x) > abs(velocity.y) else { return false }
-        if windowWidth - originX <= PagedScreenDismissalPolicy.edgeZone { return true }
+        if windowWidth - originX <= PagedScreenDismissalPolicy.trailingEdgeZone { return true }
         return !hasTravel(towardsPageDelta: 1)
     }
 
@@ -397,9 +397,9 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// the same question the moment a swipe is in flight: the viewer stops the
     /// page they are looking at, and by the time anything is reconciled the
     /// page under the finger may already be the next one.
-    public func setPausedMark(_ visible: Bool, onPage index: Int) {
+    public func setPausedMark(_ visible: Bool, onPage index: Int, animated: Bool = true) {
         guard pageViews.indices.contains(index) else { return }
-        pageViews[index].setPausedMarkVisible(visible)
+        pageViews[index].setPausedMarkVisible(visible, animated: animated)
     }
 
     /// Takes down the mark on every page that has left the box.

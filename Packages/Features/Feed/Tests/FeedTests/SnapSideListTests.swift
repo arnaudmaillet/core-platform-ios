@@ -64,38 +64,32 @@ struct SnapSideListTests {
         }
     }
 
-    /// ⚠️ WHOLE TILES, 10 ON AN 18 PRO (#1545): the tiles and their spacing
-    /// fill the height between the bars exactly — none cut at rest — square
-    /// by default, 3:4 behind the flag; a shorter screen holds fewer, still
-    /// whole.
+    /// ⚠️ WHOLE 3:4 TILES, 10 ON AN 18 PRO (#1545, #1580): the tiles and
+    /// their spacing fill the height between the bars exactly — none cut at
+    /// rest; a shorter screen holds fewer, still whole.
     @Test(arguments: [0, 1])
     func theListHoldsWholeTiles(_ device: Int) {
         let (size, bars) = Self.devices[device]
-        for shape in [SnapSideList.Geometry.TileShape.square, .portrait] {
-            let geometry = SnapSideList.Geometry(size: size, bars: bars, tileShape: shape)
-            let count = CGFloat(geometry.tileCount)
-            let tile = geometry.tileSize
-            let filled = count * tile.height + (count - 1) * SnapSideList.Geometry.tileSpacing
-            #expect(abs(filled - geometry.listFrame(progress: 1).height) < 0.01, "the tiles do not fill the list: \(filled)")
-            #expect(abs(tile.width - (shape == .square ? tile.height : tile.height * 3 / 4)) < 0.01)
-            #expect(geometry.listWidth == tile.width)
-        }
-        let square = SnapSideList.Geometry(size: size, bars: bars)
-        if device == 0 { #expect(square.tileCount == 10, "an 18 Pro holds \(square.tileCount)") }
-        if device == 1 { #expect(square.tileCount < 10, "an SE holds as many as an 18 Pro") }
+        let geometry = SnapSideList.Geometry(size: size, bars: bars)
+        let count = CGFloat(geometry.tileCount)
+        let tile = geometry.tileSize
+        let filled = count * tile.height + (count - 1) * SnapSideList.Geometry.tileSpacing
+        #expect(abs(filled - geometry.listFrame(progress: 1).height) < 0.01, "the tiles do not fill the list: \(filled)")
+        #expect(abs(tile.width - tile.height * 3 / 4) < 0.01, "the tiles are not 3:4")
+        #expect(geometry.listWidth == tile.width)
+        if device == 0 { #expect(geometry.tileCount == 10, "an 18 Pro holds \(geometry.tileCount)") }
+        if device == 1 { #expect(geometry.tileCount < 10, "an SE holds as many as an 18 Pro") }
     }
 
     /// ⚠️ THE CARD IS WIDER (#1545): wider than the page fitted to the height
-    /// between the bars was (#1509), and widest with the 3:4 tiles.
+    /// between the bars was (#1509) — the 3:4 tiles leave it the most room.
     @Test func theCardIsWiderThanAPageFittedToTheHeight() {
         let (size, bars) = Self.devices[0]
-        let square = SnapSideList.Geometry(size: size, bars: bars)
-        let portrait = SnapSideList.Geometry(size: size, bars: bars, tileShape: .portrait)
-        let fittedWidth = size.width * square.openArea.height / size.height
-        #expect(square.cardFrame.width > fittedWidth + 20, "\(square.cardFrame.width) vs \(fittedWidth)")
-        #expect(portrait.cardFrame.width > square.cardFrame.width + 10)
-        #expect(square.pageInset(progress: 0) == 0, "closed, the page is cropped")
-        #expect(square.pageInset(progress: 1) > 0, "the page overruns the bars and is not cropped")
+        let geometry = SnapSideList.Geometry(size: size, bars: bars)
+        let fittedWidth = size.width * geometry.openArea.height / size.height
+        #expect(geometry.cardFrame.width > fittedWidth + 30, "\(geometry.cardFrame.width) vs \(fittedWidth)")
+        #expect(geometry.pageInset(progress: 0) == 0, "closed, the page is cropped")
+        #expect(geometry.pageInset(progress: 1) > 0, "the page overruns the bars and is not cropped")
     }
 
     /// ⚠️ THE CORNERS GO FROM THE DEVICE'S TO THE CARD'S (#1509), in screen
@@ -285,11 +279,12 @@ struct SnapSideListTests {
         #expect(list.autoplay?.playback.isPlaying(PostID("v0")) != true, "a tile kept playing once closed")
     }
 
-    /// ⚠️ THE POST ON SHOW'S TILE PLAYS FIRST, ON ITS OWN PLAYER (#1547): it
-    /// is the list's claim (the coordinator's focus, which sorts first and is
-    /// never stopped for room), under the list's own scope — never joined to
-    /// the card's; closed, the claim goes with the list.
-    @Test func thePostOnShowsTilePlaysFirstOnItsOwnPlayer() async throws {
+    /// ⚠️ THE POST ON SHOW'S TILE IS A CLONE OF THE CARD (#1581, the owner
+    /// 2026-10-22): no player, no loan of its own — a passive second surface
+    /// on the card's player, so a pause, a scrub, the frame are the card's.
+    /// Its own loan stays the other tiles'. Closed, the mirror comes off and
+    /// the card's player plays on.
+    @Test func thePostOnShowsTileMirrorsTheCardsPlayer() async throws {
         let pool = VideoPlaybackController(source: StubSource(), poolSize: 6)
         let list = SnapSideListView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
         let autoplay = SnapSideListAutoplay(pool: pool, imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
@@ -307,17 +302,38 @@ struct SnapSideListTests {
             waited += 1
             try? await Task.sleep(for: .milliseconds(5))
         }
-        #expect(autoplay.playback.playbackScope(for: PostID("v3")) == "side-list:v3", "a tile plays under the post's own scope")
 
-        autoplay.focus(PostID("v3"))
+        // The card: a surface playing the same clip on its own player.
+        let card = VideoRenderView()
+        let url = try #require(URL(string: "mock://video/side-v3"))
+        await pool.play(url, in: card, scope: "v3")
+        try #require(pool.hasPlayer(in: card), "guard: the card plays")
+        let loansBefore = pool.activePlayerCount
+        let capBefore = pool.debugItem(in: card)?.preferredPeakBitRate
+        autoplay.cardSurface = { $0 == PostID("v3") ? card : nil }
+        autoplay.mirror(PostID("v3"))
         list.setPlaying(true)
-        #expect(autoplay.playback.focusedID == PostID("v3"))
-        // The loan is taken in the same turn; the player binds a moment later.
-        #expect(autoplay.playback.loanedCell(PostID("v3")) != nil, "the post on show's tile did not get a player")
+
+        #expect(autoplay.playback.loanedCell(PostID("v3")) == nil, "the post on show's tile took a player of its own")
+        #expect(autoplay.mirrorsCard, "the post on show's tile does not draw the card's player")
+        #expect(pool.activePlayerCount >= loansBefore)
+        #expect(pool.debugItem(in: card)?.preferredPeakBitRate == capBefore, "the mirror re-capped the card")
+        // One player: the card paused, the mirror shows a stopped clip too.
+        #expect(pool.setPaused(true, in: card))
+        #expect(autoplay.mirrorPlayheadMatchesCard(card), "the tile is not the card's frame")
+
+        // A recycled tile lets the card's player go, and never stops it.
+        let mirrored = try #require(cells.first { cell in
+            cell.loadedVideoRenderView.map { pool.sharesPlayback($0, with: card) && !pool.hasPlayer(in: $0) } ?? false
+        })
+        autoplay.stop(mirrored)
+        #expect(!autoplay.mirrorsCard, "a recycled tile kept drawing the card")
+        #expect(pool.hasPlayer(in: card), "a recycled mirror stopped the card's player")
+        #expect(pool.debugItem(in: card)?.preferredPeakBitRate == capBefore)
 
         list.setPlaying(false)
-        #expect(autoplay.playback.focusedID == nil, "the claim outlived the list")
-        #expect(autoplay.playback.loanedCell(PostID("v3")) == nil, "the tile kept its player once closed")
+        #expect(!autoplay.mirrorsCard, "the mirror outlived the list")
+        #expect(pool.hasPlayer(in: card), "closing the list stopped the card's player")
     }
 
     /// ⚠️ THE POST ON SHOW FIRST, THEN SIMILAR POSTS (#1509): current posts
@@ -480,6 +496,172 @@ struct SnapSideListTests {
         #expect(!list.debugShowsPausedMark(on: id), "the mark stayed")
     }
 
+    /// ⚠️ THE MARK CROSSES WITH THE MOVE (#1580, the owner's recording): a
+    /// paused clip's stopped mark is on the card at 1 − progress and on its
+    /// tile at progress while the list moves, and the side the move ends on
+    /// keeps it whole.
+    @Test func aPausedClipsMarkCrossesWithTheMove() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
+        let sideList = try await open(feed)
+        let list = sideList.listView
+        list.layoutIfNeeded()
+        let id = try #require(feed.activePostID)
+        let cell = try #require(feed.debugSettledSnapCell)
+        // Paused from its tile, list open (#1550).
+        feed.sideListPausedPost = id
+        list.setPausedMark(true, on: id, animated: false)
+
+        feed.sideListPoseDidChange(progress: 0.4)
+        #expect(abs((cell.debugPausedMarkAlpha ?? -1) - 0.6) < 0.001, "the card's mark is not 1 − progress")
+        #expect(abs(list.debugPausedMarkAlpha - 0.4) < 0.001, "the tile's mark is not progress")
+        feed.sideListPoseDidChange(progress: 0.1)
+        #expect(abs((cell.debugPausedMarkAlpha ?? -1) - 0.9) < 0.001)
+
+        feed.sideListDidSettle(open: false)
+        #expect(cell.debugPausedMarkAlpha == 1, "the card did not keep the mark whole")
+        #expect(!list.debugShowsPausedMark(on: id), "the tile kept a mark after the close")
+        #expect(feed.sideListPausedPost == nil)
+
+        // And back: the card's mark crosses to the tile as the list opens.
+        feed.sideListPoseDidChange(progress: 0.7)
+        #expect(abs((cell.debugPausedMarkAlpha ?? -1) - 0.3) < 0.001)
+        feed.sideListDidSettle(open: true)
+        #expect(cell.debugPausedMarkAlpha == nil, "the card kept a mark with the list open")
+        #expect(list.debugShowsPausedMark(on: id) && list.debugPausedMarkAlpha == 1)
+        #expect(feed.sideListPausedPost == id)
+    }
+
+    /// A playing clip: the move carries no mark at all.
+    @Test func aPlayingClipsMoveShowsNoMark() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
+        let sideList = try await open(feed)
+        let id = try #require(feed.activePostID)
+        let cell = try #require(feed.debugSettledSnapCell)
+        feed.sideListPoseDidChange(progress: 0.5)
+        #expect(cell.debugPausedMarkAlpha == nil)
+        #expect(!sideList.listView.debugShowsPausedMark(on: id))
+    }
+
+    /// ⚠️ THE LIST IS THE SOURCE'S (#1580, the owner's recording): closed on
+    /// a post picked in it, the list reopens as it was — the source's list,
+    /// the card on the picked post at its place in it — not a new list made
+    /// for the picked post.
+    @Test func reopenedOnAPickedPostTheListIsKept() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
+        let sideList = try await open(feed)
+        let list = sideList.listView.entries.map(\.post.id)
+        let last = feed.orderedIDs.count - 1
+        let picked = try #require(feed.orderedIDs.last)
+        feed.settlePager(onIndex: last)
+        sideList.settle(open: false, animated: false)
+        #expect(feed.activePostID == picked)
+
+        sideList.loadIfNeeded()
+        sideList.settle(open: true, animated: false)
+        try #require(await settle { feed.isSideListSessionActive }, "the list does not drive the card")
+        #expect(sideList.listView.entries.map(\.post.id) == list, "a new list was made for the picked post")
+        #expect(feed.orderedIDs == list, "the card does not page through the source's list")
+        #expect(feed.activePostID == picked, "the card left the picked post")
+        #expect(feed.orderedIDs.firstIndex(of: picked) == last, "the picked post is not at its place")
+    }
+
+    /// ⚠️ THE POST ON SHOW IS NEVER RE-ACTIVATED BY THE LIST (#1580, the
+    /// owner's device check): opening or closing the list on a post that is
+    /// not its source changes that post's index in the pager. Read by index,
+    /// the screen sat for a moment on another post and re-activated the post
+    /// on show — its clip or song jumped. No activation at all, either way.
+    @Test func openingAndClosingNeverReactivateThePostOnShow() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
+        // On screen: pages activate only then.
+        feed.beginAppearanceTransition(true, animated: false)
+        feed.endAppearanceTransition()
+        let sideList = try await open(feed)
+        let last = feed.orderedIDs.count - 1
+        let picked = try #require(feed.orderedIDs.last)
+        feed.settlePager(onIndex: last)
+        #expect(feed.activePostID == picked)
+        try #require(feed.debugActivations.last == picked, "guard: pages do not activate here")
+        feed.debugActivations = []
+
+        sideList.settle(open: false, animated: false)
+        #expect(feed.activePostID == picked)
+        sideList.loadIfNeeded()
+        sideList.settle(open: true, animated: false)
+        try #require(await settle { feed.isSideListSessionActive })
+        #expect(feed.activePostID == picked)
+        #expect(feed.debugActivations.isEmpty, "the list re-activated: \(feed.debugActivations.map(\.rawValue))")
+    }
+
+    /// ⚠️ DISMISSED, THE LIST CLOSES (#1580, the owner's recording): the
+    /// screen is kept for the next post, and a list left open came back over
+    /// it. Closed, its session ended, the kept list forgotten.
+    @Test func aDismissalClosesTheList() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
+        let sideList = try await open(feed)
+        feed.settlePager(onIndex: 1)
+        feed.closeSideListForDismissal()
+        #expect(!sideList.isOpen && !sideList.isEngaged, "the list stayed open past the dismissal")
+        #expect(!feed.isSideListSessionActive, "the card still pages through the list")
+        #expect(feed.sideListResumeAnchor == nil, "the next post would reopen this list")
+    }
+
+    /// The feed taken up again after the close: the next opening is the post
+    /// on show's own list.
+    @Test func afterTheFeedMovesTheNextOpeningIsANewList() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
+        let sideList = try await open(feed)
+        feed.settlePager(onIndex: feed.orderedIDs.count - 1)
+        sideList.settle(open: false, animated: false)
+        #expect(feed.sideListResumeAnchor == PostID("p1"))
+        // A settle alone (the close's own) keeps it; the viewer's drag ends it.
+        let next = try #require(feed.orderedIDs.firstIndex(of: PostID("p2")))
+        feed.settlePager(onIndex: next)
+        feed.settlePager(onIndex: next - 1)
+        #expect(feed.sideListResumeAnchor == PostID("p1"), "a settle ended the source's list")
+        feed.scrollViewWillBeginDragging(feed.collectionView)
+        #expect(feed.sideListResumeAnchor == nil, "the source's list outlived the feed taken up again")
+    }
+
+    /// ⚠️ A PULL PAST EITHER END OF THE LIST CLOSES IT (#1580): down on its
+    /// first post, up on its last, only with the list open; on a middle post
+    /// the pager keeps every drag.
+    @Test func aPullPastEitherEndClosesTheList() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
+        let sideList = try await open(feed)
+        let last = feed.orderedIDs.count - 1
+        try #require(last >= 2, "guard: a first, a middle and a last post")
+        #expect(feed.sideListEdgePulls == .down, "the first post: \(feed.sideListEdgePulls)")
+        feed.settlePager(onIndex: 1)
+        #expect(feed.sideListEdgePulls.isEmpty, "a middle post closes the list on a pull")
+        feed.settlePager(onIndex: last)
+        #expect(feed.sideListEdgePulls == .up, "the last post: \(feed.sideListEdgePulls)")
+        sideList.settle(open: false, animated: false)
+        #expect(feed.sideListEdgePulls.isEmpty, "a closed list takes a pull")
+    }
+
+    /// Which drag is a closing pull: vertical first, then the way it goes.
+    @Test func aClosingPullIsVerticalAndTowardItsEnd() {
+        typealias Pull = SnapSideListEdgePull
+        #expect(Pull.direction(of: CGPoint(x: 10, y: 300), allowed: .down) == .down)
+        #expect(Pull.direction(of: CGPoint(x: 10, y: -300), allowed: .up) == .up)
+        #expect(Pull.direction(of: CGPoint(x: 0, y: -300), allowed: .down) == nil, "a drag up on the first post")
+        #expect(Pull.direction(of: CGPoint(x: 300, y: 100), allowed: [.down, .up]) == nil, "a sideways drag")
+        #expect(Pull.direction(of: .zero, allowed: [.down, .up]) == nil)
+    }
+
+    /// A pull closes as the rightward swipe does, and the post on show
+    /// stays full screen after it (#1509's mid-list rule, now at both ends).
+    @Test func aPullCloseKeepsThePostOnShow() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
+        let sideList = try await open(feed)
+        let last = feed.orderedIDs.count - 1
+        let picked = try #require(feed.orderedIDs.last)
+        feed.settlePager(onIndex: last)
+        sideList.settle(open: false, animated: false)
+        #expect(!feed.isSideListSessionActive)
+        #expect(feed.activePostID == picked, "the post on show did not stay full screen")
+    }
+
     /// ⚠️ A RIGHTWARD CLOSE MID-LIST KEEPS THE POST ON SHOW (#1509): the feed
     /// comes back as it was, that post right after the anchor, the pager on
     /// it — the next swipe up continues the feed after the anchor.
@@ -494,22 +676,6 @@ struct SnapSideListTests {
         #expect(!feed.isSideListSessionActive)
         #expect(feed.orderedIDs == [PostID("p1"), picked, PostID("p2")], "not placed right after the anchor: \(feed.orderedIDs)")
         #expect(feed.activePostID == picked, "the post on show did not stay full screen")
-    }
-
-    /// ⚠️ PAST THE LIST'S LAST TILE, A SWIPE UP CLOSES THE LIST (#1509) and
-    /// lands on the feed's post after the anchor — the feed untouched.
-    @Test func aSwipeUpPastTheLastTileClosesTheListOntoTheFeed() async throws {
-        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
-        _ = try await open(feed)
-        feed.settlePager(onIndex: feed.orderedIDs.count - 1)
-        let pager = try #require(feed.collectionView)
-        var target = pager.contentOffset
-        withUnsafeMutablePointer(to: &target) { pointer in
-            feed.scrollViewWillEndDragging(pager, withVelocity: CGPoint(x: 0, y: 2), targetContentOffset: pointer)
-        }
-        #expect(!feed.isSideListSessionActive, "the list stayed open past its last tile")
-        #expect(feed.orderedIDs == [PostID("p1"), PostID("p2")], "the list leaked into the feed: \(feed.orderedIDs)")
-        #expect(feed.activePostID == PostID("p2"), "not the post after the anchor")
     }
 
     /// Closed on the post it was opened from: the feed exactly as it was.

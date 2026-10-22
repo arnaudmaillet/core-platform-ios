@@ -50,6 +50,13 @@ struct SnapLifecycleDispatcher: Equatable {
         return diff(from: before)
     }
 
+    /// The page on show moved to `index` with no change of page: the same
+    /// post, re-placed under the screen by a reorder of the items (#1580).
+    /// Nothing to resign or activate.
+    mutating func rebase(to index: Int) {
+        pageIndex = index
+    }
+
     /// The surface appeared or went away (tab switch, or app background/
     /// foreground — the view controller ANDs those two facts before calling).
     mutating func setVisible(_ visible: Bool) -> Transition {

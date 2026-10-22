@@ -44,24 +44,92 @@ final class SnapSideListAutoplay {
         playback.playbackScopeTag = "side-list"
     }
 
-    /// The post on show's tile plays first (#1547, the owner: the card,
-    /// then its tile, then the rest the pool allows): a claim on the
-    /// budget whatever its place in the list.
-    func focus(_ id: PostID?) {
-        focusedPost = id
-        if isActive { playback.focus(id) }
+    /// ⚠️ THE POST ON SHOW'S TILE IS A CLONE OF THE CARD (#1581, the owner
+    /// 2026-10-22): no player of its own — a second, passive surface on the
+    /// card's player (`attachSurface(_:alongsideSurface:)`, resolved by the
+    /// card's own surface, never by URL). One player, two pictures: the same
+    /// frame, a pause, a scrub, the loop, everything at once. It holds no
+    /// pool loan and sets no bit-rate cap — joining through `play()` did,
+    /// and re-capped the card (#1547).
+    func mirror(_ id: PostID?) {
+        guard mirroredPost != id else { return }
+        unmirror()
+        mirroredPost = id
     }
 
-    /// The post on show, claimed while the list is open.
-    private var focusedPost: PostID?
+    /// The card's surface for `id`, asked of the screen (nil: not a single
+    /// clip, or no page yet).
+    var cardSurface: ((PostID) -> VideoRenderView?)?
+
+    /// The post whose tile mirrors the card, while the list is open.
+    private(set) var mirroredPost: PostID?
+    /// The tile's surface bound to the card's player now.
+    private weak var mirrorSurface: VideoRenderView?
+    private var mirrorRetry: DispatchWorkItem?
+
+    /// The tile's surface comes off the card's player.
+    private func unmirror() {
+        mirrorRetry?.cancel()
+        mirrorRetry = nil
+        if let surface = mirrorSurface { pool.detachSurface(surface, reason: "side-list mirror") }
+        mirrorSurface = nil
+    }
+
+    /// Binds the mirrored tile's surface to the card's player — again a
+    /// moment later while the card has none yet (its page is activating).
+    private func attachMirror(_ items: [Item]) {
+        guard isActive, let id = mirroredPost, let item = items.first(where: { $0.post.id == id }),
+              item.post.kind == .video else { return }
+        let surface = item.cell.makeVideoRenderViewIfNeeded()
+        guard mirrorSurface !== surface || !pool.hasPlayer(in: surface) else { return }
+        // Already drawing the card's player — the tile's own one, handed to
+        // the card (`handOver`): nothing to bind, nothing to flash.
+        if let card = cardSurface?(id), !pool.hasPlayer(in: surface), pool.sharesPlayback(surface, with: card) {
+            mirrorSurface = surface
+            mirrorRetry?.cancel()
+            mirrorRetry = nil
+            return
+        }
+        if let old = mirrorSurface, old !== surface { pool.detachSurface(old, reason: "side-list mirror") }
+        if let card = cardSurface?(id), pool.attachSurface(surface, alongsideSurface: card) {
+            mirrorSurface = surface
+            // Shown once it draws, the cover until then (the grids' reveal).
+            surface.revealOnFirstFrame()
+            mirrorRetry?.cancel()
+            mirrorRetry = nil
+            return
+        }
+        guard mirrorRetry == nil else { return }
+        let retry = DispatchWorkItem { [weak self] in
+            self?.mirrorRetry = nil
+            self?.attachMirror(self?.lastItems ?? [])
+        }
+        mirrorRetry = retry
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: retry)
+    }
+
+    #if DEBUG
+    /// Whether the mirrored tile draws the card's playback now. Tests.
+    var mirrorsCard: Bool {
+        guard let mirrorSurface, let id = mirroredPost, let card = cardSurface?(id) else { return false }
+        return !pool.hasPlayer(in: mirrorSurface) && pool.sharesPlayback(mirrorSurface, with: card)
+    }
+
+    /// Whether the mirror stands at the card's playhead. Tests.
+    func mirrorPlayheadMatchesCard(_ card: VideoRenderView) -> Bool {
+        guard let mirrorSurface else { return false }
+        return pool.sharesPlayback(mirrorSurface, with: card)
+    }
+    #endif
+
+    /// The tiles last reconciled, for a retry.
+    private var lastItems: [Item] = []
 
     /// Open (the tiles may play) or closed (every tile gives its player back
-    /// now).
+    /// now, and the mirror comes off the card).
     func setActive(_ active: Bool) {
         isActive = active
-        // ⚠️ THE CLAIM ONLY WHILE OPEN: a focused post is never stopped, so a
-        // claim kept past the close would leave its tile playing unseen.
-        playback.focus(active ? focusedPost : nil)
+        if !active { unmirror() }
         playback.setSurfaceVisible(active)
     }
 
@@ -71,8 +139,11 @@ final class SnapSideListAutoplay {
     func reconcile(_ items: [Item], in collectionView: UICollectionView) {
         let viewport = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
         var seen = Set<PostID>()
+        lastItems = items
         let tiles = items.compactMap { item -> GridAutoplayRanking.Tile? in
-            guard item.post.kind == .video, let url = item.post.videoURL,
+            // The mirrored tile plays nothing of its own (#1581).
+            guard item.post.id != mirroredPost || !isActive,
+                  item.post.kind == .video, let url = item.post.videoURL,
                   hasCover(item), seen.insert(item.post.id).inserted
             else { return nil }
             return .init(
@@ -88,6 +159,7 @@ final class SnapSideListAutoplay {
         )
         let candidates = GridAutoplayRanking.candidates(from: tiles, in: viewport, reference: .verticalCentre)
         playback.update(candidates: candidates)
+        attachMirror(items)
     }
 
     /// The players bound to anything but this list's tiles — the card first.
@@ -99,9 +171,26 @@ final class SnapSideListAutoplay {
         return max(0, pool.activePlayerCount - own)
     }
 
+    /// Hands `id`'s tile's own player over to whoever adopts its surface
+    /// next (#1581: the page picked from the list), and returns that surface.
+    func handOver(_ id: PostID) -> VideoRenderView? {
+        playback.relinquish(id)
+    }
+
+    /// Where a tile's own clip is, in seconds.
+    func playheadSeconds(in surface: VideoRenderView) -> Double? {
+        pool.hasPlayer(in: surface) ? pool.playheadSeconds(in: surface) : nil
+    }
+
     /// A tile left the screen: its player goes back now.
     func stop(_ cell: UICollectionViewCell) {
         guard let tile = cell as? any GridPlaybackCell else { return }
+        // The mirror's surface is the card's playback: detached, never
+        // stopped (#1581).
+        if let surface = tile.loadedVideoRenderView, surface === mirrorSurface {
+            unmirror()
+            return
+        }
         playback.stop(cell: tile)
     }
 

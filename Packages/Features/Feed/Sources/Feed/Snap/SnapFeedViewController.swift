@@ -1,3 +1,4 @@
+import CoreImage
 import CoreStorage
 import MediaCore
 import CoreModels
@@ -198,6 +199,15 @@ final class SnapFeedViewController: UIViewController {
     private(set) var orderedIDs: [PostID] = []
 
     private var lifecycle = SnapLifecycleDispatcher()
+    /// The post the active page shows — what a reorder must not re-activate
+    /// (#1580, `updateActiveItem`).
+    private var lifecycleActiveID: PostID?
+    /// The items are being swapped under the post on show (`render`): the
+    /// pager's index means nothing until it is re-placed on that post.
+    private var isReplacingItems = false
+    /// The post on show and the surface its clip drew on as the items were
+    /// swapped — for the page that shows it next to adopt (#1580).
+    private var reorderHeld: (id: PostID, surface: VideoRenderView?)?
     /// The clip time a presenting flight's picture showed, for the entry page
     /// (#625) — see `zoomTransitionWillStartMedia(at:)`. A nil post is the
     /// entry page of a feed that had no posts yet when the flight took off.
@@ -429,6 +439,8 @@ final class SnapFeedViewController: UIViewController {
     private(set) var sideList: SnapSideListController?
     /// The screen's horizontal swipe chain (#1525) — see `swipeStage`.
     private(set) var swipeArbiter: SwipeStageArbiter?
+    /// A pull past either end of the side list closes it (#1580).
+    private(set) var sideListEdgePull: SnapSideListEdgePull?
     /// How far the pages' overlays sit down while the side list is open
     /// (#1509): the band the bottom toolbar covers, in the page's space.
     var sideListOverlayOffset: CGFloat = 0
@@ -439,6 +451,20 @@ final class SnapFeedViewController: UIViewController {
     /// The post on show's clip, paused from its side-list tile (#1550);
     /// nil when none.
     var sideListPausedPost: PostID?
+    /// The paused clip whose stopped mark the side list's move is carrying
+    /// between the card and its tile (#1580); nil when no move carries one.
+    var sideListMarkCarry: PostID?
+    #if DEBUG
+    /// Every post activated, in order. Tests.
+    var debugActivations: [PostID] = []
+    #endif
+    /// ⚠️ THE LIST IS THE SOURCE'S, NOT THE POST ON SHOW'S (#1580, the
+    /// owner 2026-10-22): closed on a post picked in it, the list it was
+    /// picked from — the source post's "similar" posts — stays the one a
+    /// reopening shows, the card on that post, until the feed is taken up
+    /// again (a page change after the close). Nil: the next opening makes
+    /// the post on show's list.
+    private(set) var sideListResume: (anchor: PostID, shown: PostID)?
     /// Whether this screen installs the side list — every vertical feed does
     /// (#1473); a test sets its own before the view loads.
     var installsSideList = true
@@ -583,6 +609,9 @@ final class SnapFeedViewController: UIViewController {
             let arbiter = SwipeStageArbiter(host: self)
             arbiter.install(in: view)
             swipeArbiter = arbiter
+            let edgePull = SnapSideListEdgePull(host: self)
+            edgePull.install(in: view, pager: collectionView)
+            sideListEdgePull = edgePull
         }
         configureNavigationItem()
         configureToolbarItems()
@@ -1381,6 +1410,14 @@ final class SnapFeedViewController: UIViewController {
         settleToolbarAfterDisappearance()
         isOnScreen = false
         refreshVisibility()
+        // ⚠️ DISMISSED, THE LIST CLOSES (#1580, the owner's recording): this
+        // screen is kept for the next post opened from the same surface, and
+        // a list left open came back open over it. Closed here, unseen, with
+        // its session ended and the kept list forgotten — a new post, a new
+        // list.
+        if isMovingFromParent || isBeingDismissed || navigationController == nil {
+            closeSideListForDismissal()
+        }
         // ⚠️ HERE, NOT IN `viewWillDisappear`. A cancelled drag-back fires that
         // one, and on a cold open a grab is possible for the whole wait — so
         // tearing down there would strip the skeletons and leave the viewer
@@ -2650,6 +2687,10 @@ final class SnapFeedViewController: UIViewController {
 
     private func render(_ state: FeedViewModel.RenderState) {
         let previousModels = modelsByID
+        // The post on show, to keep on show through a reorder (#1580) — the
+        // ACTIVE post by identity: read off an index, a render nested in
+        // another's layout named whichever post the old items had there.
+        let held = lifecycle.activeIndex != nil ? lifecycleActiveID : nil
         // The viewer's "not interested" applies HERE, one render late by
         // design: the post they were on when they asked stays until they leave
         // it, and never comes back.
@@ -2697,6 +2738,16 @@ final class SnapFeedViewController: UIViewController {
         snapshot.appendItems(orderedIDs)
         // Same identity, new content — the one thing appendItems cannot say.
         if !changed.isEmpty { snapshot.reconfigureItems(changed) }
+        // A reorder under the post on show (#1580): no page is activated
+        // from the pager's index until it is back on that post.
+        let reorders = held.map { id in orderedIDs.contains(id) && orderedIDs.firstIndex(of: id) != lifecycle.pageIndex } ?? false
+        if reorders, let held {
+            // No page reads the pager's index, and the post on show's page
+            // keeps its clip for the next one to adopt, until the pager is
+            // back on that post (`handOverReorderedPlayback`).
+            isReplacingItems = true
+            reorderHeld = (held, settledSnapCell?.liveVideoSurface)
+        }
         dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
             guard let self else { return }
             // ⚠️ HERE, not only at a settle. This is what takes a LENT ground
@@ -2705,6 +2756,8 @@ final class SnapFeedViewController: UIViewController {
             // to black without waiting for a settle that may be a frame away.
             applyGrounds()
             finishLoadingPageHandover()
+            // ⚠️ NOT `keepOnShow(held)` here: this completion can run late,
+            // after a later render, and a post captured then is stale (#1580).
             updateActiveItem()
             // ⚠️ **The bars are not in the cell**, and `updateActiveItem` only
             // speaks when the active INDEX moves.
@@ -2724,6 +2777,14 @@ final class SnapFeedViewController: UIViewController {
                changed.contains(orderedIDs[active]) {
                 updateBarChrome(at: active)
             }
+        }
+        // The new items are in (the apply is synchronous here): the pager
+        // back on the post on show, then the settle it was held from.
+        if reorders {
+            isReplacingItems = false
+            keepOnShow(held)
+            handOverReorderedPlayback()
+            updateActiveItem()
         }
 
         // A hero flight in progress whose post hydrated just now (cold tap):
@@ -4479,6 +4540,7 @@ final class SnapFeedViewController: UIViewController {
             applyImagePlan(pending)
         }
         apply(lifecycle.setVisible(isOnScreen && isForeground))
+        lifecycleActiveID = lifecycle.activeIndex.flatMap { orderedIDs.indices.contains($0) ? orderedIDs[$0] : nil }
         refreshAudibleSurface()
         setCoverSpinWatch(isOnScreen && isForeground)
     }
@@ -4515,12 +4577,22 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func updateActiveItem() {
+        guard !isReplacingItems else { return }
         let index = SnapActiveItemTracker.activeIndex(
             contentOffsetY: collectionView.contentOffset.y,
             pageHeight: collectionView.bounds.height,
             itemCount: orderedIDs.count
         )
-        apply(lifecycle.setPageIndex(index))
+        // The same post at a new index — the items reordered under it (the
+        // side list opening or closing, #1580): re-placed, never resigned
+        // and re-activated, which restarted its clip or its song.
+        if let index, lifecycle.activeIndex != nil, index != lifecycle.pageIndex,
+           let held = lifecycleActiveID, orderedIDs.indices.contains(index), orderedIDs[index] == held {
+            lifecycle.rebase(to: index)
+        } else {
+            apply(lifecycle.setPageIndex(index))
+        }
+        lifecycleActiveID = lifecycle.activeIndex.flatMap { orderedIDs.indices.contains($0) ? orderedIDs[$0] : nil }
         // The settled page owns the screen by definition, so the two agree
         // here — and a settle that arrives without any scroll callback (a
         // programmatic jump, a landing) is the only way the picture would
@@ -4631,6 +4703,9 @@ final class SnapFeedViewController: UIViewController {
                 if isAwaitingZoomPresentation { snapCell.setChromeHeldForFlight(true) }
             }
             lifecycleCell(at: activate)?.willBecomeActive()
+            #if DEBUG
+            if orderedIDs.indices.contains(activate) { debugActivations.append(orderedIDs[activate]) }
+            #endif
             // The pages either side get ready NOW, at the settle, rather than
             // when UIKit's scroll heuristic happens to ask — see
             // `warmSettledWindow`.
@@ -5761,7 +5836,15 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // and this guarantees the resign even if it's recycled before a settle.
         // Fully off screen: the loan goes back, because the grid behind is
         // waiting for it and nothing here is going to draw again.
-        (cell as? SnapCellLifecycle)?.didResignActive(releasingPlayback: true)
+        // ⚠️ EXCEPT the post on show's page recycled by the items' swap
+        // (#1580): its clip goes on, for the page that shows the post next to
+        // adopt (`handOverReorderedPlayback`).
+        if isReplacingItems, let snapCell = cell as? SnapFeedCell, let held = reorderHeld,
+           snapCell.representedPostID == held.id {
+            snapCell.resignKeepingPlayback()
+        } else {
+            (cell as? SnapCellLifecycle)?.didResignActive(releasingPlayback: true)
+        }
         // The resign above no-ops for a cell that was displayed but never
         // became active (a swiped-past page); its ticker must still stop.
         (cell as? SnapFeedCell)?.setTickerStreaming(false)
@@ -5798,6 +5881,10 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // still of the post that opened; the viewer is now moving the pages
         // under it, so it goes, and adopts nothing (`ZoomLandingLeftovers`).
         if scrollView === collectionView { ZoomLandingLeftovers.clear(over: view) }
+        // The feed taken up again after a close: the next opening is the
+        // post on show's own list (#1580). The viewer's drag, never a settle
+        // — the close's own re-settle passes through other posts.
+        if scrollView === collectionView, !viewModel.isInSideListSession { sideListResume = nil }
         // Unreachable while engaged (the pager is disabled — the total
         // dead-end doctrine; the swipe exit is bar-owned and pages
         // programmatically). Kept as belt and braces: if any future path
@@ -5829,14 +5916,6 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     ) {
         let page = scrollView.bounds.height
         guard page > 0 else { return }
-        if sideListShouldCloseAtEnd(velocity: velocity, in: scrollView) {
-            // The feed comes back on the post after the anchor, under the
-            // finger's release, and the list slides away.
-            endSideListSession(atEnd: true)
-            targetContentOffset.pointee.y = collectionView.contentOffset.y
-            sideList?.settle(open: false)
-            return
-        }
         let ceiling = CGFloat(reachableCeiling()) * page
         if targetContentOffset.pointee.y > ceiling {
             targetContentOffset.pointee.y = ceiling
@@ -5855,6 +5934,11 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         // caller of the seam that owns everything else — which is exactly what
         // `updateViewportPlayback` is: it moves the picture and touches
         // nothing else on the screen.
+        // The items are being swapped under the post on show (#1580):
+        // nothing reads the visible cells now — asking forces a layout of the
+        // OLD items at the NEW offset, which takes the post's cell off screen
+        // and recycles it, its player with it.
+        guard !isReplacingItems else { return }
         updateViewportPlayback()
         updatePagingFooter(for: scrollView)
         // The card's crop is in the pager's own space, which its scroll moves.
@@ -7076,7 +7160,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
                 }
             }
         }
-        if view.bounds.maxX - origin.x <= PagedScreenDismissalPolicy.edgeZone { return true }
+        if view.bounds.maxX - origin.x <= PagedScreenDismissalPolicy.trailingEdgeZone { return true }
         return MediaCarouselTouchRouting.dragPassesThroughCarousel(
             at: point, in: collectionView, towardsPageDelta: 1
         )
@@ -7166,14 +7250,102 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// feed set aside untouched, the pager on the post on show, the list's
     /// first item.
     func beginSideListSessionIfNeeded() {
-        guard let sideList, sideList.isOpen, !viewModel.isInSideListSession,
-              let anchor = activePostID, sideList.listView.entries.first?.post.id == anchor else { return }
+        guard let sideList, sideList.isOpen, !viewModel.isInSideListSession, let shown = activePostID else { return }
         let entries = sideList.listView.entries
+        // Reopened on a post picked in the last list: that list again, the
+        // card on the post at its place in it (#1580).
+        let resumed = sideListResume.flatMap { resume in
+            resume.shown == shown && entries.first?.post.id == resume.anchor
+                && entries.contains(where: { $0.post.id == shown }) ? resume.anchor : nil
+        }
+        guard let anchor = resumed ?? (entries.first?.post.id == shown ? shown : nil) else { return }
         Task { [weak self] in
             guard let self, await viewModel.beginSideListSession(anchor: anchor, entries: entries) else { return }
             sideListAnchor = anchor
-            settlePager(onIndex: 0)
+            settlePager(onIndex: orderedIDs.firstIndex(of: shown) ?? 0)
         }
+    }
+
+    /// One context for every still: making one per call is costly.
+    private static let stillContext = CIContext(options: [.useSoftwareRenderer: false])
+
+    /// The frame `surface` is drawing now, as an image (#1581).
+    private static func stillImage(of surface: VideoRenderView) -> UIImage? {
+        guard let buffer = surface.currentFrameBuffer else { return nil }
+        let image = CIImage(cvPixelBuffer: buffer)
+        guard let cg = stillContext.createCGImage(image, from: image.extent) else {
+            return nil
+        }
+        return UIImage(cgImage: cg)
+    }
+
+    /// The surface `id`'s page draws its clip on, while that page is the
+    /// post on show (#1581: the side list's tile mirrors it).
+    func liveVideoSurface(for id: PostID) -> VideoRenderView? {
+        guard activePostID == id else { return nil }
+        return settledSnapCell?.liveVideoSurface
+    }
+
+    /// The list closed, unseen, as the screen leaves (`viewDidDisappear`).
+    func closeSideListForDismissal() {
+        if let sideList, sideList.isEngaged || sideList.isOpen {
+            sideList.settle(open: false, animated: false)
+        }
+        sideListResume = nil
+    }
+
+    /// The source post whose list a reopening keeps, while it holds
+    /// (`sideListResume`).
+    var sideListResumeAnchor: PostID? {
+        guard let resume = sideListResume, resume.shown == activePostID else { return nil }
+        return resume.anchor
+    }
+
+    /// ⚠️ THE POST ON SHOW STAYS ON SHOW THROUGH A REORDER (#1580, the
+    /// owner's device check): the side list opening or closing swaps the
+    /// pager's items, and the post on show changes INDEX — unless it is the
+    /// list's source, at 0 both ways. Read by index, the screen briefly sat
+    /// on whichever post took the old index, resigned the post on show and
+    /// re-activated it a moment later: its clip or its song jumped, every
+    /// time but on the source post. The pager follows the post instead, and
+    /// the activation, which never changed post, is not replayed.
+    private func keepOnShow(_ held: PostID?) {
+        guard let held, let index = orderedIDs.firstIndex(of: held), index != lifecycle.pageIndex else { return }
+        let page = collectionView.bounds.height
+        guard page > 0 else { return }
+        UIView.performWithoutAnimation {
+            collectionView.setContentOffset(CGPoint(x: 0, y: CGFloat(index) * page), animated: false)
+            collectionView.layoutIfNeeded()
+        }
+        lifecycle.rebase(to: index)
+    }
+
+    /// ⚠️ THE POST ON SHOW KEEPS ITS PLAYER THROUGH THE ITEMS' SWAP (#1580,
+    /// measured with `-carousel-audit` and a stop's stack): opening and
+    /// closing the side list swap the pager's items, and UIKit's update lays
+    /// the OLD items out at the NEW offset — the post's cell leaves the
+    /// screen for a moment and is recycled. Its player used to go with it,
+    /// and the page showing the post again started a fresh one from the last
+    /// filed second: the jump the owner saw at every open and close. Now the
+    /// departing page keeps its clip (`resignKeepingPlayback`) and the
+    /// arriving one takes the same player over — bound alongside, then
+    /// adopted — so the clip never stops.
+    private func handOverReorderedPlayback() {
+        defer { reorderHeld = nil }
+        guard let held = reorderHeld, activePostID == held.id, let cell = settledSnapCell else { return }
+        if let old = held.surface, let surface = cell.liveVideoSurface, surface !== old,
+           let videoPlayback, videoPlayback.hasPlayer(in: old) {
+            if videoPlayback.attachSurface(surface, alongsideSurface: old),
+               videoPlayback.adoptSurface(surface, replacing: old) {
+                videoPlayback.detachSurface(old, reason: "reorder handover")
+                surface.revealOnFirstFrame()
+            } else {
+                // Refused: the departing page kept its clip for nobody —
+                // returned now, and the arriving page starts its own.
+                videoPlayback.stop(old)
+            }
+        }
+        if !cell.isLifecycleActive { cell.willBecomeActive() }
     }
 
     /// The pager on page `index`, at once, and the page made active.
@@ -7187,15 +7359,15 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         updateActiveItem()
     }
 
-    /// The list closed (#1509): the feed comes back as it was. Closed
-    /// mid-list, the post on show STAYS full screen — placed right after the
-    /// anchor, so a swipe up continues the feed from there. `atEnd`: the
-    /// list ran out, and the feed continues at the post after the anchor.
-    private func endSideListSession(atEnd: Bool) {
+    /// The list closed (#1509): the feed comes back as it was. The post on
+    /// show STAYS full screen — placed right after the anchor, so a swipe up
+    /// continues the feed from there — however the list closed: rightward,
+    /// or pulled past either end (#1580).
+    private func endSideListSession() {
         guard viewModel.isInSideListSession, let anchor = sideListAnchor else { return }
         sideListAnchor = nil
-        let shown = atEnd ? nil : activePostID
-        guard let index = viewModel.endSideListSession(anchor: anchor, keeping: shown) else { return }
+        sideListResume = activePostID.map { (anchor, $0) }
+        guard let index = viewModel.endSideListSession(anchor: anchor, keeping: activePostID) else { return }
         settlePager(onIndex: index)
     }
 
@@ -7236,7 +7408,37 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         }
         guard viewModel.isInSideListSession,
               let index = orderedIDs.firstIndex(of: entry.post.id) else { return }
+        // ⚠️ THE CARD TAKES THE TILE'S OWN PLAYER (#1581, the owner's
+        // recording): started fresh, even at the tile's second, the card and
+        // the tile both showed the post's cover until a first frame — the
+        // flash on every pick. The tile's player is handed over instead, on
+        // the frame it is showing: the card draws it at once (bound
+        // alongside, then adopted, filed under the post's own scope, its cap
+        // raised to a page's), and the tile goes on drawing it as the
+        // card's mirror. A tile with no player of its own falls back to a
+        // start at its second.
+        let id = entry.post.id
+        let handoff = sideList?.listView.tilePlayhead(for: id)
+        let tileSurface = sideList?.listView.autoplay?.handOver(id)
+        if tileSurface == nil, let handoff {
+            videoPlayback?.prepareStart(of: handoff.url, scope: id.rawValue, at: handoff.seconds)
+        }
         settlePager(onIndex: index)
+        guard let videoPlayback, let card = liveVideoSurface(for: id) else { return }
+        // The frame the tile is showing, as the card's poster until its own
+        // layer draws (a frame or so): never the post's cover.
+        if let tileSurface, let still = Self.stillImage(of: tileSurface) { card.setPoster(still) }
+        if let tileSurface, card !== tileSurface,
+           videoPlayback.attachSurface(card, alongsideSurface: tileSurface),
+           videoPlayback.adoptSurface(card, replacing: tileSurface) {
+            videoPlayback.rescope(card, to: id.rawValue)
+            videoPlayback.setPeakBitRate(MediaPlaybackPolicy.peakBitRate, in: card)
+            card.revealOnFirstFrame()
+            refreshAudibleSurface()
+            sideList?.listView.reconcileNow()
+        } else if let handoff, videoPlayback.hasPlayer(in: card) {
+            videoPlayback.seek(toSeconds: handoff.seconds, in: card, toleranceSeconds: 0)
+        }
     }
 
     /// Toggles the post on show's clip from the list: the stopped mark on
@@ -7248,10 +7450,44 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         sideList?.listView.setPausedMark(paused, on: id)
     }
 
+    /// ⚠️ THE MARK CROSSES WITH THE MOVE (#1580, the owner 2026-10-22): a
+    /// paused clip's stopped mark leaves the card for its tile as the list
+    /// opens — 1 − progress on the card, progress on the tile — under the
+    /// finger and on the spring, both ways, rather than jumping at the end.
+    /// `handOverPausedMark` settles who keeps it.
+    func sideListPoseDidChange(progress: CGFloat) {
+        guard let id = activePostID, let cell = settledSnapCell, let list = sideList?.listView else { return }
+        if sideListMarkCarry != id {
+            // Nothing paused, nothing to carry.
+            guard cell.showsPausedMark || sideListPausedPost == id else { return }
+            sideListMarkCarry = id
+            cell.setPausedMarkVisible(true, animated: false)
+            list.setPausedMark(true, on: id, animated: false)
+        }
+        cell.setPausedMarkShare(1 - progress)
+        list.setPausedMarkShare(progress)
+    }
+
     /// The stopped mark moves between the card and the tile as the list
     /// opens and closes (#1550); paging to another post takes it down.
     private func handOverPausedMark(listOpen: Bool) {
-        guard let id = activePostID, let cell = activeSnapCell else { return }
+        guard let id = activePostID, let cell = settledSnapCell else { return }
+        // A move carried it: the side it ended on keeps it, whole, the
+        // other lets it go unseen — it is at 0 already.
+        if sideListMarkCarry == id {
+            sideListMarkCarry = nil
+            if listOpen {
+                cell.setPausedMarkVisible(false, animated: false)
+                sideListPausedPost = id
+                sideList?.listView.setPausedMarkShare(1)
+            } else {
+                cell.setPausedMarkShare(1)
+                sideListPausedPost = nil
+                sideList?.listView.setPausedMark(false, on: nil, animated: false)
+            }
+            return
+        }
+        sideListMarkCarry = nil
         if listOpen {
             if cell.showsPausedMark {
                 cell.setPausedMarkVisible(false)
@@ -7265,16 +7501,32 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         }
     }
 
-    /// ⚠️ PAST THE LIST'S LAST TILE (#1509): a swipe up closes the list with
-    /// the rightward slide and lands on the feed's post after the anchor.
-    private func sideListShouldCloseAtEnd(velocity: CGPoint, in scrollView: UIScrollView) -> Bool {
-        // The page settled under the finger — `activePostID`'s answer.
-        let active = settledPageIndex
-        guard viewModel.isInSideListSession, let sideList, sideList.isOpen,
-              !orderedIDs.isEmpty, active == orderedIDs.count - 1 else { return false }
-        let page = scrollView.bounds.height
-        let overshoot = scrollView.contentOffset.y - CGFloat(active) * page
-        return velocity.y > 0.3 || overshoot > page * 0.12
+    /// The settled page's cell — the post on show's, whether or not its
+    /// activation has run (the side list's marks ask it at rest).
+    private var settledSnapCell: SnapFeedCell? {
+        collectionView.cellForItem(at: IndexPath(item: settledPageIndex, section: 0)) as? SnapFeedCell
+    }
+
+    #if DEBUG
+    /// The settled page's cell. Tests.
+    var debugSettledSnapCell: SnapFeedCell? { settledSnapCell }
+    #endif
+
+    /// The pulls that close the side list now (#1580): with the list open
+    /// and still, down on its first post, up on its last — where the card
+    /// sits at that end of the pager, with nothing beyond it.
+    var sideListEdgePulls: SnapSideListEdgePull.Directions {
+        guard let sideList, sideList.isOpen, !sideList.isSettling, viewModel.isInSideListSession,
+              let pager = collectionView, !orderedIDs.isEmpty else { return [] }
+        let page = pager.bounds.height
+        guard page > 0 else { return [] }
+        let index = settledPageIndex
+        // At rest on its page, not mid-scroll.
+        guard abs(pager.contentOffset.y - CGFloat(index) * page) < 0.5 else { return [] }
+        var pulls: SnapSideListEdgePull.Directions = []
+        if index == 0 { pulls.insert(.down) }
+        if index == orderedIDs.count - 1 { pulls.insert(.up) }
+        return pulls
     }
 
     /// What the bars cover, for the side list's card to fit between them
@@ -7313,7 +7565,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         if open {
             beginSideListSessionIfNeeded()
         } else {
-            endSideListSession(atEnd: false)
+            endSideListSession()
         }
         sideList?.activePostDidChange(activePostID)
     }

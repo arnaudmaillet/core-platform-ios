@@ -94,9 +94,11 @@ struct HeroElectionTests {
         #expect(owner.debugSavedDelegate is ZoomTransitionController,
                 "it took the slot from the flight and saved nothing to give back")
         let pushed = try #require(stack.nav.viewControllers.last)
-        // The swipe chain (#1473, #1525: the side list, the author) is not a way home.
+        // The swipe chain (#1473, #1525: the side list, the author) and the
+        // list's edge pulls (#1580) are not a way home.
         let pans = pushed.view.gestureRecognizers?
-            .filter { $0 is UIPanGestureRecognizer && !($0.delegate is SwipeStageArbiter) } ?? []
+            .filter { $0 is UIPanGestureRecognizer && !($0.delegate is SwipeStageArbiter)
+                && !($0.delegate is SnapSideListEdgePull) } ?? []
         #expect(pans.count == 2,
                 "expected the flight and the card-shaped close, found \(pans.count)")
         let slides = pans.compactMap { $0.delegate as? InteractiveSlideDismissal }
@@ -129,9 +131,11 @@ struct HeroElectionTests {
         )
 
         let pushed = try #require(stack.nav.viewControllers.last)
-        // The swipe chain (#1473, #1525: the side list, the author) is not a way home.
+        // The swipe chain (#1473, #1525: the side list, the author) and the
+        // list's edge pulls (#1580) are not a way home.
         let pans = pushed.view.gestureRecognizers?
-            .filter { $0 is UIPanGestureRecognizer && !($0.delegate is SwipeStageArbiter) } ?? []
+            .filter { $0 is UIPanGestureRecognizer && !($0.delegate is SwipeStageArbiter)
+                && !($0.delegate is SnapSideListEdgePull) } ?? []
         #expect(pans.count == 1)
     }
 

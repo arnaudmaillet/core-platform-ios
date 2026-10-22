@@ -697,6 +697,23 @@ public final class GridVideoPlaybackCoordinator {
     /// the two.
     public func loanedCell(_ id: PostID) -> (any GridPlaybackCell)? { loans[id] }
 
+    /// Gives up `id`'s loan WITHOUT stopping its player, and returns the
+    /// surface drawing it — for another surface to take that very player
+    /// over (`VideoPlaybackController.adoptSurface`): a side-list tile's clip
+    /// becoming its post's page's (#1581), on the frame it was showing, with
+    /// no cover in between. Nil: `id` holds no playing loan.
+    public func relinquish(_ id: PostID) -> VideoRenderView? {
+        guard let cell = loans[id], let surface = cell.loadedVideoRenderView, pool.hasPlayer(in: surface) else {
+            return nil
+        }
+        cell.onReuse = nil
+        loans[id] = nil
+        playingURLs[id] = nil
+        uncappedIDs.remove(id)
+        startTasks.removeValue(forKey: id)?.cancel()
+        return surface
+    }
+
     public func isPlaying(_ id: PostID) -> Bool {
         guard let surface = loans[id]?.loadedVideoRenderView else { return false }
         return pool.hasPlayer(in: surface)
