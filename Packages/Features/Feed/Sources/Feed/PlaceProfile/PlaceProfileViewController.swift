@@ -70,9 +70,10 @@ final class PlaceProfileViewController: UIViewController {
     /// The page's tone over the picture's last few points, under the
     /// counters and the selector.
     private let bannerRamp = HeroBannerRampView()
-    /// The dark veil under the identity, only as dark as a bright ground
-    /// needs for its always-light type to clear AA (#1597).
-    private let identityScrim = IdentityScrimView()
+    // ⚠️ NO VEIL UNDER THE TYPE (the owner, 2026-10-22: "une sorte de fondu
+    // noir … il faut le retirer et garder seulement notre dégradé blur"). The
+    // dark band #1597 laid under the identity and the one #1617 first laid
+    // under the Popular title are gone: the banner's dim and blur alone.
     /// The place's IDENTITY ROW — the unlock sheet's own (`PlaceIdentityView`,
     /// DesignSystem): its round flag (a city's is its country's) with the rank
     /// in a bubble over it, the name and its subtitle (a country's continent,
@@ -1088,8 +1089,6 @@ final class PlaceProfileViewController: UIViewController {
         // with the type.
         bannerView.pin(to: bannerBox)
         bannerRamp.pin(to: bannerBox)
-        identityScrim.alpha = 0
-        bannerBox.addSubview(identityScrim)
         // A light black over the picture, under the ramp (#1372): picture →
         // dim → blur, the ink read through it (`HeroBannerPictureView.dim`).
         bannerView.dim = Self.bannerDim
@@ -1362,34 +1361,6 @@ final class PlaceProfileViewController: UIViewController {
     private var nameTone = HeroInk.defaultTone
     /// The header height the pages were last inset by (#1599).
     private var laidOutHeaderHeight: CGFloat = 0
-    /// The veil's opacity for a ground whose brightest pixel is `luminance`
-    /// (#1597): what brings it down to `scrimTarget`, where light type and
-    /// its light-grey captions clear AA; none over a dark enough ground.
-    static func scrimAlpha(brightestGround luminance: CGFloat) -> CGFloat {
-        guard luminance > scrimTarget else { return 0 }
-        return min(1 - scrimTarget / luminance, 0.95)
-    }
-
-    /// The darkest a ground may be left under the light type: white's AA
-    /// with its secondary (70 %) captions.
-    static let scrimTarget: CGFloat = 0.06
-
-    /// The veil's frame: the type's blocks, the full width, rising well above
-    /// them so its gradient starts out of sight of the name — and, under an
-    /// action row (#1598), running on past the row's foot so it fades out
-    /// there instead of ending in an edge across the row.
-    static func scrimFrame(around blocks: [CGRect], through floor: CGFloat? = nil, width: CGFloat) -> CGRect {
-        guard let first = blocks.first else { return .zero }
-        let union = blocks.dropFirst().reduce(first) { $0.union($1) }
-        let solidFoot = union.maxY + Spacing.lg
-        let bottom = floor.map { max($0, solidFoot) + scrimFadeOut } ?? solidFoot
-        return CGRect(x: 0, y: union.minY - scrimFadeIn, width: width, height: bottom - (union.minY - scrimFadeIn))
-    }
-
-    /// The veil's ramps: in above the name; out under the action row.
-    static let scrimFadeIn: CGFloat = 72
-    static let scrimFadeOut: CGFloat = 48
-
     /// Whether the page wears a banner (#1599): not when the place's most
     /// popular post is words.
     private(set) var showsBanner = true
@@ -1414,7 +1385,9 @@ final class PlaceProfileViewController: UIViewController {
     /// picks each one's ink. Runs when the picture is re-baked and when the
     /// type moves; a change of ink on screen cross-dissolves.
     private func updateHeroInk(force: Bool = false) {
+        // A new picture is a new ground under the Popular title too (#1617).
         HeroBannerCost.measure(.ink) { readHeroInk(force: force) }
+        updateListTitleInk()
     }
 
     private func readHeroInk(force: Bool) {
@@ -1434,20 +1407,11 @@ final class PlaceProfileViewController: UIViewController {
         #endif
         // ⚠️ ALWAYS LIGHT ON THE PICTURE (#1597, the owner 2026-10-22): white
         // and light grey, never black, whatever the banner — its dim and fade
-        // carry the contrast, not the ink. One per column all the same, the
-        // rank's coming and going with the rank.
+        // carry the contrast, not the ink, and no veil (the owner, 2026-10-22).
+        // One per column all the same, the rank's coming and going with the
+        // rank.
         let name = HeroInk.Tone.light
         let counters = blocks.dropFirst().map { _ in HeroInk.Tone.light }
-        // …and a bright ground gets a veil under the type, as dark as the
-        // brightest pixel behind it needs and no darker: nothing over a dark
-        // picture, more over a light one.
-        let brightest = blocks.compactMap { bannerView.groundPixels(behind: $0) }.joined()
-            .map { HeroInk.luminance(red: CGFloat($0.x), green: CGFloat($0.y), blue: CGFloat($0.z)) }
-            .max() ?? 0
-        let rowFoot = actionRow.isHidden ? nil : restingFrame(of: actionRow).maxY
-        identityScrim.frame = Self.scrimFrame(around: blocks, through: rowFoot, width: bannerBox.bounds.width)
-        identityScrim.setRamps(fadeIn: Self.scrimFadeIn, fadeOut: rowFoot == nil ? 0 : Self.scrimFadeOut)
-        identityScrim.alpha = Self.scrimAlpha(brightestGround: brightest)
         #if DEBUG
         HeroInk.debugTraceGround(nameGround, name: "place-name", picked: name)
         #endif
@@ -1503,6 +1467,33 @@ final class PlaceProfileViewController: UIViewController {
         bannerView.fade = fade
         bannerRamp.fade = fade
         updateHeroInk()
+    }
+
+    /// ⚠️ THE POPULAR TITLE STANDS ON THE PICTURE (#1617, the owner's option
+    /// A, 2026-10-22). The list starts inside the banner, so at rest its first
+    /// title sits on the dimmed, blurred picture, above where the page's tone
+    /// arrives — and in the page's ink it was black on a dark foot, barely
+    /// legible. On the picture it takes the identity's ink, light; once the
+    /// page's tone is under it (the banner faded out as the header docks, or
+    /// no banner at all) it is the page's again.
+    private func updateListTitleInk() {
+        guard shelf.header.window != nil else { return }
+        let title = restingFrame(of: shelf.header)
+        let ink = Self.listTitleInk(
+            showsBanner: showsBanner, bannerAlpha: bannerBox.alpha, titleFoot: title.maxY, fade: bannerRamp.fade
+        )
+        shelf.header.setInk(ink)
+    }
+
+    /// Light while the title's foot is above where the page's tone has
+    /// started to show (a quarter into the ramp) and the banner is mostly
+    /// there; the page's ink (nil) otherwise.
+    static func listTitleInk(
+        showsBanner: Bool, bannerAlpha: CGFloat, titleFoot: CGFloat, fade: HeroBannerFade.Geometry?
+    ) -> HeroInk.Tone? {
+        guard showsBanner, bannerAlpha >= 0.5, let fade else { return nil }
+        let pageArrives = fade.rampStart + 0.25 * (fade.rampEnd - fade.rampStart)
+        return titleFoot <= pageArrives ? .light : nil
     }
 
     /// How far a pull-down has stretched the box above its resting top:
@@ -1628,6 +1619,7 @@ final class PlaceProfileViewController: UIViewController {
         contentTopConstraint?.constant = contentTop
         bannerHeightConstraint?.constant = bannerHeight
         placeHeroFade()
+        updateListTitleInk()
         let header = headerHeight
         // ⚠️ A LIST AT REST AT ITS TOP STAYS THERE when the header changes
         // height under it (#1599): the banner going for a text-only place, a
@@ -1706,6 +1698,7 @@ final class PlaceProfileViewController: UIViewController {
         bannerBox.alpha = alpha
         identityView.alpha = alpha
         actionRow.alpha = alpha
+        updateListTitleInk()
     }
 
     /// The identity fade's ramp: opaque until the last stretch of travel,
@@ -1871,7 +1864,9 @@ final class PlaceProfileViewController: UIViewController {
         showsBanner = shows
         bannerView.isHidden = !shows
         bannerRamp.isHidden = !shows
-        identityScrim.isHidden = !shows
+        // No picture: the box is the page, not a card (the owner, 2026-10-22:
+        // a white block stood behind a text-only place's info).
+        bannerBox.backgroundColor = shows ? Surface.card : Surface.page
         if !shows {
             let pageInk: HeroInk.Tone = traitCollection.userInterfaceStyle == .dark ? .light : .dark
             nameTone = pageInk
@@ -2827,15 +2822,11 @@ extension PlaceProfileViewController {
     var debugHeaderConstant: CGFloat { headerTopConstraint?.constant ?? 0 }
     /// The dock line, as the coordinator computed it for this layout.
     var debugHeaderTravel: CGFloat { headerTravel }
-    /// The veil under the identity (#1597).
-    var debugIdentityScrimAlpha: CGFloat { identityScrim.isHidden ? 0 : identityScrim.alpha }
-    /// The veil's own opacity (its gradient, not its alpha) at a point of
-    /// the screen's height.
-    func debugIdentityScrimOpacity(atScreenY y: CGFloat) -> CGFloat {
-        let local = view.convert(CGPoint(x: 0, y: y), to: identityScrim).y
-        guard local >= 0, local <= identityScrim.bounds.height else { return 0 }
-        return identityScrim.debugOpacity(atY: local)
-    }
+    /// The Popular title's ink (#1617).
+    var debugListTitleInk: HeroInk.Tone? { shelf.header.ink }
+    /// The box behind the identity: a card under a picture, the page without.
+    var debugBannerBoxColor: UIColor? { bannerBox.backgroundColor }
+    var debugListTitleFrame: CGRect { shelf.header.convert(shelf.header.bounds, to: view) }
     /// The detents the list rests on (#1599).
     var debugSnapDetents: (all: [CGFloat], catching: [CGFloat]) {
         (activityPage.snapDetents, activityPage.catchDetents)
@@ -3150,57 +3141,4 @@ extension PlaceProfileViewController: ZoomTransitionDestination {
 private struct GrabFrozenScroller {
     weak var scroller: UIScrollView?
     let wasEnabled: Bool
-}
-
-/// A black veil that rises from clear (#1597): the gradient's top 45 % fades
-/// in, the rest holds — its opacity is the view's `alpha`.
-private final class IdentityScrimView: UIView {
-    override class var layerClass: AnyClass { CAGradientLayer.self }
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isUserInteractionEnabled = false
-        setRamps(fadeIn: 0, fadeOut: 0)
-    }
-
-    private var ramps: (fadeIn: CGFloat, fadeOut: CGFloat) = (0, 0)
-
-    /// Clear to black over `fadeIn` at the top, black to clear over
-    /// `fadeOut` at the foot (none: a hard foot), in points.
-    func setRamps(fadeIn: CGFloat, fadeOut: CGFloat) {
-        ramps = (fadeIn, fadeOut)
-        applyRamps()
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        applyRamps()
-    }
-
-    /// The ramps are in points, not fractions: the frame changes with the
-    /// type's size.
-    private func applyRamps() {
-        let height = max(bounds.height, 1)
-        let top = min(ramps.fadeIn / height, 1)
-        let foot = max(1 - ramps.fadeOut / height, top)
-        let clear = UIColor.black.withAlphaComponent(0).cgColor, black = UIColor.black.cgColor
-        let gradient = layer as? CAGradientLayer
-        gradient?.colors = [clear, black, black, ramps.fadeOut > 0 ? clear : black]
-        gradient?.locations = [0, top, foot, 1].map { NSNumber(value: Double($0)) }
-    }
-
-    #if DEBUG
-    /// The veil's opacity at `y`, in its own space: what the gradient draws.
-    func debugOpacity(atY y: CGFloat) -> CGFloat {
-        let height = max(bounds.height, 1)
-        let top = min(ramps.fadeIn / height, 1) * height
-        let foot = max(1 - ramps.fadeOut / height, top / height) * height
-        if y < top { return top > 0 ? y / top : 1 }
-        if y <= foot || ramps.fadeOut == 0 { return 1 }
-        return max(0, 1 - (y - foot) / (height - foot))
-    }
-    #endif
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }

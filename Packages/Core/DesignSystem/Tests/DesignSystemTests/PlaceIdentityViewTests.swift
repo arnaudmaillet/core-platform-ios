@@ -330,10 +330,11 @@ struct PlaceIdentityViewTests {
 
     nonisolated static let pageCategories: [UIContentSizeCategory] = [.large, .extraExtraExtraLarge]
 
-    /// The rank and the likes: one size, their middles on the flag's, at the
+    /// The rank and the likes: one size, their feet on the flag's — the
+    /// name and the counters span the flag (the owner, 2026-10-22) — at the
     /// default size and at the largest the app draws (XXXL, `TextSizeCeiling`).
     @Test(arguments: pageCategories)
-    func thePagesCountersAreOneSizeCentredOnTheFlag(category: UIContentSizeCategory) throws {
+    func thePagesCountersAreOneSizeOnTheFlagsFoot(category: UIContentSizeCategory) throws {
         let (view, window) = hostedPage(category: category)
         defer { window.isHidden = true }
         let rank = try #require(view.rankStat), likes = try #require(view.statViews.first)
@@ -342,8 +343,16 @@ struct PlaceIdentityViewTests {
         #expect(rank.captionLabel.font.pointSize == likes.captionLabel.font.pointSize, "the words differ")
         let flag = frame(of: view.flagView, in: view)
         let rankFrame = frame(of: rank, in: view), likesFrame = frame(of: likes, in: view)
-        #expect(abs(rankFrame.midY - flag.midY) < 1, "the rank is off the flag's middle: \(rankFrame) \(flag)")
-        #expect(abs(likesFrame.midY - flag.midY) < 1, "the likes are off the flag's middle: \(likesFrame) \(flag)")
+        #expect(abs(rankFrame.maxY - flag.maxY) < 1, "the rank's foot is off the flag's: \(rankFrame) \(flag)")
+        #expect(abs(likesFrame.maxY - flag.maxY) < 1, "the likes' foot is off the flag's: \(likesFrame) \(flag)")
+        let title = frame(of: view.titleLabel, in: view)
+        #expect(title.maxY <= rankFrame.minY, "the name runs into the counters")
+        if category == .large {
+            // At the default size the two fill the flag: the name's line on
+            // its top, and no more than a step of air between them.
+            #expect(abs(title.minY - flag.minY) < 1, "the name is off the flag's top: \(title) \(flag)")
+            #expect(rankFrame.minY - title.maxY <= Spacing.lg + 1, "a gap between the name and the counters")
+        }
         #expect(rankFrame.minX > flag.maxX && likesFrame.minX > rankFrame.maxX, "not flag · rank · likes")
         // Nothing cut, nothing off the column.
         for label in [rank.valueLabel, rank.captionLabel, likes.valueLabel, likes.captionLabel] {

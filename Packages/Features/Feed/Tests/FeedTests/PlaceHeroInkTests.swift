@@ -91,7 +91,13 @@ struct PlaceHeroInkTests {
     /// white wash away (2026-10-18), and with the blur nil under the name a
     /// 2px black/white stripe is both inks' worst ground. The mock banners
     /// are measured on the simulator (`-place-ink-audit`).
-    @Test(arguments: [Picture.white, .black, .grey, .lightGrey], [UIUserInterfaceStyle.light, .dark])
+    ///
+    /// ⚠️ NOT OVER A PURE WHITE ONE EITHER (the owner, 2026-10-22). The type
+    /// is always light, and #1597's black veil carried it over white; the
+    /// owner removed the veil ("garder seulement notre dégradé blur"),
+    /// accepting that white type over a white picture's dimmed foot reads
+    /// below AA.
+    @Test(arguments: [Picture.black, .grey, .lightGrey], [UIUserInterfaceStyle.light, .dark])
     func theTypeClearsAAOverAnyBanner(picture: Picture, style: UIUserInterfaceStyle) throws {
         let profile = place(picture, style: style)
         #expect(profile.debugHasBannerPicture)
@@ -135,46 +141,41 @@ struct PlaceHeroInkTests {
     }
 
     /// ⚠️ ALWAYS LIGHT (#1597, the owner 2026-10-22): white type over any
-    /// picture, whatever the appearance — a bright one gets a veil under the
-    /// type instead of black ink; a dark one none.
+    /// picture, whatever the appearance, and no veil under it (the owner,
+    /// 2026-10-22, removed #1597's black band): the banner's dim and blur.
     @Test(arguments: [UIUserInterfaceStyle.light, .dark])
-    func theTypeIsAlwaysLightAndABrightPictureGetsAVeil(style: UIUserInterfaceStyle) {
-        for (picture, veiled) in [(Picture.white, true), (.black, false)] {
+    func theTypeIsAlwaysLight(style: UIUserInterfaceStyle) {
+        for picture in [Picture.white, .black] {
             let profile = place(picture, style: style)
             #expect(profile.debugHeroInkTones.name == .light, "\(picture)")
             #expect(profile.debugHeroInkTones.likes == .light, "\(picture)")
             #expect(profile.debugHeroNameInk == HeroInk.Tone.light.primary, "\(picture)")
-            #expect((profile.debugIdentityScrimAlpha > 0.5) == veiled, "\(picture) veil \(profile.debugIdentityScrimAlpha)")
         }
     }
 
-    /// ⚠️ THE VEIL FADES OUT UNDER THE ACTION ROW (#1598): it ran a hard foot
-    /// just under the counters, an edge across the row's pills once the row
-    /// stood there (filmed on the SE). Solid under the type and the row, then
-    /// gone a ramp later.
-    @Test func theVeilFadesOutUnderTheActionRow() {
-        let identity = PlaceIdentity(
-            flag: nil, subtitle: "France",
-            dockPin: ClusterGalleryFollowing(isFollowing: { false }, toggle: { true })
-        )
-        let profile = place(.white, style: .light, identity: identity)
-        let row = profile.debugActionRowFrame
-        #expect(row.height > 0)
-        #expect(profile.debugIdentityScrimOpacity(atScreenY: profile.debugIdentityFrame.midY) == 1)
-        #expect(profile.debugIdentityScrimOpacity(atScreenY: row.midY) == 1, "the row's middle is not veiled")
-        let ramp = PlaceProfileViewController.scrimFadeOut
-        let halfway = profile.debugIdentityScrimOpacity(atScreenY: row.maxY + ramp / 2)
-        #expect(halfway > 0.2 && halfway < 0.8, "no ramp under the row: \(halfway)")
-        #expect(profile.debugIdentityScrimOpacity(atScreenY: row.maxY + ramp + 1) == 0)
+    /// ⚠️ THE POPULAR TITLE IS LIGHT ON THE BANNER (#1617, the owner's option
+    /// A): at rest it stands on the picture, above where the page's tone
+    /// arrives, in the identity's ink. No veil under it (the owner,
+    /// 2026-10-22): the banner's dim and blur alone.
+    @Test(arguments: [UIUserInterfaceStyle.light, .dark])
+    func thePopularTitleIsLightOnTheBanner(style: UIUserInterfaceStyle) {
+        for picture in [Picture.white, .black] {
+            let profile = place(picture, style: style)
+            #expect(profile.debugListTitleInk == .light, "\(picture): the Popular title kept the page's ink")
+        }
     }
 
-    /// The veil's rule: none over a dark enough ground, and as dark as a
-    /// bright one needs.
-    @Test func theVeilIsAsDarkAsTheGroundNeeds() {
-        #expect(PlaceProfileViewController.scrimAlpha(brightestGround: 0.03) == 0)
-        #expect(PlaceProfileViewController.scrimAlpha(brightestGround: 1) > 0.9)
-        #expect(PlaceProfileViewController.scrimAlpha(brightestGround: 0.5)
-                < PlaceProfileViewController.scrimAlpha(brightestGround: 0.9))
+    /// The rule: light only on a picture that is there, above where the
+    /// page's tone has started to show; the page's ink otherwise.
+    @Test func thePopularTitleTakesThePagesInkOnceThePageIsUnderIt() {
+        let fade = HeroBannerFade.Geometry(blurStart: 300, blurFull: 700, rampStart: 580, rampEnd: 700)
+        let ink = PlaceProfileViewController.listTitleInk
+        #expect(ink(true, 1, 500, fade) == .light)
+        #expect(ink(true, 1, 610, fade) == .light, "a quarter into the ramp is still the picture")
+        #expect(ink(true, 1, 620, fade) == nil, "on the page's tone")
+        #expect(ink(true, 0.3, 500, fade) == nil, "the banner faded out as the header docked")
+        #expect(ink(false, 1, 500, fade) == nil, "no banner (#1599)")
+        #expect(ink(true, 1, 500, nil) == nil, "no fade yet")
     }
 
     /// The ink is read through the dim: a light grey that takes black ink
