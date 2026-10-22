@@ -378,3 +378,53 @@ struct HorizontalScrollerRoutingTests {
         ))
     }
 }
+
+/// ⚠️ A SIDEWAYS SCROLLER ALREADY MOVING KEEPS THE DRAG (#1595): paged back
+/// and forth fast, a carousel read "no travel" at its first page mid-glide,
+/// and the place page's grab took the drag while the carousel went on.
+@MainActor
+struct CarouselMotionRoutingTests {
+    private final class MovingScroller: UIScrollView {
+        var fakeDragging = false
+        var fakeGliding = false
+        override var isDragging: Bool { fakeDragging }
+        override var isDecelerating: Bool { fakeGliding }
+    }
+
+    private func scroller(sideways: Bool) -> MovingScroller {
+        let view = MovingScroller(frame: CGRect(x: 0, y: 0, width: 300, height: 200))
+        view.contentSize = sideways ? CGSize(width: 900, height: 200) : CGSize(width: 300, height: 900)
+        return view
+    }
+
+    @Test func aSidewaysScrollerDraggedOrGlidingIsMoving() {
+        let view = scroller(sideways: true)
+        #expect(!MediaCarouselTouchRouting.isMovingSideways(view))
+        view.fakeDragging = true
+        #expect(MediaCarouselTouchRouting.isMovingSideways(view))
+        view.fakeDragging = false
+        view.fakeGliding = true
+        #expect(MediaCarouselTouchRouting.isMovingSideways(view))
+    }
+
+    /// A vertical list's own glide says nothing about a horizontal drag.
+    @Test func aVerticalListsGlideIsNotSidewaysMotion() {
+        let view = scroller(sideways: false)
+        view.fakeGliding = true
+        #expect(!MediaCarouselTouchRouting.isMovingSideways(view))
+    }
+
+    /// At its start — no travel back — a gliding sideways scroller still
+    /// keeps a rightward drag.
+    @Test func aGlidingScrollerAtItsStartKeepsTheDrag() {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 300, height: 200))
+        let view = scroller(sideways: true)
+        host.addSubview(view)
+        view.contentOffset = .zero
+        let point = CGPoint(x: 150, y: 100)
+        #expect(MediaCarouselTouchRouting.dragPassesThroughCarousel(at: point, in: host, towardsPageDelta: -1),
+                "guard: at rest at its start, the drag passes through")
+        view.fakeGliding = true
+        #expect(!MediaCarouselTouchRouting.dragPassesThroughCarousel(at: point, in: host, towardsPageDelta: -1))
+    }
+}

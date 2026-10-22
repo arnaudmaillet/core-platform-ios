@@ -181,6 +181,9 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// Deceleration is stopped as well as scrolling disabled: a carousel already
     /// gliding when the dismissal stages would otherwise coast through it and
     /// change the page under a flight that has already read which one it is.
+    /// Whether the pages are moving under a finger or gliding (#1595).
+    public var isMoving: Bool { scrollView.isDragging || scrollView.isDecelerating }
+
     public func setScrollEnabled(_ enabled: Bool) {
         guard scrollView.isScrollEnabled != enabled else { return }
         if !enabled, scrollView.isDecelerating || scrollView.isDragging {

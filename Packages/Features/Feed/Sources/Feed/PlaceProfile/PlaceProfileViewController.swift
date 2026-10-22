@@ -111,6 +111,9 @@ final class PlaceProfileViewController: UIViewController {
     /// The page under its hosted-header contract — one now, the header's
     /// coordinator kept page-agnostic.
     private var hostedPages: [any PlaceProfileHostedPage] = []
+    /// The horizontal scrollers a grab froze — the posts' carousels and the
+    /// Popular shelf — with what each was before, to put back (#1595).
+    private var grabFrozenScrollers: [GrabFrozenScroller] = []
     /// The page the header rides: the only one.
     private let activeIndex = 0
 
@@ -2805,7 +2808,61 @@ extension PlaceProfileViewController: ZoomTransitionDestination {
     /// RESTORED, not re-enabled: paging can be off for its own reasons (a
     /// multi-selection in progress), and a grab ending must hand back the
     /// state it found — the feed's `ScrollLock` rule.
+    ///
+    /// ⚠️ ONE DRAG, ONE OWNER (#1595, the owner 2026-10-22): there is no
+    /// pager, but there ARE horizontal scrollers under the finger — every
+    /// post's media carousel and the Popular shelf. A grab that began left
+    /// them live, so a drag the close had taken also paged a carousel, both
+    /// following the finger. The vertical feed freezes its carousels for
+    /// exactly this (`SnapFeedViewController.setContentScrollEnabled`); the
+    /// place page now does too, every horizontal scroller it holds.
     func setContentScrollEnabled(_ enabled: Bool) {
-        // One page, no horizontal pager left to hold still.
+        if enabled {
+            for entry in grabFrozenScrollers {
+                guard let scroller = entry.scroller else { continue }
+                if let carousel = scroller.superview as? MediaCarouselView {
+                    carousel.setScrollEnabled(entry.wasEnabled)
+                } else {
+                    scroller.isScrollEnabled = entry.wasEnabled
+                }
+            }
+            grabFrozenScrollers = []
+            return
+        }
+        // Re-entrant: a grab that reports its start twice must not record
+        // `false` as the state to restore.
+        guard grabFrozenScrollers.isEmpty else { return }
+        for scroller in Self.horizontalScrollers(in: view) {
+            grabFrozenScrollers.append(GrabFrozenScroller(scroller: scroller, wasEnabled: scroller.isScrollEnabled))
+            if let carousel = scroller.superview as? MediaCarouselView {
+                // Stops a glide too, so no page changes under the close.
+                carousel.setScrollEnabled(false)
+            } else {
+                scroller.setContentOffset(scroller.contentOffset, animated: false)
+                scroller.isScrollEnabled = false
+            }
+        }
     }
+
+    /// Every scroll view under `root` that scrolls SIDEWAYS — wider content
+    /// than bounds, no taller — so the page's own vertical list stays live.
+    static func horizontalScrollers(in root: UIView) -> [UIScrollView] {
+        var found: [UIScrollView] = []
+        var stack: [UIView] = [root]
+        while let view = stack.popLast() {
+            if let scroller = view as? UIScrollView, scroller !== root,
+               scroller.contentSize.width > scroller.bounds.width + 1,
+               scroller.contentSize.height <= scroller.bounds.height + 1 {
+                found.append(scroller)
+            }
+            stack.append(contentsOf: view.subviews)
+        }
+        return found
+    }
+}
+
+/// A scroller a place-page grab froze, and what to put back (#1595).
+private struct GrabFrozenScroller {
+    weak var scroller: UIScrollView?
+    let wasEnabled: Bool
 }
