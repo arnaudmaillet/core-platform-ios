@@ -35,6 +35,14 @@ public enum PlaceLink: Equatable, Sendable {
         return components.url
     }
 
+    /// Reads one of this app's place links back (`url`'s own form) — what a
+    /// store keeps a place by (#1598: the map's docked places). Nil for any
+    /// other link.
+    public init?(url: URL) {
+        guard case .place(let link)? = AppRoute(deepLink: url) else { return nil }
+        self = link
+    }
+
     /// Reads a link's path after `place` and its query: nil for anything
     /// malformed — a code that is not two letters, a coordinate out of range,
     /// a city with no name.

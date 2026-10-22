@@ -339,12 +339,19 @@ public struct PlaceIdentity {
     /// Which place the server lists the posts of (#643) — past the map's
     /// pins, page by page. Nil: the page shows the pins it was handed.
     public let query: PlaceQuery?
+    /// The place pinned to the map's dock (#1598): its state and its toggle,
+    /// bound by the map to its own store. Nil: the page offers no pin.
+    public let dockPin: ClusterGalleryFollowing?
 
-    public init(flag: UIImage?, subtitle: String?, shareURL: URL? = nil, query: PlaceQuery? = nil) {
+    public init(
+        flag: UIImage?, subtitle: String?, shareURL: URL? = nil, query: PlaceQuery? = nil,
+        dockPin: ClusterGalleryFollowing? = nil
+    ) {
         self.flag = flag
         self.subtitle = subtitle
         self.shareURL = shareURL
         self.query = query
+        self.dockPin = dockPin
     }
 }
 

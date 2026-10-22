@@ -301,11 +301,24 @@ extension MapsFeatureBuilder {
         of place: MapPlace, countryCode: String, centre: CLLocationCoordinate2D? = nil
     ) -> PlaceIdentity? {
         let country = CountryAtlas.shared.country(code: countryCode)
+        let link = shareURL(of: place, countryCode: countryCode, centre: centre)
         return PlaceIdentity(
             flag: country.flatMap { FlagPalette.largeRoundFlag(for: $0.code) ?? FlagPalette.image(for: $0.code) },
             subtitle: country.map { place.kind == .country ? $0.continent : $0.name },
-            shareURL: shareURL(of: place, countryCode: countryCode, centre: centre),
-            query: placeQuery(of: place, countryCode: countryCode, centre: centre)
+            shareURL: link,
+            query: placeQuery(of: place, countryCode: countryCode, centre: centre),
+            dockPin: link.map { dockPin(for: MapDockedPlacesStore.Entry(url: $0.absoluteString, name: place.name)) }
+        )
+    }
+
+    /// The place page's "Add Pin to Map" (#1598), bound to the map's dock:
+    /// the place by its public link, the one identity every route agrees on.
+    static func dockPin(
+        for entry: MapDockedPlacesStore.Entry, store: MapDockedPlacesStore = MapDockedPlacesStore()
+    ) -> ClusterGalleryFollowing {
+        return ClusterGalleryFollowing(
+            isFollowing: { store.isDocked(entry.url) },
+            toggle: { store.toggle(entry) }
         )
     }
 

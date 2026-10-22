@@ -17,6 +17,8 @@ import UIKit
 /// The pin-tap hero transition and the live-preview video pool arrive in Step B
 /// (the `didSelect` and annotation-view seams are marked below).
 final class MapsViewController: UIViewController {
+    /// The places pinned to the dock (#1598).
+    private let dockedPlaces = MapDockedPlacesStore()
     #if DEBUG
     /// `-maps-offer-country` ran (#1600).
     private var didDebugOfferCountry = false
@@ -499,6 +501,7 @@ final class MapsViewController: UIViewController {
         bindViewModel()
         observeAppLifecycle()
         observeFavoriteChanges()
+        observeDockedPlaces()
         loadFavorites()
         prefetchPeople()
         mapView.setRegion(Self.defaultRegion, animated: false)
@@ -764,6 +767,39 @@ final class MapsViewController: UIViewController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.viewModel.followedPlacesChanged() }
         })
+    }
+
+    // MARK: - Docked places (#1598)
+
+    /// The places pinned from their page, in the dock after the people.
+    private func loadDockedPlaces() {
+        filterBar.setDockedPlaces(isMember() ? dockedPlaces.entries : [])
+    }
+
+    /// Any screen's pin (the place page's row) re-reads the dock; a tap on
+    /// a docked place flies the map there.
+    private func observeDockedPlaces() {
+        filterBar.onPlaceTapped = { [weak self] entry in self?.fly(to: entry) }
+        loadDockedPlaces()
+        appObservers.add(NotificationCenter.default.addObserver(
+            forName: MapDockedPlacesStore.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.loadDockedPlaces() }
+        })
+    }
+
+    /// Flies to a docked place: a country framed as the shop frames it (its
+    /// offer when locked), a city centred at the city band.
+    private func fly(to entry: MapDockedPlacesStore.Entry) {
+        guard let url = URL(string: entry.url), let link = PlaceLink(url: url) else { return }
+        switch link {
+        case .country(let code):
+            showCountry(code)
+        case .city(let latitude, let longitude, _, _):
+            let centre = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+            // The map's own neighbourhood zoom, the one it opens at.
+            mapView.setRegion(MKCoordinateRegion(center: centre, span: Self.defaultRegion.span), animated: true)
+        }
     }
 
     private func observeAppLifecycle() {
@@ -3694,6 +3730,8 @@ extension MapsViewController: MapViewerRefreshing {
         updateGuestLock(animated: true)
         subFilterMemory.forgetPeople()
         loadFavorites()
+        // The docked places are the profile's own too (#1598).
+        loadDockedPlaces()
         prefetchPeople()
     }
 }

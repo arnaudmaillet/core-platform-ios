@@ -52,11 +52,14 @@ struct PlaceHeroInkTests {
     private final class WindowHosts { var windows: [UIWindow] = [] }
     private let hosts = WindowHosts()
 
-    private func place(_ picture: Picture, style: UIUserInterfaceStyle) -> PlaceProfileViewController {
+    private func place(
+        _ picture: Picture, style: UIUserInterfaceStyle, identity: PlaceIdentity? = nil
+    ) -> PlaceProfileViewController {
         let profile = PlaceProfileViewController(
             postIDs: [],
             placeName: "Paris • City Cluster",
             rank: PlaceRankBadge(position: 3, label: "City Rank"),
+            identity: identity,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             videoPlayback: nil,
             loadPosts: { [] },
@@ -143,6 +146,26 @@ struct PlaceHeroInkTests {
             #expect(profile.debugHeroNameInk == HeroInk.Tone.light.primary, "\(picture)")
             #expect((profile.debugIdentityScrimAlpha > 0.5) == veiled, "\(picture) veil \(profile.debugIdentityScrimAlpha)")
         }
+    }
+
+    /// ⚠️ THE VEIL FADES OUT UNDER THE ACTION ROW (#1598): it ran a hard foot
+    /// just under the counters, an edge across the row's pills once the row
+    /// stood there (filmed on the SE). Solid under the type and the row, then
+    /// gone a ramp later.
+    @Test func theVeilFadesOutUnderTheActionRow() {
+        let identity = PlaceIdentity(
+            flag: nil, subtitle: "France",
+            dockPin: ClusterGalleryFollowing(isFollowing: { false }, toggle: { true })
+        )
+        let profile = place(.white, style: .light, identity: identity)
+        let row = profile.debugActionRowFrame
+        #expect(row.height > 0)
+        #expect(profile.debugIdentityScrimOpacity(atScreenY: profile.debugIdentityFrame.midY) == 1)
+        #expect(profile.debugIdentityScrimOpacity(atScreenY: row.midY) == 1, "the row's middle is not veiled")
+        let ramp = PlaceProfileViewController.scrimFadeOut
+        let halfway = profile.debugIdentityScrimOpacity(atScreenY: row.maxY + ramp / 2)
+        #expect(halfway > 0.2 && halfway < 0.8, "no ramp under the row: \(halfway)")
+        #expect(profile.debugIdentityScrimOpacity(atScreenY: row.maxY + ramp + 1) == 0)
     }
 
     /// The veil's rule: none over a dark enough ground, and as dark as a

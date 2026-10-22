@@ -300,6 +300,69 @@ struct PlaceIdentityViewTests {
         #expect(try #require(view.rankStat).valueLabel.textColor == HeroInk.Tone.light.primary)
         #expect(try #require(view.statViews.first).valueLabel.textColor == HeroInk.Tone.dark.primary)
     }
+
+    // MARK: - The page (the place page and the unlock sheet, #1597)
+
+    /// The `.page` block hosted in a window at `category`, so its fonts
+    /// follow the text size as on a device.
+    private func hostedPage(
+        category: UIContentSizeCategory, width: CGFloat = 370
+    ) -> (PlaceIdentityView, UIWindow) {
+        let screen = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.traitOverrides.preferredContentSizeCategory = category
+        window.rootViewController = screen
+        window.isHidden = false
+        let view = PlaceIdentityView(
+            flag: Self.flag, name: "Paris", subtitle: "France",
+            counters: [.init(value: "29.4K", caption: "Likes")], rank: "#3", layout: .page
+        )
+        view.translatesAutoresizingMaskIntoConstraints = false
+        screen.view.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: screen.view.leadingAnchor, constant: 10),
+            view.widthAnchor.constraint(equalToConstant: width),
+            view.topAnchor.constraint(equalTo: screen.view.topAnchor, constant: 100),
+        ])
+        screen.view.layoutIfNeeded()
+        return (view, window)
+    }
+
+    nonisolated static let pageCategories: [UIContentSizeCategory] = [.large, .extraExtraExtraLarge]
+
+    /// The rank and the likes: one size, their middles on the flag's, at the
+    /// default size and at the largest the app draws (XXXL, `TextSizeCeiling`).
+    @Test(arguments: pageCategories)
+    func thePagesCountersAreOneSizeCentredOnTheFlag(category: UIContentSizeCategory) throws {
+        let (view, window) = hostedPage(category: category)
+        defer { window.isHidden = true }
+        let rank = try #require(view.rankStat), likes = try #require(view.statViews.first)
+        #expect(!rank.isHidden)
+        #expect(rank.valueLabel.font.pointSize == likes.valueLabel.font.pointSize, "the figures differ")
+        #expect(rank.captionLabel.font.pointSize == likes.captionLabel.font.pointSize, "the words differ")
+        let flag = frame(of: view.flagView, in: view)
+        let rankFrame = frame(of: rank, in: view), likesFrame = frame(of: likes, in: view)
+        #expect(abs(rankFrame.midY - flag.midY) < 1, "the rank is off the flag's middle: \(rankFrame) \(flag)")
+        #expect(abs(likesFrame.midY - flag.midY) < 1, "the likes are off the flag's middle: \(likesFrame) \(flag)")
+        #expect(rankFrame.minX > flag.maxX && likesFrame.minX > rankFrame.maxX, "not flag · rank · likes")
+        // Nothing cut, nothing off the column.
+        for label in [rank.valueLabel, rank.captionLabel, likes.valueLabel, likes.captionLabel] {
+            #expect(label.bounds.width >= label.intrinsicContentSize.width - 0.5, "\(label.text ?? "") is cut")
+        }
+        #expect(likesFrame.maxX <= view.bounds.width + 0.5)
+    }
+
+    /// The XXXL type is larger than the default's: the counters do follow
+    /// the text size (the test above would pass on frozen fonts otherwise).
+    @Test func thePagesCountersFollowTheTextSize() throws {
+        let (large, largeWindow) = hostedPage(category: .large)
+        defer { largeWindow.isHidden = true }
+        let (xxxl, xxxlWindow) = hostedPage(category: .extraExtraExtraLarge)
+        defer { xxxlWindow.isHidden = true }
+        let small = try #require(large.statViews.first).valueLabel.font.pointSize
+        let big = try #require(xxxl.statViews.first).valueLabel.font.pointSize
+        #expect(big > small, "\(big) at XXXL, \(small) at the default size")
+    }
 }
 
 private extension UILabel {
