@@ -412,6 +412,8 @@ extension MainTabCoordinator {
                     Self.debugRunDrawerDragDemo(drawer.container)
                 } else {
                     drawer.open()
+                    // The drawer's stack carries one foot blur (#1576).
+                    print("[drawer] bottom blur count=\(drawer.debugBottomBlurCount)")
                 }
             }
         }
