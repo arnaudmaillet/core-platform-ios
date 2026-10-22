@@ -2430,8 +2430,8 @@ extension PlaceProfileViewController: CardCloseLanding {
         // — the place's most popular post — and never re-plans Recent to put
         // the post read at its head (the old rule, kept below as the fallback
         // for a page with no Popular card).
-        if let origin = popularLandingOrigin(sizedTo: bounds) {
-            debugLogLanding("landing on Popular's first card")
+        if let origin = popularLandingOrigin(sizedTo: bounds, closing: activePostID?()) {
+            debugLogLanding("landing on Popular's first card of the post's kind")
             return TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
         }
         guard let landed = activePostID?() else { return nil }
@@ -2441,13 +2441,21 @@ extension PlaceProfileViewController: CardCloseLanding {
         return TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
     }
 
-    /// The window onto Popular's first card, with the page staged at its top
-    /// so the shelf is on screen: the card's own window — the one its flight
-    /// left by (`PostShelfOrigins`), a media card's or a text card's. Nil when
-    /// the shelf has no card.
-    func popularLandingOrigin(sizedTo bounds: CGRect) -> TextRevealOrigin? {
+    /// The window onto Popular's first card OF THE CLOSING POST'S KIND, with
+    /// the page staged at its top so the shelf is on screen: the card's own
+    /// window — the one its flight left by (`PostShelfOrigins`), a media
+    /// card's or a text card's. Nil when the shelf has no card.
+    ///
+    /// ⚠️ BY KIND (the owner, 2026-10-22): a text post closes onto the first
+    /// card of Popular's TEXT row, a media post onto the first of its MEDIA
+    /// row — "le premier item de leur type de contenu dans la première
+    /// section". The shelf's first card alone sent a text post's close onto a
+    /// photograph. Any card when the shelf has none of that kind.
+    func popularLandingOrigin(sizedTo bounds: CGRect, closing closingID: PostID? = nil) -> TextRevealOrigin? {
         loadViewIfNeeded()
-        guard let first = shelf.cards.first else { return nil }
+        let closingIsText = closingID.flatMap { id in corpus.first { $0.id == id } }.map { $0.kind == .text }
+        let sameKind = closingIsText.flatMap { isText in shelf.cards.first { ($0.kind == .text) == isText } }
+        guard let first = sameKind ?? shelf.cards.first else { return nil }
         let stage: () -> Void = { [weak self] in
             guard let self else { return }
             if view.bounds.size != bounds.size, bounds.size != .zero { view.frame = bounds }

@@ -434,9 +434,10 @@ struct PlaceProfileTests {
         #expect(profile.debugSectionTitles.list == "Recent")
     }
 
-    /// ⚠️ A DISMISSAL FROM THE MAP LANDS ON POPULAR'S FIRST CARD (#1596, the
-    /// owner 2026-10-22) — the page's first section, whatever post the viewer
-    /// was on and whatever its kind — and Recent keeps its order.
+    /// ⚠️ A DISMISSAL FROM THE MAP LANDS ON POPULAR'S FIRST CARD OF THE POST'S
+    /// KIND (#1596, the owner 2026-10-22) — the page's first section: its
+    /// media row's first card for a photograph or a clip, its text row's
+    /// first card for words — and Recent keeps its order.
     ///
     /// It used to put the post the viewer was on at the head of Recent and
     /// land there. Pinned through the landing's one entry point
@@ -452,8 +453,10 @@ struct PlaceProfileTests {
         profile.beginLoading()
         for _ in 0..<50 where profile.renderedActivity.isEmpty { await Task.yield() }
         let recentBefore = profile.renderedActivity.map(\.id)
-        let first = try #require(profile.renderedPopular.first?.id)
-        #expect(first == PostID("post-2"), "precondition: the most popular post leads the row")
+        #expect(profile.renderedPopular.first?.id == PostID("post-2"), "precondition: the most popular post leads the row")
+        // Words land on the text row's first card (the only text here, the
+        // post itself); a picture or a clip on the media row's first.
+        let first = kind == .text ? PostID("post-3") : PostID("post-2")
 
         // The viewer paged on to the least popular post before closing.
         profile.activePostID = { PostID("post-3") }
@@ -462,8 +465,30 @@ struct PlaceProfileTests {
         let geometry = try #require(profile.cardCloseGeometry(dismissing: feed), "no window to close through")
         let landing = try #require(geometry.sourceFrame(profile.view), "the window measures nothing")
         let card = try #require(profile.debugShelf.cardFrame(for: first, in: profile.view))
-        #expect(landing == card, "the window does not land on Popular's first card")
+        #expect(landing == card, "the window does not land on Popular's first \(kind) card")
         #expect(profile.renderedActivity.map(\.id) == recentBefore, "Recent was re-planned for the landing")
+    }
+
+    /// Words close onto the text row's FIRST card — the most popular text, not
+    /// the post read — and a picture onto the media row's first.
+    @Test func aTextPostClosesOntoTheMostPopularTextCard() async throws {
+        let profile = makeProfile(posts: [
+            post("photo", kind: .photo, reactions: 90),
+            post("loud-words", kind: .text, reactions: 60),
+            post("quiet-words", kind: .text, reactions: 5),
+        ])
+        laidOut(profile)
+        profile.beginLoading()
+        for _ in 0..<50 where profile.renderedActivity.isEmpty { await Task.yield() }
+        let feed = UIViewController()
+        feed.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        for (closing, expected) in [("quiet-words", "loud-words"), ("photo", "photo")] {
+            profile.activePostID = { PostID(closing) }
+            let geometry = try #require(profile.cardCloseGeometry(dismissing: feed))
+            let landing = try #require(geometry.sourceFrame(profile.view))
+            let card = try #require(profile.debugShelf.cardFrame(for: PostID(expected), in: profile.view))
+            #expect(landing == card, "\(closing) did not close onto \(expected)")
+        }
     }
 
     /// The gallery's rule, on its own: the ranking minus what a grid cannot
