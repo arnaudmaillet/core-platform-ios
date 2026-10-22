@@ -183,6 +183,38 @@ struct PlacePostsTests {
         #expect(pages.asked == [nil, "t1"])
     }
 
+    /// ⚠️ A PAGE OPENED ALONE RESTS AT ITS TOP once its first page lands on
+    /// screen (#1610). The Popular row arriving re-configures the list's
+    /// layout, and UIKit answered that with an ANIMATED offset adjustment
+    /// that went on scrolling the list ~300pt down after the page had put it
+    /// back at its top — the identity under the bar, the banner gone.
+    @Test func aPageOpenedAloneRestsAtItsTopWhenItsFirstPageLands() async {
+        let pages = Pages()
+        pages.answers = [
+            "": PlacePostsPage(
+                posts: (1...8).map { post("x\($0)", reactions: Int64(10 - $0)) }, nextPageToken: nil
+            ),
+        ]
+        let profile = makeProfile(pages)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = profile
+        window.isHidden = false
+        defer { window.isHidden = true }
+        profile.view.layoutIfNeeded()
+        // On screen first, then the first page.
+        #expect(profile.view.window != nil)
+        profile.beginLoading()
+        #expect(await settle { profile.renderedActivity.count == 8 }, "the first page never landed")
+        // Long enough for a scroll animation to run its course (UIKit's are
+        // ~0.3 s): the list must still be at its top, not on its way down.
+        for _ in 0..<40 {
+            try? await Task.sleep(for: .milliseconds(20))
+            profile.view.layoutIfNeeded()
+            if abs(profile.debugActivityOffset) > 0.5 { break }
+        }
+        #expect(abs(profile.debugActivityOffset) < 0.5, "the list scrolled itself to \(profile.debugActivityOffset)")
+    }
+
     /// Done when: a refresh doesn't drop loaded pages.
     @Test func aRefreshKeepsThePagesLoaded() async {
         let pages = Pages()
