@@ -71,6 +71,20 @@ struct SectionTitleViewTests {
         #expect(font?.fontDescriptor.symbolicTraits.contains(.traitBold) == true)
     }
 
+    /// On a picture (#1617, a place page's Popular title on its banner) the
+    /// whole run takes the picture's ink — the title, the count and the
+    /// chevron — and gives the page's back when told nil.
+    @Test func onAPictureTheRunTakesThePicturesInk() {
+        let (bar, _) = bar(.init(title: "Popular", newCount: 3, isLink: true))
+        bar.setInk(.light)
+        #expect(bar.ink == .light)
+        let light = bar.debugColors
+        #expect(light.title == .white && light.count == .white && light.chevron == .white)
+        bar.setInk(nil)
+        let page = bar.debugColors
+        #expect(page.title == .label && page.count == .secondaryLabel && page.chevron == .secondaryLabel)
+    }
+
     /// `Following 3 ›`, left-aligned: a word space after the title, a tighter
     /// one before the chevron so `3 ›` reads as one token — and the run stops
     /// well short of the trailing edge.

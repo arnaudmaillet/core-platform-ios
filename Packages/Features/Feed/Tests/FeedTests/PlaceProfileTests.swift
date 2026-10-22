@@ -121,6 +121,9 @@ struct PlaceProfileTests {
         #expect(!profile.showsBanner)
         #expect(profile.debugBannerHeight < coverHeight * 0.6,
                 "the header kept the cover's height: \(profile.debugBannerHeight) of \(coverHeight)")
+        // The page's ground behind the info, not a white card (the owner,
+        // 2026-10-22).
+        #expect(profile.debugBannerBoxColor == Surface.page)
     }
 
     /// A COVER, as a profile's poster: the banner runs down 80% of the

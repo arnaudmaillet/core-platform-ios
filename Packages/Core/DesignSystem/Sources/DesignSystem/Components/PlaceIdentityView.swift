@@ -261,13 +261,18 @@ public final class PlaceIdentityView: UIView {
     /// flag; the title right above them.
     ///
     /// ```
-    ///        Paris  France
-    ///  ⬤      #3     29.4K
-    ///       Ranking  Likes
+    ///  ⬤‾‾  Paris  France
+    ///  ⬤     #3     29.4K
+    ///  ⬤__ Ranking  Likes
     /// ```
+    ///
+    /// ⚠️ THE NAME AND THE COUNTERS SPAN THE FLAG (the owner, 2026-10-22):
+    /// the name's line on the flag's top, the counters' foot on its foot,
+    /// their figures large enough (`PlaceStatView.Style.page`) for the two to
+    /// fill its height — not a small block centred on its middle.
     private func buildPage(counters: [Counter]) {
-        statViews = counters.prefix(1).map { PlaceStatView(value: $0.value, caption: $0.caption) }
-        let rank = PlaceStatView(value: "", caption: Self.pageRankCaption)
+        statViews = counters.prefix(1).map { PlaceStatView(value: $0.value, caption: $0.caption, style: .page) }
+        let rank = PlaceStatView(value: "", caption: Self.pageRankCaption, style: .page)
         rank.accessibilityIdentifier = "place.identity.rank"
         rankStat = rank
         let stats = UIStackView(arrangedSubviews: [rank] + statViews)
@@ -292,15 +297,16 @@ public final class PlaceIdentityView: UIView {
             flagView.heightAnchor.constraint(lessThanOrEqualToConstant: Self.flagMaxSide),
             flagView.heightAnchor.constraint(greaterThanOrEqualTo: stats.heightAnchor),
             flagTop,
-            // The counters on the flag's middle, the profile's columns.
+            // The counters' foot on the flag's foot.
             stats.leadingAnchor.constraint(equalTo: flagView.trailingAnchor, constant: Spacing.lg),
             stats.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            stats.centerYAnchor.constraint(equalTo: flagView.centerYAnchor),
-            // The title right above them, the name's line at the identity's top.
+            stats.bottomAnchor.constraint(equalTo: flagView.bottomAnchor),
+            // The name's line at the identity's top — the flag's, while the
+            // two fit its height — and at least the gap above the counters.
             titleLabel.topAnchor.constraint(equalTo: topAnchor),
             titleLabel.leadingAnchor.constraint(equalTo: stats.leadingAnchor),
             titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
-            titleLabel.bottomAnchor.constraint(equalTo: stats.topAnchor, constant: -Self.titleToCounters),
+            titleLabel.bottomAnchor.constraint(lessThanOrEqualTo: stats.topAnchor, constant: -Self.titleToCounters),
         ])
         setRank(rankBubble.text)
     }
@@ -507,7 +513,13 @@ public final class PlaceStatView: UIView {
     /// The profile's column; the headline's likes, a large figure over its
     /// word; or the headline's rank, the rank bubble's type and a trophy over
     /// its word (#1371).
-    enum Style { case column, headline, rank }
+    enum Style {
+        case column, headline, rank
+        /// The place page's info block (#1597, the owner 2026-10-22): the
+        /// headline's large figure over the column's word, so the name and
+        /// the counters span the flag's height.
+        case page
+    }
 
     public let valueLabel = UILabel()
     public let captionLabel = UILabel()
@@ -520,6 +532,9 @@ public final class PlaceStatView: UIView {
         case .column:
             // The profile's type, capped (#482).
             valueLabel.font = .scaledSystemFont(ofSize: 17, weight: .semibold, relativeTo: .headline, maximumPointSize: 24)
+            captionLabel.font = .scaledSystemFont(ofSize: 12, relativeTo: .caption1, maximumPointSize: 16)
+        case .page:
+            valueLabel.font = .scaledSystemFont(ofSize: 34, weight: .bold, relativeTo: .largeTitle, maximumPointSize: 44)
             captionLabel.font = .scaledSystemFont(ofSize: 12, relativeTo: .caption1, maximumPointSize: 16)
         case .headline:
             // Large: the place's number, the page's headline (#1304).
@@ -549,7 +564,7 @@ public final class PlaceStatView: UIView {
             label.setContentCompressionResistancePriority(.required, for: .vertical)
             label.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
-        if style != .column {
+        if style == .headline || style == .rank {
             // At the largest type the two columns outgrow the room beside
             // the flag: a word wraps ("World / ranking") before anything is
             // cut. The figures never do.

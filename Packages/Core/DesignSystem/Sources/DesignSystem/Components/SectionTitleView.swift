@@ -380,6 +380,22 @@ public final class SectionTitleView: UIView {
         setPressed(false)
     }
 
+    /// The run's ink: the page's (nil, the default), or a picture's (#1617:
+    /// a place page's Popular title standing on its banner), with the soft
+    /// shadow `HeroInk` gives type on a picture.
+    public private(set) var ink: HeroInk.Tone?
+
+    public func setInk(_ tone: HeroInk.Tone?) {
+        guard tone != ink else { return }
+        ink = tone
+        titleLabel.textColor = tone?.primary ?? .label
+        countLabel.textColor = tone?.secondary ?? .secondaryLabel
+        chevron.tintColor = tone?.secondary ?? .secondaryLabel
+        for label in [titleLabel, countLabel] {
+            HeroInk.applyShadow(to: label, tone: tone ?? .dark, onPicture: tone == nil ? 0 : 1)
+        }
+    }
+
     /// Dims and shrinks the run on a touch-down, at once; springs it back
     /// on the touch-up, after it has shown for `minimumPressShow`.
     func setPressed(_ pressed: Bool) {
