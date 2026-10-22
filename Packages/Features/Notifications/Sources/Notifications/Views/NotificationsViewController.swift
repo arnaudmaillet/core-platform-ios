@@ -49,9 +49,21 @@ final class NotificationsViewController: UIViewController {
         return binding
     }()
 
-    init(viewModel: NotificationsViewModel, imagePipeline: ImagePipeline?) {
+    // The mute toolbar (#1575): see `NotificationsViewController+Mute`.
+    let muteModel: NotificationsMuteModel?
+    /// The pause the toolbar SHOWS — the server's, handed over by a toast's
+    /// reveal (#1447: the old look holds while a write is on its way).
+    var shownPause: PushPause = .off
+    var shownMuteLook: MuteLook?
+    weak var muteButton: UIButton?
+    var muteTimerItem: UIBarButtonItem?
+    var muteTick: Timer?
+
+    /// - Parameter muteModel: the mute toolbar; nil shows none.
+    init(viewModel: NotificationsViewModel, imagePipeline: ImagePipeline?, muteModel: NotificationsMuteModel? = nil) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
+        self.muteModel = muteModel
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -73,11 +85,13 @@ final class NotificationsViewController: UIViewController {
         }
         render(.loading)
         viewModel.viewDidLoad()
+        installMuteToolbar()
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         viewModel.willReveal()
+        showMuteToolbar()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -97,6 +111,7 @@ final class NotificationsViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        stopMuteTick()
         viewModel.didConceal()
         // The next visit starts at the top, where "New" is.
         collectionView.setContentOffset(

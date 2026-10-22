@@ -190,6 +190,28 @@ struct NotificationsRepositoryTests {
         #expect(items.allSatisfy { $0.isRead })
     }
 
+    /// The mute toolbar's pause (#1575) is the server's "pause all": what it
+    /// sends reads back — a day long, indefinite, resumed — the field
+    /// Settings → Notifications reads too.
+    @Test func thePushPauseRoundTrips() async throws {
+        let repository = makeRepository()
+        #expect(try await repository.pushPause() == .off)
+
+        let tomorrow = Date().addingTimeInterval(24 * 3_600)
+        guard case .until(let held) = try await repository.setPushPause(.until(tomorrow)) else {
+            Issue.record("a day's pause did not hold")
+            return
+        }
+        #expect(abs(held.timeIntervalSince(tomorrow)) < 1)
+        #expect(try await repository.pushPause() == .until(held))
+
+        #expect(try await repository.setPushPause(.indefinite) == .indefinite)
+        #expect(try await repository.pushPause() == .indefinite)
+
+        #expect(try await repository.setPushPause(.off) == .off)
+        #expect(try await repository.pushPause() == .off)
+    }
+
     // MARK: - Why a call failed (#794)
 
     /// Connect answers a lost connection with `unavailable`. The

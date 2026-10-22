@@ -148,10 +148,11 @@ public final class MockNotificationService: @unchecked Sendable {
             .success(preferencesLock.withLock { preferences[request.profileID] } ?? Self.defaultPreferences())
         }
         bff.register(path: "/notification.v1.NotificationService/UpdateNotificationPreferences") { [self] (request: Notification_V1_UpdateNotificationPreferencesRequest) -> Result<Notification_V1_NotificationPreferences, ConnectError> in
-            let nowMS = Int64(Date().timeIntervalSince1970 * 1_000)
-            if request.hasPausedUntilMs, request.pausedUntilMs > nowMS + 8 * 3_600_000 + 60_000 {
-                return .failure(ConnectError(code: .invalidArgument, message: "NTF-9001: a pause lasts at most 8 hours"))
-            }
+            // ⚠️ AHEAD OF THE SERVER (#1575, backend #971): a pause of any
+            // length is accepted, and the far-future deadline the client sends
+            // for "until I turn it back on" (`PushPause.indefiniteMs`) too.
+            // The fleet still caps a pause at 8 h until #971 lands; the client
+            // offers the longer choices only where they are accepted.
             // Partial: only what's sent changes.
             let updated = preferencesLock.withLock {
                 var current = preferences[request.profileID] ?? Self.defaultPreferences()

@@ -117,15 +117,29 @@ struct NotificationPreferencesTests {
     }
 
     /// A pause runs until it ends or is resumed; more than 8 h is refused.
+    /// The Notifications toolbar's longer pauses (#1575) read here too.
+    @Test func theFooterReadsAnyPause() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let footer = { (until: Date?) in NotificationSettingsViewController.pauseFooter(until: until, now: now, calendar: calendar) }
+        #expect(footer(nil).hasPrefix("Stops every push"))
+        #expect(footer(Date(timeIntervalSince1970: 253_402_300_799)) == "Paused until you turn it back on.")
+        let tomorrow = now.addingTimeInterval(24 * 3_600)
+        #expect(footer(tomorrow).hasPrefix("Paused until ") && footer(tomorrow) != footer(now.addingTimeInterval(60)))
+    }
+
     @Test func aPauseHoldsUntilResumed() async throws {
         let repository = makeRepository()
         let until = Date().addingTimeInterval(3_600)
         let paused = try await repository.updateNotificationPreferences(.pause(until: until))
         #expect(abs((paused.pausedUntil ?? .distantPast).timeIntervalSince(until)) < 1)
 
-        await #expect(throws: (any Error).self) {
-            _ = try await repository.updateNotificationPreferences(.pause(until: Date().addingTimeInterval(9 * 3_600)))
-        }
+        // The mock is ahead of the fleet here (#1575, backend #971): a pause
+        // past 8 h holds — the Notifications toolbar's 24 h and week.
+        let longer = Date().addingTimeInterval(24 * 3_600)
+        let held = try await repository.updateNotificationPreferences(.pause(until: longer))
+        #expect(abs((held.pausedUntil ?? .distantPast).timeIntervalSince(longer)) < 1)
 
         #expect(try await repository.updateNotificationPreferences(.pause(until: nil)).pausedUntil == nil)
     }

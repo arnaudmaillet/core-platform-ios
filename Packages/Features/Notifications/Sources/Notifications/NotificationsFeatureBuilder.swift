@@ -15,6 +15,10 @@ public struct NotificationsFeatureBuilder: NotificationsFeatureBuilding {
     private let imagePipeline: ImagePipeline?
     /// The drawer's last 100 rows on the device (#897).
     private let deviceCache: NotificationsLocalCache?
+    /// The mute toolbar offers pauses past 8 h and "until I turn it back on"
+    /// (#1575): only where the server accepts them (the mock, until backend
+    /// #971 reaches the fleet).
+    private let allowsLongPushPauses: Bool
 
     /// `localStore`: the drawer opens on its last rows, offline and at a cold
     /// start (#897). Nil keeps them in memory.
@@ -22,8 +26,10 @@ public struct NotificationsFeatureBuilder: NotificationsFeatureBuilding {
         repository: any NotificationsProviding,
         router: (any Router)? = nil,
         imagePipeline: ImagePipeline? = nil,
-        localStore: LocalStore? = nil
+        localStore: LocalStore? = nil,
+        allowsLongPushPauses: Bool = false
     ) {
+        self.allowsLongPushPauses = allowsLongPushPauses
         self.repository = repository
         self.router = router
         self.imagePipeline = imagePipeline
@@ -33,7 +39,10 @@ public struct NotificationsFeatureBuilder: NotificationsFeatureBuilding {
     public func makeNotificationsViewController() -> UIViewController {
         let viewModel = NotificationsViewModel(repository: repository, router: router)
         viewModel.deviceCache = deviceCache
-        return NotificationsViewController(viewModel: viewModel, imagePipeline: imagePipeline)
+        return NotificationsViewController(
+            viewModel: viewModel, imagePipeline: imagePipeline,
+            muteModel: NotificationsMuteModel(repository: repository, allowsLongPauses: allowsLongPushPauses)
+        )
     }
 
     public func unreadCount() async -> Int {
