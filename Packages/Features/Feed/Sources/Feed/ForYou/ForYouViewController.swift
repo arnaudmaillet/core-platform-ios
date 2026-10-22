@@ -395,6 +395,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         page.onAuthorTapped = { [weak self] post in self?.openAuthor(of: post) }
         // A text card's long press shows its top comments (#1498).
         page.topComments = cachedTopComments
+        // The Following shelf's text cards too (the owner, 2026-10-22).
+        shelf.topComments = cachedTopComments
         page.authorMenuActions = { [weak self] context in
             self?.authorMenuActions(for: context) ?? []
         }

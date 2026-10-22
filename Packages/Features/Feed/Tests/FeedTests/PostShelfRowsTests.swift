@@ -493,6 +493,31 @@ struct PostShelfRowsTests {
         #expect(opened == [index])
     }
 
+    /// ⚠️ A TEXT CARD'S PREVIEW SHOWS ITS TOP COMMENTS (#1498), on the shelf
+    /// as on the grid (the owner, 2026-10-22: a Following text card previewed
+    /// bare beside For You's). A media card's carries none.
+    @Test func aTextCardsPreviewShowsItsTopComments() throws {
+        let cards = Self.mixed
+        let fixture = Fixture(cards: cards)
+        let comments = (0..<3).map {
+            CommentEntry(
+                id: "c\($0)", authorID: ProfileID("prof-\($0)"), authorName: "Ava", authorHandle: "ava",
+                body: "comment \($0)", createdAt: Date(timeIntervalSince1970: 0)
+            )
+        }
+        var asked: [PostID] = []
+        fixture.lead.shelf.topComments = { id in asked.append(id); return comments }
+        let text = try #require(cards.firstIndex { $0.kind == .text })
+        let preview = try #require(fixture.lead.shelf.debugCardPreview(at: text))
+        preview.loadViewIfNeeded()
+        let card = try #require(preview.debugTextCard)
+        #expect(!card.rows.isEmpty, "the text card's preview shows no comment")
+        #expect(asked == [cards[text].id])
+        let media = try #require(cards.firstIndex { $0.kind != .text })
+        _ = fixture.lead.shelf.debugCardPreview(at: media)
+        #expect(asked == [cards[text].id], "a media card asked for comments")
+    }
+
     // MARK: - Fixtures
 
     /// Seven media and three text posts, interleaved as the section might
