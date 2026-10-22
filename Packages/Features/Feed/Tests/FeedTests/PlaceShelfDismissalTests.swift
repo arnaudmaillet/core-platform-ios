@@ -76,6 +76,41 @@ struct PlaceShelfDismissalTests {
                 "a shelf at its first card kept the close")
     }
 
+    /// ⚠️ ONE DRAG, ONE OWNER (#1595): a grab freezes every sideways
+    /// scroller the page holds — the shelf, the posts' carousels — and puts
+    /// back exactly what it found; the page's own vertical list stays live.
+    @Test func aGrabFreezesTheSidewaysScrollersAndPutsThemBack() async throws {
+        let (place, window) = await landedPage()
+        defer { window.isHidden = true }
+        let row = place.debugShelf.mediaView
+        try #require(row.contentSize.width > row.bounds.width, "precondition: the shelf overflows")
+        let sideways = PlaceProfileViewController.horizontalScrollers(in: place.view)
+        #expect(sideways.contains { $0 === row }, "the shelf is not frozen by a grab")
+        let vertical = place.view.allSubviewsOfType(UIScrollView.self).filter { scroller in
+            !sideways.contains { $0 === scroller } && scroller.isScrollEnabled
+        }
+
+        place.setContentScrollEnabled(false)
+        place.setContentScrollEnabled(false) // a start reported twice
+        #expect(sideways.allSatisfy { !$0.isScrollEnabled }, "a sideways scroller stayed live under the grab")
+        #expect(vertical.allSatisfy { $0.isScrollEnabled }, "the page's own list froze")
+
+        place.setContentScrollEnabled(true)
+        #expect(sideways.allSatisfy { $0.isScrollEnabled }, "a scroller was left frozen")
+    }
+
+    /// A scroller that was off before the grab stays off after it.
+    @Test func aGrabRestoresRatherThanEnables() async throws {
+        let (place, window) = await landedPage()
+        defer { window.isHidden = true }
+        let row = place.debugShelf.mediaView
+        try #require(row.contentSize.width > row.bounds.width, "precondition: the shelf overflows")
+        row.isScrollEnabled = false
+        place.setContentScrollEnabled(false)
+        place.setContentScrollEnabled(true)
+        #expect(!row.isScrollEnabled, "the grab enabled a scroller it had found off")
+    }
+
     @Test func theLeadingEdgeClosesWhateverTheShelf() async {
         let (place, window) = await landedPage()
         defer { window.isHidden = true }
@@ -83,5 +118,11 @@ struct PlaceShelfDismissalTests {
         var point = shelfPoint(in: place)
         point.x = 10
         #expect(place.zoomHorizontalDismissalPermitted(at: point, in: place.view))
+    }
+}
+
+private extension UIView {
+    func allSubviewsOfType<T: UIView>(_ type: T.Type) -> [T] {
+        subviews.flatMap { ($0 as? T).map { [$0] } ?? [] } + subviews.flatMap { $0.allSubviewsOfType(type) }
     }
 }

@@ -83,12 +83,25 @@ public enum MediaCarouselTouchRouting {
            sequence(first: hit, next: { $0.superview }).prefix(while: { $0 !== host })
                .contains(where: { view in
                    guard let scroller = view as? UIScrollView, scroller !== own else { return false }
-                   return hasTravel(scroller, towardsPageDelta: pageDelta)
+                   return isMovingSideways(scroller) || hasTravel(scroller, towardsPageDelta: pageDelta)
                }) {
             return false
         }
         guard let carousel = carousel(at: point, in: host) else { return true }
+        // ⚠️ A CAROUSEL ALREADY MOVING KEEPS THE DRAG (#1595): paged back and
+        // forth fast, a carousel still gliding (or still under the previous
+        // stroke) read "no travel" at its first page for an instant, and the
+        // screen's grab took the drag while the carousel went on paging.
+        if carousel.isMoving { return false }
         return !carousel.hasTravel(towardsPageDelta: pageDelta)
+    }
+
+    /// A SIDEWAYS scroller in motion (dragged, or gliding): its drag is not
+    /// over, whatever its travel reads this instant. A vertical list's own
+    /// motion says nothing about a horizontal drag.
+    static func isMovingSideways(_ scroller: UIScrollView) -> Bool {
+        guard scroller.contentSize.width > scroller.bounds.width + travelSlack else { return false }
+        return scroller.isDragging || scroller.isDecelerating
     }
 
     /// Movement a scroller needs left before it counts as having travel —
