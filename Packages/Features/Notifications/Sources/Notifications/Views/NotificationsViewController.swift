@@ -39,6 +39,14 @@ final class NotificationsViewController: UIViewController {
     /// True between `viewDidAppear` and `viewWillDisappear` — the only time a
     /// change is worth animating.
     private var isOnScreen = false
+    /// The section the list has scrolled into, named in the bar's leading
+    /// slot — New, Yesterday, … — and a tap on it scrolls back to its title
+    /// (#1573, the app's one contract).
+    private lazy var sectionBinding: PinnedSectionBarBinding = {
+        let binding = PinnedSectionBarBinding(viewController: self, placement: .leading, scope: "notifications")
+        binding.onSelect = { [weak self] index in self?.scrollToSection(index) }
+        return binding
+    }()
 
     init(viewModel: NotificationsViewModel, imagePipeline: ImagePipeline?) {
         self.viewModel = viewModel
@@ -263,6 +271,7 @@ final class NotificationsViewController: UIViewController {
             snapshot.reconfigureItems([.pageFooter])
         }
         dataSource.apply(snapshot, animatingDifferences: isOnScreen && !previous.isEmpty)
+        updateSectionItem()
     }
 
     #if DEBUG
@@ -283,7 +292,54 @@ final class NotificationsViewController: UIViewController {
     #endif
 }
 
+// MARK: - The section in the bar (#1573)
+
+extension NotificationsViewController {
+    /// The section titles' tops, in the list's content coordinates.
+    ///
+    /// ⚠️ Asked of the LAYOUT, and only for sections the list already has: the
+    /// collection view's own lookup aborts for a section its data has not
+    /// caught up with (an apply in flight, the first render before a layout).
+    private var sectionTops: [CGFloat] {
+        let known = collectionView.numberOfSections
+        return sections.indices.map { index in
+            guard index < known else { return .greatestFiniteMagnitude }
+            return collectionView.collectionViewLayout.layoutAttributesForSupplementaryView(
+                ofKind: UICollectionView.elementKindSectionHeader, at: IndexPath(item: 0, section: index)
+            )?.frame.minY ?? .greatestFiniteMagnitude
+        }
+    }
+
+    /// Tells the bar which section the list is in.
+    func updateSectionItem() {
+        let described = sections.map {
+            PinnedSectionBarBinding.Section(id: $0.kind.rawValue, title: $0.title)
+        }
+        sectionBinding.update(sections: described, sectionTops: sectionTops, in: collectionView)
+    }
+
+    /// Puts section `index`'s title under the bar — what tapping its name
+    /// means. Clamped: a list too short to scroll stays where it is.
+    private func scrollToSection(_ index: Int) {
+        guard sectionTops.indices.contains(index) else { return }
+        collectionView.layoutIfNeeded()
+        let inset = collectionView.adjustedContentInset
+        let furthest = collectionView.contentSize.height + inset.bottom - collectionView.bounds.height
+        let target = min(sectionTops[index] - inset.top, furthest)
+        collectionView.setContentOffset(CGPoint(x: 0, y: max(-inset.top, target)), animated: true)
+    }
+
+    #if DEBUG
+    /// The bar's section item while it is shown — what a test reads.
+    var debugSectionItemTitle: String? { sectionBinding.item?.title }
+    #endif
+}
+
 extension NotificationsViewController: UICollectionViewDelegate {
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        updateSectionItem()
+    }
+
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         switch dataSource.itemIdentifier(for: indexPath) {
