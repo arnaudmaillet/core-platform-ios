@@ -247,6 +247,31 @@ struct SnapSideListTests {
         )
     }
 
+    /// ⚠️ A TILE MADE BEFORE IT SHOWS GETS ITS RING WHEN IT SHOWS (the owner,
+    /// 2026-10-22): the list prefetches, so a cell made while another post
+    /// was on show — then ringed for the post the card paged onto, off screen
+    /// — must take that ring as it comes into view. It came in bare.
+    @Test func aTilePreparedOffScreenWearsItsRingWhenItShows() throws {
+        let list = SnapSideListView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        list.frame = CGRect(x: 0, y: 0, width: 80, height: 300)
+        list.layoutIfNeeded()
+        let entries = (0..<12).map { Self.clip("v\($0)") }
+        list.show(entries)
+        list.layoutIfNeeded()
+        let collection = list.debugCollection
+        let last = IndexPath(item: entries.count - 1, section: 0)
+        // Made ahead, as a prefetch makes it: the ring is still the first post's.
+        list.setRing([entries[0].post.id: 1], animated: false)
+        let prepared = try #require(collection.dataSource?.collectionView(collection, cellForItemAt: last))
+        #expect(prepared.contentView.layer.borderWidth == SnapSideListView.hairlineWidth)
+        // The card pages onto the last post while its tile is off screen…
+        list.setRing([entries[last.item].post.id: 1], animated: false)
+        #expect(prepared.contentView.layer.borderWidth == SnapSideListView.hairlineWidth, "guard: off screen, not restyled")
+        // …and it comes on screen ringed.
+        collection.delegate?.collectionView?(collection, willDisplay: prepared, forItemAt: last)
+        #expect(prepared.contentView.layer.borderWidth == SnapSideListView.ringWidth, "the tile came in without its ring")
+    }
+
     /// ⚠️ THE LIST'S VIDEO TILES PLAY WHILE IT IS OPEN, AND ONLY THEN (#1509,
     /// the owner's choice): muted, on the app's pool, within the shared
     /// ranking's budget; closed, every tile gives its player back.
