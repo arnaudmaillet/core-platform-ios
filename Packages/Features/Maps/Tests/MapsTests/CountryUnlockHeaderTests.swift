@@ -5,7 +5,8 @@ import UIKit
 
 /// The unlock sheet's header is the place identity row (`PlaceIdentityView`,
 /// whose layout DesignSystem's tests pin) filled with the COUNTRY: its large
-/// round flag, its name and continent, its likes and posts, its rank.
+/// round flag, its name and continent, its rank and its likes — the place
+/// page's own arrangement since #1600 (`.page`, #1597).
 @MainActor
 struct CountryUnlockHeaderTests {
     private func header(_ code: String, standing: CountryStanding? = nil) throws -> PlaceIdentityView {
@@ -28,16 +29,17 @@ struct CountryUnlockHeaderTests {
         #expect(identity.titleLabel.subtitle == "Europe")
     }
 
-    @Test func theCountersAreLikesThenPostsAndTheRankRidesTheFlag() throws {
+    /// The place page's block (#1600): the rank a column like the likes,
+    /// at one size, never a bubble.
+    @Test func theCountersAreTheRankThenTheLikesLikeThePlacePage() throws {
         let identity = try header("ES")
-        #expect(identity.statViews.map(\.captionLabel.text) == ["Likes", "Posts"])
-        #expect(identity.statViews.map(\.valueLabel.text) == ["8.7K", "86"])
-        #expect(identity.rankBubble.label.text == "#4")
-        #expect(!identity.rankBubble.isHidden)
-    }
-
-    @Test func aSinglePostIsOnePost() throws {
-        let identity = try header("ES", standing: CountryStanding(code: "ES", rank: 9, likes: 3, posts: 1, price: 15))
-        #expect(identity.statViews.map(\.captionLabel.text) == ["Likes", "Post"])
+        #expect(identity.layout == .page)
+        #expect(identity.statViews.map(\.captionLabel.text) == ["Likes"])
+        #expect(identity.statViews.map(\.valueLabel.text) == ["8.7K"])
+        let rank = try #require(identity.rankStat)
+        #expect(rank.valueLabel.text == "#4" && !rank.isHidden)
+        #expect(identity.rankBubble.isHidden, "a bubble rode the flag")
+        #expect(rank.valueLabel.font.pointSize == identity.statViews[0].valueLabel.font.pointSize,
+                "the rank and the likes are not one size")
     }
 }

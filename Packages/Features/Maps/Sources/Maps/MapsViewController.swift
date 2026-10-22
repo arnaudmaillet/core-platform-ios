@@ -17,6 +17,10 @@ import UIKit
 /// The pin-tap hero transition and the live-preview video pool arrive in Step B
 /// (the `didSelect` and annotation-view seams are marked below).
 final class MapsViewController: UIViewController {
+    #if DEBUG
+    /// `-maps-offer-country` ran (#1600).
+    private var didDebugOfferCountry = false
+    #endif
     /// Internal (not private) only for the +QA hooks.
     let viewModel: MapsViewModel
     /// Sources the filter bar's scrollable favorites section (fail-open:
@@ -582,6 +586,9 @@ final class MapsViewController: UIViewController {
         super.viewDidAppear(animated)
         // A tab root always shows the bar (#769).
         ensureAppTabBarAsTabRoot()
+        #if DEBUG
+        debugOfferCountryIfRequested()
+        #endif
         // Kick the first query; coalesces with any region-settle callback.
         scheduleQuery()
         // Any marker a departed flow concealed comes back now. The window
@@ -855,6 +862,18 @@ final class MapsViewController: UIViewController {
         }
         navigationController.pushViewController(shop, animated: true)
     }
+
+    #if DEBUG
+    /// `-maps-offer-country <CC>` (#1600): a country's offer, as the shop opens
+    /// it — once, a beat after the map first appears.
+    private func debugOfferCountryIfRequested() {
+        guard !didDebugOfferCountry, let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-maps-offer-country"),
+              index + 1 < ProcessInfo.processInfo.arguments.count else { return }
+        didDebugOfferCountry = true
+        let code = ProcessInfo.processInfo.arguments[index + 1].uppercased()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.showCountry(code) }
+    }
+    #endif
 
     /// Goes to a country from the shop: lifted and framed, and a locked one
     /// makes its offer (framed above the sheet).

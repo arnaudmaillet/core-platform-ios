@@ -8,9 +8,10 @@ import CoreNavigation
 /// ```
 ///  ┌──────────────────────────────────────┐
 ///  │ ▔▔                                   │
-///  │ ╭────╮ Spain  Europe                │
-///  │ │ 🇪🇸 │  12K    86                   │
-///  │ ╰──#4╯ Likes  Posts   ·      ·      │
+///  │ (✕)        Spain  Europe            │  ← the bar's close item
+///  │ ╭────╮      #4      12K              │
+///  │ │ 🇪🇸 │   Ranking  Likes             │
+///  │ ╰────╯                               │
 ///  │  Unlock Spain to see its posts on    │
 ///  │  your map.                           │
 ///  │  You have 100 gems                   │
@@ -18,11 +19,11 @@ import CoreNavigation
 ///  └──────────────────────────────────────┘
 /// ```
 ///
-/// The header is the place identity row (`PlaceIdentityView`, DesignSystem),
-/// the place page's too: the country's ROUND flag where a profile's avatar
-/// stands — the map's own artwork, drawn large (`FlagPalette.largeRoundFlag`)
-/// — and beside it the name and its continent over Likes and Posts. The RANK
-/// rides the flag as a bubble.
+/// The header is the place identity row (`PlaceIdentityView`, DesignSystem)
+/// in the PLACE PAGE's arrangement (`.page`, #1597, #1600): the country's
+/// ROUND flag where a profile's avatar stands — the map's own artwork, drawn
+/// large (`FlagPalette.largeRoundFlag`) — and beside it the rank and the
+/// likes at one size, centred on it, under the name and its continent.
 ///
 /// One detent, the content's own height and the toolbar's; the map stays
 /// visible and the country stays lifted above the sheet. Gems only — points
@@ -31,8 +32,9 @@ import CoreNavigation
 ///
 /// **THE UNLOCK IS THE SHEET'S NATIVE TOOLBAR**, as "Use this sound" is the
 /// sound sheet's: the screen is presented as the root of a navigation
-/// controller that hides its bar and shows its toolbar (`wrappedInSheet`),
-/// and the prominent capsule fills the toolbar.
+/// controller that shows its toolbar (`wrappedInSheet`), and the prominent
+/// capsule fills the toolbar. Its BAR shows too, for the close item
+/// top-left, with the content starting behind it (#1600).
 final class CountryUnlockSheetViewController: UIViewController {
     /// The country was unlocked; the sheet is on its way out.
     var onUnlocked: ((String) -> Void)?
@@ -79,7 +81,9 @@ final class CountryUnlockSheetViewController: UIViewController {
     /// presentation — the one presented.
     func wrappedInSheet() -> UINavigationController {
         let navigation = UINavigationController(rootViewController: self)
-        navigation.setNavigationBarHidden(true, animated: false)
+        // ⚠️ THE BAR SHOWS, FOR ITS CLOSE ITEM (#1600, the owner 2026-10-22),
+        // and the content does NOT move for it: it starts behind the bar, the
+        // sound sheet's arrangement (`SoundSheetViewController`).
         navigation.setToolbarHidden(false, animated: false)
         navigation.modalPresentationStyle = .pageSheet
         if let sheet = navigation.sheetPresentationController {
@@ -109,6 +113,12 @@ final class CountryUnlockSheetViewController: UIViewController {
         // Its own prominent capsule is its background: no bubble in a bubble.
         unlockItem.hidesSharedBackground = true
         toolbarItems = [unlockItem]
+        // ✕ top-LEFT (the owner's placement; the sound sheet's is trailing).
+        let close = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
+            (self?.navigationController ?? self)?.dismiss(animated: true)
+        })
+        close.accessibilityIdentifier = "countryUnlock.close"
+        navigationItem.leftBarButtonItem = close
 
         balanceLabel.font = .appFont(forTextStyle: .footnote)
         balanceLabel.textColor = .secondaryLabel
@@ -336,8 +346,10 @@ final class CountryUnlockSheetViewController: UIViewController {
     // MARK: - Header
 
     /// The place identity row (`PlaceIdentityView`, shared with the place
-    /// page): the country's round flag at its LARGE size, the rank in a
-    /// bubble over it, the name and its continent, Likes and Posts.
+    /// page): ⚠️ THE PLACE PAGE'S OWN ARRANGEMENT since #1600 (`.page`, #1597)
+    /// — the round flag where the avatar stands, the rank and the likes at
+    /// one size centred on it, the name and its continent right above them —
+    /// so the sheet and the page it sells cannot drift apart.
     static func header(country: CountryAtlas.Country, standing: CountryStanding?) -> PlaceIdentityView {
         PlaceIdentityView(
             // The round flag the map wears (an emoji drawn and trimmed for a
@@ -347,9 +359,9 @@ final class CountryUnlockSheetViewController: UIViewController {
             subtitle: country.continent,
             counters: [
                 .init(value: standing.map { CountryStanding.compact($0.likes) } ?? "—", caption: "Likes"),
-                .init(value: standing.map { "\($0.posts)" } ?? "—", caption: standing?.posts == 1 ? "Post" : "Posts"),
             ],
-            rank: standing.map { "#\($0.rank)" } ?? "#—"
+            rank: standing.map { "#\($0.rank)" } ?? "#—",
+            layout: .page
         )
     }
 }
