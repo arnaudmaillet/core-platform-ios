@@ -140,8 +140,7 @@ struct SnapActionColumnLayoutTests {
     static func engagedPanel() -> (PostDetailViewController, UIWindow) {
         let controller = PostDetailViewController(
             viewModel: PostDetailViewModel(postID: PostID("p"), repository: ColumnSilentProvider()),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            mode: .commentsOnly
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
         let window = UIWindow(frame: Self.screen)
         window.rootViewController = controller

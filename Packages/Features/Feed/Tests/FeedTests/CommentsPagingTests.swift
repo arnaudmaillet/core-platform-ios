@@ -399,15 +399,6 @@ struct CommentsPagingTests {
         )
     }
 
-    /// The full mode's note never ends "..": a period is added only to a
-    /// message without one (#794).
-    @Test func theFailedNoteNeverDoublesItsPeriod() {
-        typealias Screen = PostDetailViewController
-        #expect(Screen.commentsFailedNoteText(FailureCopy.timeout) == "That took too long. Try again.")
-        #expect(Screen.commentsFailedNoteText(FailureCopy.offline) == FailureCopy.offline)
-        #expect(Screen.commentsFailedNoteText("Couldn't load comments") == "Couldn't load comments.")
-    }
-
     /// #798: comments already on screen are kept when a refresh's first page
     /// fails — no failed state, no empty stream.
     @Test func aFailedRefreshLeavesTheCommentsOnScreen() async {

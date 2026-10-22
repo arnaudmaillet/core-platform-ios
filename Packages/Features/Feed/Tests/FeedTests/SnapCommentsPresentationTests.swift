@@ -889,8 +889,7 @@ struct SnapCommentsPresentationTests {
             viewModel: PostDetailViewModel(
                 postID: PostID("p"), repository: EmptyFeedProvider()
             ),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            mode: .commentsOnly
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
         detail.loadViewIfNeeded()
         let stream = try #require(Self.firstView(UICollectionView.self, in: detail.view))

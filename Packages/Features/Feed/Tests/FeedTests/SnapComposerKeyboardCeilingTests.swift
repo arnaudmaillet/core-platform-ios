@@ -44,7 +44,6 @@ struct SnapComposerKeyboardCeilingTests {
             let panel = PostDetailViewController(
                 viewModel: PostDetailViewModel(postID: id, repository: CeilingMuteProvider()),
                 imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-                mode: .commentsOnly,
                 threadChrome: true,
                 groupsByDay: true
             )
