@@ -7154,11 +7154,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     func sideListMayOpen(from origin: CGPoint) -> Bool {
         guard !collectionView.isDecelerating, !isKeyboardOnScreen, !orderedIDs.isEmpty else { return false }
         guard commentsEngagedID == nil || commentsEngagementIsResting else { return false }
-        // ⚠️ THE EDGE FIRST (#1592, the owner): the trailing strip wins over
-        // everything under it — the rail stands clear of it by layout
-        // (`SnapActionColumn.trailingInset`), and a drag born there is the
-        // screen's whatever lies beneath.
-        if isInTrailingEdge(origin) { return true }
+        // ⚠️ THE EDGE FIRST (#1592, the owner): the trailing strip — and the
+        // trailing column standing at it — win over everything under them.
+        if isInTrailingEdge(origin) || isOnTrailingColumn(origin) { return true }
         let point = collectionView.convert(origin, from: view)
         if let hit = collectionView.hitTest(point, with: nil) {
             for current in sequence(first: hit, next: { $0.superview }) {
@@ -7175,6 +7173,20 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// Whether `origin` (in this view) lies in the trailing edge strip.
     func isInTrailingEdge(_ origin: CGPoint) -> Bool {
         view.bounds.maxX - origin.x <= PagedScreenDismissalPolicy.trailingEdgeZone
+    }
+
+    /// ⚠️ THE TRAILING COLUMN IS THE EDGE (the owner, 2026-10-22): the emote
+    /// rail, the like bubble and the sound bubble stand at the screen's edge,
+    /// so a leftward drag born on one of them is a drag "from the right edge"
+    /// — the author's profile. Nothing of theirs is lost: the rail scrolls on
+    /// VERTICAL drags only (`SnapShortcutRailView.gestureRecognizerShouldBegin`)
+    /// and the bubbles answer taps.
+    func isOnTrailingColumn(_ origin: CGPoint) -> Bool {
+        let point = collectionView.convert(origin, from: view)
+        guard let hit = collectionView.hitTest(point, with: nil) else { return false }
+        return sequence(first: hit, next: { $0.superview }).contains {
+            $0 is SnapShortcutRailView || $0 is SnapRailBoostButton || $0 is SnapSoundBubbleButton
+        }
     }
 
     // MARK: - The swipe chain (#1525)
@@ -7201,7 +7213,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             }
         }
         guard direction == .leftward, sideListMayOpen(from: origin) else { return nil }
-        if isInTrailingEdge(origin) { return authorPushStage() }
+        if isInTrailingEdge(origin) || isOnTrailingColumn(origin) { return authorPushStage() }
         guard let model = activePostID.flatMap({ modelsByID[$0] }) else { return nil }
         return model.mediaURL != nil ? .panel(sideList) : authorPushStage()
     }

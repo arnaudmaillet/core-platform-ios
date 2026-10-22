@@ -56,11 +56,11 @@ enum SnapActionColumn {
 
     /// From the screen's trailing edge (the chrome's margin) to the column —
     /// the like anchor's inset.
-    /// ⚠️ CLEAR OF THE EDGE STRIP (#1592): the whole trailing column — the
-    /// emote rail, the boost station, the sound station — stands
-    /// `PagedScreenDismissalPolicy.trailingClearance` from the edge, so an
-    /// edge swipe never lands on the rail and the rail never takes it.
-    static var trailingInset: CGFloat { PagedScreenDismissalPolicy.trailingClearance }
+    /// ⚠️ AT THE EDGE, WHERE IT ALWAYS STOOD (the owner, 2026-10-22: #1592
+    /// had moved the whole column inboard to clear the edge strip — "il faut
+    /// remettre où ils étaient avant"). A leftward drag born on the column
+    /// counts as one born at the edge instead (`isOnTrailingColumn`).
+    static let trailingInset: CGFloat = Spacing.md
 
     /// Between the like bubble and the bubble under it. The like anchor's
     /// bottom is the band's, and the repost bubble's top is the caption

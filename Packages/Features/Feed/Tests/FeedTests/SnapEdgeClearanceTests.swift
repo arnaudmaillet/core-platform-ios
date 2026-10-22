@@ -4,10 +4,11 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// ⚠️ THE EDGE STRIP AND THE TRAILING COLUMN NEVER OVERLAP (#1592, the
-/// owner 2026-10-22): the emote rail, the boost station and the sound
-/// bubble all stand at least `trailingEdgeGap` inside the trailing strip,
-/// on every screen width.
+/// ⚠️ THE TRAILING COLUMN STANDS AT THE EDGE, WHERE IT ALWAYS STOOD (the
+/// owner, 2026-10-22): #1592 had pushed the emote rail, the like bubble and
+/// the sound bubble inboard to clear the edge strip, and that is reverted —
+/// the column IS the edge for a leftward drag instead
+/// (`SnapFeedViewController.isOnTrailingColumn`).
 @MainActor
 @Suite(.serialized)
 struct SnapEdgeClearanceTests {
@@ -25,19 +26,19 @@ struct SnapEdgeClearanceTests {
     }
 
     @Test(arguments: [375.0, 393.0, 402.0, 440.0])
-    func theTrailingColumnStandsClearOfTheEdge(width: CGFloat) {
+    func theTrailingColumnStandsAtTheEdge(width: CGFloat) {
         let chrome = Self.chrome(width: width)
-        let limit = width - PagedScreenDismissalPolicy.trailingEdgeZone - PagedScreenDismissalPolicy.trailingEdgeGap
+        let edge = width - chrome.layoutMargins.right - Spacing.md
         let rail = chrome.debugRailFrame
         #expect(!rail.isEmpty, "guard: the rail is laid out")
-        #expect(rail.maxX <= limit + 0.5, "the rail reaches \\(rail.maxX) of \\(width)")
-        #expect(chrome.debugBoostButton.convert(chrome.debugBoostButton.bounds, to: chrome).maxX <= limit + 0.5)
-        #expect(chrome.debugSoundBubble.convert(chrome.debugSoundBubble.bounds, to: chrome).maxX <= limit + 0.5)
+        #expect(abs(rail.maxX - edge) < 0.5, "the rail stands at \(rail.maxX), not \(edge)")
+        let boost = chrome.debugBoostButton.convert(chrome.debugBoostButton.bounds, to: chrome)
+        #expect(abs(boost.maxX - edge) < 0.5, "the like bubble stands at \(boost.maxX)")
     }
 
-    /// The strip is still wider than the 28 pt the owner's thumb landed past.
-    @Test func theStripStaysWiderThanTheLeadingOne() {
+    /// The strip is back at 44 pt, wider than the leading 28 pt one.
+    @Test func theStripIsFortyFourPoints() {
+        #expect(PagedScreenDismissalPolicy.trailingEdgeZone == 44)
         #expect(PagedScreenDismissalPolicy.trailingEdgeZone > PagedScreenDismissalPolicy.edgeZone)
-        #expect(PagedScreenDismissalPolicy.trailingEdgeGap >= 8)
     }
 }

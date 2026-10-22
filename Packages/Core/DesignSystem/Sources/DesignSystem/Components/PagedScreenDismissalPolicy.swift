@@ -45,21 +45,12 @@ public enum PagedScreenDismissalPolicy {
     /// the carousel instead (2026-10-22). A carousel swipe starts on the
     /// photo, well clear of it.
     ///
-    /// ⚠️ 36, NOT 44 (#1592, the owner 2026-10-22): the edge wins over
-    /// EVERYTHING, and nothing may share the strip — the snap feed's emote
-    /// rail used to sit 12 pt from the edge, 32 pt INSIDE a 44 pt strip, and
-    /// took the edge swipes. 36 still clears the 28 pt the owner's thumb
-    /// landed past, and a trailing control column now stands clear of it
-    /// (`trailingClearance`).
-    public static let trailingEdgeZone: CGFloat = 36
-
-    /// The air between the trailing strip and the first control beside it:
-    /// a thumb on the control never starts an edge swipe, and the reverse.
-    public static let trailingEdgeGap: CGFloat = 8
-
-    /// How far from the trailing edge a column of controls that owns its own
-    /// drags (the snap feed's emote rail) must stand: the strip, then the gap.
-    public static var trailingClearance: CGFloat { trailingEdgeZone + trailingEdgeGap }
+    /// ⚠️ 44 AGAIN, AND NOTHING MOVES OUT OF ITS WAY (the owner, 2026-10-22):
+    /// #1592 narrowed it to 36 and pushed the snap feed's trailing column
+    /// clear of it — not what was asked. The column stays where it was, at
+    /// the edge, and IS the edge for a leftward drag
+    /// (`SnapFeedViewController.isOnTrailingColumn`).
+    public static let trailingEdgeZone: CGFloat = 44
 
     /// Whether a drag beginning at `x` (in the screen's own coordinates) may
     /// dismiss, given which tab is up.
