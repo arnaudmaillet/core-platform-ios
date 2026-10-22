@@ -41,6 +41,11 @@ final class NotificationsDrawer {
         self.tabBarController = tabBarController
         let navigation = ChevronBackNavigationController(rootViewController: list)
         navigation.navigationBar.prefersLargeTitles = true
+        // The blur at the foot of the screen the tab stacks wear (#1002),
+        // on the drawer's own stack too (#1576): over its screens, under its
+        // bars and its toolbar, at the drawer's width — once, so a screen
+        // pushed in the drawer wears it as well.
+        BottomEdgeBlurView.install(in: navigation)
         container = SideDrawerContainerViewController(main: tabBarController, drawer: navigation)
         container.dimmingAccessibilityLabel = "Close notifications"
         container.onDidOpen = onDidOpen
@@ -54,6 +59,14 @@ final class NotificationsDrawer {
     }
 
     var isOpen: Bool { container.isOpen }
+
+    #if DEBUG
+    /// How many foot blurs the drawer's stack carries — one (#1576). QA.
+    var debugBottomBlurCount: Int {
+        (container.drawerViewController as? UINavigationController)?.viewIfLoaded?.subviews
+            .filter { $0 is BottomEdgeBlurView }.count ?? 0
+    }
+    #endif
 
     /// The bell's action.
     func open() {
