@@ -376,3 +376,125 @@ final class TextCardPreview {
         }
     }
 }
+
+/// A committed lift, captured AS UIKit COMMITS IT (#1543): where the flight
+/// that opens its post takes off.
+///
+/// ⚠️ CAPTURED, NEVER LOOKED UP LATER. Measured 2026-10-22 on iOS 27: a `.pop`
+/// commit runs the animator's completion BEFORE the run loop's next turn, the
+/// one the post opens on. A lift looked up when the flight asked for its
+/// origin was already gone, and the flight left from the tile.
+///
+/// ⚠️ AND NEVER THE PREVIEW CONTROLLER'S OWN VIEW. UIKit keeps it in a
+/// container at alpha 0, at (0, 0) on one lift and (-402, 0) on the next, and
+/// draws it through a portal in the context menu's platter, which a later
+/// sibling of that container holds — at (16, 78) for the same lift. The
+/// platter is the first view of the lift's own size in the containers added
+/// after the lift's; nothing private is named.
+///
+/// ⚠️ AND IT STAYS ON SCREEN UNTIL THE CARD IS. Opening the feed costs about
+/// 250 ms before the flight's first frame (`-zoom-profile`: the screen's
+/// build, then ~80 ms before the first commit), and UIKit's fade of the lift
+/// is over in ~115 ms: filmed at 60 fps, three frames showed neither. A tap
+/// on a tile hides that cost behind the tile; here a still of the lift holds
+/// its place over everything until the flight conceals its source — once
+/// the card is drawing (`ZoomAnimator`'s first-frame handoff) — or the
+/// capture expires.
+@MainActor
+final class PreviewLaunch {
+    /// How long the capture answers: the flight's departure asks within a
+    /// frame or two of the commit; a close, much later, must land on the tile.
+    static let lifetime: CFTimeInterval = 1
+
+    let postID: PostID
+    private let frameInWindow: CGRect
+    private weak var window: UIWindow?
+    private weak var lift: UIView?
+    private weak var drawing: UIView?
+    /// The still holding the lift's place — see the note on this type.
+    private var hold: UIView?
+    private let expiry: CFTimeInterval
+
+    /// Nil when the lift is not on screen, or UIKit's drawing of it cannot be
+    /// found — the tile is then the honest origin.
+    init?(_ preview: ForYouPostPreviewViewController, now: CFTimeInterval = CACurrentMediaTime()) {
+        guard let lift = preview.viewIfLoaded, let window = lift.window,
+              let drawing = Self.drawing(of: lift, in: window) else { return nil }
+        postID = preview.post.id
+        frameInWindow = drawing.convert(drawing.bounds, to: window)
+        self.window = window
+        self.lift = lift
+        self.drawing = drawing
+        expiry = now + Self.lifetime
+        // The lift's own view: the platter's portal snapshots blank.
+        if let still = lift.snapshotView(afterScreenUpdates: true) {
+            still.frame = frameInWindow
+            still.isUserInteractionEnabled = false
+            window.addSubview(still)
+            hold = still
+            // A post that never opens must not leave the still behind.
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.lifetime) { [weak still] in
+                still?.removeFromSuperview()
+            }
+        }
+    }
+
+    /// Where the lift was, in `space` — nil once the capture has expired.
+    func frame(in space: UICoordinateSpace, now: CFTimeInterval = CACurrentMediaTime()) -> CGRect? {
+        guard now < expiry, let window else { return nil }
+        return window.convert(frameInWindow, to: space)
+    }
+
+    /// Where the menu's dismissal takes the lift: where it already is, so it
+    /// fades out IN PLACE under the flight leaving from it.
+    ///
+    /// ⚠️ Measured 2026-10-22 (iOS 27, 30 fps film): with the tile as the
+    /// target — and with `.pop`, which follows the same target — UIKit carried
+    /// the lift back into its card, and the card stood there for four frames
+    /// before the flight jumped up to the lift's place. A collection view's
+    /// nil target means the cell, so the target is a clear view of the lift's
+    /// size, centred on it.
+    func dismissalTarget(now: CFTimeInterval = CACurrentMediaTime()) -> UITargetedPreview? {
+        guard now < expiry, let window else { return nil }
+        let blank = UIView(frame: CGRect(origin: .zero, size: frameInWindow.size))
+        let parameters = UIPreviewParameters()
+        parameters.backgroundColor = .clear
+        return UITargetedPreview(
+            view: blank, parameters: parameters,
+            target: UIPreviewTarget(container: window, center: CGPoint(x: frameInWindow.midX, y: frameInWindow.midY))
+        )
+    }
+
+    /// Hides the lift wherever it is drawn: the card flying out of it is the
+    /// lift now, and UIKit's own fade of it must not draw over the card.
+    func conceal() {
+        lift?.alpha = 0
+        drawing?.alpha = 0
+        hold?.removeFromSuperview()
+        hold = nil
+    }
+
+    #if DEBUG
+    /// Whether the still is holding the lift's place.
+    var debugIsHolding: Bool { hold?.window != nil }
+    #endif
+
+    /// The view UIKit draws `lift` in.
+    private static func drawing(of lift: UIView, in window: UIWindow) -> UIView? {
+        let size = lift.bounds.size
+        guard size.width > 0, size.height > 0,
+              let held = window.subviews.firstIndex(where: { lift.isDescendant(of: $0) })
+        else { return nil }
+        // Breadth first: the platter, not a same-sized piece inside it.
+        var queue = Array(window.subviews[(held + 1)...])
+        while !queue.isEmpty {
+            let view = queue.removeFirst()
+            if !view.isHidden, view.alpha > 0.01,
+               abs(view.bounds.width - size.width) < 0.5, abs(view.bounds.height - size.height) < 0.5 {
+                return view
+            }
+            queue.append(contentsOf: view.subviews)
+        }
+        return nil
+    }
+}

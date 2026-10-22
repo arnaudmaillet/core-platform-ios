@@ -165,6 +165,9 @@ final class ForYouGridPage: UIView {
     /// view has neither. It supplies the context and renders whatever comes
     /// back — including nothing, which hides the control.
     var authorMenuActions: ((AuthorMenuContext) -> [PostCardMenuAction])?
+    /// The lift a committed long press opens from, while the flight takes
+    /// off (#1543).
+    var previewLaunch: PreviewLaunch?
     /// Select Text's session on this page's list cards (#1498 §4).
     private let captionSelection = CaptionSelectionSession()
     /// Whether this author is the viewer — whose own post's menu names no
@@ -2118,6 +2121,13 @@ final class ForYouGridPage: UIView {
         guard let cell = cell(for: postID), let appearance = heroAppearance(for: postID) else {
             return nil
         }
+        // ⚠️ A COMMITTED PREVIEW IS WHERE THE FLIGHT TAKES OFF (#1543): the
+        // card leaves from the lift as captured at the commit
+        // (`PreviewLaunch`) — never back through the tile. Once the capture
+        // has expired (a close, later), the tile is the answer again.
+        if let launch = previewLaunch, launch.postID == postID, let lift = launch.frame(in: space) {
+            return Hero(frame: lift, cover: appearance.cover, style: appearance.style)
+        }
         let rect: CGRect = switch cell {
         // A brick IS its media, edge to edge; a row is a card of which the
         // media is one part, so fly that part. A TEXT row has no media and no
@@ -2852,6 +2862,10 @@ final class ForYouGridPage: UIView {
     }
 
     func setHeroHidden(_ hidden: Bool, for postID: PostID, conceals: Bool = true) {
+        // The lift the flight took off from goes with the tile (#1543): the
+        // card is it now, and UIKit's own fade of it must not draw over the
+        // card.
+        if hidden, let launch = previewLaunch, launch.postID == postID { launch.conceal() }
         heroFlyingPostID = hidden ? postID : nil
         heroHiddenPostID = (hidden && conceals) ? postID : nil
         // Apply to whatever is on screen right now; `cellForItemAt` covers
@@ -3793,19 +3807,38 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         contextMenuConfiguration configuration: UIContextMenuConfiguration,
         dismissalPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-        tilePreview(at: indexPath)
+        // A committed lift fades where it is, under its flight (#1543).
+        previewLaunch?.dismissalTarget() ?? tilePreview(at: indexPath)
     }
 
     /// Tapping the lift opens the post — the tap's own open, through the same
-    /// flight. `.dismiss` first, then ours, one turn past the completion: the
-    /// flight leaves FROM the tile, so UIKit must have put it back (the
-    /// shelf's rule, `PostShelfSection`).
+    /// flight. A media post's flight leaves from the lift itself (#1543);
+    /// words go back into their card first, then open, one turn past the
+    /// completion.
     func collectionView(
         _ collectionView: UICollectionView,
         willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
         animator: UIContextMenuInteractionCommitAnimating
     ) {
         guard let raw = configuration.identifier as? String else { return }
+        // ⚠️ FROM THE LIFT, NOT BACK THROUGH THE TILE (#1543, the owner
+        // 2026-10-21, Instagram's way): a media post's flight takes off from
+        // the preview the viewer tapped — the lift, captured now while UIKit
+        // still draws it (`PreviewLaunch`), is the hero's origin
+        // (`hero(for:in:)`), and the post opens now, rather than after UIKit
+        // has put it back into its tile. Its clip plays on: the lift is
+        // already a surface of the tile's own player
+        // (`ForYouPostPreviewViewController`).
+        if let preview = animator.previewViewController as? ForYouPostPreviewViewController,
+           preview.post.id.rawValue == raw, heroAppearance(for: preview.post.id) != nil,
+           let launch = PreviewLaunch(preview) {
+            previewLaunch = launch
+            animator.preferredCommitStyle = .dismiss
+            DispatchQueue.main.async { [weak self] in self?.openPost(rawID: raw) }
+            return
+        }
+        // A text card (no hero: it opens through its window) and any other
+        // lift: back into its card, then the tap's own open.
         animator.preferredCommitStyle = .dismiss
         animator.addCompletion { [weak self] in
             DispatchQueue.main.async { self?.openPost(rawID: raw) }

@@ -207,6 +207,9 @@ final class PostShelfSection: UIView {
     /// a readout; a TEXT card's like is the list's own chip, and stakes
     /// (`PostCardStaking.bind`).
     var staking: PostCardStaking?
+    /// The lift a committed long press opens from, while the flight takes
+    /// off (#1543) — the grid's rule (`ForYouGridPage.previewLaunch`).
+    var previewLaunch: PreviewLaunch?
     /// The part of the screen the viewer can see, in THIS view's space, for
     /// autoplay: a card under the navigation bar is not one they are looking
     /// at. Nil (no host yet) plays nothing.
@@ -646,6 +649,11 @@ final class PostShelfSection: UIView {
 
     /// The card's rect in `space`, at rest — see `RowGeometry.restingFrame`.
     func cardFrame(for id: PostID, in space: UICoordinateSpace) -> CGRect? {
+        // A committed preview is where the flight takes off, as captured at
+        // the commit (#1543, `PreviewLaunch`).
+        if let launch = previewLaunch, launch.postID == id, let lift = launch.frame(in: space) {
+            return lift
+        }
         guard let (row, indexPath) = cardRow(for: id), let cell = row.cellForItem(at: indexPath),
               RowGeometry.isInRow(cell, row) else { return nil }
         return RowGeometry.restingFrame(of: cell, below: row, in: space)
@@ -716,6 +724,8 @@ final class PostShelfSection: UIView {
     }
 
     func setCardConcealed(_ concealed: Bool, for id: PostID) {
+        // The lift the flight left from goes with the card (#1543).
+        if concealed, let launch = previewLaunch, launch.postID == id { launch.conceal() }
         if concealed { concealedCard = id } else if concealedCard == id { concealedCard = nil }
         cardCell(for: id)?.isHidden = concealed
         // A committed window close is landing: the card takes the clip its
@@ -1206,26 +1216,34 @@ extension PostShelfSection: UICollectionViewDelegate {
         contextMenuConfiguration configuration: UIContextMenuConfiguration,
         dismissalPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-        targetedPreview(in: collectionView, at: indexPath)
+        // A committed lift fades where it is, under its flight (#1543).
+        previewLaunch?.dismissalTarget() ?? targetedPreview(in: collectionView, at: indexPath)
     }
 
     /// Tapping the lifted preview opens the post — the same open as a tap on
-    /// the card, through the same flight.
+    /// the card, through our flight, never UIKit's `.pop` (which grows the
+    /// preview into a destination UIKit presents itself): the flight hands
+    /// the card's player to the page, and the close lands back on the card.
     ///
-    /// ⚠️ `.dismiss`, THEN OUR HERO — not UIKit's `.pop`. The open is a flight
-    /// OUT OF THE CARD: it conceals the source, hands the card's player to
-    /// the page, and the close lands back on that same card. A `.pop` commit
-    /// grows the preview into a destination UIKit presents itself, and none
-    /// of that would hold. So the preview settles back into its card first
-    /// and the flight takes off from there; the open waits one turn past the
-    /// completion so UIKit has put the card back before the flight measures
-    /// and hides it.
+    /// ⚠️ A MEDIA card's flight takes off FROM THE LIFT (#1543): captured now
+    /// (`PreviewLaunch`), the lift fading in place under it. A text card
+    /// settles back into its card first, and opens one turn past the
+    /// completion, once UIKit has put the card back.
     func collectionView(
         _ collectionView: UICollectionView,
         willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
         animator: UIContextMenuInteractionCommitAnimating
     ) {
         guard case .card(let id)? = RowMenuTarget(configuration.identifier) else { return }
+        // From the lift, not back through the card (#1543) — a media card's;
+        // a text card still opens through its window, after the lift is home.
+        if let preview = animator.previewViewController as? ForYouPostPreviewViewController,
+           preview.post.id == id, mediaCardCell(for: id) != nil, let launch = PreviewLaunch(preview) {
+            previewLaunch = launch
+            animator.preferredCommitStyle = .dismiss
+            DispatchQueue.main.async { [weak self] in self?.open(id) }
+            return
+        }
         animator.preferredCommitStyle = .dismiss
         animator.addCompletion { [weak self] in
             DispatchQueue.main.async { self?.open(id) }
