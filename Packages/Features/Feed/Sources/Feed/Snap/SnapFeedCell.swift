@@ -90,6 +90,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Whether there is anything to play at all — the replacement for the
     /// `mediaKind == .video` gates.
     private var playsVideo: Bool { activeVideoURL != nil }
+
+    /// The surface the page's clip draws on, for a second surface to show
+    /// the same playback (the side list's tile of this post, #1581). Nil: no
+    /// single clip on show (a photo, text, a collection).
+    var liveVideoSurface: VideoRenderView? {
+        playsVideo && !mediaCard.showsCollection ? mediaCard.renderView : nil
+    }
     /// The clip on the page under the finger — a collection's current page.
     var currentClipURL: URL? { activeVideoURL }
     /// Whether the clip under the finger is actually running — the cover's
@@ -2879,9 +2886,17 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// The stopped mark on the picture, shown or taken down from outside —
     /// the side list hands it over as it opens and back as it closes.
-    func setPausedMarkVisible(_ visible: Bool) {
-        setPauseGlyphVisible(visible)
+    func setPausedMarkVisible(_ visible: Bool, animated: Bool = true) {
+        mediaCard.setPausedMark(visible, animated: animated)
     }
+
+    /// The mark's share while the side list carries it to the tile (#1580).
+    func setPausedMarkShare(_ share: CGFloat) {
+        mediaCard.setPausedMarkShare(share)
+    }
+
+    /// The picture's stopped mark's opacity, nil when it wears none. Tests.
+    var debugPausedMarkAlpha: CGFloat? { mediaCard.visiblePausedMark?.alpha }
 
     /// Whether the picture wears the stopped mark.
     var showsPausedMark: Bool { mediaCard.showsPausedMark }
@@ -3002,6 +3017,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.surface(forPage: page)
     }
     #endif
+
+    /// Whether this page is the active one, for the lifecycle.
+    var isLifecycleActive: Bool { isActive }
+
+    /// Steps down as the active page WITHOUT touching its clip (#1580): the
+    /// items are being swapped under the post on show, and the page that
+    /// shows it next adopts this very player (`SnapFeedViewController
+    /// .handOverReorderedPlayback`) — stopped here, it restarted.
+    func resignKeepingPlayback() {
+        guard isActive else { return }
+        isActive = false
+        updatePlayheadFeed()
+        chrome.setTickerActive(false)
+        chrome.setSubtitlesActive(false)
+        cancelPrewarming()
+    }
 
     func didResignActive(releasingPlayback: Bool) {
         guard isActive else { return }

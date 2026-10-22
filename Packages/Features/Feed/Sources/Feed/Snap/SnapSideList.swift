@@ -39,21 +39,6 @@ enum SnapSideList {
         /// The device's own corner radius (`ScreenGeometry`): the page's
         /// corners when closed.
         var deviceCornerRadius: CGFloat = 0
-        /// The tiles' shape (#1545): square by default, 3:4 behind
-        /// `-side-list-narrow-tiles`, the owner's two options to try.
-        var tileShape: TileShape = .square
-
-        enum TileShape: Equatable {
-            /// Square: a wider card than before, tiles still readable.
-            case square
-            /// 3:4, narrower: the widest card.
-            case portrait
-
-            /// The launch flag's choice.
-            static var current: TileShape {
-                ProcessInfo.processInfo.arguments.contains("-side-list-narrow-tiles") ? .portrait : .square
-            }
-        }
 
         /// Between the card, the list, the bars and the screen's edges.
         static let gap: CGFloat = 6
@@ -82,8 +67,10 @@ enum SnapSideList {
             return min(max(Int(fitting), 1), Self.maximumTiles)
         }
 
-        /// The width of a tile per point of its height.
-        private var tileAspect: CGFloat { tileShape == .square ? 1 : 3 / 4 }
+        /// The width of a tile per point of its height: 3:4, narrow, for the
+        /// widest card. The owner tried square tiles beside it and kept these
+        /// (device check, 2026-10-22; #1580).
+        static let tileAspect: CGFloat = 3 / 4
 
         /// The list's height — the card's: the height between the bars, or
         /// less where the page scaled to the width the list leaves is
@@ -94,7 +81,7 @@ enum SnapSideList {
             let open = openArea.height
             guard size.width > 0, size.height > 0, open > 0 else { return open }
             let count = CGFloat(tileCount), spacing = Self.tileSpacing
-            let perPoint = tileAspect / count
+            let perPoint = Self.tileAspect / count
             let solved = size.height * (size.width - 3 * Self.gap + perPoint * (count - 1) * spacing)
                 / (size.width + size.height * perPoint)
             return min(open, solved)
@@ -105,7 +92,7 @@ enum SnapSideList {
         var tileSize: CGSize {
             let count = CGFloat(tileCount)
             let height = max(0, (listHeight - Self.tileSpacing * (count - 1)) / count)
-            return CGSize(width: max(height * tileAspect, Self.minimumListWidth), height: height)
+            return CGSize(width: max(height * Self.tileAspect, Self.minimumListWidth), height: height)
         }
 
         /// The open card's room: between the bars, a gap from each.
@@ -267,6 +254,8 @@ final class SnapSideListController: NSObject, SwipePanel {
         listView = SnapSideListView(imagePipeline: imagePipeline)
         // Its video tiles loop, muted, on the app's one pool (#1509).
         listView.autoplay = videoPlayback.map { SnapSideListAutoplay(pool: $0, imagePipeline: imagePipeline) }
+        // The post on show's tile mirrors the card's playback (#1581).
+        listView.autoplay?.cardSurface = { [weak host] id in host?.liveVideoSurface(for: id) }
         super.init()
         listView.isHidden = true
         listView.onSelect = { [weak self] entry in self?.host?.showSideListEntry(entry) }
@@ -280,8 +269,7 @@ final class SnapSideListController: NSObject, SwipePanel {
         guard let host else { return SnapSideList.Geometry(size: .zero) }
         return SnapSideList.Geometry(
             size: host.view.bounds.size, bars: host.sideListBars,
-            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: host.view),
-            tileShape: .current
+            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: host.view)
         )
     }
 
@@ -302,6 +290,9 @@ final class SnapSideListController: NSObject, SwipePanel {
         listView.tileSize = geometry.tileSize
         listView.frame = geometry.listFrame(progress: value)
         if value > 0 { listView.isHidden = false }
+        // A paused clip's mark crosses from the card to its tile with the
+        // move, not at its end (#1580).
+        host.sideListPoseDidChange(progress: value)
     }
 
     /// The card's shape (#1545): the scaled page cropped top and bottom to
@@ -405,14 +396,17 @@ final class SnapSideListController: NSObject, SwipePanel {
     func loadIfNeeded() {
         // While the list drives the card, it is the list on show.
         guard loadTask == nil, let host, !host.isSideListSessionActive,
-              let anchor = host.activePostID, anchor != loadedAnchor else { return }
+              let anchor = host.activePostID, anchor != loadedAnchor,
+              // Reopened on a post picked in the list on show: kept, and
+              // where it was scrolled (#1580).
+              host.sideListResumeAnchor != loadedAnchor || loadedAnchor == nil else { return }
         loadTask = Task { [weak self, weak host] in
             let entries = await host?.sideListCandidates() ?? []
             guard let self else { return }
             loadTask = nil
             loadedAnchor = anchor
             listView.show(entries)
-            listView.autoplay?.focus(anchor)
+            listView.autoplay?.mirror(host?.activePostID)
             listView.outline(anchor)
             // Settled open before the list came: it drives the card now.
             if isOpen { host?.beginSideListSessionIfNeeded() }
@@ -430,7 +424,9 @@ final class SnapSideListController: NSObject, SwipePanel {
 
     /// The post on show changed: outlined in the list when it is one of its.
     func activePostDidChange(_ id: PostID?) {
-        listView.autoplay?.focus(id)
+        listView.autoplay?.mirror(id)
+        // The tile left behind plays on its own again; the new one mirrors.
+        if listView.autoplay?.isActive == true { listView.reconcileNow() }
         listView.outline(id)
     }
 }
@@ -458,16 +454,28 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
     static let tileMarkScale: CGFloat = 0.42
 
     /// Shows or takes down the stopped mark on `id`'s tile (#1550).
-    func setPausedMark(_ visible: Bool, on id: PostID?) {
+    func setPausedMark(_ visible: Bool, on id: PostID?, animated: Bool = true) {
         pausedMarkID = visible ? id : nil
+        if !visible { pausedMarkShare = 1 }
         guard visible, let id, let index = entries.firstIndex(where: { $0.post.id == id }),
               let cell = collection.cellForItem(at: IndexPath(item: index, section: 0)) else {
-            tileMark.setVisible(false)
+            tileMark.setVisible(false, animated: animated)
             return
         }
         attachMark(to: cell)
-        tileMark.setVisible(true)
+        tileMark.setVisible(true, animated: animated)
+        tileMark.alpha = pausedMarkShare
     }
+
+    /// The tile's mark's share while the list's move carries it from the
+    /// card (#1580): its opacity, from 0 closed to 1 open — the card's mark
+    /// wears the rest. Kept for a tile drawn later in the move.
+    func setPausedMarkShare(_ share: CGFloat) {
+        pausedMarkShare = share
+        if tileMark.superview != nil { tileMark.alpha = share }
+    }
+
+    private var pausedMarkShare: CGFloat = 1
 
     /// On the CELL, above its content: a tile's looping clip mounts its
     /// surface in the content after the mark, and covered it.
@@ -483,6 +491,12 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
     func debugShowsPausedMark(on id: PostID) -> Bool {
         pausedMarkID == id && tileMark.isShowing && tileMark.superview != nil
     }
+
+    /// The list's viewport corner. Tests.
+    var debugViewportCornerRadius: CGFloat { collection.clipsToBounds ? collection.layer.cornerRadius : 0 }
+
+    /// The tile's mark's opacity. Tests.
+    var debugPausedMarkAlpha: CGFloat { tileMark.alpha }
 
     /// How much each tile wears the ring, 0…1 (#1546): the post on show's
     /// alone at rest, two sharing it while the card moves between them.
@@ -509,6 +523,13 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         collection = UICollectionView(frame: .zero, collectionViewLayout: layout)
         super.init(frame: .zero)
         collection.backgroundColor = .clear
+        // ⚠️ THE LIST'S EDGES WEAR THE TILES' CORNER (the owner, 2026-10-22):
+        // scrolled, a tile met the list's top and bottom on a flat cut; the
+        // viewport is rounded like a tile, so a tile half out is a rounded
+        // shape too.
+        collection.layer.cornerRadius = SnapSideList.Geometry.tileCornerRadius
+        collection.layer.cornerCurve = .continuous
+        collection.clipsToBounds = true
         collection.showsVerticalScrollIndicator = false
         collection.alwaysBounceVertical = true
         collection.dataSource = self
@@ -527,6 +548,9 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         self.entries = entries
         collection.reloadData()
         collection.layoutIfNeeded()
+        // A new list starts at its top: its first tile is the post on show
+        // (#1509) — wherever the last list was scrolled.
+        collection.setContentOffset(CGPoint(x: 0, y: -collection.adjustedContentInset.top), animated: false)
         reconcilePlayback()
     }
 
@@ -553,6 +577,20 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
     func setPlaying(_ playing: Bool) {
         autoplay?.setActive(playing)
         if playing { reconcilePlayback() }
+    }
+
+    /// Reconciles now (the post on show changed, #1581).
+    func reconcileNow() { reconcilePlayback() }
+
+    /// Where `id`'s tile's own clip is, in seconds — nil when it plays none
+    /// (#1581: a picked post's card starts on that frame).
+    func tilePlayhead(for id: PostID) -> (url: URL, seconds: Double)? {
+        guard let autoplay, let index = entries.firstIndex(where: { $0.post.id == id }),
+              let cell = collection.cellForItem(at: IndexPath(item: index, section: 0)) as? PostGridTileCell,
+              let surface = cell.loadedVideoRenderView,
+              let url = ForYouRepository.galleryPost(from: entries[index]).videoURL,
+              let seconds = autoplay.playheadSeconds(in: surface) else { return nil }
+        return (url, seconds)
     }
 
     /// Reconciles the tiles' players against the tiles on screen.
@@ -586,6 +624,12 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         // tapped, or reached by paging the card — comes fully into view on
         // that edge; a whole one does not move. It used to be centred, which
         // left its neighbours cut.
+        // ⚠️ NEVER AGAINST AN EMPTY VIEWPORT (#1580): the list loads as a
+        // swipe begins, often at once from its cache, before any pose has
+        // placed it. Against 0 pt, "show the first tile whole" scrolled a
+        // tile and a half past it, for the whole opening, and the outline at
+        // the settle scrolled back — the owner's recording.
+        guard collection.bounds.height > 0 else { return }
         if let id, let index = entries.firstIndex(where: { $0.post.id == id }),
            let tile = collection.layoutAttributesForItem(at: IndexPath(item: index, section: 0))?.frame,
            let offset = SnapSideList.Snapping.reveal(
@@ -691,6 +735,7 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         if entries[indexPath.item].post.id == pausedMarkID {
             attachMark(to: cell)
             tileMark.setVisible(true, animated: false)
+            tileMark.alpha = pausedMarkShare
         } else if tileMark.superview === cell {
             tileMark.removeFromSuperview()
         }

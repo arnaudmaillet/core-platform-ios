@@ -114,6 +114,42 @@ struct SnapSideListSnappingTests {
         #expect(list.debugBone(on: cells[1]) == (true, false), "a failed cover's bone still shimmers, or left")
     }
 
+    // MARK: - No scroll while the list opens (#1580)
+
+    /// ⚠️ THE OWNER'S RECORDING (2026-10-22): the list loads as a swipe
+    /// begins, often at once, before any pose has given it a height. Its
+    /// outline then "revealed" the first tile against a 0-pt viewport and
+    /// scrolled a tile and a half past it for the whole opening, until the
+    /// settle's outline scrolled back. A list with no height never scrolls.
+    @Test func aListWithNoHeightYetNeverScrolls() {
+        let list = SnapSideListView(imagePipeline: ImagePipeline(fetcher: PendingFetcher()))
+        list.tileSize = CGSize(width: 47, height: 62)
+        list.show((0..<14).map { Self.entry("m\($0)") })
+        list.outline(PostID("m0"))
+        #expect(list.debugOffset == 0, "the list scrolled against an empty viewport")
+        // The opening places it: still on its first tile.
+        list.frame = CGRect(x: 0, y: 0, width: 47, height: 674)
+        list.layoutIfNeeded()
+        list.outline(PostID("m0"))
+        #expect(list.debugOffset == 0, "the first tile, already whole, moved")
+    }
+
+    /// A new list starts at its top — its first tile is the post on show —
+    /// whatever the last list was scrolled to.
+    @Test func aNewListStartsAtItsTop() {
+        let list = makeList((0..<20).map { Self.entry("a\($0)") })
+        list.debugOffset = 300
+        list.show((0..<20).map { Self.entry("b\($0)") })
+        #expect(list.debugOffset == 0)
+    }
+
+    /// The list's viewport is rounded like a tile: a tile scrolled half out
+    /// is cut on a curve, never on a flat line (the owner, 2026-10-22).
+    @Test func theListsEdgesWearTheTilesCorner() {
+        let list = makeList((0..<14).map { Self.entry("m\($0)") })
+        #expect(list.debugViewportCornerRadius == SnapSideList.Geometry.tileCornerRadius)
+    }
+
     /// The list's tiles are the geometry's size (#1545).
     @Test func theTilesAreTheGeometrysSize() throws {
         let list = makeList((0..<12).map { Self.entry("m\($0)") })

@@ -37,6 +37,15 @@ public enum PagedScreenDismissalPolicy {
     /// finger is already tens of points past this strip.
     public static let edgeZone: CGFloat = 28
 
+    /// The TRAILING strip a leftward drag claims for the screen over a
+    /// carousel's own paging (#1580: the snap feed's side list, or the
+    /// author's profile, from any photo). Wider than `edgeZone`: nothing
+    /// system-owned shares this edge, and the owner's thumb, swiping in "from
+    /// the right edge" on the device, landed past the 28 pt strip and paged
+    /// the carousel instead (2026-10-22). A carousel swipe starts on the
+    /// photo, well clear of it.
+    public static let trailingEdgeZone: CGFloat = 44
+
     /// Whether a drag beginning at `x` (in the screen's own coordinates) may
     /// dismiss, given which tab is up.
     ///

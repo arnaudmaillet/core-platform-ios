@@ -648,13 +648,19 @@ final class SnapMediaCardView: UIView {
     private let singleMark = PausedClipMarkView()
 
     /// Shows or hides the mark on the picture the viewer is looking at.
-    func setPausedMark(_ visible: Bool) {
+    func setPausedMark(_ visible: Bool, animated: Bool = true) {
         if showsCollection {
-            carousel?.setPausedMark(visible, onPage: currentPage)
+            carousel?.setPausedMark(visible, onPage: currentPage, animated: animated)
         } else {
             if visible { bringSubviewToFront(singleMark) }
-            singleMark.setVisible(visible)
+            singleMark.setVisible(visible, animated: animated)
         }
+    }
+
+    /// The mark's share while the side list's move carries it to the
+    /// post's tile and back (#1580): its opacity, the mark kept up.
+    func setPausedMarkShare(_ share: CGFloat) {
+        visiblePausedMark?.alpha = share
     }
 
     /// Whether the picture in front of the viewer wears the mark.

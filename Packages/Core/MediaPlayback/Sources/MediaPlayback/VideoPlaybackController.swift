@@ -2385,6 +2385,23 @@ public final class VideoPlaybackController {
     ///
     /// Not `stop(_:)`: that returns a pool loan and tears the player down.
     /// This surface never held one.
+    /// Files `view`'s playback under `scope` — a player handed from one
+    /// owner to another (a side-list tile's clip taken over by its post's
+    /// page, #1581) belongs to the new owner's scope, or its own next `play`
+    /// would not recognise it and mint a fresh one at the filed second.
+    public func rescope(_ view: VideoRenderView, to scope: String) {
+        let key = ObjectIdentifier(view)
+        guard activePlayers[key] != nil else { return }
+        playingScope[key] = scope
+    }
+
+    /// Whether two surfaces draw the same player — one playback, two
+    /// pictures (a passive surface bound `alongsideSurface`).
+    public func sharesPlayback(_ view: VideoRenderView, with other: VideoRenderView) -> Bool {
+        guard let player = view.boundPlayer else { return false }
+        return player === other.boundPlayer
+    }
+
     public func detachSurface(_ view: VideoRenderView, reason: String = "detachSurface") {
         guard activePlayers[ObjectIdentifier(view)] == nil else { return }
         view.detach(reason: reason)

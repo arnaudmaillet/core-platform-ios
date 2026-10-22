@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import MediaCore
 import Testing
 import UIKit
@@ -146,6 +147,10 @@ struct CarouselTravelTests {
                 "a photo with one after it gave up its turn")
         #expect(view.yieldsLeftwardDrag(velocity: leftward, originX: edge, windowWidth: width),
                 "a drag born at the trailing edge did not open the list")
+        // A thumb "from the edge" lands well inside it on a device (#1580).
+        let thumb = width - PagedScreenDismissalPolicy.trailingEdgeZone + 2
+        #expect(view.yieldsLeftwardDrag(velocity: leftward, originX: thumb, windowWidth: width),
+                "a thumb's swipe from the right edge paged the carousel")
     }
 
     /// ⚠️ PREDOMINANTLY HORIZONTAL, which is the mirror of the dismissal's own
