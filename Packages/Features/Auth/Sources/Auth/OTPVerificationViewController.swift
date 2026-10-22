@@ -38,9 +38,9 @@ final class OTPVerificationViewController: UITableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Enter Code"
-        // No effect under the bar: the rows run up under the pills untouched — see
-        // `prefersClearTopEdge`.
-        tableView.prefersClearTopEdge()
+        // A titled header: the soft blur covers the bar (#1591) — see
+        // `applyTopEdge(for:)`.
+        tableView.applyTopEdge(for: .titled)
         navigationItem.rightBarButtonItem = verifyButton
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             systemItem: .cancel,

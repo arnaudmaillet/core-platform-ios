@@ -168,9 +168,9 @@ final class MessageRequestsViewController: UIViewController {
         // switch reads as motion nobody asked for.
         tableView.showsVerticalScrollIndicator = false
         tableView.showsHorizontalScrollIndicator = false
-        // No effect under the bar: the rows run up under the pills untouched — see
-        // `prefersClearTopEdge`.
-        tableView.prefersClearTopEdge()
+        // A titled header: the soft blur covers the bar (#1591) — see
+        // `applyTopEdge(for:)`.
+        tableView.applyTopEdge(for: .titled)
         tableView.delegate = self
         tableView.register(
             InboxSectionHeaderView.self,

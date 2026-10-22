@@ -45,9 +45,9 @@ final class EditLinksViewController: UIViewController {
 
     private func configureLayout() {
         scrollView.keyboardDismissMode = .interactive
-        // No effect under the bar: the rows run up under the pills untouched — see
-        // `prefersClearTopEdge`.
-        scrollView.prefersClearTopEdge()
+        // A titled header: the soft blur covers the bar (#1591) — see
+        // `applyTopEdge(for:)`.
+        scrollView.applyTopEdge(for: .titled)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scrollView)
 

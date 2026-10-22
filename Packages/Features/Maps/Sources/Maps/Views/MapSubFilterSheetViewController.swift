@@ -282,9 +282,9 @@ final class MapSubFilterSheetViewController: UIViewController {
         // two things you can do to it — remove/add, and drag; a highlight on
         // tap would promise a third that doesn't exist.
         collectionView.allowsSelection = false
-        // No effect under the bar: the rows run up under the pills untouched — see
-        // `prefersClearTopEdge`.
-        collectionView.prefersClearTopEdge()
+        // A titled header: the soft blur covers the bar (#1591) — see
+        // `applyTopEdge(for:)`.
+        collectionView.applyTopEdge(for: .titled)
         collectionView.pin(to: view)
 
         let registration = UICollectionView.CellRegistration<MapSubFilterRowCell, MapSubFilter> {

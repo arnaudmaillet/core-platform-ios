@@ -68,17 +68,18 @@ struct ProfileChildChromeTests {
         #expect(SettingsComingSoonViewController(section: .wallet).hidesBottomBarWhenPushed)
     }
 
-    /// ⚠️ The profile editor runs under its bar with no system effect drawn
-    /// there — neither iOS 26's fade nor iOS 27's hard band — see
-    /// `prefersClearTopEdge`.
-    @Test func theProfileEditorRunsUnderItsBarWithNoSystemEffect() throws {
+    /// The profile editor is titled: since #1591 its list wears the soft blur
+    /// over the bar — see `applyTopEdge(for:)`.
+    @Test func theTitledProfileEditorWearsTheSoftBlur() throws {
         let editor = EditProfileViewController(
             viewModel: EditProfileViewModel(repository: StubProfiles(), onSaved: {}),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher())
         )
         editor.loadViewIfNeeded()
         let list = try #require(editor.view.subviews.compactMap { $0 as? UICollectionView }.first)
-        #expect(list.topEdgeEffect.isHidden)
+        // Titled "Edit Profile" (#1591): the soft blur covers its bar.
+        #expect(!list.topEdgeEffect.isHidden)
+        #expect(list.topEdgeEffect.style == .soft)
     }
 
     /// Settings screens are the exception (2026-10-04): UIKit's SOFT top

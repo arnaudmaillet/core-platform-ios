@@ -168,9 +168,9 @@ final class SearchFilterSheetViewController: UIViewController {
 
         let scroll = UIScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
-        // No effect under the bar: the rows run up under the pills untouched — see
-        // `prefersClearTopEdge`.
-        scroll.prefersClearTopEdge()
+        // A titled header: the soft blur covers the bar (#1591) — see
+        // `applyTopEdge(for:)`.
+        scroll.applyTopEdge(for: .titled)
         scroll.addSubview(stack)
         view.addSubview(scroll)
         NSLayoutConstraint.activate([
