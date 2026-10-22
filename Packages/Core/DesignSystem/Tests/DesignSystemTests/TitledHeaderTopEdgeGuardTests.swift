@@ -20,7 +20,7 @@ import Testing
 struct TitledHeaderTopEdgeGuardTests {
     /// File name → why its titled header stays clear.
     static let allowed: [String: String] = [
-        "PostDetailViewController.swift": "also the snap feed's embedded comment stream, where a blur would band the panel; standalone use goes with #1577",
+        "PostDetailViewController.swift": "the snap feed's embedded comment stream, where a blur would band the panel",
     ]
 
     private static var root: URL {

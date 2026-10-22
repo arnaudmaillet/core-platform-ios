@@ -95,9 +95,9 @@ struct UnavailablePostActionsTests {
         )
     }
 
-    private func makeScreen(_ viewModel: PostDetailViewModel, mode: PostDetailMode) -> PostDetailViewController {
+    private func makeScreen(_ viewModel: PostDetailViewModel) -> PostDetailViewController {
         let screen = PostDetailViewController(
-            viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: Unreachable()), mode: mode
+            viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: Unreachable())
         )
         screen.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         screen.loadViewIfNeeded()
@@ -151,22 +151,9 @@ struct UnavailablePostActionsTests {
 
     // MARK: - Acceptance
 
-    /// AC1: the pushed post (`.full`, the `.post` route) opened on a post no
-    /// one but its author may read shows no composer and no enabled action.
-    @Test func anUnavailablePostsDetailShowsNoComposerAndNoEnabledAction() async {
-        let viewModel = PostDetailViewModel(
-            postID: PostID("post-1"), repository: Provider(.failure(.notFound)),
-            engagementProvider: SpyEngagement(), commentsProvider: SpyComments()
-        )
-        let screen = makeScreen(viewModel, mode: .full)
-        #expect(await settle { readsUnavailable(screen) })
-        #expect(offersNoPostAction(screen), "composers \(composers(in: screen.view)), controls \(actionableControls(in: screen.view))")
-        withExtendedLifetime(viewModel) {}
-    }
-
-    /// AC2: the comment sheet (`.commentsOnly`, the `.comments` route) opened
-    /// on a post moderation took down — over the mock, `-mock-takedown`'s
-    /// path — shows no composer and no enabled action either.
+    /// The comments panel opened on a post moderation took down — over the
+    /// mock, `-mock-takedown`'s path — shows no composer and no enabled
+    /// action.
     @Test func aCommentSheetOnAnUnavailablePostShowsNoComposerAndNoEnabledAction() async throws {
         let backend = MockBackend()
         let client = backend.makeRPCClient()
@@ -186,23 +173,22 @@ struct UnavailablePostActionsTests {
             postID: postID, repository: repository,
             engagementProvider: SpyEngagement(), commentsProvider: SpyComments()
         )
-        let sheet = makeScreen(viewModel, mode: .commentsOnly)
+        let sheet = makeScreen(viewModel)
         #expect(await settle { readsUnavailable(sheet) })
         #expect(offersNoPostAction(sheet), "composers \(composers(in: sheet.view)), controls \(actionableControls(in: sheet.view))")
         withExtendedLifetime(viewModel) {}
     }
 
-    /// AC3: opened on the warm copy, the post shows its composer and its
-    /// actions; the revalidation then answers not-found, and the SAME screen
-    /// loses them where it stands — in both modes.
-    @Test(arguments: [PostDetailMode.full, .commentsOnly])
-    func aPostThatTurnsUnavailableWhileShownLosesItsActionsInPlace(mode: PostDetailMode) async {
+    /// Opened on the warm copy, the panel shows its composer and its
+    /// actions; the revalidation then answers not-found, and the SAME panel
+    /// loses them where it stands.
+    @Test func aPostThatTurnsUnavailableWhileShownLosesItsActionsInPlace() async {
         let provider = Provider(.failure(.notFound), peekable: entry(), holding: true)
         let viewModel = PostDetailViewModel(
             postID: PostID("post-1"), repository: provider,
             engagementProvider: SpyEngagement(), commentsProvider: SpyComments()
         )
-        let screen = makeScreen(viewModel, mode: mode)
+        let screen = makeScreen(viewModel)
         // Shown: the warm copy, with its composer and something to act with.
         #expect(await settle {
             screen.view.layoutIfNeeded()
@@ -231,7 +217,7 @@ struct UnavailablePostActionsTests {
         let viewModel = PostDetailViewModel(postID: PostID("post-1"), repository: Provider(.failure(.notFound)))
         let screen = PostDetailViewController(
             viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: Unreachable()),
-            mode: .commentsOnly, wallet: wallet
+            wallet: wallet
         )
         screen.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         screen.loadViewIfNeeded()

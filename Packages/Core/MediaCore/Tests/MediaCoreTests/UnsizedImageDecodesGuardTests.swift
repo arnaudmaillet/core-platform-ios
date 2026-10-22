@@ -28,7 +28,6 @@ struct UnsizedImageDecodesGuardTests {
         "PlaceProfileViewController.swift": "the place page's banner, full width",
         "ThreadMediaViewer.swift": "a conversation's media, full screen",
         "ThreadMediaView.swift": "a conversation's media bubble, the viewer's hero source",
-        "PostDetailViewController.swift": "the post's media (its avatar is sized)",
         "WalletClaimViews.swift": "a stake row's post cover, the hero source of the post it opens",
     ]
 

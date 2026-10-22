@@ -170,7 +170,6 @@ struct OwnCommentsSectionTests {
         let controller = PostDetailViewController(
             viewModel: viewModel,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            mode: .commentsOnly,
             threadChrome: true,
             groupsByDay: groupsByDay
         )

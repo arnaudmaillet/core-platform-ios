@@ -5,7 +5,6 @@ import CoreNetworking
 import CoreStorage
 import MediaCore
 import DesignSystem
-import EmoteKit
 import FeedInterface
 import ProfileInterface
 import UIKit
@@ -43,7 +42,6 @@ private final class StreamSectionPolicy: @unchecked Sendable {
     }
 }
 private enum StreamItem: Hashable {
-    case postSection
     /// The post's caption, as the list's first row — a message bubble in
     /// the thread rather than a fixed header above it.
     case caption
@@ -63,18 +61,12 @@ final class PostDetailViewController: UIViewController {
         if let postID = viewModel.postID { viewHistory?.record(postID.rawValue) }
     }
 
-    private enum Metrics {
-        static let avatarSize: CGFloat = 44
-    }
-
     private let viewModel: PostDetailViewModel
     private let imagePipeline: ImagePipeline
-    private let mode: PostDetailMode
     /// A TEXT post's resting comments: the threads grouped under pinned day
     /// pills (Recent order only), and the long press lifting the row into its
-    /// menu. False everywhere else — media comment panels and the pushed
-    /// `.comments` screen — where nothing below runs and each row keeps its
-    /// own menu.
+    /// menu. False for the media pages' comment panels, where nothing below
+    /// runs and each row keeps its own menu.
     private let threadChrome: Bool
     /// The threads grouped under a day chip each, in Recent order (#757):
     /// every snap page's comments — media and text — not only a text page's.
@@ -84,9 +76,8 @@ final class PostDetailViewController: UIViewController {
     /// The order the engaged toolbar last chose; day grouping follows Recent
     /// only — a Trending rank has no chronology to pin days over.
     private var commentSortOrder: SnapCommentSortButton.Order = .recent
-    /// Builds the composer avatar's profile switcher menu. Nil on the pushed
-    /// comments screen and wherever the app wires none — the face is then a
-    /// plain, inert identity.
+    /// Builds the composer avatar's profile switcher menu. Nil wherever the
+    /// app wires none — the face is then a plain, inert identity.
     private let profileSwitcher: (any ProfileSwitcherPresenting)?
     /// Watches for profile switches made ANYWHERE — this composer's menu, or
     /// the profile header while the comments sit open underneath.
@@ -101,7 +92,6 @@ final class PostDetailViewController: UIViewController {
         // Captured by VALUE: the layout closure outlives nothing here, but a
         // section provider that reaches back through `self` is a retain cycle
         // waiting for someone to forget the `weak`.
-        let leadsWithCaption = mode != .full
         let policy = streamPolicy
         let layout = UICollectionViewCompositionalLayout { index, environment in
             var config = UICollectionLayoutListConfiguration(appearance: .plain)
@@ -112,7 +102,7 @@ final class PostDetailViewController: UIViewController {
             // trailing inset used to carry an exclusion for the shortcut
             // rail's column; the engagement fades the rail now, so there is
             // no column to leave clear.)
-            // NO TOP INSET when the caption leads, and the reason is that the
+            // NO TOP INSET: the stream leads with the caption row, and the
             // caption row already carries one.
             //
             // It is the CARD's `captionTopInset`, reproduced deliberately so
@@ -125,11 +115,9 @@ final class PostDetailViewController: UIViewController {
             //
             // Dropping it moves the row up bodily, caption and all, so the
             // reveal's registration is untouched: the anchor is the row's own
-            // frame and it travels with it. Full mode leads with the post
-            // section instead, which has no inset of its own, so it keeps the
-            // section's.
+            // frame and it travels with it.
             section.contentInsets = NSDirectionalEdgeInsets(
-                top: leadsWithCaption ? 0 : Spacing.lg,
+                top: 0,
                 leading: Spacing.lg,
                 bottom: Spacing.lg,
                 trailing: Spacing.lg
@@ -185,37 +173,19 @@ final class PostDetailViewController: UIViewController {
     /// when that is why (#794).
     private var commentsFailureText = PostDetailViewModel.commentsFailureMessage
     private var streamModels: [String: CommentDisplayModel] = [:]
-    /// The full-mode post section (header/media/engagement), built once
-    /// and hosted by the stream's leading cell.
-    private let postSectionHost = UIView()
-    private let refreshControl = AppRefreshControl()
-    private let spinner = AppLoaderView(size: .large)
     /// A failed first load, with its way out (#797).
     private let statusView = EmptyStateView()
 
-    private let avatarView = UIView()
-    private let avatarImageView = UIImageView()
-    private let monogramLabel = UILabel()
-    private let nameLabel = UILabel()
-    private let handleLabel = UILabel()
-    private let captionLabel = EmoteLabel()
-    private let mediaView = UIImageView()
-    private let timestampLabel = UILabel()
-    private let likeButton = UIButton(configuration: .plain())
-    private let likeCountLabel = UILabel()
-
-    private let commentsHeaderLabel = UILabel()
     private let composeBar = CommentsInputBar()
 
-    private var mediaAspectConstraint: NSLayoutConstraint?
     private var composeBottomDefault: NSLayoutConstraint?
     private var composeBottomEngaged: [NSLayoutConstraint] = []
     /// **The action column (`SnapActionColumn`).** The engaged composer
     /// stands its stake and rail slot ON the media layout's like and repost
     /// bubbles — same size, same screen coordinates — so opening and closing
     /// the comments crossfades two bubbles that never move. The slot wears
-    /// REPOST, and never anything else; the waveform and the send arrow are
-    /// in the field.
+    /// the post's sound (`publishedRailFace`); the waveform and the send
+    /// arrow are in the field.
     ///
     /// - AT REST the bar's input row sits on the toolbar like every composer's
     ///   (`SnapActionColumn.inputRestingGap`) and the bar lifts its column to
@@ -244,7 +214,6 @@ final class PostDetailViewController: UIViewController {
         maskColors: SnapCommentsLayout.footerFrostMaskColors,
         maskLocations: SnapCommentsLayout.footerFrostMaskLocations
     )
-    private var imageTasks: [Task<Void, Never>] = []
     /// The threaded stream as last loaded — kept so expansion re-renders
     /// without a refetch.
     private var latestComments: [CommentDisplayModel] = []
@@ -289,8 +258,8 @@ final class PostDetailViewController: UIViewController {
     private let walletObservers = NotificationObserverTokenBag()
     /// The session's undoable spend through THIS bar. Its window is this
     /// controller's lifetime, which IS the product rule: the embedded
-    /// comments panel is torn down when the page changes, and the pushed
-    /// screen when it pops — either way, moving on finalizes the spend.
+    /// comments panel is torn down when the page changes, so moving on
+    /// finalizes the spend.
     private var sessionBoostAmount = 0
     /// The stake toast up for that spend (#957), closed with the window.
     private weak var stakeToast: ToastView?
@@ -298,7 +267,6 @@ final class PostDetailViewController: UIViewController {
     init(
         viewModel: PostDetailViewModel,
         imagePipeline: ImagePipeline,
-        mode: PostDetailMode = .full,
         profileSwitcher: (any ProfileSwitcherPresenting)? = nil,
         wallet: WalletStore? = nil,
         threadChrome: Bool = false,
@@ -306,7 +274,6 @@ final class PostDetailViewController: UIViewController {
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
-        self.mode = mode
         self.threadChrome = threadChrome
         self.groupsByDay = threadChrome || groupsByDay
         self.profileSwitcher = profileSwitcher
@@ -316,10 +283,6 @@ final class PostDetailViewController: UIViewController {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    deinit {
-        for task in imageTasks { task.cancel() }
-    }
 
     /// Takes back everything this bar spent while the screen stayed up — the
     /// menu's Undo entry and the stake toast's (#957).
@@ -424,12 +387,12 @@ final class PostDetailViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = mode == .commentsOnly ? "Comments" : "Post"
+        title = "Comments"
         view.backgroundColor = .systemBackground
         configureViews()
         // The snap feed's comments panel stands its stake bubble on the media
         // layout's like button: the same heart, badge and menu (#668).
-        composeBar.usesLikeFace = mode == .commentsOnly
+        composeBar.usesLikeFace = true
         pushComposerLikeCount()
         if viewModel.isDraft { configureDraft() }
 
@@ -566,16 +529,12 @@ final class PostDetailViewController: UIViewController {
         // surfaces rather than one.)
         //
         // It keeps NO refresh control, though: that competed for the same
-        // gesture outright. The PUSHED POST screen (`.full`, the `.post`
-        // deep link) is a different surface with no layout to collapse to —
-        // it keeps its refresh.
-        let isCommentList = mode == .commentsOnly
+        // gesture outright.
         collectionView.alwaysBounceVertical = true
         collectionView.bounces = true
-        // ⚠️ CLEAR, THE ONE TITLED EXCEPTION (#1591): this list is also the
-        // snap feed's EMBEDDED comment stream (`commentsContentVC`), where a
-        // soft blur would draw a band over the panel. Its title only shows
-        // when pushed alone, which #1577 removes.
+        // ⚠️ CLEAR, THE ONE TITLED EXCEPTION (#1591): this list is the snap
+        // feed's EMBEDDED comment stream (`commentsContentVC`), where a soft
+        // blur would draw a band over the panel.
         collectionView.prefersClearTopEdge()
         collectionView.keyboardDismissMode = .interactive
         // A bare tap on the stream retires the keyboard (the drag path
@@ -587,10 +546,6 @@ final class PostDetailViewController: UIViewController {
         let keyboardDismissTap = UITapGestureRecognizer(target: self, action: #selector(handleStreamTap))
         keyboardDismissTap.cancelsTouchesInView = false
         collectionView.addGestureRecognizer(keyboardDismissTap)
-        if !isCommentList {
-            refreshControl.addAction(UIAction { [weak self] _ in self?.viewModel.refresh() }, for: .valueChanged)
-            collectionView.refreshControl = refreshControl
-        }
         // With bouncing back on, the overshoot itself is the signal — the
         // scroll delegate reports it continuously, during the drag AND
         // through the spring-back, which is what makes the cancel free.
@@ -625,101 +580,6 @@ final class PostDetailViewController: UIViewController {
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ] + scrollBottomDefault)
 
-        // Author row: avatar + name/handle, tappable → profile.
-        avatarView.backgroundColor = .tertiarySystemFill
-        avatarView.layer.cornerRadius = Metrics.avatarSize / 2
-        avatarView.clipsToBounds = true
-        monogramLabel.font = .systemFont(ofSize: 17, weight: .semibold)
-        monogramLabel.textColor = .secondaryLabel
-        monogramLabel.textAlignment = .center
-        monogramLabel.pin(to: avatarView)
-        avatarImageView.contentMode = .scaleAspectFill
-        avatarImageView.clipsToBounds = true
-        avatarImageView.pin(to: avatarView) // overlays the monogram once loaded
-
-        nameLabel.font = .appFont(forTextStyle: .headline)
-        nameLabel.adjustsFontForContentSizeCategory = true
-        nameLabel.textColor = .label
-        handleLabel.font = .appFont(forTextStyle: .subheadline)
-        handleLabel.adjustsFontForContentSizeCategory = true
-        handleLabel.textColor = .secondaryLabel
-
-        let nameStack = UIStackView(arrangedSubviews: [nameLabel, handleLabel])
-        nameStack.axis = .vertical
-        nameStack.spacing = 2
-        let authorRow = UIStackView(arrangedSubviews: [avatarView, nameStack])
-        authorRow.axis = .horizontal
-        authorRow.alignment = .center
-        authorRow.spacing = Spacing.md
-        authorRow.isUserInteractionEnabled = true
-        authorRow.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(authorTapped)))
-
-        captionLabel.font = .appFont(forTextStyle: .body)
-        captionLabel.adjustsFontForContentSizeCategory = true
-        captionLabel.textColor = .label
-        captionLabel.numberOfLines = 0
-        captionLabel.textEntityStyle = .link
-        captionLabel.opensTextEntities = true
-
-        mediaView.clipsToBounds = true
-        mediaView.layer.cornerRadius = 12
-        mediaView.backgroundColor = .tertiarySystemFill
-        mediaView.contentMode = .scaleAspectFill
-
-        timestampLabel.font = .appFont(forTextStyle: .footnote)
-        timestampLabel.adjustsFontForContentSizeCategory = true
-        timestampLabel.textColor = .secondaryLabel
-
-        var likeConfig = UIButton.Configuration.plain()
-        likeConfig.image = AppSymbol.like.image()
-        likeConfig.contentInsets = .zero
-        likeButton.configuration = likeConfig
-        likeButton.addAction(UIAction { [weak self] _ in
-            guard let self else { return }
-            MemberGates.perform(.like, from: self) { [weak self] in self?.viewModel.like() }
-        }, for: .primaryActionTriggered)
-        likeCountLabel.font = .appFont(forTextStyle: .subheadline)
-        likeCountLabel.textColor = .secondaryLabel
-        let likeRow = UIStackView(arrangedSubviews: [likeButton, likeCountLabel, UIView()])
-        likeRow.axis = .horizontal
-        likeRow.alignment = .center
-        likeRow.spacing = Spacing.xs
-
-        commentsHeaderLabel.text = "Comments"
-        commentsHeaderLabel.font = .appFont(forTextStyle: .headline)
-        commentsHeaderLabel.adjustsFontForContentSizeCategory = true
-        commentsHeaderLabel.textColor = .label
-        commentsHeaderLabel.isHidden = true
-
-        // The post section (header/media/engagement + the inline comments
-        // title), built once into the retained host — the stream's leading
-        // cell adopts it in full mode; comments-only never lists the item.
-        let postSectionStack = UIStackView(
-            arrangedSubviews: [authorRow, captionLabel, mediaView, timestampLabel, likeRow, commentsHeaderLabel]
-        )
-        postSectionStack.axis = .vertical
-        postSectionStack.spacing = Spacing.md
-        postSectionStack.setCustomSpacing(Spacing.lg, after: likeRow)
-        postSectionStack.translatesAutoresizingMaskIntoConstraints = false
-        postSectionHost.addSubview(postSectionStack)
-        NSLayoutConstraint.activate([
-            postSectionStack.topAnchor.constraint(equalTo: postSectionHost.topAnchor),
-            postSectionStack.leadingAnchor.constraint(equalTo: postSectionHost.leadingAnchor),
-            postSectionStack.trailingAnchor.constraint(equalTo: postSectionHost.trailingAnchor),
-            postSectionStack.bottomAnchor.constraint(equalTo: postSectionHost.bottomAnchor, constant: -Spacing.sm),
-        ])
-
-        NSLayoutConstraint.activate([
-            avatarView.widthAnchor.constraint(equalToConstant: Metrics.avatarSize),
-            avatarView.heightAnchor.constraint(equalToConstant: Metrics.avatarSize)
-        ])
-
-        spinner.hidesWhenStopped = true
-        spinner.constrain(in: view) { parent in
-            spinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            spinner.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-        }
-
         statusView.isHidden = true
         statusView.constrain(in: view) { parent in
             statusView.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
@@ -728,10 +588,6 @@ final class PostDetailViewController: UIViewController {
             statusView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             statusView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
         }
-    }
-
-    @objc private func authorTapped() {
-        viewModel.didTapAuthor()
     }
 
     /// Pushes the wallet's current answer — affordability and the session
@@ -809,7 +665,7 @@ final class PostDetailViewController: UIViewController {
     /// The draft is a post now: the composer goes back to being a post's —
     /// "Comment as …", a send that comments, the boost in the slot the
     /// visibility held (a published post's audience is settled), and the
-    /// repost in the rail slot.
+    /// post's sound in the rail slot.
     private func becomePublished(_ entry: FeedEntry) {
         composeBar.defaultPlaceholder = nil
         composeBar.sendAccessibilityLabel = nil
@@ -863,8 +719,7 @@ final class PostDetailViewController: UIViewController {
     }
 
     private func configureComposeBar() {
-        // A post's rail slot is its REPOST — drawn without an action, like the
-        // media layout's bubble (no client path publishes one yet). A draft
+        // A post's rail slot wears its sound (`publishedRailFace`). A draft
         // is not a post: its slot stays empty until it is.
         composeBar.railFace = viewModel.isDraft ? .empty : publishedRailFace
         // The Liquid Glass composer (Private Messages' recipe): a floating
@@ -1007,8 +862,7 @@ final class PostDetailViewController: UIViewController {
     /// each phase with the raw downward translation and release velocity;
     /// the host renders the progress and decides, on release, whether to
     /// finish or spring back. Left unwired by text posts (whose engagement
-    /// is permanent) and by the pushed comments screen — nil makes the
-    /// gesture a plain scroll.
+    /// is permanent) — nil makes the gesture a plain scroll.
     func setPullDismissDriveHandler(
         _ handler: @escaping (CommentsInputBar.PageSwipePhase, _ translation: CGFloat, _ velocity: CGFloat) -> Void
     ) {
@@ -1064,7 +918,7 @@ final class PostDetailViewController: UIViewController {
         // The footer band rides the same seam — this already runs inside the
         // master spring both ways, and `effect` is the one animatable path
         // for a material. Window-guarded (headless CI never pays for a real
-        // blur) and gated on the engaged context (the pushed screen has no
+        // blur) and gated on the engaged context (outside it there is no
         // band).
         if offstage {
             composerBackdrop.effect = nil
@@ -1190,8 +1044,7 @@ final class PostDetailViewController: UIViewController {
         collectionView.contentInset.top = max(0, top)
         collectionView.verticalScrollIndicatorInsets.top = max(0, top)
         collectionView.contentOffset = CGPoint(x: 0, y: -max(0, top))
-        // A clean minimal stream: no indicator (engaged context only — the
-        // pushed comments screen keeps its native affordance).
+        // A clean minimal stream: no indicator (engaged context only).
         collectionView.showsVerticalScrollIndicator = false
         // TOTAL immersion: the stream spans the full height and glides
         // BEHIND the footer too — the scroll's bottom swaps from the
@@ -1270,29 +1123,19 @@ final class PostDetailViewController: UIViewController {
         switch phase {
         case .loading:
             statusView.isHidden = true
-            if mode == .commentsOnly {
-                // The skeleton stream IS the loading state (the messages
-                // doctrine) — no spinner, no hidden surface.
-                spinner.stopAnimating()
-                collectionView.isHidden = false
-                if !hasAppliedStream { applyStream(animated: false) }
-            } else {
-                if !refreshControl.isRefreshing { spinner.startAnimating() }
-                collectionView.isHidden = true
-            }
+            // The skeleton stream IS the loading state (the messages
+            // doctrine) — no spinner, no hidden surface.
+            collectionView.isHidden = false
+            if !hasAppliedStream { applyStream(animated: false) }
         case .content(let model):
-            spinner.stopAnimating()
-            refreshControl.endRefreshing()
             statusView.isHidden = true
             collectionView.isHidden = false
             setPostActionsShown(true)
             configure(model)
         case .failed(let message):
-            spinner.stopAnimating()
-            refreshControl.endRefreshing()
             collectionView.isHidden = true
-            // ⚠️ A WAY OUT (#797): the refresh control it promised lives on
-            // the collection this hides, so "Pull to retry" could not be done.
+            // ⚠️ A WAY OUT (#797): "Pull to retry" was promised over a
+            // collection this hides, so it could not be done.
             statusView.configure(
                 symbolName: "exclamationmark.triangle", title: message,
                 actionTitle: "Try Again", actionHandler: { [weak self] in
@@ -1307,8 +1150,6 @@ final class PostDetailViewController: UIViewController {
             // A draft, a deleted post or one withheld from this viewer
             // (#447): the same block, without Try Again — and nothing left
             // to act on it with (#1404).
-            spinner.stopAnimating()
-            refreshControl.endRefreshing()
             collectionView.isHidden = true
             setPostActionsShown(false)
             statusView.configure(symbolName: "eye.slash", title: message)
@@ -1319,8 +1160,7 @@ final class PostDetailViewController: UIViewController {
 
     /// Whether the post's actions are on screen: the composer — its field,
     /// the stake (like) bubble, the boost and the rail slot — and the engaged
-    /// footer's band under it. (The post section's like goes with the stream,
-    /// which the unavailable block hides.)
+    /// footer's band under it.
     ///
     /// A post the server shows the viewer no more (#447) has none (#1404):
     /// a like or a comment would only be refused. The way back stays, and it
@@ -1369,7 +1209,7 @@ final class PostDetailViewController: UIViewController {
         composerBackdrop.setVeilOpacity(
             SnapCommentsLayout.frostVeilOpacity(hasMedia: model.hasMedia)
         )
-        if mode == .commentsOnly, model.hasCaption != hadCaption || hasAppliedStream {
+        if model.hasCaption != hadCaption || hasAppliedStream {
             // The apply that FIRST introduces the caption row lands without
             // animation, even though the stream has been applied before.
             //
@@ -1390,38 +1230,10 @@ final class PostDetailViewController: UIViewController {
                 introducesCaption: model.hasCaption && !hadCaption
             ))
         }
-        monogramLabel.text = model.avatarMonogram
-        nameLabel.text = model.authorName
-        handleLabel.text = model.handle
-        captionLabel.text = model.caption
-        captionLabel.isHidden = !model.hasCaption
-        timestampLabel.text = model.timestampText
-
-        mediaView.isHidden = !model.hasMedia
-        mediaAspectConstraint?.isActive = false
-        if model.hasMedia {
-            let constraint = mediaView.heightAnchor.constraint(
-                equalTo: mediaView.widthAnchor,
-                multiplier: 1 / max(0.5, model.mediaAspectRatio)
-            )
-            constraint.isActive = true
-            mediaAspectConstraint = constraint
-        }
-
-        loadAvatar(model.avatarURL)
-        loadMedia(model.mediaURL)
     }
 
     private func renderEngagement(_ state: PostDetailViewModel.EngagementState) {
-        likeCountLabel.text = state.likeCount > 0 && !state.countHidden ? "\(state.likeCount)" : ""
-        var config = likeButton.configuration
-        // Liked, the button's own filled Points heart (#1128; no overlay
-        // since #1186).
-        let glyph = UIImage.SymbolConfiguration(textStyle: .body)
-        config?.image = state.isLiked ? LikesSymbol.likeImage(staked: true, glyph) : AppSymbol.like.image()
-        config?.baseForegroundColor = .secondaryLabel
-        likeButton.configuration = config
-        // The caption row carries the same number in its closing line, and it
+        // The caption row carries the like count in its closing line, and it
         // is a LIVE one: the viewer can like the post from the toolbar with
         // that row on screen.
         // ⚠️ ONLY ONCE THE POST HAS LANDED. The state starts at zero for every
@@ -1473,7 +1285,7 @@ final class PostDetailViewController: UIViewController {
         avatarURL: URL? = nil,
         metrics: PostCardMetrics? = nil
     ) {
-        guard mode == .commentsOnly, !text.isEmpty, latestPost == nil else { return }
+        guard !text.isEmpty, latestPost == nil else { return }
         seededCaption = (text, timestamp)
         seededAuthor = (authorName, monogram, avatarURL)
         seededCardMetrics = metrics
@@ -1485,12 +1297,11 @@ final class PostDetailViewController: UIViewController {
     /// The post this panel is about — nil on a draft.
     var postID: PostID? { viewModel.postID }
 
-    /// What a published post's rail slot wears: in the snap feed's panel, the
-    /// sound's cover the feed hands over (`setRailSoundFace`, #671) — nothing
-    /// for a post with no sound bubble; elsewhere the repost.
+    /// What a published post's rail slot wears: the sound's cover the snap
+    /// feed hands over (`setRailSoundFace`, #671) — nothing for a post with
+    /// no sound bubble.
     private var publishedRailFace: CommentsInputBar.RailFace {
-        guard mode == .commentsOnly else { return .repost }
-        return railSoundFace.map { .sound($0) } ?? .empty
+        railSoundFace.map { .sound($0) } ?? .empty
     }
 
     private var railSoundFace: SnapSoundFace?
@@ -1573,10 +1384,6 @@ final class PostDetailViewController: UIViewController {
     }
 
     private func renderComments(_ state: PostDetailViewModel.CommentsState) {
-        // Comments-only contexts already carry a "Comments" title (the nav
-        // bar when pushed, the panel header when sheeted) — the inline
-        // section header would duplicate it.
-        commentsHeaderLabel.isHidden = mode == .commentsOnly
         let models: [CommentDisplayModel]
         switch state {
         case .loaded(let loaded):
@@ -1919,20 +1726,6 @@ final class PostDetailViewController: UIViewController {
     }
 
     private func configureStreamDataSource() {
-        let postCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> {
-            [weak self] cell, _, _ in
-            guard let self else { return }
-            cell.contentView.subviews.forEach { $0.removeFromSuperview() }
-            self.postSectionHost.removeFromSuperview()
-            self.postSectionHost.translatesAutoresizingMaskIntoConstraints = false
-            cell.contentView.addSubview(self.postSectionHost)
-            NSLayoutConstraint.activate([
-                self.postSectionHost.topAnchor.constraint(equalTo: cell.contentView.topAnchor),
-                self.postSectionHost.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor),
-                self.postSectionHost.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor),
-                self.postSectionHost.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor),
-            ])
-        }
         // The cell owns its row for its whole life; this only re-points it.
         // No subview teardown, no view construction, no recognizer or
         // interaction allocation per dequeue — the scroll path does layout
@@ -1977,44 +1770,9 @@ final class PostDetailViewController: UIViewController {
                 row.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -Spacing.lg),
             ])
         }
-        // COMMENTS-ONLY gets the app's shared empty PAGE; the full post
-        // detail keeps a one-line note. The difference is what the surface
-        // is: with the post above it the comments are a SECTION, and a
-        // centred illustration block inside a section reads as a broken
-        // layout — but in comments-only the comments ARE the page, so its
-        // emptiness is the page's emptiness, and that is exactly what
-        // `EmptyStateView` is for.
-        let mode = mode
-        // COMMENTS-ONLY gets the app's shared empty PAGE; the full post
-        // detail keeps a one-line note. The difference is what the surface
-        // is: with the post above it the comments are a SECTION, and a
-        // centred illustration block inside a section reads as a broken
-        // layout — but in comments-only the comments ARE the page, so its
-        // emptiness is the page's emptiness, and that is exactly what
-        // `EmptyStateView` is for.
-        let emptyNoteCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> {
-            [weak self] cell, _, _ in
-            cell.contentView.subviews.forEach { $0.removeFromSuperview() }
-            let failed = self?.commentsFailed ?? false
-            self?.renderedEmptyNoteFailed = failed
-            if failed, let self {
-                self.installFailedNote(in: cell.contentView)
-                return
-            }
-            let empty = UILabel()
-            empty.text = "No comments yet. Be the first."
-            empty.font = .appFont(forTextStyle: .subheadline)
-            empty.adjustsFontForContentSizeCategory = true
-            empty.textColor = .secondaryLabel
-            empty.translatesAutoresizingMaskIntoConstraints = false
-            cell.contentView.addSubview(empty)
-            NSLayoutConstraint.activate([
-                empty.topAnchor.constraint(equalTo: cell.contentView.topAnchor),
-                empty.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor),
-                empty.trailingAnchor.constraint(lessThanOrEqualTo: cell.contentView.trailingAnchor),
-                empty.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor),
-            ])
-        }
+        // The empty stream gets the app's shared empty PAGE: the comments ARE
+        // the page, so its emptiness is the page's emptiness, and that is
+        // exactly what `EmptyStateView` is for.
         // The height is decided HERE, once, from geometry that is already
         // final on frame 0 — `CommentsEmptyPageCell` then returns it
         // unchanged for the life of the configuration. Nothing recomputes
@@ -2068,18 +1826,10 @@ final class PostDetailViewController: UIViewController {
             collectionView: collectionView
         ) { collectionView, indexPath, item in
             switch item {
-            case .postSection:
-                return collectionView.dequeueConfiguredReusableCell(using: postCell, for: indexPath, item: item)
             case .caption:
                 return collectionView.dequeueConfiguredReusableCell(using: captionCell, for: indexPath, item: item)
             case .emptyState:
-                return mode == .commentsOnly
-                    ? collectionView.dequeueConfiguredReusableCell(
-                        using: emptyPageCell, for: indexPath, item: item
-                    )
-                    : collectionView.dequeueConfiguredReusableCell(
-                        using: emptyNoteCell, for: indexPath, item: item
-                    )
+                return collectionView.dequeueConfiguredReusableCell(using: emptyPageCell, for: indexPath, item: item)
             case .skeletonPlaceholder(let index):
                 return collectionView.dequeueConfiguredReusableCell(using: skeletonCell, for: indexPath, item: index)
             case .comment(let id):
@@ -2182,12 +1932,10 @@ final class PostDetailViewController: UIViewController {
 
     private func streamItems() -> [StreamItem] {
         var items: [StreamItem] = []
-        if mode == .full { items.append(.postSection) }
-        // The caption leads the COMMENTS-ONLY stream — item #0, above the
-        // skeletons as well as above the comments, so it is on screen from
-        // the first frame and never pops in behind a shimmer. The full mode
-        // already carries the caption inside its post section.
-        if mode == .commentsOnly, latestPost?.hasCaption == true || seededCaption != nil {
+        // The caption leads the stream — item #0, above the skeletons as well
+        // as above the comments, so it is on screen from the first frame and
+        // never pops in behind a shimmer.
+        if latestPost?.hasCaption == true || seededCaption != nil {
             items.append(.caption)
         }
         guard commentsLoaded else {
@@ -2256,14 +2004,6 @@ final class PostDetailViewController: UIViewController {
            snapshot.itemIdentifiers.contains(.emptyState),
            streamDataSource.snapshot().itemIdentifiers.contains(.emptyState),
            !rendered.matches(currentEmptyPageFit()) {
-            snapshot.reconfigureItems([.emptyState])
-        }
-        // The full mode's one-line note has no fit to compare, only its two
-        // wordings (#798): empty, or failed with a Try Again.
-        if let renderedFailed = renderedEmptyNoteFailed, renderedFailed != commentsFailed,
-           snapshot.itemIdentifiers.contains(.emptyState),
-           streamDataSource.snapshot().itemIdentifiers.contains(.emptyState),
-           !snapshot.reconfiguredItemIdentifiers.contains(.emptyState) {
             snapshot.reconfigureItems([.emptyState])
         }
         hasAppliedStream = true
@@ -2336,53 +2076,9 @@ final class PostDetailViewController: UIViewController {
         }
     }
 
-    /// The full mode's one line: the message as a sentence, never with a
-    /// second period after one it already has ("…Try again..").
-    static func commentsFailedNoteText(_ message: String) -> String {
-        message.hasSuffix(".") ? message : message + "."
-    }
-
     private var emptyPageCopy: EmptyPageCopy {
         if commentsFailed { return Self.commentsFailedPageCopy(commentsFailureText) }
         return viewModel.isDraft ? Self.draftEmptyPageCopy : Self.commentsEmptyPageCopy
-    }
-
-    /// What the full mode's note last said: failed (true) or empty.
-    private var renderedEmptyNoteFailed: Bool?
-
-    /// The full mode's failed note (#798): one line and its Try Again, at the
-    /// note's own size — the comments are a section under the post here, not
-    /// the page.
-    private func installFailedNote(in contentView: UIView) {
-        let label = UILabel()
-        label.text = Self.commentsFailedNoteText(commentsFailureText)
-        label.font = .appFont(forTextStyle: .subheadline)
-        label.adjustsFontForContentSizeCategory = true
-        label.textColor = .secondaryLabel
-        label.numberOfLines = 0
-        var configuration = UIButton.Configuration.plain()
-        configuration.title = "Try Again"
-        configuration.contentInsets = .zero
-        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var attributes = attributes
-            attributes.font = UIFont.appFont(forTextStyle: .subheadline)
-            return attributes
-        }
-        let retry = UIButton(configuration: configuration, primaryAction: UIAction { [weak self] _ in
-            self?.viewModel.retryComments()
-        })
-        let stack = UIStackView(arrangedSubviews: [label, retry])
-        stack.axis = .vertical
-        stack.alignment = .leading
-        stack.spacing = Spacing.xs
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor),
-            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor),
-            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-        ])
     }
 
     /// What the empty page was last configured with.
@@ -2515,7 +2211,7 @@ final class PostDetailViewController: UIViewController {
     /// block never leaves its row.
     private func emptyPageBlockOffset(rowHeight: CGFloat, blockHeight: CGFloat, space: StreamSpace?) -> CGFloat {
         let slack = max(0, (rowHeight - blockHeight) / 2)
-        guard let space else { return min((Spacing.lg - streamSectionTopInset) / 2, slack) }
+        guard let space else { return min(Spacing.lg / 2, slack) }
         let offset = (space.top + space.bottom) / 2 - (space.rowTop + rowHeight / 2)
         return min(max(offset, -slack), slack)
     }
@@ -2540,7 +2236,7 @@ final class PostDetailViewController: UIViewController {
     /// changed answer is a block that jumps.
     private func streamSpace(captionHeight: CGFloat) -> StreamSpace? {
         guard let engaged = engagedStreamInsets, view.bounds.height > 0 else { return nil }
-        let rowTop = engaged.top + streamSectionTopInset + captionHeight
+        let rowTop = engaged.top + captionHeight
         let top = captionHeight > 0 ? rowTop : engaged.top - SnapCommentsLayout.streamTopBreath
         let restingBottomInset = engaged.bottom - engagedFooterClearance
         let category = traitCollection.preferredContentSizeCategory
@@ -2610,11 +2306,9 @@ final class PostDetailViewController: UIViewController {
     }
 
     /// The empty stream's section insets, mirroring the layout
-    /// (`collectionView`): no top inset when the stream leads with a caption
-    /// row — comments-only, even while a draft has none yet — and `Spacing.lg`
-    /// at the bottom.
-    private var streamSectionTopInset: CGFloat { mode == .full ? Spacing.lg : 0 }
-    private var streamSectionVerticalInsets: CGFloat { streamSectionTopInset + Spacing.lg }
+    /// (`collectionView`): no top inset — the stream leads with its caption
+    /// row, even while a draft has none yet — and `Spacing.lg` at the bottom.
+    private var streamSectionVerticalInsets: CGFloat { Spacing.lg }
 
     /// How tall this view has to be for the empty page's block to show WHOLE
     /// in the visible stream — the inverse of `currentEmptyPageFit`: the
@@ -2638,7 +2332,7 @@ final class PostDetailViewController: UIViewController {
         // …and the block has to clear the composer, which the stream's fixed
         // footer clearance stops covering once the field outgrows one small
         // line (accessibility sizes: the field reaches ~80pt).
-        let rowTop = engaged.top + streamSectionTopInset + caption
+        let rowTop = engaged.top + caption
         let restingBottomInset = engaged.bottom - engagedFooterClearance
         let composerHeight = CommentsInputBar.restingHeight(for: contentSizeCategory)
         let blockClearsComposer = rowTop + block + composerRestingGap + composerHeight + restingBottomInset
@@ -2680,7 +2374,7 @@ final class PostDetailViewController: UIViewController {
     /// caption row. Sized through the real cell so the answer cannot drift
     /// from what the layout will produce.
     private func captionRowHeight(width: CGFloat) -> CGFloat {
-        guard width > 0, mode == .commentsOnly else { return 0 }
+        guard width > 0 else { return 0 }
         let sizingCell = captionSizingCell
         // The SAME count the real row gets: this cell exists to answer how tall
         // the caption row will be, and a closing line it was not given is a
@@ -2929,27 +2623,6 @@ final class PostDetailViewController: UIViewController {
     /// Whether a send is in flight — for a host that must not let go of the
     /// screen meanwhile: the Text Post page, while its post is on its way.
     var onComposingChange: ((Bool) -> Void)?
-
-    // MARK: - Images
-
-    private func loadAvatar(_ url: URL?) {
-        avatarImageView.image = nil
-        guard let url else { return }
-        let pipeline = imagePipeline
-        imageTasks.append(Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url, size: .avatar) else { return }
-            self?.avatarImageView.image = image
-        })
-    }
-
-    private func loadMedia(_ url: URL?) {
-        guard let url else { return }
-        let pipeline = imagePipeline
-        imageTasks.append(Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url) else { return }
-            self?.mediaView.image = image
-        })
-    }
 }
 
 // MARK: - Interactive pull-down dismissal

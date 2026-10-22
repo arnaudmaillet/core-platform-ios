@@ -70,7 +70,6 @@ struct UnifiedThreadChromeTests {
                 postID: PostID("p"), repository: NoPostFeed(), commentsProvider: Prefetched(entries)
             ),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            mode: .commentsOnly,
             threadChrome: threadChrome,
             groupsByDay: groupsByDay
         )

@@ -29,7 +29,6 @@ struct SnapCommentsDayBarTests {
             let panel = PostDetailViewController(
                 viewModel: PostDetailViewModel(postID: id, repository: DayMuteProvider()),
                 imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-                mode: .commentsOnly,
                 threadChrome: true,
                 groupsByDay: true
             )

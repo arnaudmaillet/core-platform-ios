@@ -3,20 +3,6 @@ import CoreNavigation
 import PostGrid
 import UIKit
 
-/// How the post-detail screen presents.
-public enum PostDetailMode: Sendable, Equatable {
-    /// The full post (header, media, engagement) above its comments. No route
-    /// opens it any more (#1577: one post screen, the vertical feed); its
-    /// removal is the next slice.
-    case full
-    /// Comments + compose bar only, no post header/media — used from the snap
-    /// feed, where the post is already full-screen. Text-only snap pages use
-    /// this mode too: their engagement is pixel-identical to the media
-    /// layouts' (the floating card simply has an empty media slot), so one
-    /// mode serves every hosted engagement.
-    case commentsOnly
-}
-
 /// How the For You tab should present ITSELF in the app's tab bar: how much
 /// is waiting on the screen's two rows. Zero means nothing new.
 ///

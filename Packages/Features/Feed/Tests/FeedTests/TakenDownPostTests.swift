@@ -88,7 +88,7 @@ struct TakenDownPostTests {
         ((view as? UILabel)?.text.map { [$0] } ?? []) + view.subviews.filter { !$0.isHidden }.flatMap(labels(in:))
     }
 
-    /// The comment sheet (`.comments`, commentsOnly) says so too: an answer,
+    /// The comments panel says so too: an answer,
     /// not an empty "No comments yet" over a post no one may read.
     @Test func aCommentSheetOnATakenDownPostSaysThePostIsNotAvailable() async throws {
         let fixture = try makeFixture()
@@ -97,7 +97,7 @@ struct TakenDownPostTests {
 
         let viewModel = PostDetailViewModel(postID: fixture.postID, repository: fixture.repository)
         let sheet = PostDetailViewController(
-            viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: Unreachable()), mode: .commentsOnly
+            viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: Unreachable())
         )
         sheet.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         sheet.loadViewIfNeeded()

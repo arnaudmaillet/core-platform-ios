@@ -23,8 +23,7 @@ struct CommentStreamScrollLockTests {
             viewModel: PostDetailViewModel(
                 postID: PostID("p"), repository: SilentFeedProvider()
             ),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            mode: .commentsOnly
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
         controller.loadViewIfNeeded()
         return controller

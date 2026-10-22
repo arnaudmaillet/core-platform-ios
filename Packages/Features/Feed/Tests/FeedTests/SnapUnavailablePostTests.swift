@@ -54,8 +54,7 @@ struct SnapUnavailablePostTests {
         func make(_ id: PostID) -> UIViewController {
             let panel = PostDetailViewController(
                 viewModel: PostDetailViewModel(postID: id, repository: posts),
-                imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-                mode: .commentsOnly
+                imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
             )
             byPost[id] = panel
             return panel

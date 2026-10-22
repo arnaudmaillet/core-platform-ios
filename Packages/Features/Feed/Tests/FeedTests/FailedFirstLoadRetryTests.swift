@@ -6,12 +6,12 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// **A FAILED FIRST LOAD HAS A WAY OUT (#797).** The post opened full-screen
-/// and the snap timeline both said "Pull to retry" over a screen with nothing
-/// to pull — the post's refresh control lives on the collection its failure
-/// hides, and the timeline has none. Each now shows the shared empty state
-/// with Try Again; these pin that the action is there, that it reaches the
-/// view model's reload, and that the content the reload brings replaces it.
+/// **A FAILED FIRST LOAD HAS A WAY OUT (#797).** The comments panel and the
+/// snap timeline both said "Pull to retry" over a screen with nothing to
+/// pull — the failure hides the panel's collection, and the timeline has no
+/// refresh control. Each now shows the shared empty state with Try Again;
+/// these pin that the action is there, that it reaches the view model's
+/// reload, and that the content the reload brings replaces it.
 ///
 /// The thread's twin is `ConversationThreadViewControllerTests.aFailedFirstLoadOffersTryAgain`.
 @MainActor

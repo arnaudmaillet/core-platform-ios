@@ -1476,9 +1476,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             viewModel: viewModel,
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
-            // The comments panel embeds the same comments-only detail the
-            // `.comments` route pushes — one comments UI, two presentations.
-            // Text-only pages host the SAME panel (their engaged card
+            // Every page's comments are this one panel (`.comments` opens the
+            // vertical feed with them up, #1577). Text-only pages host the
+            // SAME panel (their engaged card
             // carries the post, exactly like media pages).
             makeCommentsPanelContent: { postID in makePanel(postID, false) },
             // A TEXT page's resting comments carry the day pills and the lifted
@@ -1534,7 +1534,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         PostDetailViewController(
             viewModel: viewModel,
             imagePipeline: imagePipeline,
-            mode: .commentsOnly,
             profileSwitcher: makeProfileSwitcher?(),
             wallet: wallet,
             threadChrome: threadChrome,
