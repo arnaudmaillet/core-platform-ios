@@ -32,12 +32,18 @@ public struct MockBackend: Sendable {
     /// on the Paris-only scatter their fixtures are calibrated against.
     /// `enforcesEdgePolicy` refuses a guest's call to a member route
     /// (`MockEdgePolicy`); the app passes true, tests opt in.
+    /// `persistence` is where the services that keep across launches (the
+    /// wallet, the saves, the unlocked countries) keep: the app's standard
+    /// defaults; a test that spends passes a suite of its own, or the
+    /// test host's wallet runs dry over a day of local runs (it did:
+    /// `SnapUnavailablePostTests`' stake refused, `points: 0`).
     public init(
         conditions: SimulatedConditions = .none,
         mediaCatalog: MockSocialDataset.MediaCatalog = .synthetic,
         seedsMapHierarchy: Bool = false,
         enforcesEdgePolicy: Bool = false,
-        countryOf: (@Sendable (Double, Double) -> String?)? = nil
+        countryOf: (@Sendable (Double, Double) -> String?)? = nil,
+        persistence: UserDefaults = .standard
     ) {
         // The world beyond France (`MockWorldSeed`) rides the same decision
         // as the European seed: it is what the map's places are for.
@@ -95,12 +101,12 @@ public struct MockBackend: Sendable {
         }
         // Saves are kept per profile, the account's own only, and across
         // launches as the server keeps them (#837).
-        MockEngagementService(store: counterStore, dataset: dataset, persistence: .standard).register(on: bff)
+        MockEngagementService(store: counterStore, dataset: dataset, persistence: persistence).register(on: bff)
         // A like is a point staked in the wallet (#676).
         // The wallet is the server's (#1098): it opens at the charter's 250
         // points and keeps across launches, as the fleet's does.
         let wallet = MockWalletService(
-            store: counterStore, dataset: dataset, startingLikes: 250, persistence: .standard,
+            store: counterStore, dataset: dataset, startingLikes: 250, persistence: persistence,
             // Stakes the wallet opens with, so the sheet's lists show
             // something on a fresh install (#903).
             demoPositions: dataset.posts.prefix(8).map(\.postID),
@@ -122,7 +128,7 @@ public struct MockBackend: Sendable {
         wallet.register(on: bff)
         // The account's countries (#1475): unlocked with the wallet's gems,
         // kept across launches as the fleet keeps them.
-        MockCountryUnlockService(wallet: wallet, persistence: .standard).register(on: bff)
+        MockCountryUnlockService(wallet: wallet, persistence: persistence).register(on: bff)
         // A guest signing up is credited the welcome gift by the wallet
         // (#1008): a flat 50, once per device (#1146). The upgrade itself is
         // the "a guest was here" — no date is needed for the amount.
