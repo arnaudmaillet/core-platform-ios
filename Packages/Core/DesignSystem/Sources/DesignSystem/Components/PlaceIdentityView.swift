@@ -46,6 +46,12 @@ public final class PlaceIdentityView: UIView {
         case profile
         /// The place page's: flag and figure on one line, the title under it.
         case headline
+        /// ⚠️ THE PLACE PAGE'S SINCE #1597 (the owner, 2026-10-22): the
+        /// PROFILE's info block — the flag where the avatar stands, beside it
+        /// the name and its subtitle over the counters — with the counters
+        /// CENTRED on the flag and all of one size: the rank is a column
+        /// like the likes, never a smaller figure or a bubble.
+        case page
     }
     /// A counter: its figure ("38K") and the word for what it counts.
     public struct Counter: Equatable, Sendable {
@@ -110,6 +116,10 @@ public final class PlaceIdentityView: UIView {
         setRank(rank)
         if layout == .headline {
             buildHeadline(counters: counters)
+            return
+        }
+        if layout == .page {
+            buildPage(counters: counters)
             return
         }
         let flagBox = UIView()
@@ -245,6 +255,58 @@ public final class PlaceIdentityView: UIView {
         ])
         setRank(rankBubble.text)
     }
+
+    /// The page (#1597): the flag; beside it the counters — the rank first,
+    /// then the likes, ONE style (the profile's columns) — centred on the
+    /// flag; the title right above them.
+    ///
+    /// ```
+    ///        Paris  France
+    ///  ⬤      #3     29.4K
+    ///       Ranking  Likes
+    /// ```
+    private func buildPage(counters: [Counter]) {
+        statViews = counters.prefix(1).map { PlaceStatView(value: $0.value, caption: $0.caption) }
+        let rank = PlaceStatView(value: "", caption: Self.pageRankCaption)
+        rank.accessibilityIdentifier = "place.identity.rank"
+        rankStat = rank
+        let stats = UIStackView(arrangedSubviews: [rank] + statViews)
+        stats.axis = .horizontal
+        stats.alignment = .center
+        stats.spacing = Spacing.xl
+        for view in [flagView, stats, titleLabel] as [UIView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+        }
+        let side = flagView.heightAnchor.constraint(equalToConstant: Self.flagSide)
+        side.priority = .defaultHigh
+        // Never above the identity's top: the title may stand higher than
+        // the disc (two lines, large type), never the reverse.
+        let flagTop = flagView.topAnchor.constraint(greaterThanOrEqualTo: topAnchor)
+        flagTop.priority = .init(999)
+        NSLayoutConstraint.activate([
+            flagView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            flagView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            flagView.widthAnchor.constraint(equalTo: flagView.heightAnchor),
+            side,
+            flagView.heightAnchor.constraint(lessThanOrEqualToConstant: Self.flagMaxSide),
+            flagView.heightAnchor.constraint(greaterThanOrEqualTo: stats.heightAnchor),
+            flagTop,
+            // The counters on the flag's middle, the profile's columns.
+            stats.leadingAnchor.constraint(equalTo: flagView.trailingAnchor, constant: Spacing.lg),
+            stats.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            stats.centerYAnchor.constraint(equalTo: flagView.centerYAnchor),
+            // The title right above them, the name's line at the identity's top.
+            titleLabel.topAnchor.constraint(equalTo: topAnchor),
+            titleLabel.leadingAnchor.constraint(equalTo: stats.leadingAnchor),
+            titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor),
+            titleLabel.bottomAnchor.constraint(equalTo: stats.topAnchor, constant: -Self.titleToCounters),
+        ])
+        setRank(rankBubble.text)
+    }
+
+    /// The page's rank column's word (#1597): one word, the likes' size.
+    public static let pageRankCaption = "Ranking"
 
     /// The rank column's word (#1371).
     public static let rankCaption = "World ranking"

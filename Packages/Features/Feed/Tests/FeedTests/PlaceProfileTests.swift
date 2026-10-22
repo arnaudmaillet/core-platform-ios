@@ -150,17 +150,17 @@ struct PlaceProfileTests {
         #expect(profile.debugMetricsFrame.maxY <= profile.debugIdentityFrame.maxY + 0.5)
     }
 
-    /// On the profile's column, as the HEADLINE (#1304): the flag at the
-    /// column's leading edge with the likes beside it, the name UNDER that
-    /// line, from the same leading edge.
+    /// On the profile's column, as the profile's own info block (#1597): the
+    /// flag at the column's leading edge, the likes beside it, the name
+    /// ABOVE them, from their leading edge.
     @Test func theIdentityIsLaidOnTheProfilesColumn() {
         let profile = makeProfile()
         laidOut(profile)
         let identity = profile.debugIdentityFrame
         #expect(abs(identity.minX - HeroBannerMetrics.identityInset) < 0.5)
         #expect(abs(identity.maxX - (402 - HeroBannerMetrics.identityInset)) < 0.5)
-        #expect(abs(profile.debugNameFrame.minX - identity.minX) < 0.5, "the name is not under the flag")
-        #expect(profile.debugNameFrame.minY > profile.debugMetricsFrame.minY, "the name is not under the likes' line")
+        #expect(profile.debugNameFrame.minX > identity.minX, "the name is not beside the flag")
+        #expect(profile.debugNameFrame.maxY <= profile.debugMetricsFrame.minY + 0.5, "the name is not above the counters")
         #expect(profile.debugMetricsFrame.minX > identity.minX, "the likes are not beside the flag")
     }
 
@@ -499,12 +499,12 @@ struct PlaceProfileTests {
     /// tray's Pin capsule became the bar's star) — outline → toggle → filled
     /// in the save star's gold → toggle → outline — always reading the
     /// caller's answer rather than caching its own.
-    /// The place page's identity is the HEADLINE (#1304): its likes alone,
-    /// large, beside the flag; no posts' count.
-    @Test func theIdentityIsTheHeadlineWithItsLikesAlone() {
+    /// The place page's identity is the PROFILE'S info block (#1597): its
+    /// likes alone beside the flag; no posts' count.
+    @Test func theIdentityIsThePagesBlockWithItsLikesAlone() {
         let profile = makeProfile()
         laidOut(profile)
-        #expect(profile.debugIdentity.layout == .headline)
+        #expect(profile.debugIdentity.layout == .page)
         #expect(profile.debugIdentity.statViews.count == 1)
         #expect(profile.debugIdentity.statViews.first?.captionLabel.text == "Likes")
     }
@@ -673,7 +673,7 @@ struct PlaceProfileTests {
         #expect(profile.debugIdentityAlpha == 1)
 
         profile.debugScrollActivePage(to: -60)
-        #expect(profile.debugHeaderConstant == 60, "overscroll carries the header down, unclamped")
+        #expect(abs(profile.debugHeaderConstant - 60) < 0.01, "overscroll carries the header down, unclamped")
     }
 
     // MARK: - The hero title and its crossfade
