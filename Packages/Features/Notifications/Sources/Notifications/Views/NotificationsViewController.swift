@@ -14,7 +14,7 @@ import UIKit
 final class NotificationsViewController: UIViewController {
     private enum Item: Hashable {
         case row(String)
-        case showMore
+        case showMore(NotificationSection.Kind)
         /// Under the last row while there is another page (#608): a spinner,
         /// or "Try Again" after a failure.
         case pageFooter
@@ -168,8 +168,8 @@ final class NotificationsViewController: UIViewController {
             switch item {
             case .row(let id):
                 return collectionView.dequeueConfiguredReusableCell(using: rowRegistration, for: indexPath, item: id)
-            case .showMore:
-                let hidden = self?.sections.first { $0.kind == .new }?.hiddenCount ?? 0
+            case .showMore(let kind):
+                let hidden = self?.sections.first { $0.kind == kind }?.hiddenCount ?? 0
                 return collectionView.dequeueConfiguredReusableCell(using: showMoreRegistration, for: indexPath, item: hidden)
             case .pageFooter:
                 let failed = self?.viewModel.pageFooter == .retry
@@ -243,7 +243,7 @@ final class NotificationsViewController: UIViewController {
             snapshot.appendSections([section.kind])
             snapshot.appendItems(section.rows.map { .row($0.id) }, toSection: section.kind)
             if section.hiddenCount > 0 {
-                snapshot.appendItems([.showMore], toSection: section.kind)
+                snapshot.appendItems([.showMore(section.kind)], toSection: section.kind)
             }
         }
         // The page footer closes the LAST section, whichever it is.
@@ -257,9 +257,8 @@ final class NotificationsViewController: UIViewController {
             return .row(id)
         }
         snapshot.reconfigureItems(changed.filter { snapshot.indexOfItem($0) != nil })
-        if snapshot.indexOfItem(.showMore) != nil {
-            snapshot.reconfigureItems([.showMore])
-        }
+        let showMores = newSections.map { Item.showMore($0.kind) }.filter { snapshot.indexOfItem($0) != nil }
+        if !showMores.isEmpty { snapshot.reconfigureItems(showMores) }
         if snapshot.indexOfItem(.pageFooter) != nil {
             snapshot.reconfigureItems([.pageFooter])
         }
@@ -276,7 +275,8 @@ final class NotificationsViewController: UIViewController {
             return sections.contains { $0.hiddenCount > 0 }
         }) { [weak self] in
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                self?.viewModel.showMore()
+                guard let self, let kind = sections.first(where: { $0.hiddenCount > 0 })?.kind else { return }
+                viewModel.showMore(in: kind)
             }
         }
     }
@@ -289,8 +289,8 @@ extension NotificationsViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .row(let id):
             viewModel.didSelect(id)
-        case .showMore:
-            viewModel.showMore()
+        case .showMore(let kind):
+            viewModel.showMore(in: kind)
         case .pageFooter:
             viewModel.retryPage()
         case nil:

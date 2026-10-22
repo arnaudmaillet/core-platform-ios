@@ -82,7 +82,7 @@ struct NotificationsRepositoryTests {
         let items = try await repository.loadNotifications(limit: 50)
 
         // Enough new rows to exercise "Show more", and some already read.
-        #expect(items.filter { !$0.isRead }.count > NotificationSectionBuilder.newLimit + 1)
+        #expect(items.filter { !$0.isRead }.count > NotificationSectionBuilder.sectionLimit + 1)
         #expect(items.contains { $0.isRead })
         // Sender names are hydrated from profile.v1, not left as ids.
         let first = try #require(items.first)

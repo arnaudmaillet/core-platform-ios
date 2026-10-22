@@ -3,62 +3,98 @@ import Foundation
 
 /// One section of the notifications list.
 ///
-/// There are two, and the split replaces the old unread TINT: a row's place
-/// says whether it is new, so no row has to be painted differently from its
-/// neighbours to say it (and nothing changes colour under the viewer's eye
-/// when it is marked read — it simply is in "Earlier" next time).
+/// ⚠️ SECTIONS BY DATE, NOT BY READ STATE (#1571, the owner 2026-10-22):
+/// "New" used to be the server's unread, so a close and a reopen — which mark
+/// everything read — emptied it. A row's section is now its day, on the
+/// viewer's calendar; whether it has been seen is the row's own business
+/// (#1572's dot). A section with nothing in it is left out.
 public struct NotificationSection: Equatable, Sendable {
-    public enum Kind: String, Sendable {
-        /// Unread — what arrived since the viewer last opened the drawer.
+    public enum Kind: String, Sendable, CaseIterable {
+        /// Today, since local midnight.
         case new
-        /// Everything already seen.
-        case earlier
+        /// The day before.
+        case yesterday
+        /// 2 to 7 days ago.
+        case lastWeek
+        /// 8 to 30 days ago.
+        case lastMonth
+        /// 31 to 365 days ago.
+        case lastYear
+        /// Before that.
+        case older
+
+        /// The section a notification of `date` falls in, `now` on
+        /// `calendar` — whole calendar days, so 23:59 yesterday is
+        /// "Yesterday" at 00:01 today. A date ahead of `now` (a skewed clock)
+        /// is today's.
+        static func of(_ date: Date, now: Date, calendar: Calendar) -> Kind {
+            let days = calendar.dateComponents(
+                [.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)
+            ).day ?? 0
+            switch days {
+            case ...0: return .new
+            case 1: return .yesterday
+            case 2...7: return .lastWeek
+            case 8...30: return .lastMonth
+            case 31...365: return .lastYear
+            default: return .older
+            }
+        }
     }
 
     public let kind: Kind
     /// The rows shown.
     public let rows: [NotificationDisplayModel]
-    /// Rows held back behind "Show more" — only ever non-zero for `.new`.
+    /// Rows held back behind "Show more".
     public let hiddenCount: Int
 
     public var title: String {
         switch kind {
         case .new: "New"
-        case .earlier: "Earlier"
+        case .yesterday: "Yesterday"
+        case .lastWeek: "Last week"
+        case .lastMonth: "Last month"
+        case .lastYear: "Last year"
+        case .older: "Older"
         }
     }
 }
 
 /// Builds the list's sections from loaded notifications.
 enum NotificationSectionBuilder {
-    /// How many new rows show before "Show more": the six most recent.
-    static let newLimit = 6
+    /// How many rows a section shows before "Show more" (#1571).
+    static let sectionLimit = 6
+    /// The LAST section shown takes a little more: nothing comes after it to
+    /// scroll on to.
+    static let lastSectionLimit = 12
 
-    /// `newExpanded` is the viewer having pressed "Show more".
+    /// `expanded`: the sections whose "Show more" the viewer pressed.
     ///
     /// ⚠️ "Show more" never hides ONE row: a button the height of a row that
-    /// reveals a single row is a tap for nothing, so up to `newLimit + 1` new
-    /// rows simply all show.
+    /// reveals a single row is a tap for nothing, so up to `limit + 1` rows
+    /// simply all show.
     static func sections(
         from items: [NotificationItem],
-        newExpanded: Bool,
+        expanded: Set<NotificationSection.Kind> = [],
         now: Date,
-        newLimit: Int = NotificationSectionBuilder.newLimit
+        calendar: Calendar = .current,
+        limit: Int = NotificationSectionBuilder.sectionLimit,
+        lastLimit: Int = NotificationSectionBuilder.lastSectionLimit
     ) -> [NotificationSection] {
-        let grouped = NotificationGrouping.grouped(items)
-        let unread = grouped.filter { !$0.isRead }.map { NotificationDisplayModel(item: $0, now: now) }
-        let read = grouped.filter(\.isRead).map { NotificationDisplayModel(item: $0, now: now) }
-
-        var sections: [NotificationSection] = []
-        if !unread.isEmpty {
-            let collapses = !newExpanded && unread.count > newLimit + 1
-            let shown = collapses ? Array(unread.prefix(newLimit)) : unread
-            sections.append(NotificationSection(kind: .new, rows: shown, hiddenCount: unread.count - shown.count))
+        let kindOf = { (item: NotificationItem) in NotificationSection.Kind.of(item.createdAt, now: now, calendar: calendar) }
+        let grouped = NotificationGrouping.grouped(items, section: kindOf)
+        var byKind: [NotificationSection.Kind: [NotificationDisplayModel]] = [:]
+        for item in grouped {
+            byKind[kindOf(item), default: []].append(NotificationDisplayModel(item: item, now: now))
         }
-        if !read.isEmpty {
-            sections.append(NotificationSection(kind: .earlier, rows: read, hiddenCount: 0))
+        let kinds = NotificationSection.Kind.allCases.filter { byKind[$0]?.isEmpty == false }
+        return kinds.enumerated().map { index, kind in
+            let rows = byKind[kind] ?? []
+            let cap = index == kinds.count - 1 ? lastLimit : limit
+            let collapses = !expanded.contains(kind) && rows.count > cap + 1
+            let shown = collapses ? Array(rows.prefix(cap)) : rows
+            return NotificationSection(kind: kind, rows: shown, hiddenCount: rows.count - shown.count)
         }
-        return sections
     }
 }
 
@@ -68,19 +104,23 @@ enum NotificationSectionBuilder {
 ///
 /// The server already collapses (`sender_count`, `sample_sender_ids`); this is
 /// the client's fallback for rows it delivered separately — the same action on
-/// the same post, in the same section. Never across sections: a like already
-/// seen and a new like on the same post are two pieces of news, and folding
-/// them would either hide the new one in "Earlier" or re-announce the old one.
+/// the same post, in the same section and read state. Never across sections
+/// (a like today and one last month are two pieces of news) nor read states
+/// (a seen like and a new one: folding would hide the new one's dot).
 enum NotificationGrouping {
     private struct Key: Hashable {
         let action: NotificationItem.Action
         let post: PostID
         let isRead: Bool
+        let section: NotificationSection.Kind?
     }
 
     /// Most recent first, with rows about the same (action, post, read state)
     /// folded into the most recent of them.
-    static func grouped(_ items: [NotificationItem]) -> [NotificationItem] {
+    static func grouped(
+        _ items: [NotificationItem],
+        section: (NotificationItem) -> NotificationSection.Kind? = { _ in nil }
+    ) -> [NotificationItem] {
         let ordered = items.enumerated()
             .sorted { lhs, rhs in
                 lhs.element.createdAt != rhs.element.createdAt
@@ -97,7 +137,7 @@ enum NotificationGrouping {
                 result.append(item)
                 continue
             }
-            let key = Key(action: item.action, post: post, isRead: item.isRead)
+            let key = Key(action: item.action, post: post, isRead: item.isRead, section: section(item))
             if let index = indexByKey[key] {
                 result[index] = merge(newer: result[index], older: item)
             } else {

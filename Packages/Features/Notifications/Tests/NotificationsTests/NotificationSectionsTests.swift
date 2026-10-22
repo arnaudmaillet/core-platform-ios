@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import Notifications
 
-/// Sections ("New" with its "Show more", then "Earlier") and the client-side
+/// Sections by date ("New", "Yesterday", … each with its "Show more") and the client-side
 /// folding of rows about the same thing.
 struct NotificationSectionsTests {
     private let now = Date(timeIntervalSince1970: 100_000)
@@ -32,41 +32,115 @@ struct NotificationSectionsTests {
         NotificationActor(id: ProfileID(id), name: "Name \(id)", avatarURL: nil)
     }
 
-    // MARK: - Sections
+    // MARK: - Sections (#1571: by date)
 
-    @Test func newShowsTheSixMostRecentAndHoldsTheRestBehindShowMore() {
-        let items = (0..<9).map { item("u\($0)", minutesAgo: Double($0)) }
-            + (0..<3).map { item("r\($0)", read: true, minutesAgo: 100 + Double($0)) }
-        let sections = NotificationSectionBuilder.sections(from: items.shuffled(), newExpanded: false, now: now)
-
-        #expect(sections.map(\.kind) == [.new, .earlier])
-        #expect(sections[0].rows.map(\.id) == ["u0", "u1", "u2", "u3", "u4", "u5"])
-        #expect(sections[0].hiddenCount == 3)
-        #expect(sections[1].rows.map(\.id) == ["r0", "r1", "r2"])
-        #expect(sections[1].hiddenCount == 0)
+    /// UTC, so a day is the same day wherever the suite runs.
+    private var utc: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
     }
 
-    @Test func expandedShowsEveryNewRow() {
-        let items = (0..<9).map { item("u\($0)", minutesAgo: Double($0)) }
-        let sections = NotificationSectionBuilder.sections(from: items, newExpanded: true, now: now)
-        #expect(sections[0].rows.count == 9)
-        #expect(sections[0].hiddenCount == 0)
+    private func sections(
+        _ items: [NotificationItem], expanded: Set<NotificationSection.Kind> = [], now: Date? = nil
+    ) -> [NotificationSection] {
+        NotificationSectionBuilder.sections(from: items, expanded: expanded, now: now ?? self.now, calendar: utc)
     }
 
-    /// "Show 1 more" is a tap for nothing: seven new rows all show.
+    /// `now` is 03:46 UTC: whole days back from it.
+    private func daysAgo(_ days: Double) -> Double { days * 24 * 60 }
+
+    @Test func eachRowFallsInItsDaysSection() {
+        // 03:46 UTC: 3 minutes ago is today; 4 hours ago is yesterday.
+        let items = [
+            item("today", minutesAgo: 3),
+            item("yesterday", minutesAgo: 4 * 60),
+            item("week", minutesAgo: daysAgo(5)),
+            item("month", minutesAgo: daysAgo(20)),
+            item("year", minutesAgo: daysAgo(200)),
+            item("older", minutesAgo: daysAgo(400)),
+        ]
+        let built = sections(items.shuffled())
+        #expect(built.map(\.kind) == [.new, .yesterday, .lastWeek, .lastMonth, .lastYear, .older])
+        #expect(built.map(\.title) == ["New", "Yesterday", "Last week", "Last month", "Last year", "Older"])
+        #expect(built.map { $0.rows.map(\.id) } == [["today"], ["yesterday"], ["week"], ["month"], ["year"], ["older"]])
+    }
+
+    /// The boundaries are whole calendar days, on the viewer's calendar.
+    @Test func theBoundariesAreCalendarDays() {
+        let calendar = utc
+        let noon = calendar.date(from: DateComponents(year: 2026, month: 10, day: 22, hour: 12))!
+        func kind(daysBack: Int, hour: Int) -> NotificationSection.Kind {
+            let day = calendar.date(byAdding: .day, value: -daysBack, to: calendar.startOfDay(for: noon))!
+            let date = calendar.date(byAdding: .hour, value: hour, to: day)!
+            return NotificationSection.Kind.of(date, now: noon, calendar: calendar)
+        }
+        #expect(kind(daysBack: 0, hour: 0) == .new, "midnight today")
+        #expect(kind(daysBack: 1, hour: 23) == .yesterday, "23:00 yesterday")
+        #expect(kind(daysBack: 2, hour: 0) == .lastWeek)
+        #expect(kind(daysBack: 7, hour: 23) == .lastWeek)
+        #expect(kind(daysBack: 8, hour: 0) == .lastMonth)
+        #expect(kind(daysBack: 30, hour: 23) == .lastMonth)
+        #expect(kind(daysBack: 31, hour: 0) == .lastYear)
+        #expect(kind(daysBack: 365, hour: 23) == .lastYear)
+        #expect(kind(daysBack: 366, hour: 0) == .older)
+        #expect(NotificationSection.Kind.of(noon.addingTimeInterval(600), now: noon, calendar: calendar) == .new,
+                "a date ahead of now (a skewed clock) is today's")
+    }
+
+    /// The day follows the viewer's time zone: the same instant is today in
+    /// one and yesterday in another.
+    @Test func theDayFollowsTheTimeZone() {
+        var tokyo = Calendar(identifier: .gregorian)
+        tokyo.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+        // now = 03:46 UTC = 12:46 in Tokyo; 4 hours ago = 23:46 UTC yesterday, 08:46 in Tokyo today.
+        let date = now.addingTimeInterval(-4 * 3600)
+        #expect(NotificationSection.Kind.of(date, now: now, calendar: utc) == .yesterday)
+        #expect(NotificationSection.Kind.of(date, now: now, calendar: tokyo) == .new)
+    }
+
+    /// Read or not, a row stays in its day: seeing it never moves it.
+    @Test func readStateNeverMovesARow() {
+        let built = sections([item("seen", read: true, minutesAgo: 2), item("unseen", minutesAgo: 1)])
+        #expect(built.map(\.kind) == [.new])
+        #expect(Set(built[0].rows.map(\.id)) == ["seen", "unseen"])
+    }
+
+    /// Six rows per section before "Show more", and twelve in the LAST one.
+    @Test func sixPerSectionAndMoreInTheLast() {
+        let items = (0..<9).map { item("t\($0)", minutesAgo: Double($0)) }
+            + (0..<15).map { item("y\($0)", minutesAgo: 4 * 60 + Double($0)) }
+        let built = sections(items.shuffled())
+        #expect(built.map(\.kind) == [.new, .yesterday])
+        #expect(built[0].rows.map(\.id) == ["t0", "t1", "t2", "t3", "t4", "t5"])
+        #expect(built[0].hiddenCount == 3)
+        #expect(built[1].rows.count == 12, "the last section shows twelve")
+        #expect(built[1].hiddenCount == 3)
+    }
+
+    @Test func expandingASectionShowsAllOfItAlone() {
+        let items = (0..<9).map { item("t\($0)", minutesAgo: Double($0)) }
+            + (0..<15).map { item("y\($0)", minutesAgo: 4 * 60 + Double($0)) }
+        let built = sections(items, expanded: [.new])
+        #expect(built[0].rows.count == 9)
+        #expect(built[0].hiddenCount == 0)
+        #expect(built[1].hiddenCount == 3, "expanding New expanded Yesterday")
+    }
+
+    /// "Show 1 more" is a tap for nothing: one row past the limit all show.
     @Test func showMoreNeverHidesASingleRow() {
-        let seven = (0..<7).map { item("u\($0)", minutesAgo: Double($0)) }
-        #expect(NotificationSectionBuilder.sections(from: seven, newExpanded: false, now: now)[0].hiddenCount == 0)
-        let eight = (0..<8).map { item("u\($0)", minutesAgo: Double($0)) }
-        #expect(NotificationSectionBuilder.sections(from: eight, newExpanded: false, now: now)[0].hiddenCount == 2)
+        let yesterday = [item("y", minutesAgo: 4 * 60)]
+        let seven = (0..<7).map { item("t\($0)", minutesAgo: Double($0)) } + yesterday
+        #expect(sections(seven)[0].hiddenCount == 0)
+        let eight = (0..<8).map { item("t\($0)", minutesAgo: Double($0)) } + yesterday
+        #expect(sections(eight)[0].hiddenCount == 2)
+        let thirteen = (0..<13).map { item("t\($0)", minutesAgo: Double($0)) }
+        #expect(sections(thirteen)[0].hiddenCount == 0, "the last section: twelve plus one all show")
     }
 
     @Test func aSectionWithNothingInItIsLeftOut() {
-        let onlyRead = [item("r0", read: true, minutesAgo: 5)]
-        #expect(NotificationSectionBuilder.sections(from: onlyRead, newExpanded: false, now: now).map(\.kind) == [.earlier])
-        let onlyNew = [item("u0", minutesAgo: 5)]
-        #expect(NotificationSectionBuilder.sections(from: onlyNew, newExpanded: false, now: now).map(\.kind) == [.new])
-        #expect(NotificationSectionBuilder.sections(from: [], newExpanded: false, now: now).isEmpty)
+        #expect(sections([item("w", minutesAgo: daysAgo(4))]).map(\.kind) == [.lastWeek])
+        #expect(sections([]).isEmpty)
     }
 
     // MARK: - Folding
@@ -124,12 +198,25 @@ struct NotificationSectionsTests {
     }
 
     @Test func foldsBeforeSectioningSoShowMoreCountsRows() {
-        // Eight new notifications, two of them the same like: seven rows.
+        // Eight of today's notifications, two of them the same like: seven rows.
         var items = (0..<7).map { item("u\($0)", minutesAgo: Double($0)) }
         items.append(item("dup", sender: "zed", post: "post-u0", minutesAgo: 50))
-        let sections = NotificationSectionBuilder.sections(from: items, newExpanded: false, now: now)
-        #expect(sections[0].rows.count == 7)
-        #expect(sections[0].hiddenCount == 0)
-        #expect(sections[0].rows[0].text.hasSuffix("and 1 other liked your post"))
+        items.append(item("y", minutesAgo: 4 * 60))
+        let built = sections(items)
+        #expect(built[0].rows.count == 7)
+        #expect(built[0].hiddenCount == 0)
+        #expect(built[0].rows[0].text.hasSuffix("and 1 other liked your post"))
+    }
+
+    /// Folding stays inside a section: the same like today and yesterday are
+    /// two rows, in two sections.
+    @Test func foldingNeverCrossesSections() {
+        let items = [
+            item("today", sender: "ava", post: "post-x", minutesAgo: 3),
+            item("yesterday", sender: "ben", post: "post-x", minutesAgo: 4 * 60),
+        ]
+        let built = sections(items)
+        #expect(built.map(\.kind) == [.new, .yesterday])
+        #expect(built.allSatisfy { $0.rows.count == 1 })
     }
 }
