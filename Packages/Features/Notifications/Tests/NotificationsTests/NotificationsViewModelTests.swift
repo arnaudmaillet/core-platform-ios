@@ -164,6 +164,30 @@ struct NotificationsViewModelTests {
         #expect(router.routes == [.post(PostID("post-7"))])
     }
 
+    /// ONE POST SCREEN, ABOVE THE DRAWER (#1577): the list's opener takes a
+    /// post notification first — no route, so the drawer stays open — and
+    /// the route is what is left when it cannot (off screen, covered).
+    @Test func aPostNotificationOpensAboveTheDrawerAndRoutesOnlyWhenItCannot() async {
+        let router = SpyRouter()
+        let viewModel = NotificationsViewModel(repository: StubProvider([item(id: "n1", post: PostID("post-7"))]), router: router)
+        viewModel.viewDidLoad()
+        await settle()
+        var opened: [String] = []
+        var canOpen = true
+        viewModel.opensPost = { row, post in
+            opened.append("\(row):\(post.rawValue)")
+            return canOpen
+        }
+
+        viewModel.didSelect("n1")
+        #expect(opened == ["n1:post-7"])
+        #expect(router.routes.isEmpty, "the drawer was closed by a route")
+
+        canOpen = false
+        viewModel.didSelect("n1")
+        #expect(router.routes == [.post(PostID("post-7"))])
+    }
+
     @Test func tapOnNonPostNotificationRoutesToProfile() async {
         let router = SpyRouter()
         let comment = NotificationItem(

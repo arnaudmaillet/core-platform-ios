@@ -1605,23 +1605,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         return navigation
     }
 
-    public func makePostDetailViewController(for postID: PostID, mode: PostDetailMode) -> UIViewController {
-        let detail = PostDetailViewController(
-            viewModel: PostDetailViewModel(
-                postID: postID,
-                repository: repository,
-                engagementProvider: engagementProvider,
-                commentsProvider: commentsProvider,
-                router: router,
-                entities: entities
-            ),
-            imagePipeline: imagePipeline,
-            mode: mode,
-            wallet: wallet
-        )
-        // An opened post is a viewed one (#1344).
-        detail.viewHistory = .shared
-        return detail
+    public func makePostFeedViewController(for postID: PostID, opensComments: Bool) -> UIViewController {
+        let feed = makeSnapFeedViewController(postIDs: [postID], ownsInteractiveDismissal: false)
+        // Before the push, so the page opens already in its thread
+        // (`openComments`'s own rule).
+        if opensComments { (feed as? SnapFeedViewController)?.openComments(for: postID) }
+        return feed
     }
 }
 

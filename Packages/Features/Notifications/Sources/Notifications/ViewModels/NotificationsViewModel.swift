@@ -283,17 +283,24 @@ public final class NotificationsViewModel {
         emitContent()
     }
 
-    /// Tap on a row: route to its subject — a post when the notification is
-    /// about one, otherwise the sender's profile. Notifications never imports
-    /// Feed or Profile; it only emits routes (and the shell, receiving one,
-    /// closes the drawer to show where it went).
+    /// Opens a post notification's post from the list itself (#1577): the
+    /// vertical feed ABOVE the drawer, which stays open. Answers false when it
+    /// cannot (no opener, the list off screen), and the `.post` route goes
+    /// instead. Set by the list.
+    var opensPost: ((_ rowID: String, _ postID: PostID) -> Bool)?
+
+    /// Tap on a row: open its subject — a post when the notification is about
+    /// one (above the drawer, `opensPost`), otherwise the sender's profile.
+    /// Notifications never imports Feed or Profile; it only emits routes (and
+    /// the shell, receiving one, closes the drawer to show where it went) or
+    /// hands the post to the shell's opener.
     public func didSelect(_ id: String) {
         guard let item = items.first(where: { $0.id == id }) else { return }
         if item.action.isSupervision, let account = item.subjectAccountID {
             // Family and Teens, on that link when it still exists (#1106).
             router?.route(to: .supervision(otherAccountID: account))
         } else if let postID = item.postSubjectID {
-            router?.route(to: .post(postID))
+            if opensPost?(id, postID) != true { router?.route(to: .post(postID)) }
         } else {
             // Notification rows render an aggregated sentence, not the raw
             // handle, so there is no identity slice to attach.

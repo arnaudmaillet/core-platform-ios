@@ -1671,7 +1671,9 @@ final class AppContainer {
         localStore: localStore,
         // Pauses past 8 h and "until I turn it back on" (#1575): the mock
         // accepts them; the fleet will once backend #971 lands.
-        allowsLongPushPauses: environment == .mock
+        allowsLongPushPauses: environment == .mock,
+        // A post notification opens the vertical feed above the drawer (#1577).
+        openPost: { [unowned self] opening in NotificationPostFeed.open(opening, feed: self.feedFeature) }
     )
 
     // MARK: - Chat

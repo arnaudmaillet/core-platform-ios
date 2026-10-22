@@ -220,9 +220,10 @@ final class GuestModeUITests: XCTestCase {
     // MARK: Steps
 
     /// Opens the post's sign-up sheet by liking it as a guest: the like
-    /// button, its value before, and the sheet's headline.
+    /// button, its value before, and the sheet's headline. `-open-post` opens
+    /// the vertical feed (#1577, one post screen): its rail's heart.
     private func likeAsGuest(in app: XCUIApplication) -> (XCUIElement, String?, XCUIElement) {
-        let like = app.buttons["Boost post"]
+        let like = app.buttons["Like"]
         XCTAssertTrue(like.waitForExistence(timeout: 25), "the post never showed its like button")
         // The comments are readable; writing one is what needs an account.
         XCTAssertTrue(
@@ -264,6 +265,6 @@ final class GuestModeUITests: XCTestCase {
         let landed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", before ?? ""), object: like)
         XCTAssertEqual(XCTWaiter.wait(for: [landed], timeout: 10), .completed, "the like did not land")
         XCTAssertTrue(like.exists, "signing in moved the viewer off the post")
-        XCTAssertTrue(app.buttons["BackButton"].exists, "signing in reset the post's stack")
+        XCTAssertTrue(app.navigationBars.buttons["Back"].firstMatch.exists, "signing in reset the post's stack")
     }
 }

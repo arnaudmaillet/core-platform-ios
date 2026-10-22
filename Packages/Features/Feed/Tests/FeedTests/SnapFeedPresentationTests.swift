@@ -4,17 +4,24 @@ import FeedInterface
 import Testing
 @testable import Feed
 
-/// The snap feed is the app's sole Timeline; the builder always vends it, and
-/// the post-detail builder honours the requested mode.
+/// The snap feed is the app's sole Timeline, and its ONE post screen (#1577):
+/// the builder always vends it, for the timeline and for a single post.
 @MainActor
 struct SnapFeedPresentationTests {
     @Test func feedBuilderVendsTheSnapViewController() {
         #expect(makeBuilder().makeFeedViewController() is SnapFeedViewController)
     }
 
-    @Test func postDetailBuilderReturnsADetailViewControllerForBothModes() {
-        #expect(makeBuilder().makePostDetailViewController(for: PostID("p1"), mode: .full) is PostDetailViewController)
-        #expect(makeBuilder().makePostDetailViewController(for: PostID("p1"), mode: .commentsOnly) is PostDetailViewController)
+    /// The `.post` and `.comments` routes open the vertical feed on the post —
+    /// its comments asked for on the second — never a standalone detail screen.
+    @Test func aSinglePostOpensTheVerticalFeed() throws {
+        let post = try #require(makeBuilder().makePostFeedViewController(for: PostID("p1"), opensComments: false)
+            as? SnapFeedViewController)
+        #expect(post.debugPendingCommentsID == nil && post.debugRestingCommentsID == nil)
+        let comments = try #require(makeBuilder().makePostFeedViewController(for: PostID("p1"), opensComments: true)
+            as? SnapFeedViewController)
+        #expect(comments.debugPendingCommentsID == PostID("p1") || comments.debugRestingCommentsID == PostID("p1"),
+                "the comments were not asked for")
     }
 
     private func makeBuilder() -> FeedFeatureBuilder {

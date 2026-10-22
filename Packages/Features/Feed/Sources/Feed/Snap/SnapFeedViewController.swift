@@ -3341,6 +3341,8 @@ final class SnapFeedViewController: UIViewController {
 
     /// Which post the resting panel is standing in for right now.
     var debugRestingCommentsID: PostID? { commentsEngagedID }
+    /// A comments request not yet engaged (#1577's routes).
+    var debugPendingCommentsID: PostID? { pendingCommentsID }
 
     /// And which one is showing a panel WITHOUT owning the engagement.
     var debugPreviewRestingID: PostID? { previewRestingID }
