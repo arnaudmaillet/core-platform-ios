@@ -487,6 +487,9 @@ final class CommentRowView: UIView {
         failedMark.isHidden = delivery != .failed
         placeDeliveryIndicators()
         guard delivery == .sending else {
+            // A send that is over — failed, or no longer pending — cancels the
+            // loader it may still have on its way (#1640).
+            if wasSending { deliveryRun += 1 }
             sendingSpinner.layer.removeAllAnimations()
             sendingSpinner.stopAnimating(animated: false)
             sendingSpinner.transform = Self.spinnerScale
@@ -505,7 +508,12 @@ final class CommentRowView: UIView {
         sendingSpinner.alpha = 0
         let run = deliveryRun
         DispatchQueue.main.asyncAfter(deadline: .now() + loaderDelay) { [weak self] in
-            guard let self, deliveryRun == run, delivery == .sending else { return }
+            // ⚠️ `self.delivery`, NOT `delivery` (#1640): inside this method
+            // `delivery` is the PARAMETER — `.sending`, captured — so the guard
+            // always passed, and a send that had FAILED meanwhile turned its
+            // loader on behind the red mark, for good (the owner, on device,
+            // offline, 2026-10-23).
+            guard let self, deliveryRun == run, self.delivery == .sending else { return }
             sendingSpinner.startAnimating()
             bounceInSpinner()
         }
