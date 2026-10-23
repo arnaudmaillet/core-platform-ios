@@ -138,7 +138,7 @@ struct ProfileTabsTests {
         pager.onPageSettled = { settled.append($0) }
         let last = CGFloat(ProfileTab.ownTabs.count - 1)
         pager.debugScrollView.contentOffset = CGPoint(x: last * pager.bounds.width, y: 0)
-        pager.scrollViewDidEndDecelerating(pager.debugScrollView)
+        pager.debugScrollView.delegate?.scrollViewDidEndDecelerating?(pager.debugScrollView)
         #expect(settled == [.reactions])
     }
 }
