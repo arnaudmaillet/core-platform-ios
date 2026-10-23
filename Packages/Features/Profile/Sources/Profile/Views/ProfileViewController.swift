@@ -166,7 +166,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// The mute bell, on someone else's profile (#689): the scoped Mute menu
     /// that used to sit in the see-more menu. `bell`, or `bell.slash` once
     /// anything is muted. Kept: the trailing run is compared by reference
-    /// (`appliedBarItems`), so a fresh item is a rebuild — made only when the
+    /// (the bar's identical-group guard), so a fresh item is a rebuild — made only when the
     /// viewer's own change is revealed under its toast (#1447).
     private lazy var muteBellItem = makeMuteBellItem()
     /// While the viewer's own mute change is on its way (#1447), the scopes
@@ -232,11 +232,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     ///    hosted view is just a subview it has to carry, which is what makes
     ///    custom bar items snap while native ones interpolate.
     ///
-    /// The item set last handed to the navigation item, so a re-entrant apply
-    /// that resolves to the same items touches nothing. `UIBarButtonItem`
-    /// inherits `NSObject`'s identity equality, so this compares by reference —
-    /// exactly the question being asked ("are these the same items?").
-    private var appliedBarItems: [UIBarButtonItem]?
 
     /// The loaded profile's @handle — the screen title once known. Stashed so
     /// `viewWillAppear` can bind the bar from current state before the push
@@ -1797,79 +1792,68 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         [leadingAccessoryItem, shownBarPill].compactMap { $0 }
     }
 
+    /// History's day in the bar (#1344): the app's one section contract
+    /// (#1573) — it mints the item (one per day, each with its own
+    /// identifier, so UIKit morphs between them), places it innermost of the
+    /// trailing group (#1590) through `setOwnTrailingBarItems`, so a bar
+    /// toast that takes the group (#1066) gives it back with the day in
+    /// place, and never mid-push. A tap: the day's first post under the bar.
+    private lazy var sectionBinding: PinnedSectionBarBinding = {
+        let binding = PinnedSectionBarBinding(
+            viewController: self, placement: .trailing, scope: "profile.history", separator: sectionSpacer
+        )
+        binding.onSelect = { [weak self] index in self?.galleryPager.scrollActivePageToSection(index) }
+        return binding
+    }()
+
     /// The day the page in front has scrolled into, as last published.
     private var pinnedSection: PostGridPinnedSection?
 
-    /// Its name after the bell — the Messages inbox's section item, exactly
-    /// (#1301; the owner, 2026-10-17): a system-titled glass bubble in the
-    /// bar's own type, which may truncate. ⚠️ ONE ITEM PER DAY, EACH WITH ITS
-    /// OWN IDENTIFIER: a new item under a new identifier gets UIKit's Liquid
-    /// Glass morph, a title edited in place swaps in a frame.
-    ///
-    /// ⚠️ TRAILING since #1590, the innermost of the screen's own trailing
-    /// items — through `setOwnTrailingBarItems`, so a bar toast that takes the
-    /// group (#1066) gives it back with the day in place.
-    private var sectionItem: UIBarButtonItem?
-
-    private func makeSectionItem(_ section: PostGridPinnedSection) -> UIBarButtonItem {
-        let index = section.index
-        // The inbox's and the post lists' item, one look (`SectionBarItem`):
-        // what tapping the day's title in the list does — its first post
-        // under the bar.
-        return SectionBarItem.make(
-            title: section.title, count: section.count, countNoun: "new", scope: "profile.history.\(index)"
-        ) { [weak self] in self?.galleryPager.scrollActivePageToSection(index) }
-    }
-
-    /// Names `section` after the bell, or takes the name away.
+    /// Names `section` innermost of the trailing group, or takes the name
+    /// away. No day over a page for no one (#1406): its gallery is gone.
     private func applyPinnedSection(_ section: PostGridPinnedSection?) {
-        guard section != pinnedSection else { return }
         pinnedSection = section
-        sectionItem = section.map(makeSectionItem)
-        guard isViewLoaded else { return }
-        scheduleSectionPlacement()
+        let shown = viewModel.namesNoOne ? nil : section
+        sectionBinding.show(pinned: shown.map { ($0.index, .init(id: $0.title, title: $0.title, count: $0.count)) })
     }
 
-    /// Puts both groups where the state says — the pill leading, the day
-    /// trailing — ONCE, on the next turn: the inbox's placement (#756). A
-    /// scroll can publish a day twice in one turn, and a second write cut the
-    /// first one's animation short.
-    private func scheduleSectionPlacement() {
+    /// Puts the leading group — the bell, the pill — where the state says,
+    /// ONCE, on the next turn: a scroll can move the tray twice in one turn,
+    /// and a second write cut the first one's animation short.
+    private func scheduleLeadingPlacement() {
         guard view.window != nil else {
             navigationItem.leftBarButtonItems = leadingItems
-            updateActionBarItem(followButtonState)
             return
         }
-        guard !sectionPlacementScheduled else { return }
-        sectionPlacementScheduled = true
-        DispatchQueue.main.async { [weak self] in self?.placeSectionAfterTransition() }
+        guard !leadingPlacementScheduled else { return }
+        leadingPlacementScheduled = true
+        DispatchQueue.main.async { [weak self] in self?.placeLeadingAfterTransition() }
     }
 
     /// ⚠️ NOT DURING A PUSH (#756): items set while the bar is in its push
     /// transition land with it, unanimated, when it ends. A placement due
     /// mid-transition waits for its end, then animates.
-    private func placeSectionAfterTransition() {
+    private func placeLeadingAfterTransition() {
         if let coordinator = transitionCoordinator,
            coordinator.animate(alongsideTransition: nil, completion: { [weak self] _ in
                // Off the completion's turn, which still belongs to the transition.
-               DispatchQueue.main.async { self?.placeSectionAfterTransition() }
+               DispatchQueue.main.async { self?.placeLeadingAfterTransition() }
            }) {
             return
         }
-        sectionPlacementScheduled = false
+        leadingPlacementScheduled = false
         if !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leadingItems, by: ===) {
             navigationItem.setLeftBarButtonItems(leadingItems, animated: true)
         }
-        updateActionBarItem(followButtonState, animated: true)
     }
 
-    private var sectionPlacementScheduled = false
+    private var leadingPlacementScheduled = false
 
     #if DEBUG
     /// The bar's day item while it is shown — what a test reads.
     var debugSectionItem: UIBarButtonItem? {
-        guard let sectionItem, ownTrailingBarItems.contains(where: { $0 === sectionItem }) else { return nil }
-        return sectionItem
+        guard let item = sectionBinding.item, ownTrailingBarItems.contains(where: { $0 === item }) else { return nil }
+        return item
     }
 
     /// History publishing the day it scrolled into. Tests.
@@ -2006,7 +1990,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // Written only when it changed — the same "say nothing" rule as the
         // trailing run below, for the same torn-capsule reason.
         let leading = leadingItems
-        if !sectionPlacementScheduled,
+        if !leadingPlacementScheduled,
            !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leading, by: ===) {
             navigationItem.leftBarButtonItems = leading
         }
@@ -2161,7 +2145,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         let pill = namesNoOne ? nil : barIdentityItem(for: followButtonState)
         if pill !== shownBarPill {
             shownBarPill = pill
-            scheduleSectionPlacement()
+            scheduleLeadingPlacement()
         }
         if namesNoOne {
             // Nothing to mute, follow or spend on.
@@ -2178,17 +2162,19 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             if showsMuteBell { items.append(muteBellSpacer) }
             items.append(trailingAccessoryItem)
         }
-        // History's day, innermost (#1590). No day over a page for no one
-        // (#1406): its gallery is gone.
-        if let sectionItem, !namesNoOne {
-            if !items.isEmpty { items.append(sectionSpacer) }
-            items.append(sectionItem)
-        }
+        // History's day, innermost (#1590), is the section contract's
+        // (`sectionBinding`): it composes the group, the day after these. No
+        // day over a page for no one (#1406): its gallery is gone.
+        if namesNoOne, sectionBinding.item != nil { sectionBinding.show(pinned: nil) }
         // The load-bearing guard. A pop's `viewWillAppear` resolves to exactly
         // the item set already on the bar, and handing that same set back is
         // what used to tear the capsule down and rebuild it mid-transition.
         // Nothing changed, so nothing is said.
-        guard items != appliedBarItems else { return }
+        let group = sectionBinding.placedTrailing(items)
+        guard !ownTrailingBarItems.elementsEqual(group, by: ===) else {
+            sectionBinding.trailingItems = items
+            return
+        }
         // ⚠️ THE BELL ARRIVING waits for rest too, then comes in animated
         // (#1398): added mid-push it would pop in unanimated at the end
         // (#756).
@@ -2206,7 +2192,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             applyNavigationStateAtRest()
             return
         }
-        appliedBarItems = items
         #if DEBUG
         // Dev convenience: `-profile-navbar-audit` prints every *actual* bar
         // rebuild with the transition state it happened in. A rebuild logged
@@ -2224,14 +2209,16 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             // screen's OWN items — the follow capsule above all, which was
             // converted off a custom view for exactly this reason — so read it
             // as "one, and only the injected one".
-            let custom = items.count(where: { $0.customView != nil })
-            print("PROFILE-NAVBAR-AUDIT rebuild items=\(items.count) custom=\(custom) "
+            let custom = group.count(where: { $0.customView != nil })
+            print("PROFILE-NAVBAR-AUDIT rebuild items=\(group.count) custom=\(custom) "
                 + "state=\(followButtonState) \(phase)")
         }
         #endif
-        // The screen's own items: under bar toasts, the ones that come back
-        // (#1420, #1447).
-        setOwnTrailingBarItems(items, animated: animated)
+        // Written now, so they ride a push they arrive in; the contract
+        // composes the group with the day and writes it through the toasts'
+        // door — under bar toasts, the ones that come back (#1420, #1447).
+        sectionBinding.trailingItems = items
+        sectionBinding.placeNow(animated: animated)
     }
 
     /// The bar's identity pill, or nil: none until the tray has scrolled
@@ -2277,7 +2264,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
                 : accessory.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
         }
         if showsMuteBell { others += Self.barControlSide }
-        if let title = sectionItem?.title {
+        if let title = sectionBinding.item?.title {
             // The day's glass bubble: its title and the bubble's own padding.
             let font = UIFont.appFont(forTextStyle: .body)
             others += ceil((title as NSString).size(withAttributes: [.font: font]).width) + Spacing.lg * 2

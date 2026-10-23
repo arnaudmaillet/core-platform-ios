@@ -30,6 +30,14 @@ import UIKit
 ///   through `setOwnTrailingBarItems` — a bar toast that holds the trailing
 ///   group gives them back with the section item in place.
 ///
+/// A `separator` (a fixed space) keeps the section item in its own glass
+/// bubble beside the screen's items: adjacent items otherwise share one.
+///
+/// A screen that writes its own items on the bound side at moments of its own
+/// choosing — inside a push, so they ride it (the profile) — hands them over
+/// and places at once (`placeNow(animated:)`); the section item still comes
+/// and goes on the binding's own rules.
+///
 /// A screen never edits the item arrays itself while bound: it sets
 /// `leadingPrefix` / `leadingItems` / `trailingItems` here instead — or, while
 /// it shows a bar of another kind (the inbox's search), suspends the binding
@@ -80,18 +88,24 @@ public final class PinnedSectionBarBinding {
     private weak var viewController: UIViewController?
     private let scope: String
     private let countNoun: String
+    /// Between the screen's items and the section item, when both show.
+    private let separator: UIBarButtonItem?
     private var placementScheduled = false
 
     /// - Parameters:
     ///   - scope: the items' identifier prefix, one per screen.
     ///   - countNoun: what a count counts, for VoiceOver ("new", "unread").
+    ///   - separator: a fixed space between the screen's items and the
+    ///     section item, so each keeps its own glass; nil for none.
     public init(
-        viewController: UIViewController, placement: Placement, scope: String, countNoun: String = "new"
+        viewController: UIViewController, placement: Placement, scope: String, countNoun: String = "new",
+        separator: UIBarButtonItem? = nil
     ) {
         self.viewController = viewController
         self.placement = placement
         self.scope = scope
         self.countNoun = countNoun
+        self.separator = separator
         if placement == .leading { viewController.navigationItem.leftItemsSupplementBackButton = true }
     }
 
@@ -138,9 +152,21 @@ public final class PinnedSectionBarBinding {
     /// The items the bound side shows now.
     public var placedItems: [UIBarButtonItem] {
         switch placement {
-        case .leading: leadingPrefix + (item.map { [$0] } ?? []) + leadingItems
-        case .trailing: trailingItems + (item.map { [$0] } ?? [])
+        case .leading: placedLeading(leadingPrefix)
+        case .trailing: placedTrailing(trailingItems)
         }
+    }
+
+    /// The trailing group with `own` as the screen's items: what a screen
+    /// that places at once compares with what the bar shows.
+    public func placedTrailing(_ own: [UIBarButtonItem]) -> [UIBarButtonItem] {
+        guard placement == .trailing, let item else { return own }
+        return own + (own.isEmpty ? [] : [separator].compactMap { $0 }) + [item]
+    }
+
+    private func placedLeading(_ prefix: [UIBarButtonItem]) -> [UIBarButtonItem] {
+        guard let item else { return prefix + leadingItems }
+        return prefix + (prefix.isEmpty ? [] : [separator].compactMap { $0 }) + [item] + leadingItems
     }
 
     /// ONCE, on the next turn: a scroll can publish twice in one turn, and a
@@ -179,6 +205,9 @@ public final class PinnedSectionBarBinding {
             guard !(viewController.navigationItem.leftBarButtonItems ?? []).elementsEqual(items, by: ===) else { return }
             viewController.navigationItem.setLeftBarButtonItems(items, animated: animated)
         case .trailing:
+            // The same rule on this side: an identical group is not handed
+            // back (the profile's `appliedBarItems`, now here).
+            guard !viewController.ownTrailingBarItems.elementsEqual(items, by: ===) else { return }
             // ⚠️ Through the toasts' door: while a toast holds the trailing
             // group, these are what come back when it leaves.
             viewController.setOwnTrailingBarItems(items, animated: animated)
@@ -188,9 +217,9 @@ public final class PinnedSectionBarBinding {
     /// Places now, unanimated, skipping the turn and the transition wait: for
     /// a screen rebuilding its whole bar in one go (the inbox handing its bar
     /// back from search, inside the bar's own crossfade).
-    public func placeNow() {
+    public func placeNow(animated: Bool = false) {
         placementScheduled = false
-        place(animated: false)
+        place(animated: animated)
     }
 
     #if DEBUG
