@@ -434,6 +434,20 @@ final class PlaceProfileViewController: UIViewController {
                 slide.revealGeometry = markerClose(self)
             }
             markerCloseDriver = slide
+            #if DEBUG
+            // `-place-grab-demo <peak>`: the window grab onto the marker, from
+            // a script — released short of the threshold for a peak under it
+            // (#1638). The simulator injects no drag.
+            let arguments = ProcessInfo.processInfo.arguments
+            if let position = arguments.firstIndex(of: "-place-grab-demo"), position + 1 < arguments.count,
+               let peak = Double(arguments[position + 1]) {
+                Task { @MainActor [weak slide] in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    let driven = await slide?.debugPerformSwipe(peakProgress: CGFloat(peak), axis: .horizontal)
+                    print("[place-grab] peak=\(peak) driven=\(driven ?? false)")
+                }
+            }
+            #endif
         }
         markerCloseDriver?.install(on: nav)
     }
