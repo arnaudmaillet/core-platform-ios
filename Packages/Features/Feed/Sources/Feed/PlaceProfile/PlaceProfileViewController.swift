@@ -966,16 +966,6 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         applyLandingOcclusion()
     }
 
-    /// How much of this screen's foot the tab bar actually covers — measured,
-    /// because it floats over the pages rather than insetting them. Same
-    /// quantity `landingOcclusion` takes for its bottom, asked of the bar.
-    private var floatingBarCover: CGFloat {
-        guard let bar = tabBarController?.tabBar, !bar.isHidden, let host = bar.superview
-        else { return view.safeAreaInsets.bottom }
-        let inPage = view.convert(bar.frame, from: host)
-        return max(view.safeAreaInsets.bottom, view.bounds.maxY - inPage.minY)
-    }
-
     /// Exactly one page may drive playback: two grids competing for one pool
     /// is how a working set of six turns into a queue nobody wins. For You's
     /// pager makes the same call from the same three places (settle, tab tap,
