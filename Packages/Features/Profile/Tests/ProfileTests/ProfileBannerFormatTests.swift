@@ -3,6 +3,7 @@ import DesignSystem
 import MediaCore
 import Testing
 import UIKit
+import HeroPage
 @testable import Profile
 
 /// The banner — a band card across the top, or none (no poster any more) — the
@@ -10,13 +11,13 @@ import UIKit
 /// both share: the name and the handle on the picture, the counters on the
 /// page, the banner ending on the avatar's midline between them.
 @MainActor
-struct ProfileBannerFormatTests {
+struct HeroBannerFormatTests {
     private struct SilentFetcher: ImageFetching {
         func fetchImageData(for url: URL) async throws -> Data { Data() }
     }
 
     private func header(
-        width: CGFloat = 393, format: ProfileBannerFormat, picture: Bool = true
+        width: CGFloat = 393, format: HeroBannerFormat, picture: Bool = true
     ) -> ProfileHeaderView {
         let header = ProfileHeaderView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
         header.chromeTopInset = 103
@@ -49,16 +50,16 @@ struct ProfileBannerFormatTests {
     @Test func everyPictureIsABand() {
         for size in [CGSize(width: 1600, height: 900), CGSize(width: 900, height: 1600),
                      CGSize(width: 800, height: 800), .zero] {
-            #expect(ProfileBannerFormat.resolved(forImageSize: size) == .band)
+            #expect(HeroBannerFormat.resolved(forImageSize: size) == .band)
         }
-        #expect(ProfileBannerFormat.unresolved == .band)
+        #expect(HeroBannerFormat.unresolved == .band)
     }
 
     /// Beside the avatar, two halves of its height: the name and the handle
     /// in the top one, the counters in the bottom one — under the name,
     /// leading-aligned with it.
-    @Test(arguments: [ProfileBannerFormat.band, .none])
-    func theIdentityRowSplitsTheAvatarsHeightInTwo(format: ProfileBannerFormat) {
+    @Test(arguments: [HeroBannerFormat.band, .none])
+    func theIdentityRowSplitsTheAvatarsHeightInTwo(format: HeroBannerFormat) {
         let header = header(format: format, picture: format != .none)
         let avatar = header.debugAvatarFrame
         let names = header.debugNameHalfFrame
@@ -107,8 +108,8 @@ struct ProfileBannerFormatTests {
     /// The blur's container — and the page's fade — run from JUST ABOVE THE
     /// AVATAR (user, 30 September 2026) to the banner's FOOT, where both are
     /// whole; the stage above it is the picture, untouched.
-    @Test(arguments: [ProfileBannerFormat.band])
-    func theRunOutClimbsFromAboveTheAvatarToTheFoot(format: ProfileBannerFormat) throws {
+    @Test(arguments: [HeroBannerFormat.band])
+    func theRunOutClimbsFromAboveTheAvatarToTheFoot(format: HeroBannerFormat) throws {
         let header = header(format: format)
         let fade = try #require(header.debugBannerFade)
         let avatar = header.debugAvatarFrame
@@ -137,8 +138,8 @@ struct ProfileBannerFormatTests {
 
     /// Every shape keeps its fade layer; a band's is black (#718 brought the
     /// poster's back, at its foot).
-    @Test(arguments: [ProfileBannerFormat.band, .none])
-    func everyShapeKeepsItsFade(format: ProfileBannerFormat) {
+    @Test(arguments: [HeroBannerFormat.band, .none])
+    func everyShapeKeepsItsFade(format: HeroBannerFormat) {
         let header = header(format: format, picture: format != .none)
         #expect(header.debugBannerShowsRamp)
         // `.none` hides the whole banner; its layers are as they always were.
@@ -146,7 +147,7 @@ struct ProfileBannerFormatTests {
             #expect(!header.debugBannerShowsBlur)
         }
         if format == .band {
-            #expect(header.debugBannerRampTone == ProfileBannerView.bandRampTone)
+            #expect(header.debugBannerRampTone == HeroBannerView.bandRampTone)
         }
     }
 
@@ -168,7 +169,7 @@ struct ProfileBannerFormatTests {
         let header = header(format: .band)
         header.setTravelled(100)
         #expect(header.debugBannerAlpha == 1)
-        #expect(abs(header.debugBannerPictureShift - 100 * ProfileBannerView.parallaxShare) < 0.5)
+        #expect(abs(header.debugBannerPictureShift - 100 * HeroBannerView.parallaxShare) < 0.5)
     }
 
     /// A header with no picture is the shorter one: its column starts on

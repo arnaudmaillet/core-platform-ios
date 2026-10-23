@@ -22,7 +22,7 @@ struct RawHueGuardTests {
         // User content and measured inks — not the theme (#1124, out of scope).
         "MediaTextStyleBar.swift": "the user's text inks drawn on media",
         "FlagPalette.swift": "colours read from a country's flag",
-        "ProfileBannerView.swift": "a band card's ramp tone, read from the profile's own picture",
+        "HeroBannerView.swift": "a band card's ramp tone, read from the profile's own picture",
         "ShareQRCardView.swift": "the QR card is pinned light: its fixed grouped grey",
         // Debug and simulator art.
         "AppButtonGalleryViewController.swift": "the DEBUG button gallery's sample gradient",
@@ -36,7 +36,7 @@ struct RawHueGuardTests {
         "PersonListCell.swift": "the verified seal stays blue (the platform convention)",
         "RelationshipListCell.swift": "the verified seal stays blue (the platform convention)",
         "AccountTypeViewController.swift": "the verified seal stays blue (the platform convention)",
-        "ProfileHeaderView.swift": "the verified seal stays blue (the platform convention)",
+        "HeroHeaderView.swift": "the verified seal stays blue (the platform convention)",
         // White labels the dark tangerine would fail (#1124 step 4).
         "MutedAccountsViewController.swift": "a swipe action's ground under its white label",
         "FollowRequestsViewController.swift": "a swipe action's ground under its white label",

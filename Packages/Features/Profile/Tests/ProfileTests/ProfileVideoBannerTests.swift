@@ -5,6 +5,7 @@ import MediaCore
 import MediaPlayback
 import Testing
 import UIKit
+import HeroPage
 @testable import Profile
 
 /// The video banner (#944): read off the profile's own banner media, played
@@ -62,7 +63,7 @@ struct ProfileVideoBannerTests {
 
     /// No pool, nothing plays: the still stays, and a stop is harmless.
     @Test func withoutAPoolTheStillStays() {
-        let banner = ProfileBannerView(imagePipeline: ImagePipeline(fetcher: NoFetch()))
+        let banner = HeroBannerView(imagePipeline: ImagePipeline(fetcher: NoFetch()))
         banner.setVideoURL(URL(string: "https://example.com/loop.m3u8"), pool: nil)
         banner.setVideoPlaying(true, pool: nil)
         #expect(!banner.isVideoPlaying)
@@ -155,7 +156,7 @@ struct ProfileVideoBannerTests {
     /// A stilled loop (Reduce Motion, Power Saving, once gone) leaves the
     /// still drawn under it — never the empty card.
     @Test func aStoppedLoopLeavesItsStill() async throws {
-        let banner = ProfileBannerView(imagePipeline: ImagePipeline(fetcher: PictureFetch()))
+        let banner = HeroBannerView(imagePipeline: ImagePipeline(fetcher: PictureFetch()))
         banner.frame = CGRect(x: 0, y: 0, width: 378, height: 300)
         let pool = VideoPlaybackController(source: StubSource(), poolSize: 2)
         banner.setVideoURL(URL(string: "mock://video/clip-18"), pool: pool)

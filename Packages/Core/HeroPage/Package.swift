@@ -18,10 +18,17 @@ let package = Package(
         .package(path: "../../FeatureInterfaces/FeedInterface"),
         // `MediaCarouselTouchRouting`: a carousel with somewhere to go keeps
         // its drag from the pager.
-        .package(path: "../PostGrid")
+        .package(path: "../PostGrid"),
+        // The header's pictures: the avatar and the banner's (`ImagePipeline`,
+        // `AvatarView`), the banner's loop, a bio's emotes.
+        .package(path: "../MediaCore"),
+        .package(path: "../MediaPlayback"),
+        .package(path: "../EmoteKit")
     ],
     targets: [
-        .target(name: "HeroPage", dependencies: ["DesignSystem", "FeedInterface", "PostGrid"]),
-        .testTarget(name: "HeroPageTests", dependencies: ["HeroPage", "FeedInterface"])
+        .target(name: "HeroPage", dependencies: [
+            "DesignSystem", "FeedInterface", "PostGrid", "MediaCore", "MediaPlayback", "EmoteKit"
+        ]),
+        .testTarget(name: "HeroPageTests", dependencies: ["HeroPage", "DesignSystem", "FeedInterface", "MediaCore"])
     ]
 )

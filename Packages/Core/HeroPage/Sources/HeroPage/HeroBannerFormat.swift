@@ -24,18 +24,18 @@ import Foundation
 /// ⚠️ NO POSTER ANY MORE (the owner, 2026-10-15): the tall "cover" banner —
 /// a streaming-app stage running under the whole identity block — is gone.
 /// Any picture is a band, cropped to it; a profile without one has none.
-enum ProfileBannerFormat: Equatable, Sendable {
+public enum HeroBannerFormat: Equatable, Sendable {
     case band
     /// No picture at all: the header is the identity block on the page,
     /// starting under the chrome, with no banner drawn and nothing to fade.
     case none
 
     /// Any picture is a band.
-    static func resolved(forImageSize size: CGSize) -> ProfileBannerFormat {
+    public static func resolved(forImageSize size: CGSize) -> HeroBannerFormat {
         .band
     }
 
     /// What a profile shows before its picture has said anything: a band,
     /// the one shape a picture takes.
-    static let unresolved: ProfileBannerFormat = .band
+    public static let unresolved: HeroBannerFormat = .band
 }

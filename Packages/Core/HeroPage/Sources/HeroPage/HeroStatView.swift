@@ -9,14 +9,14 @@ import UIKit
 /// accessibility trait, and `addAction` wiring for free. Likes has no
 /// destination — it stays inert, which `isTappable` makes explicit
 /// rather than leaving to whether a caller happened to attach an action.
-final class ProfileStatView: UIControl {
+public final class HeroStatView: UIControl {
     private let valueLabel = UILabel()
     private let captionLabel = UILabel()
 
     /// Set by the owner for the two counters that lead somewhere. An untapped
     /// column reports no button trait, so VoiceOver doesn't offer an action
     /// that isn't there.
-    var isTappable = false {
+    public var isTappable = false {
         didSet {
             isUserInteractionEnabled = isTappable
             accessibilityTraits = isTappable ? .button : .staticText
@@ -25,11 +25,11 @@ final class ProfileStatView: UIControl {
 
     /// Dims on press, the way a plain-styled system button does. The whole
     /// column responds — value and caption are one target.
-    override var isHighlighted: Bool {
+    public override var isHighlighted: Bool {
         didSet { alpha = isHighlighted ? 0.4 : 1 }
     }
 
-    init(caption: String) {
+    public init(caption: String) {
         super.init(frame: .zero)
         isUserInteractionEnabled = false
         isAccessibilityElement = true
@@ -75,13 +75,13 @@ final class ProfileStatView: UIControl {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// Where an edge must stand, from this view's top, to leave the same air
     /// above the number as under it, down to the caption — as drawn: the
     /// number's cap top, less the gap from its baseline to the caption's cap
     /// top (the owner, 2026-10-15: a band card's foot).
-    var evenAirEdge: CGFloat {
+    public var evenAirEdge: CGFloat {
         let value = valueLabel.font ?? .systemFont(ofSize: 19)
         let caption = captionLabel.font ?? .systemFont(ofSize: 12)
         let capTop = value.ascender - value.capHeight
@@ -95,7 +95,7 @@ final class ProfileStatView: UIControl {
     /// plane is expected to answer for every column in production, so this is
     /// the rare case — and when it happens, the honest thing is a row of the
     /// counts that exist rather than a placeholder pretending to be one.
-    func setValue(_ text: String?) {
+    public func setValue(_ text: String?) {
         isHidden = text == nil
         valueLabel.text = text
         // "1.2K, Followers" — the number leads, because that is what the
@@ -106,7 +106,7 @@ final class ProfileStatView: UIControl {
     /// How much of the column's ink is the picture's: page ink at 0, the
     /// picture's (`HeroInk`, white or black by `tone`) at 1 — on a poster,
     /// whose picture runs down under the counters.
-    func setInk(tone: HeroInk.Tone, onPicture: CGFloat) {
+    public func setInk(tone: HeroInk.Tone, onPicture: CGFloat) {
         valueLabel.textColor = HeroInk.blend(page: .label, picture: tone.primary, onPicture: onPicture)
         captionLabel.textColor = HeroInk.blend(
             page: .secondaryLabel, picture: tone.secondary, onPicture: onPicture
@@ -118,7 +118,7 @@ final class ProfileStatView: UIControl {
 
     #if DEBUG
     /// The value and its caption, for the ink audit.
-    var debugLabels: [UILabel] { [valueLabel, captionLabel] }
+    public var debugLabels: [UILabel] { [valueLabel, captionLabel] }
     #endif
 
     // MARK: - Redaction
@@ -130,7 +130,7 @@ final class ProfileStatView: UIControl {
     /// height so the row cannot shift when the real count lands; the bone
     /// rides the value label's own center. Alpha-only, so a reveal inside an
     /// animation block cross-fades.
-    func setRedacted(_ redacted: Bool) {
+    public func setRedacted(_ redacted: Bool) {
         if redacted, bone == nil {
             let bone = SkeletonBoneView()
             bone.constrain(in: self) { _ in
