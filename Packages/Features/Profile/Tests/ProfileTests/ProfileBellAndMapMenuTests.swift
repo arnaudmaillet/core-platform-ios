@@ -421,15 +421,28 @@ extension ProfileBellAndMapMenuTests {
         #expect(withDay < free, "the day's bubble did not take its room from the pill at \(width)")
     }
 
-    /// Your own profile: the day goes trailing too, inboard of the balance
-    /// and the gear.
-    @Test func theOwnProfilesDayIsTrailingToo() async throws {
+    /// Your own profile: the day goes LEADING (#1642, the owner 2026-10-23),
+    /// after the shell's bell — the inbox's arrangement — and the trailing
+    /// group keeps the balance and the gear alone.
+    @Test func theOwnProfilesDayLeads() async throws {
         let (screen, viewModel, _) = makeScreen(relationship: .me, own: true)
         try #require(await settle { viewModel.isOwnProfile })
+        let bell = UIBarButtonItem(image: UIImage(systemName: "bell"))
+        screen.setLeadingAccessoryItem(bell)
         screen.debugApplyPinnedSection(PostGridPinnedSection(index: 0, title: "Today"))
         let day = try #require(screen.debugSectionItem)
-        #expect(screen.navigationItem.rightBarButtonItems?.last === day)
+        let leading = screen.navigationItem.leftBarButtonItems ?? []
+        #expect(leading.count == 2 && leading[0] === bell && leading[1] === day, "the day is not after the bell")
+        #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains { $0 === day }, "the day stayed trailing")
         #expect(screen.debugBarRelationshipItem == nil)
+
+        // The bell rebuilt by the shell keeps the day after it.
+        screen.debugRebuildNavigationState()
+        #expect((screen.navigationItem.leftBarButtonItems ?? []).last === day)
+
+        screen.debugApplyPinnedSection(nil)
+        #expect(screen.debugSectionItem == nil, "the day stayed after the list went back to the top")
+        #expect((screen.navigationItem.leftBarButtonItems ?? []).elementsEqual([bell], by: ===))
     }
 
     @Test func theOwnProfileWearsNothing() async throws {

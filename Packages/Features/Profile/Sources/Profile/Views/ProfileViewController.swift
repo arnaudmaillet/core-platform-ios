@@ -1794,13 +1794,20 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
 
     /// History's day in the bar (#1344): the app's one section contract
     /// (#1573) — it mints the item (one per day, each with its own
-    /// identifier, so UIKit morphs between them), places it innermost of the
-    /// trailing group (#1590) through `setOwnTrailingBarItems`, so a bar
-    /// toast that takes the group (#1066) gives it back with the day in
-    /// place, and never mid-push. A tap: the day's first post under the bar.
+    /// identifier, so UIKit morphs between them), places it, and never
+    /// mid-push. A tap: the day's first post under the bar.
+    ///
+    /// - Someone else's profile: innermost of the TRAILING group (#1590) —
+    ///   the identity pill holds the leading one — through
+    ///   `setOwnTrailingBarItems`, so a bar toast that takes the group
+    ///   (#1066) gives it back with the day in place.
+    /// - The viewer's own (`dayLeads`): LEADING, after the bell (the owner,
+    ///   2026-10-23, #1642) — the Messages inbox's arrangement. The leading
+    ///   group is then the contract's to write.
     private lazy var sectionBinding: PinnedSectionBarBinding = {
         let binding = PinnedSectionBarBinding(
-            viewController: self, placement: .trailing, scope: "profile.history", separator: sectionSpacer
+            viewController: self, placement: dayLeads ? .leading : .trailing, scope: "profile.history",
+            separator: dayLeads ? nil : sectionSpacer
         )
         binding.onSelect = { [weak self] index in self?.galleryPager.scrollActivePageToSection(index) }
         return binding
@@ -1808,6 +1815,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
 
     /// The day the page in front has scrolled into, as last published.
     private var pinnedSection: PostGridPinnedSection?
+
+    /// The viewer's own profile — the tab root, the only one with account
+    /// actions — names its day leading (#1642).
+    private var dayLeads: Bool { onLogout != nil }
 
     /// Names `section` innermost of the trailing group, or takes the name
     /// away. No day over a page for no one (#1406): its gallery is gone.
@@ -1821,6 +1832,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// ONCE, on the next turn: a scroll can move the tray twice in one turn,
     /// and a second write cut the first one's animation short.
     private func scheduleLeadingPlacement() {
+        // The own profile's leading group is the contract's (#1642): it
+        // defers the same way, with the day after these.
+        guard !dayLeads else {
+            sectionBinding.leadingPrefix = leadingItems
+            return
+        }
         guard view.window != nil else {
             navigationItem.leftBarButtonItems = leadingItems
             return
@@ -1852,7 +1869,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     #if DEBUG
     /// The bar's day item while it is shown — what a test reads.
     var debugSectionItem: UIBarButtonItem? {
-        guard let item = sectionBinding.item, ownTrailingBarItems.contains(where: { $0 === item }) else { return nil }
+        let shown = ownTrailingBarItems + (navigationItem.leftBarButtonItems ?? [])
+        guard let item = sectionBinding.item, shown.contains(where: { $0 === item }) else { return nil }
         return item
     }
 
@@ -1990,7 +2008,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // Written only when it changed — the same "say nothing" rule as the
         // trailing run below, for the same torn-capsule reason.
         let leading = leadingItems
-        if !leadingPlacementScheduled,
+        if dayLeads {
+            // The contract writes the group, the day after the bell (#1642):
+            // at once, as below, and only if it changed.
+            sectionBinding.leadingPrefix = leading
+            sectionBinding.placeNow()
+        } else if !leadingPlacementScheduled,
            !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leading, by: ===) {
             navigationItem.leftBarButtonItems = leading
         }
@@ -2172,7 +2195,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // Nothing changed, so nothing is said.
         let group = sectionBinding.placedTrailing(items)
         guard !ownTrailingBarItems.elementsEqual(group, by: ===) else {
-            sectionBinding.trailingItems = items
+            if !dayLeads { sectionBinding.trailingItems = items }
             return
         }
         // ⚠️ THE BELL ARRIVING waits for rest too, then comes in animated
@@ -2217,8 +2240,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // Written now, so they ride a push they arrive in; the contract
         // composes the group with the day and writes it through the toasts'
         // door — under bar toasts, the ones that come back (#1420, #1447).
-        sectionBinding.trailingItems = items
-        sectionBinding.placeNow(animated: animated)
+        if dayLeads {
+            // The day is leading here (#1642): the trailing group is all ours.
+            setOwnTrailingBarItems(items, animated: animated)
+        } else {
+            sectionBinding.trailingItems = items
+            sectionBinding.placeNow(animated: animated)
+        }
     }
 
     /// The bar's identity pill, or nil: none until the tray has scrolled
