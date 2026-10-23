@@ -169,8 +169,36 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
         // With a transparent bar the view extends under the chrome, so the top
         // safe-area inset is exactly the status-bar + navigation-bar height the
         // header's overlay content must clear.
-        heroHeader.chromeTopInset = view.safeAreaInsets.top
+        heroHeader.chromeTopInset = chromeTop
     }
+
+    /// The status bar and the navigation bar the header runs under: the top
+    /// safe area — or, while this screen is laid out OFF a window, the bar's
+    /// own foot.
+    ///
+    /// ⚠️ A PAGE STAGED BEFORE IT IS SHOWN (a close from the map lands the
+    /// place page from under the feed, #1656) has no safe area yet: its
+    /// bannerless header — which starts under the bar — was measured 116pt
+    /// short, grew by that once on screen, and the page came to rest pulled
+    /// down by it, the spinner showing (the owner, on a device, 2026-10-23).
+    ///
+    /// ⚠️ …AND OFTEN NO STACK EITHER: a page staged under the feed it is
+    /// about to land a close from is not in the stack yet. Whoever stages it
+    /// says what chrome it will run under (`stagingChromeTop`).
+    public var chromeTop: CGFloat {
+        if let navigationController, !navigationController.isNavigationBarHidden {
+            return max(view.safeAreaInsets.top, navigationController.navigationBar.frame.maxY)
+        }
+        if view.window == nil, let stagingChromeTop {
+            return max(view.safeAreaInsets.top, stagingChromeTop)
+        }
+        return view.safeAreaInsets.top
+    }
+
+    /// The chrome a page staged off a window and off a stack will run under,
+    /// told by whoever stages it — read by `chromeTop` until the page has a
+    /// stack or a window of its own.
+    public var stagingChromeTop: CGFloat?
 
     open override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
@@ -299,6 +327,8 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
         if let cached = headerHeightCache, abs(headerHost.bounds.height - cached.height) > 0.5 {
             headerHeightCache = nil
         }
+        // Off a window the safe area says nothing yet — see `chromeTop`.
+        if heroHeader.chromeTopInset != chromeTop { heroHeader.chromeTopInset = chromeTop }
         // The pages opt out of automatic inset adjustment (the banner must
         // start at y = 0), so the bottom safe area — which includes the
         // toolbar while it shows — is re-added by hand, plus breathing room so
@@ -324,20 +354,20 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
         heroPager.setSharedTravel(dockLine: headerTravel, contentFloor: contentTravel)
         // Where a release rests while the header is on screen: the top, the
         // first post — and a band card's avatar just under the bar (#1208).
-        let notch = heroHeader.bannerFormat == .band ? heroHeader.bandAvatarDetent : nil
-        heroPager.setSnapDetents(
-            scroll.detents(notch: notch), catching: heroHeader.bandAvatarDetent.map { [$0] } ?? []
-        )
+        // A band resting collapsed has its avatar there already: no notch.
+        let notch = heroHeader.bannerFormat == .band ? heroHeader.bandAvatarDetent.flatMap { $0 > 0 ? $0 : nil } : nil
+        heroPager.setSnapDetents(scroll.detents(notch: notch), catching: notch.map { [$0] } ?? [])
     }
 
-    /// What content actually passes under at the top: `safeAreaInsets.top`
-    /// and nothing else. It already reaches the bottom of the navigation bar.
+    /// What content actually passes under at the top: the chrome
+    /// (`chromeTop`) and nothing else. It already reaches the bottom of the
+    /// navigation bar.
     ///
     /// Assembled rather than read off the selector's frame: that bar is
     /// transiently out of any window during a push, so measuring it made the
     /// occlusion flip between values between reveals.
     private var stickyTopOcclusion: CGFloat {
-        view.safeAreaInsets.top
+        chromeTop
     }
 
     // MARK: - The header's travel
@@ -357,7 +387,7 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
     public var headerHeight: CGFloat {
         let key = HeaderHeightKey(
             width: view.bounds.width,
-            safeTop: view.safeAreaInsets.top,
+            safeTop: chromeTop,
             contentSize: traitCollection.preferredContentSizeCategory,
             revision: heroHeader.layoutRevision
         )
@@ -389,7 +419,7 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
     /// fresh, since the header's height is cached and the rest is a few
     /// subtractions.
     public var scroll: HeroScrollCoordinator {
-        HeroScrollCoordinator(headerHeight: headerHeight, safeTop: view.safeAreaInsets.top, dockedSlot: dockedSlot)
+        HeroScrollCoordinator(headerHeight: headerHeight, safeTop: chromeTop, dockedSlot: dockedSlot)
     }
 
     /// How far the header travels before its selector reaches the navigation

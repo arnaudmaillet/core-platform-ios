@@ -135,6 +135,9 @@ struct PlaceProfileTests {
         #expect(profile.debugHeaderContent.bannerImageURL == URL(string: "https://paris.example/top.jpg"))
         #expect(profile.debugHeader.bannerFormat == .band)
         #expect(!profile.debugHeader.debugBannerIsHidden)
+        // Resting collapsed (the owner, 2026-10-23): the flag just under the
+        // bar, the card at the height a profile's shrinks to.
+        #expect(profile.debugHeader.bandRestsCollapsed)
     }
 
     /// ⚠️ A CLOSE FROM THE MAP STAGES THIS PAGE OFF SCREEN (#1656): the page

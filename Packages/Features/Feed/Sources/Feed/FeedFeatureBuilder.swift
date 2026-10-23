@@ -1045,6 +1045,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                     dismissal.revealGeometry = markerGeometry
                     return
                 }
+                // Staged off the stack, under the chrome it is about to wear.
+                (landing as? PlaceProfileViewController)?.stagingChromeTop = nav.navigationBar.frame.maxY
                 // Nil origin — no card to land on — leaves the geometry nil,
                 // which is exactly how the driver selects the plain slide.
                 dismissal.revealGeometry = (landing as? PlaceProfileViewController)?

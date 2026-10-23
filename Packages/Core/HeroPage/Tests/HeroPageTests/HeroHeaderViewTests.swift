@@ -100,6 +100,26 @@ struct HeroHeaderViewTests {
         }
     }
 
+    /// A band card resting COLLAPSED (a place's, #1656): its avatar a
+    /// detent's gap under the chrome, the card shorter than a profile's.
+    @Test func aCollapsedBandRestsItsAvatarUnderTheChrome() {
+        let banner = URL(string: "https://paris.example/banner.jpg")
+        let standard = makeHeader(banner: banner)
+        let collapsed = makeHeader(banner: banner)
+        collapsed.bandRestsCollapsed = true
+        collapsed.frame.size.height = collapsed.systemLayoutSizeFitting(
+            CGSize(width: 393, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+        ).height
+        collapsed.layoutIfNeeded()
+        #expect(collapsed.bannerFormat == .band)
+        let avatarTop = collapsed.debugAvatarFrame.minY
+        #expect(abs(avatarTop - (103 + HeroBannerMetrics.bandAvatarDetentGap)) < 1, "avatar at \(avatarTop)")
+        #expect(collapsed.debugBannerFrame.maxY < standard.debugBannerFrame.maxY - 50,
+                "the card is not shorter: \(collapsed.debugBannerFrame) vs \(standard.debugBannerFrame)")
+        #expect((collapsed.bandAvatarDetent ?? 99) < 1, "a collapsed band has no notch left to rest on")
+    }
+
     /// Any view can stand in the disc — a place's flag — filling it; with no
     /// person's avatar to wait for, the pictures are settled.
     @Test func aCustomViewFillsTheDisc() {

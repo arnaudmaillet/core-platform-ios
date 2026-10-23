@@ -1163,6 +1163,11 @@ final class ForYouGridPage: UIView {
         hostedBottomInset = bottom
         collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.contentInset.top = top
+        // ⚠️ PINNED FOR A FLIGHT, the new top is the one the thaw restores
+        // (`endHeroFreeze`): left to the inset pinned before it, a header that
+        // grew during the flight (a page staged off a window, then shown,
+        // #1656) came back with its list pulled down by the difference.
+        frozenContentInset?.top = top
         collectionView.verticalScrollIndicatorInsets.top = top
         // Changing the inset moves the content under a stationary offset, so
         // the offset is restated to keep the page where it was.

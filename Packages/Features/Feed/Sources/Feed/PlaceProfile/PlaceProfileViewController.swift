@@ -707,6 +707,9 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         // the disc, Ranking and Likes; the action row is `configureActionRow`'s.
         let header = HeroHeaderView(imagePipeline: imagePipeline, counters: ["Ranking", "Likes"], avatar: .custom(flag))
         header.bannerVideoPool = videoPlayback
+        // A place's band card rests COLLAPSED (the owner, 2026-10-23): the
+        // height a profile's shrinks to, its flag just under the bar.
+        header.bandRestsCollapsed = true
         // One page, so no selector is ever placed: the strip is the
         // container's, titled for the day a place has tabs.
         // ⚠️ NO DOCKED SLOT: with no selector the WHOLE header climbs under
@@ -1126,7 +1129,9 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         // The docked band is the navigation bar alone now — no selector lands
         // in it any more. That is what still covers the list once the header
         // has gone.
-        return UIEdgeInsets(top: view.safeAreaInsets.top, left: 0, bottom: bottom, right: 0)
+        // The chrome, not the safe area: a landing stages this page off a
+        // window, where the safe area is still zero (`chromeTop`).
+        return UIEdgeInsets(top: chromeTop, left: 0, bottom: bottom, right: 0)
     }
 
     /// Hands both tabs what actually covers them.
@@ -1825,6 +1830,8 @@ extension PlaceProfileViewController: CardCloseLanding {
         // and unsized when the driver asks, and the feed's own stack is the
         // one it is about to join.
         let bounds = feed.navigationController?.view.bounds ?? feed.view.bounds
+        // …under the feed's own chrome, which this page is about to wear.
+        stagingChromeTop = feed.navigationController?.navigationBar.frame.maxY ?? feed.view.safeAreaInsets.top
         // ⚠️ HOME TO POPULAR'S FIRST CARD (#1596, the owner 2026-10-22): a
         // flight that arrived from a MARKER lands on the page's FIRST section
         // — the place's most popular post — and never re-plans Recent to put

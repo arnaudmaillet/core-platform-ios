@@ -323,6 +323,8 @@ open class HeroHeaderView: UIView {
             if chromeTopInset != oldValue { layoutRevision += 1 }
             columnTopConstraint?.constant = columnTopConstant
             columnTopFloor?.constant = columnTopConstant
+            // A collapsed band's avatar rides the chrome's foot.
+            bandAvatarLine?.constant = bandAvatarLineConstant
             // The status bar's scrim covers the chrome, and stops there.
             bannerView.topScrimHeight = chromeTopInset > 0 ? chromeTopInset : 160
         }
@@ -340,11 +342,28 @@ open class HeroHeaderView: UIView {
         chromeTopInset + Metrics.bandGap
     }
 
+    /// Whether a band card RESTS COLLAPSED (a place's, the owner
+    /// 2026-10-23): at the height a profile's shrinks to as it climbs — its
+    /// avatar just under the bar, a detent's gap between them — rather than
+    /// down to `bandScreenFraction` of the screen.
+    public var bandRestsCollapsed = false {
+        didSet {
+            guard bandRestsCollapsed != oldValue else { return }
+            bandAvatarLine?.constant = bandAvatarLineConstant
+            layoutRevision += 1
+            setNeedsLayout()
+        }
+    }
+
     /// A band card's avatar midline, so its foot (`bandFootBelowMidline`
-    /// under it) lands at `bandScreenFraction` of the screen.
+    /// under it) lands at `bandScreenFraction` of the screen — or, resting
+    /// collapsed, so the avatar's top stands a detent's gap under the chrome.
     private var bandAvatarLine: NSLayoutConstraint?
     private var bandAvatarLineConstant: CGFloat {
-        (screenHeight * Metrics.bandScreenFraction).rounded() - Metrics.bandFootBelowMidline
+        if bandRestsCollapsed {
+            return chromeTopInset + Metrics.bandAvatarDetentGap + Metrics.avatarSize / 2
+        }
+        return (screenHeight * Metrics.bandScreenFraction).rounded() - Metrics.bandFootBelowMidline
     }
     /// The column never starts higher than a band's.
     private var columnTopFloor: NSLayoutConstraint?

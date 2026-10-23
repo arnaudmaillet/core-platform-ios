@@ -122,6 +122,19 @@ struct HeroPageViewControllerTests {
         }
     }
 
+    /// ⚠️ A PAGE STAGED OFF A WINDOW AND OFF A STACK (a place page landing a
+    /// close from under the feed, #1656) has no safe area: it wears the
+    /// chrome it is told, so its header is measured as it will be shown.
+    @Test func aPageStagedOffAWindowWearsTheChromeItIsTold() {
+        let screen = FixtureHeroPage(fetcher: SilentFetcher())
+        screen.stagingChromeTop = 116
+        screen.view.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        screen.view.layoutIfNeeded()
+        #expect(screen.view.window == nil && screen.navigationController == nil)
+        #expect(screen.chromeTop == 116)
+        #expect(screen.heroHeader.chromeTopInset == 116)
+    }
+
     /// One tab is no selector: nothing in the toolbar, nothing in an
     /// accessory, the status block hidden.
     @Test func oneTabShowsNoSelector() {
