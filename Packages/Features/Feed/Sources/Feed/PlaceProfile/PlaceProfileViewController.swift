@@ -457,9 +457,9 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
                     view.layoutIfNeeded()
                     guard let identity = heroHeader.debugIdentityContrast() else { return }
                     let style = traitCollection.userInterfaceStyle == .dark ? "dark" : "light"
-                    let body = (heroHeader.debugBodyContrast() ?? []).map { "\($0.0)=[\($0.1)]" }
-                    print("PLACE-INK-AUDIT format=\(heroHeader.bannerFormat) style=\(style) "
-                        + "name=[\(identity.name)] region=[\(identity.handle)] " + body.joined(separator: " "))
+                    let body = (heroHeader.debugBodyContrast() ?? []).map { "\($0.0)=[\($0.1)]" }.joined(separator: " ")
+                    let format = heroHeader.bannerFormat
+                    print("PLACE-INK-AUDIT format=\(format) style=\(style) name=[\(identity.name)] region=[\(identity.handle)] \(body)")
                 }
             }
         }
