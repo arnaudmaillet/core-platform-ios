@@ -60,6 +60,35 @@ struct PinCardIconFloorTests {
         #expect(card.debugIconFaceIsVisible)
     }
 
+    /// ⚠️ A STAND-IN'S ALPHA IS THE WINDOW'S (#1638): a reveal fades the card
+    /// itself, and re-rounding or re-dressing it on every pose must not put
+    /// it back — that was the marker's media flashing in a grab's window, and
+    /// filling it on a grab let go short.
+    @Test(arguments: PinCardIconFloorTests.shownFaces)
+    func anOwnersAlphaSurvivesTheCardBeingReshaped(face: PinCardView.Face) {
+        let card = makeCard(face)
+        #expect(card.alpha == 1, "guard: a shown face starts shown")
+        card.alpha = 0
+        card.setCornerRadius(200)
+        card.setDress(MapMarkerDress())
+        card.setIcon(face == .icon ? (art(), 0) : nil)
+        card.setFace(face)
+        #expect(card.alpha == 0, "the card's own rule overrode the reveal's alpha")
+    }
+
+    nonisolated static let shownFaces: [PinCardView.Face] = [.media, .text]
+
+    /// …and an emote still hidden waiting for its art still appears once,
+    /// when the art lands — the rule's own change, which it does write.
+    @Test func anAwaitedEmoteStillAppearsOnceItsArtLands() {
+        let card = makeCard(.icon)
+        #expect(card.alpha == 0)
+        card.setCornerRadius(20)
+        #expect(card.alpha == 0)
+        card.setIcon((art(), 0))
+        #expect(card.alpha == 1)
+    }
+
     /// The disc never comes back for an icon, with or without art.
     @Test func theDiscNeverStandsInForAnIcon() {
         let card = makeCard(.icon)

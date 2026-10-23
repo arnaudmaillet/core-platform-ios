@@ -780,14 +780,28 @@ final class PinCardView: UIView {
     /// How long a marker takes to appear once its emote has landed.
     static let iconArrivalDuration: TimeInterval = 0.2
 
+    /// Whether the card is hidden waiting for its emote, as this rule last
+    /// set it.
+    private var hiddenAwaitingIcon = false
+
     /// ⚠️ AN EMOTE MARKER APPEARS WITH ITS EMOTE (#1504, the owner
     /// 2026-10-21): the whole card stays transparent while its art is on its
     /// way — the map shows nothing there rather than a stand-in — and fades
     /// in when it lands. The card's OWN alpha: the arrival's pop animates the
-    /// annotation view's, and nothing else writes this one.
+    /// annotation view's.
+    ///
+    /// ⚠️ WRITTEN ONLY WHEN THIS RULE'S OWN ANSWER CHANGES, never to correct
+    /// whatever the alpha is (#1638). A reveal's stand-in is a `PinCardView`
+    /// whose alpha the WINDOW owns: 0 while the finger is down, 1 only on a
+    /// committed release. Every pose re-rounds the card (`setCornerRadius`),
+    /// which re-runs this — and comparing the alpha with "shown" put it back
+    /// to 1 on every frame: the marker's media flashed in the window as a grab
+    /// began, and filled it on a grab let go short of the threshold (the
+    /// owner, on device, 2026-10-23).
     private func applyIconPresence(awaiting: Bool) {
+        guard awaiting != hiddenAwaitingIcon else { return }
+        hiddenAwaitingIcon = awaiting
         let target: CGFloat = awaiting ? 0 : 1
-        guard alpha != target else { return }
         layer.removeAnimation(forKey: "opacity")
         guard !awaiting, window != nil, !UIAccessibility.isReduceMotionEnabled else {
             alpha = target
