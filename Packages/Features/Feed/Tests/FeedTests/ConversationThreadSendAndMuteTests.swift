@@ -557,6 +557,37 @@ struct ConversationThreadSendAndMuteTests {
         #expect(await settle { row.sendingSpinnerView.isAnimating }, "the loader never came for a slow send")
     }
 
+    /// ⚠️ A FAILED SEND NEVER TURNS ITS LOADER (#1640): offline, the send
+    /// fails before the loader's delay — and the delayed start came anyway,
+    /// a violet arc turning behind the red mark for good.
+    @Test func aSendThatFailsBeforeTheDelayNeverShowsItsLoader() async throws {
+        let pending = Self.message("p1", mine: true, minutes: 3, delivery: .sending)
+        let (screen, driver, window) = makeScreen(phase: .content([pending]), loaderDelay: 0.1)
+        defer { window.isHidden = true }
+        let row = try #require(cell("Message p1", in: screen))
+        driver.onPhaseChange?(.content([Self.message("p1", mine: true, minutes: 3, delivery: .failed)]))
+        let failed = try #require(cell("Message p1", in: screen))
+        #expect(failed.row.delivery == .failed, "precondition: the row failed")
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(!row.sendingSpinnerView.isAnimating, "the loader turned on behind the failed mark")
+        #expect(!failed.sendingSpinnerView.isAnimating, "the loader turned on behind the failed mark")
+    }
+
+    /// …and one that fails after its loader came: the loader goes, and stays
+    /// gone.
+    @Test func aSendThatFailsAfterTheDelayLosesItsLoader() async throws {
+        let pending = Self.message("p1", mine: true, minutes: 3, delivery: .sending)
+        let (screen, driver, window) = makeScreen(phase: .content([pending]), loaderDelay: 0.1)
+        defer { window.isHidden = true }
+        let row = try #require(cell("Message p1", in: screen))
+        try #require(await settle { row.sendingSpinnerView.isAnimating }, "precondition: the loader came")
+        driver.onPhaseChange?(.content([Self.message("p1", mine: true, minutes: 3, delivery: .failed)]))
+        let failed = try #require(cell("Message p1", in: screen))
+        #expect(!failed.sendingSpinnerView.isAnimating, "the loader stayed on a failed row")
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(!failed.sendingSpinnerView.isAnimating, "the loader came back on a failed row")
+    }
+
     // MARK: - Arrival and departure (#920)
 
     /// A message is the row's MESSAGE variant: no ♥, and the fade-up for its
