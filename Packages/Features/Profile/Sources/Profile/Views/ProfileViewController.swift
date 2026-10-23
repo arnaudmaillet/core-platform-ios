@@ -107,15 +107,20 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     ///
     /// THE TAB ROOT ONLY (#728): a pushed profile hosts the strip as a
     /// bottom-leading toolbar item instead (`selectorItem`).
-    private(set) var selectorAccessory: SelectorAccessory?
+    var selectorAccessory: SelectorAccessory? { selector.accessory }
     /// Between `viewWillAppear` and `viewWillDisappear`: the only span in
     /// which this screen may put the shell-wide band up — see `showTabs`.
     private var isShownOnScreen = false
-    /// The strip as a toolbar item at the bottom leading corner, on a pushed
-    /// profile (#728) — `SelectorToolbarItem`, the search results' too (#881).
-    private var selectorToolbar: SelectorToolbarItem?
-    /// The strip's toolbar item. Internal for tests.
-    var selectorItem: UIBarButtonItem? { selectorToolbar?.item }
+    /// The strip's toolbar item, on a pushed profile (#728) — the search
+    /// results' too (#881). Internal for tests.
+    var selectorItem: UIBarButtonItem? { selector.item }
+    /// The strip, kept in step with the pager and placed at the foot of the
+    /// screen — the hero page's (`HeroPageSelector`, #1653), in the home
+    /// `trayPlacement` says.
+    private lazy var selector = HeroPageSelector(
+        bar: selectorBar, placement: trayPlacement == .aboveBottomSafeArea ? .accessory : .toolbar,
+        touchProbe: selectorTouchProbe
+    )
     /// The gallery's format selector — the SAME `PagedTabBar` For You and
     /// Messages wear, so a viewer meets one selector in three places rather
     /// than three selectors doing one job.
@@ -205,7 +210,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         guard let pill = makePersonBarItem?() else { return nil }
         pill.setOverMedia(false)
         pill.view.accessibilityHint = "Scrolls back to the top of the profile."
-        pill.onPersonTapped = { [weak self] _ in self?.galleryPager.scrollActivePageToProfileTop() }
+        pill.onPersonTapped = { [weak self] _ in self?.galleryPager.scrollActivePageToHeaderTop() }
         pill.onFollowTapped = { [weak self] _ in self?.headerView.onFollowTapped?() }
         return pill
     }()
@@ -582,18 +587,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         installBottomChromeWhenAppearing(hasActiveFlight: false,
                                          handsOver: tabBarController?.bottomAccessory != nil) { [weak self] in
             guard let self else { return }
-            selectorAccessory?.install(into: tabBarController, owner: self,
-                                   // ⚠️ THE TAB ROOT ONLY. A pushed profile keeps
-                                   // `hidesBottomBarWhenPushed`, so there is no bar
-                                   // under it to collapse — and the behaviour is
-                                   // SHELL-WIDE, so arming it from a screen that
-                                   // cannot use it gives every other tab a
-                                   // minimizing bar and this one nothing.
-                                   minimizesOnScroll: trayPlacement == .aboveBottomSafeArea,
-                                       alongside: transitionCoordinator)
+            // Minimizes with the scroll on the tab root only — see
+            // `HeroPageSelector.install`.
+            selector.install(on: self, alongside: transitionCoordinator)
         }
         // A pushed profile's strip rides the stack's toolbar (#728).
-        selectorToolbar?.show(for: self, animated: animated)
+        selector.showToolbar(for: self, animated: animated)
         // The accessory's collapse rides the active page: name it again on
         // every appearance, as the inbox's pager does (#1191).
         galleryPager.republishActiveScrollView()
@@ -674,10 +673,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         isShownOnScreen = false
-        selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
-        // The toolbar is the stack's: put away unless the screen taking over
-        // brings items of its own (the relations screen, the feed).
-        selectorToolbar?.hide(leaving: self, animated: animated)
+        // The band comes down; the toolbar is the stack's, put away unless the
+        // screen taking over brings items of its own (the relations screen,
+        // the feed).
+        selector.hide(leaving: self, animated: animated, alongside: transitionCoordinator)
         setStackGesturesEnabled(true)
         // Stops as this screen is covered — including by the post it just
         // opened, whose own player is what should be heard.
@@ -710,9 +709,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // (native chrome is UIKit's — see `TabBarRevealPolicy`). A tab switch
         // and a committed close install from `viewWillAppear` and find nothing
         // to do here.
-        selectorAccessory?.install(into: tabBarController, owner: self,
-                                   minimizesOnScroll: trayPlacement == .aboveBottomSafeArea,
-                                   alongside: transitionCoordinator)
+        selector.install(on: self, alongside: transitionCoordinator)
         #if DEBUG
         verifyRevealClearsSelector()
         #endif
@@ -2393,30 +2390,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     private func configureFilterTray() {
         guard viewModel.hasGallery else { return }
 
-        selectorBar.addAction(
-            UIAction { [weak self] _ in
-                guard let self else { return }
-                barSelectionChanged(selectorBar)
-            },
-            for: .valueChanged
-        )
-        // Tapping the tab already showing is a request to go back to the top
-        // of it — see the pager for which top that is.
-        selectorBar.onReselect = { [weak self] _ in self?.galleryPager.scrollActivePageToTop() }
-        // The lens tracks the finger, exactly as it does on the other two
-        // screens that wear this bar — the pager reports a fractional position
-        // every frame and the capsule interpolates against it.
-        galleryPager.onProgress = { [weak self] progress in
-            self?.selectorBar.setProgress(progress)
-        }
-        // And the other way: the pill can be picked up, which scrubs the
-        // gallery under the finger. The release hands over a velocity and the
-        // pager commits — including the `onPageSettled` this screen adopts its
-        // tab from, so a drag ends exactly where a swipe does.
-        selectorBar.onScrub = { [weak self] progress in self?.galleryPager.scrub(to: progress) }
-        selectorBar.onScrubEnd = { [weak self] velocity in
-            self?.galleryPager.settleAfterScrub(velocityInPages: velocity)
-        }
+        // Both ways (`HeroPageSelector.bind`): the lens tracks the pages, the
+        // pill scrubs them, a reselect goes back to the top of the tab.
+        selector.bind(to: galleryPager) { [weak self] index in self?.barSelectionChanged(index) }
 
         placeSelectors()
 
@@ -2434,8 +2410,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
 
     /// A tap on either selector: record the format, page the gallery, and carry
     /// the choice to the other bar so the hand-over has nothing to reconcile.
-    private func barSelectionChanged(_ bar: PagedTabBar) {
-        let index = bar.selectedIndex
+    private func barSelectionChanged(_ index: Int) {
         mirrorSelection(to: index)
         let tab = tabs[index]
         adoptTab(tab)
@@ -2484,8 +2459,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// `select` fires `.valueChanged`, whose action mirrored into the other
     /// bar, which selected again. With one strip the guard below is all of it.
     private func mirrorSelection(to index: Int) {
-        guard selectorBar.selectedIndex != index else { return }
-        selectorBar.select(index)
+        selector.select(index)
     }
 
     /// Puts one selector in the page's column and the other in the navigation
@@ -2546,33 +2520,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     ///   the item's platter is the glass, so the strip draws none
     ///   (`.platter`).
     private func placeSelectors() {
-        guard viewModel.hasGallery, tabs.count > 1, selectorAccessory == nil, selectorItem == nil else { return }
-        selectorTouchProbe.attach(to: selectorBar)
-        switch trayPlacement {
-        case .aboveBottomSafeArea:
-            // `hosting` and `fillsWidth` are the host's to set — see
-            // `SelectorAccessoryHost`, which is where the reasons for both live.
-            selectorAccessory = SelectorAccessory(strip: selectorBar)
-        case .navigationToolbar:
-            let toolbar = SelectorToolbarItem(strip: selectorBar)
-            selectorToolbar = toolbar
-            toolbarItems = toolbar.toolbarItems
-        }
+        guard viewModel.hasGallery, tabs.count > 1 else { return }
+        selector.place(on: self)
     }
 
     /// Takes the selector away when one tab is left (#742).
     private func removeSelectors() {
-        if let accessory = selectorAccessory {
-            accessory.remove(from: tabBarController, alongside: nil)
-            selectorAccessory = nil
-        }
-        if selectorToolbar != nil {
-            selectorToolbar = nil
-            toolbarItems = []
-            if navigationController?.topViewController === self {
-                navigationController?.setToolbarHidden(true, animated: true)
-            }
-        }
+        selector.remove(from: self)
     }
 
     /// ⚠️ NO TAB FOR A SOURCE WITH NOTHING IN IT (#742, the owner's call
@@ -2607,7 +2561,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // "View all" from the wrong corpus.
         if active != shown[index] { adoptTab(shown[index]) }
         if shown.count > 1 {
-            let wasPlaced = selectorAccessory != nil || selectorItem != nil
+            let wasPlaced = selector.isPlaced
             placeSelectors()
             // ⚠️ ON SCREEN, NOT IN A WINDOW. A tab that arrives while a pushed
             // screen (Settings) is covering this one found the view still in
@@ -2616,11 +2570,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             // no band to remove. The next `viewWillAppear` puts it up.
             guard !wasPlaced, isShownOnScreen else { return }
             // Arrived while on screen: up now, not at the next appearance.
-            selectorAccessory?.install(into: tabBarController, owner: self,
-                                       minimizesOnScroll: trayPlacement == .aboveBottomSafeArea,
-                                       alongside: nil)
+            selector.install(on: self, alongside: nil)
             if navigationController?.topViewController === self {
-                selectorToolbar?.show(for: self, animated: true)
+                selector.showToolbar(for: self, animated: true)
             }
         } else {
             removeSelectors()
@@ -3223,7 +3175,7 @@ extension ProfileViewController: TabReselectScrolling {
     /// Back to the PROFILE's top — the identity and its tray at rest, as the
     /// bar's identity pill does — not merely the active tab's first row.
     func scrollToTopForTabReselect() {
-        galleryPager.scrollActivePageToProfileTop()
+        galleryPager.scrollActivePageToHeaderTop()
     }
 }
 
