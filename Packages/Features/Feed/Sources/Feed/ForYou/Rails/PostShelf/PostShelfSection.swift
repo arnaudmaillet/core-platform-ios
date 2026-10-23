@@ -939,6 +939,13 @@ final class PostShelfSection: UIView {
     /// The card the lift is made of, on its own curve: the list's card for
     /// words — not the whole cell, whose rectangle would flash its square
     /// corners under the lift.
+    ///
+    /// ⚠️ DRAWN IN THE SECTION, NOT IN THE ROW (#1639): a row is exactly as
+    /// tall as its cards and clips, so the press's highlight — the card
+    /// growing — was cut flat at its top and bottom, its rounded corners
+    /// gone, while the grid's tiles grew whole (the owner, on device,
+    /// 2026-10-23). The target puts the lift in this section, centred where
+    /// the card stands; the card itself is still what it shows.
     private func targetedPreview(in row: UICollectionView, at indexPath: IndexPath) -> UITargetedPreview? {
         guard let cell = row.cellForItem(at: indexPath), cell.window != nil else { return nil }
         let parameters = UIPreviewParameters()
@@ -948,7 +955,8 @@ final class PostShelfSection: UIView {
             ? PostGridListRowCell.cardCornerRadius
             : PostShelfMediaCardCell.cornerRadius
         parameters.visiblePath = UIBezierPath(roundedRect: card.bounds, cornerRadius: radius)
-        return UITargetedPreview(view: card, parameters: parameters)
+        let centre = card.convert(CGPoint(x: card.bounds.midX, y: card.bounds.midY), to: self)
+        return UITargetedPreview(view: card, parameters: parameters, target: UIPreviewTarget(container: self, center: centre))
     }
 
     /// Whether `scrollView` is one of the shelf's rows.
@@ -1018,6 +1026,14 @@ final class PostShelfSection: UIView {
     func debugCardPlace(at index: Int) -> (row: UICollectionView, indexPath: IndexPath)? {
         guard cards.indices.contains(index) else { return nil }
         return cardRow(for: cards[index].id)
+    }
+
+    /// The highlight a long press on card `index` grows, through the row's
+    /// own delegate path.
+    func debugCardHighlight(at index: Int) -> UITargetedPreview? {
+        guard let (row, indexPath) = debugCardPlace(at: index),
+              let configuration = debugCardMenuConfiguration(at: index) else { return nil }
+        return collectionView(row, contextMenuConfiguration: configuration, highlightPreviewForItemAt: indexPath)
     }
 
     /// The long-press configuration for card `index`, through the row's own

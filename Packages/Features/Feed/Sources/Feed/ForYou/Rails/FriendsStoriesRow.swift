@@ -341,7 +341,11 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
         parameters.backgroundColor = .clear
         let face = story.faceView
         parameters.visiblePath = ForYouStoryCell.Metrics.faceShape.path(in: face.bounds)
-        return UITargetedPreview(view: face, parameters: parameters)
+        // In the row's view, not in the clipping collection view the face
+        // scrolls in: the highlight grows past the face (#1639, the shelf's
+        // same fix).
+        let centre = face.convert(CGPoint(x: face.bounds.midX, y: face.bounds.midY), to: self)
+        return UITargetedPreview(view: face, parameters: parameters, target: UIPreviewTarget(container: self, center: centre))
     }
 
     #if DEBUG

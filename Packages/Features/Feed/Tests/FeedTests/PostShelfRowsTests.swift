@@ -518,6 +518,26 @@ struct PostShelfRowsTests {
         #expect(asked == [cards[text].id], "a media card asked for comments")
     }
 
+    /// ⚠️ THE HIGHLIGHT IS NOT DRAWN IN THE ROW (#1639): a row is exactly as
+    /// tall as its cards and clips, so the press's growing card was cut flat
+    /// at its top and bottom. The lift's container is the section, which
+    /// does not clip, centred on the card — for a media card and a text one.
+    @Test func aCardsHighlightGrowsOutsideItsClippingRow() throws {
+        let cards = Self.mixed
+        let fixture = Fixture(cards: cards)
+        let shelf = fixture.lead.shelf
+        for index in [0, try #require(cards.firstIndex { $0.kind == .text })] {
+            let (row, indexPath) = try #require(shelf.debugCardPlace(at: index))
+            let cell = try #require(row.cellForItem(at: indexPath), "precondition: card \(index) is drawn")
+            let highlight = try #require(shelf.debugCardHighlight(at: index))
+            #expect(highlight.target.container === shelf, "card \(index)'s highlight is drawn in its clipping row")
+            #expect(!shelf.clipsToBounds)
+            let card = cell.contentView.convert(cell.contentView.bounds, to: shelf)
+            #expect(abs(highlight.target.center.x - card.midX) < 0.5 && abs(highlight.target.center.y - card.midY) < 0.5,
+                    "card \(index)'s highlight is not centred on it")
+        }
+    }
+
     // MARK: - Fixtures
 
     /// Seven media and three text posts, interleaved as the section might
