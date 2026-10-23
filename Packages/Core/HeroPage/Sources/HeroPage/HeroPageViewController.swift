@@ -313,7 +313,10 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
     /// The bar floats over these pages rather than insetting them, so the safe
     /// area understates it by the bar's own height. Asked of the bar rather
     /// than written down as a number, which goes stale on the next device.
-    private var floatingBarCover: CGFloat {
+    ///
+    /// Public: a page kind's own landings measure the same cover (the place
+    /// page's `landingOcclusion`).
+    public var floatingBarCover: CGFloat {
         guard let bar = tabBarController?.tabBar, !bar.isHidden, let host = bar.superview
         else { return view.safeAreaInsets.bottom }
         let inPage = view.convert(bar.frame, from: host)
