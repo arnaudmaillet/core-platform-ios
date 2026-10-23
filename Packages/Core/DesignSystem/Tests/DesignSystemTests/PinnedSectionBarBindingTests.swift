@@ -179,6 +179,54 @@ struct PinnedSectionBarBindingTests {
         }
     }
 
+    /// A separator keeps the section item in its own glass beside the
+    /// screen's items — and only when there are any (the profile's day).
+    @Test func aSeparatorStandsBetweenTheScreensItemsAndTheSection() {
+        hosting { screen in
+            let space = UIBarButtonItem.fixedSpace(8)
+            let binding = PinnedSectionBarBinding(
+                viewController: screen, placement: .trailing, scope: "test", separator: space
+            )
+            binding.update(sections: sections, sectionTops: tops, pinLine: 300)
+            binding.debugPlaceNow()
+            let alone = screen.navigationItem.rightBarButtonItems ?? []
+            #expect(alone.count == 1 && alone[0] === binding.item, "a separator with nothing to separate")
+
+            let trash = UIBarButtonItem(systemItem: .trash)
+            binding.trailingItems = [trash]
+            binding.debugPlaceNow()
+            let items = screen.navigationItem.rightBarButtonItems ?? []
+            #expect(items.count == 3 && items[0] === trash && items[1] === space && items[2] === binding.item)
+            #expect(binding.placedTrailing([trash]).elementsEqual(items, by: ===))
+        }
+    }
+
+    /// An identical trailing group is not handed back: re-setting the same
+    /// items rebuilt the glass mid-transition (the profile's guard, #1573).
+    @Test func anIdenticalTrailingGroupIsNotHandedBack() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let screen = CountingScreen()
+        window.rootViewController = UINavigationController(rootViewController: screen)
+        window.isHidden = false
+        window.layoutIfNeeded()
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+        let binding = PinnedSectionBarBinding(viewController: screen, placement: .trailing, scope: "test")
+        binding.trailingItems = [UIBarButtonItem(systemItem: .trash)]
+        binding.update(sections: sections, sectionTops: tops, pinLine: 300)
+        binding.placeNow(animated: true)
+        let writes = screen.counted.trailingWrites
+        #expect(writes >= 1)
+
+        binding.placeNow(animated: true)
+        let same = binding.trailingItems
+        binding.trailingItems = same
+        binding.placeNow()
+        #expect(screen.counted.trailingWrites == writes, "the same group was handed back")
+    }
+
     /// On screen, the placement waits a turn — a scroll can publish twice in
     /// one — and lands once.
     @Test func onScreenThePlacementWaitsATurn() async {
@@ -219,4 +267,25 @@ struct PinnedSectionBarBindingTests {
             #expect(back.count == 2 && back[0] === trash && back[1] === binding.item)
         }
     }
+}
+
+/// A screen whose navigation item counts the trailing writes.
+private final class CountingScreen: UIViewController {
+    final class CountingItem: UINavigationItem {
+        private(set) var trailingWrites = 0
+        override func setRightBarButtonItems(_ items: [UIBarButtonItem]?, animated: Bool) {
+            trailingWrites += 1
+            super.setRightBarButtonItems(items, animated: animated)
+        }
+        override var rightBarButtonItems: [UIBarButtonItem]? {
+            get { super.rightBarButtonItems }
+            set {
+                trailingWrites += 1
+                super.rightBarButtonItems = newValue
+            }
+        }
+    }
+
+    let counted = CountingItem(title: "")
+    override var navigationItem: UINavigationItem { counted }
 }
