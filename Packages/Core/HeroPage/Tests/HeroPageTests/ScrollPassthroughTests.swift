@@ -1,6 +1,6 @@
 import Testing
 import UIKit
-@testable import Profile
+@testable import HeroPage
 
 /// Which touches the floating header keeps, and which it lets past.
 ///

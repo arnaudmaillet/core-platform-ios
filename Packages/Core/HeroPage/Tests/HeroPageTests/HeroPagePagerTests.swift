@@ -131,7 +131,7 @@ struct HeroPageSelectorTests {
 
 /// A page with an offset and nothing else.
 @MainActor
-private final class StubPage: UIView, PostGridPage {
+final class StubPage: UIView, PostGridPage {
     private(set) var verticalOffset: CGFloat = 0
     private(set) var handedPull = false
     private(set) var hostedInsets: UIEdgeInsets?

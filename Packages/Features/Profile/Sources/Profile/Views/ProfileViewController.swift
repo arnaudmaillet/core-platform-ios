@@ -15,7 +15,10 @@ import UIKit
 /// control (#1273).
 typealias ProfileGridPageFactory = (_ style: PostGridPageStyle, _ savesPosts: Bool) -> any PostGridPage
 
-final class ProfileViewController: UIViewController, HeaderAccessoryHosting, ProfileRouteAnswering {
+/// A person's hero page (`HeroPageViewController`, #1655): the container's
+/// layout, travel, dock and bar dress, with the profile's own data, tabs,
+/// bar items, menus and post opening.
+final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAccessoryHosting, ProfileRouteAnswering {
     /// For You's grid page (#1273, epic #1269): the profile's pages and its
     /// media gallery are For You's, so every tile behaves as For You's does.
     private let makeGridPage: ProfileGridPageFactory
@@ -45,24 +48,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         (ProfileRelationshipsViewModel.Subject, RelationshipDirection) -> UIViewController
     )?
 
-    /// The identity block and the selector, floating above the pages.
-    ///
-    /// ⚠️ **Not in a scroll view.** The profile used to be one outer scroll view
-    /// containing the header and a pager sized to its active page; every layout
-    /// defect on this screen came from that container resizing. The pages own
-    /// all vertical motion now and this host is MOVED by whichever page is being
-    /// read — see `ProfileHeaderScrollCoordinator`.
-    /// Passthrough, not a plain view: the header floats OVER the pages, so a
-    /// container that took every touch inside its bounds would stop a drag that
-    /// began on the avatar or the bio from scrolling anything. See
-    /// `ScrollPassthroughView`.
-    private let headerHost = ScrollPassthroughView()
-    /// How far the host has been pulled up, driven by the active page's offset.
-    private var headerTopConstraint: NSLayoutConstraint?
-    /// The bar's see-through dress, worn only while the banner is behind it.
-    private var transparentBarAppearance: UINavigationBarAppearance?
-    /// Whether the bar is currently see-through.
-    private var isBarTransparent = true
     /// Retained for the share sheet, which builds its own QR card (and a
     /// throwaway one to rasterize) and needs the same avatar cache.
     private let imagePipeline: ImagePipeline
@@ -108,41 +93,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// THE TAB ROOT ONLY (#728): a pushed profile hosts the strip as a
     /// bottom-leading toolbar item instead (`selectorItem`).
     var selectorAccessory: SelectorAccessory? { selector.accessory }
-    /// Between `viewWillAppear` and `viewWillDisappear`: the only span in
-    /// which this screen may put the shell-wide band up — see `showTabs`.
-    private var isShownOnScreen = false
     /// The strip's toolbar item, on a pushed profile (#728) — the search
     /// results' too (#881). Internal for tests.
     var selectorItem: UIBarButtonItem? { selector.item }
-    /// The strip, kept in step with the pager and placed at the foot of the
-    /// screen — the hero page's (`HeroPageSelector`, #1653), in the home
-    /// `trayPlacement` says.
-    private lazy var selector = HeroPageSelector(
-        bar: selectorBar, placement: trayPlacement == .aboveBottomSafeArea ? .accessory : .toolbar,
-        touchProbe: selectorTouchProbe
-    )
-    /// The gallery's format selector — the SAME `PagedTabBar` For You and
-    /// Messages wear, so a viewer meets one selector in three places rather
-    /// than three selectors doing one job.
-    ///
-    /// ⚠️ **ONE INSTANCE, AND IT NEVER MOVES.** There were two, cross-fading as
-    /// the identity block scrolled away: one inline in the column, one in the
-    /// navigation bar's title slot. Both are gone with the docking — the strip
-    /// sits at the foot of the screen for this screen's whole life, so there is
-    /// no second copy to keep in step, no echo to latch against, and no
-    /// hand-over to animate. Built `.navigationTitle` and told to FILL, which
-    /// spreads it across its host.
-    ///
-    /// Internal (not private) only for the +QA hooks.
-    let selectorBar: PagedTabBar
-    /// The pull indicator, above the header rather than inside a list — see
-    /// `HeroPullToRefreshView` for why the stock control could not be used.
-    private let pullIndicator = HeroPullToRefreshView()
-    /// The band the spinner centres in, under the navigation bar.
-    private static let pullIndicatorHeight: CGFloat = 44
-    /// A failed first load, with its way out (#797), or a handle or link
-    /// that names no one (#800).
-    private let statusView = EmptyStateView()
     /// First-load guarantee: while the skeleton screen is up, the scroll
     /// content must fill the viewport, so the gallery's shimmer rows reach
     /// the screen bottom from the very first layout pass. The pager's own
@@ -255,9 +208,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     private var hasLoggedFirstFrame = false
     fileprivate var lastTracedReadiness = ""
     fileprivate let debugBornAt = CACurrentMediaTime()
-    /// How many times the header has been measured — `headerHeight`'s fitting
-    /// passes, which a frame that only scrolls must not add to.
-    private(set) var debugHeaderMeasureCount = 0
     #endif
 
     /// Where the filter tray lives, and with it whether a bottom bar survives
@@ -277,12 +227,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         /// needs separating from is the content it filters. Equal gaps made it
         /// read as a third thing floating between two others.
         static let selectorTopGap: CGFloat = 10
-        /// Between the selector and the first row it filters.
-        static let selectorBottomGap: CGFloat = 16
-        /// The height the selector's slot holds in the scrolling column,
-        /// whether or not the selector is in it — the bar's own height plus the
-        /// breathing room beneath it, taken from the bar rather than restated.
-        static let selectorSlotHeight = PagedTabBar.Style.navigationTitle.height + selectorBottomGap
         /// How long the hand-over between the two selectors takes.
         ///
         /// Short enough to feel like a state change rather than a performance —
@@ -333,8 +277,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         self.imagePipeline = imagePipeline
         self.videoPlayback = videoPlayback
         self.shareTargeting = shareTargeting
-        headerView = ProfileHeaderView(imagePipeline: imagePipeline)
-        headerView.bannerVideoPool = videoPlayback
+        let header = ProfileHeaderView(imagePipeline: imagePipeline)
+        header.bannerVideoPool = videoPlayback
+        headerView = header
         // Every profile can carry Saved and Liked (#411, #837): someone
         // else's only when its owner shows them — the server answers empty
         // otherwise, and an empty source is no tab (#742).
@@ -345,10 +290,17 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         let shown = allTabs.filter { $0 == .format(.activity) }
         self.tabs = shown
         let savesPosts = viewModel.bookmarks != nil
-        galleryPager = ProfileGalleryPagerView(tabs: allTabs) { style in makeGridPage(style, savesPosts) }
-        galleryPager.setVisibleTabs(shown)
-        selectorBar = PagedTabBar(titles: shown.map(\.title), style: .navigationTitle)
-        super.init(nibName: nil, bundle: nil)
+        let pager = ProfileGalleryPagerView(tabs: allTabs) { style in makeGridPage(style, savesPosts) }
+        pager.setVisibleTabs(shown)
+        galleryPager = pager
+        // The gallery's format selector — the SAME `PagedTabBar` For You and
+        // Messages wear, built `.navigationTitle` and told to FILL — at the
+        // foot of the screen in the home `trayPlacement` says.
+        super.init(
+            header: header, pager: pager,
+            selectorBar: PagedTabBar(titles: shown.map(\.title), style: .navigationTitle),
+            selectorPlacement: trayPlacement == .aboveBottomSafeArea ? .accessory : .toolbar
+        )
 
         // Only for the toolbar-hosted tray, which owns the bottom of the screen
         // and would otherwise stack with the tab bar. Safe with the standard pop
@@ -396,14 +348,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override func viewDidLoad() {
+        // The hero page's layout, bar dress and travel (#1655).
         super.viewDidLoad()
-        // The video banner rests under Reduce Motion, Power Saving and idle
-        // calm, and plays again when they end (#944).
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(decorativeMotionDidChange), name: .decorativeMotionDidChange, object: nil
-        )
-        // The page the cards lie on, a step below them — see `Surface`.
-        view.backgroundColor = Surface.page
         // Selector-based, so UIKit drops it with this object — no token to hold
         // and no `deinit` to remember.
         NotificationCenter.default.addObserver(
@@ -415,7 +361,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // finished toolbar (the title and action slot fill in when the data
         // resolves, riding the same transition if one is still running).
         applyNavigationState()
-        configureViews()
+        heroPager.onPinnedSectionChanged = { [weak self] section in self?.applyPinnedSection(section) }
+        galleryPager.onNearEnd = { [weak self] in self?.viewModel.loadMoreGallery() }
 
         viewModel.onPhaseChange = { [weak self] phase in
             HeroScreenCost.measure("landing.phase") { self?.render(phase) }
@@ -574,8 +521,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        isShownOnScreen = true
-        isLeavingScreen = false
         Task { [weak self] in await self?.viewModel.refreshShareToken() }
         // ⚠️ **AS EARLY AS THE TRANSITION ALLOWS, AND `viewDidAppear` IS NOT
         // EARLY.** Measured on a tab switch, headless: `viewWillAppear` at
@@ -672,20 +617,15 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        isShownOnScreen = false
         // The band comes down; the toolbar is the stack's, put away unless the
         // screen taking over brings items of its own (the relations screen,
         // the feed).
         selector.hide(leaving: self, animated: animated, alongside: transitionCoordinator)
-        setStackGesturesEnabled(true)
         // Stops as this screen is covered — including by the post it just
         // opened, whose own player is what should be heard.
         galleryPager.setAutoplayActive(false)
-        // ⚠️ NOT THE BANNER (#1399): it is muted, and stopping it here took
-        // the loop off the card for the whole dismissal — the profile slid
-        // away on an empty banner. It plays on while the screen leaves, and
-        // stops once it has gone (`viewDidDisappear`).
-        isLeavingScreen = true
+        // Not the banner (#1399): the hero page plays it on while the screen
+        // leaves.
     }
 
     /// The post has finished covering this screen, so the tapped tile can be
@@ -695,8 +635,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // Not `viewWillDisappear`: that fires as the transition begins, while
         // the grid is still visible behind an expanding hero card.
         galleryPager.applyPendingReveal()
-        isLeavingScreen = false
-        updateBannerVideo()
         // What the cards staked while the screen was up is final now.
         staking?.endSession()
     }
@@ -716,7 +654,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // Both facts are true only here: the screen owns the display AND its
         // cells are realized. Reconciling any earlier finds no candidates.
         galleryPager.setAutoplayActive(true)
-        updateBannerVideo()
         // The pager's horizontal pan yields to the stack's edge-swipe pop:
         // without this, an edge-start drag over the grid PAGES instead of
         // popping (verified in-sim) — the platform contract loses. Mid-surface
@@ -1218,84 +1155,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         #endif
     }
 
-    override func viewSafeAreaInsetsDidChange() {
-        super.viewSafeAreaInsetsDidChange()
-        // With a transparent bar the view extends under the chrome, so the top
-        // safe-area inset is exactly the status-bar + navigation-bar height the
-        // header's overlay content must clear.
-        headerView.chromeTopInset = view.safeAreaInsets.top
-    }
-
-    /// How much of this screen's foot the tab bar actually covers.
-    ///
-    /// The bar floats over these pages rather than insetting them, so the safe
-    /// area understates it by the bar's own height. Asked of the bar rather
-    /// than written down as a number, which goes stale on the next device.
-    private var floatingBarCover: CGFloat {
-        guard let bar = tabBarController?.tabBar, !bar.isHidden, let host = bar.superview
-        else { return view.safeAreaInsets.bottom }
-        let inPage = view.convert(bar.frame, from: host)
-        return max(view.safeAreaInsets.bottom, view.bounds.maxY - inPage.minY)
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        HeroScreenCost.measure("layout.page") { layoutPages() }
-    }
-
-    private func layoutPages() {
-        // The host has just been laid out by the same constraints the fitting
-        // pass solves: a height it disagrees with is a header that changed
-        // behind `layoutRevision`'s back — measure again rather than trust it.
-        if let cached = headerHeightCache, abs(headerHost.bounds.height - cached.height) > 0.5 {
-            headerHeightCache = nil
-        }
-        // The scroll view opts out of automatic inset adjustment (the banner
-        // must start at y = 0), so the bottom safe area — which includes the
-        // toolbar while it shows — is re-added by hand, plus breathing room
-        // so the grid's last row scrolls clear of the transparent bar's glass
-        // capsules.
-        // ⚠️ **THERE IS NO TRAY TO CLEAR ANY MORE, AND THAT USED TO BE LOAD-
-        // BEARING BY ACCIDENT.** A `trayClearance` term added the inline tray's
-        // own height here, because that tray lived inside this view rather than
-        // in a bar UIKit insets for. The source filter is a navigation-bar item
-        // now and there is nothing at the foot but the accessory, whose height
-        // IS in `safeAreaInsets.bottom` — measured on the search results, an
-        // inset of 69 in an 874pt window with the band's top edge at exactly
-        // 805.
-        //
-        // ⚠️ AND NEVER LESS THAN THE BAR ACTUALLY COVERS. The tab bar FLOATS —
-        // it draws over these pages without insetting them — so
-        // `safeAreaInsets.bottom` understates it by the bar's own height. The
-        // tray clearance happened to bridge most of that gap, which is why
-        // nothing was ever reported for it; `floatingBarCover` is what covers
-        // it on purpose, and it is the reason removing the tray does not put a
-        // revealed tile back behind the bar.
-        let bottom = max(
-            floatingBarCover,
-            view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0)
-        )
-        galleryPager.setContentBottomInset(bottom)
-        // The pages are inset by the header floating over them, so their content
-        // starts below it rather than behind it. Applied here because the
-        // header's height is only known once it has laid out.
-        galleryPager.setContentTopInset(headerHeight)
-        galleryPager.setStickyTopOcclusion(stickyTopOcclusion)
-        // Every tab must be able to absorb the header's whole travel, or a
-        // short one cannot hold the position a long one was left at and the
-        // header follows the clamp back up. See `setMinimumScrollTravel`.
-        galleryPager.setMinimumScrollTravel(contentTravel)
-        // Where the header stops, and so where the offset stops being the
-        // screen's business and starts being each tab's own. See the pager's
-        // `alignedOffset`.
-        galleryPager.setSharedTravel(dockLine: headerTravel, contentFloor: contentTravel)
-        // Where a release rests while the header is on screen: the top, the
-        // identity with the poster gone (posters only), the first post.
-        // A band card also rests with its avatar just under the bar (#1208).
-        let notch = headerView.bannerFormat == .band ? headerView.bandAvatarDetent : nil
-        galleryPager.setSnapDetents(scroll.detents(notch: notch), catching: headerView.bandAvatarDetent.map { [$0] } ?? [])
-    }
-
     /// Opens the followers / following lists on the tapped counter's tab.
     ///
     /// Pushed onto this screen's own stack rather than routed: the destination
@@ -1709,29 +1568,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
 
     // MARK: - Setup
 
-    /// The banner runs under the navigation area, so the bar is transparent
-    /// while the header is at the scroll edge (white title over the banner's
-    /// top scrim) and stays transparent, with the title in the system's ink,
-    /// once content scrolls up underneath it.
+    /// The viewer's own bar items: the gear and the switcher. The bar's
+    /// dress — transparent, white ink over the banner — is the hero page's.
     private func configureNavigationBar() {
-        // A custom leading item silently disables the navigation controller's
-        // interactive pop gesture (the feed had to build a whole replacement
-        // pan for that reason). The profile must keep the native edge swipe in
-        // every pushed context, so any leading item an owner installs (the
-        // sheet flow's bell today) supplements the back button instead of
-        // replacing it. Harmless at a stack root, where no back button exists.
-        navigationItem.leftItemsSupplementBackButton = true
-        let transparent = UINavigationBarAppearance()
-        transparent.configureWithTransparentBackground()
-        transparent.titleTextAttributes = [.foregroundColor: UIColor.white]
-        transparentBarAppearance = transparent
-        navigationItem.scrollEdgeAppearance = transparent
-        // ⚠️ TRANSPARENT HERE TOO, not a fresh `UINavigationBarAppearance()`: a
-        // default one is the system's material slab, and this bar wears none in
-        // any state — `updateBarTransparency` only ever changes the title's
-        // colour.
-        navigationItem.standardAppearance = dockedBarAppearance
-
         // Account actions only exist for the viewer's own profile. (`onLogout`
         // is retained for the Account Settings screen, which will host Log Out.)
         guard onLogout != nil else { return }
@@ -2312,106 +2151,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// identity block. The header stops climbing once its selector docks, so
     /// the tray's foot can rest at the bar's edge; by then the identity fade
     /// (`applyIdentityFade`, run first) has taken it out.
-    private func trayIsScrolledAway(travelled: CGFloat) -> Bool {
-        // ⚠️ AT REST THE TRAY IS ON SCREEN, whatever the frames say: a push
-        // reads them before the header has laid out (a tray foot at 0, an
-        // identity not faded in yet), and the pill showed over a profile that
-        // had not moved (the owner, on a device, 2026-10-15).
-        guard travelled > 0, headerView.bounds.height > 0,
-              let trayFoot = headerView.actionTrayMaxY(in: headerHost), trayFoot > 0 else { return false }
-        let covered = scroll.isUnderBar(foot: trayFoot, travelled: travelled)
-        return covered || headerView.alpha < 0.5
-    }
-
-    private func configureViews() {
-        // The pages fill the screen and scroll themselves; the header floats
-        // over them. Order matters — the header is added second so it draws
-        // above the content sliding under it.
-        galleryPager.pin(to: view)
-
-        headerHost.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(headerHost)
-        let top = headerHost.topAnchor.constraint(equalTo: view.topAnchor)
-        headerTopConstraint = top
-        NSLayoutConstraint.activate([
-            top,
-            headerHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            headerHost.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        ])
-
-        headerView.constrain(in: headerHost) { parent in
-            headerView.topAnchor.constraint(equalTo: parent.topAnchor)
-            headerView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-            headerView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-        }
-        // The selector's slot sits between the identity block and the gallery
-        // it filters — the one place on this screen where "what you are looking
-        // at" changes hands.
-        // ⚠️ **THE IDENTITY BLOCK'S BOTTOM IS WHAT GIVES THE HOST A HEIGHT
-        // NOW.** It used to be the selector's slot — a fixed-height seat pinned
-        // to `headerHost.bottomAnchor`, and the only constraint doing that.
-        // Delete the slot without this and `headerHeight` goes ambiguous,
-        // taking the pages' inset, the dock line and the content floor with it.
-        headerView.bottomAnchor.constraint(equalTo: headerHost.bottomAnchor).isActive = true
-
-        // ⚠️ Stretchy banner, unchanged in mechanism and load-bearing in this
-        // arrangement. The host is moved by its TOP CONSTRAINT rather than by a
-        // transform precisely so this still works: constraints cannot see a
-        // transform, and `lessThanOrEqualTo` the view's top is what pins the
-        // banner while the host travels down under a pull, stretching it instead
-        // of dragging it away and exposing the background behind.
-        // ⚠️ THE BANNER STANDS BEHIND THE PAGES, not in the floating header:
-        // a poster's picture runs to 80% of the screen while its identity
-        // block — and the posts after it — start at 40%, OVER the picture's
-        // lower part (user, 5 October 2026). The pages are clear; only their
-        // cards cover it. It still rests on the header's top and travels
-        // with it, so the fade, the ink and the stretch are read as before.
-        headerView.moveBanner(into: view, below: galleryPager)
-        headerView.anchorBanner(toViewportTop: view.topAnchor)
-
-        galleryPager.onVerticalScroll = { [weak self] offset in
-            guard let self else { return }
-            self.applyHeaderOffset(offset)
-            // Negative travel is the overscroll the indicator draws from.
-            self.pullIndicator.setPull(
-                max(0, -offset), isTracking: self.galleryPager.activePage?.scrollView.isTracking ?? false
-            )
-        }
-        galleryPager.onPullReleased = { [weak self] distance in
-            guard let self, self.pullIndicator.shouldRefresh(releasedAt: distance) else { return }
-            self.pullIndicator.beginRefreshing()
-            self.viewModel.refresh()
-        }
-        galleryPager.onPullToRefresh = { [weak self] in self?.viewModel.refresh() }
-        galleryPager.onPinnedSectionChanged = { [weak self] section in self?.applyPinnedSection(section) }
-        galleryPager.onNearEnd = { [weak self] in self?.viewModel.loadMoreGallery() }
-        // The band's minimize rides whichever page is in front. The pager is
-        // what knows, and it is what says so — see `onActiveScrollViewChanged`.
-        galleryPager.onActiveScrollViewChanged = { [weak self] scroller in
-            self?.setContentScrollView(scroller, for: .bottom)
-        }
-
-
-        // Above everything, including the header it is pulled out from under:
-        // the band between the safe-area top and the first content is exactly
-        // where a refresh belongs, and the header slides down past it.
-        pullIndicator.constrain(in: view) { parent in
-            pullIndicator.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
-            pullIndicator.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-            pullIndicator.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-            pullIndicator.heightAnchor.constraint(equalToConstant: Self.pullIndicatorHeight)
-        }
-        view.bringSubviewToFront(pullIndicator)
-
-        statusView.isHidden = true
-        statusView.constrain(in: view) { parent in
-            statusView.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
-            statusView.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor)
-            statusView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-            statusView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-        }
-    }
-
     /// Wires the selector and the source filter, and puts the selector in its
     /// inline slot: a format tab records the selection and pages the gallery; a
     /// source pick re-filters every page in place.
@@ -2620,268 +2359,29 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         }
     }
 
-    /// ⚠️ THE STRIP WINS THE TOUCH IT IS UNDER — see `SelectorTouchProbe`.
-    private lazy var selectorTouchProbe = SelectorTouchProbe { [weak self] isTouching in
-        self?.setStackGesturesEnabled(!isTouching)
+    // MARK: - The hero page's contract
+
+    /// A pull released past its threshold, or a page asking.
+    override func heroPageRefresh() {
+        viewModel.refresh()
     }
 
-    /// ⚠️ THE STACK HAS TWO BACK-SWIPE RECOGNISERS AND
-    /// `interactivePopGestureRecognizer` VENDS ONLY ONE — audited on the search
-    /// results screen, where gating the vended one looked right and left the
-    /// screen anyway. Every pan on the container is suspended for the length of
-    /// a touch, restored to the value it had, and only while this screen is on
-    /// top.
-    private func setStackGesturesEnabled(_ isEnabled: Bool) {
-        if isEnabled {
-            for (recogniser, wasEnabled) in suspendedPans { recogniser.isEnabled = wasEnabled }
-            suspendedPans = []
-            return
-        }
-        guard navigationController?.topViewController === self,
-              suspendedPans.isEmpty,
-              let host = navigationController?.view
-        else { return }
-        let pans = (host.gestureRecognizers ?? []).filter { $0 is UIPanGestureRecognizer }
-        suspendedPans = pans.map { ($0, $0.isEnabled) }
-        for recogniser in pans { recogniser.isEnabled = false }
-    }
+    /// A profile with no gallery (a page for no one) needs no air under it.
+    override var heroPageBottomBreathingRoom: CGFloat { viewModel.hasGallery ? 8 : 0 }
 
-    private var suspendedPans: [(UIGestureRecognizer, Bool)] = []
-
-    /// What content actually passes under at the top.
-    ///
-    /// `safeAreaInsets.top` and nothing else. It already reaches the bottom of
-    /// the navigation bar, and the docked selector rides INSIDE that bar — so
-    /// adding `selectorSlotHeight` counted the selector a second time and parked
-    /// every revealed card 60pt further down, leaving a blank band between the
-    /// header and the card. The reveal's own 12pt padding is the only gap.
-    ///
-    /// Assembled rather than read off `selectorBar`'s frame: that bar is
-    /// transiently out of any window during a push, so measuring it made the
-    /// occlusion flip between values between reveals.
-    private var stickyTopOcclusion: CGFloat {
-        view.safeAreaInsets.top
-    }
-
-    /// The height the header takes when nothing is scrolled — what the pages
-    /// are inset by so their content starts below it rather than behind it.
-    ///
-    /// ⚠️ MEASURED ONCE PER CONTENT, NOT PER FRAME. It is read five times a
-    /// frame while the page moves — the header's offset, its fade, the pages'
-    /// insets and travels — and each read was a fitting pass over the whole
-    /// header: about 5 ms a frame of a pull on a profile, most of a 120 Hz
-    /// frame's 8.3. The answer only changes with what the header holds
-    /// (`ProfileHeaderView.layoutRevision`), the width, the chrome above it
-    /// and Dynamic Type, so those are its key; and should anything else ever
-    /// resize the header, the laid-out host disagreeing with the cached
-    /// height drops it (`viewDidLayoutSubviews`).
-    private var headerHeight: CGFloat {
-        let key = HeaderHeightKey(
-            width: view.bounds.width,
-            safeTop: view.safeAreaInsets.top,
-            contentSize: traitCollection.preferredContentSizeCategory,
-            revision: headerView.layoutRevision
-        )
-        if let cached = headerHeightCache, cached.key == key { return cached.height }
-        let height = HeroScreenCost.measure("layout.headerHeight") {
-            #if DEBUG
-            debugHeaderMeasureCount += 1
-            #endif
-            return headerHost.systemLayoutSizeFitting(
-                CGSize(width: view.bounds.width, height: UIView.layoutFittingCompressedSize.height),
-                withHorizontalFittingPriority: .required,
-                verticalFittingPriority: .fittingSizeLevel
-            ).height
-        }
-        headerHeightCache = (key, height)
-        return height
-    }
-
-    /// What `headerHeight` was last measured for.
-    private struct HeaderHeightKey: Equatable {
-        var width: CGFloat
-        var safeTop: CGFloat
-        var contentSize: UIContentSizeCategory
-        var revision: Int
-    }
-    private var headerHeightCache: (key: HeaderHeightKey, height: CGFloat)?
-
-    /// The header's scroll arithmetic (#1652): the dock line, the content's
-    /// floor, the header's position, the identity's fade, the detents — the
-    /// hero page's one copy (`HeroScrollCoordinator`), read fresh, since the
-    /// header's height is cached and the rest is a few subtractions.
-    private var scroll: HeroScrollCoordinator {
-        HeroScrollCoordinator(
-            headerHeight: headerHeight, safeTop: view.safeAreaInsets.top,
-            dockedSlot: Metrics.selectorSlotHeight
-        )
-    }
-
-    /// How far the header travels before its selector reaches the navigation
-    /// bar — the moment it docks.
-    private var headerTravel: CGFloat { scroll.dockLine }
-
-    /// How far a tab must be able to scroll for its first row to sit directly
-    /// beneath the navigation bar — a slot's height further than the dock line
-    /// (see `HeroScrollCoordinator.contentFloor`).
-    private var contentTravel: CGFloat { scroll.contentFloor }
-
-    /// **The coordinator.** Moves the header from the active page's offset, and
-    /// decides docking from the same number.
-    ///
-    /// ⚠️ Everything on this screen that used to be a separate mechanism is this
-    /// arithmetic now. The header's position, the docking state and the
-    /// tab-switch continuity all read the SAME offset, so they cannot disagree —
-    /// which is what the previous architecture spent five fixes trying to
-    /// arrange between a resizing container and a scroll view that clamped it.
-    private func applyHeaderOffset(_ travelled: CGFloat) {
-        HeroScreenCost.measure("scroll.coordinator") { applyHeaderOffsetNow(travelled) }
-    }
-
-    private func applyHeaderOffsetNow(_ travelled: CGFloat) {
-        // ⚠️ **Negative travel is not clamped, and that is the point.** The
-        // floor used to be `max(travelled, 0)`, which pinned the header at rest
-        // while the list bounced beneath it — pull down at the top of a profile
-        // and the identity block sat still while the grid peeled away from it,
-        // as though the two were unrelated screens. Letting the constant go
-        // POSITIVE carries the header down by exactly the overscroll, so the
-        // banner, the identity block and the selector travel with the content
-        // they belong to and the whole top of the screen stretches as one.
-        //
-        // Only the downward end is free. The upward end still stops at
-        // `headerTravel`, which is where the header has finished docking under
-        // the navigation bar and must not keep climbing.
-        //
-        // Everything downstream of here already tolerates it: `identityAlpha`
-        // clamps its ramp, and `isDocked` compares against a dock line no
-        // negative offset can reach.
-        headerTopConstraint?.constant = scroll.headerTop(travelled: travelled)
-        headerView.setTravelled(travelled)
-        if headerView.hasBannerVideo { updateBannerVideo() }
-        applyIdentityFade(travelled: travelled)
-        updateBarTransparency(travelled: travelled)
-        let trayGone = trayIsScrolledAway(travelled: travelled)
-        if trayGone != isTrayScrolledAway {
-            isTrayScrolledAway = trayGone
-            updateActionBarItem(followButtonState, animated: view.window != nil && transitionCoordinator == nil)
-        }
-    }
-
-    /// Between `viewWillDisappear` and `viewDidDisappear`: the screen is
-    /// leaving and the banner's loop plays on through it (#1399). A
-    /// cancelled interactive pop never reaches `viewDidDisappear`;
-    /// `viewWillAppear` clears it.
-    private var isLeavingScreen = false
-
-    private func updateBannerVideo() {
-        headerView.setBannerVideoPlaying(bannerVideoShouldPlay)
-    }
-
-    /// The video banner (#944) plays while this screen is on show or
-    /// leaving, the banner on screen and decorative motion allowed — the
-    /// poster under Reduce Motion, Power Saving and idle calm (#580), and as
-    /// soon as the banner has scrolled away.
-    private var bannerVideoShouldPlay: Bool {
-        view.window != nil && headerView.bannerShouldPlay(hostShowing: isShownOnScreen || isLeavingScreen)
+    /// Once the tray has scrolled under the bar, the bar carries the
+    /// profile's identity (#1451) — and gives it back on the way down.
+    override func heroPageHeaderDidMove(travelled: CGFloat) {
+        let trayGone = isActionRowUnderBar(travelled: travelled)
+        guard trayGone != isTrayScrolledAway else { return }
+        isTrayScrolledAway = trayGone
+        updateActionBarItem(followButtonState, animated: view.window != nil && transitionCoordinator == nil)
     }
 
     #if DEBUG
     /// Whether the banner's loop is wanted now (#1399) — what a test reads.
     var debugBannerVideoShouldPlay: Bool { bannerVideoShouldPlay }
     #endif
-
-    @objc private func decorativeMotionDidChange() {
-        updateBannerVideo()
-    }
-
-    /// Fades the identity block out as it reaches the navigation bar, and back
-    /// in on the way down.
-    ///
-    /// This replaced hiding the host outright at the dock line, which was two
-    /// faults in one line: the block vanished in a single frame, and until that
-    /// frame it went on drawing through the transparent bar — the bio's last
-    /// lines sat over the status bar for the whole approach. Both are the same
-    /// mistake, which is that visibility was a consequence of a STATE when it is
-    /// really a function of a POSITION.
-    ///
-    /// ⚠️ The fade is on the identity block alone, not on its host. The host
-    /// also carries the selector, which is running its own hand-over at exactly
-    /// this moment; fading the pair would apply that transition twice to one of
-    /// them.
-    private func applyIdentityFade(travelled: CGFloat) {
-        let alpha = scroll.identityAlpha(travelled: travelled)
-        guard abs(headerView.alpha - alpha) > 0.001 else { return }
-        headerView.alpha = alpha
-        // ⚠️ Nothing drawn, nothing to touch. The host still spans the band
-        // between the navigation bar and the content once the header has
-        // travelled, and a `UIView` takes touches inside its bounds whether or
-        // not it has anything to show — so left interactive it swallows scrolls
-        // in that band. Hiding it used to do this for free; a faded view has to
-        // say so.
-        headerHost.isUserInteractionEnabled = alpha > 0.01
-    }
-
-    /// Swaps the bar's title colour once the banner is no longer behind it.
-    ///
-    /// ⚠️ **UIKit normally does this for us and cannot here.** The scroll-edge
-    /// appearance is chosen by watching a scroll view in the hierarchy, and this
-    /// screen no longer has one at the top level — the pages own their own
-    /// scrolling, one level down. Left alone the bar stays at its scroll-edge
-    /// dress forever, whose white title is written for the banner and unreadable
-    /// over the docked content.
-    ///
-    /// ⚠️ THE DOCKED BAR IS AS TRANSPARENT AS THE BANNER ONE. It used to take a
-    /// `configureWithDefaultBackground()` dress here — the system's material,
-    /// a flat slab — which made this the one header in the app with a blurred
-    /// band behind it. No header wears one (`prefersClearTopEdge`), so the bar
-    /// stays transparent and the only thing this swap changes is the ink.
-    private func updateBarTransparency(travelled: CGFloat) {
-        let shouldBeTransparent = scroll.barIsAtRest(travelled: travelled)
-        guard shouldBeTransparent != isBarTransparent else { return }
-        isBarTransparent = shouldBeTransparent
-        let appearance = shouldBeTransparent ? transparentBarAppearance : dockedBarAppearance
-        navigationItem.scrollEdgeAppearance = appearance
-        navigationItem.standardAppearance = appearance
-        navigationItem.compactAppearance = appearance
-        forceNavigationBarLayout()
-    }
-
-    /// The bar's dress once the header has scrolled behind it: the same
-    /// transparent background, with the title back in the system's ink.
-    private var dockedBarAppearance: UINavigationBarAppearance {
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithTransparentBackground()
-        return appearance
-    }
-
-    /// Hands the selection over between the two selectors, and back.
-    ///
-    /// **Two coordinated halves, not a move.** The one being left shrinks
-    /// slightly and fades out; the one arriving grows from the same shallow
-    /// scale and fades in. They run together, so for a quarter of a second both
-    /// are on screen and the eye reads one control changing places rather than
-    /// two controls swapping.
-    ///
-    /// This is why there are two bars at all. The previous arrangement moved a
-    /// single bar between the hosts and could only ever dissolve the hosts'
-    /// rendered contents around the swap — a view cannot fade out of one place
-    /// while fading into another.
-    ///
-    /// ⚠️ **Scale by TRANSFORM, and only the transform.** These capsules take
-    /// their corner radius from their own bounds, so a capsule resized towards
-    /// its target would need its radius re-derived every frame; a transform
-    /// scales what is already drawn, corners included, and leaves the layout
-    /// alone. The shallow 0.88 is also what keeps the glass honest — a deep
-
-    /// The nav bar caches its title view's size, so a bar arriving in or leaving
-    /// the title slot has to make it re-measure — the same re-layout the other
-    /// two screens force whenever a badge changes their bar's width.
-    private func forceNavigationBarLayout() {
-        guard let bar = navigationController?.navigationBar else { return }
-        bar.setNeedsLayout()
-        bar.layoutIfNeeded()
-    }
-
 
 
     // MARK: - Render
@@ -3045,13 +2545,7 @@ extension ProfileViewController {
     /// The content inset the pages were handed — the header's height.
     var debugHeaderHeight: CGFloat { headerHeight }
     /// The same, measured afresh — what the cached answer must agree with.
-    var debugMeasuredHeaderHeight: CGFloat {
-        headerHost.systemLayoutSizeFitting(
-            CGSize(width: view.bounds.width, height: UIView.layoutFittingCompressedSize.height),
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel
-        ).height
-    }
+    var debugMeasuredHeaderHeight: CGFloat { measuredHeaderHeight }
 
     /// `-profile-first-frame-log`: each readiness milestone as it lands,
     /// stamped from the screen's construction — what a held push is waiting
