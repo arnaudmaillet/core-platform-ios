@@ -23,6 +23,8 @@ let package = Package(
         .package(path: "../../Core/CacheKit"),
         .package(path: "../../Core/LocalStore"),
         .package(path: "../../Core/DesignSystem"),
+        // The hero page's shared mechanics (#1651).
+        .package(path: "../../Core/HeroPage"),
         .package(path: "../../Core/EmoteKit"),
         .package(path: "../../Core/MediaPlayback"),
         .package(path: "../../Core/PostGrid"),
@@ -53,6 +55,7 @@ let package = Package(
                 "CacheKit",
                 "LocalStore",
                 "DesignSystem",
+                "HeroPage",
                 "EmoteKit",
                 // Settings → App Preferences measures and clears the video
                 // cache it names (`VideoSourceCache`); the builder already

@@ -3,6 +3,7 @@ import CoreModels
 import ProfileInterface
 import CoreNavigation
 import FeedInterface
+import HeroPage
 import MapsInterface
 import MediaPlayback
 import DesignSystem
@@ -1293,11 +1294,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         galleryPager.setSharedTravel(dockLine: headerTravel, contentFloor: contentTravel)
         // Where a release rests while the header is on screen: the top, the
         // identity with the poster gone (posters only), the first post.
-        galleryPager.setSnapDetents(ProfileScrollDetents.detents(
-            for: headerView.bannerFormat,
-            firstPost: contentTravel,
-            bandAvatar: headerView.bandAvatarDetent
-        ), catching: headerView.bandAvatarDetent.map { [$0] } ?? [])
+        // A band card also rests with its avatar just under the bar (#1208).
+        let notch = headerView.bannerFormat == .band ? headerView.bandAvatarDetent : nil
+        galleryPager.setSnapDetents(scroll.detents(notch: notch), catching: headerView.bandAvatarDetent.map { [$0] } ?? [])
     }
 
     /// Opens the followers / following lists on the tapped counter's tab.
@@ -2295,7 +2294,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // had not moved (the owner, on a device, 2026-10-15).
         guard travelled > 0, headerView.bounds.height > 0,
               let trayFoot = headerView.actionTrayMaxY(in: headerHost), trayFoot > 0 else { return false }
-        let covered = trayFoot - min(travelled, headerTravel) <= view.safeAreaInsets.top
+        let covered = scroll.isUnderBar(foot: trayFoot, travelled: travelled)
         return covered || headerView.alpha < 0.5
     }
 
@@ -2727,29 +2726,25 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     }
     private var headerHeightCache: (key: HeaderHeightKey, height: CGFloat)?
 
-    /// How far the header travels before its selector reaches the navigation
-    /// bar — the moment it docks.
-    private var headerTravel: CGFloat {
-        max(0, headerHeight - Metrics.selectorSlotHeight - view.safeAreaInsets.top)
+    /// The header's scroll arithmetic (#1652): the dock line, the content's
+    /// floor, the header's position, the identity's fade, the detents — the
+    /// hero page's one copy (`HeroScrollCoordinator`), read fresh, since the
+    /// header's height is cached and the rest is a few subtractions.
+    private var scroll: HeroScrollCoordinator {
+        HeroScrollCoordinator(
+            headerHeight: headerHeight, safeTop: view.safeAreaInsets.top,
+            dockedSlot: Metrics.selectorSlotHeight
+        )
     }
 
+    /// How far the header travels before its selector reaches the navigation
+    /// bar — the moment it docks.
+    private var headerTravel: CGFloat { scroll.dockLine }
+
     /// How far a tab must be able to scroll for its first row to sit directly
-    /// beneath the navigation bar.
-    ///
-    /// ⚠️ **A slot's height further than the header travels, and the difference
-    /// is the whole bug.** The pages are inset by the header's full height,
-    /// selector slot included. Once the selector DOCKS, that slot is empty — its
-    /// occupant is in the navigation bar — but the inset still reserves it, so a
-    /// tab resting at the docked position sat a slot's height below the bar with
-    /// nothing in the gap. One number was being asked two questions: when does
-    /// the selector dock, and how far must the content come up. They differ by
-    /// exactly the slot that changed hands.
-    ///
-    /// Only the FLOOR uses this. Docking still happens where it did, and the
-    /// header still stops where it did — it is hidden past that point anyway.
-    private var contentTravel: CGFloat {
-        max(0, headerHeight - view.safeAreaInsets.top)
-    }
+    /// beneath the navigation bar — a slot's height further than the dock line
+    /// (see `HeroScrollCoordinator.contentFloor`).
+    private var contentTravel: CGFloat { scroll.contentFloor }
 
     /// **The coordinator.** Moves the header from the active page's offset, and
     /// decides docking from the same number.
@@ -2780,7 +2775,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // Everything downstream of here already tolerates it: `identityAlpha`
         // clamps its ramp, and `isDocked` compares against a dock line no
         // negative offset can reach.
-        headerTopConstraint?.constant = -min(travelled, headerTravel)
+        headerTopConstraint?.constant = scroll.headerTop(travelled: travelled)
         headerView.setTravelled(travelled)
         if headerView.hasBannerVideo { updateBannerVideo() }
         applyIdentityFade(travelled: travelled)
@@ -2834,9 +2829,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// this moment; fading the pair would apply that transition twice to one of
     /// them.
     private func applyIdentityFade(travelled: CGFloat) {
-        let alpha = HeaderIdentityFade.alpha(
-            travelled: travelled, dockLine: headerTravel
-        )
+        let alpha = scroll.identityAlpha(travelled: travelled)
         guard abs(headerView.alpha - alpha) > 0.001 else { return }
         headerView.alpha = alpha
         // ⚠️ Nothing drawn, nothing to touch. The host still spans the band
@@ -2863,7 +2856,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// band behind it. No header wears one (`prefersClearTopEdge`), so the bar
     /// stays transparent and the only thing this swap changes is the ink.
     private func updateBarTransparency(travelled: CGFloat) {
-        let shouldBeTransparent = travelled <= 0
+        let shouldBeTransparent = scroll.barIsAtRest(travelled: travelled)
         guard shouldBeTransparent != isBarTransparent else { return }
         isBarTransparent = shouldBeTransparent
         let appearance = shouldBeTransparent ? transparentBarAppearance : dockedBarAppearance
