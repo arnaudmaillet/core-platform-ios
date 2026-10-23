@@ -21,7 +21,7 @@ import UIKit
 ///
 /// A `UIControl` is the test that matters here: every interactive thing in this
 /// header is one — the action buttons are `UIButton`s and the three counters are
-/// `ProfileStatView`, which is a `UIControl` for exactly this kind of reason.
+/// `HeroStatView`, which is a `UIControl` for exactly this kind of reason.
 /// Gesture recognizers are checked too, so anything added later that reads
 /// touches directly (the selector's grabbable capsule already does) keeps them
 /// without having to be remembered here.

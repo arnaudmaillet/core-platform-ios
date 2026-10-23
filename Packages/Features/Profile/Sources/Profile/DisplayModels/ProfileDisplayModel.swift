@@ -89,7 +89,7 @@ public struct ProfileDisplayModel: Equatable, Sendable {
     /// unreadable → "—" (never a misleading "0").
     /// Nil for a counter the backend did not project: the column is then not
     /// drawn, rather than shown with a dash that reads as a defect. See
-    /// `ProfileStatView.setValue`.
+    /// `HeroStatView.setValue`.
     static func format(_ estimate: CountEstimate) -> String? {
         switch estimate {
         case .exact(let value): abbreviate(value)

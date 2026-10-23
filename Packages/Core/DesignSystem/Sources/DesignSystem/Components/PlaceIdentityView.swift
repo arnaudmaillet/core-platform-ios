@@ -506,7 +506,7 @@ public final class PlaceTitleLabel: UILabel {
     }
 }
 
-/// One counter as the profile draws its own (`ProfileStatView`): the figure
+/// One counter as the profile draws its own (`HeroStatView`): the figure
 /// over the word that says what it counts, centred on each other, the column
 /// as wide as the wider of the two.
 public final class PlaceStatView: UIView {

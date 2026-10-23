@@ -3,6 +3,7 @@ import DesignSystem
 import MediaCore
 import Testing
 import UIKit
+import HeroPage
 @testable import Profile
 
 /// The two banner shapes as redesigned on 5 October 2026:
@@ -80,7 +81,7 @@ struct ProfileBannerShapeTests {
         #expect(band.bannerFormat == .band)
         #expect(!band.debugBannerShowsBlur, "the band still blurs")
         #expect(band.debugBannerShowsRamp, "a band lost its fade")
-        #expect(ProfileBannerView.luminance(of: band.debugBannerRampTone) <= ProfileBannerView.maxToneLuminance + 0.0005,
+        #expect(HeroBannerView.luminance(of: band.debugBannerRampTone) <= HeroBannerView.maxToneLuminance + 0.0005,
                 "the band's ramp is lighter than its cap")
         #expect(band.debugBannerBlurLevels.isEmpty, "blur levels are drawn")
         // A card's height: above the counters, near 35% of the screen.

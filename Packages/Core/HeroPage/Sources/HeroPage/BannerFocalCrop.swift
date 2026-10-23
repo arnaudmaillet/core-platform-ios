@@ -21,14 +21,14 @@ import Vision
 /// - Otherwise THE PICTURE'S RATIO: a subject sits higher the taller the
 ///   picture — the centre for a square, a third of the way down for a 9:16
 ///   portrait, linear in between — and the cut is centred there.
-enum BannerFocalCrop {
+public enum BannerFocalCrop {
     /// The banner card's shape, width over height: near 35% of a phone's
     /// height, the card's width less its margins.
-    static let bandAspect: CGFloat = 1.3
+    public static let bandAspect: CGFloat = 1.3
 
     /// Where the subject of a picture of `aspect` (width over height) sits,
     /// as a fraction of its height from the top, with no face to go by.
-    static func focusY(aspect: CGFloat) -> CGFloat {
+    public static func focusY(aspect: CGFloat) -> CGFloat {
         let square: CGFloat = 1, tall: CGFloat = 9.0 / 16.0
         guard aspect < square else { return 0.5 }
         let t = min(1, max(0, (square - aspect) / (square - tall)))
@@ -39,7 +39,7 @@ enum BannerFocalCrop {
     /// height landing `anchor` of the way down the cut — the middle of what
     /// the card SHOWS of it — inside the picture. The whole picture when it is already
     /// as wide as the cut.
-    static func cropRect(
+    public static func cropRect(
         imageSize: CGSize, targetAspect: CGFloat, focusY: CGFloat, anchor: CGFloat = 0.5
     ) -> CGRect {
         guard imageSize.width > 0, imageSize.height > 0, targetAspect > 0 else {
@@ -53,7 +53,7 @@ enum BannerFocalCrop {
 
     /// `image` cut to `targetAspect` around `focusY`; the image itself when
     /// it needs no cut.
-    static func cropped(
+    public static func cropped(
         _ image: UIImage, targetAspect: CGFloat = bandAspect, focusY: CGFloat, anchor: CGFloat = 0.5
     ) -> UIImage {
         let size = image.size
@@ -67,17 +67,17 @@ enum BannerFocalCrop {
     }
 
     /// The smallest side, in pixels, a picture needs for a face search.
-    static let minimumFacePixels = 256
+    public static let minimumFacePixels = 256
 
     /// Whether `image` is taller than the card, so a cut chooses what shows.
-    static func needsCut(_ image: UIImage, targetAspect: CGFloat = bandAspect) -> Bool {
+    public static func needsCut(_ image: UIImage, targetAspect: CGFloat = bandAspect) -> Bool {
         image.size.height > 0 && image.size.width / image.size.height < targetAspect
     }
 
     /// The faces' centre in `image`, as a fraction of its height from the
     /// top — nil when Vision finds none. Off the main thread: a request is a
     /// few milliseconds on a decoded picture.
-    static func faceFocusY(in image: UIImage) async -> CGFloat? {
+    public static func faceFocusY(in image: UIImage) async -> CGFloat? {
         // A thumbnail-sized picture has no face worth a Vision pass (and the
         // test host's synthetic pictures would each pay for one).
         guard let cg = image.cgImage, min(cg.width, cg.height) >= minimumFacePixels else { return nil }

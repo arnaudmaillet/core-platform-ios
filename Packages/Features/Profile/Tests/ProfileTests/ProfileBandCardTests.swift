@@ -4,6 +4,7 @@ import MediaCore
 import PostGrid
 import Testing
 import UIKit
+import HeroPage
 @testable import Profile
 
 /// A profile's landscape banner is a CARD (the owner, 2026-10-15): held off
@@ -99,13 +100,13 @@ struct ProfileBandCardTests {
             }
         }
         let navy = UIColor(red: 0.05, green: 0.08, blue: 0.30, alpha: 1)
-        let tone = try #require(ProfileBannerView.prominentDarkTone(of: picture([(.white, 0.4), (navy, 0.6)])))
+        let tone = try #require(HeroBannerView.prominentDarkTone(of: picture([(.white, 0.4), (navy, 0.6)])))
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         tone.getRed(&r, green: &g, blue: &b, alpha: &a)
         #expect(b > r && b > g, "the navy's hue is gone: \(tone)")
-        #expect(ProfileBannerView.luminance(of: tone) <= ProfileBannerView.maxToneLuminance + 0.0005)
+        #expect(HeroBannerView.luminance(of: tone) <= HeroBannerView.maxToneLuminance + 0.0005)
 
-        let light = try #require(ProfileBannerView.prominentDarkTone(of: picture([(.white, 1)])))
-        #expect(ProfileBannerView.luminance(of: light) <= ProfileBannerView.maxToneLuminance + 0.0005)
+        let light = try #require(HeroBannerView.prominentDarkTone(of: picture([(.white, 1)])))
+        #expect(HeroBannerView.luminance(of: light) <= HeroBannerView.maxToneLuminance + 0.0005)
     }
 }

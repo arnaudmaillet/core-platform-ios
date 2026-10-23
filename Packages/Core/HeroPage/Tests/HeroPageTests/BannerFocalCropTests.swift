@@ -1,7 +1,7 @@
 import CoreGraphics
 import Testing
 import UIKit
-@testable import Profile
+@testable import HeroPage
 
 /// Where a banner card cuts a picture taller than itself (the owner,
 /// 2026-10-15): by its ratio — the centre for a square, a third of the way
@@ -34,7 +34,7 @@ struct BannerFocalCropTests {
         let portrait = CGSize(width: 900, height: 1600)
         let cut = BannerFocalCrop.cropRect(imageSize: portrait, targetAspect: 1, focusY: 0.5, anchor: 0.6)
         #expect(abs((800 - cut.minY) / cut.height - 0.6) < 0.01)
-        let (aspect, anchor) = ProfileBannerView.pictureCut
+        let (aspect, anchor) = HeroBannerView.pictureCut
         #expect(aspect > 0.5 && aspect < 1.3)
         #expect(anchor > 0.5, "the hidden reserve above should push the shown middle down")
     }

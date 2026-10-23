@@ -22,7 +22,7 @@ import UIKit
 /// fed through `ImagePipeline`; a video banner would drop a `VideoRenderView`
 /// (MediaPlayback) into the same slot — and would need a live blur, since
 /// `HeroBannerPictureView` bakes its blur from a still.
-final class ProfileBannerView: UIView {
+public final class HeroBannerView: UIView {
     private let mediaContainer = UIView()
     private let picture = HeroBannerPictureView()
     /// Over the media (and a loading bone), in this view's coordinates.
@@ -41,7 +41,7 @@ final class ProfileBannerView: UIView {
     private let veil = UIView()
     /// How much of the banner shows: 1 at rest; a poster's falls to 0 as it
     /// scrolls away. What the type's ink follows (`ProfileHeaderView`).
-    private(set) var visibility: CGFloat = 1
+    public private(set) var visibility: CGFloat = 1
     /// How far down the top scrim reaches — the chrome's own height, set by
     /// the header (`chromeTopInset`).
     ///
@@ -49,7 +49,7 @@ final class ProfileBannerView: UIView {
     /// chrome, and a 160pt scrim laid a sliver of black veil over it: the
     /// name measured 4.30:1 over a busy picture (the unit suite's stripes),
     /// over 4.5 once the scrim stops at the chrome.
-    var topScrimHeight: CGFloat = 160 {
+    public var topScrimHeight: CGFloat = 160 {
         didSet { if topScrimHeight != oldValue { setNeedsLayout() } }
     }
 
@@ -60,20 +60,20 @@ final class ProfileBannerView: UIView {
     private var currentImageURL: URL?
     /// The picture that landed, whatever its route — from the cache before
     /// the first layout, or from a fetch afterwards — so the header can read
-    /// its shape off it. See `ProfileBannerFormat`.
-    var onImageResolved: ((UIImage) -> Void)?
+    /// its shape off it. See `HeroBannerFormat`.
+    public var onImageResolved: ((UIImage) -> Void)?
     /// Whether the picture has stopped changing: drawn, absent, or failed —
     /// anything but a fetch still on its way. The screen holds its push on it
     /// (`ProfileViewController.isSettledForPresentation`), so the shape and
     /// the picture a viewer first sees are the ones that stay.
-    private(set) var isPictureSettled = true
+    public private(set) var isPictureSettled = true
     /// Fires when `isPictureSettled` becomes true after a fetch.
-    var onPictureSettled: (() -> Void)?
+    public var onPictureSettled: (() -> Void)?
     /// The shape the banner is drawn in — which decides whether it fades out
     /// on the way up (a poster does, a band does not).
-    private var format: ProfileBannerFormat = .unresolved
+    private var format: HeroBannerFormat = .unresolved
 
-    init(imagePipeline: ImagePipeline) {
+    public init(imagePipeline: ImagePipeline) {
         self.imagePipeline = imagePipeline
         super.init(frame: .zero)
         clipsToBounds = true
@@ -113,17 +113,17 @@ final class ProfileBannerView: UIView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     // MARK: - The video banner (#944)
 
     private let video = VideoRenderView()
     /// The banner's loop, nil for a still banner.
-    private(set) var videoURL: URL?
-    private(set) var isVideoPlaying = false
+    public private(set) var videoURL: URL?
+    public private(set) var isVideoPlaying = false
 
     /// Names the banner's loop — or none. A new one stops the old.
-    func setVideoURL(_ url: URL?, pool: VideoPlaybackController?) {
+    public func setVideoURL(_ url: URL?, pool: VideoPlaybackController?) {
         guard url != videoURL else { return }
         setVideoPlaying(false, pool: pool)
         videoURL = url
@@ -132,7 +132,7 @@ final class ProfileBannerView: UIView {
     /// Plays the loop over the still — muted, on the shared pool — or stops
     /// it, the still showing again. The host decides when (on show, the
     /// banner on screen, motion allowed).
-    func setVideoPlaying(_ playing: Bool, pool: VideoPlaybackController?) {
+    public func setVideoPlaying(_ playing: Bool, pool: VideoPlaybackController?) {
         guard playing != isVideoPlaying else { return }
         guard playing, let url = videoURL, let pool else {
             if isVideoPlaying { pool?.stop(video) }
@@ -149,13 +149,13 @@ final class ProfileBannerView: UIView {
         }
     }
 
-    static let playbackScope = "profile.banner"
+    public static let playbackScope = "profile.banner"
 
     #if DEBUG
-    var debugVideoView: VideoRenderView { video }
+    public var debugVideoView: VideoRenderView { video }
     #endif
 
-    func setImageURL(_ url: URL?) {
+    public func setImageURL(_ url: URL?) {
         guard url != currentImageURL || picture.image == nil else { return }
         currentImageURL = url
         picture.image = nil
@@ -196,7 +196,7 @@ final class ProfileBannerView: UIView {
     /// the card's width by its height plus the parallax reserve above it, and
     /// where the middle of what the card SHOWS sits in it — the reserve and
     /// the card's top margin are hidden above.
-    static var pictureCut: (aspect: CGFloat, anchor: CGFloat) {
+    public static var pictureCut: (aspect: CGFloat, anchor: CGFloat) {
         let screen = UIScreen.main.bounds.size
         let cardMargin: CGFloat = 12
         let width = screen.width - cardMargin * 2
@@ -244,7 +244,7 @@ final class ProfileBannerView: UIView {
     /// over the last 30 % of the blur's run, so the picture's edge melts into
     /// the page while the type above stands on the blur alone. Its geometry is
     /// `ProfileHeaderView.placeBannerFade`'s; the ink reads the ground with it.
-    func setFormat(_ format: ProfileBannerFormat) {
+    public func setFormat(_ format: HeroBannerFormat) {
         self.format = format
         let band = format == .band
         picture.showsBlur = !band
@@ -259,10 +259,10 @@ final class ProfileBannerView: UIView {
     }
 
     /// The ramp's tone changed — a band card's shadow wears it.
-    var onRampToneChange: ((UIColor) -> Void)?
+    public var onRampToneChange: ((UIColor) -> Void)?
 
     /// The tone a band's ramp lands on when the picture gives none: black.
-    static let bandRampTone = UIColor.black
+    public static let bandRampTone = UIColor.black
 
     /// ⚠️ EXPERIMENT (the owner, 2026-10-15): a band's ramp lands on the
     /// picture's own prominent DARK colour rather than black.
@@ -273,7 +273,7 @@ final class ProfileBannerView: UIView {
     /// The picture's prominent dark colour: the most common dark shade (in
     /// coarse buckets) over a small sample. A picture with hardly anything
     /// dark gives its most common shade, darkened. Nil if it cannot be read.
-    static func prominentDarkTone(of image: UIImage) -> UIColor? {
+    public static func prominentDarkTone(of image: UIImage) -> UIColor? {
         guard let cg = image.cgImage, let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
         let side = 24
         var bytes = [UInt8](repeating: 0, count: side * side * 4)
@@ -330,9 +330,9 @@ final class ProfileBannerView: UIView {
 
     /// The darkest-looking cap on a band's ramp tone: WCAG relative
     /// luminance.
-    static let maxToneLuminance: CGFloat = 0.006
+    public static let maxToneLuminance: CGFloat = 0.006
 
-    static func luminance(of colour: UIColor) -> CGFloat {
+    public static func luminance(of colour: UIColor) -> CGFloat {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         colour.getRed(&r, green: &g, blue: &b, alpha: &a)
         func linear(_ c: CGFloat) -> CGFloat { c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
@@ -342,12 +342,12 @@ final class ProfileBannerView: UIView {
     /// How much slower than the content the picture climbs: it keeps this
     /// share of the travel, so the identity block slides up OVER it rather
     /// than the two moving as one flat sheet.
-    static let parallaxShare: CGFloat = 0.4
+    public static let parallaxShare: CGFloat = 0.4
     /// How far the parallax may carry the picture down before it would
     /// uncover the banner's top — the picture is given this much extra
     /// height above the banner. 200pt of travel is more than either shape
     /// stays on screen for.
-    static let parallaxReserve: CGFloat = 80
+    public static let parallaxReserve: CGFloat = 80
 
     /// The scroll, as the picture experiences it: it lags the content by
     /// `parallaxShare` — sliding UNDER the blur, which stays with the type —
@@ -355,7 +355,7 @@ final class ProfileBannerView: UIView {
     /// point at which the avatar's top reaches where a band would have put
     /// it, under the chrome. Nothing on a pull down: the stretch there is the
     /// banner's own.
-    func setTravelled(_ travelled: CGFloat) {
+    public func setTravelled(_ travelled: CGFloat) {
         let climb = max(0, travelled)
         picture.pictureShift = min(climb * Self.parallaxShare, Self.parallaxReserve)
         setVisibility(1)
@@ -374,7 +374,7 @@ final class ProfileBannerView: UIView {
     /// The header's own alpha, when the banner stands OUTSIDE the header —
     /// behind the screen's content (`ProfileHeaderView.moveBanner`) — and so
     /// no longer fades with it as the identity docks.
-    var hostAlpha: CGFloat = 1 {
+    public var hostAlpha: CGFloat = 1 {
         didSet { if hostAlpha != oldValue { applyAlpha() } }
     }
 
@@ -389,13 +389,13 @@ final class ProfileBannerView: UIView {
 
     /// Touches as the view's alpha gave them: a banner all but gone is not
     /// there to be touched.
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+    public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         visibility < 0.01 ? nil : super.hitTest(point, with: event)
     }
 
     /// Called when the blurred picture changes — the moment to read the
     /// ground under the type again (`groundPixels(behind:)`).
-    var onLevelsChanged: (() -> Void)? {
+    public var onLevelsChanged: (() -> Void)? {
         get { picture.onLevelsChanged }
         set { picture.onLevelsChanged = newValue }
     }
@@ -404,37 +404,37 @@ final class ProfileBannerView: UIView {
     /// coordinates AT REST — the header's own, since the banner rests on the
     /// header's top (the picture is pinned edge to edge) — see
     /// `HeroBannerPictureView.groundPixels(behind:)`.
-    func groundPixels(behind rect: CGRect) -> [SIMD3<Float>]? {
+    public func groundPixels(behind rect: CGRect) -> [SIMD3<Float>]? {
         picture.groundPixels(behind: rect)
     }
 
     /// Where the picture blurs and where the page takes over, in this view's
     /// own points from its RESTING top (the header's) — set by the header
     /// from where the identity block actually landed. See `HeroBannerFade`.
-    func setFade(_ fade: HeroBannerFade.Geometry) {
+    public func setFade(_ fade: HeroBannerFade.Geometry) {
         picture.fade = fade
         ramp.fade = fade
     }
 
     #if DEBUG
-    var debugHasPicture: Bool { picture.image != nil }
-    var debugShowsBlur: Bool { picture.showsBlur }
-    var debugRampTone: UIColor { ramp.tone }
+    public var debugHasPicture: Bool { picture.image != nil }
+    public var debugShowsBlur: Bool { picture.showsBlur }
+    public var debugRampTone: UIColor { ramp.tone }
     /// Whether the opaque fade is drawn (not on a poster, #688).
-    var debugShowsRamp: Bool { !ramp.isHidden }
-    var debugFade: HeroBannerFade.Geometry? { picture.fade }
-    var debugBlurLevels: [(start: CGFloat, full: CGFloat)] { picture.debugVisibleLevels }
-    var debugRampLocations: [CGFloat] { ramp.debugLocations }
-    var debugRampAlphas: [CGFloat] { ramp.debugAlphas }
-    var debugLastBlurBakeMilliseconds: Double { picture.debugLastBakeMilliseconds }
-    var debugLastBlurBakeBytes: Int { picture.debugLastBakeBytes }
-    var debugBlurComposeCount: Int { picture.debugComposeCount }
-    var debugBlurBakeCount: Int { picture.debugBakeCount }
+    public var debugShowsRamp: Bool { !ramp.isHidden }
+    public var debugFade: HeroBannerFade.Geometry? { picture.fade }
+    public var debugBlurLevels: [(start: CGFloat, full: CGFloat)] { picture.debugVisibleLevels }
+    public var debugRampLocations: [CGFloat] { ramp.debugLocations }
+    public var debugRampAlphas: [CGFloat] { ramp.debugAlphas }
+    public var debugLastBlurBakeMilliseconds: Double { picture.debugLastBakeMilliseconds }
+    public var debugLastBlurBakeBytes: Int { picture.debugLastBakeBytes }
+    public var debugBlurComposeCount: Int { picture.debugComposeCount }
+    public var debugBlurBakeCount: Int { picture.debugBakeCount }
     /// Where the sharp picture covers, in this view's space.
-    var debugPictureCover: CGRect { picture.convert(picture.debugPictureCover, to: self) }
-    var debugRampFrame: CGRect { ramp.convert(ramp.debugRampFrame, to: self) }
+    public var debugPictureCover: CGRect { picture.convert(picture.debugPictureCover, to: self) }
+    public var debugRampFrame: CGRect { ramp.convert(ramp.debugRampFrame, to: self) }
     /// How far the picture has been carried down by the parallax.
-    var debugPictureShift: CGFloat { picture.pictureShift }
+    public var debugPictureShift: CGFloat { picture.pictureShift }
     #endif
 
     // MARK: - Redaction
@@ -445,7 +445,7 @@ final class ProfileBannerView: UIView {
     /// which dissolves it into the page exactly as it does real media, so the
     /// loading banner and the loaded one share every seam. Alpha-only, so a
     /// reveal inside an animation block cross-fades.
-    func setRedacted(_ redacted: Bool) {
+    public func setRedacted(_ redacted: Bool) {
         if redacted, bone == nil {
             let bone = SkeletonBoneView(rounding: .fixed(0))
             bone.pin(to: mediaContainer)
@@ -455,7 +455,7 @@ final class ProfileBannerView: UIView {
         bone?.alpha = redacted ? 1 : 0
     }
 
-    override func layoutSubviews() {
+    public override func layoutSubviews() {
         super.layoutSubviews()
         // A pull-down stretches the banner ABOVE the header's top, where it
         // rests (`ProfileHeaderView.anchorBanner`): the picture and the ramp
