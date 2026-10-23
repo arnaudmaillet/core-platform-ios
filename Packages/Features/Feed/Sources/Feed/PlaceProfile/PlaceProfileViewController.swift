@@ -2439,15 +2439,28 @@ extension PlaceProfileViewController: CardCloseLanding {
         // — the place's most popular post — and never re-plans Recent to put
         // the post read at its head (the old rule, kept below as the fallback
         // for a page with no Popular card).
-        if let origin = popularLandingOrigin(sizedTo: bounds, closing: activePostID?()) {
-            debugLogLanding("landing on Popular's first card of the post's kind")
-            return TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
-        }
-        guard let landed = activePostID?() else { return nil }
-        guard let origin = activityCardRevealOrigin(sizedTo: bounds, settled: landed)
-        else { return nil }
-        debugLogLanding("landing \(landed.rawValue) at the head of Recent")
+        guard let origin = markerFlightLandingOrigin(sizedTo: bounds, settled: activePostID?()) else { return nil }
         return TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
+    }
+
+    /// Where a post opened from a MARKER lands when it closes down onto this
+    /// page — the one rule for every such close, a hero's (`cardCloseGeometry`)
+    /// and a text post's (the feed builder's reveal close): Popular's first
+    /// card of the post's kind (#1596), else, with no Popular card, the head
+    /// of Recent with the post put there.
+    ///
+    /// ⚠️ ONE RULE, TWO CALLERS (the owner, on device, 2026-10-23): #1596
+    /// changed only the hero's close, and a TEXT post opened from a text
+    /// marker still landed at the head of Recent — the other caller asked
+    /// `activityCardRevealOrigin` directly.
+    func markerFlightLandingOrigin(sizedTo bounds: CGRect, settled: PostID?) -> TextRevealOrigin? {
+        if let origin = popularLandingOrigin(sizedTo: bounds, closing: settled) {
+            debugLogLanding("landing on Popular's first card of the post's kind")
+            return origin
+        }
+        guard let settled else { return nil }
+        debugLogLanding("landing \(settled.rawValue) at the head of Recent")
+        return activityCardRevealOrigin(sizedTo: bounds, settled: settled)
     }
 
     /// The window onto Popular's first card OF THE CLOSING POST'S KIND, with
@@ -3105,7 +3118,12 @@ extension PlaceProfileViewController: ZoomTransitionDestination {
     /// them live, so a drag the close had taken also paged a carousel, both
     /// following the finger. The vertical feed freezes its carousels for
     /// exactly this (`SnapFeedViewController.setContentScrollEnabled`); the
-    /// place page now does too, every horizontal scroller it holds.
+    /// place page now does too.
+    ///
+    /// ⚠️ AND THE PAGE'S OWN LIST (the owner, on device, 2026-10-23): the
+    /// list was left live, and a grab whose finger drifted up or down
+    /// scrolled the page INSIDE the window that was flying it home. The
+    /// window holds a still page; every scroller under it freezes.
     func setContentScrollEnabled(_ enabled: Bool) {
         if enabled {
             for entry in grabFrozenScrollers {
@@ -3122,7 +3140,7 @@ extension PlaceProfileViewController: ZoomTransitionDestination {
         // Re-entrant: a grab that reports its start twice must not record
         // `false` as the state to restore.
         guard grabFrozenScrollers.isEmpty else { return }
-        for scroller in Self.horizontalScrollers(in: view) {
+        for scroller in Self.grabFrozenScrollers(in: view) {
             grabFrozenScrollers.append(GrabFrozenScroller(scroller: scroller, wasEnabled: scroller.isScrollEnabled))
             if let carousel = scroller.superview as? MediaCarouselView {
                 // Stops a glide too, so no page changes under the close.
@@ -3134,15 +3152,13 @@ extension PlaceProfileViewController: ZoomTransitionDestination {
         }
     }
 
-    /// Every scroll view under `root` that scrolls SIDEWAYS — wider content
-    /// than bounds, no taller — so the page's own vertical list stays live.
-    static func horizontalScrollers(in root: UIView) -> [UIScrollView] {
+    /// Every scroll view under `root` — the page's list, the shelf, the
+    /// posts' carousels — that a grab freezes.
+    static func grabFrozenScrollers(in root: UIView) -> [UIScrollView] {
         var found: [UIScrollView] = []
         var stack: [UIView] = [root]
         while let view = stack.popLast() {
-            if let scroller = view as? UIScrollView, scroller !== root,
-               scroller.contentSize.width > scroller.bounds.width + 1,
-               scroller.contentSize.height <= scroller.bounds.height + 1 {
+            if let scroller = view as? UIScrollView, scroller !== root {
                 found.append(scroller)
             }
             stack.append(contentsOf: view.subviews)
