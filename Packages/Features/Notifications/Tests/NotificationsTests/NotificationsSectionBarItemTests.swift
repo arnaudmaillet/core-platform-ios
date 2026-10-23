@@ -3,12 +3,23 @@ import Testing
 import UIKit
 @testable import Notifications
 
+/// The list's clock and calendar, fixed: noon UTC. ⚠️ Read off the wall
+/// clock, "26 hours ago" fell two calendar days back between 00:00 and
+/// 02:00 and bucketed "Last week" — the develop backstop went red every
+/// night in that window.
+private let sectionTestNow = Date(timeIntervalSince1970: 1_792_670_400) // 2026-10-22 12:00 UTC
+private let sectionTestCalendar: Calendar = {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "UTC")!
+    return calendar
+}()
+
 /// Two days of notifications: enough rows that the list scrolls past New.
 private actor TwoDaysProvider: NotificationsProviding {
     func loadNotifications(limit: Int32, after pageToken: String?) async throws -> NotificationsPage {
-        let now = Date()
+        let now = sectionTestNow
         let today = (0..<7).map { item("t\($0)", at: now.addingTimeInterval(-Double($0) * 60)) }
-        let yesterday = (0..<7).map { item("y\($0)", at: now.addingTimeInterval(-26 * 3600 - Double($0) * 60)) }
+        let yesterday = (0..<7).map { item("y\($0)", at: now.addingTimeInterval(-24 * 3600 - Double($0) * 60)) }
         return NotificationsPage(items: today + yesterday, nextPageToken: nil)
     }
     func markAllRead() async throws {}
@@ -30,7 +41,10 @@ struct NotificationsSectionBarItemTests {
     @Test func theBarNamesTheSectionTheListIsIn() async throws {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         let controller = NotificationsViewController(
-            viewModel: NotificationsViewModel(repository: TwoDaysProvider()), imagePipeline: nil
+            viewModel: NotificationsViewModel(
+                repository: TwoDaysProvider(), now: { sectionTestNow }, calendar: { sectionTestCalendar }
+            ),
+            imagePipeline: nil
         )
         window.rootViewController = UINavigationController(rootViewController: controller)
         window.isHidden = false
