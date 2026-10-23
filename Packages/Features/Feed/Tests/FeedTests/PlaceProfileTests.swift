@@ -494,6 +494,31 @@ struct PlaceProfileTests {
         }
     }
 
+    /// ⚠️ THE TEXT POST'S OWN CLOSE TOO (the owner, on device, 2026-10-23):
+    /// a text post opened from a TEXT marker closes through the feed
+    /// builder's reveal, which asked for the head of Recent directly — and
+    /// landed there, not on Popular. Both closes now ask
+    /// `markerFlightLandingOrigin`, with no `activePostID` wired (the builder
+    /// passes the feed's settled post itself).
+    @Test func aTextPostsRevealCloseLandsOnPopularsTextCardNotOnRecent() async throws {
+        let profile = makeProfile(posts: [
+            post("photo", kind: .photo, reactions: 90),
+            post("loud-words", kind: .text, reactions: 60),
+            post("quiet-words", kind: .text, reactions: 5),
+        ])
+        laidOut(profile)
+        profile.beginLoading()
+        for _ in 0..<50 where profile.renderedActivity.isEmpty { await Task.yield() }
+        let recentBefore = profile.renderedActivity.map(\.id)
+        let origin = try #require(profile.markerFlightLandingOrigin(
+            sizedTo: CGRect(x: 0, y: 0, width: 402, height: 874), settled: PostID("quiet-words")
+        ))
+        let landing = try #require(origin.rowFrame(profile.view))
+        let card = try #require(profile.debugShelf.cardFrame(for: PostID("loud-words"), in: profile.view))
+        #expect(landing == card, "the text post did not close onto Popular's first text card")
+        #expect(profile.renderedActivity.map(\.id) == recentBefore, "Recent was re-planned for the landing")
+    }
+
     /// The gallery's rule, on its own: the ranking minus what a grid cannot
     /// draw, in that order.
     @Test func theGalleryIsTheRankingMinusWhatHasNoCover() {

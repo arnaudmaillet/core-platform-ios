@@ -76,27 +76,30 @@ struct PlaceShelfDismissalTests {
                 "a shelf at its first card kept the close")
     }
 
-    /// ⚠️ ONE DRAG, ONE OWNER (#1595): a grab freezes every sideways
-    /// scroller the page holds — the shelf, the posts' carousels — and puts
-    /// back exactly what it found; the page's own vertical list stays live.
-    @Test func aGrabFreezesTheSidewaysScrollersAndPutsThemBack() async throws {
+    /// ⚠️ ONE DRAG, ONE OWNER (#1595): a grab freezes every scroller the
+    /// page holds — the shelf, the posts' carousels and, since the owner's
+    /// device check (2026-10-23), the page's own list — and puts back exactly
+    /// what it found.
+    @Test func aGrabFreezesEveryScrollerAndPutsThemBack() async throws {
         let (place, window) = await landedPage()
         defer { window.isHidden = true }
         let row = place.debugShelf.mediaView
         try #require(row.contentSize.width > row.bounds.width, "precondition: the shelf overflows")
-        let sideways = PlaceProfileViewController.horizontalScrollers(in: place.view)
-        #expect(sideways.contains { $0 === row }, "the shelf is not frozen by a grab")
-        let vertical = place.view.allSubviewsOfType(UIScrollView.self).filter { scroller in
-            !sideways.contains { $0 === scroller } && scroller.isScrollEnabled
+        let frozen = PlaceProfileViewController.grabFrozenScrollers(in: place.view)
+        #expect(frozen.contains { $0 === row }, "the shelf is not frozen by a grab")
+        let list = place.view.allSubviewsOfType(UICollectionView.self).first { list in
+            list.contentSize.height > list.bounds.height && list.isScrollEnabled
         }
+        let pageList = try #require(list, "precondition: the page's list scrolls")
+        #expect(frozen.contains { $0 === pageList }, "the page's own list is not frozen by a grab")
 
         place.setContentScrollEnabled(false)
         place.setContentScrollEnabled(false) // a start reported twice
-        #expect(sideways.allSatisfy { !$0.isScrollEnabled }, "a sideways scroller stayed live under the grab")
-        #expect(vertical.allSatisfy { $0.isScrollEnabled }, "the page's own list froze")
+        #expect(!row.isScrollEnabled, "the shelf stayed live under the grab")
+        #expect(!pageList.isScrollEnabled, "the page scrolled inside the grab's window")
 
         place.setContentScrollEnabled(true)
-        #expect(sideways.allSatisfy { $0.isScrollEnabled }, "a scroller was left frozen")
+        #expect(row.isScrollEnabled && pageList.isScrollEnabled, "a scroller was left frozen")
     }
 
     /// A scroller that was off before the grab stays off after it.
