@@ -31,7 +31,14 @@ struct SearchPeopleAvatarRecyclingTests {
         loads.load(grace, using: pipeline, for: cell) { image, _ in landed.land(image) }
 
         // Ada's picture arrives first — late, for a row that has moved on.
-        await fetcher.release(ada)
+        // ⚠️ RELEASED SYNCHRONOUSLY (#1606): the release used to be an ACTOR
+        // call — a hop onto Swift's shared cooperative pool, unbounded. Timed
+        // under load (2026-10-23), that hop alone took 0.5–2.9 s while the
+        // decode it unblocked took 0.15 s; a pool exhausted by blocking work
+        // elsewhere in the process never runs it, and the test sat its 600 s
+        // limit with nothing to say. The only waits left are the bounded ones
+        // below.
+        fetcher.release(ada)
         // ⚠️ BOUNDED, AND SAYING WHICH STAGE STALLED (#1606): this test hung
         // its 600 s limit twice on CI with nothing to say where. Each wait
         // now counts LOOKS (the runner's starvation spends none of them —
@@ -43,7 +50,7 @@ struct SearchPeopleAvatarRecyclingTests {
                      "STALLED: Ada's late picture never decoded (the fetcher released it)")
         #expect(landed.images.isEmpty, "Ada's late picture landed on a row that had moved on")
 
-        await fetcher.release(grace)
+        fetcher.release(grace)
         try #require(await Self.settle { !landed.images.isEmpty },
                      "STALLED: Grace's picture was released but never landed on the row")
 
@@ -80,19 +87,34 @@ private final class LandedAvatars {
     }
 }
 
-/// Holds each URL's fetch until the test releases it.
-private actor GatedAvatarFetcher: ImageFetching {
-    private var released: Set<URL> = []
-    private var waiters: [URL: [CheckedContinuation<Void, Never>]] = [:]
+/// Holds each URL's fetch until the test releases it. A lock, not an actor:
+/// the test releases without a hop onto the cooperative pool (#1606).
+private final class GatedAvatarFetcher: ImageFetching, Sendable {
+    private struct Gate {
+        var released: Set<URL> = []
+        var waiters: [URL: [CheckedContinuation<Void, Never>]] = [:]
+    }
+
+    private let gate = Mutex(Gate())
 
     func release(_ url: URL) {
-        released.insert(url)
-        waiters.removeValue(forKey: url)?.forEach { $0.resume() }
+        let waiting = gate.withLock { gate in
+            gate.released.insert(url)
+            return gate.waiters.removeValue(forKey: url) ?? []
+        }
+        waiting.forEach { $0.resume() }
     }
 
     func fetchImageData(for url: URL) async throws -> Data {
-        if !released.contains(url) {
-            await withCheckedContinuation { waiters[url, default: []].append($0) }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let isReleased = gate.withLock { gate in
+                guard gate.released.contains(url) else {
+                    gate.waiters[url, default: []].append(continuation)
+                    return false
+                }
+                return true
+            }
+            if isReleased { continuation.resume() }
         }
         return Self.onePixelPNG
     }
