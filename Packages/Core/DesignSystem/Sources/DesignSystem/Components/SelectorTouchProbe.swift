@@ -28,14 +28,14 @@ import UIKit
 @MainActor
 public final class SelectorTouchProbe: NSObject, UIGestureRecognizerDelegate {
     /// `true` while a finger is on ANY watched view.
-    private let onChange: (Bool) -> Void
+    private let onChange: @MainActor (Bool) -> Void
 
     /// The probes with a finger currently down. Announcements happen only on the
     /// transitions into and out of empty — a second view being touched is not a
     /// second "a touch began".
     private var down: Set<ObjectIdentifier> = []
 
-    public init(onChange: @escaping (Bool) -> Void) {
+    public init(onChange: @escaping @MainActor (Bool) -> Void) {
         self.onChange = onChange
         super.init()
     }

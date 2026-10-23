@@ -3,7 +3,7 @@ import UIKit
 /// A container that keeps only the touches its controls actually want, and
 /// lets every other touch fall through to whatever is behind it.
 ///
-/// The profile's header floats OVER the pages rather than scrolling inside
+/// The hero page's header floats OVER the pages rather than scrolling inside
 /// them — that is the whole of the architecture, and it is what lets one header
 /// ride three independently scrolling tabs. The cost is hit-testing: a plain
 /// `UIView` takes every touch inside its bounds whether or not it has anything
@@ -25,8 +25,8 @@ import UIKit
 /// Gesture recognizers are checked too, so anything added later that reads
 /// touches directly (the selector's grabbable capsule already does) keeps them
 /// without having to be remembered here.
-final class ScrollPassthroughView: UIView {
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+public final class ScrollPassthroughView: UIView {
+    public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard let hit = super.hitTest(point, with: event) else { return nil }
         var node: UIView? = hit
         while let current = node, current !== self {
