@@ -2,15 +2,16 @@ import CoreModels
 import CoreStorage
 import DesignSystem
 import FeedInterface
+import HeroPage
 import MediaCore
 import PostGrid
 import Testing
 import UIKit
 @testable import Feed
 
-/// The PLACE PROFILE: a hero banner wearing the top post, aggregated
-/// Likes, two tabs (a Discover grid and an Activity list, both by
-/// popularity), and the follow toggle in its header.
+/// The PLACE PROFILE: a hero page (#1656) — the profile's header with the
+/// place's flag in its disc, Ranking and Likes, a band card wearing the top
+/// media post or none, Popular over Recent, and the place's tray.
 @MainActor
 struct PlaceProfileTests {
     private func post(
@@ -74,25 +75,15 @@ struct PlaceProfileTests {
         profile.viewDidLayoutSubviews()
     }
 
-    /// ⚠️ THREE DETENTS, THE PROFILE'S (#1599): the top, the identity under
-    /// the bar (catching), the first post under the bar.
-    @Test func theDetentsAreTheTopTheIdentityAndTheFirstPost() {
-        let detents = PlaceProfileViewController.snapDetents(identityTop: 350, safeTop: 62, firstPost: 600)
-        #expect(detents.all == [0, 288, 600])
-        #expect(detents.catching == [288])
-        // An identity at or past the first post's detent is not one of its own.
-        let short = PlaceProfileViewController.snapDetents(identityTop: 700, safeTop: 62, firstPost: 600)
-        #expect(short.all == [0, 600] && short.catching.isEmpty)
-    }
-
-    /// Laid out, the list rests on the page's three detents.
-    @Test func theListRestsOnThePagesDetents() {
+    /// Laid out, the list rests on the profile's detents (#1599, #1656 —
+    /// `HeroScrollCoordinator.detents`): the top first, in order.
+    @Test func theListRestsOnTheProfilesDetents() {
         let profile = makeProfile()
         laidOut(profile)
         let detents = profile.debugSnapDetents
-        #expect(detents.all.count == 3, "\(detents.all)")
         #expect(detents.all.first == 0)
-        #expect(detents.catching.count == 1)
+        #expect(detents.all.count >= 2, "\(detents.all)")
+        #expect(detents.all == detents.all.sorted())
     }
 
     /// ⚠️ NO BANNER WHEN THE TOP POST IS WORDS (#1599): the most popular post
@@ -107,84 +98,96 @@ struct PlaceProfileTests {
         #expect(PlaceProfileViewController.showsBanner(for: []), "no posts yet: the cover's place is kept")
     }
 
-    /// …and the page re-lays out without it: the identity right under the
-    /// bar, the header no taller than the identity.
-    @Test func withoutABannerTheIdentityMovesUp() async {
+    /// Waits for the place's posts to reach the page.
+    private func loaded(_ profile: PlaceProfileViewController) async {
+        profile.beginLoading()
+        for _ in 0..<100 where profile.debugRenderCount == 0 { await Task.yield() }
+    }
+
+    /// …and its header is then a BANNERLESS PROFILE'S (the owner,
+    /// 2026-10-23): no banner, the identity right under the bar.
+    @Test func withoutABannerTheHeaderIsABannerlessProfiles() async {
         let profile = makeProfile(posts: [
-            post("words", kind: .text, reactions: 900), post("photo", kind: .photo, reactions: 10),
+            post("words", kind: .text, reactions: 900),
+            post("photo", kind: .photo, reactions: 10, thumbnail: "https://paris.example/photo.jpg"),
         ])
         laidOut(profile)
-        let coverHeight = profile.debugBannerHeight
-        profile.beginLoading()
-        for _ in 0..<50 where profile.showsBanner { await Task.yield() }
+        await loaded(profile)
         laidOut(profile)
         #expect(!profile.showsBanner)
-        #expect(profile.debugBannerHeight < coverHeight * 0.6,
-                "the header kept the cover's height: \(profile.debugBannerHeight) of \(coverHeight)")
-        // The page's ground behind the info, not a white card (the owner,
-        // 2026-10-22).
-        #expect(profile.debugBannerBoxColor == Surface.page)
+        #expect(profile.debugHeaderContent.bannerImageURL == nil)
+        #expect(profile.debugHeader.bannerFormat == .none)
+        #expect(profile.debugHeader.debugBannerIsHidden)
+        #expect(profile.debugIdentityFrame.minY < profile.view.safeAreaInsets.top + 40,
+                "the identity is not under the bar: \(profile.debugIdentityFrame)")
     }
 
-    /// A COVER, as a profile's poster: the banner runs down 80% of the
-    /// screen (user, 5 October 2026), the identity row at its foot — well
-    /// below where the poster's old 200pt stage put it.
-    @Test func theCoverRunsDownEightyPercentOfTheScreen() {
-        let profile = makeProfile()
+    /// A media top post is the banner: a profile's band card wearing its cover.
+    @Test func aMediaTopPostIsTheBandCard() async {
+        let profile = makeProfile(posts: [
+            post("photo", kind: .photo, reactions: 900, thumbnail: "https://paris.example/top.jpg"),
+            post("words", kind: .text, reactions: 10),
+        ])
         laidOut(profile)
-        let screen = profile.view.bounds.height
-        #expect(abs(profile.debugBannerHeight - (screen * 0.8).rounded()) < 1,
-                "banner \(profile.debugBannerHeight) of \(screen)")
-        // The content — the identity row, then the posts — starts at 40%,
-        // over the picture's lower part.
-        #expect(abs(profile.debugIdentityFrame.minY - (screen * 0.4).rounded()) < 1,
-                "identity at \(profile.debugIdentityFrame.minY)")
-        #expect(profile.debugHeaderBottom < profile.debugBannerHeight, "the posts wait under the picture")
-    }
-
-    /// The HEADER — what the pages are inset by — ends under the identity row
-    /// by the clearance, and nowhere else: derived from its content, so
-    /// Dynamic Type cannot put type off it. The counters stand inside the
-    /// row, above its foot. (The picture runs on below, under the posts.)
-    @Test func theHeaderEndsJustUnderTheIdentity() {
-        let profile = makeProfile()
+        await loaded(profile)
         laidOut(profile)
-        #expect(abs(profile.debugIdentityClearance - (profile.debugHeaderBottom - profile.debugIdentityFrame.maxY)) < 1)
-        #expect(profile.debugMetricsFrame.maxY <= profile.debugIdentityFrame.maxY + 0.5)
+        #expect(profile.showsBanner)
+        #expect(profile.debugHeaderContent.bannerImageURL == URL(string: "https://paris.example/top.jpg"))
+        #expect(profile.debugHeader.bannerFormat == .band)
+        #expect(!profile.debugHeader.debugBannerIsHidden)
+        // Resting collapsed (the owner, 2026-10-23): the flag just under the
+        // bar, the card at the height a profile's shrinks to.
+        #expect(profile.debugHeader.bandRestsCollapsed)
     }
 
-    /// On the profile's column, as the profile's own info block (#1597): the
-    /// flag at the column's leading edge, the likes beside it, the name
-    /// ABOVE them, from their leading edge.
+    /// ⚠️ A CLOSE FROM THE MAP STAGES THIS PAGE OFF SCREEN (#1656): the page
+    /// hangs in the hero pager's scroll view, placed only in the pager's own
+    /// layout pass, and the Popular row must still be sized for its first
+    /// card to be the landing — sized off the page's own width, it was not,
+    /// and every close fell back to Recent's head with the header docked.
+    @Test func aLandingStagedOffScreenFindsPopularsFirstCard() async {
+        let profile = makeProfile(posts: (1...6).map {
+            post("post-\($0)", reactions: Int64(100 - $0), thumbnail: "https://paris.example/\($0).jpg")
+        })
+        await loaded(profile)
+        #expect(profile.view.window == nil)
+        let origin = profile.popularLandingOrigin(sizedTo: CGRect(x: 0, y: 0, width: 402, height: 874))
+        #expect(origin != nil, "the landing fell back to Recent")
+        #expect(abs(profile.debugActivityOffset) < 1, "the page did not rest at its top")
+    }
+
+    /// On the profile's column, as the profile's own identity row: the flag at
+    /// the column's leading edge, the name beside it over the counters.
     @Test func theIdentityIsLaidOnTheProfilesColumn() {
         let profile = makeProfile()
         laidOut(profile)
         let identity = profile.debugIdentityFrame
-        #expect(abs(identity.minX - HeroBannerMetrics.identityInset) < 0.5)
-        #expect(abs(identity.maxX - (402 - HeroBannerMetrics.identityInset)) < 0.5)
-        #expect(profile.debugNameFrame.minX > identity.minX, "the name is not beside the flag")
+        #expect(abs(identity.minX - HeroHeaderView.pageMargin) < 0.5)
+        #expect(abs(identity.maxX - (402 - HeroHeaderView.pageMargin)) < 0.5)
+        #expect(profile.debugNameFrame.minX > identity.minX + 40, "the name is not beside the flag")
         #expect(profile.debugNameFrame.maxY <= profile.debugMetricsFrame.minY + 0.5, "the name is not above the counters")
-        #expect(profile.debugMetricsFrame.minX > identity.minX, "the likes are not beside the flag")
+        #expect(profile.debugMetricsFrame.minX > identity.minX + 40, "the counters are not beside the flag")
     }
 
-    /// "#3" rides the flag in its bubble when the place has a rank…
+    /// "#3" is the Ranking counter when the place has a rank…
     @Test func aRankedPlaceWearsItsRankOnTheFlag() {
         let profile = makeProfile(rank: PlaceRankBadge(position: 3, label: "City Rank"))
         laidOut(profile)
         #expect(profile.debugRank == "#3")
     }
 
-    /// …and a place with none (every place on the fleet today) draws no bubble.
+    /// …and a place with none (every place on the fleet today) leaves its
+    /// cell empty.
     @Test func anUnrankedPlaceDrawsNoRank() {
         let profile = makeProfile()
         laidOut(profile)
         #expect(profile.debugRank == nil)
     }
 
-    /// The identity row is the unlock sheet's (`PlaceIdentityView`): the flag
-    /// and the subtitle the map resolved, the name without its kind, and the
-    /// place's Likes and Posts — no flag without a country.
-    @Test func theIdentityRowWearsTheFlagAndSubtitleTheMapGave() {
+    /// The header wears the flag and the subtitle the map resolved, the name
+    /// without its kind, and the place's two counters, Ranking and Likes — no
+    /// flag without a country.
+    @Test func theHeaderWearsTheFlagAndSubtitleTheMapGave() {
         let flag = UIGraphicsImageRenderer(size: CGSize(width: 96, height: 96)).image { _ in }
         let profile = PlaceProfileViewController(
             postIDs: [], placeName: "Paris • City Cluster",
@@ -193,44 +196,19 @@ struct PlaceProfileTests {
             videoPlayback: nil, loadPosts: { [] }, openPost: { _, _, _ in }
         )
         laidOut(profile)
-        let identity = profile.debugIdentity
-        #expect(identity.flagView.image === flag)
-        #expect(identity.titleLabel.name == "Paris")
-        #expect(identity.titleLabel.subtitle == "France")
-        #expect(identity.statViews.map(\.captionLabel.text) == ["Likes"])
+        #expect(profile.debugFlag.image === flag)
+        // The flag fills the disc a profile's avatar stands in.
+        let disc = profile.debugHeader.debugAvatarFrame
+        let shown = profile.debugFlag.convert(profile.debugFlag.bounds, to: profile.debugHeader)
+        #expect(abs(shown.width - disc.width) < 0.5 && abs(shown.minY - disc.minY) < 0.5)
+        #expect(profile.debugHeaderContent.title == "Paris")
+        #expect(profile.debugHeaderContent.subtitle == "France")
+        #expect(profile.debugHeader.counters.map { $0.accessibilityLabel } == ["Ranking", "Likes"])
 
         let bare = makeProfile()
         laidOut(bare)
-        #expect(bare.debugIdentity.flagView.image == nil, "a flag out of nowhere")
-        #expect(bare.debugIdentity.titleLabel.subtitle == "")
-    }
-
-    /// ⚠️ THE SELECTOR IS ON THE BANNER, NOT UNDER IT — bottoms level.
-    ///
-    /// And the SLOT is what is pinned there, not the bar: `headerHost` takes
-    /// its whole height from `slot.bottom == host.bottom`, so anchoring the BAR
-    /// to the picture would make every number derived from the header — the
-    /// pages' inset, the dock line, the content floor — hostage to a control
-    /// ⚠️ THE HEADER IS NO LONGER THE BANNER (5 October 2026). It was —
-    /// the banner's bottom gave the header its height — until the cover and
-    /// its content were dissociated: the header ends with the identity row,
-    /// the pages are inset by it, and the picture runs on below, BEHIND the
-    /// first posts, to 80% of the screen.
-    @Test func theBannerRunsOnBehindThePosts() {
-        let profile = makeProfile()
-        laidOut(profile)
-        #expect(profile.debugBannerHeight > profile.debugHeaderBottom + 50,
-                "banner \(profile.debugBannerHeight), header \(profile.debugHeaderBottom)")
-        #expect(profile.debugIdentityRidesTheBanner)
-    }
-
-    /// The first post stands as far under the identity row as a profile's
-    /// stands under its tray (`Spacing.xl`) — not the old selector band's
-    /// 68pt, kept for a capsule that left the banner for the screen's foot.
-    @Test func theFirstPostStandsTheProfilesGapUnderTheIdentity() {
-        let profile = makeProfile()
-        laidOut(profile)
-        #expect(abs(profile.debugIdentityClearance - Spacing.xl) < 0.5)
+        #expect(bare.debugFlag.image == nil, "a flag out of nowhere")
+        #expect(bare.debugHeaderContent.subtitle == "")
     }
 
     /// ⚠️ WHAT COVERS THE LIST IS NOT WHAT THE LIST IS INSET BY. This page
@@ -251,43 +229,6 @@ struct PlaceProfileTests {
         // every card "taller than the gap", and the landing moved nothing.
         #expect(occlusion.top < profile.debugHeaderBottom)
         #expect(occlusion.top < profile.view.bounds.height / 4)
-    }
-
-    /// The name and the counters are the place's identity, so they sit ON the
-    /// picture, one under the other, rather than in a band beneath it.
-    @Test func theNameAndCountersRideTheBanner() {
-        let profile = makeProfile()
-        laidOut(profile)
-        #expect(profile.debugIdentityRidesTheBanner)
-    }
-
-    /// The picture runs under the whole identity — the name and the counters
-    /// — fading into the page only over the blur's last 30 % (#1372), whole
-    /// by the banner's edge, so the list below starts on the page with no
-    /// seam and the name stands on the picture alone.
-    @Test func thePictureRunsUnderTheIdentityToTheFoot() throws {
-        let profile = makeProfile()
-        laidOut(profile)
-        let fade = try #require(profile.debugBannerFade)
-        let box = profile.debugBannerBoxFrame
-        #expect(fade.rampStart > profile.debugNameFrame.maxY)
-        #expect(abs(fade.rampEnd - box.maxY) < 0.5)
-        #expect(profile.debugRampAlphas.last == 1)
-    }
-
-    /// The image lags the scroll and is cut taller than its viewport, so the
-    /// lag can never expose an edge: at the furthest the header travels, the
-    /// image's top is still at or above the box's.
-    @Test func theBannerImageLagsTheScrollWithoutExposingAnEdge() {
-        let profile = makeProfile()
-        laidOut(profile)
-        let atRest = profile.debugBannerImageTop
-        #expect(atRest < 0, "the image is cut taller than its viewport")
-
-        profile.debugApplyHeaderOffset(2_000)
-        let scrolled = profile.debugBannerImageTop
-        #expect(scrolled > atRest, "the image did not lag the scroll")
-        #expect(scrolled <= 0, "the lag exposed the image's top edge")
     }
 
     /// A defaults suite of this test's own: `WalletStore` persists there, and
@@ -543,7 +484,7 @@ struct PlaceProfileTests {
         for _ in 0..<50 where profile.renderedActivity.isEmpty { await Task.yield() }
         #expect(profile.debugLikes == 57)
         // Both posts' likes count, the text one's too.
-        #expect(profile.debugIdentity.statViews.map(\.valueLabel.text) == ["57"])
+        #expect(profile.debugHeaderContent.counterValues == [nil, "57"])
     }
 
     // MARK: - The follow toggle
@@ -552,16 +493,6 @@ struct PlaceProfileTests {
     /// tray's Pin capsule became the bar's star) — outline → toggle → filled
     /// in the save star's gold → toggle → outline — always reading the
     /// caller's answer rather than caching its own.
-    /// The place page's identity is the PROFILE'S info block (#1597): its
-    /// likes alone beside the flag; no posts' count.
-    @Test func theIdentityIsThePagesBlockWithItsLikesAlone() {
-        let profile = makeProfile()
-        laidOut(profile)
-        #expect(profile.debugIdentity.layout == .page)
-        #expect(profile.debugIdentity.statViews.count == 1)
-        #expect(profile.debugIdentity.statViews.first?.captionLabel.text == "Likes")
-    }
-
     @Test func theStarTogglesTheInjectedState() throws {
         var followed = false
         let profile = makeProfile(following: ClusterGalleryFollowing(
@@ -662,9 +593,9 @@ struct PlaceProfileTests {
         let bare = makeProfile(following: nil)
         laidOut(bare)
         #expect(bare.debugStarButton == nil && bare.debugQRButton == nil && bare.debugDockPinButton == nil)
-        // No row: the first post stands its gap under the identity itself.
-        #expect(abs(bare.debugIdentityClearance - Spacing.xl) < 0.5)
-        #expect(abs(bare.debugHeaderBottom - bare.debugIdentityFrame.maxY - Spacing.xl) < 0.5)
+        // No row: the first post stands the profile's gap under the identity
+        // itself.
+        #expect(bare.debugHeaderBottom - bare.debugIdentityFrame.maxY < Spacing.xl * 3)
     }
 
     /// The pin toggles the map dock's store, says which state it is in, and
@@ -708,43 +639,8 @@ struct PlaceProfileTests {
 
     // MARK: - The collapsible header's coordinator rules
 
-    /// The alignment rule that keeps the header still across tab switches —
-    /// the profile pager's, verbatim: below the dock line the offset belongs
-    /// to the SCREEN (every page must agree); above it, to the TAB (its own
-    /// place, floored at the first row under the chrome).
-    @Test func alignedOffsetSharesBelowTheDockLineAndFreesAbove() {
-        // Below the line: every page takes the screen's number, even one
-        // that had its own.
-        #expect(PlaceProfileViewController.alignedOffset(
-            current: 120, pageOwn: 300, dockLine: 227, contentFloor: 281
-        ) == 120)
-        // Above it: the tab keeps its own place...
-        #expect(PlaceProfileViewController.alignedOffset(
-            current: 500, pageOwn: 400, dockLine: 227, contentFloor: 281
-        ) == 400)
-        // ...but never above the floor that would leave its first row under
-        // the chrome.
-        #expect(PlaceProfileViewController.alignedOffset(
-            current: 500, pageOwn: 0, dockLine: 227, contentFloor: 281
-        ) == 281)
-        // Degenerate geometry (nothing to dock) shares everywhere.
-        #expect(PlaceProfileViewController.alignedOffset(
-            current: 500, pageOwn: 0, dockLine: 0, contentFloor: 0
-        ) == 500)
-    }
-
-    /// The identity fade is position-driven and lands at exactly zero on the
-    /// dock line — where the metrics would otherwise draw through the
-    /// transparent navigation bar.
-    @Test func identityFadesOutExactlyAtTheDock() {
-        #expect(PlaceProfileViewController.identityAlpha(travelled: 0, dockLine: 227) == 1)
-        #expect(PlaceProfileViewController.identityAlpha(travelled: 227, dockLine: 227) == 0)
-        #expect(PlaceProfileViewController.identityAlpha(travelled: 187, dockLine: 227) == 0.5)
-        #expect(PlaceProfileViewController.identityAlpha(travelled: 300, dockLine: 227) == 0,
-                "past the dock stays gone, never negative")
-        #expect(PlaceProfileViewController.identityAlpha(travelled: -80, dockLine: 227) == 1,
-                "overscroll stays opaque, never over 1")
-    }
+    // The alignment rule and the identity fade are the hero page's
+    // (`HeroPagePagerTests`, `HeroScrollCoordinatorTests`).
 
     /// The whole mechanism, window-hosted: scrolling the active page collapses
     /// the header (its top constraint follows the offset), stops at the dock

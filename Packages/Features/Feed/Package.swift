@@ -28,6 +28,8 @@ let package = Package(
         .package(path: "../../Core/EmoteKit"),
         .package(path: "../../Core/PostGrid"),
         .package(path: "../../Core/ShareSheet"),
+        // The place page is a hero page, the profile's container (#1656).
+        .package(path: "../../Core/HeroPage"),
         // A like batch's `first_tap_at` is a `Google_Protobuf_Timestamp` (#676).
         .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.28.0")
     ],
@@ -59,6 +61,7 @@ let package = Package(
                 "PostGrid",
                 // The place page's QR bubble opens the profile's share sheet.
                 "ShareSheet",
+                "HeroPage",
                 .product(name: "SwiftProtobuf", package: "swift-protobuf")
             ]
         ),
@@ -75,6 +78,7 @@ let package = Package(
                 "LocalStore",
                 "EntityStore",
                 "PostGrid",
+                "HeroPage",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking"),
                 .product(name: "CoreRealtimeMocks", package: "CoreRealtime")
             ]

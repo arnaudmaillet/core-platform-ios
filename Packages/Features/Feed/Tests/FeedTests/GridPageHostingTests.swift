@@ -92,6 +92,21 @@ struct GridPageHostingTests {
         #expect(page.posts.isEmpty)
     }
 
+    /// ⚠️ A HEADER THAT GROWS DURING A FLIGHT (#1656): the inset pinned for
+    /// the flight is not what the thaw puts back — the hosted top set while
+    /// pinned is — so a page at rest comes back at rest, not pulled down by
+    /// the difference (a place page staged off a window, then shown).
+    @Test func aHostedTopSetDuringAFreezeSurvivesTheThaw() {
+        let page = page(style: .discover, posts: posts(30))
+        page.setHostedInsets(top: 232, bottom: 34)
+        page.restAtTop()
+        page.beginHeroFreeze()
+        page.setHostedInsets(top: 348, bottom: 34)
+        page.endHeroFreeze()
+        #expect(abs(page.verticalOffset) < 0.5, "the thaw left the page pulled by \(page.verticalOffset)")
+        #expect(page.collectionView.contentInset.top == 348)
+    }
+
     // MARK: - Counts in place
 
     /// The same posts with new counts re-dress nothing: the visible cells take
