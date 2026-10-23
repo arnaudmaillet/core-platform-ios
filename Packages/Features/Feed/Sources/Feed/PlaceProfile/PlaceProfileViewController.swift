@@ -4,6 +4,7 @@ import CoreStorage
 import DesignSystem
 import EntityStore
 import FeedInterface
+import HeroPage
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -17,14 +18,14 @@ import UIKit
 /// feed closes the active post onto the FIRST ROW of its Activity tab here —
 /// whatever kind of post the marker wore and whatever post is on screen.
 ///
-/// The page is a profile-shaped column:
-/// - a HERO BANNER wearing the place's TOP post (highest engagement — the
+/// The page is a PROFILE's (the hero page, #1656 — the owner 2026-10-23):
+/// - a band card wearing the place's TOP media post (highest engagement — the
 ///   same ranking the Gallery leads with, so banner, pin face and first tile
-///   are one post);
-/// - a metric band: the place's rank, when it has one, and its aggregated
-///   LIKES — likes, not views, since no surface shows views any more (product
-///   call, 2026-09-30). No avatar, no bio, no edit/share — a place is not an
-///   account;
+///   are one post) — or, with none, exactly what a bannerless profile shows;
+/// - the flag where a profile's avatar stands, the name over its region, and
+///   two counters: the place's RANKING, when it has one, and its aggregated
+///   LIKES — likes, not views (product call, 2026-09-30). No bio, no edit —
+///   a place is not an account;
 /// - ONE page under the metrics, For You's own layout (the owner,
 ///   2026-10-16 — the Activity/Discover pair and its strip are gone): a
 ///   **Popular** row of cards (For You's Following row — the place's most
@@ -40,7 +41,7 @@ import UIKit
 /// screen: the two-VC stack insertion is the map's, the vertical close is
 /// the card close's, and this type only has to host its column and say where
 /// that close lands (`CardCloseLanding`).
-final class PlaceProfileViewController: UIViewController {
+final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> {
     /// The page: For You's own list (`.discover` — cards and mosaic
     /// stretches) over the place's posts in the `recent` order, led by
     /// `lead`, and the landing of every dismissal from the map. Not a
@@ -60,39 +61,18 @@ final class PlaceProfileViewController: UIViewController {
     var makePostList: (() -> ForYouPostListViewController)?
     var makeGallery: (() -> DiscoverGalleryViewController)?
 
-    /// The banner's viewport. The PICTURE inside it is cut taller than it is,
-    /// so it can lag behind the scroll without ever showing an edge — see
-    /// `applyBannerParallax`.
-    private let bannerBox = UIView()
-    /// The picture, its foot progressively blurred under the name — the
-    /// profile banner's run-out, shared through `HeroBannerFade`.
-    private let bannerView = HeroBannerPictureView()
-    /// The page's tone over the picture's last few points, under the
-    /// counters and the selector.
-    private let bannerRamp = HeroBannerRampView()
-    // ⚠️ NO VEIL UNDER THE TYPE (the owner, 2026-10-22: "une sorte de fondu
-    // noir … il faut le retirer et garder seulement notre dégradé blur"). The
-    // dark band #1597 laid under the identity and the one #1617 first laid
-    // under the Popular title are gone: the banner's dim and blur alone.
-    /// The place's IDENTITY ROW — the unlock sheet's own (`PlaceIdentityView`,
-    /// DesignSystem): its round flag (a city's is its country's) with the rank
-    /// in a bubble over it, the name and its subtitle (a country's continent,
-    /// a city's country), and the place's Likes and Posts. One component for
-    /// both, so the country's sheet and its page cannot drift apart.
-    private let identityView: PlaceIdentityView
+    /// The place's flag, where a profile's avatar stands (`HeroHeaderAvatar
+    /// .custom`) — a city's is its country's; a neutral disc without one.
+    private let flagView: UIImageView
+    /// What the header shows: the name over the region, the Ranking and the
+    /// Likes, the banner's picture — re-applied whenever one of them moves.
+    private var headerContent: HeroHeaderContent
     /// The heart every tile of this page counts, summed — what the Likes
     /// column shows. It used to sit beside a "Views" total and be called
     /// "Reactions"; the views went (2026-09-30).
     private var likesTotal: Int64 = 0
 
 
-    /// The floating header: banner, identity and tray in one host that RIDES
-    /// THE PAGE'S OFFSET (the profile page's mechanics, adopted wholesale).
-    /// The page fills the screen and scrolls itself; this host sits above
-    /// it, moved by its top constraint, and stops once it has gone under the
-    /// navigation bar — the dock.
-    private let headerHost = UIView()
-    private var headerTopConstraint: NSLayoutConstraint?
     /// The place's display title ("Paris • City Cluster") — worn as the HERO
     /// TITLE on the banner, and nowhere else.
     ///
@@ -112,13 +92,11 @@ final class PlaceProfileViewController: UIViewController {
     /// cluster this is. The SPLITTER stays: `placeName` still arrives as the
     /// gallery's "Paris • City Cluster", so stripping the kind is the only way
     /// to draw the name alone (`heroTitleComponents`).
-    /// The page under its hosted-header contract — one now, the header's
-    /// coordinator kept page-agnostic.
-    private var hostedPages: [any PlaceProfileHostedPage] = []
     /// The horizontal scrollers a grab froze — the posts' carousels and the
     /// Popular shelf — with what each was before, to put back (#1595).
     private var grabFrozenScrollers: [GrabFrozenScroller] = []
-    /// The page the header rides: the only one.
+    /// The page the header rides: the only one (`heroPager`'s).
+    private var hostedPages: [ForYouGridPage] { [activityPage] }
     private let activeIndex = 0
 
     private let postIDs: [PostID]
@@ -170,10 +148,9 @@ final class PlaceProfileViewController: UIViewController {
     /// The bar's one trailing item: the balance, when there is a wallet. The
     /// star and the QR code moved back under the identity (#1598).
     private var walletItem: UIBarButtonItem?
-    /// The row under the identity, the profile's tray for a place (#1598, the
-    /// owner 2026-10-22): `[Add Pin to Map] [star] [QR code]`, each shown
-    /// only with its seam.
-    private let actionRow = UIStackView()
+    // The row under the identity — the header's action row, the profile's
+    // tray for a place (#1598, the owner 2026-10-22): `[Add Pin to Map]
+    // [star] [QR code]`, each shown only with its seam (`configureActionRow`).
     /// Pins the place to the map's dock (`dockPin`): a pill there, a tap
     /// flies the map back here.
     private let dockPinButton = AppButton(
@@ -214,10 +191,6 @@ final class PlaceProfileViewController: UIViewController {
     /// post the viewer was on once a close stages it at the head of the list.
     private var anchorID: PostID
     private var loadTask: Task<Void, Never>?
-    /// The pull's spinner, pinned under the status bar — the profile's.
-    private let pullIndicator = HeroPullToRefreshView()
-    /// The band the spinner centres in — the profile's height.
-    private static let pullIndicatorHeight: CGFloat = 44
     /// A hydration is in flight — what coalesces a pull (`refresh`).
     private var isLoading = false
     /// The members last fanned out to the page — what a refresh compares its
@@ -476,14 +449,17 @@ final class PlaceProfileViewController: UIViewController {
         // is in (it lands after the posts, and dissolves over 0.25s).
         if arguments.contains("-place-ink-audit") {
             QAWait.until("place-ink-audit", { [weak self] in
-                self?.bannerView.image != nil
+                guard let self else { return false }
+                return !showsBanner || heroHeader.debugBannerHasPicture
             }) { [weak self] in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    guard let self, let measured = debugHeroInkContrast() else { return }
+                    guard let self else { return }
+                    view.layoutIfNeeded()
+                    guard let identity = heroHeader.debugIdentityContrast() else { return }
                     let style = traitCollection.userInterfaceStyle == .dark ? "dark" : "light"
-                    let rows = measured.map { "\($0.0)=[\($0.1)]" }.joined(separator: " ")
-                    print("PLACE-INK-AUDIT style=\(style) tones=\(debugHeroInkTones) \(rows) "
-                        + String(format: "blur-bake=%.1fms", debugBlurBakeMilliseconds))
+                    let body = (heroHeader.debugBodyContrast() ?? []).map { "\($0.0)=[\($0.1)]" }
+                    print("PLACE-INK-AUDIT format=\(heroHeader.bannerFormat) style=\(style) "
+                        + "name=[\(identity.name)] region=[\(identity.handle)] " + body.joined(separator: " "))
                 }
             }
         }
@@ -495,9 +471,8 @@ final class PlaceProfileViewController: UIViewController {
         if let offset = value("-maps-place-scroll") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 QAWait.until("-maps-place-scroll \(offset)", { [weak self] in
-                    guard let self, self.hostedPages.indices.contains(self.activeIndex),
-                          let grid = self.hostedPages[self.activeIndex] as? ForYouGridPage
-                    else { return false }
+                    guard let self else { return false }
+                    let grid = self.activityPage
                     return !grid.posts.isEmpty
                 }) { [weak self] in
                     guard let self else { return }
@@ -515,10 +490,9 @@ final class PlaceProfileViewController: UIViewController {
         if arguments.contains("-place-scroll-sweep") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 QAWait.until("-place-scroll-sweep", { [weak self] in
-                    guard let self, self.hostedPages.indices.contains(self.activeIndex),
-                          let grid = self.hostedPages[self.activeIndex] as? ForYouGridPage
-                    else { return false }
-                    return !grid.posts.isEmpty && self.bannerView.image != nil
+                    guard let self else { return false }
+                    let grid = self.activityPage
+                    return !grid.posts.isEmpty && (!self.showsBanner || self.heroHeader.debugBannerHasPicture)
                 }) { [weak self] in
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
                         guard let self else { return }
@@ -537,10 +511,9 @@ final class PlaceProfileViewController: UIViewController {
         if arguments.contains("-place-stretch-sweep") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 QAWait.until("-place-stretch-sweep", { [weak self] in
-                    guard let self, self.hostedPages.indices.contains(self.activeIndex),
-                          let grid = self.hostedPages[self.activeIndex] as? ForYouGridPage
-                    else { return false }
-                    return !grid.posts.isEmpty && self.bannerView.image != nil
+                    guard let self else { return false }
+                    let grid = self.activityPage
+                    return !grid.posts.isEmpty && (!self.showsBanner || self.heroHeader.debugBannerHasPicture)
                 }) { [weak self] in
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                         guard let self else { return }
@@ -594,16 +567,14 @@ final class PlaceProfileViewController: UIViewController {
         if let index = value("-maps-place-open-tile").map(Int.init) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { [weak self] in
                 QAWait.until("-maps-place-open-tile \(index)", { [weak self] in
-                    guard let self, self.hostedPages.indices.contains(self.activeIndex),
-                          let grid = self.hostedPages[self.activeIndex] as? ForYouGridPage
-                    else { return false }
+                    guard let self else { return false }
+                    let grid = self.activityPage
                     return grid.posts.indices.contains(index)
                 }) { [weak self] in
                     guard let self else { return }
                     debugFlightBeforeTileOpen = ZoomTransitionController.debugMostRecent
                     debugDidOpenTile = true
-                    let grid = hostedPages.indices.contains(activeIndex)
-                        ? hostedPages[activeIndex] as? ForYouGridPage : nil
+                    let grid: ForYouGridPage? = activityPage
                     // The ELECTION, not just the tap: a text row that opens with
                     // no window is a plain push, and a plain push looks like a
                     // perfectly good animation. Only the line says which happened.
@@ -681,79 +652,9 @@ final class PlaceProfileViewController: UIViewController {
     private weak var debugFlightBeforeTileOpen: ZoomTransitionController?
     private var debugDidOpenTile = false
     #endif
-    private var bannerTask: Task<Void, Never>?
-    /// The cover the banner wears.
-    private var bannerURL: URL?
-
     /// How many posts seed a feed opened from a tile — the same window (and
     /// the same reason) as For You's.
     private static let seedWindow = 40
-    /// The floor a headless or not-yet-laid-out view falls back to, so a
-    /// constraint built before the first layout pass is never zero.
-    private static let bannerHeightFloor: CGFloat = 220
-    /// How far the image lags the scroll, as a fraction of the header's travel.
-    /// Enough to read as depth, little enough that the crop stays honest.
-    private static let bannerParallaxFraction: CGFloat = 0.25
-
-    /// The banner's height: the PROFILE POSTER's — a cover, 80% of the
-    /// screen (`coverScreenFraction`), the identity row at its foot.
-    ///
-    /// ⚠️ History: it was 70% of the viewport, then cut to the poster's 200pt
-    /// stage ("la bannière est beaucoup trop haute", 25 September 2026) so
-    /// the two screens read as one design; on 5 October 2026 both covers went
-    /// to 80% together — the profile's poster and this — so they still match.
-    /// Never less than the chrome, `HeroBannerMetrics.posterStage`, the
-    /// identity row and its clearance; re-derived on every layout, since the
-    /// identity grows with Dynamic Type.
-    private var bannerHeight: CGFloat {
-        let width = view.bounds.width - 2 * HeroBannerMetrics.identityInset
-        guard width > 0 else { return Self.bannerHeightFloor }
-        func height(of subject: UIView?) -> CGFloat {
-            subject?.systemLayoutSizeFitting(
-                CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
-                withHorizontalFittingPriority: .required,
-                verticalFittingPriority: .fittingSizeLevel
-            ).height ?? 0
-        }
-        // `coverScreenFraction` of the screen — or, should the identity
-        // outgrow it (Dynamic Type), down to the identity's clearance.
-        let content = contentTop + height(of: identityView) + actionRowBlock + Self.identityClearance
-        // No banner (#1599): the header is the identity's own height.
-        guard showsBanner else { return content }
-        return max(content, (view.bounds.height * Self.coverScreenFraction).rounded())
-    }
-
-    /// How much of the screen's height the banner — a COVER, the profile
-    /// poster's shape — runs down: 80% (user, 5 October 2026), as a
-    /// profile's poster does.
-    static let coverScreenFraction: CGFloat = 0.8
-    /// Where the CONTENT starts — the identity row, then the posts: 40% of
-    /// the screen, OVER the picture, which runs on under it to 80% — the
-    /// two dissociated, as on a profile's poster (user, 5 October 2026).
-    static let contentScreenFraction: CGFloat = 0.4
-
-    /// The identity row's top, from the header's: 40% of the screen, never
-    /// under the chrome.
-    private var contentTop: CGFloat {
-        // No banner (#1599): the identity starts right under the bar — the
-        // navigation bar's foot, which the safe area does not reach on a
-        // page that runs under it.
-        guard showsBanner else {
-            let barFoot = navigationController.map { $0.navigationBar.frame.maxY } ?? 0
-            return max(view.safeAreaInsets.top, barFoot) + Spacing.md
-        }
-        return max((view.bounds.height * Self.contentScreenFraction).rounded(), view.safeAreaInsets.top + Spacing.md)
-    }
-    private var contentTopConstraint: NSLayoutConstraint?
-
-    /// How much taller than its viewport the image is cut. The parallax slides
-    /// the image by at most this, so the overshoot is what guarantees no edge
-    /// is ever exposed.
-    private var bannerOvershoot: CGFloat {
-        max(1, headerTravel * Self.bannerParallaxFraction)
-    }
-
-    private var bannerHeightConstraint: NSLayoutConstraint?
 
     init(
         postIDs: [PostID],
@@ -777,21 +678,18 @@ final class PlaceProfileViewController: UIViewController {
         self.rank = rank
         self.shareURL = identity?.shareURL
         self.dockPin = identity?.dockPin
-        self.identityView = PlaceIdentityView(
-            flag: identity?.flag,
-            name: Self.heroTitleComponents(of: placeName).name,
-            subtitle: identity?.subtitle,
-            // A dash until the place's posts arrive (`render`). Its likes
-            // alone: the posts' count is gone (#1304).
-            counters: [.init(value: "—", caption: "Likes")],
-            rank: rank?.positionText,
-            // The profile's info block (#1597): the flag where the avatar
-            // stands, the rank and the likes beside it at one size, centred
-            // on it, the name right above them.
-            layout: .page
+        // The flag fills the disc a profile's avatar stands in — or, for a
+        // place with none, the disc's own neutral fill.
+        let flag = UIImageView(image: identity?.flag)
+        flag.contentMode = .scaleAspectFill
+        flag.accessibilityIdentifier = "place.identity.flag"
+        self.flagView = flag
+        // Ranking and Likes (the owner, 2026-10-23): no rank, no Ranking
+        // column; a dash for the likes until the posts arrive (`renderCorpus`).
+        headerContent = HeroHeaderContent(
+            title: Self.heroTitleComponents(of: placeName).name, subtitle: identity?.subtitle ?? "",
+            counterValues: [rank?.positionText, "—"]
         )
-        // One ink per column from the start: the rank's too.
-        counterTones = Array(repeating: HeroInk.defaultTone, count: identityView.inkedStats.count)
         self.imagePipeline = imagePipeline
         self.following = following
         self.wallet = wallet
@@ -800,13 +698,26 @@ final class PlaceProfileViewController: UIViewController {
         self.loadPosts = loadPosts
         self.openPost = openPost
         self.anchorID = postIDs.first ?? PostID("")
-        self.activityPage = ForYouGridPage(
-            imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback
-        )
+        let page = ForYouGridPage(imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback)
+        self.activityPage = page
         let shelf = PostShelfSection(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
         self.shelf = shelf
         self.lead = GridLeadStack(sections: [shelf])
-        super.init(nibName: nil, bundle: nil)
+        // The profile's header with the place's identity (#1656): the flag in
+        // the disc, Ranking and Likes; the action row is `configureActionRow`'s.
+        let header = HeroHeaderView(imagePipeline: imagePipeline, counters: ["Ranking", "Likes"], avatar: .custom(flag))
+        header.bannerVideoPool = videoPlayback
+        // One page, so no selector is ever placed: the strip is the
+        // container's, titled for the day a place has tabs.
+        // ⚠️ NO DOCKED SLOT: with no selector the WHOLE header climbs under
+        // the bar, the tray included — stopping a strip's height short left
+        // the Pin and the QR code floating over the posts.
+        super.init(
+            header: header, pager: HeroPagePager(tabs: [PlaceProfileTab.posts], pages: [page]),
+            selectorBar: PagedTabBar(titles: ["Posts"], style: .navigationTitle),
+            dockedSlot: 0
+        )
+        header.configure(with: headerContent)
         shelf.title = "Popular"
         // Its title over skeleton cards until the place's posts land (#1296).
         shelf.isLoading = true
@@ -824,25 +735,19 @@ final class PlaceProfileViewController: UIViewController {
     deinit {
         loadTask?.cancel()
         moreLoad?.cancel()
-        bannerTask?.cancel()
     }
 
     override func viewDidLoad() {
+        // The hero page's layout: the pages, the header over them, the
+        // banner behind, the pull's indicator (#1655).
         super.viewDidLoad()
-        // The page the cards lie on, a step below them — see `Surface`.
-        view.backgroundColor = Surface.page
-        configureHeader()
-        configureScroll()
         activityPage.render(.loading)
-        // "Try Again" reloads the whole place. The pull is the indicator's —
-        // `configureScroll`.
-        activityPage.onRefresh = { [weak self] in self?.refresh() }
+        // "Try Again" and a released pull reload the whole place
+        // (`heroPageRefresh`).
         // Near the list's end: the place's next page (#643).
         if loadMore != nil {
             activityPage.onNearEnd = { [weak self] in self?.loadMorePosts() }
         }
-        activityPage.handPullToHost()
-        installPullIndicator()
         activityPage.onItemTapped = { [weak self] index in
             self?.openTile(at: index, in: self?.activityPage)
         }
@@ -905,8 +810,15 @@ final class PlaceProfileViewController: UIViewController {
     }
 
     /// Sizes the list's leading header to the rows it holds.
+    ///
+    /// ⚠️ THE PAGER'S WIDTH, not the page's: the page hangs in the pager's
+    /// scroll view, one viewport wide, and is placed only in the pager's own
+    /// layout pass — after this screen's. Read off the page, the width was
+    /// still zero when a landing staged the page off screen, the Popular row
+    /// was never sized, and every close fell back to Recent's head with the
+    /// header docked.
     private func updateLeadHeight() {
-        let width = activityPage.bounds.width
+        let width = heroPager.bounds.width
         guard width > 0 else { return }
         activityPage.setLead(lead, height: lead.preferredHeight(forWidth: width))
     }
@@ -980,7 +892,7 @@ final class PlaceProfileViewController: UIViewController {
         super.viewWillDisappear(animated)
         // Off screen, this page holds no claim on the shared player pool —
         // the feed pushed above it is about to want every loan.
-        for hosted in hostedPages { (hosted as? ForYouGridPage)?.setAutoplayActive(false) }
+        for hosted in hostedPages { hosted.setAutoplayActive(false) }
         shelf.setAutoplayActive(false)
     }
 
@@ -1012,7 +924,7 @@ final class PlaceProfileViewController: UIViewController {
         // still runs when the viewer leaves by the chevron or a system pop
         // rather than by a drag that may never come.
         for hosted in hostedPages {
-            guard let page = hosted as? ForYouGridPage else { continue }
+            let page = hosted
             page.applyPendingReveal()
         }
     }
@@ -1067,188 +979,47 @@ final class PlaceProfileViewController: UIViewController {
     /// appearance).
     private func syncAutoplay() {
         for (index, hosted) in hostedPages.enumerated() {
-            (hosted as? ForYouGridPage)?.setAutoplayActive(index == activeIndex)
+            hosted.setAutoplayActive(index == activeIndex)
         }
         shelf.setAutoplayActive(true)
     }
 
-    // MARK: - Layout (floating header over full-screen pages)
+    // MARK: - The header (the hero page's, #1656)
 
-    private func configureHeader() {
-        // The PAGES fill the screen and scroll themselves; the header floats
-        // over them (added second, so it draws above the content sliding
-        // under it) and is moved by its top constraint from whichever page
-        // is being read.
-        hostedPages = [activityPage]
-        activityPage.pin(to: view)
-
-        headerHost.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(headerHost)
-        let top = headerHost.topAnchor.constraint(equalTo: view.topAnchor)
-        headerTopConstraint = top
-
-        bannerBox.clipsToBounds = true
-        bannerBox.backgroundColor = Surface.card
-        bannerBox.translatesAutoresizingMaskIntoConstraints = false
-        // ⚠️ BEHIND THE PAGES, not in the floating header: the cover runs to
-        // 80% of the screen while the identity row and the posts start at
-        // 40%, OVER its lower part (user, 5 October 2026). The pages are
-        // clear; only their cards cover it. It still rests on the header's
-        // top and travels with it (`bannerRestingTop`), so the fade, the ink
-        // and the stretch are read in its space as before.
-        view.insertSubview(bannerBox, belowSubview: activityPage)
-
-        // Both fill the box; the picture slides INSIDE its view for the
-        // parallax (`applyBannerParallax`), under a blur and a ramp that stay
-        // with the type.
-        bannerView.pin(to: bannerBox)
-        bannerRamp.pin(to: bannerBox)
-        // A light black over the picture, under the ramp (#1372): picture →
-        // dim → blur, the ink read through it (`HeroBannerPictureView.dim`).
-        bannerView.dim = Self.bannerDim
-        // The blurred picture decides the type's ink — read it again the
-        // moment it changes, off the bake's own dissolve when on screen.
-        bannerView.onLevelsChanged = { [weak self] in
-            guard let self else { return }
-            guard view.isInVisibleWindow else { return updateHeroInk(force: true) }
-            DispatchQueue.main.async { [weak self] in self?.updateHeroInk(force: true) }
-        }
-
-        // THE IDENTITY ROW at the banner's foot, standing on the picture — the
-        // identity leads the page, not the chrome. The unlock sheet's own
-        // (`PlaceIdentityView`): the flag, the name and its subtitle, Likes
-        // and Posts.
-        //
-        // ⚠️ THE PICTURE'S INK, THE PROFILE'S RULE (`HeroInk`). It was
-        // `.label` over a page-toned plate, which was only ~0.2–0.4 under the
-        // name: black type over a dark photograph (or white over a bright
-        // one, in dark mode) read faint. #327 put a black scrim under white
-        // type; that read as a black veil and went (30 September 2026). What
-        // stands under the identity now is the picture's progressively
-        // blurred foot (`HeroBannerFade`), and the title and each counter wear
-        // white or black by what that blurred picture is behind them
-        // (`updateHeroInk`) — white alone measured 2.34:1 over this page's
-        // light mock picture.
-        //
-        // ⚠️ INSIDE THE BANNER, ON THE PICTURE, counters included: they are
-        // part of the place's identity, so they stand on its picture as a
-        // poster's do on a profile, and the page arrives only over the
-        // banner's last few points, where the list begins (user, 30
-        // September 2026).
-        applyHeroLegibility()
-        identityView.translatesAutoresizingMaskIntoConstraints = false
-        headerHost.addSubview(identityView)
-        actionRow.translatesAutoresizingMaskIntoConstraints = false
-        headerHost.addSubview(actionRow)
-
-        // ⚠️ Stretchy banner, the profile's own mechanism: the host is moved
-        // by its TOP CONSTRAINT rather than a transform precisely so this
-        // works — the banner's top is pinned `lessThanOrEqualTo` the view's
-        // top at required priority over its natural host-top equality, so a
-        // pull-down (the host travelling below rest) stretches the banner
-        // from the viewport's top edge instead of dragging it away and
-        // exposing the background behind.
-        let bannerRestingTop = bannerBox.topAnchor.constraint(equalTo: headerHost.topAnchor)
-        bannerRestingTop.priority = .defaultHigh
-        let bannerBottom = bannerBox.bottomAnchor.constraint(
-            equalTo: headerHost.topAnchor, constant: bannerHeight
-        )
-        bannerHeightConstraint = bannerBottom
-        let contentTop = identityView.topAnchor.constraint(equalTo: headerHost.topAnchor, constant: self.contentTop)
-        contentTopConstraint = contentTop
-        NSLayoutConstraint.activate([
-            top,
-            headerHost.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            headerHost.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            bannerRestingTop,
-            bannerBox.topAnchor.constraint(lessThanOrEqualTo: view.topAnchor),
-            bannerBox.leadingAnchor.constraint(equalTo: headerHost.leadingAnchor),
-            bannerBox.trailingAnchor.constraint(equalTo: headerHost.trailingAnchor),
-            // The BOTTOM is the fixed edge (host.top + bannerHeight), so a
-            // stretched banner grows upward while the identity holds still.
-            bannerBottom,
-            // The identity at `contentTop` of the header — 40% of the screen,
-            // on the cover — on the profile's column.
-            contentTop,
-            identityView.leadingAnchor.constraint(
-                equalTo: headerHost.leadingAnchor, constant: HeroBannerMetrics.identityInset
-            ),
-            identityView.trailingAnchor.constraint(
-                equalTo: headerHost.trailingAnchor, constant: -HeroBannerMetrics.identityInset
-            ),
-            // ⚠️ **THE IDENTITY'S FOOT IS WHAT GIVES THE HOST A HEIGHT NOW** —
-            // the banner's used to, until the two were dissociated: the pages
-            // are inset by the host, so the posts start right under the
-            // identity, over the picture's lower part. The foot keeps the old
-            // selector slot's clearance, derived from the bar, not typed (see
-            // `debugIdentityClearance`).
-            // The action row under the identity, on its column (#1598).
-            actionRow.topAnchor.constraint(
-                equalTo: identityView.bottomAnchor, constant: hasActions ? Self.actionRowGap : 0
-            ),
-            actionRow.leadingAnchor.constraint(equalTo: identityView.leadingAnchor),
-            actionRow.trailingAnchor.constraint(equalTo: identityView.trailingAnchor),
-            actionRow.heightAnchor.constraint(equalToConstant: hasActions ? Self.actionBubbleSize : 0),
-            // The row's foot ends the header (the identity's, without one).
-            headerHost.bottomAnchor.constraint(
-                equalTo: actionRow.bottomAnchor, constant: Self.identityClearance
-            ),
-        ])
+    /// Re-applies the header's content: the name and region, the Ranking and
+    /// the Likes, the banner's picture.
+    private func applyHeaderContent() {
+        heroHeader.configure(with: headerContent)
     }
 
-    /// The profile's tray metrics: 44pt bubbles, `Spacing.lg` under the
-    /// identity (the profile's air after its top row).
-    static let actionBubbleSize: CGFloat = 44
-    private static let actionRowGap = Spacing.lg
-
-    /// Whether the row has anything to show: a pin, a star or a QR code.
-    private var hasActions: Bool { dockPin != nil || following != nil || shareURL != nil }
-
-    /// The row's share of the header: its gap and its height, or nothing.
-    private var actionRowBlock: CGFloat { hasActions ? Self.actionRowGap + Self.actionBubbleSize : 0 }
-
-    /// Builds the row: the pin capsule takes the width the bubbles leave, the
-    /// bubbles are circles — the profile's Follow · QR · ⋯ tray.
+    /// The row under the identity — the profile's tray for a place (#1598):
+    /// the pin capsule takes the width the bubbles leave, the bubbles are
+    /// circles (`HeroHeaderView.setActions`). With no pin, the bubbles stand
+    /// at the leading edge and a spacer takes the rest.
     private func configureActionRow() {
-        actionRow.axis = .horizontal
-        actionRow.alignment = .fill
-        actionRow.distribution = .fill
-        actionRow.spacing = Spacing.sm
-        actionRow.isHidden = !hasActions
+        var actions: [HeroHeaderAction] = []
         if dockPin != nil {
             dockPinButton.accessibilityIdentifier = "place.dockPin"
-            dockPinButton.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
-            dockPinButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             dockPinButton.addAction(UIAction { [weak self] _ in self?.dockPinTapped() }, for: .primaryActionTriggered)
-            actionRow.addArrangedSubview(dockPinButton)
+            actions.append(.capsule(dockPinButton))
             renderDockState(dockPin?.isFollowing() ?? false, animated: false)
         }
         if following != nil {
             starButton.accessibilityIdentifier = "place.star"
             starButton.addAction(UIAction { [weak self] _ in self?.starTapped() }, for: .primaryActionTriggered)
-            actionRow.addArrangedSubview(starButton)
+            actions.append(.bubble(starButton))
             renderFollowState(following?.isFollowing() ?? false, animated: false)
         }
         if shareURL != nil {
             qrButton.accessibilityIdentifier = "place.qrCode"
             qrButton.accessibilityLabel = "QR code"
             qrButton.addAction(UIAction { [weak self] _ in self?.presentQRCode() }, for: .primaryActionTriggered)
-            actionRow.addArrangedSubview(qrButton)
+            actions.append(.bubble(qrButton))
         }
-        if dockPin == nil {
-            // No capsule to take the width: the bubbles stand at the leading
-            // edge, a spacer takes the rest.
-            let spacer = UIView()
-            spacer.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
-            actionRow.addArrangedSubview(spacer)
-        }
-        for bubble in [starButton, qrButton] where bubble.superview != nil {
-            // 999, the profile's: on the narrowest devices a bubble shaving a
-            // point beats an unsatisfiable-constraints break.
-            let diameter = bubble.widthAnchor.constraint(equalToConstant: Self.actionBubbleSize)
-            diameter.priority = UILayoutPriority(999)
-            NSLayoutConstraint.activate([diameter, bubble.heightAnchor.constraint(equalTo: bubble.widthAnchor)])
-        }
+        if dockPin == nil, !actions.isEmpty { actions.append(.capsule(UIView())) }
+        heroHeader.setActions(actions)
+        // Nothing to offer: no row, as on the profile card's sheet.
+        heroHeader.showsActionTray = !actions.isEmpty
     }
 
     /// The pin's two states: an offer, then the fact.
@@ -1289,15 +1060,6 @@ final class PlaceProfileViewController: UIViewController {
         dockPinButton.accessibilityLabel = docked ? "Unpin from Map" : "Add Pin to Map"
     }
 
-    /// The air between the tray and the first post: the profile's own under
-    /// its tray (`ProfileHeaderView`'s column foot, `Spacing.xl`), so the two
-    /// pages' content starts alike (user, 5 October 2026).
-    ///
-    /// ⚠️ It was the selector's band plus that air — 68pt — from when the
-    /// capsule stood on the banner's foot. The strip lives at the foot of the
-    /// screen now, and the band was air with nothing in it.
-    private static let identityClearance = Spacing.xl
-
     /// The place's share sheet — the PROFILE'S OWN (`ShareSheet`, shared):
     /// its QR card with the place's flag punched in, its name and country,
     /// and the actions tray. No row of people to send it to: the page has no
@@ -1320,10 +1082,10 @@ final class PlaceProfileViewController: UIViewController {
     private func makeShareSheet() -> ShareSheetViewController? {
         guard let shareURL else { return nil }
         let card = ShareCard(
-            displayName: identityView.titleLabel.name,
-            handle: identityView.titleLabel.subtitle,
+            displayName: headerContent.title,
+            handle: headerContent.subtitle,
             avatarURL: nil,
-            avatarImage: identityView.flagView.image,
+            avatarImage: flagView.image,
             url: shareURL
         )
         return ShareSheetViewController(
@@ -1334,226 +1096,6 @@ final class PlaceProfileViewController: UIViewController {
             fallbackWidth: view.bounds.width
         )
     }
-    /// The crossfade's length and the size the leaving copy shrinks to —
-    /// the profile screen's measured pair, shared so the two screens that
-    /// perform the same hand-over cannot drift apart.
-    private static let dockTransition: TimeInterval = 0.26
-    private static let dockZoomScale: CGFloat = 0.88
-
-
-    private func configureScroll() {
-        // The header rides the page's offset.
-        for (index, hosted) in hostedPages.enumerated() {
-            hosted.onVerticalScroll = { [weak self] offset in
-                guard let self, index == activeIndex else { return }
-                applyHeaderOffset(offset)
-                // Negative travel is the overscroll the indicator draws from.
-                pullIndicator.setPull(max(0, -offset), isTracking: hosted.scrollView.isTracking)
-            }
-            // The profile's release rule, verbatim: the indicator owns the
-            // threshold, and a release past it refreshes the whole place.
-            hosted.onPullReleased = { [weak self] distance in
-                guard let self, index == activeIndex,
-                      pullIndicator.shouldRefresh(releasedAt: distance) else { return }
-                pullIndicator.beginRefreshing()
-                refresh()
-            }
-        }
-        // ⚠️ NO TAB BAR COLLAPSE — For You's product call (2026-09-29): the
-        // bar minimized on scroll riding the tab strip's accessory, and with
-        // no tabs on the screen there is nothing for it to make room for.
-    }
-
-    // MARK: - The scroll coordinator (the profile page's arithmetic)
-
-    /// Which ink the title and each counter wear on the picture — read off
-    /// the blurred picture behind each (`updateHeroInk`); see `HeroInk`.
-    /// Per COUNTER, not per row: the columns stand apart, and one ink for
-    /// the row was the worse of two grounds (a light wall under one, dark hair
-    /// under the other measured 2.3:1 in either ink). The rank's bubble wears
-    /// its own fixed ink.
-    private var nameTone = HeroInk.defaultTone
-    /// The header height the pages were last inset by (#1599).
-    private var laidOutHeaderHeight: CGFloat = 0
-    /// Whether the page wears a banner (#1599): not when the place's most
-    /// popular post is words.
-    private(set) var showsBanner = true
-    private var counterTones: [HeroInk.Tone] = [HeroInk.defaultTone]
-    private var heroInkReadFor: [CGRect] = []
-    #if DEBUG
-    /// How many times the ground under the type was read.
-    private(set) var debugInkReadCount = 0
-    #endif
-
-    /// The name's and the counters' ink and edge: the picture's ink (white on
-    /// a dark picture, black on a light one) with a soft shadow of the
-    /// opposite tone — it holds a glyph where the picture puts its own tone
-    /// right behind it.
-    private func applyHeroLegibility() {
-        identityView.setTitleInk(nameTone)
-        // The rank's column too (#1371): every column reads its own ground.
-        identityView.setStatInks(counterTones)
-    }
-
-    /// Reads the blurred picture behind the name and behind each counter and
-    /// picks each one's ink. Runs when the picture is re-baked and when the
-    /// type moves; a change of ink on screen cross-dissolves.
-    private func updateHeroInk(force: Bool = false) {
-        // A new picture is a new ground under the Popular title too (#1617).
-        HeroBannerCost.measure(.ink) { readHeroInk(force: force) }
-        updateListTitleInk()
-    }
-
-    private func readHeroInk(force: Bool) {
-        // No picture to read (#1599): the page's ink, set with the banner.
-        guard showsBanner else { return }
-        // In the box's space AT REST, what the ground is read in: the type
-        // rides the box's foot, and in the box's own space a pull-down (the
-        // box stretching up) moved it down its ground and read the ground
-        // again every two points of the pull.
-        let blocks = ([identityView.titleLabel] + identityView.inkedStats).map(restingFrame(of:))
-        let moved = blocks.count != heroInkReadFor.count
-            || zip(blocks, heroInkReadFor).contains { abs($0.minY - $1.minY) > 2 || abs($0.height - $1.height) > 2 }
-        guard force || moved, let nameGround = bannerView.groundPixels(behind: blocks[0]) else { return }
-        heroInkReadFor = blocks
-        #if DEBUG
-        debugInkReadCount += 1
-        #endif
-        // ⚠️ ALWAYS LIGHT ON THE PICTURE (#1597, the owner 2026-10-22): white
-        // and light grey, never black, whatever the banner — its dim and fade
-        // carry the contrast, not the ink, and no veil (the owner, 2026-10-22).
-        // One per column all the same, the rank's coming and going with the
-        // rank.
-        let name = HeroInk.Tone.light
-        let counters = blocks.dropFirst().map { _ in HeroInk.Tone.light }
-        #if DEBUG
-        HeroInk.debugTraceGround(nameGround, name: "place-name", picked: name)
-        #endif
-        guard name != nameTone || counters != counterTones else { return }
-        nameTone = name
-        counterTones = counters
-        guard view.isInVisibleWindow else { return applyHeroLegibility() }
-        UIView.transition(
-            with: bannerBox, duration: 0.2, options: [.transitionCrossDissolve, .allowUserInteraction]
-        ) {
-            self.applyHeroLegibility()
-        }
-    }
-
-    /// Hands the fade where the type landed: from just above the name — the
-    /// identity's top, as a profile's avatar is its — down to the banner's
-    /// foot, the blur barely there under the name and the page's tone
-    /// already half there (shouldered), both whole where the list begins. The whole identity stands on the picture, as on a
-    /// profile's poster. The box is settled first — the controller's pass
-    /// runs before the box's own subviews are placed.
-    ///
-    /// ⚠️ It used to be a page-toned PLATE a third of the banner tall — a
-    /// ladder climbing from the name's foot, with the counters' values on
-    /// 0.55 of it and their captions on 0.93 — under #327's black ink scrim.
-    /// Both went (30 September 2026): the plate's long climb was the white
-    /// halo over the photograph, the scrim a black veil. `HeroBannerFade` is
-    /// the profile banner's run-out too, so the two screens cannot drift.
-    /// The picture's dim (#1372): light, not #327's black veil — the owner
-    /// asked for "slightly darkened", to be tuned on a device.
-    static let bannerDim: CGFloat = 0.25
-    /// The share of the blur's run, at its foot, over which the page's tone
-    /// arrives (#1372; the poster's 30 %, #718).
-    static let footFadeShare: CGFloat = 0.7
-
-    private func placeHeroFade() {
-        // The identity stands in the floating header, over the box.
-        headerHost.layoutIfNeeded()
-        bannerBox.layoutIfNeeded()
-        // In the box's space AT REST: a pull-down stretches the box above,
-        // and must not move the fade — see `HeroBannerPictureView`.
-        // From the identity's top — the flag's, as a profile's avatar is its.
-        let name = restingFrame(of: identityView)
-        let foot = bannerBox.bounds.height - restingDrop
-        guard name.height > 0, foot > name.minY else { return }
-        // ⚠️ NO PAGE-TONED WASH (#1372, the owner 2026-10-18): the type
-        // stands on the dimmed, blurred picture alone, and the page's tone
-        // arrives only over the blur's LAST 30 %, so the banner's edge melts
-        // into the page rather than ending on a line — the poster's rule
-        // (#718), set here explicitly. It was shouldered: the page already
-        // at 0.55 under the flag and the name, a white haze in light mode.
-        var fade = HeroBannerFade.geometry(identityTop: name.minY, foot: foot)
-        fade.rampStart = fade.blurStart + Self.footFadeShare * (fade.blurFull - fade.blurStart)
-        bannerView.fade = fade
-        bannerRamp.fade = fade
-        updateHeroInk()
-    }
-
-    /// ⚠️ THE POPULAR TITLE STANDS ON THE PICTURE (#1617, the owner's option
-    /// A, 2026-10-22). The list starts inside the banner, so at rest its first
-    /// title sits on the dimmed, blurred picture, above where the page's tone
-    /// arrives — and in the page's ink it was black on a dark foot, barely
-    /// legible. On the picture it takes the identity's ink, light; once the
-    /// page's tone is under it (the banner faded out as the header docks, or
-    /// no banner at all) it is the page's again.
-    private func updateListTitleInk() {
-        guard shelf.header.window != nil else { return }
-        let title = restingFrame(of: shelf.header)
-        let ink = Self.listTitleInk(
-            showsBanner: showsBanner, bannerAlpha: bannerBox.alpha, titleFoot: title.maxY, fade: bannerRamp.fade
-        )
-        shelf.header.setInk(ink)
-    }
-
-    /// Light while the title's foot is above where the page's tone has
-    /// started to show (a quarter into the ramp) and the banner is mostly
-    /// there; the page's ink (nil) otherwise.
-    static func listTitleInk(
-        showsBanner: Bool, bannerAlpha: CGFloat, titleFoot: CGFloat, fade: HeroBannerFade.Geometry?
-    ) -> HeroInk.Tone? {
-        guard showsBanner, bannerAlpha >= 0.5, let fade else { return nil }
-        let pageArrives = fade.rampStart + 0.25 * (fade.rampEnd - fade.rampStart)
-        return titleFoot <= pageArrives ? .light : nil
-    }
-
-    /// How far a pull-down has stretched the box above its resting top:
-    /// what it is taller than its resting height (`bannerHeight`, its foot
-    /// below the host's top, which is where its top rests).
-    ///
-    /// ⚠️ READ OFF THE BOX'S OWN BOUNDS, not its frame in the host: this
-    /// runs in the controller's layout pass, before the host has placed the
-    /// box, and the host-relative frame lagged the box's insides by a
-    /// frame's travel — on a quick release the fade wandered 8pt and the
-    /// blur was recomposed on every frame of it. The box's bounds and the
-    /// type inside it are laid out together (`bannerBox.layoutIfNeeded()`).
-    private var restingDrop: CGFloat {
-        max(0, bannerBox.bounds.height - (bannerHeightConstraint?.constant ?? bannerBox.bounds.height))
-    }
-
-    /// `view`'s frame in the box's resting space — the stretch taken off.
-    private func restingFrame(of view: UIView) -> CGRect {
-        view.convert(view.bounds, to: bannerBox).offsetBy(dx: 0, dy: -restingDrop)
-    }
-
-    /// Slides the image within its viewport so it lags the scroll.
-    ///
-    /// The header itself is moved by its top constraint, so the picture would
-    /// travel with it exactly 1:1 and read as flat. Moving the image DOWN
-    /// inside the box by a fraction of that travel makes it fall behind, which
-    /// is the whole of the effect. The image is cut taller than the box by at
-    /// least the largest offset this can produce, so no edge is ever exposed.
-    ///
-    /// The picture slides INSIDE `bannerView` rather than the view moving:
-    /// the blur's masks belong to the box, where the name is, and the
-    /// picture passes under them.
-    private func applyBannerParallax(travelled: CGFloat) {
-        let overshoot = bannerOvershoot
-        bannerView.pictureOutset = UIEdgeInsets(top: overshoot, left: 0, bottom: overshoot, right: 0)
-        let clamped = min(max(travelled, 0), headerTravel)
-        bannerView.pictureShift = clamped * Self.bannerParallaxFraction
-        // A pull-down carries the host down by the overscroll while the
-        // box's top holds at the view's: the box is stretched by exactly
-        // that, and the picture and its ramp only zoom (set before the
-        // layout pass the offset causes).
-        let stretch = max(0, -travelled)
-        bannerView.stretch = stretch
-        bannerRamp.stretch = stretch
-    }
-
     /// What actually COVERS the hosted list right now, top and bottom.
     ///
     /// Not the content inset: this page reserves the header's whole height as
@@ -1595,45 +1137,17 @@ final class PlaceProfileViewController: UIViewController {
     private func applyLandingOcclusion() {
         let cover = landingOcclusion
         for hosted in hostedPages {
-            (hosted as? ForYouGridPage)?.setChromeOcclusion(cover)
+            hosted.setChromeOcclusion(cover)
         }
     }
 
-    /// The height the header takes at rest — what the pages are inset by so
-    /// their content starts below it rather than behind it.
-    private var headerHeight: CGFloat {
-        headerHost.systemLayoutSizeFitting(
-            CGSize(width: view.bounds.width, height: UIView.layoutFittingCompressedSize.height),
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel
-        ).height
-    }
-
-    /// How far the header travels before it is all under the navigation bar
-    /// — the moment it docks and stops climbing.
-    private var headerTravel: CGFloat {
-        // ⚠️ THE WHOLE HEADER, the tray included: it used to stop a tab
-        // strip's height short — the strip's seat under the bar — which, with
-        // the strip gone, left the Pin and the QR code floating over the posts.
-        max(0, headerHeight - view.safeAreaInsets.top)
-    }
-
-    /// The offset that puts a page's FIRST ROW directly under the navigation
-    /// bar — a tab-bar slot further than `headerTravel`, because the pages
-    /// are inset by the header's whole height, tab bar included.
-    private var contentFloor: CGFloat {
-        max(0, headerHeight - view.safeAreaInsets.top)
-    }
+    /// The header height the pages were last inset by (#1599).
+    private var laidOutHeaderHeight: CGFloat = 0
 
     override func viewDidLayoutSubviews() {
+        // The container's pass: the header measured, the pages inset by it,
+        // the travel, the detents.
         super.viewDidLayoutSubviews()
-        // Idempotent per value — the pages guard their own writes.
-        // The banner is re-derived rather than fixed: the chrome, the name and
-        // the counters all change with the device and with Dynamic Type.
-        contentTopConstraint?.constant = contentTop
-        bannerHeightConstraint?.constant = bannerHeight
-        placeHeroFade()
-        updateListTitleInk()
         let header = headerHeight
         // ⚠️ A LIST AT REST AT ITS TOP STAYS THERE when the header changes
         // height under it (#1599): the banner going for a text-only place, a
@@ -1642,85 +1156,22 @@ final class PlaceProfileViewController: UIViewController {
         // by the difference, the identity under the bar.
         let restedAtTop = activityPage.verticalOffset.magnitude < 1 && header != laidOutHeaderHeight
         laidOutHeaderHeight = header
-        for hosted in hostedPages {
-            hosted.setHostedInsets(top: header, bottom: view.safeAreaInsets.bottom)
-            // Room to hold ANY position the header can be in, so a tab
-            // switch moves the chrome by nothing.
-            hosted.setMinimumScrollTravel(contentFloor)
-        }
         if restedAtTop { activityPage.restAtTop() }
-        // Derived from the safe area and the banner's fraction, so a rotation
-        // or a size change is a different answer. Idempotent — a plain
-        // assignment — and deliberately NOT re-measuring `restingBarCover`,
-        // which runs during the push when the bar is already down.
+        // Derived from the safe area, so a rotation or a size change is a
+        // different answer. Idempotent — a plain assignment — and
+        // deliberately NOT re-measuring `restingBarCover`, which runs during
+        // the push when the bar is already down. After the container's
+        // occlusion, which it refines with the bar's resting cover.
         applyLandingOcclusion()
-        applyHeaderOffset(hostedPages.indices.contains(activeIndex)
-            ? hostedPages[activeIndex].verticalOffset : 0)
         // The rows' height depends on the WIDTH (a card is a fraction of it).
         updateLeadHeight()
         // The foot chrome may have moved at rest (the tab bar collapsing).
         chromeDidMove()
-        applySnapDetents()
     }
 
-    /// ⚠️ THREE DETENTS, THE PROFILE'S (#1599, the owner 2026-10-22): a
-    /// release while the header is on screen rests at the top, with the
-    /// identity just under the bar (a CATCHING detent: a release crossing it
-    /// stops there), or with the first post under the bar — the profile's
-    /// `ProfileScrollDetents`, through the same `ScrollDetents` the grid runs.
-    private func applySnapDetents() {
-        let detents = Self.snapDetents(
-            identityTop: contentTop, safeTop: view.safeAreaInsets.top, firstPost: contentFloor
-        )
-        activityPage.snapDetents = detents.all
-        activityPage.catchDetents = detents.catching
-    }
-
-    /// The detents in the header's travelled space (0 at rest): the top, the
-    /// identity's top meeting the bar's foot, the first post under the bar.
-    /// A detent that would not lie strictly between its neighbours is left
-    /// out (a short header, a huge text size).
-    static func snapDetents(
-        identityTop: CGFloat, safeTop: CGFloat, firstPost: CGFloat
-    ) -> (all: [CGFloat], catching: [CGFloat]) {
-        var all: [CGFloat] = [0]
-        let identity = (identityTop - safeTop).rounded()
-        var catching: [CGFloat] = []
-        if identity > 0, identity < firstPost {
-            all.append(identity)
-            catching.append(identity)
-        }
-        if firstPost > 0 { all.append(firstPost) }
-        return (all, catching)
-    }
-
-    /// Moves the header from the active page's offset, and fades the
-    /// identity content (banner, metrics) as it slips under the translucent
-    /// navigation bar — position-driven, both directions.
-    ///
-    /// Negative travel is NOT clamped, deliberately (the profile's rule):
-    /// a pull-down at rest carries the header down with the content, and
-    /// the banner's viewport-top pin turns that travel into stretch.
-    private func applyHeaderOffset(_ travelled: CGFloat) {
-        headerTopConstraint?.constant = -min(travelled, headerTravel)
-        applyBannerParallax(travelled: travelled)
-        let alpha = Self.identityAlpha(travelled: travelled, dockLine: headerTravel)
-        // The box AND the identity row — apart since the cover was dissociated
-        // from its content — so the picture, its blur, the name and the
-        // counters fade as one identity rather than the image sliding out
-        // from under its own caption.
-        bannerBox.alpha = alpha
-        identityView.alpha = alpha
-        actionRow.alpha = alpha
-        updateListTitleInk()
-    }
-
-    /// The identity fade's ramp: opaque until the last stretch of travel,
-    /// gone exactly at the dock — where the metrics would otherwise go on
-    /// drawing through the transparent bar.
-    static func identityAlpha(travelled: CGFloat, dockLine: CGFloat, ramp: CGFloat = 80) -> CGFloat {
-        guard dockLine > 0, ramp > 0 else { return 1 }
-        return min(1, max(0, (dockLine - travelled) / ramp))
+    /// A released pull, or "Try Again": the whole place again.
+    override func heroPageRefresh() {
+        refresh()
     }
 
     /// Splits the gallery title's "Name • Kind Cluster" shape into the hero
@@ -1731,27 +1182,6 @@ final class PlaceProfileViewController: UIViewController {
         let name = String(title[..<range.lowerBound])
         let kind = String(title[range.upperBound...])
         return (name, kind.isEmpty ? nil : kind)
-    }
-
-    /// Where a page should sit, given where the screen currently is — the
-    /// profile pager's rule verbatim: below the dock line the offset belongs
-    /// to the SCREEN (every page must agree or the header teleports on a tab
-    /// switch); above it, to the TAB (each keeps its own place, floored so
-    /// its first row is never left under the chrome).
-    private func alignedOffset(for index: Int) -> CGFloat {
-        Self.alignedOffset(
-            current: hostedPages[activeIndex].verticalOffset,
-            pageOwn: hostedPages[index].verticalOffset,
-            dockLine: headerTravel,
-            contentFloor: contentFloor
-        )
-    }
-
-    static func alignedOffset(
-        current: CGFloat, pageOwn: CGFloat, dockLine: CGFloat, contentFloor: CGFloat
-    ) -> CGFloat {
-        guard dockLine > 0, current >= dockLine else { return current }
-        return max(pageOwn, contentFloor)
     }
 
     /// Starts the one hydration this screen ever does. Called by the builder
@@ -1826,20 +1256,6 @@ final class PlaceProfileViewController: UIViewController {
         pullIndicator.endRefreshing()
     }
 
-    /// The profile's indicator, above the header rather than inside a list —
-    /// see `HeroPullToRefreshView` for why the pages carry no stock control.
-    private func installPullIndicator() {
-        // In the band between the safe-area top and the banner's type: the
-        // header slides down past it on a pull, and it draws over the picture.
-        pullIndicator.constrain(in: view) { parent in
-            pullIndicator.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
-            pullIndicator.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-            pullIndicator.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-            pullIndicator.heightAnchor.constraint(equalToConstant: Self.pullIndicatorHeight)
-        }
-        view.bringSubviewToFront(pullIndicator)
-    }
-
     /// One place fans the hydrated corpus out to every surface of the page,
     /// so they can never disagree about what the place contains.
     ///
@@ -1863,37 +1279,12 @@ final class PlaceProfileViewController: UIViewController {
         let pinned = Set(members.map(\.id))
         extraPosts.removeAll { pinned.contains($0.id) }
         renderCorpus(reset: isRefresh)
-        setShowsBanner(Self.showsBanner(for: members))
-        renderBanner(for: showsBanner ? Self.bannerPost(in: Self.gallery(members)) : nil)
+        renderBanner(for: Self.bannerPost(in: Self.gallery(members)), shows: Self.showsBanner(for: members))
     }
 
-    /// ⚠️ NO BANNER WHEN THE TOP POST IS WORDS (#1599, the owner 2026-10-22):
-    /// the place's most popular post is a text-only one, so the page shows
-    /// no picture at all — not the photograph of a post that is not its
-    /// best — and the identity moves up under the bar (`contentTop`,
-    /// `bannerHeight`). Its ink follows the page then: there is no picture
-    /// to read.
-    private func setShowsBanner(_ shows: Bool) {
-        guard shows != showsBanner else { return }
-        showsBanner = shows
-        bannerView.isHidden = !shows
-        bannerRamp.isHidden = !shows
-        // No picture: the box is the page, not a card (the owner, 2026-10-22:
-        // a white block stood behind a text-only place's info).
-        bannerBox.backgroundColor = shows ? Surface.card : Surface.page
-        if !shows {
-            let pageInk: HeroInk.Tone = traitCollection.userInterfaceStyle == .dark ? .light : .dark
-            nameTone = pageInk
-            counterTones = counterTones.map { _ in pageInk }
-            applyHeroLegibility()
-        }
-        // The header changed height: the list starts again at its top, under
-        // the new header (never while the viewer is moving it).
-        view.setNeedsLayout()
-        guard isViewLoaded else { return }
-        view.layoutIfNeeded()
-        activityPage.restAtTop()
-    }
+    /// Whether the page wears a banner (#1599): not when the place's most
+    /// popular post is words.
+    private(set) var showsBanner = true
 
     /// Whether a place with these posts wears a banner: not when its most
     /// popular post — `ranked`'s first — is text-only.
@@ -1937,9 +1328,8 @@ final class PlaceProfileViewController: UIViewController {
         // as are loaded: the pins, and the pages read so far.
         let corpus = self.corpus
         likesTotal = Self.aggregatedLikes(of: corpus)
-        identityView.setCounters([
-            .init(value: CountFormatter.compactString(for: likesTotal), caption: "Likes"),
-        ])
+        headerContent.counterValues = [rank?.positionText, CountFormatter.compactString(for: likesTotal)]
+        applyHeaderContent()
     }
 
     /// The place's next page, once the pins have landed, one at a time: its
@@ -1983,8 +1373,7 @@ final class PlaceProfileViewController: UIViewController {
             // page's top post does — and the first page, landing under a
             // header that grew with it, starts the list at its top.
             if (renderedMembers ?? []).isEmpty, !fresh.isEmpty {
-                setShowsBanner(Self.showsBanner(for: extraPosts))
-                renderBanner(for: showsBanner ? Self.bannerPost(in: Self.gallery(extraPosts)) : nil)
+                renderBanner(for: Self.bannerPost(in: Self.gallery(extraPosts)), shows: Self.showsBanner(for: extraPosts))
                 if extraPosts.count == fresh.count, view.window != nil { activityPage.restAtTop() }
             }
             // Nothing new but more behind: no row reaches the end to ask, so
@@ -1999,25 +1388,27 @@ final class PlaceProfileViewController: UIViewController {
         }
     }
 
-    /// The hero banner wears the TOP post's cover. A coverless top post (a
-    /// text check-in) keeps the neutral fill — honest, and never a broken
-    /// image.
-    private func renderBanner(for post: GalleryPost?) {
-        // A refresh whose top post kept its cover keeps the picture on screen.
-        guard let url = post?.thumbnailURL, url != bannerURL else { return }
-        bannerTask?.cancel()
-        bannerTask = Task { [weak self] in
-            guard let self, let image = try? await imagePipeline.image(for: url),
-                  !Task.isCancelled else { return }
-            // Remembered once it is ON the banner, so a fetch that failed is
-            // tried again by the next refresh.
-            bannerURL = url
-            UIView.transition(
-                with: bannerView, duration: 0.25, options: [.transitionCrossDissolve]
-            ) {
-                self.bannerView.image = image
-            }
-        }
+    /// The banner wears the TOP media post's cover, as a profile's band card
+    /// (`HeroHeaderView`, #1656).
+    ///
+    /// ⚠️ NO BANNER WHEN THE TOP POST IS WORDS (#1599, the owner 2026-10-22):
+    /// the place's most popular post is a text-only one, so the page shows no
+    /// picture at all — not the photograph of a post that is not its best —
+    /// and the header is a bannerless profile's. A refresh whose top post
+    /// kept its cover keeps the picture on screen.
+    private func renderBanner(for post: GalleryPost?, shows: Bool) {
+        let url = shows ? post?.thumbnailURL : nil
+        let showsChanged = shows != showsBanner
+        showsBanner = shows
+        guard url != headerContent.bannerImageURL else { return }
+        headerContent.bannerImageURL = url
+        applyHeaderContent()
+        // The header changed height: the list starts again at its top, under
+        // the new header (never while the viewer is moving it).
+        guard showsChanged, isViewLoaded else { return }
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        activityPage.restAtTop()
     }
 
     // MARK: - The page's pure rules (tested directly)
@@ -2504,7 +1895,7 @@ extension PlaceProfileViewController: CardCloseLanding {
         // page held it depends on which tab the viewer opened from, and by the
         // time this runs that is no longer a question worth asking.
         for hosted in hostedPages {
-            guard let grid = hosted as? ForYouGridPage else { continue }
+            let grid = hosted
             grid.clearRevealConcealment()
             grid.clearHeroConcealment()
             grid.endHeroFreeze()
@@ -2844,108 +2235,54 @@ extension PlaceProfileViewController {
 
 #if DEBUG
 extension PlaceProfileViewController {
-    /// The header's live top-constraint constant — negative while collapsed,
-    /// positive under a pull-down.
-    var debugHeaderConstant: CGFloat { headerTopConstraint?.constant ?? 0 }
+    /// The header's top, from the screen's — negative while collapsed,
+    /// positive under a pull-down. After a layout pass.
+    var debugHeaderConstant: CGFloat {
+        view.layoutIfNeeded()
+        return headerHost.frame.minY
+    }
     /// The dock line, as the coordinator computed it for this layout.
     var debugHeaderTravel: CGFloat { headerTravel }
-    /// The Popular title's ink (#1617).
-    var debugListTitleInk: HeroInk.Tone? { shelf.header.ink }
-    /// The box behind the identity: a card under a picture, the page without.
-    var debugBannerBoxColor: UIColor? { bannerBox.backgroundColor }
-    var debugListTitleFrame: CGRect { shelf.header.convert(shelf.header.bounds, to: view) }
-    /// The detents the list rests on (#1599).
+    /// The detents the list rests on — the profile's (#1599, #1656).
     var debugSnapDetents: (all: [CGFloat], catching: [CGFloat]) {
         (activityPage.snapDetents, activityPage.catchDetents)
     }
-    var debugIdentityAlpha: CGFloat { bannerBox.alpha }
-    var debugBannerHeight: CGFloat { bannerHeightConstraint?.constant ?? 0 }
+    /// The identity's fade at the dock.
+    var debugIdentityAlpha: CGFloat { heroHeader.alpha }
     var debugLandingOcclusion: UIEdgeInsets { landingOcclusion }
     var debugHeaderBottom: CGFloat { headerHost.frame.maxY }
-    /// The picture's top inside the box — negative while it is cut taller.
-    var debugBannerImageTop: CGFloat { bannerView.pictureFrame.minY }
-    var debugHeroNameInk: UIColor? {
-        identityView.titleLabel.attributedText?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor
-    }
-    /// The ink the title and each counter wear on the picture.
-    var debugHeroInkTones: (name: HeroInk.Tone, likes: HeroInk.Tone) {
-        (nameTone, counterTones.last ?? HeroInk.defaultTone)
-    }
-    /// The identity row, for a test that reads it.
-    var debugIdentity: PlaceIdentityView { identityView }
+    /// The hero header the page wears (#1656), for a test that reads it.
+    var debugHeader: HeroHeaderView { heroHeader }
+    /// What the header was last handed.
+    var debugHeaderContent: HeroHeaderContent { headerContent }
+    /// The flag standing in the header's disc.
+    var debugFlag: UIImageView { flagView }
     /// The bar's trailing items, rightmost first (#1304).
     var debugTrailingItems: [UIBarButtonItem] { navigationItem.rightBarButtonItems ?? [] }
     /// The row's controls, each nil when its seam is (#1598).
     var debugStarButton: AppButton? { starButton.superview == nil ? nil : starButton }
     var debugQRButton: AppButton? { qrButton.superview == nil ? nil : qrButton }
     var debugDockPinButton: AppButton? { dockPinButton.superview == nil ? nil : dockPinButton }
-    var debugActionRowFrame: CGRect { actionRow.convert(actionRow.bounds, to: view) }
+    var debugActionRowFrame: CGRect { heroHeader.convert(heroHeader.debugTrayFrame, to: view) }
     var debugIsDocked: Bool { isDocked }
     /// The share sheet the QR bubble opens.
     func debugMakeShareSheet() -> ShareSheetViewController? { makeShareSheet() }
-    /// The banner's fade, in the view's space.
-    var debugBannerFade: HeroBannerFade.Geometry? {
-        bannerView.fade?.offset(by: headerHost.frame.minY)
-    }
-    /// The blur levels showing, in the view's space.
-    var debugBannerBlurLevels: [(start: CGFloat, full: CGFloat)] {
-        let top = headerHost.frame.minY
-        return bannerView.debugVisibleLevels.map { ($0.start + top, $0.full + top) }
-    }
-    var debugBlurComposeCount: Int { bannerView.debugComposeCount }
-    var debugBlurBakeCount: Int { bannerView.debugBakeCount }
-    /// Where the sharp picture covers, in the view's space.
-    var debugBannerPictureCover: CGRect { bannerView.convert(bannerView.debugPictureCover, to: view) }
-    var debugRampLocations: [CGFloat] { bannerRamp.debugLocations }
-    var debugRampAlphas: [CGFloat] { bannerRamp.debugAlphas }
-    /// The picture's dim and where it lies, in this view's space (#1372).
-    var debugBannerDim: CGFloat { bannerView.dim }
-    var debugBannerDimFrame: CGRect { bannerView.convert(bannerView.debugDimFrame, to: view) }
-    var debugBlurBakeMilliseconds: Double { bannerView.debugLastBakeMilliseconds }
-    /// The banner box's frame, in the view's space.
-    var debugBannerBoxFrame: CGRect { bannerBox.convert(bannerBox.bounds, to: view) }
-    var debugHasBannerPicture: Bool { bannerView.image != nil }
-    /// Puts a picture on the banner directly, for a test that measures the
-    /// type over it — the load path is the pipeline's, tested elsewhere.
-    func debugSetBannerImage(_ image: UIImage) {
-        bannerView.image = image
-    }
-    /// WCAG contrast of the name, then each shown counter's value and
-    /// caption, against the pixels rendered behind them — see
-    /// `HeroInk.debugContrast`. Labelled by their text.
-    func debugHeroInkContrast() -> [(String, HeroInkContrast)]? {
-        view.layoutIfNeeded()
-        let labels: [UILabel] = [identityView.titleLabel]
-            + identityView.statViews.flatMap { [$0.valueLabel, $0.captionLabel] }
-        guard let measured = HeroInk.debugContrast(of: labels, in: bannerBox, over: Surface.page)
-        else { return nil }
-        return zip(labels, measured).map { ($0.text ?? "?", $1) }
-    }
+    var debugHasBannerPicture: Bool { heroHeader.debugBannerHasPicture }
     /// Drives the header the way a scroll does, which the simulator cannot.
-    func debugApplyHeaderOffset(_ travelled: CGFloat) { applyHeaderOffset(travelled) }
-    /// Whether the name and the counters are drawn ON the banner.
-    var debugIdentityRidesTheBanner: Bool {
-        // Over the picture, inside its frame — no longer inside its view
-        // since the cover and its content were dissociated.
-        let banner = bannerBox.convert(bannerBox.bounds, to: view)
-        return banner.contains(identityView.convert(identityView.bounds, to: view))
+    func debugApplyHeaderOffset(_ travelled: CGFloat) { applyHeaderOffsetNow(travelled) }
+    /// The name's frame, in the view's space.
+    var debugNameFrame: CGRect { heroHeader.convert(heroHeader.debugNameFrame, to: view) }
+    /// The identity row — the flag and, beside it, the name over the
+    /// counters — in the view's space.
+    var debugIdentityFrame: CGRect {
+        heroHeader.convert(heroHeader.debugAvatarFrame.union(heroHeader.debugStatsFrame), to: view)
     }
-    /// The name's and the counter row's frames, in the view's space.
-    var debugNameFrame: CGRect { identityView.titleLabel.convert(identityView.titleLabel.bounds, to: view) }
-    /// The whole identity row — flag, title, counters — in the view's space.
-    var debugIdentityFrame: CGRect { identityView.convert(identityView.bounds, to: view) }
-    var debugMetricsFrame: CGRect {
-        guard let likes = identityView.statViews.first else { return .null }
-        return likes.convert(likes.bounds, to: view)
-    }
-    /// The rank's bubble as drawn — nil when it is not.
-    /// The rank as drawn: the headline's rank column (#1371).
+    var debugMetricsFrame: CGRect { heroHeader.convert(heroHeader.debugStatsFrame, to: view) }
+    /// The Ranking as drawn — nil when it is not.
     var debugRank: String? {
-        guard let rank = identityView.rankStat, !rank.isHidden else { return nil }
-        return rank.valueLabel.text
+        guard heroHeader.debugStatFrames.first.flatMap({ $0 }) != nil else { return nil }
+        return headerContent.counterValues.first ?? nil
     }
-    /// The band's two numbers as rendered — the place's own totals, which are
-    /// deliberately NOT the gallery's (see `render`).
     /// Which Activity row a dismissal from the MAP is currently aimed at. The
     /// rule it pins is a product one — always the head of the list, holding the
     /// post the viewer was on — and its violation is a page that lands
@@ -2987,46 +2324,24 @@ extension PlaceProfileViewController {
     /// Whether any page still carries a stock `UIRefreshControl`.
     var debugPagesCarryRefreshControl: Bool { activityPage.debugHasRefreshControl }
     var debugIsLoading: Bool { isLoading }
-    var debugHeroName: String? { identityView.titleLabel.name }
-    /// How far the identity's foot clears the banner's edge — the invariant the
-    /// old -18 constant broke the moment the selector moved onto the banner.
-    ///
-    /// ⚠️ THE CAPSULE IT WAS CLEARING IS NOT ON THE BANNER ANY MORE. The number
-    /// is kept because the counters still need air above the picture's edge,
-    /// but its stated reason is history: the selector is at the foot of the
-    /// screen. Re-decide it rather than inheriting it.
-    var debugIdentityClearance: CGFloat {
-        // From the action row's foot, the header's last content (#1598) —
-        // the identity's own when the row is empty.
-        headerHost.bounds.height - actionRow.frame.maxY
-    }
+    var debugHeroName: String? { headerContent.title }
     /// Drives the active page to a travel offset through the same path a
     /// finger's scroll reports through.
     func debugScrollActivePage(to offset: CGFloat) {
-        hostedPages[activeIndex].setVerticalOffset(offset)
-        applyHeaderOffset(hostedPages[activeIndex].verticalOffset)
+        activityPage.setVerticalOffset(offset)
+        applyHeaderOffsetNow(activityPage.verticalOffset)
     }
 }
 #endif
 
-// MARK: - The hosted-header contract
+// MARK: - The hero page's tabs
 
-/// What a page owes the floating header's coordinator: report travel, take a
-/// travel offset, and reserve room. One shape for both page kinds, so the
-/// coordinator rides whichever is active without caring which it is.
-@MainActor
-protocol PlaceProfileHostedPage: UIView {
-    var onVerticalScroll: ((CGFloat) -> Void)? { get set }
-    var onPullReleased: ((CGFloat) -> Void)? { get set }
-    var verticalOffset: CGFloat { get }
-    func setVerticalOffset(_ offset: CGFloat)
-    func setHostedInsets(top: CGFloat, bottom: CGFloat)
-    func setMinimumScrollTravel(_ travel: CGFloat)
-    /// Whether a finger is on it is what lets a pull tick (#1354).
-    var scrollView: UIScrollView { get }
+/// A place page's tabs: one page today, its posts — Popular over Recent. The
+/// container supports more, with a selector at the foot (#1656); no place has
+/// any yet.
+enum PlaceProfileTab: Equatable {
+    case posts
 }
-
-extension ForYouGridPage: PlaceProfileHostedPage {}
 
 // MARK: - The map return flight's destination half
 //
