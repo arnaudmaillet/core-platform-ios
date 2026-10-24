@@ -68,11 +68,14 @@ public enum BarItems {
     /// bar's own `.prominent` style does. It hugs nothing and asks, at the
     /// lowest priority, for more room than any bar has, so the bar gives it
     /// exactly what the other items leave (#304, #1678).
+    ///
+    /// An `image` leads the word (a glyph that says what the tap does, e.g.
+    /// the notifications' bell).
     public static func stretched(
-        id: String, title: String, prominent: Bool = false, height: CGFloat = bubbleHeight,
-        action: @escaping () -> Void
+        id: String, title: String, image: UIImage? = nil, prominent: Bool = false,
+        height: CGFloat = bubbleHeight, action: @escaping () -> Void
     ) -> (item: UIBarButtonItem, label: StretchedBarLabel) {
-        let label = StretchedBarLabel(title: title, ink: prominent ? .white : .label, action: action)
+        let label = StretchedBarLabel(title: title, image: image, ink: prominent ? .white : .label, action: action)
         label.setContentHuggingPriority(.init(1), for: .horizontal)
         let fill = label.widthAnchor.constraint(equalToConstant: 10_000)
         fill.priority = .init(2)
@@ -107,27 +110,56 @@ public enum BarItems {
 }
 
 /// The stretched toolbar item's content (#1678, `BarItems.stretched`): its
-/// word, centred, and a tap — nothing drawn behind it, the bar's bubble is
-/// its background. Read by VoiceOver as the button it stands for.
+/// word, centred — after its glyph, when it has one — and a tap; nothing
+/// drawn behind it, the bar's bubble is its background. Read by VoiceOver as
+/// the button it stands for.
+///
+/// ⚠️ ITS WORD AND GLYPH ARE FIXED (R3): a new word — a price, Mute turned
+/// Unmute — is a new item under the same identifier, which the bar animates
+/// (`set…Items(animated:)`). Only `isEnabled` changes in place, as a stock
+/// item's does.
 public final class StretchedBarLabel: UIView {
     private let label = UILabel()
+    private let glyph = UIImageView()
+    private let content = UIStackView()
     private let action: () -> Void
 
     public var title: String { label.text ?? "" }
 
-    public init(title: String, ink: UIColor, action: @escaping () -> Void) {
+    /// Off: dimmed, and a tap does nothing — as a disabled control.
+    public var isEnabled = true {
+        didSet {
+            content.alpha = isEnabled ? 1 : Self.disabledAlpha
+            accessibilityTraits = isEnabled ? .button : [.button, .notEnabled]
+        }
+    }
+
+    static let disabledAlpha: CGFloat = 0.4
+
+    public init(title: String, image: UIImage? = nil, ink: UIColor, action: @escaping () -> Void) {
         self.action = action
         super.init(frame: .zero)
         label.text = title
         label.textColor = ink
         label.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
         label.adjustsFontForContentSizeCategory = true
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
+        glyph.image = image
+        glyph.isHidden = image == nil
+        glyph.tintColor = ink
+        glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .body, scale: .medium)
+        glyph.setContentHuggingPriority(.required, for: .horizontal)
+        content.axis = .horizontal
+        content.alignment = .center
+        content.spacing = Spacing.sm
+        content.isUserInteractionEnabled = false
+        content.addArrangedSubview(glyph)
+        content.addArrangedSubview(label)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(content)
         NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: centerXAnchor),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: Spacing.md),
+            content.centerXAnchor.constraint(equalTo: centerXAnchor),
+            content.centerYAnchor.constraint(equalTo: centerYAnchor),
+            content.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: Spacing.md),
         ])
         isAccessibilityElement = true
         accessibilityLabel = title
@@ -138,15 +170,22 @@ public final class StretchedBarLabel: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    @objc private func tapped() { action() }
+    /// The leading glyph, nil without one.
+    public var image: UIImage? { glyph.image }
+
+    @objc private func tapped() {
+        guard isEnabled else { return }
+        action()
+    }
 
     override public func accessibilityActivate() -> Bool {
+        guard isEnabled else { return false }
         action()
         return true
     }
 
     #if DEBUG
     /// The tap's own path, for tests.
-    public func debugTap() { action() }
+    public func debugTap() { tapped() }
     #endif
 }

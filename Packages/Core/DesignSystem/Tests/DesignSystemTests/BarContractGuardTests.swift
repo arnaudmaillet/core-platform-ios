@@ -26,13 +26,9 @@ struct BarContractGuardTests {
         "App/Shell/WalletStakesViewController.swift": 1,
         "Packages/Core/DesignSystem/Sources/DesignSystem/Components/NavigationBarToasts.swift": 1,
         "Packages/Core/DesignSystem/Sources/DesignSystem/Components/SelectorToolbarItem.swift": 1,
-        "Packages/Core/DesignSystem/Sources/DesignSystem/Components/ToastMessageSheet.swift": 1,
         "Packages/Features/Auth/Sources/Auth/LoginFlowCoordinator.swift": 1,
         "Packages/Features/Feed/Sources/Feed/ForYou/PushedScreenHeader.swift": 1,
-        "Packages/Features/Feed/Sources/Feed/Snap/Sound/SoundSheetViewController.swift": 1,
         "Packages/Features/Maps/Sources/Maps/Countries/CountryShopViewController.swift": 1,
-        "Packages/Features/Maps/Sources/Maps/Countries/CountryUnlockSheetViewController.swift": 1,
-        "Packages/Features/Notifications/Sources/Notifications/Views/NotificationsViewController+Mute.swift": 1,
         "Packages/Features/Profile/Sources/Profile/Views/ProfileRelationshipsViewController.swift": 1,
         "Packages/Features/Profile/Sources/Profile/Views/ProfileViewController.swift": 3,
         "Packages/Features/Profile/Sources/Profile/Views/Settings/DecisionDetailViewController.swift": 1,
@@ -46,10 +42,6 @@ struct BarContractGuardTests {
     static let ownGlassDebt: [String: Int] = [
         "App/Shell/WalletHistoryViewController.swift": 1,
         "App/Shell/WalletStakesViewController.swift": 1,
-        "Packages/Core/DesignSystem/Sources/DesignSystem/Components/ToastMessageSheet.swift": 1,
-        "Packages/Features/Feed/Sources/Feed/Snap/Sound/SoundSheetViewController.swift": 1,
-        "Packages/Features/Maps/Sources/Maps/Countries/CountryUnlockSheetViewController.swift": 1,
-        "Packages/Features/Notifications/Sources/Notifications/Views/NotificationsViewController+Mute.swift": 1,
     ]
 
     /// Files still building icon buttons for bars through `SnapNavControls`.

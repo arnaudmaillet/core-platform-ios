@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 import Synchronization
 import Testing
@@ -204,6 +205,28 @@ struct NotificationsMuteTests {
         await settle { muted.debugMuteButtonTitle == "Unmute" }
         #expect(muted.debugMuteButtonTitle == "Unmute")
         #expect(muted.debugMuteTimerText == "7 h 42")
+    }
+
+    /// The bar contract (#1679): the wide item is a plain view whose bubble
+    /// the BAR draws, both items keep their identifiers, and a new look is a
+    /// new wide item under the same identifier — the bar animates the swap.
+    @Test func theMuteItemsKeepTheirIdentitiesAndTheBarsBubble() async throws {
+        let (window, controller) = hosting(PauseServer())
+        defer { window.rootViewController = nil; window.isHidden = true }
+        let items = controller.toolbarItems ?? []
+        let wide = try #require(items.first)
+        #expect(wide.identifier == NotificationsViewController.muteWideIdentifier)
+        #expect(items.last?.identifier == NotificationsViewController.muteTimerIdentifier)
+        #expect(!wide.hidesSharedBackground, "the mute draws a glass of its own")
+        #expect(!(wide.customView is UIControl), "a control in the bar item")
+        #expect((wide.customView as? StretchedBarLabel)?.image != nil, "the bell left the mute")
+
+        controller.shownPause = .indefinite
+        controller.applyMuteToolbar()
+        let after = try #require(controller.toolbarItems?.first)
+        #expect(after !== wide, "the new look restyled the item in place")
+        #expect(after.identifier == wide.identifier)
+        #expect(controller.debugMuteButtonTitle == "Unmute")
     }
 
     /// The menu offers the rows, worded as additions while muted.

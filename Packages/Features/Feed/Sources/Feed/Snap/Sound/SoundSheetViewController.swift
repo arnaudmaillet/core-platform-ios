@@ -707,6 +707,7 @@ final class SoundSheetViewController: UIViewController {
             self?.close()
         })
         close.accessibilityIdentifier = "sound.close"
+        close.identifier = "soundSheet.close"
         closeItem = close
         return close
     }
@@ -736,18 +737,20 @@ final class SoundSheetViewController: UIViewController {
     /// A custom view that hugs nothing and asks, at the lowest priority, for
     /// more room than any bar has is stretched by the bar to exactly what the
     /// other items leave — measured on iOS 27 — whatever the width, the text
-    /// size or the OS's bar margins. Its own `.prominentGlass()` capsule is
-    /// its background, so the item hides the shared one (no bubble in a
-    /// bubble).
+    /// size or the OS's bar margins (`BarItems.stretched`). Its bubble is the
+    /// BAR's, prominent in the theme's pink: the item draws no glass of its
+    /// own (the bar contract, `dev/BAR_CONTRACT.md`).
     private func makeToolbarItems(primary: Bool) -> [UIBarButtonItem] {
         let share = UIBarButtonItem(systemItem: .action)
         share.primaryAction = UIAction { [weak self, weak share] _ in self?.share(from: share) }
         share.accessibilityLabel = "Share sound"
+        share.identifier = "soundSheet.share"
         // ⚠️ AN ACTION WITHOUT AN IMAGE, the glyph on the ITEM: an action's
         // image is re-applied to its item when it fires, and put the
         // star outline back over the fill just set (measured: the fill
         // flashed during the press and was gone at rest).
         let bookmark = UIBarButtonItem(primaryAction: UIAction { [weak self] _ in self?.toggleSaved() })
+        bookmark.identifier = "soundSheet.save"
         bookmarkItems.add(bookmark)
         if primary {
             shareItem = share
@@ -756,48 +759,21 @@ final class SoundSheetViewController: UIViewController {
         refreshBookmark()
         let trailing: [UIBarButtonItem] = [bookmark, .fixedSpace(), share]
         guard onUseSound != nil else { return [.flexibleSpace()] + trailing }
-        let use = UIBarButtonItem(customView: makeUseButton())
-        use.hidesSharedBackground = true
-        if primary { useItem = use }
-        return [use, .fixedSpace()] + trailing
-    }
-
-    /// The prominent capsule in the theme's pink, as tall as the bar's
-    /// bubbles — the sheet's one primary action (#1169).
-    private func makeUseButton() -> UIButton {
-        var configuration = UIButton.Configuration.prominentGlass()
-        configuration.title = "Use this sound"
-        configuration.baseBackgroundColor = Palette.prominentGlassTint
-        configuration.baseForegroundColor = .white
-        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var attributes = attributes
-            attributes.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
-            return attributes
-        }
-        let button = UIButton(configuration: configuration, primaryAction: UIAction { [weak self] _ in
+        // The bar draws its prominent bubble (#1679, `BarItems.stretched`):
+        // no button with a glass of its own.
+        let use = BarItems.stretched(id: "soundSheet.use", title: "Use this sound", prominent: true) { [weak self] in
             self?.useSound()
-        })
-        button.accessibilityIdentifier = "sound.use"
-        // Hugs nothing, and wants everything — at the lowest priorities, so
-        // the bar's own layout (the bubbles, their gaps, its margins) wins
-        // and this takes the rest.
-        button.setContentHuggingPriority(.init(1), for: .horizontal)
-        let fill = button.widthAnchor.constraint(equalToConstant: 10_000)
-        fill.priority = .init(2)
-        // 999, never required: the bar's first pass pins its item wrapper to
-        // the raw intrinsic size.
-        let height = button.heightAnchor.constraint(equalToConstant: Self.barBubbleHeight)
-        height.priority = .init(999)
-        NSLayoutConstraint.activate([fill, height])
-        return button
+        }
+        use.label.accessibilityIdentifier = "sound.use"
+        if primary {
+            useItem = use.item
+            useControl = use.label
+        }
+        return [use.item, .fixedSpace()] + trailing
     }
-
-    /// The bar's glass bubbles' height (bookmark, share): 48, measured on
-    /// iOS 27 (iPhone 18 Pro) — at 44 the capsule stood visibly shorter.
-    static let barBubbleHeight: CGFloat = 48
 
     /// The "Use this sound" control — what a test reads.
-    var useButton: UIButton? { useItem?.customView as? UIButton }
+    private(set) weak var useControl: StretchedBarLabel?
 
     // MARK: - Saved
 
@@ -1483,7 +1459,7 @@ final class SoundSheetViewController: UIViewController {
             // screen), so the view's bounds stay the width the grid and the
             // detent are computed for.
             let inWindow: CGRect = view.convert(view.bounds, to: nil)
-            let use: CGRect = useButton.map { $0.convert($0.bounds, to: nil) } ?? .zero
+            let use: CGRect = useControl.map { $0.convert($0.bounds, to: nil) } ?? .zero
             trace("geometry: view \(view.bounds) on screen \(inWindow) use \(use)")
             // The list at rest: at its top (−topInset) below the fullest
             // detent, and whether it has anywhere to scroll.

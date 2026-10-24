@@ -55,6 +55,27 @@ struct BarItemsTests {
         #expect(tapped == 2)
     }
 
+    /// A glyph may lead the word; off, the tap does nothing and VoiceOver
+    /// hears it as disabled.
+    @Test func aStretchedItemTakesAGlyphAndAnOffState() {
+        var tapped = 0
+        let made = BarItems.stretched(id: "test.mute", title: "Mute", image: UIImage(systemName: "bell.slash")) {
+            tapped += 1
+        }
+        #expect(made.label.image != nil)
+        #expect(made.item.style == .plain)
+        #expect(made.label.accessibilityLabel == "Mute")
+        made.label.isEnabled = false
+        made.label.debugTap()
+        #expect(!made.label.accessibilityActivate())
+        #expect(tapped == 0, "a disabled item answered")
+        #expect(made.label.accessibilityTraits.contains(.notEnabled))
+        made.label.isEnabled = true
+        made.label.debugTap()
+        #expect(tapped == 1)
+        #expect(!made.label.accessibilityTraits.contains(.notEnabled))
+    }
+
     @Test func aContainerKeepsItsViewAndIdentity() {
         let view = UIView()
         let item = BarItems.container(id: BarItems.SharedID.walletBalance, view: view)

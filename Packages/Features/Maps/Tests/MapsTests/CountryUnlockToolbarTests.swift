@@ -67,18 +67,25 @@ struct CountryUnlockToolbarTests {
     @Test func theUnlockIsTheToolbarsOneItemAndNotInTheContent() throws {
         let (sheet, _) = try makeSheet()
         let items = try #require(sheet.toolbarItems)
+        let unlock = try #require(sheet.unlockControl)
         #expect(items.count == 1)
-        #expect(items.first?.customView === sheet.unlockButton)
-        #expect(items.first?.hidesSharedBackground == true, "a bubble in a bubble")
-        #expect(sheet.unlockButton.configuration?.title == "Unlock · 50")
-        #expect(!Self.descendants(of: sheet.view).contains { $0 === sheet.unlockButton },
+        #expect(items.first?.customView === unlock)
+        // The bar contract (#1679): the bar draws its bubble, prominent.
+        #expect(items.first?.hidesSharedBackground == false, "the unlock draws a glass of its own")
+        #expect(items.first?.style == .prominent)
+        #expect(items.first?.identifier == "countryUnlock.unlock")
+        #expect(unlock.title == "Unlock · 50")
+        #expect(unlock.image != nil, "the gem left the unlock")
+        #expect(!Self.descendants(of: sheet.view).contains { $0 === unlock },
                 "the unlock is still in the content")
-        #expect(sheet.unlockButton.isEnabled)
+        #expect(unlock.isEnabled)
     }
 
     @Test func shortOfGemsTheToolbarsUnlockIsDisabled() throws {
         let (sheet, _) = try makeSheet(gems: 10)
-        #expect(!sheet.unlockButton.isEnabled)
+        let unlock = try #require(sheet.unlockControl)
+        #expect(!unlock.isEnabled)
+        #expect(unlock.accessibilityTraits.contains(.notEnabled))
         let labels = Self.descendants(of: sheet.view).compactMap { ($0 as? UILabel)?.text }
         #expect(labels.contains("You need 40 more gems"))
     }
@@ -102,7 +109,8 @@ struct CountryUnlockToolbarTests {
         let labels = Self.descendants(of: sheet.view).compactMap { ($0 as? UILabel)?.text }
         #expect(labels.contains("Unlock \(italy.name) to see its posts on your map."), "\(labels)")
         #expect(!labels.contains { $0.contains("Spain") }, "the first country is still on show: \(labels)")
-        #expect(sheet.unlockButton.configuration?.title == "Unlock · 50")
+        #expect(sheet.unlockControl?.title == "Unlock · 50")
+        #expect(sheet.toolbarItems?.first?.identifier == "countryUnlock.unlock")
     }
 
     /// A country's flag disc answers its own tap: MapKit's selection of it,
