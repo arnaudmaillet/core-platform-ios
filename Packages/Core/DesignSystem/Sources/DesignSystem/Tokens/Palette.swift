@@ -91,15 +91,12 @@ public enum Palette {
         pink: Shade(0xFDE3EF, 0x3A0A22), violet: Shade(0xEFEEFF, 0x211944), red: Shade(0xFDE4E4, 0x3A0A0C)
     )
 
-    /// The prominent button's fill (#1178, the owner 2026-10-15: "pink, a
-    /// pink-to-white gradient"): the tint at the bottom-left lightening
-    /// toward a pale pink at the top-right, under white words — 4.53:1 where
-    /// the words start, lighter toward the far corner. The same in both
-    /// appearances.
-    public static let primaryGradient: [UIColor] = [
-        themed(pink: Shade(0xF37AB4, 0xF37AB4), violet: Shade(0xA78BFA, 0xA78BFA), red: Shade(0xE5484D, 0xE5484D)),
-        themed(pink: Shade(0xFAC8DF, 0xFAC8DF), violet: Shade(0xDCD2FD, 0xDCD2FD), red: Shade(0xF7C1C3, 0xF7C1C3)),
-    ]
+    /// The prominent button's fill: a solid pink in both appearances,
+    /// under white words (#1178; solid since the owner's 2026-10-23 "no
+    /// more white gradient, plain colours").
+    public static let prominentFill = themed(
+        pink: Shade(0xF37AB4, 0xF37AB4), violet: Shade(0xA78BFA, 0xA78BFA), red: Shade(0xE5484D, 0xE5484D)
+    )
 
     /// Text on `primaryContainer`.
     public static let onPrimaryContainer = themed(

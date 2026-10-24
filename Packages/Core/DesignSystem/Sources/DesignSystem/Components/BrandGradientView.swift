@@ -3,8 +3,7 @@ import UIKit
 /// A gradient as a view, bottom-left to top-right as the icon runs it: the
 /// brand's (`Palette.brandGradient`, a key moment's hero button under
 /// `Palette.rules.heroButton = .gradient`, #1169) by default, or the stops a
-/// caller gives — the prominent button's fill (`Palette.primaryGradient`,
-/// #1178).
+/// caller gives.
 /// Dynamic stops re-resolve on an appearance or accent theme change (#1379).
 /// Takes no touch: a button's background, not a control.
 public final class BrandGradientView: UIView {

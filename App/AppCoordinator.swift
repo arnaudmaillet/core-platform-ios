@@ -334,6 +334,17 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
                 print("[qa] gate-demo: requireMember(.like) -> \(passed)")
             }
         }
+        // `-button-catalog`: every button the app wears, as its screen
+        // configures it, with its states — see `AppButtonCatalogViewController`.
+        if ProcessInfo.processInfo.arguments.contains("-button-catalog") {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                guard let shell = self?.mainTabCoordinator?.rootViewController else { return }
+                let catalog = UINavigationController(rootViewController: AppButtonCatalogViewController())
+                catalog.modalPresentationStyle = .fullScreen
+                shell.present(catalog, animated: false)
+            }
+        }
         // `-button-gallery`: every AppButton aspect, size and state, and its
         // motions on demand (#931), over the app.
         if ProcessInfo.processInfo.arguments.contains("-button-gallery") {
