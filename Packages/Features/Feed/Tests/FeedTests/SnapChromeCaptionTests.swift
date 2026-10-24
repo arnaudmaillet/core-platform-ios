@@ -124,6 +124,26 @@ struct SnapChromeCaptionTests {
         #expect(SnapChromeView.composedCaption(caption, timestamp: timestamp, width: 0).string == caption)
     }
 
+    /// EXPERIMENTAL (#1697): the For You root's caption is one text style
+    /// smaller and greyer than the feed's, its time still the smaller,
+    /// dimmer register — and the two-line contract holds at its own size.
+    @Test func theSoftCaptionIsSmallerAndGreyerAndKeepsTheContract() throws {
+        let caption = "Weekend build log: rebuilt the pipeline end to end, found two race conditions that only reproduce on cold caches, and learned more about backpressure than I ever wanted to."
+        let standard = SnapChromeView.composedCaption(caption, timestamp: timestamp, width: width)
+        let soft = SnapChromeView.composedCaption(caption, timestamp: timestamp, width: width, style: .soft)
+        let standardFont = try #require(standard.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
+        let softFont = try #require(soft.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
+        #expect(softFont.pointSize < standardFont.pointSize, "the soft caption is not smaller")
+        let softInk = try #require(soft.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor)
+        var white: CGFloat = 0
+        softInk.getWhite(&white, alpha: nil)
+        #expect(white < 0.9, "the soft caption is not grey: \(white)")
+        let timeFont = try #require(soft.attribute(.font, at: soft.length - 1, effectiveRange: nil) as? UIFont)
+        #expect(timeFont.pointSize < softFont.pointSize, "the time is not the smaller register")
+        #expect(SnapChromeView.captionLineCount(soft, width: width, style: .soft) <= 2)
+        #expect(soft.string.hasSuffix(timestamp.replacingOccurrences(of: " ", with: "\u{00A0}")))
+    }
+
     /// The timestamp reads as SECONDARY metadata: both DIMMER and in a
     /// SMALLER font register than the caption body, on every case.
     @Test func timestampRendersDimmerAndSmallerThanTheCaption() throws {

@@ -1688,6 +1688,8 @@ final class SnapFeedViewController: UIViewController {
                 cell.onRequestSoundSheet = { [weak self] in self?.presentSoundSheet() }
                 // The For You root's save and repost (#1681), in the column.
                 cell.setPostActions(shown: self.isForYouRoot, saved: self.bookmarks.isSaved(id.rawValue))
+                // …and its caption, smaller and greyer over the media (#1697).
+                cell.setCaptionStyle(self.isForYouRoot ? .soft : .standard)
                 cell.onRequestSave = { [weak self] in self?.toggleBookmark(for: id) }
             }
             return cell

@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// EXPERIMENTAL (#1681, the owner 2026-10-24): the For You tab lands on the
 /// full-screen post feed instead of today's For You screen — the author pill
@@ -19,6 +20,14 @@ public enum ForYouFullScreenExperiment {
     /// Whether the experiment is on: the launch argument, or the stored switch.
     public static var isOn: Bool {
         arguments.contains(argument) || storedSwitch
+    }
+
+    /// The tab bar's appearance (#1697, the owner 2026-10-24): DARK while the
+    /// For You tab — the full-screen post feed — is selected, so the bar
+    /// sits over the media as the post's own chrome does; the app's own
+    /// everywhere else, and always with the experiment off.
+    public static func tabBarStyle(forYouSelected: Bool) -> UIUserInterfaceStyle {
+        isOn && forYouSelected ? .dark : .unspecified
     }
 
     /// The Settings switch — a DEBUG build's; a release build never writes it.

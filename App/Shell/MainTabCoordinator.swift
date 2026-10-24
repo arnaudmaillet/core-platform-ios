@@ -440,6 +440,7 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
         refreshUnreadBadge()
         syncTabBarVisibility()
+        applyTabBarStyle()
         // Selection resizes the tab buttons (the selected one carries the
         // lens), so the overlays have to follow.
         alignMenuOverlays()
@@ -462,6 +463,14 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// A viewer standing on a tab that leaves (a member on Messages who logs
     /// out) lands on Explore — set before the bar changes, so the bar never
     /// holds a selection it no longer has.
+    /// EXPERIMENTAL (#1697): the tab bar dark over the For You root's
+    /// full-screen feed, the app's own on every other tab — an appearance,
+    /// never an alpha (`native-chrome-uikit-only`).
+    private func applyTabBarStyle() {
+        let forYou = tabBarController.selectedTab?.identifier == AppTab.forYou.rawValue
+        tabBarController.tabBar.overrideUserInterfaceStyle = ForYouFullScreenExperiment.tabBarStyle(forYouSelected: forYou)
+    }
+
     private func applyBar(animated: Bool) {
         createItem.showSignIn(!isMember)
         createHold.isEnabled = isMember
@@ -476,6 +485,7 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
            let explore = orderedTabs.first(where: { $0.0 == .explore })?.1.tab {
             tabBarController.selectedTab = explore
         }
+        applyTabBarStyle()
         let current = tabBarController.tabs
         guard current.count != wanted.count || zip(current, wanted).contains(where: { $0 !== $1 }) else { return }
         tabBarController.setTabs(wanted, animated: animated)
@@ -735,6 +745,7 @@ extension MainTabCoordinator: AppNavigating {
             tabBarController.dismiss(animated: true)
         }
         tabBarController.selectedTab = match.1.tab
+        applyTabBarStyle()
         // Programmatic selection skips `didSelect` — reconcile the bar here.
         syncTabBarVisibility()
     }
