@@ -21,10 +21,10 @@ public final class SelectorToolbarItem {
     /// The strip's bar item — what a test finds leading `toolbarItems`.
     public let item: UIBarButtonItem
 
-    public init(strip: PagedTabBar) {
+    public init(strip: PagedTabBar, id: String = "selector.toolbar") {
         strip.hosting = .platter
         strip.fillsWidth = false
-        item = UIBarButtonItem(customView: strip)
+        item = BarItems.container(id: id, view: strip)
     }
 
     /// The screen's `toolbarItems`: the strip at the leading corner, nothing

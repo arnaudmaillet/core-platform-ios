@@ -932,7 +932,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
                 let swatch = UIView(frame: CGRect(x: 0, y: 0, width: 80, height: 36))
                 swatch.backgroundColor = .systemRed
                 swatch.translatesAutoresizingMaskIntoConstraints = true
-                let probeItem = UIBarButtonItem(customView: swatch)
+                let probeItem = BarItems.container(id: "profile.debug.dock-probe", view: swatch)
                 var leading = navigationItem.leftBarButtonItems ?? []
                 leading.append(probeItem)
                 navigationItem.leftBarButtonItems = leading

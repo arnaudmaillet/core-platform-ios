@@ -252,8 +252,7 @@ final class NavigationBarToasts {
         // Newest first: the first right item sits at the trailing edge.
         handedItems = zip(live, widths).reversed().map { toast, width in
             toast.sizeInBar(width: width)
-            let item = UIBarButtonItem(customView: toast)
-            item.identifier = "toast.\(ObjectIdentifier(toast).hashValue)"
+            let item = BarItems.container(id: "toast.\(ObjectIdentifier(toast).hashValue)", view: toast)
             // Each toast its own bubble.
             item.sharesBackground = false
             return item

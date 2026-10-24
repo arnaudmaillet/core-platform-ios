@@ -239,7 +239,7 @@ final class SearchResultsViewController: UIViewController {
                 greaterThanOrEqualToConstant: NavigationBarMetrics.itemPlatterHeight
             )
         ])
-        fieldItem = UIBarButtonItem(customView: searchField)
+        fieldItem = BarItems.container(id: "search.results.field", view: searchField)
         configureWalletBadge()
         applyTrailingItems()
 
