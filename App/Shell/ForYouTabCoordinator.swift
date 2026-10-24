@@ -28,6 +28,12 @@ final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
 
     /// EXPERIMENTAL (#1697, #1703): the tab bar goes dark over the For You
     /// tab — unless the sector shows Home.
+    /// The notifications drawer slid the shell aside (true) or closed: the
+    /// feed pauses behind it (#1703).
+    func setSetAside(_ setAside: Bool) {
+        (navigationController.viewControllers.first as? any ForYouSectorPaging)?.setSetAside(setAside)
+    }
+
     var wantsDarkTabBar: Bool {
         (navigationController.viewControllers.first as? any ForYouSectorPaging)?.isShowingFeed ?? true
     }

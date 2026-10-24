@@ -43,6 +43,9 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// The window's appearance is watched once the experimental dark tab bar
     /// first shows (#1697, `applyTabBarStyle`).
     fileprivate var isObservingWindowStyle = false
+    /// The style `applyTabBarStyle` gave the bars: `.dark` over the
+    /// experimental feed, `.unspecified` (the app's) everywhere else.
+    fileprivate var barStyle: UIUserInterfaceStyle = .unspecified
 
     /// Internal (not private) only for the +QA hooks.
     let container: AppContainer
@@ -69,19 +72,23 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // The WINDOW's traits — the app's appearance — not the tab bar
         // controller's, which the experimental dark tab bar overrides (#1697):
         // the bell lives in the pages' bars, which keep the app's look.
-        bell.traits = { [weak self] in
-            self?.tabBarController.view.window?.traitCollection ?? self?.tabBarController.view.traitCollection ?? .current
-        }
+        // …unless the bar the bell stands in is the experimental feed's dark
+        // one (#1703: it stayed black over Feed's dark header).
+        bell.traits = { [weak self] in self?.barTraits ?? .current }
         return bell
     }()
     /// Notifications, as a drawer BEHIND the shell: the whole tab bar
     /// controller slides right to reveal it. See `NotificationsDrawer`.
     ///
     /// Internal (not private) only for the +QA hooks.
-    private(set) lazy var notificationsDrawer: NotificationsDrawer = NotificationsDrawer(
-        tabBarController: tabBarController,
-        list: container.notificationsFeature.makeNotificationsViewController()
-    )
+    private(set) lazy var notificationsDrawer: NotificationsDrawer = {
+        let drawer = NotificationsDrawer(
+            tabBarController: tabBarController,
+            list: container.notificationsFeature.makeNotificationsViewController()
+        )
+        drawer.onSetAsideChange = { [weak self] setAside in self?.forYouTab?.setSetAside(setAside) }
+        return drawer
+    }()
     /// What the window shows: the drawer container, holding the tab bar
     /// controller as its main screen.
     var rootViewController: UIViewController { notificationsDrawer.container }
@@ -490,6 +497,19 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// Its pages are given the app's appearance back — the window's — so a
     /// text page, a pushed profile or a sheet the feed presents stays as the
     /// app draws it.
+    /// The traits the bars' baked glyphs are drawn for — the tab icons and
+    /// the badged bell: the window's (the app's appearance), darkened over
+    /// the experimental feed. ⚠️ Not read off `tabBar.traitCollection`: it
+    /// had not taken the controller's dark override when the glyphs were
+    /// baked, and the For You and Messages icons stayed black on the dark
+    /// bar (#1703).
+    private var barTraits: UITraitCollection {
+        let base = tabBarController.view.window?.traitCollection ?? tabBarController.view.traitCollection
+        guard barStyle != .unspecified else { return base }
+        let style = barStyle
+        return base.modifyingTraits { $0.userInterfaceStyle = style }
+    }
+
     private func applyTabBarStyle() {
         let forYou = tabBarController.selectedTab?.identifier == AppTab.forYou.rawValue
             && forYouTab?.wantsDarkTabBar ?? true
@@ -506,6 +526,11 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         }
         if tabBarController.overrideUserInterfaceStyle != style {
             tabBarController.overrideUserInterfaceStyle = style
+        }
+        if barStyle != style {
+            barStyle = style
+            refreshTabGlyphs()
+            notificationsBell.repaint()
         }
         // The app's appearance can change under a dark bar (iOS's switch, the
         // app's theme): the pages follow the window, not the bar.
@@ -562,7 +587,7 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
             let tab = glyphTab.tab
             // Baked for the BAR's traits (#1501): the app's appearance, or the
             // dark the experimental For You tab gives the bar (#1697).
-            let traits = tabBarController.tabBar.traitCollection
+            let traits = barTraits
             tab.image = glyphTab.glyph.image(selected: false, badged: glyphTab.hasUnread, traits: traits)
             // The badge said aloud (#1196): an image tells VoiceOver nothing.
             tab.accessibilityValue = glyphTab.hasUnread ? glyphTab.glyph.unreadAccessibilityValue : nil

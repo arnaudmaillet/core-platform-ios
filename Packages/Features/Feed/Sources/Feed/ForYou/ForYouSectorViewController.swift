@@ -56,6 +56,10 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
     private var isVisible = false
 
     var isShowingFeed: Bool { activeIndex == Self.feedIndex }
+
+    func setSetAside(_ setAside: Bool) {
+        (pages[Self.feedIndex] as? SnapFeedViewController)?.setSetAside(setAside)
+    }
     var onPageChange: (() -> Void)?
 
     init(home: any ForYouSectorPage, feed: any ForYouSectorPage) {
