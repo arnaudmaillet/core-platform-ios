@@ -27,10 +27,12 @@ import DesignSystem
 /// `comfortableAuthor` wide (`sortShowsTitle`) — the bar's geometry again,
 /// not the author's handle, which is what used to decide it.
 ///
-/// THE AUDIO CAPSULE shares its glass with the mute button, which only clips
-/// show — also per post. So the capsule's width, not the attribution's, is
-/// what stays put: the attribution takes the mute's slot on a post without
-/// sound (`attribution(soundShown:)`).
+/// THE TOOLBAR'S AUTHOR PILL (#671) takes what the footer's stock items
+/// leave it — `[pill] —— [☆ ⇄] [⋯]` — and those GROW WITH DYNAMIC TYPE: a
+/// bar's symbol scales with the text size (measured on the iPhone SE at
+/// XXXL, #1679: a 38pt glyph item draws 49). So the reserve is read for the
+/// icon width the screen's text size gives (`toolbarIcon`), and a long name
+/// at a large size truncates in the pill instead of sweeping ⇄ into `•••`.
 ///
 /// ⚠️ THE BARS FOLD, THEY DO NOT SQUEEZE. A run that does not fit is swept into
 /// UIKit's `•••` whole (memory `navbar-leading-selector-collapse`), so every
@@ -40,25 +42,12 @@ import DesignSystem
 struct SnapBarPillWidths: Equatable {
     /// The author pill's width.
     var author: CGFloat
-    /// The attribution's width while the mute button shares its capsule.
-    var attributionWithSound: CGFloat
+    /// The author pill's width in the TOOLBAR's leading slot (#671): what the
+    /// footer's stock items leave (`toolbarReserve(icon:)`), capped, so the
+    /// run never folds into `•••`.
+    var toolbarAuthor: CGFloat
     /// Whether the comments sort shows its word; false without a sort.
     var sortShowsTitle: Bool
-
-    /// The attribution's width on a post with (`true`) or without the mute
-    /// button: without it, the attribution takes the button's slot, so the
-    /// capsule they share keeps its width.
-    /// The author pill's width in the TOOLBAR's leading slot (#671): the room
-    /// the audio capsule and its mute button shared — the trailing run is the
-    /// same two bubbles — capped at the capsule's own cap, so the pill never
-    /// folds into `•••`.
-    var toolbarAuthor: CGFloat {
-        min(attribution(soundShown: false), Self.attributionCap)
-    }
-
-    func attribution(soundShown: Bool) -> CGFloat {
-        soundShown ? attributionWithSound : attributionWithSound + Self.soundSlot
-    }
 
     // MARK: - Navigation bar (measured, iOS 26/27)
 
@@ -85,21 +74,29 @@ struct SnapBarPillWidths: Equatable {
     /// is never the one that folds the run.
     static let slack: CGFloat = 8
 
-    // MARK: - Toolbar (measured, iOS 27, `-dump-bars`)
+    // MARK: - Toolbar (measured, iOS 27, `-dump-bars`, #1679)
 
-    /// The toolbar around the attribution, the mute button included, read off
-    /// the bar's own frames on iOS 27 (iPhone 18 Pro, `-dump-bars`): 28pt
-    /// margins each side, the capsule's glass (+10), the mute's 48, the
-    /// [🔖 ⇄] capsule's 86, ⋯'s 48, two 8pt gaps, and 16pt of slack — the
-    /// fold is silent, and one point short is the whole [🔖 ⇄] capsule
-    /// replaced by a system `•••` that looks exactly like ⋯ (a fixed 180
-    /// did that on a 402pt screen).
-    static let toolbarReserve: CGFloat = 28 + 10 + soundSlot + 8 + 86 + 8 + 48 + 28 + 16
-    /// What the mute button adds to the capsule it shares.
-    static let soundSlot: CGFloat = 48
-    /// The attribution's cap — the author pill's old one: the sound's two
-    /// lines did not change.
-    static let attributionCap: CGFloat = 220
+    /// A stock glyph item's width at the default text size: what the
+    /// footer's ☆, ⇄ and ⋯ draw (`BarItems.icon`, since #1683).
+    static let defaultToolbarIcon: CGFloat = 38
+
+    /// Everything on the footer but the author pill, for glyph items `icon`
+    /// wide — read off the bar's own frames on iOS 27 (iPhone SE and 18 Pro,
+    /// `-dump-bars`): 28pt margins each side; the glass around the pill
+    /// (+10); a 13pt gap to the [☆ ⇄] platter, which is the two glyphs and
+    /// 31 of its own (107 at the default size); a 13pt gap; ⋯'s 48 (its glyph
+    /// does not grow); and 8 of slack. The fold is silent, and one point
+    /// short sweeps ⇄ into a system `•••` that looks exactly like ⋯.
+    ///
+    /// ⚠️ It was a fixed 280 against an 86pt platter — the custom buttons'
+    /// before the stock items (#1683) — and a long name on an SE folded ⇄
+    /// away, at any text size and at once at XXXL.
+    static func toolbarReserve(icon: CGFloat) -> CGFloat {
+        28 + 10 + 13 + (2 * icon + 31) + 13 + 48 + 28 + slack
+    }
+
+    /// The toolbar author's cap: past it a short name floats in glass.
+    static let toolbarAuthorCap: CGFloat = 220
 
     /// The narrowest the author pill is left for the sort's WORD: below it the
     /// sort drops to its glyph and gives the pill the difference — the old
@@ -125,11 +122,13 @@ struct SnapBarPillWidths: Equatable {
     ///   - toolbarWidth: the toolbar's (the screen's, on a phone).
     ///   - walletWidth: the wallet badge's fitted width, nil without a wallet.
     ///   - sort: the comments sort's widths while it is on the bar, else nil.
+    ///   - toolbarIcon: a stock glyph item's width at the screen's text size.
     static func resolve(
         navBarWidth: CGFloat,
         toolbarWidth: CGFloat,
         walletWidth: CGFloat?,
-        sort: Sort?
+        sort: Sort?,
+        toolbarIcon: CGFloat = defaultToolbarIcon
     ) -> SnapBarPillWidths {
         // Everything on the nav bar but the author pill, the sort (if any)
         // `sortWidth` points wide. The back arrow is always paid for: whether
@@ -148,7 +147,7 @@ struct SnapBarPillWidths: Equatable {
         let sortWidth = sort.map { showsTitle ? $0.titled : $0.glyph }
         return SnapBarPillWidths(
             author: clamp(room(sortWidth: sortWidth), cap: authorCap),
-            attributionWithSound: clamp(toolbarWidth - toolbarReserve, cap: attributionCap),
+            toolbarAuthor: clamp(toolbarWidth - toolbarReserve(icon: toolbarIcon), cap: toolbarAuthorCap),
             sortShowsTitle: showsTitle
         )
     }
