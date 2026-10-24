@@ -575,7 +575,7 @@ final class ProfileRelationshipsViewController: UIViewController {
         // and lays the strip out against the platter's edge, so its titles
         // scroll right up to the glass the viewer sees.
         tabBar.hosting = .platter
-        toolbarItems = [UIBarButtonItem(customView: tabBar), .flexibleSpace()]
+        toolbarItems = [BarItems.container(id: "profile.relationships.tabs", view: tabBar), .flexibleSpace()]
     }
 
     /// ⚠️ THE STRIP WINS THE TOUCH IT IS UNDER — see `SelectorTouchProbe`.

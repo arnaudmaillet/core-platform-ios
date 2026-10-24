@@ -677,8 +677,7 @@ public final class CountryShopViewController: UIViewController {
         balance.accessibilityLabel = "\(gems) gems"
         let fitted = balance.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
         balance.frame.size = CGSize(width: ceil(fitted.width), height: 36)
-        let item = UIBarButtonItem(customView: balance)
-        item.identifier = balanceItemIdentifier
+        let item = BarItems.container(id: balanceItemIdentifier, view: balance)
         item.accessibilityLabel = "\(gems) gems"
         return item
     }

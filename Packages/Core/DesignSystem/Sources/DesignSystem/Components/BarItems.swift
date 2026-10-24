@@ -114,9 +114,15 @@ public enum BarItems {
 
     /// A complex container (R6): a view a stock item cannot draw, under its
     /// identifier. Not for an icon (`icon`) nor a wide word (`stretched`).
-    public static func container(id: String, view: UIView) -> UIBarButtonItem {
+    ///
+    /// `ownBackground`: the view is a control that draws its own capsule (a
+    /// `UISegmentedControl`), so the bar draws none around it — no bubble in
+    /// a bubble. Only for such a control: a word or a glyph takes the bar's
+    /// bubble (`stretched`, `labeled`, `icon`).
+    public static func container(id: String, view: UIView, ownBackground: Bool = false) -> UIBarButtonItem {
         let item = UIBarButtonItem(customView: view)
         item.identifier = id
+        if ownBackground { item.hidesSharedBackground = true }
         return item
     }
 

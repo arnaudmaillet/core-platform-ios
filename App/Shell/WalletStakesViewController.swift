@@ -99,10 +99,10 @@ final class WalletStakesViewController: UIViewController {
             select(next)
         }, for: .valueChanged)
         segments.accessibilityLabel = "Stakes"
-        let filter = UIBarButtonItem(customView: segments)
         // The control is its own capsule: no bubble in a bubble.
-        filter.hidesSharedBackground = true
-        navigationItem.rightBarButtonItem = filter
+        navigationItem.rightBarButtonItem = BarItems.container(
+            id: "wallet.stakes.filter", view: segments, ownBackground: true
+        )
         buildCollection()
 
         walletObservers.tokens = [

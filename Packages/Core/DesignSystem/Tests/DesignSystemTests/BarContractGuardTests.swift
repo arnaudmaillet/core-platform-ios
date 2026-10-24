@@ -20,24 +20,10 @@ import Testing
 /// it) in the same change, so the baseline keeps shrinking to nothing.
 struct BarContractGuardTests {
     /// Files still holding custom-view items made by hand, and how many.
-    static let customViewDebt: [String: Int] = [
-        "App/Shell/WalletBadgeInstaller.swift": 1,
-        "App/Shell/WalletHistoryViewController.swift": 1,
-        "App/Shell/WalletStakesViewController.swift": 1,
-        "Packages/Core/DesignSystem/Sources/DesignSystem/Components/NavigationBarToasts.swift": 1,
-        "Packages/Core/DesignSystem/Sources/DesignSystem/Components/SelectorToolbarItem.swift": 1,
-        "Packages/Features/Feed/Sources/Feed/ForYou/PushedScreenHeader.swift": 1,
-        "Packages/Features/Maps/Sources/Maps/Countries/CountryShopViewController.swift": 1,
-        "Packages/Features/Profile/Sources/Profile/Views/ProfileRelationshipsViewController.swift": 1,
-        "Packages/Features/Profile/Sources/Profile/Views/ProfileViewController.swift": 1,
-        "Packages/Features/Search/Sources/Search/Views/SearchResultsViewController.swift": 1,
-    ]
+    static let customViewDebt: [String: Int] = [:]
 
     /// Files whose bar buttons still draw their own glass.
-    static let ownGlassDebt: [String: Int] = [
-        "App/Shell/WalletHistoryViewController.swift": 1,
-        "App/Shell/WalletStakesViewController.swift": 1,
-    ]
+    static let ownGlassDebt: [String: Int] = [:]
 
     /// Files still building icon buttons for bars through `SnapNavControls`.
     static let iconButtonDebt: [String: Int] = [:]
@@ -57,7 +43,9 @@ struct BarContractGuardTests {
     }
 
     @Test func noNewBarButtonDrawingItsOwnGlass() throws {
-        try expectWithinDebt(#"hidesSharedBackground\s*=\s*true"#, debt: Self.ownGlassDebt)
+        // The factory's `container(…, ownBackground:)` is the one place it is
+        // set — for a control that draws its own capsule (R6).
+        try expectWithinDebt(#"hidesSharedBackground\s*=\s*true"#, debt: Self.ownGlassDebt, exempt: [Self.factory])
     }
 
     @Test func noNewIconButtonForABar() throws {

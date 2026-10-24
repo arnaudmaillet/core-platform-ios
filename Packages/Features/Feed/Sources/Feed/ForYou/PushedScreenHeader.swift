@@ -130,8 +130,7 @@ final class PushedScreenHeader: NSObject {
     }
 
     private func makeWalletItem() -> UIBarButtonItem {
-        let item = UIBarButtonItem(customView: badge)
-        item.identifier = Self.walletItemIdentifier
+        let item = BarItems.container(id: Self.walletItemIdentifier, view: badge)
         item.accessibilityLabel = "Likes balance"
         return item
     }

@@ -119,10 +119,10 @@ final class WalletHistoryViewController: UIViewController {
             navigationItem.style = .browser
             let control = makeFilterControl()
             control.accessibilityLabel = "Activity"
-            let item = UIBarButtonItem(customView: control)
             // The control is its own capsule: no bubble in a bubble.
-            item.hidesSharedBackground = true
-            navigationItem.rightBarButtonItem = item
+            navigationItem.rightBarButtonItem = BarItems.container(
+                id: "wallet.history.filter", view: control, ownBackground: true
+            )
         }
         reload()
     }

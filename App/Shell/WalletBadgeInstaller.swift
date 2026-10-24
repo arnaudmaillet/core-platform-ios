@@ -141,9 +141,8 @@ final class WalletBadgeInstaller: NSObject {
     /// background behind adjacent bar items, so without the opt-out the badge
     /// and its neighbour fuse into a single pill.
     private func makeItem() -> UIBarButtonItem {
-        let item = UIBarButtonItem(customView: badge)
+        let item = BarItems.container(id: Self.itemIdentifier, view: badge)
         item.sharesBackground = false
-        item.identifier = Self.itemIdentifier
         item.accessibilityLabel = "Likes balance"
         return item
     }
