@@ -68,6 +68,10 @@ public final class ForYouViewModel {
         /// The people the viewer follows who are NOT friends: their posts,
         /// unseen first, as cards.
         public var following: [GalleryPost] = []
+        /// The pushed Following list holds more than the rows show: a row cut
+        /// at its limit, or a timeline page not loaded yet — the rows then
+        /// end on "View all" (the shelf contract, #1671).
+        public var followingHasMore = false
         /// The Friends header's count: friends' posts the viewer has not seen.
         public var friendsBadge = 0
         /// The Following header's count: arrivals since the session baseline —
@@ -940,6 +944,8 @@ public final class ForYouViewModel {
                 friends: friends, friendsUnseen: snapshot.friendsUnseen,
                 limit: Self.railLimit, rowLimit: PostShelfSection.rowLimit
             )
+            // A page still to load may hold more of them.
+            if hasDiscovery, nextPageToken != nil { snapshot.rails.followingHasMore = true }
             // On the next turn: the first page publishes from inside its own
             // load, which is only over once this returns.
             let cards = snapshot.rails.following
@@ -995,6 +1001,7 @@ public final class ForYouViewModel {
             media += 1
             return media <= rowLimit
         }
+        rails.followingHasMore = text > rowLimit || media > rowLimit
 
         var byAuthor: [ProfileID: [GalleryPost]] = [:]
         var order: [ProfileID] = []

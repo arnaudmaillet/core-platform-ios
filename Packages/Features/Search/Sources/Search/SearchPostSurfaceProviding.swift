@@ -64,8 +64,9 @@ public protocol SearchPostSurface: AnyObject {
     func setHasMore(_ hasMore: Bool)
 
     /// `.discover` only (#629): a row of cards above the list — For You's
-    /// "Following" slot — showing these posts in this order.
-    func showLeadRow(_ state: SearchPostSurfaceState)
+    /// "Following" slot — showing these posts in this order. `hasMore`: the
+    /// list its title opens holds more than these posts (#1671).
+    func showLeadRow(_ state: SearchPostSurfaceState, hasMore: Bool)
     /// `.discover` only: what the lead row and the list are titled.
     func setSectionTitles(row: String, list: String)
     /// `.discover` only: the lead row's title was tapped.
@@ -85,7 +86,7 @@ public extension SearchPostSurface {
 
     func setPaging(_ paging: Bool) {}
     func setHasMore(_ hasMore: Bool) {}
-    func showLeadRow(_ state: SearchPostSurfaceState) {}
+    func showLeadRow(_ state: SearchPostSurfaceState, hasMore: Bool) {}
     func setSectionTitles(row: String, list: String) {}
     var onLeadRowTitleTapped: (() -> Void)? {
         get { nil }

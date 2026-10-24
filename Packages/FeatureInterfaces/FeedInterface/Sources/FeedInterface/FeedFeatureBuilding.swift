@@ -431,8 +431,10 @@ public protocol PostSetSurface: AnyObject {
 
     /// `.discover` only (#629): a row of cards above the list — For You's
     /// "Following" slot — showing these posts in this order. Anything but
-    /// `.posts` (or an empty one) shows no row.
-    func showLeadRow(_ state: PostSetSurfaceState)
+    /// `.posts` (or an empty one) shows no row. `hasMore`: the list its title
+    /// opens holds more than these posts, so the row ends on "View all"
+    /// (#1671) — without it, only a row cut at its limit does.
+    func showLeadRow(_ state: PostSetSurfaceState, hasMore: Bool)
     /// `.discover` only: what the lead row and the list are titled — For You's
     /// "Following" and "For you".
     func setSectionTitles(row: String, list: String)
@@ -454,7 +456,7 @@ public extension PostSetSurface {
 
     func setPaging(_ paging: Bool) {}
     func setHasMore(_ hasMore: Bool) {}
-    func showLeadRow(_ state: PostSetSurfaceState) {}
+    func showLeadRow(_ state: PostSetSurfaceState, hasMore: Bool) {}
     func setSectionTitles(row: String, list: String) {}
     var onLeadRowTitleTapped: (() -> Void)? {
         get { nil }

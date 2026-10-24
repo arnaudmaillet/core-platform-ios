@@ -799,7 +799,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
             departure = open.origin.textReveal.map(Departure.card)
             openPost(self, open.origin, open.stream.map(\.id))
         }
-        shelf.onTitleTapped = { [weak self] in self?.pushPopularList() }
+        shelf.onViewAll = { [weak self] in self?.pushPopularList() }
         lead.onListTitleTapped = { [weak self] in self?.pushGallery() }
         lead.listTitleAccessibilityHint = "Shows every post"
         activityPage.onViewAllTapped = { [weak self] in self?.pushGallery() }
@@ -1314,7 +1314,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
                 ? .empty(.init(title: "Nothing has happened here yet"))
                 : .content(recent))
         }
-        shelf.apply(.init(title: "Popular", posts: Self.popular(self.corpus, limit: Self.popularRowCount)))
+        shelf.apply(Self.popularShelf(self.corpus))
         updateLeadHeight()
         // ⚠️ THE WHOLE CORPUS. These are the PLACE's numbers, and a check-in
         // with no photograph is still something that happened here. As many
@@ -1457,6 +1457,19 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     /// The Popular row: the place's most liked posts — `ranked`, the rule
     /// the banner and the map's pin already lead with — every kind, the first
     /// `limit` (all of them for the pushed list).
+    /// The Popular shelf over `corpus` (the shelf contract, #1671): the
+    /// `popularRowCount` most liked posts, its rows ending on "View all" only
+    /// when the Popular list holds more than those — a place with three
+    /// posts shows three, and no chevron.
+    static func popularShelf(_ corpus: [GalleryPost]) -> PostShelfSection.Model {
+        let ranked = popular(corpus, limit: nil)
+        return PostShelfSection.Model(
+            title: "Popular",
+            posts: Array(ranked.prefix(popularRowCount)),
+            hasMore: ranked.count > popularRowCount
+        )
+    }
+
     static func popular(_ posts: [GalleryPost], limit: Int?) -> [GalleryPost] {
         let ordered = ranked(posts)
         return limit.map { Array(ordered.prefix($0)) } ?? ordered

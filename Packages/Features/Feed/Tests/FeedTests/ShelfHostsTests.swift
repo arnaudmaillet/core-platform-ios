@@ -8,8 +8,9 @@ import UIKit
 @testable import Feed
 
 /// Every host of a shelf (#1296, the owner 2026-10-16): its title over
-/// skeleton cards until its posts land, then ten cards a row at most, each
-/// row ending on the chevron card that runs the title's action.
+/// skeleton cards until its posts land, then ten cards a row at most — a row
+/// ending on the chevron card that runs "View all" only when its list holds
+/// more than it shows (#1671, the owner 2026-10-24).
 @MainActor
 struct ShelfHostsTests {
     private struct SilentFetcher: ImageFetching {
@@ -44,6 +45,29 @@ struct ShelfHostsTests {
                 "the row does not end on the chevron card")
     }
 
+    /// The landed shelf showing every post it has: no chevron card.
+    private static func expectLandedWhole(_ shelf: PostShelfSection, of total: Int) {
+        #expect(!shelf.isLoading, "the skeleton outlived the posts")
+        #expect(shelf.rowCounts.media == total)
+        shelf.layoutIfNeeded()
+        #expect(shelf.mediaView.numberOfItems(inSection: 0) == total,
+                "a row showing all its posts ends on the chevron card")
+    }
+
+    private static func place(_ posts: [GalleryPost]) -> PlaceProfileViewController {
+        PlaceProfileViewController(
+            postIDs: posts.map(\.id),
+            placeName: "Paris",
+            rank: nil,
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            videoPlayback: nil,
+            following: nil,
+            wallet: nil,
+            loadPosts: { posts },
+            openPost: { _, _, _ in }
+        )
+    }
+
     @Test func forYousFollowingLoadsThenDrawsTenAndTheChevron() {
         let screen = ForYouViewController(
             viewModel: ForYouViewModel(repository: EmptyForYouProvider()),
@@ -62,18 +86,7 @@ struct ShelfHostsTests {
     }
 
     @Test func thePlacePagesPopularLoadsThenDrawsTenAndTheChevron() async {
-        let posts = Self.posts(14, prefix: "p")
-        let place = PlaceProfileViewController(
-            postIDs: posts.map(\.id),
-            placeName: "Paris",
-            rank: nil,
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            videoPlayback: nil,
-            following: nil,
-            wallet: nil,
-            loadPosts: { posts },
-            openPost: { _, _, _ in }
-        )
+        let place = Self.place(Self.posts(14, prefix: "p"))
         place.loadViewIfNeeded()
         #expect(place.debugShelf.isLoading, "no skeleton before the place's posts")
         place.beginLoading()
@@ -97,5 +110,58 @@ struct ShelfHostsTests {
         #expect(shelf.isLoading, "no skeleton while the posts hydrate")
         await Self.settle { !shelf.cards.isEmpty }
         Self.expectLanded(shelf, of: 14)
+    }
+
+    /// ⚠️ #1671 (the owner's screenshot, 2026-10-24): a place with fewer
+    /// posts than Popular shows draws them all — and no chevron card.
+    @Test func thePlacePagesPopularWithFewPostsHasNoChevron() async {
+        let place = Self.place(Self.posts(3, prefix: "p"))
+        place.loadViewIfNeeded()
+        place.beginLoading()
+        await Self.settle { !place.debugShelf.cards.isEmpty }
+        Self.expectLandedWhole(place.debugShelf, of: 3)
+        #expect(!PlaceProfileViewController.popularShelf(Self.posts(10, prefix: "p")).hasMore)
+        #expect(PlaceProfileViewController.popularShelf(Self.posts(11, prefix: "p")).hasMore)
+    }
+
+    /// For You's Following rows: cut at their limit, or with a page still to
+    /// load, they end on the chevron; showing the whole list, they do not.
+    @Test func forYousFollowingEndsOnTheChevronOnlyWithMore() {
+        let few = ForYouViewModel.rails(
+            following: Self.posts(3, prefix: "f"), followingNew: [], friends: [], friendsUnseen: [],
+            limit: 20, rowLimit: 10
+        )
+        #expect(!few.followingHasMore)
+        let many = ForYouViewModel.rails(
+            following: Self.posts(14, prefix: "f"), followingNew: [], friends: [], friendsUnseen: [],
+            limit: 20, rowLimit: 10
+        )
+        #expect(many.followingHasMore)
+    }
+
+    /// The hashtag's lead row: a few posts and nothing past them draw no
+    /// chevron; told its list goes on, the row ends on it, and it pushes.
+    @Test func theLeadRowEndsOnTheChevronOnlyWithMore() async throws {
+        let posts = Self.posts(3, prefix: "r")
+        let byID = Dictionary(uniqueKeysWithValues: posts.map { ($0.id, $0) })
+        let surface = PostSetSurfaceViewController(
+            style: .discover,
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            videoPlayback: nil,
+            hydrate: { ids in ids.compactMap { byID[$0] } }
+        )
+        var pushed = 0
+        surface.onLeadRowTitleTapped = { pushed += 1 }
+        surface.loadViewIfNeeded()
+        let shelf = try #require(surface.debugShelf)
+        surface.showLeadRow(.posts(posts.map(\.id)), hasMore: false)
+        await Self.settle { !shelf.cards.isEmpty }
+        Self.expectLandedWhole(shelf, of: 3)
+
+        surface.showLeadRow(.posts(posts.map(\.id)), hasMore: true)
+        shelf.layoutIfNeeded()
+        #expect(shelf.mediaView.numberOfItems(inSection: 0) == 4, "a list that goes on drew no chevron")
+        #expect(shelf.debugTapViewAll())
+        #expect(pushed == 1, "the chevron did not push the destination")
     }
 }

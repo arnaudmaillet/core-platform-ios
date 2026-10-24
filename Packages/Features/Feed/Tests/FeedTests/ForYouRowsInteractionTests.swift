@@ -59,7 +59,7 @@ struct ForYouRowsInteractionTests {
         let lead = makeLead()
         var pushed: [String] = []
         lead.friends.onTitleTapped = { pushed.append("friends") }
-        lead.shelf.onTitleTapped = { pushed.append("following") }
+        lead.shelf.onViewAll = { pushed.append("following") }
         lead.stack.onListTitleTapped = { pushed.append("for you") }
         lead.render(railsState(friends: [story("ana", unseen: true)], following: [post("c", by: "bo")]))
         lead.friends.debugTapTitle()
