@@ -90,6 +90,28 @@ public enum BarItems {
         return (item, label)
     }
 
+    /// A word with its glyph, as wide as they are — what a stock item cannot
+    /// draw (given an image and a title it shows only the image): the same
+    /// plain view as `stretched`, not stretched, in an item whose bubble the
+    /// BAR draws. Never a `UIButton` in a custom view (R1).
+    public static func labeled(
+        id: String, title: String, image: UIImage?, ink: UIColor = .label,
+        textStyle: UIFont.TextStyle = .body, height: CGFloat = bubbleHeight, action: @escaping () -> Void
+    ) -> (item: UIBarButtonItem, label: StretchedBarLabel) {
+        let label = StretchedBarLabel(
+            title: title, image: image, ink: ink, textStyle: textStyle, weight: .regular, action: action
+        )
+        // As wide as its content and margins (`intrinsicContentSize`): a
+        // view with no width of its own is stretched by the bar.
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        let tall = label.heightAnchor.constraint(equalToConstant: height)
+        tall.priority = .init(999)
+        tall.isActive = true
+        let item = UIBarButtonItem(customView: label)
+        item.identifier = id
+        return (item, label)
+    }
+
     /// A complex container (R6): a view a stock item cannot draw, under its
     /// identifier. Not for an icon (`icon`) nor a wide word (`stretched`).
     public static func container(id: String, view: UIView) -> UIBarButtonItem {
@@ -136,17 +158,20 @@ public final class StretchedBarLabel: UIView {
 
     static let disabledAlpha: CGFloat = 0.4
 
-    public init(title: String, image: UIImage? = nil, ink: UIColor, action: @escaping () -> Void) {
+    public init(
+        title: String, image: UIImage? = nil, ink: UIColor,
+        textStyle: UIFont.TextStyle = .body, weight: UIFont.Weight = .semibold, action: @escaping () -> Void
+    ) {
         self.action = action
         super.init(frame: .zero)
         label.text = title
         label.textColor = ink
-        label.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
+        label.font = UIFont.scaledFont(forTextStyle: textStyle, weight: weight)
         label.adjustsFontForContentSizeCategory = true
         glyph.image = image
         glyph.isHidden = image == nil
         glyph.tintColor = ink
-        glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .body, scale: .medium)
+        glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: textStyle, scale: .medium)
         glyph.setContentHuggingPriority(.required, for: .horizontal)
         content.axis = .horizontal
         content.alignment = .center
@@ -169,6 +194,20 @@ public final class StretchedBarLabel: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Its content and the margins either side: what a `labeled` item is
+    /// (a `stretched` one asks, at a higher priority than it hugs, for more).
+    override public var intrinsicContentSize: CGSize {
+        let fitted = content.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        return CGSize(width: ceil(fitted.width) + 2 * Spacing.md, height: UIView.noIntrinsicMetric)
+    }
+
+    override public func traitCollectionDidChange(_ previous: UITraitCollection?) {
+        super.traitCollectionDidChange(previous)
+        if previous?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+            invalidateIntrinsicContentSize()
+        }
+    }
 
     /// The leading glyph, nil without one.
     public var image: UIImage? { glyph.image }

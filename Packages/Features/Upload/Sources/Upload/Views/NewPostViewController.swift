@@ -256,10 +256,9 @@ final class NewPostViewController: UIViewController {
     private var list: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Row>!
 
-    private lazy var postItem = UIBarButtonItem(
-        title: "Post",
-        primaryAction: UIAction { [weak self] _ in self?.post() }
-    )
+    private lazy var postItem = BarItems.title(id: "upload.newPost.post", title: "Post") { [weak self] in
+        self?.post()
+    }
 
     /// ⚠️ DRAWN AND INERT, like the editor's. Media drafts do not exist —
     /// `MediaDraftsViewController` is an empty list waiting for the notion — and
@@ -280,6 +279,8 @@ final class NewPostViewController: UIViewController {
             style: .plain, target: nil, action: nil
         )
         item.accessibilityLabel = "Save draft"
+        // The editor's, so the push from it carries the item (#1679).
+        item.identifier = MediaEditorViewController.ItemID.saveDraft
         return item
     }()
 

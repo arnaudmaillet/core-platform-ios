@@ -76,6 +76,20 @@ struct BarItemsTests {
         #expect(!made.label.accessibilityTraits.contains(.notEnabled))
     }
 
+    /// A word with its glyph, not stretched: the bar's bubble, no control.
+    @Test func aLabeledItemIsAPlainViewWithItsGlyph() {
+        var tapped = 0
+        let made = BarItems.labeled(id: "test.language", title: "en-US", image: UIImage(systemName: "globe"),
+                                    textStyle: .footnote) { tapped += 1 }
+        #expect(made.item.identifier == "test.language")
+        #expect(made.item.customView === made.label)
+        #expect(!made.item.hidesSharedBackground)
+        #expect(!(made.item.customView is UIControl), "a control in the bar item")
+        #expect(made.label.image != nil && made.label.title == "en-US")
+        made.label.debugTap()
+        #expect(tapped == 1)
+    }
+
     @Test func aContainerKeepsItsViewAndIdentity() {
         let view = UIView()
         let item = BarItems.container(id: BarItems.SharedID.walletBalance, view: view)

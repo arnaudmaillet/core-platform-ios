@@ -303,10 +303,11 @@ final class MediaEditorViewController: UIViewController {
         return bar
     }()
 
-    private lazy var nextItem = UIBarButtonItem(
-        title: "Next",
-        primaryAction: UIAction { [weak self] _ in self?.goNext() }
-    )
+    private lazy var nextItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(title: "Next", primaryAction: UIAction { [weak self] _ in self?.goNext() })
+        item.identifier = ItemID.primary
+        return item
+    }()
 
     /// What the trailing side says while a text overlay is being typed.
     ///
@@ -318,14 +319,19 @@ final class MediaEditorViewController: UIViewController {
     /// finalisation page. There is one now, and it means the nearer thing:
     /// finish what is being typed. "Next" comes back the moment the session
     /// ends, because leaving the screen mid-sentence is not what "Done" is for.
-    private lazy var doneTypingItem: UIBarButtonItem = {
+    private lazy var doneTypingItem = makeDoneTypingItem(hasWords: false)
+
+    /// "Next"'s slot while typing: under "Next"'s identifier, so the bar
+    /// morphs one into the other (#1679).
+    private func makeDoneTypingItem(hasWords: Bool) -> UIBarButtonItem {
         let item = UIBarButtonItem(
             primaryAction: UIAction { [weak self] _ in self?.overlayMode.finishComposing() }
         )
-        item.image = Self.typingGlyph(hasWords: false)
-        item.accessibilityLabel = "Discard"
+        item.image = Self.typingGlyph(hasWords: hasWords)
+        item.accessibilityLabel = hasWords ? "Done" : "Discard"
+        item.identifier = ItemID.primary
         return item
-    }()
+    }
 
     /// The glyph the one typing button wears.
     ///
@@ -333,8 +339,9 @@ final class MediaEditorViewController: UIViewController {
     /// CHANGES.** Finishing an empty field already removes the text — that is
     /// `composed(_:)`'s documented rule — so a tick over nothing would promise
     /// to keep something that is about to be thrown away. A cross says what
-    /// will actually happen. Two separate bar items would re-hand the whole
-    /// trailing group at each crossing; one item changing its image does not.
+    /// will actually happen. ⚠️ A new glyph is a NEW item under the slot's
+    /// identifier, set animated — the bar morphs the glyph (#1679, R3) —
+    /// never an image swapped on the item it shows.
     private static func typingGlyph(hasWords: Bool) -> UIImage? {
         UIImage(systemName: hasWords ? "checkmark" : "xmark")
     }
@@ -344,8 +351,8 @@ final class MediaEditorViewController: UIViewController {
     var typedWords = false {
         didSet {
             guard typedWords != oldValue else { return }
-            doneTypingItem.image = Self.typingGlyph(hasWords: typedWords)
-            doneTypingItem.accessibilityLabel = typedWords ? "Done" : "Discard"
+            doneTypingItem = makeDoneTypingItem(hasWords: typedWords)
+            if isTypingText { showTheTrailingItem(animated: view.window != nil) }
         }
     }
 
@@ -385,6 +392,7 @@ final class MediaEditorViewController: UIViewController {
             primaryAction: UIAction { [weak self] _ in self?.stepBack() }
         )
         item.accessibilityLabel = "Undo"
+        item.identifier = ItemID.undo
         return item
     }()
 
@@ -394,6 +402,7 @@ final class MediaEditorViewController: UIViewController {
             primaryAction: UIAction { [weak self] _ in self?.stepForward() }
         )
         item.accessibilityLabel = "Redo"
+        item.identifier = ItemID.redo
         return item
     }()
 
@@ -822,6 +831,7 @@ final class MediaEditorViewController: UIViewController {
             style: .plain, target: nil, action: nil
         )
         item.accessibilityLabel = "Save draft"
+        item.identifier = ItemID.saveDraft
         return item
     }()
 
@@ -1477,6 +1487,12 @@ final class MediaEditorViewController: UIViewController {
     /// see `photoStrip`.
     enum ItemID {
         static let leading = "upload.editor.toolbar.leading"
+        /// "Next", and "Done"/"Discard" in its place while typing.
+        static let primary = "upload.editor.primary"
+        static let undo = "upload.editor.undo"
+        static let redo = "upload.editor.redo"
+        /// Shared with the new post's, so the push from here carries it.
+        static let saveDraft = "upload.save-draft"
 
         static func categories(_ list: [Category]) -> String {
             "upload.editor.toolbar.categories." + list.map(\.title).joined(separator: ",")
@@ -1484,9 +1500,7 @@ final class MediaEditorViewController: UIViewController {
     }
 
     private static func barItem(_ view: UIView, as identifier: String) -> UIBarButtonItem {
-        let item = UIBarButtonItem(customView: view)
-        item.identifier = identifier
-        return item
+        BarItems.container(id: identifier, view: view)
     }
 
     /// A hand-over the bar could not take yet, owed to the first layout pass

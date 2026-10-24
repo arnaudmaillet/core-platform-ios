@@ -26,15 +26,11 @@ struct BarContractGuardTests {
         "App/Shell/WalletStakesViewController.swift": 1,
         "Packages/Core/DesignSystem/Sources/DesignSystem/Components/NavigationBarToasts.swift": 1,
         "Packages/Core/DesignSystem/Sources/DesignSystem/Components/SelectorToolbarItem.swift": 1,
-        "Packages/Features/Auth/Sources/Auth/LoginFlowCoordinator.swift": 1,
         "Packages/Features/Feed/Sources/Feed/ForYou/PushedScreenHeader.swift": 1,
         "Packages/Features/Maps/Sources/Maps/Countries/CountryShopViewController.swift": 1,
         "Packages/Features/Profile/Sources/Profile/Views/ProfileRelationshipsViewController.swift": 1,
         "Packages/Features/Profile/Sources/Profile/Views/ProfileViewController.swift": 1,
         "Packages/Features/Search/Sources/Search/Views/SearchResultsViewController.swift": 1,
-        "Packages/Features/Upload/Sources/Upload/Capture/CaptureViewController.swift": 1,
-        "Packages/Features/Upload/Sources/Upload/Views/MediaEditorViewController.swift": 1,
-        "Packages/Features/Upload/Sources/Upload/Views/MediaPickerViewController.swift": 1,
     ]
 
     /// Files whose bar buttons still draw their own glass.

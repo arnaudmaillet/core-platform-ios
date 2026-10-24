@@ -20,6 +20,7 @@ final class PendingScreenViewController: UIViewController {
             systemItem: .close,
             primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) }
         )
+        navigationItem.leftBarButtonItem?.identifier = "upload.pending.close"
     }
 
     @available(*, unavailable)

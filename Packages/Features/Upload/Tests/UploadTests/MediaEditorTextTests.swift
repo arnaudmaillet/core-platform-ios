@@ -253,15 +253,20 @@ struct MediaEditorTextTests {
         let composer = try #require(screen.editor.overlayMode.debugComposer)
         composer.debugType("Hello")
 
-        #expect(button.image == UIImage(systemName: "checkmark"), "words arrived and the glyph did not follow")
-        #expect(button.accessibilityLabel == "Done")
-        #expect(screen.editor.debugTrailingBarItems.first === button,
-                "the glyph changed on the item that was already there, not by re-handing the group")
+        // ⚠️ A NEW GLYPH IS A NEW ITEM under the slot's identifier (#1679,
+        // R3): the bar morphs it, never an image swapped in place.
+        let ticked = try #require(screen.editor.debugTrailingBarItems.first)
+        #expect(ticked.image == UIImage(systemName: "checkmark"), "words arrived and the glyph did not follow")
+        #expect(ticked.accessibilityLabel == "Done")
+        #expect(ticked !== button, "the glyph was swapped on the item the bar shows")
+        #expect(ticked.identifier == button.identifier && button.identifier != nil)
+        #expect(button.image == UIImage(systemName: "xmark"), "the old item was restyled")
 
         composer.debugType("")
 
-        #expect(button.image == UIImage(systemName: "xmark"), "the field was emptied and the glyph stayed a tick")
-        #expect(button.accessibilityLabel == "Discard")
+        let crossed = try #require(screen.editor.debugTrailingBarItems.first)
+        #expect(crossed.image == UIImage(systemName: "xmark"), "the field was emptied and the glyph stayed a tick")
+        #expect(crossed.accessibilityLabel == "Discard")
     }
 
     /// And opening on a text that already has words shows the tick at once,
