@@ -95,8 +95,10 @@ struct ProfileCardTests {
         #expect(Card.wideItem(in: Card.toolbarItems(for: .follow)) == .follow)
         #expect(Card.wideItem(in: Card.toolbarItems(for: .following)) == .message)
         #expect(Card.wideItem(in: Card.toolbarItems(for: .requested)) == .requested)
-        #expect(Card.barShape(Card.toolbarItems(for: .follow)) == Card.barShape(Card.toolbarItems(for: .requested)),
-                "Follow and Requested are not one bar")
+        #expect(Card.barIdentifier(for: .follow) == Card.barIdentifier(for: .requested),
+                "Follow and Requested are not one item to UIKit")
+        let kinds: [Card.ToolbarItem] = [.follow, .message, .openProfile, .bell, .qr]
+        #expect(Set(kinds.map(Card.barIdentifier(for:))).count == kinds.count, "two items share an identity")
         #expect(Card.wideItem(in: Card.toolbarItems(for: .unavailable)) == .message)
         #expect(Card.wideItem(in: Card.toolbarItems(for: .edit)) == nil)
     }
@@ -146,23 +148,45 @@ struct ProfileCardTests {
         #expect(card.toolbarItems?.contains { $0.accessibilityLabel == "QR Code" } == true, "the QR is not in the toolbar")
         #expect(card.navigationItem.rightBarButtonItem != nil, "no ✕")
         #expect(!card.headerView.showsActionTray, "the header kept its tray")
-        #expect(card.wideButton?.configuration?.title == "Follow", "Follow is not the stretched item")
+        #expect(card.wideLabel?.title == "Follow", "Follow is not the stretched item")
     }
 
-    /// Follow → Requested changes the stretched button in place: the same
-    /// bar items, the same button, its words changed (#1668).
-    @Test func followToRequestedKeepsTheBar() async throws {
+    /// Follow → Requested is the bar's own transition (#1678): the bar is
+    /// rebuilt — nothing restyled in place, no `UIButton` drawing its own
+    /// glass — every item keeps its identity, Follow and Requested one item
+    /// to UIKit, and the bar draws the stretched item's bubble.
+    @Test func followToRequestedIsTheBarsOwnTransition() async throws {
         let host = Host()
         let card = try await makeCard(following: false, host: host)
         let items = try #require(card.toolbarItems)
-        let button = try #require(card.wideButton)
+        let identities = items.map(\.identifier)
+        #expect(identities.compactMap { $0 } == ["profileCard.follow", "profileCard.message", "profileCard.qr"])
+        #expect(items.first?.style == .prominent, "the bar does not draw Follow prominent")
+        #expect(items.first?.hidesSharedBackground == false, "the stretched item draws its own bubble")
+        #expect(!items.contains { $0.customView is UIButton }, "a button in the toolbar")
         card.debugApplyFollowButton(.requested)
-        #expect(card.toolbarItems?.count == items.count)
-        #expect(zip(card.toolbarItems ?? [], items).allSatisfy { $0 === $1 }, "the bar was rebuilt")
-        #expect(card.wideButton === button, "the stretched button was replaced")
-        #expect(button.configuration?.title == "Requested")
+        let rebuilt = try #require(card.toolbarItems)
+        #expect(rebuilt.map(\.identifier) == identities, "an item lost its identity across the change")
+        #expect(rebuilt.first !== items.first, "Follow was restyled in place")
+        #expect(card.wideLabel?.title == "Requested")
+        #expect(rebuilt.first?.style == .plain, "Requested kept the prominent bubble")
         card.debugApplyFollowButton(.follow)
-        #expect(button.configuration?.title == "Follow")
+        #expect(card.wideLabel?.title == "Follow")
+        #expect(card.toolbarItems?.map(\.identifier) == identities)
+    }
+
+    /// Followed, the bell comes in and Message takes the free width — Follow
+    /// is never matched with the bell (#1678, the owner's recording).
+    @Test func followToFollowingBringsTheBellAndStretchesMessage() async throws {
+        let host = Host()
+        let card = try await makeCard(following: false, host: host)
+        card.debugApplyFollowButton(.following)
+        let items = try #require(card.toolbarItems)
+        let identities = items.compactMap(\.identifier)
+        #expect(!identities.contains("profileCard.follow"), "Follow stayed in the bar")
+        #expect(identities.contains("profileCard.message"))
+        #expect(card.wideLabel?.title == "Message", "Message does not take the free width")
+        #expect(!items.contains { $0.customView is UIButton }, "a button in the toolbar")
     }
 
     /// Followed: Message takes the free width (#1542), Following is gone
@@ -170,7 +194,7 @@ struct ProfileCardTests {
     @Test func followedMessageIsTheStretchedItem() async throws {
         let host = Host()
         let card = try await makeCard(following: true, host: host)
-        #expect(card.wideButton?.configuration?.title == "Message")
+        #expect(card.wideLabel?.title == "Message")
         #expect(card.toolbarItems?.contains { $0.title == "Following" } != true, "Following stayed in the toolbar")
         #expect(card.debugMoreMenuTitles.first == "Unfollow", "no Unfollow at the head of the ••• menu")
     }
