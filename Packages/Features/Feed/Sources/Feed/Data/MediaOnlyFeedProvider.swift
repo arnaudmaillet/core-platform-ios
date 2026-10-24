@@ -35,8 +35,11 @@ actor MediaOnlyFeedProvider: FeedProviding {
         entry.post.attachments.first?.url != nil
     }
 
+    /// `nil` when no cached post is media: an empty copy would put the feed
+    /// in its content phase with nothing to show until the network answers.
     func cachedFirstPage() async -> [FeedEntry]? {
-        await base.cachedFirstPage()?.filter(Self.admits)
+        guard let media = await base.cachedFirstPage()?.filter(Self.admits), !media.isEmpty else { return nil }
+        return media
     }
 
     func loadFirstPage() async throws -> FeedPage {

@@ -56,6 +56,19 @@ struct MediaOnlyFeedProviderTests {
         #expect(page.nextPageToken == "p4", "it would re-read pages it passed")
     }
 
+    /// A cached first page with no media post is no cache at all: the feed
+    /// would otherwise rest in its content phase with nothing to show.
+    @Test func anAllTextCacheIsNoCache() async {
+        let allText = MediaOnlyFeedProvider(base: Pages([
+            "": FeedPage(entries: [Self.entry("t1", media: false)], nextPageToken: nil, isCold: false),
+        ]))
+        #expect(await allText.cachedFirstPage() == nil)
+        let mixed = MediaOnlyFeedProvider(base: Pages([
+            "": FeedPage(entries: [Self.entry("t1", media: false), Self.entry("m1", media: true)], nextPageToken: nil, isCold: false),
+        ]))
+        #expect(await mixed.cachedFirstPage()?.map(\.post.id.rawValue) == ["m1"])
+    }
+
     @Test func aPostWithAnAttachmentButNoURLIsATextPage() {
         let urlless = FeedEntry(
             post: Post(id: PostID("x"), authorID: ProfileID("a"), caption: "x",
