@@ -112,6 +112,19 @@ public final class FollowGraphEvents: @unchecked Sendable {
         for handler in current { handler(change) }
     }
 
+    /// Hears every request change on the PUBLISHER's executor — for a store
+    /// that locks on its own (`subscribe(_:)`'s twin).
+    public func subscribeToRequests(
+        _ handler: @escaping @Sendable (FollowRequestChange) -> Void
+    ) -> FollowGraphSubscription {
+        let id = UUID()
+        lock.withLock { requestHandlers[id] = handler }
+        return FollowGraphSubscription { [weak self] in
+            guard let self else { return }
+            _ = self.lock.withLock { self.requestHandlers.removeValue(forKey: id) }
+        }
+    }
+
     /// Hears every request change on the MAIN actor, in publication order.
     public func subscribeToRequestsOnMain(
         _ handler: @escaping @MainActor @Sendable (FollowRequestChange) -> Void
@@ -157,6 +170,12 @@ public final class FollowGraphSubscription: Sendable {
 
     init(cancel: @escaping @Sendable () -> Void) {
         self.cancel = cancel
+    }
+
+    /// One subscription holding `subscriptions`: release it and every one of
+    /// them is gone — a reader of both channels keeps a single handle.
+    public static func all(_ subscriptions: [FollowGraphSubscription]) -> FollowGraphSubscription {
+        FollowGraphSubscription { withExtendedLifetime(subscriptions) {} }
     }
 
     deinit { cancel() }

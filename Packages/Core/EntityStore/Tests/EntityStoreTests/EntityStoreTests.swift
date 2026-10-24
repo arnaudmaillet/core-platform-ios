@@ -102,6 +102,29 @@ struct EntityStoreTests {
         withExtendedLifetime((pill, subscription)) {}
     }
 
+    /// A follow REQUEST is heard on the same subscription (#1670): pending is
+    /// a fact even about someone not yet drawn, a withdrawal offers "+"
+    /// again, and someone the viewer follows does not move.
+    @Test func theRequestChannelMovesTheRelationToo() {
+        let store = EntityStore()
+        let events = FollowGraphEvents()
+        let subscription = store.follow(events)
+        let stranger = ProfileID("a1")
+        let followed = ProfileID("a2")
+        store.setRelation(.following, for: followed)
+
+        events.publish(FollowRequestChange(profileID: stranger, isPending: true))
+        #expect(store.relation(to: stranger) == .requested, "an unknown relation learns the request")
+        events.publish(FollowRequestChange(profileID: followed, isPending: true))
+        #expect(store.relation(to: followed) == .following)
+
+        events.publish(FollowRequestChange(profileID: stranger, isPending: false))
+        #expect(store.relation(to: stranger) == .notFollowing)
+        events.publish(FollowRequestChange(profileID: followed, isPending: false))
+        #expect(store.relation(to: followed) == .following, "a withdrawal moves only a pending request")
+        withExtendedLifetime(subscription) {}
+    }
+
     @Test func anAcceptedFollowLeavesAnUnknownRelationUnknown() {
         let store = EntityStore()
         store.applyFollowChange(FollowChange(profileID: ProfileID("a1"), isFollowing: true))

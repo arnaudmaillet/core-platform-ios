@@ -54,11 +54,13 @@ extension ProfileRepository: FollowRequestSending, FollowRequestsManaging {
         // `ALREADY_EXISTS` / SGR-1005 means the ask is there — "Requested",
         // as the lists have said since #726. It read "Couldn't ask to follow".
         if response.error?.code == .alreadyExists {
+            pendingRequests.record(true, viewer: viewer, target: profileID)
             followEvents?.publish(FollowRequestChange(profileID: profileID, isPending: true, viewerID: viewer))
             return .requested
         }
         try Self.ensureAccepted(response)
         if response.message?.requested == true {
+            pendingRequests.record(true, viewer: viewer, target: profileID)
             followEvents?.publish(FollowRequestChange(profileID: profileID, isPending: true, viewerID: viewer))
             return .requested
         }
@@ -76,6 +78,7 @@ extension ProfileRepository: FollowRequestSending, FollowRequestsManaging {
         // withdrawal's goal is met either way.
         let nothingPending = (response.error?.message ?? "").contains("SGR-1006")
         if !nothingPending { try Self.ensureAccepted(response) }
+        pendingRequests.record(false, viewer: viewer, target: profileID)
         followEvents?.publish(FollowRequestChange(profileID: profileID, isPending: false, viewerID: viewer))
     }
 

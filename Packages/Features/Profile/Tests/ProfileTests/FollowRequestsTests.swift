@@ -56,6 +56,17 @@ struct FollowRequestsTests {
         return ProfileID(id)
     }
 
+    /// A private author who follows the viewer, unfollowed back.
+    private func privateFollower(in dataset: MockSocialDataset) -> ProfileID {
+        let viewer = MockSocialDataset.viewerProfileID
+        let viewerFollows = dataset.followingByProfileID[viewer] ?? []
+        let id = dataset.authors.map(\.profileID).first {
+            dataset.isRelationshipsPrivate($0) && !viewerFollows.contains($0)
+                && dataset.followingByProfileID[$0]?.contains(viewer) == true
+        }!
+        return ProfileID(id)
+    }
+
     /// Waits on STATE, not time: polls until `condition` holds and returns at
     /// once when it does, giving up after 2,000 looks (about 10 s on a free
     /// main actor).
@@ -163,6 +174,70 @@ struct FollowRequestsTests {
         try #require(await settle { !viewModel.followInFlight }, "the request never came back")
         #expect(buttons.last == .requested, "the duplicate ask did not end on Requested: \(buttons)")
         #expect(!failed, "a pending request showed a failure toast")
+    }
+
+    /// ⚠️ #1670: a card seen once, then a request made from a feed's "+"
+    /// while no card was alive, then the card opened again on the same cache
+    /// — it read "Follow". It opens on "Requested", and settles there.
+    @Test func aCardReopenedAfterARequestElsewhereReadsRequested() async throws {
+        let events = FollowGraphEvents()
+        let fixture = makeFixture(followEvents: events)
+        let target = privateStranger(in: fixture.dataset)
+        let cache = ProfileCache()
+        cache.observe(events)
+        var first: ProfileViewModel? = ProfileViewModel(
+            repository: fixture.repository, source: .profile(target), cache: cache, followEvents: events
+        )
+        var firstButtons: [ProfileViewModel.FollowButton] = []
+        first?.onFollowButtonChange = { firstButtons.append($0) }
+        first?.viewDidLoad()
+        try #require(await settle { firstButtons.last == .follow && first?.profile != nil }, "the card never loaded")
+        first = nil
+
+        #expect(try await fixture.repository.follow(target) == .requested)
+        try #require(await settle { cache.relationship(for: target) == .requested }, "the cache kept \(String(describing: cache.relationship(for: target)))")
+
+        let again = ProfileViewModel(
+            repository: fixture.repository, source: .profile(target), cache: cache, followEvents: events
+        )
+        var buttons: [ProfileViewModel.FollowButton] = []
+        again.onFollowButtonChange = { buttons.append($0) }
+        again.viewDidLoad()
+        #expect(buttons.first == .requested, "the card opened on \(buttons)")
+        // The read that revalidates it agrees: nothing moves.
+        try #require(await settle { again.profile != nil && !again.isLoadingRelationship }, "the card never loaded")
+        #expect(buttons == [.requested], "the card moved: \(buttons)")
+    }
+
+    /// ⚠️ #1670, backend #972: a private person who already FOLLOWS the
+    /// viewer. The graph's status hides the request behind `FOLLOWED_BY`; the
+    /// repository keeps it for the session, so every read says Requested
+    /// until it is withdrawn — then Follow (follow back) again.
+    @Test func aRequestToSomeoneWhoFollowsTheViewerStaysRequested() async throws {
+        let fixture = makeFixture()
+        let target = privateFollower(in: fixture.dataset)
+        #expect(try await fixture.repository.followRelation(to: target) == .followedBy)
+
+        #expect(try await fixture.repository.follow(target) == .requested)
+        #expect(try await fixture.repository.relationship(for: target) == .requested)
+        #expect(try await fixture.repository.followRelation(to: target) == .requested)
+
+        try await fixture.repository.cancelFollowRequest(to: target)
+        #expect(try await fixture.repository.relationship(for: target) == .other(isFollowing: false, isMutual: false, isBlocked: false))
+        #expect(try await fixture.repository.followRelation(to: target) == .followedBy)
+    }
+
+    /// The same request asked by ANOTHER writer (a list row, a suggestion)
+    /// reaches the repository through the follow channel.
+    @Test func aRequestHeardFromAnotherWriterStaysRequested() async throws {
+        let events = FollowGraphEvents()
+        let fixture = makeFixture(followEvents: events)
+        let target = privateFollower(in: fixture.dataset)
+        let viewer = ProfileID(MockSocialDataset.viewerProfileID)
+        events.publish(FollowRequestChange(profileID: target, isPending: true, viewerID: viewer))
+        #expect(try await fixture.repository.followRelation(to: target) == .requested)
+        events.publish(FollowRequestChange(profileID: target, isPending: false, viewerID: viewer))
+        #expect(try await fixture.repository.followRelation(to: target) == .followedBy)
     }
 
     /// A request made from a list row or a suggestion turns the profile

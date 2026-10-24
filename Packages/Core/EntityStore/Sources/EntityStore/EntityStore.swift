@@ -276,12 +276,44 @@ public final class EntityStore: Sendable {
         if changed { notifyProfiles(.some([change.profileID])) }
     }
 
+    /// A follow REQUEST the graph accepted or one withdrawn (#1670): a
+    /// private person asked from a card, a list or a profile is pending
+    /// everywhere — the feeds' "+" turns to the pending mark — and a
+    /// withdrawal offers "+" again. Pending is a fact on its own, so an
+    /// unknown relation learns it too; a person the viewer follows, blocks or
+    /// is does not move. A withdrawal moves only a known pending request —
+    /// to `.notFollowing`, even for someone who follows the viewer: a
+    /// pending relation no longer says so, and the next read puts it back.
+    public func applyFollowRequestChange(_ change: FollowRequestChange) {
+        let changed = writes.withLock { _ -> Bool in
+            let known = relations.cache.peek(change.profileID)
+            let next: FollowRelation?
+            if change.isPending {
+                switch known {
+                case nil, .notFollowing?, .followedBy?: next = .requested
+                default: next = nil
+                }
+            } else {
+                next = known == .requested ? .notFollowing : nil
+            }
+            guard let next else { return false }
+            storeFact(next, for: change.profileID, in: relations.cache, registry: \.profiles)
+            return true
+        }
+        if changed { notifyProfiles(.some([change.profileID])) }
+    }
+
     /// Hears the app's follow channel for as long as the subscription lives:
     /// every follow or unfollow the graph accepts, from any writer, moves the
     /// relation the feeds' "+" draws (`applyFollowChange`) — the same channel
-    /// the profile header and the search rows hear, so they agree.
+    /// the profile header and the search rows hear, so they agree. Requests
+    /// too (`applyFollowRequestChange`, #1670): one asked from a profile card
+    /// turns the pill's "+" pending.
     public func follow(_ events: FollowGraphEvents) -> FollowGraphSubscription {
-        events.subscribe { [weak self] change in self?.applyFollowChange(change) }
+        .all([
+            events.subscribe { [weak self] change in self?.applyFollowChange(change) },
+            events.subscribeToRequests { [weak self] change in self?.applyFollowRequestChange(change) }
+        ])
     }
 
     /// Whether the viewer saved the post; nil while not known.
