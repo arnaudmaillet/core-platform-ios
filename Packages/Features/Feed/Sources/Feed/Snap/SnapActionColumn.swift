@@ -125,9 +125,14 @@ enum SnapActionColumn {
     /// EXPERIMENTAL (#1701, the For You root): how far the column — and the
     /// comments' composer, which rests on its lowest bubble's line — rises
     /// to stand ABOVE the page strip, its lowest bubble level with the
-    /// caption's bottom (`xl` over the margin line). The strip's room is kept
-    /// under the composer too, empty, and on a post with no strip.
-    static var stripRoomLift: CGFloat { Spacing.xl - inputRestingGap }
+    /// caption's bottom (`stripSeat` over the margin line). The strip's room
+    /// is kept under the composer too, empty, and on a post with no strip.
+    static var stripRoomLift: CGFloat { stripSeat - inputRestingGap }
+
+    /// The caption's bottom over the margin line on the For You root: `lg`,
+    /// a step tighter over the strip than elsewhere's `xl` (the owner,
+    /// 2026-10-24: a little less room above the strip).
+    static let stripSeat: CGFloat = Spacing.lg
 
     // MARK: - The like pill (#669)
 
