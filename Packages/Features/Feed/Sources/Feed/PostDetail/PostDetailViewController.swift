@@ -1349,10 +1349,11 @@ final class PostDetailViewController: UIViewController {
     /// (#1681, the For You root): save and repost upright in
     /// the composer's column — drawn on a text page, reserved under a media
     /// page's (which draws its own) — the star for `saved`.
-    func setPostActions(shown: Bool, saved: Bool, onSave: (() -> Void)?) {
+    func setPostActions(shown: Bool, saved: Bool, onSave: (() -> Void)?, onShare: (() -> Void)? = nil) {
         composeBar.showsPostActions = shown
         composeBar.postActions.setSaved(saved)
         composeBar.postActions.onSave = onSave
+        composeBar.postActions.onShare = onShare
     }
 
     /// The composer's star after a save anywhere (#1681).

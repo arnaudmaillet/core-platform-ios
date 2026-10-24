@@ -32,9 +32,10 @@ final class ShareActionChip: UIView {
         super.init(frame: .zero)
 
         var configuration = UIButton.Configuration.filled()
-        configuration.image = UIImage(
-            systemName: symbol,
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .regular)
+        // Through the app's symbol lookup: an SF Symbol, or one of the app's
+        // own (Repost's, #1710).
+        configuration.image = UIImage.symbol(
+            named: symbol, configuration: UIImage.SymbolConfiguration(pointSize: 22, weight: .regular)
         )
         configuration.contentInsets = .zero
         configuration.cornerStyle = .capsule

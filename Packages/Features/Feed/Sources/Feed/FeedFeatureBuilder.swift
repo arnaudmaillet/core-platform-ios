@@ -9,6 +9,7 @@ import CoreNavigation
 import FeedInterface
 import MediaPlayback
 import PostGrid
+import ShareSheet
 import UIKit
 
 /// The feed feature's entry point, resolved by the composition root and
@@ -129,9 +130,13 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         entities: EntityStore? = nil,
         /// A place's posts past the map's pins (#643). Nil: a place page shows
         /// the pins it was handed.
-        placePosts: (any PlacePostsListing)? = nil
+        placePosts: (any PlacePostsListing)? = nil,
+        /// The post share sheet's quick-send row (#1710) — the profile
+        /// sheet's own source. Nil: the sheet has no row of people.
+        shareTargeting: (any ShareTargeting)? = nil
     ) {
         self.placePosts = placePosts
+        self.shareTargeting = shareTargeting
         self.entities = entities ?? EntityStore()
         self.discovery = discovery
         self.localCache = localCache
@@ -326,6 +331,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     private let counterClient: (any Counter_V1_CounterServiceClientInterface)?
     private let placePosts: (any PlacePostsListing)?
     private let discovery: (any FeedProviding)?
+    private let shareTargeting: (any ShareTargeting)?
     private let localCache: FeedLocalCache?
 
     public func makeForYouSectorViewController(
@@ -1549,6 +1555,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // The side list's posts (#1425, #1473): For You's discovery pool as
         // the app already holds it, else as it loads.
         let source: any FeedProviding = discovery ?? repository
+        // Its share sheet's people (#1710).
+        feed.shareTargeting = shareTargeting
         feed.sideListEntries = {
             if let cached = await source.cachedFirstPage(), !cached.isEmpty { return cached }
             return (try? await source.loadFirstPage())?.entries ?? []

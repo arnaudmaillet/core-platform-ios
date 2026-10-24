@@ -30,6 +30,7 @@ public final class ShareSheetViewController: UIViewController {
     public var onSendToTarget: ((ShareTarget, ShareCard) -> Void)?
 
     private let card: ShareCard
+    private let configuration: ShareSheetConfiguration
     private let imagePipeline: ImagePipeline
     private let targeting: (any ShareTargeting)?
     private let deviceCornerRadius: CGFloat
@@ -175,9 +176,11 @@ public final class ShareSheetViewController: UIViewController {
         imagePipeline: ImagePipeline,
         targeting: (any ShareTargeting)?,
         deviceCornerRadius: CGFloat,
-        fallbackWidth: CGFloat
+        fallbackWidth: CGFloat,
+        configuration: ShareSheetConfiguration = ShareSheetConfiguration()
     ) {
         self.card = card
+        self.configuration = configuration
         self.imagePipeline = imagePipeline
         self.targeting = targeting
         self.deviceCornerRadius = deviceCornerRadius
@@ -186,6 +189,8 @@ public final class ShareSheetViewController: UIViewController {
         targetsView = ShareTargetsView(imagePipeline: imagePipeline, inset: Self.margin)
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .pageSheet
+        // The screen's forced appearance, set before the first frame (#1710).
+        overrideUserInterfaceStyle = configuration.interfaceStyle
         configureDetent()
         // Concentric by construction, and settled before presentation for the
         // same reason: a shape inset by `margin` inside a rounded rect keeps a
@@ -521,7 +526,12 @@ public final class ShareSheetViewController: UIViewController {
             ShareActionChip(title: "Copy Link", symbol: "link", prominent: false) { [weak self] in
                 self?.copyLink()
             }
-        ])
+        ] + configuration.extraActions.map { extra in
+            // The screen's own actions, after the two every share has (#1710).
+            ShareActionChip(title: extra.title, symbol: extra.symbol, prominent: false) { [weak self] in
+                self?.perform(extra)
+            }
+        })
         actions.axis = .horizontal
         // Top-aligned: a chip whose caption wraps to two lines must not push
         // its neighbours' circles out of line.
@@ -905,6 +915,13 @@ public final class ShareSheetViewController: UIViewController {
         dismiss(animated: true) { [onSendToTarget] in
             onSendToTarget?(target, card)
         }
+    }
+
+    /// A screen's extra action: run in place, or once the sheet is gone when
+    /// it leaves (`dismissesSheet`).
+    private func perform(_ action: ShareSheetAction) {
+        guard action.dismissesSheet else { return action.handler() }
+        dismiss(animated: true) { action.handler() }
     }
 
     private func copyLink() {
