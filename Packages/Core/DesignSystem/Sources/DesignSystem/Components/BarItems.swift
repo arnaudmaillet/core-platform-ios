@@ -101,12 +101,12 @@ public enum BarItems {
         let label = StretchedBarLabel(
             title: title, image: image, ink: ink, textStyle: textStyle, weight: .regular, action: action
         )
-        // As narrow as its content and margins allow.
-        let hug = label.widthAnchor.constraint(equalToConstant: 0)
-        hug.priority = .init(1)
+        // As wide as its content and margins (`intrinsicContentSize`): a
+        // view with no width of its own is stretched by the bar.
+        label.setContentHuggingPriority(.required, for: .horizontal)
         let tall = label.heightAnchor.constraint(equalToConstant: height)
         tall.priority = .init(999)
-        NSLayoutConstraint.activate([hug, tall])
+        tall.isActive = true
         let item = UIBarButtonItem(customView: label)
         item.identifier = id
         return (item, label)
@@ -194,6 +194,20 @@ public final class StretchedBarLabel: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Its content and the margins either side: what a `labeled` item is
+    /// (a `stretched` one asks, at a higher priority than it hugs, for more).
+    override public var intrinsicContentSize: CGSize {
+        let fitted = content.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        return CGSize(width: ceil(fitted.width) + 2 * Spacing.md, height: UIView.noIntrinsicMetric)
+    }
+
+    override public func traitCollectionDidChange(_ previous: UITraitCollection?) {
+        super.traitCollectionDidChange(previous)
+        if previous?.preferredContentSizeCategory != traitCollection.preferredContentSizeCategory {
+            invalidateIntrinsicContentSize()
+        }
+    }
 
     /// The leading glyph, nil without one.
     public var image: UIImage? { glyph.image }
