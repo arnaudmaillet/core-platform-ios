@@ -389,62 +389,6 @@ extension PersonPill.Badge {
     }
 }
 
-/// The snap feed's navigation-bar controls, built as *custom views* so their
-/// on-screen frames are readable with public API (a system-styled
-/// `UIBarButtonItem` exposes no view), and so the hero flight's stand-ins can
-/// be second instances of the exact same controls — pixel-identical at the
-/// landing swap by construction.
-enum SnapNavControls {
-    /// The back chevron for a presented (map-opened) feed; dismisses to the map.
-    static func makeBackButton() -> UIButton {
-        makeCircularBarButton(systemName: "chevron.backward", pointSize: 17)
-    }
-
-    /// A NAVIGATION-bar action that stands in the back button's slot (the
-    /// comments ✕). The back button's 17pt metric, not the toolbar's 15,
-    /// because it sits in the same slot and swaps with it — two glyphs at
-    /// different weights trading places would read as a size change.
-    static func makeNavActionButton(systemName: String) -> UIButton {
-        makeCircularBarButton(systemName: systemName, pointSize: 17)
-    }
-
-    /// A bottom-toolbar action (share, more): the same 36pt circle as the
-    /// back button, hosted as a bar item custom view so the system glass
-    /// wraps each action in its own isolated bubble — custom views never
-    /// join a shared item background.
-    static func makeToolbarActionButton(systemName: String) -> UIButton {
-        makeCircularBarButton(systemName: systemName, pointSize: 15)
-    }
-
-    /// One symbol in a strict 1:1 box: symbol intrinsic sizes are asymmetric
-    /// and the system glass pill wraps the custom view's bounds, which
-    /// renders slightly oval without this. Both metrics are 999, never
-    /// required: the bar's FIRST pass pins its item wrapper to the raw
-    /// intrinsic size with autoresizing constraints, and anything required
-    /// loses to that with a console break. 36 matches the wrapper's real
-    /// item height, so the settled pill is an exact circle (a 40pt box
-    /// would settle 40×36 — subtly oval).
-    private static func makeCircularBarButton(systemName: String, pointSize: CGFloat) -> UIButton {
-        var config = UIButton.Configuration.plain()
-        config.image = UIImage.symbol(named: systemName)?
-            .withConfiguration(UIImage.SymbolConfiguration(pointSize: pointSize, weight: .semibold))
-        config.baseForegroundColor = .label
-        config.contentInsets = .zero
-        let button = UIButton(configuration: config)
-        let height = button.heightAnchor.constraint(equalToConstant: 36)
-        height.priority = UILayoutPriority(999)
-        height.isActive = true
-        let aspect = button.widthAnchor.constraint(equalTo: button.heightAnchor)
-        aspect.priority = UILayoutPriority(999)
-        aspect.isActive = true
-        button.layer.shadowColor = UIColor.black.cgColor
-        button.layer.shadowOpacity = 0.5
-        button.layer.shadowRadius = 3
-        button.layer.shadowOffset = .zero
-        return button
-    }
-}
-
 #if DEBUG
 extension SnapAuthorIdentityView {
     /// The picture on the disc now; nil while the initials show.

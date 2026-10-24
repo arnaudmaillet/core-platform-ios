@@ -166,6 +166,15 @@ struct SnapActionColumnLayoutTests {
     /// 48pt in the app on iOS 27, 44pt for the same lone ⋯ in the package
     /// test host — and a test that took the item's centre minus 24 read the
     /// host's drop 2pt short and called the host unfaithful (it is not).
+    /// The view UIKit made for a stock bar item (#1679) — its `view`, read
+    /// the way UIKit's own tests do; nil before the bar hosts it. Tests only.
+    static func hostedView(of item: UIBarButtonItem) -> UIView? {
+        let selector = NSSelectorFromString("view")
+        guard item.responds(to: selector) else { return nil }
+        let view = item.perform(selector)?.takeUnretainedValue() as? UIView
+        return view?.window == nil ? nil : view
+    }
+
     static func glassFrame(of item: UIView, in window: UIWindow) -> CGRect? {
         var node = item.superview
         while let view = node, view !== window {
@@ -188,7 +197,15 @@ struct SnapActionColumnLayoutTests {
     /// number, and the constant is what to update.
     @Test func theToolbarsGlassStandsWhereTheComposerExpectsIt() async throws {
         let screen = UIViewController()
-        let more = SnapFooterToolbar.makeMoreButton(menu: UIMenu(children: []))
+        // A 36pt probe in a custom-view item: where the BAR draws its glass
+        // does not depend on what the item holds.
+        let more = UIView()
+        more.translatesAutoresizingMaskIntoConstraints = false
+        let side = more.heightAnchor.constraint(equalToConstant: 36)
+        side.priority = .init(999)
+        let square = more.widthAnchor.constraint(equalTo: more.heightAnchor)
+        square.priority = .init(999)
+        NSLayoutConstraint.activate([side, square])
         screen.toolbarItems = [.flexibleSpace(), UIBarButtonItem(customView: more)]
         let nav = UINavigationController(rootViewController: screen)
         nav.setToolbarHidden(false, animated: false)

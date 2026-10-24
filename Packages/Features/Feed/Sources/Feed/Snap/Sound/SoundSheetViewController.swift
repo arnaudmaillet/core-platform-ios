@@ -785,7 +785,7 @@ final class SoundSheetViewController: UIViewController {
         let fill = button.widthAnchor.constraint(equalToConstant: 10_000)
         fill.priority = .init(2)
         // 999, never required: the bar's first pass pins its item wrapper to
-        // the raw intrinsic size (`SnapNavControls.makeCircularBarButton`).
+        // the raw intrinsic size.
         let height = button.heightAnchor.constraint(equalToConstant: Self.barBubbleHeight)
         height.priority = .init(999)
         NSLayoutConstraint.activate([fill, height])

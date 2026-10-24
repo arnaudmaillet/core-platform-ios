@@ -73,12 +73,9 @@ struct ConversationThreadMediaTests {
         return (screen, driver, window)
     }
 
-    private func toolbarButtons(_ screen: UIViewController) -> [UIButton] {
-        (screen.toolbarItems ?? []).compactMap(\.customView).flatMap { view -> [UIButton] in
-            if let button = view as? UIButton { return [button] }
-            if let stack = view as? UIStackView { return stack.arrangedSubviews.compactMap { $0 as? UIButton } }
-            return []
-        }
+    /// The footer's actions: stock bar items (#1679), the leading pill left out.
+    private func toolbarActions(_ screen: UIViewController) -> [UIBarButtonItem] {
+        (screen.toolbarItems ?? []).filter { $0.customView == nil && $0.accessibilityLabel != nil }
     }
 
     private func mediaView(_ screen: UIViewController, item: Int = 0) throws -> ThreadMediaView {
@@ -106,12 +103,12 @@ struct ConversationThreadMediaTests {
         defer { window.isHidden = true }
         let items = try #require(screen.toolbarItems)
         #expect(items.first?.customView is SnapAuthorIdentityView)
-        let labels = toolbarButtons(screen).compactMap(\.accessibilityLabel)
+        let labels = toolbarActions(screen).compactMap(\.accessibilityLabel)
         #expect(labels == ["Camera", "Photo Library", "More actions"], "the footer reads \(labels)")
 
-        let buttons = toolbarButtons(screen)
-        buttons[0].sendActions(for: .primaryActionTriggered)
-        buttons[1].sendActions(for: .primaryActionTriggered)
+        let actions = toolbarActions(screen)
+        actions[0].primaryAction?.performWithSender(nil, target: nil)
+        actions[1].primaryAction?.performWithSender(nil, target: nil)
         #expect(driver.picked == [.camera, .library])
     }
 
@@ -119,7 +116,7 @@ struct ConversationThreadMediaTests {
     @Test func aTextOnlyThreadHasNoMediaButtons() {
         let (screen, _, window) = screen(sendsMedia: false)
         defer { window.isHidden = true }
-        #expect(toolbarButtons(screen).compactMap(\.accessibilityLabel) == ["More actions"])
+        #expect(toolbarActions(screen).compactMap(\.accessibilityLabel) == ["More actions"])
     }
 
     // MARK: - The bubble

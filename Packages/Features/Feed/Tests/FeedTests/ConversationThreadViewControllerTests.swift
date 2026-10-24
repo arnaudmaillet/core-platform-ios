@@ -433,13 +433,15 @@ struct ConversationThreadViewControllerTests {
     @Test func theFieldStandsOneGlassGapAboveTheToolbar() async throws {
         let (screen, _, _, window) = makeScreen()
         screen.navigationController?.setToolbarHidden(false, animated: false)
-        let more = try #require(screen.toolbarItems?.last?.customView)
-        for _ in 0..<30 where more.window == nil || more.bounds.height == 0 {
+        // ⋯ is a stock item (#1679): its view is UIKit's.
+        var hosted: UIView?
+        for _ in 0..<30 where hosted == nil || hosted?.bounds.height == 0 {
             screen.navigationController?.view.setNeedsLayout()
             screen.navigationController?.view.layoutIfNeeded()
-            try await Task.sleep(for: .milliseconds(10))
+            hosted = screen.toolbarItems?.last.flatMap(SnapActionColumnLayoutTests.hostedView(of:))
+            if hosted == nil { try await Task.sleep(for: .milliseconds(10)) }
         }
-        try #require(more.window != nil, "the bar never hosted ⋯")
+        let more = try #require(hosted, "the bar never hosted ⋯")
         let composer = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
         let glass = try #require(SnapActionColumnLayoutTests.glassFrame(of: more, in: window))
         let gap = glass.minY - composer.field.maxY
@@ -610,7 +612,8 @@ struct ConversationThreadViewControllerTests {
         let (screen, _, _, _) = makeScreen()
         let items = try #require(screen.toolbarItems)
         #expect(items.first?.customView is SnapAuthorIdentityView)
-        #expect((items.last?.customView as? UIButton)?.accessibilityLabel == "More actions")
+        #expect(items.last?.accessibilityLabel == "More actions")
+        #expect(items.last?.customView == nil, "⋯ is not a stock bar item")
         let nav = screen.navigationItem.rightBarButtonItems ?? []
         #expect(!nav.contains { $0.customView is SnapAuthorIdentityView }, "the peer pill is still in the nav bar")
         let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))

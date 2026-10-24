@@ -587,24 +587,28 @@ final class ConversationThreadViewController: UIViewController {
     /// is (#671): [peer pill] … [⋯]. The emote strip that held the slot is
     /// gone — the composer's own emote button is the way to emotes.
     private func configureToolbar() {
-        let more = SnapFooterToolbar.makeMoreButton(menu: UIMenu(children: [
+        let more = SnapFooterToolbar.makeMoreItem(menu: UIMenu(children: [
             UIAction(title: "View Profile", image: UIImage(systemName: "person.crop.circle")) { [weak self] _ in
                 self?.driver.didTapIdentity()
             },
         ]))
-        toolbarItems = SnapFooterToolbar.items(leading: peerPill, actions: mediaButtons(), more: more)
+        toolbarItems = SnapFooterToolbar.items(
+            leading: peerPill, leadingID: "conversation.peer-pill", actions: mediaItems(), more: more
+        )
     }
 
     /// `[📷 🖼]` left of the ⋯ (#681): the camera and the library, for a
     /// thread whose driver sends media.
-    private func mediaButtons() -> [UIButton] {
+    /// Stock bar items side by side, so the bar puts them in one platter
+    /// (#1679).
+    private func mediaItems() -> [UIBarButtonItem] {
         guard mode == .full, driver.sendsMedia else { return [] }
-        let camera = SnapNavControls.makeToolbarActionButton(systemName: "camera")
-        camera.accessibilityLabel = "Camera"
-        camera.addAction(UIAction { [weak self] _ in self?.pickMedia(.camera) }, for: .primaryActionTriggered)
-        let library = SnapNavControls.makeToolbarActionButton(systemName: "photo.on.rectangle")
-        library.accessibilityLabel = "Photo Library"
-        library.addAction(UIAction { [weak self] _ in self?.pickMedia(.library) }, for: .primaryActionTriggered)
+        let camera = BarItems.icon(
+            id: "conversation.camera", image: UIImage(systemName: "camera"), label: "Camera"
+        ) { [weak self] in self?.pickMedia(.camera) }
+        let library = BarItems.icon(
+            id: "conversation.library", image: UIImage(systemName: "photo.on.rectangle"), label: "Photo Library"
+        ) { [weak self] in self?.pickMedia(.library) }
         return [camera, library]
     }
 
@@ -652,7 +656,7 @@ final class ConversationThreadViewController: UIViewController {
         peerPill.onFollowTapped = { [weak self] id in self?.followPeer(id) }
         // The pill is the toolbar's (#671); a preview (no toolbar) keeps it
         // in the bar.
-        var items = pillRidesToolbar ? [] : [UIBarButtonItem(customView: peerPill)]
+        var items = pillRidesToolbar ? [] : [BarItems.container(id: "conversation.peer-pill", view: peerPill)]
         // No points badge on a conversation (#738): the bell alone trails.
         navigationItem.rightBarButtonItems = items
         placeMuteItem()
@@ -1437,7 +1441,7 @@ final class ConversationThreadViewController: UIViewController {
             // The toolbar's leading slot (#671): the bar less its margins, the
             // ⋯ bubble beside it and — sending media (#681) — the camera and
             // library capsule, the snap feed's repost and save capsule's size.
-            let capsule: CGFloat = mediaButtons().isEmpty ? 0 : 2 * 44 + itemPadding + Spacing.sm
+            let capsule: CGFloat = mediaItems().isEmpty ? 0 : 2 * 44 + itemPadding + Spacing.sm
             peerPill.setWidthBudget(bar - 16 * 2 - (48 + itemPadding) - capsule)
             return
         }

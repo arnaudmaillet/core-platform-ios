@@ -59,10 +59,22 @@ final class TextPostComposerViewController: UIViewController {
 
     // MARK: The writing chrome
 
+    /// The bars' identities (#1679, `dev/BAR_CONTRACT.md`), by function.
+    enum ItemID {
+        static let cancel = "textpost.cancel"
+        static let drafts = "textpost.drafts"
+        static let topSound = "textpost.sound.top"
+        static let footerSound = "textpost.sound"
+        static let close = "textpost.close"
+        static let sort = "textpost.sort"
+        static let authorPill = "textpost.author-pill"
+        static let attribution = "textpost.attribution"
+    }
+
     private var draftsItem: UIBarButtonItem?
     /// The sound pill's two homes — see `placeSoundPill`. Two instances,
     /// because a view lives in one bar at a time.
-    private let topSoundItem = UIBarButtonItem(customView: SoundPillView())
+    private let topSoundItem = BarItems.container(id: ItemID.topSound, view: SoundPillView())
     private var footerSoundItem: UIBarButtonItem?
     /// The writing footer without its leading pill: [🔖 ⇄] [⋯], right-aligned.
     private var writingFooterTrailing: [UIBarButtonItem] = []
@@ -84,7 +96,7 @@ final class TextPostComposerViewController: UIViewController {
     private let walletObservers = NotificationObserverTokenBag()
     /// The saved pile: the app's one (`shared`) outside tests.
     private let bookmarks: PostBookmarkStore
-    private let bookmarkButton = SnapFooterToolbar.makeSaveButton()
+    private lazy var bookmarkItem = SnapFooterToolbar.makeSaveItem { [weak self] in self?.toggleBookmark() }
     /// Keeps the published post's save glyph on its saved fact (#1067): a
     /// save or unsave made on another surface while the page shows the post
     /// draws at once — the feed page's and the cards' mechanism. Lives as
@@ -148,7 +160,6 @@ final class TextPostComposerViewController: UIViewController {
                 MainActor.assumeIsolated { self?.refreshSwipeGuard() }
             },
         ]
-        bookmarkButton.addAction(UIAction { [weak self] _ in self?.toggleBookmark() }, for: .primaryActionTriggered)
         observeKeyboard()
         // The invitation grows with the text size, and so may the least the
         // sheet rests at.
@@ -255,19 +266,20 @@ final class TextPostComposerViewController: UIViewController {
 
     private func showWritingBars() {
         navigationItem.leftBarButtonItems = [
-            UIBarButtonItem(title: "Cancel", primaryAction: UIAction { [weak self] _ in self?.cancelTapped() }),
+            BarItems.title(id: ItemID.cancel, title: "Cancel") { [weak self] in self?.cancelTapped() },
         ]
-        let drafts = UIBarButtonItem(title: "Drafts", primaryAction: UIAction { [weak self] _ in self?.showDrafts() })
+        let drafts = BarItems.title(id: ItemID.drafts, title: "Drafts") { [weak self] in self?.showDrafts() }
         draftsItem = drafts
         navigationItem.rightBarButtonItems = [drafts]
         // Drawn as they will be once the post exists, and quiet until then:
         // there is nothing to save, pass on or report yet.
-        bookmarkButton.isEnabled = false
-        let more = SnapFooterToolbar.makeMoreButton(menu: UIMenu(children: []))
+        bookmarkItem.isEnabled = false
+        let more = SnapFooterToolbar.makeMoreItem(menu: UIMenu(children: []))
         more.isEnabled = false
         let footer = SnapFooterToolbar.items(
             leading: SoundPillView(),
-            actions: [bookmarkButton, SnapFooterToolbar.makeRepostButton()],
+            leadingID: ItemID.footerSound,
+            actions: [bookmarkItem, SnapFooterToolbar.makeRepostItem()],
             more: more
         )
         footerSoundItem = footer.first
@@ -528,13 +540,12 @@ final class TextPostComposerViewController: UIViewController {
     }
 
     private func showPublishedBars(_ model: FeedItemDisplayModel, author: AuthorSummary) {
-        let close = SnapNavControls.makeNavActionButton(systemName: "xmark")
-        close.accessibilityLabel = "Close"
-        close.addAction(UIAction { [weak self] _ in self?.close() }, for: .primaryActionTriggered)
-        closeItem = UIBarButtonItem(customView: close)
+        closeItem = BarItems.icon(id: ItemID.close, image: UIImage(systemName: "xmark"), label: "Close") { [weak self] in
+            self?.close()
+        }
         sortButton.reset()
         sortButton.onOrderChange = { [weak panel] order in panel?.setCommentSortOrder(order) }
-        sortItem = UIBarButtonItem(customView: sortButton)
+        sortItem = BarItems.container(id: ItemID.sort, view: sortButton)
         applyLeadingItems(animated: true)
 
         // Your own post: there is nobody to follow.
@@ -546,7 +557,7 @@ final class TextPostComposerViewController: UIViewController {
                 id, stub: ProfileIdentityStub(handle: author.handle, displayName: author.displayName)
             ))
         }
-        var trailing = [UIBarButtonItem(customView: authorPill)]
+        var trailing = [BarItems.container(id: ItemID.authorPill, view: authorPill)]
         if let walletItem = makeWalletItem() {
             trailing += [.fixedSpace(Spacing.sm), walletItem]
         }
@@ -554,16 +565,17 @@ final class TextPostComposerViewController: UIViewController {
 
         attribution.setOverMedia(false)
         attribution.setPost(model, pipeline: imagePipeline)
-        bookmarkButton.isEnabled = true
+        bookmarkItem.isEnabled = true
         refreshBookmarkGlyph()
-        let more = SnapFooterToolbar.makeMoreButton(menu: UIMenu(children: [
+        let more = SnapFooterToolbar.makeMoreItem(menu: UIMenu(children: [
             UIAction(title: "Share", image: AppSymbol.share.image()) { [weak self] _ in
                 self?.sharePost()
             },
         ]))
         setToolbarItems(SnapFooterToolbar.items(
             leading: attribution,
-            actions: [bookmarkButton, SnapFooterToolbar.makeRepostButton()],
+            leadingID: ItemID.attribution,
+            actions: [bookmarkItem, SnapFooterToolbar.makeRepostItem()],
             more: more
         ), animated: true)
         fitTrailingRun()
@@ -596,7 +608,8 @@ final class TextPostComposerViewController: UIViewController {
         let bar = navigationController?.navigationBar.bounds.width ?? view.bounds.width
         guard bar > 0 else { return }
         let pad: CGFloat = 18
-        var budget = bar - 16 * 2 - (36 + pad) - pad
+        // The ✕ is a stock item now (#1679): a bar bubble, 44 wide.
+        var budget = bar - 16 * 2 - (44 + pad) - pad
         if isSortAvailable {
             budget -= sortButton.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + pad + Spacing.sm
         }
@@ -673,10 +686,8 @@ final class TextPostComposerViewController: UIViewController {
         guard let id = publishedModel?.id else { return }
         let saved = bookmarks.isSaved(id.rawValue)
         drawnBookmarkSymbol = SnapFeedViewController.bookmarkSymbol(saved: saved)
-        bookmarkButton.accessibilityLabel = saved ? "Saved" : "Save"
-        var config = bookmarkButton.configuration
-        config?.image = SnapFeedViewController.bookmarkImage(saved: saved)
-        bookmarkButton.configuration = config
+        bookmarkItem.accessibilityLabel = saved ? "Saved" : "Save"
+        bookmarkItem.image = SnapFooterToolbar.saveImage(saved: saved)
     }
 
     private func sharePost() {
@@ -695,7 +706,7 @@ final class TextPostComposerViewController: UIViewController {
     var debugPublishedPostID: PostID? { publishedModel?.id }
     /// The save glyph as drawn: its symbol and its spoken label.
     var debugBookmarkGlyph: (symbol: String, label: String?) {
-        (drawnBookmarkSymbol, bookmarkButton.accessibilityLabel)
+        (drawnBookmarkSymbol, bookmarkItem.accessibilityLabel)
     }
 
     private var didRunDebugHooks = false

@@ -78,7 +78,7 @@ final class SnapCommentSortButton: UIButton {
         // light mode, hardcoded white put invisible glyphs on a light
         // platter. That is the exact failure `applyChromeTheme` was written
         // to prevent; this item was the one that never got the memo. Every
-        // other bar item already reads `.label` (see `SnapNavControls` and
+        // other bar item already reads `.label` (the stock items and
         // `SnapAuthorIdentityView`), so this joins them rather than
         // inventing a rule.
         config.baseForegroundColor = .label

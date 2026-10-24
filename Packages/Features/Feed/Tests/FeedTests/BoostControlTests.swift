@@ -458,7 +458,7 @@ struct BoostControlTests {
         #expect(engaged.first == resting.first)
         #expect(feed.debugTrailingHasClose == false)
         let leading = feed.navigationItem.leftBarButtonItems ?? []
-        #expect((leading.first?.customView as? UIButton)?.accessibilityLabel == "Close comments")
+        #expect(leading.first?.accessibilityLabel == "Close comments")
         #expect(feed.debugLeadingIsClose)
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
@@ -483,7 +483,7 @@ struct BoostControlTests {
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
         #expect(feed.debugLeadingIsClose)
         #expect(feed.navigationItem.leftBarButtonItems?.first !== arrow)
-        #expect((feed.navigationItem.leftBarButtonItems?.first?.customView as? UIButton)?.accessibilityLabel == "Close comments")
+        #expect(feed.navigationItem.leftBarButtonItems?.first?.accessibilityLabel == "Close comments")
         #expect(feed.debugTrailingHasClose == false)
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
