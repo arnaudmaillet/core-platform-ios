@@ -81,7 +81,7 @@ struct LikesHeartViewTests {
 @MainActor
 struct AppButtonLikesHeartTests {
     @Test func aSelectedLikeDrawsTheGradientHeart() {
-        let button = AppButton(aspect: .bare, size: .inline, content: .symbol(LikesSymbol.glyph))
+        let button = AppIconButton(style: .glyph, content: .symbol(LikesSymbol.glyph))
         button.drawsLikesHeart = true
         #expect(button.likesHeart == nil, "at rest the glyph is the button's own")
         button.setSelected(true, animated: false)
@@ -94,7 +94,7 @@ struct AppButtonLikesHeartTests {
     }
 
     @Test func offByDefault() {
-        let button = AppButton(aspect: .bare, size: .inline, content: .symbol(LikesSymbol.glyph))
+        let button = AppIconButton(style: .glyph, content: .symbol(LikesSymbol.glyph))
         button.setSelected(true, animated: false)
         #expect(button.likesHeart == nil)
     }

@@ -646,8 +646,8 @@ struct CarouselChipsAreFixedTests {
     /// The line's counters: the actions carrying a count (the app's button
     /// since #934), left to right.
     private func counterPills(in cell: PostGridListRowCell) -> [UIView] {
-        func walk(_ view: UIView) -> [AppButton] {
-            ((view as? AppButton).map { [$0] } ?? []) + view.subviews.flatMap(walk)
+        func walk(_ view: UIView) -> [AppIconButton] {
+            ((view as? AppIconButton).map { [$0] } ?? []) + view.subviews.flatMap(walk)
         }
         return walk(cell.contentView)
             .filter { !$0.isHidden && $0.superviewChainIsVisible && $0.content.count != nil }

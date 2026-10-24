@@ -47,8 +47,8 @@ final class MessageRequestCell: UITableViewCell {
     /// press (#866).
     private let acceptButton = AppButton(aspect: .pill(.prominent), size: .row, content: .title("Accept"))
     /// A quiet circle carrying only a glyph.
-    private let dismissButton: AppButton = {
-        let button = AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("xmark"))
+    private let dismissButton: AppIconButton = {
+        let button = AppIconButton(style: .bubble(.quiet), content: .symbol("xmark"))
         button.inkColor = .secondaryLabel
         return button
     }()
@@ -56,7 +56,7 @@ final class MessageRequestCell: UITableViewCell {
     /// Accept. Internal for tests.
     var debugAcceptButton: AppButton { acceptButton }
     /// Decline. Internal for tests.
-    var debugDismissButton: AppButton { dismissButton }
+    var debugDismissButton: AppIconButton { dismissButton }
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -253,7 +253,7 @@ final class MessageRequestCell: UITableViewCell {
         // ⚠️ Drawn at 36pt, under its 44pt icon size: the size constraints
         // below win, so the button's own intrinsic 44 must give rather than
         // resist (a required resistance was an unsatisfiable layout). Its
-        // hit region stays 44×44 (`AppButton.hitRegion`).
+        // hit region stays 44×44 (`AppControl.hitRegion`).
         dismissButton.setContentHuggingPriority(.required, for: .horizontal)
         dismissButton.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         dismissButton.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)

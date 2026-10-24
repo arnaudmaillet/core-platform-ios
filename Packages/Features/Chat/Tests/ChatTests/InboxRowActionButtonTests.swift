@@ -6,7 +6,7 @@ import UIKit
 @testable import Chat
 
 // THE INBOX'S ROW ACTIONS ARE THE APP'S BUTTON (#932). The Requests rows'
-// Accept and Decline and the Suggestions rows' Follow and ✕ are `AppButton`:
+// Accept and Decline and the Suggestions rows' Follow and ✕ are `AppButton` / `AppIconButton`:
 // one press each (#866), Follow ⇄ Following blurred over to the quiet ground
 // (#931). These pin the states per tab and that every action still lands
 // through the button, optimistic and rolled back as before.
@@ -102,7 +102,7 @@ struct InboxRowActionButtonTests {
 
     /// One press per button (#866): the button's own, and a touch-down
     /// scales it once.
-    private func expectOnePress(_ button: AppButton, _ name: String) {
+    private func expectOnePress(_ button: AppControl, _ name: String) {
         #expect(PressFeedback.attached(to: button) === button.pressFeedback, "\(name) carries a second press")
         button.sendActions(for: .touchDown)
         button.sendActions(for: .touchCancel)
@@ -137,7 +137,7 @@ struct InboxRowActionButtonTests {
         #expect(cell.debugFollowButton.accessibilityLabel == "Unfollow Name s1")
         #expect(cell.debugFollowButton.accessibilityTraits.contains(.toggleButton))
 
-        #expect(cell.debugDismissButton.aspect == .bare)
+        #expect(cell.debugDismissButton.style == .glyph)
         #expect(cell.debugDismissButton.content.symbol == "xmark")
         expectOnePress(cell.debugFollowButton, "Follow")
         expectOnePress(cell.debugDismissButton, "the ✕")
@@ -226,7 +226,8 @@ struct InboxRowActionButtonTests {
         #expect(cell.debugAcceptButton.content.title == "Accept")
         #expect(cell.debugAcceptButton.currentGround == .prominent)
         let decline = cell.debugDismissButton
-        #expect(decline.content.symbol == "xmark" && decline.content.title == nil, "Decline is not the ✕")
+        #expect(decline.content.symbol == "xmark" && decline.content.count == nil, "Decline is not the ✕")
+        #expect(decline.style == .bubble(.quiet))
         #expect(decline.currentGround == .quiet)
         #expect(decline.configuration?.cornerStyle == .capsule)
         expectOnePress(cell.debugAcceptButton, "Accept")

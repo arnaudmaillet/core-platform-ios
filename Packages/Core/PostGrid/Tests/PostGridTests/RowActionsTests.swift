@@ -44,7 +44,7 @@ struct RowActionsTests {
         func walk(_ view: UIView) -> [UIButton] {
             // The glyph-only controls: the band's "..." and the line's save
             // and repost (counts are the line's other two buttons).
-            if let button = view as? AppButton { return button.content.count == nil ? [button] : [] }
+            if let button = view as? AppIconButton { return button.content.count == nil ? [button] : [] }
             if let button = view as? UIButton { return [button] }
             return view.subviews.flatMap(walk)
         }
@@ -54,7 +54,7 @@ struct RowActionsTests {
     /// The line's chips: the indicator's capsule and the card's actions.
     private func pills(in view: UIView) -> [UIView] {
         func walk(_ view: UIView) -> [UIView] {
-            if view is PostMetaPillView || view is AppButton { return [view] }
+            if view is PostMetaPillView || view is AppIconButton { return [view] }
             return view.subviews.flatMap(walk)
         }
         return walk(view).filter { !$0.isHidden && $0.superviewChainIsVisible }
@@ -106,7 +106,7 @@ struct RowActionsTests {
         }
         #expect(ordered.count == 4)
         // Glyph-only controls lead, counters close (all the app's button, #934).
-        let line = ordered.compactMap { $0 as? AppButton }
+        let line = ordered.compactMap { $0 as? AppIconButton }
         #expect(line.count == 4)
         #expect(line[0].content.count == nil && line[1].content.count == nil)
         #expect(line[2].content.count != nil && line[3].content.count != nil)
@@ -116,8 +116,8 @@ struct RowActionsTests {
         // The boxes HANG past the column by the air they leave before their
         // ink (plain actions, 2026-09-30), so the ink is what sits on it —
         // measured on the ink in `PlainCardActionsTests`.
-        let first = try #require(ordered.first as? AppButton)
-        let last = try #require(ordered.last as? AppButton)
+        let first = try #require(ordered.first as? AppIconButton)
+        let last = try #require(ordered.last as? AppIconButton)
         let leading = first.convert(first.bounds, to: cell.contentView).minX
         let trailing = cell.contentView.bounds.maxX
             - last.convert(last.bounds, to: cell.contentView).maxX

@@ -3,8 +3,9 @@ import Testing
 import UIKit
 @testable import DesignSystem
 
-/// The app's one button (#931): two aspects, four sizes, the states, the
-/// motions and their Reduce Motion fallbacks, the hit region, VoiceOver.
+/// The app's button with words (#931, #1666): the grounds, the sizes, the
+/// states, the motions and their fallbacks, the hit region, VoiceOver. The
+/// icon-only buttons are `AppIconButtonTests`'.
 @MainActor
 struct AppButtonTests {
     private func hosted(_ button: AppButton) -> (UIWindow, UIView) {
@@ -73,31 +74,18 @@ struct AppButtonTests {
         #expect(button.configuration?.background.cornerRadius == AppButton.Metrics.cardRadius)
     }
 
-    @Test func aBareButtonHasNoGroundUntilButtonShapesAsksForOne() {
-        let button = AppButton(aspect: .bare, size: .inline, content: AppButton.Content(symbol: "heart", count: 12))
-        button.buttonShapes = { false }
-        #expect(button.currentGround == nil)
-        #expect(button.configuration?.background.backgroundColor == nil || button.configuration?.background.backgroundColor == .clear)
-        button.buttonShapes = { true }
-        #expect(button.currentGround == .quiet, "Button Shapes on: the bare aspect gains a visible shape")
-    }
-
     @Test func titleSymbolAndCountCombine() {
-        let button = AppButton(aspect: .bare, size: .inline, content: AppButton.Content(symbol: "heart", count: 1_234))
-        #expect(button.configuration?.image != nil)
-        #expect(button.configuration?.title == "1.2K", "a count is drawn compact")
         let both = AppButton(aspect: .pill(.quiet), size: .header, content: AppButton.Content(title: "Likes", count: 7))
         #expect(both.configuration?.title == "Likes 7")
-        let icon = AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("qrcode"))
-        #expect(icon.configuration?.title == nil)
-        #expect(icon.intrinsicContentSize == CGSize(width: 44, height: 44))
+        let symbol = AppButton(aspect: .pill(.quiet), size: .header, content: AppButton.Content(title: "Save", symbol: "bookmark"))
+        #expect(symbol.configuration?.image != nil)
     }
 
     // MARK: - Hit region
 
     @Test(arguments: AppButton.Size.allCases)
     func everySizeTakesAFingerOver44Points(_ size: AppButton.Size) {
-        let button = AppButton(aspect: .bare, size: size, content: AppButton.Content(symbol: "heart", count: 3))
+        let button = AppButton(aspect: .pill(.quiet), size: size, content: .title("Go"))
         let (window, host) = hosted(button)
         defer { window.isHidden = true }
         host.layoutIfNeeded()
@@ -116,14 +104,6 @@ struct AppButtonTests {
         #expect(button.currentGround == .quiet, "Follow → Following goes quiet")
         #expect(button.accessibilityTraits.contains(.selected))
         #expect(button.accessibilityTraits.contains(.toggleButton))
-        let liked = AppButton(aspect: .bare, size: .inline, content: .symbol("heart"))
-        liked.selectedTint = .systemRed
-        liked.isSelected = true
-        // The symbol turns red; the count keeps the ink.
-        #expect(liked.configuration?.imageColorTransformer?(.label) == .systemRed)
-        #expect(liked.configuration?.baseForegroundColor == .label)
-        let ground = liked.configuration?.updated(for: liked).background.resolvedBackgroundColor(for: .systemBlue)
-        #expect(ground == .clear, "a selected bare button grew a ground: \(String(describing: ground))")
     }
 
     @Test func disabledIsGreyedInertAndSilent() {
@@ -355,43 +335,6 @@ struct AppButtonTests {
     }
 
     @Test(arguments: [false, true])
-    func aCountRollsOrFades(_ reduced: Bool) {
-        let button = AppButton(aspect: .bare, size: .inline, content: AppButton.Content(symbol: "heart", count: 9))
-        button.reducesMotion = { reduced }
-        let (window, _) = hosted(button)
-        defer { window.isHidden = true }
-        button.setContent(AppButton.Content(symbol: "heart", count: 10), animated: true)
-        #expect(button.events.last == (reduced ? .countFade : .countRoll(up: true)))
-        button.setContent(AppButton.Content(symbol: "heart", count: 8), animated: true)
-        #expect(button.events.last == (reduced ? .countFade : .countRoll(up: false)))
-        #expect(button.configuration?.title == "8")
-        #expect(button.accessibilityValue == "8", "the count is the accessibility value")
-    }
-
-    @Test(arguments: [false, true])
-    func aSymbolSwapIsReplacedOrFaded(_ reduced: Bool) {
-        let button = AppButton(aspect: .bare, size: .inline, content: .symbol("bookmark"))
-        button.reducesMotion = { reduced }
-        let (window, _) = hosted(button)
-        defer { window.isHidden = true }
-        button.setContent(.symbol("bookmark.fill"), animated: true)
-        #expect(button.events.last == (reduced ? .symbolFade : .symbolReplace))
-    }
-
-    @Test(arguments: [false, true])
-    func theSymbolEffectBouncesOrFlashes(_ reduced: Bool) {
-        let button = AppButton(aspect: .bare, size: .inline, content: .symbol("heart"))
-        button.reducesMotion = { reduced }
-        button.bouncesSymbolOnTap = true
-        let (window, _) = hosted(button)
-        defer { window.isHidden = true }
-        button.updateConfiguration()
-        button.layoutIfNeeded()
-        button.debugTap()
-        #expect(button.events.last == (reduced ? .symbolFlash : .symbolBounce))
-    }
-
-    @Test(arguments: [false, true])
     func aFailureShakesOrFlashes(_ reduced: Bool) {
         let button = follow(reduced: reduced)
         button.notifiesCompletion = true
@@ -490,18 +433,6 @@ struct AppButtonTests {
         #expect(PressFeedback.attached(to: button) === press, "a second press was attached")
     }
 
-    @Test func aBareButtonGivesUnderTheFinger() throws {
-        let button = AppButton(aspect: .bare, size: .inline, content: AppButton.Content(symbol: "heart", count: 3))
-        button.reducesMotion = { false }
-        let (window, _) = hosted(button)
-        defer { window.isHidden = true }
-        let press = try #require(button.pressFeedback)
-        #expect(press.style == .press)
-        button.sendActions(for: .touchDown)
-        #expect(press.scale == PressFeedback.pressedScale(for: button.bounds.size))
-        #expect(press.scale < 1)
-    }
-
     @Test func aSoundIsTheTapsTick() throws {
         let button = AppButton(aspect: .pill(.quiet), size: .header, content: .title("Message"), sound: .tap)
         let press = try #require(button.pressFeedback)
@@ -540,85 +471,6 @@ struct AppButtonTests {
         #expect(button.debugHoldRecognizer == nil)
     }
 
-    // MARK: - The card actions' press (#934)
-
-    /// A card action: no dim, a wash inside its shape — one step pressed, a
-    /// second held — gone once the finger lifts; a lift inside still taps.
-    @Test func aCardActionWashesInsteadOfDimming() {
-        let button = AppButton(aspect: .bare, size: .inline, content: .init(symbol: "heart", count: 3), dims: false)
-        button.washesOnPress = true
-        button.holdFreezesScrolling = true
-        var tapped = 0
-        button.addAction(UIAction { _ in tapped += 1 }, for: .primaryActionTriggered)
-        #expect(button.debugWashAlpha == 0)
-        button.debugHold(liftInside: true)
-        #expect(tapped == 1)
-        #expect(button.debugWashAlpha == 0, "the wash clears after the hold")
-        #expect(!button.isHolding)
-        button.debugHold(liftInside: false)
-        #expect(tapped == 1, "a lift outside does not tap")
-        #expect(AppButton.Metrics.pressedWash < AppButton.Metrics.heldWash)
-    }
-
-    /// The hold shares the finger with the button's own recognisers (its
-    /// menu's) and with nothing above it.
-    @Test func theHoldSharesOnlyWithTheButtonsOwnRecognisers() throws {
-        let host = UIScrollView()
-        let button = AppButton(aspect: .bare, size: .inline, content: .symbol("heart"))
-        host.addSubview(button)
-        button.holdFreezesScrolling = true
-        let hold = try #require(button.debugHoldRecognizer)
-        let own = UILongPressGestureRecognizer()
-        button.addGestureRecognizer(own)
-        let delegate = try #require(hold.delegate)
-        #expect(delegate.gestureRecognizer?(hold, shouldRecognizeSimultaneouslyWith: own) == true)
-        #expect(delegate.gestureRecognizer?(hold, shouldRecognizeSimultaneouslyWith: host.panGestureRecognizer) == false)
-    }
-
-    /// A held card action raises its menu — built when it lifts — and a
-    /// button without one keeps UIKit's own context menu off.
-    @Test func aMenuProviderTurnsTheHoldMenuOn() throws {
-        let button = AppButton(aspect: .bare, size: .inline, content: .symbol("heart"))
-        #expect(!button.isContextMenuInteractionEnabled)
-        var built = 0
-        button.menuProvider = {
-            built += 1
-            return UIMenu(children: [UIAction(title: "Stake 50") { _ in }])
-        }
-        #expect(button.isContextMenuInteractionEnabled)
-        #expect(built == 0, "built when raised, not when set")
-        let interaction = try #require(button.contextMenuInteraction)
-        let configuration = try #require(button.contextMenuInteraction(interaction, configurationForMenuAtLocation: .zero))
-        _ = configuration
-        button.menuProvider = nil
-        #expect(!button.isContextMenuInteractionEnabled)
-    }
-
-    /// A provider that answers nil raises nothing — not a lifted preview
-    /// round an empty menu (a guest's like, #1146).
-    @Test func aProviderThatAnswersNilRaisesNothing() throws {
-        let button = AppButton(aspect: .bare, size: .inline, content: .symbol("heart"))
-        button.menuProvider = { nil }
-        let interaction = try #require(button.contextMenuInteraction)
-        #expect(button.contextMenuInteraction(interaction, configurationForMenuAtLocation: .zero) == nil)
-    }
-
-    /// A card's glyph is drawn at its own size, not the type's.
-    @Test func aSymbolPointSizeOverridesTheTypes() throws {
-        let button = AppButton(aspect: .bare, size: .inline, content: .symbol("heart"))
-        button.symbolPointSize = 17
-        let symbol = try #require(button.configuration?.preferredSymbolConfigurationForImage)
-        #expect(symbol == UIImage.SymbolConfiguration(pointSize: 17, weight: .medium, scale: .medium))
-    }
-
-    @Test func aMenuIsUIKits() {
-        let button = AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("ellipsis"))
-        button.menu = UIMenu(children: [UIAction(title: "Report") { _ in }])
-        button.showsMenuAsPrimaryAction = true
-        #expect(button.showsMenuAsPrimaryAction)
-        #expect(button.showsLargeContentViewer, "an icon-only button shows large on a long press")
-    }
-
     // MARK: - Cell accessory
 
     /// The accessory reserves the button's real width at once, so taps land
@@ -635,17 +487,18 @@ struct AppButtonTests {
 
     // MARK: - Never glass
 
-    @Test func theComponentNeverUsesGlass() throws {
+    @Test(arguments: ["AppControl", "AppButton", "AppIconButton"])
+    func theComponentsNeverUseGlass(_ name: String) throws {
         let file = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // DesignSystemTests
             .deletingLastPathComponent() // Tests
             .deletingLastPathComponent() // DesignSystem
-            .appendingPathComponent("Sources/DesignSystem/Components/AppButton.swift")
+            .appendingPathComponent("Sources/DesignSystem/Components/\(name).swift")
         let source = try String(contentsOf: file, encoding: .utf8)
             .split(separator: "\n")
             .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
             .joined(separator: "\n")
         let glass = try Regex(#"\.(prominentGlass|clearGlass|prominentClearGlass|glass)\s*\(|UIGlassEffect|UIGlassContainerEffect"#)
-        #expect(!source.contains(glass), "AppButton uses a glass API")
+        #expect(!source.contains(glass), "\(name) uses a glass API")
     }
 }

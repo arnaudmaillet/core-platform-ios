@@ -936,7 +936,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
     /// Presses `action` as a finger would, reporting whether it is a control
     /// that is shown — "did nothing" and "is not a control" differ.
-    private static func debugPress(_ action: AppButton) -> Bool {
+    private static func debugPress(_ action: AppControl) -> Bool {
         guard !action.isHidden, action.isUserInteractionEnabled, action.superviewChainIsVisible,
               action.acceptsTaps else { return false }
         action.debugTap()
@@ -1712,7 +1712,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// row is already showing, never for a row bound to a new one.
     private func applyReactionCount(animated: Bool) {
         let staked = viewerStake > 0
-        let content = AppButton.Content(
+        let content = AppIconButton.Content(
             symbol: staked ? LikesSymbol.glyph : ActionSymbol.like,
             count: baseReactionCount.map { Int(clamping: $0) }
         )
@@ -1854,7 +1854,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// carrying a count and holding the line's end rather than by a darker
     /// ink: glyph and count in the line's one ink (`PostCardPillView.ink`).
     /// The app's one button since #934 (`PostCardAction`).
-    private let likesAction: AppButton = {
+    private let likesAction: AppIconButton = {
         // Staked, the button's own filled heart in the Points pink — no
         // `LikesHeartView` laid over it (#1186): that overlay showed the like
         // twice and left a mark during the hero flight home, and the hearts
@@ -2211,8 +2211,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     var closingLineHang: (leading: CGFloat, trailing: CGFloat) {
         let shown = metaRow.arrangedSubviews.filter { !$0.isHidden && $0 !== lineSpacer }
         return (
-            (shown.first as? AppButton).map(PostCardAction.inkLeading) ?? 0,
-            (shown.last as? AppButton).map(PostCardAction.inkTrailing) ?? 0
+            (shown.first as? AppIconButton).map(PostCardAction.inkLeading) ?? 0,
+            (shown.last as? AppIconButton).map(PostCardAction.inkTrailing) ?? 0
         )
     }
 

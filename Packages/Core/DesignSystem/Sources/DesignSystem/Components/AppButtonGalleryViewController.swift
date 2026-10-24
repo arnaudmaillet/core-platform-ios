@@ -1,20 +1,21 @@
 #if DEBUG
 import UIKit
 
-/// Every `AppButton` aspect × size × state on one screen, and its motions on
-/// demand (#931) — `-button-gallery` opens it over the app. A QA surface: it
-/// is how the component is filmed in light, dark, Reduce Motion and at the
-/// app's largest text size.
+/// Every `AppButton` aspect × size × state and every `AppIconButton` style on
+/// one screen, and their motions on demand (#931, #1666) — `-button-gallery`
+/// opens it over the app. A QA surface: it is how the components are filmed
+/// in light, dark and at the app's largest text size.
 public final class AppButtonGalleryViewController: UIViewController {
     private let scroll = UIScrollView()
     private let column = UIStackView()
-    private var all: [AppButton] = []
-    /// The gallery's own Reduce Motion, on top of the iPhone's.
+    private var all: [AppControl] = []
+    /// The gallery's own Reduce Motion: the buttons ignore the iPhone's, and
+    /// this shows their fallbacks.
     private var forcesReducedMotion = false
     private var demo: AppButton?
-    private var counter: AppButton?
-    private var toggled: AppButton?
-    private var vanishing: AppButton?
+    private var counter: AppIconButton?
+    private var toggled: AppIconButton?
+    private var vanishing: AppIconButton?
 
     public init() {
         super.init(nibName: nil, bundle: nil)
@@ -92,19 +93,25 @@ public final class AppButtonGalleryViewController: UIViewController {
         shape: AppButton.Shape = .capsule
     ) -> AppButton {
         let button = AppButton(aspect: aspect, size: size, shape: shape, content: content, sound: .tap)
-        button.reducesMotion = { [weak self] in
-            MotionPreference.reducesMotion || (self?.forcesReducedMotion ?? false)
-        }
-        all.append(button)
+        track(button)
         return button
+    }
+
+    private func makeIcon(_ style: AppIconButton.Style, _ content: AppIconButton.Content) -> AppIconButton {
+        let button = AppIconButton(style: style, content: content, sound: .tap)
+        track(button)
+        return button
+    }
+
+    private func track(_ button: AppControl) {
+        button.reducesMotion = { [weak self] in self?.forcesReducedMotion ?? false }
+        all.append(button)
     }
 
     private func content(for size: AppButton.Size) -> AppButton.Content {
         switch size {
         case .row: .title("Follow")
         case .header: AppButton.Content(title: "Message", symbol: "paperplane")
-        case .icon: .symbol("qrcode")
-        case .inline: AppButton.Content(symbol: AppSymbol.like.rawValue, count: 1_284)
         }
     }
 
@@ -113,8 +120,15 @@ public final class AppButtonGalleryViewController: UIViewController {
             header("\(size)".capitalized)
             let sample = content(for: size)
             row([make(.pill(.prominent), size, sample), make(.pill(.quiet), size, sample), make(.pill(.tinted), size, sample)])
-            row([make(.pill(.material), size, sample), make(.bare, size, sample)], over: true)
+            row([make(.pill(.material), size, sample)], over: true)
         }
+        header("Bubble")
+        let qr = AppIconButton.Content.symbol("qrcode")
+        row([makeIcon(.bubble(.prominent), qr), makeIcon(.bubble(.quiet), qr), makeIcon(.bubble(.tinted), qr)])
+        row([makeIcon(.bubble(.material), qr), makeIcon(.glyph, qr)], over: true)
+        header("Glyph")
+        let likes = AppIconButton.Content(symbol: AppSymbol.like.rawValue, count: 1_284)
+        row([makeIcon(.glyph, likes), makeIcon(.glyph, .symbol(AppSymbol.save.rawValue))])
         header("Card shape")
         row([
             make(.pill(.quiet), .header, .title("Edit profile"), shape: .card),
@@ -139,10 +153,10 @@ public final class AppButtonGalleryViewController: UIViewController {
         let loadingSymbol = make(.pill(.quiet), .header, AppButton.Content(title: "Save", symbol: AppSymbol.save.rawValue))
         loadingSymbol.setPhase(.loading, animated: false)
         row([placeholder, loading, loadingSymbol])
-        let liked = make(.bare, .inline, AppButton.Content(symbol: AppSymbol.liked.rawValue, count: 1_285))
+        let liked = makeIcon(.glyph, AppIconButton.Content(symbol: AppSymbol.liked.rawValue, count: 1_285))
         liked.selectedTint = Palette.tint
         liked.isSelected = true
-        row([liked, make(.bare, .inline, AppButton.Content(symbol: "bubble.right", count: 48))])
+        row([liked, makeIcon(.glyph, AppIconButton.Content(symbol: "bubble.right", count: 48))])
     }
 
     // MARK: - Motion
@@ -154,17 +168,17 @@ public final class AppButtonGalleryViewController: UIViewController {
         demo.haptic = .selection
         demo.addAction(UIAction { [weak self] _ in self?.cycleFollow() }, for: .primaryActionTriggered)
         self.demo = demo
-        let counter = make(.bare, .inline, AppButton.Content(symbol: AppSymbol.like.rawValue, count: 99))
+        let counter = makeIcon(.glyph, AppIconButton.Content(symbol: AppSymbol.like.rawValue, count: 99))
         counter.selectedTint = Palette.tint
         counter.bouncesSymbolOnTap = true
         counter.haptic = .lightImpact
         counter.holdFreezesScrolling = true
         counter.addAction(UIAction { [weak self] _ in self?.like() }, for: .primaryActionTriggered)
         self.counter = counter
-        let toggled = make(.bare, .inline, .symbol(AppSymbol.save.rawValue))
+        let toggled = makeIcon(.glyph, .symbol(AppSymbol.save.rawValue))
         toggled.addAction(UIAction { [weak self] _ in self?.save() }, for: .primaryActionTriggered)
         self.toggled = toggled
-        let vanishing = make(.pill(.quiet), .icon, .symbol("ellipsis"))
+        let vanishing = makeIcon(.bubble(.quiet), .symbol("ellipsis"))
         // A menu as the primary action; its item answers with the symbol
         // effect, so the menu's own path is visible too.
         vanishing.menu = UIMenu(children: [UIAction(title: "Bounce") { [weak vanishing] _ in
@@ -200,9 +214,9 @@ public final class AppButtonGalleryViewController: UIViewController {
         Task { @MainActor [weak demo] in
             try? await Task.sleep(for: .milliseconds(700))
             guard let demo else { return }
+            // The answer onto the held load, then the morph to it.
+            demo.setContent(.title(following ? "Following" : "Follow"), selected: following, animated: true)
             demo.setPhase(.content, animated: true)
-            demo.setSelected(following, animated: true)
-            demo.setContent(.title(following ? "Following" : "Follow"), animated: true)
         }
     }
 
@@ -211,7 +225,7 @@ public final class AppButtonGalleryViewController: UIViewController {
         let liked = !counter.isSelected
         counter.setSelected(liked, animated: true)
         let count = (counter.content.count ?? 0) + (liked ? 1 : -1)
-        counter.setContent(AppButton.Content(symbol: liked ? AppSymbol.liked.rawValue : AppSymbol.like.rawValue, count: count), animated: true)
+        counter.setContent(AppIconButton.Content(symbol: liked ? AppSymbol.liked.rawValue : AppSymbol.like.rawValue, count: count), animated: true)
     }
 
     private func save() {

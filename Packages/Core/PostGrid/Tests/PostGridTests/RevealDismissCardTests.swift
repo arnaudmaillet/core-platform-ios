@@ -101,8 +101,8 @@ struct RevealDismissCardTests {
     /// safe, so it is worth holding on to.
     @Test func theStandInAlreadyCarriesTheClosingMetricLine() throws {
         // The line's counters: the actions carrying a count (#934).
-        func metrics(_ view: UIView) -> [AppButton] {
-            if let button = view as? AppButton { return button.content.count == nil ? [] : [button] }
+        func metrics(_ view: UIView) -> [AppIconButton] {
+            if let button = view as? AppIconButton { return button.content.count == nil ? [] : [button] }
             return view.subviews.flatMap(metrics)
         }
         // Counted, because a chip with no number hides itself — the line the

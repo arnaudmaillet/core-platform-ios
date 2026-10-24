@@ -2,7 +2,7 @@ import Testing
 import UIKit
 @testable import DesignSystem
 
-/// Under a press an `AppButton`'s icon scales with its text, by
+/// Under a press an `AppIconButton`'s icon scales with its text, by
 /// `PressFeedback`'s factor alone (#1376). UIKit's symbol animation shrank the
 /// icon to about half on every highlight — measured, 11.7 pt to 6.3 pt — so it
 /// stays off, and the symbol replace comes from the configuration.
@@ -16,7 +16,7 @@ struct AppButtonIconPressTests {
     }
 
     @Test func symbolAnimationIsOff() {
-        let button = AppButton(aspect: .bare, size: .inline, content: AppButton.Content(symbol: "bubble", count: 78))
+        let button = AppIconButton(style: .glyph, content: AppIconButton.Content(symbol: "bubble", count: 78))
         #expect(button.isSymbolAnimationEnabled == false)
     }
 
@@ -28,7 +28,7 @@ struct AppButtonIconPressTests {
         window.rootViewController = host
         window.isHidden = false
         defer { window.isHidden = true }
-        let button = AppButton(aspect: .bare, size: .inline, content: AppButton.Content(symbol: "bubble", count: 78))
+        let button = AppIconButton(style: .glyph, content: AppIconButton.Content(symbol: "bubble", count: 78))
         host.view.addSubview(button)
         button.frame = CGRect(x: 100, y: 100, width: 80, height: 36)
         button.layoutIfNeeded()
@@ -48,10 +48,10 @@ struct AppButtonIconPressTests {
     /// A symbol swapped for another is still replaced — the configuration's
     /// transition — and simply swapped under reduced motion (the cross-fade).
     @Test func theSymbolReplaceComesFromTheConfiguration() {
-        let button = AppButton(aspect: .bare, size: .icon, content: .symbol("star"))
+        let button = AppIconButton(style: .bubble(.quiet), content: .symbol("star"))
         button.reducesMotion = { false }
-        #expect(button.configuration(for: .symbol("star.fill"), phase: .content).symbolContentTransition != nil)
+        #expect(button.configuration(for: .symbol("star.fill")).symbolContentTransition != nil)
         button.reducesMotion = { true }
-        #expect(button.configuration(for: .symbol("star.fill"), phase: .content).symbolContentTransition == nil)
+        #expect(button.configuration(for: .symbol("star.fill")).symbolContentTransition == nil)
     }
 }

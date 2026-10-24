@@ -98,7 +98,7 @@ struct CompactCardLikeTests {
         like.setViewerStake(0)
         #expect(like.debugIsStaked == false)
         #expect(like.isUserInteractionEnabled == false, "scenery: the card takes the touch")
-        #expect(!((like as UIView) is AppButton), "a readout, not the card's like button")
+        #expect(!((like as UIView) is AppIconButton), "a readout, not the card's like button")
         #expect(like.gestureRecognizers?.isEmpty ?? true)
     }
 }

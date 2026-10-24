@@ -52,7 +52,7 @@ private func row(
 /// The line's chips: the page indicator's capsule and the card's actions
 /// (the app's one button since #934).
 private func pills(in view: UIView) -> [UIView] {
-    if view is PostMetaPillView || view is AppButton { return [view] }
+    if view is PostMetaPillView || view is AppIconButton { return [view] }
     return view.subviews.flatMap(pills(in:))
 }
 
@@ -222,7 +222,7 @@ struct MediaMetaPillPlacementTests {
         }
         let chip = try #require(indicators(cell.contentView).first)
         let counter = try #require(visiblePills(in: cell).first { !($0 is MediaPageIndicatorView) })
-        #expect((counter as? AppButton)?.currentGround == nil, "an action draws no ground")
+        #expect((counter as? AppIconButton)?.currentGround == nil, "an action draws no ground")
         #expect(chip.contentView.backgroundColor == .tertiarySystemFill)
         func dots(_ view: UIView) -> [UIView] {
             let own = view.subviews.filter { $0.layer.cornerRadius == MediaPageIndicatorView.dotDiameter / 2 && $0.bounds.width > 0 }
@@ -321,7 +321,7 @@ struct MediaMetaPillContentTests {
         cell.onRepostTapped = {}
         #expect(visiblePills(in: cell).count == 4)
         // The two glyph-only controls: save and repost.
-        #expect(visiblePills(in: cell).filter { ($0 as? AppButton)?.content.count == nil }.count == 2)
+        #expect(visiblePills(in: cell).filter { ($0 as? AppIconButton)?.content.count == nil }.count == 2)
     }
 
     /// The rule, tested where it lives rather than only through a cell.
