@@ -124,7 +124,7 @@ struct SnapAuthorPillItemTests {
         for (id, name, meta) in [
             ("prof-1", "Al", "@al · 2h"),
             ("prof-2", "Grace Hopper With A Very Long Name Indeed", "@grace.hopper.the.admiral · 1d"),
-            ("prof-3", "Ada Lovelace", "@ada · 3w"),
+            ("prof-3", "Ada Byron", "@ada · 3w"),
         ] {
             feed.showAuthor(Self.model(id: "p-\(id)", author: name, authorID: id, meta: meta))
             #expect(Self.authorItem(feed)?.customView === pill)
