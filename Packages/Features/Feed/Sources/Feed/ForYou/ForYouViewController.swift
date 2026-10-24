@@ -292,10 +292,38 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     }
 
     /// The bell alone, in its own bubble (it opts out of the shared
-    /// background; see `NotificationsBell`).
+    /// background; see `NotificationsBell`) — and, as the For You sector's
+    /// Home page (#1703), the sector's selector just inboard of it.
     private func applyLeadingItems() {
-        navigationItem.leftBarButtonItems = [leadingAccessoryItem].compactMap { $0 }
+        var items = [leadingAccessoryItem].compactMap { $0 }
+        if let selector = sectorSelectorItem {
+            items += items.isEmpty ? [selector] : [BarItems.separator(), selector]
+        }
+        navigationItem.leftBarButtonItems = items
     }
+
+    /// EXPERIMENTAL (#1703): the sector's item while this is its page in
+    /// front (`ForYouSectorPage`).
+    var sectorNavigationItem: UINavigationItem?
+    /// The sector's Home | Feed selector.
+    var sectorSelectorItem: UIBarButtonItem? {
+        didSet {
+            guard isViewLoaded else { return }
+            applyLeadingItems()
+        }
+    }
+
+    override var navigationItem: UINavigationItem { sectorNavigationItem ?? super.navigationItem }
+    var ownNavigationItem: UINavigationItem { super.navigationItem }
+
+    /// The sector's insets while this is its Home page (#1703) — UIKit gives
+    /// the screen none in there. Read in place of the view's own.
+    var sectorSafeAreaInsets: UIEdgeInsets?
+    private var safeArea: UIEdgeInsets { sectorSafeAreaInsets ?? view.safeAreaInsets }
+
+    /// The controller the navigation stack holds for this screen: the sector
+    /// when it is a page of one (#1703), itself otherwise.
+    var stackScreen: UIViewController { (parent as? ForYouSectorViewController) ?? self }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -511,7 +539,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     private func visibleBand() -> CGRect? {
         guard shelf.window != nil, view.window != nil else { return nil }
         let band = view.bounds.inset(by: UIEdgeInsets(
-            top: view.safeAreaInsets.top, left: 0, bottom: floatingBarCover, right: 0
+            top: safeArea.top, left: 0, bottom: floatingBarCover, right: 0
         ))
         return shelf.convert(band, from: view)
     }
@@ -1183,7 +1211,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// so a tap landing mid-transition cannot stack a push on a pop.
     func pushDiscoverGallery() {
         guard activeTransition == nil,
-              let navigationController, navigationController.topViewController === self,
+              let navigationController, navigationController.topViewController === stackScreen,
               navigationController.transitionCoordinator == nil
         else { return }
         let gallery = DiscoverGalleryViewController(
@@ -1966,7 +1994,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // tab bar). They left the screen, so the Friends row may re-sort
         // before they are back. A push — a friend's posts, a list — is not
         // leaving: the row keeps the order they tapped from.
-        if navigationController?.topViewController === self {
+        if navigationController?.topViewController === stackScreen {
             friendsRow.releaseStoryOrder()
         }
     }
@@ -2004,7 +2032,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         if let story = flyingStory { friendsRow.bringStoryIntoView(story) }
         if let card = flyingCard { shelf.bringCardIntoView(card) }
         // Coming back from the feed: this screen owns the bottom again.
-        guard navigationController?.topViewController === self else { return }
+        guard navigationController?.topViewController === stackScreen else { return }
         // WHEN is `TabBarRevealPolicy`'s, HOW is UIKit's. A tab switch back or
         // a still screen: now. A scrub — a grab, a swipe, a window's drag,
         // whether or not it closes the feed — runs this at pop-BEGIN, which is
@@ -2076,7 +2104,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // A text visit's close-only flight ends with the visit, whoever ended it.
         cardPathFlight?.close(.abandoned)
         cardPathFlight = nil
-        guard let activeSession, navigationController?.topViewController === self else {
+        guard let activeSession, navigationController?.topViewController === stackScreen else {
             return
         }
         // The same close-out the flight's own endings run (the dock a turn
@@ -2096,9 +2124,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// rather than restated as a number that can go stale on the next device.
     private var floatingBarCover: CGFloat {
         guard let bar = tabBarController?.tabBar, !bar.isHidden, let host = bar.superview
-        else { return view.safeAreaInsets.bottom }
+        else { return safeArea.bottom }
         let inPage = view.convert(bar.frame, from: host)
-        return max(view.safeAreaInsets.bottom, view.bounds.maxY - inPage.minY)
+        return max(safeArea.bottom, view.bounds.maxY - inPage.minY)
     }
 
     // MARK: - The rows
@@ -2117,7 +2145,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// air — a tap landing mid-transition must not stack a push on a pop.
     private var canOpenFromRow: Bool {
         guard activeTransition == nil, openPostHero != nil,
-              let navigationController, navigationController.topViewController === self,
+              let navigationController, navigationController.topViewController === stackScreen,
               navigationController.transitionCoordinator == nil
         else { return false }
         return true
@@ -2205,7 +2233,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// to be, Friends the same screen over the friends' posts.
     func pushList(_ kind: ForYouPostListViewController.Kind) {
         guard activeTransition == nil,
-              let navigationController, navigationController.topViewController === self,
+              let navigationController, navigationController.topViewController === stackScreen,
               navigationController.transitionCoordinator == nil
         else { return }
         let list = ForYouPostListViewController(
@@ -2371,5 +2399,20 @@ extension ForYouViewController: TabReselectScrolling {
     func scrollToTopForTabReselect() {
         guard page.verticalOffset > 0.5 else { return }
         page.setVerticalOffset(0, animated: true)
+    }
+}
+
+// MARK: - The For You sector's Home page (#1703)
+
+extension ForYouViewController: ForYouSectorPage {
+    func sectorPageDidChangeActivity(_ isActive: Bool) {}
+    func sectorPageOwnsHorizontalDrag(velocity: CGPoint) -> Bool { false }
+
+    /// The sector's insets, which UIKit does not give this screen in there:
+    /// the list is laid out from them (`ForYouGridPage.setHostedInsets`).
+    func sectorSafeAreaDidChange(_ insets: UIEdgeInsets) {
+        guard sectorSafeAreaInsets != insets else { return }
+        sectorSafeAreaInsets = insets
+        page.setHostedInsets(top: insets.top, bottom: insets.bottom)
     }
 }

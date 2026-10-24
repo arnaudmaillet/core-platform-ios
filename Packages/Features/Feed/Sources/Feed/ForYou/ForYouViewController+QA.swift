@@ -269,13 +269,13 @@ extension ForYouViewController {
                     DispatchQueue.main.asyncAfter(deadline: .now() + popFloor) { [weak self] in
                         QAWait.until("-zoom-repeat round \(round) pop", { [weak self] in
                             guard let self, let nav = self.navigationController else { return false }
-                            return nav.topViewController !== self && nav.transitionCoordinator == nil
+                            return nav.topViewController !== self.stackScreen && nav.transitionCoordinator == nil
                         }) { [weak self] in
                             self?.navigationController?.popViewController(animated: true)
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                                 QAWait.until("-zoom-repeat round \(round) reopen", { [weak self] in
                                     guard let self, let nav = self.navigationController else { return false }
-                                    return nav.topViewController === self && nav.transitionCoordinator == nil
+                                    return nav.topViewController === self.stackScreen && nav.transitionCoordinator == nil
                                 }) { [weak self] in
                                     self?.debugOpenFeed(at: reopen)
                                     runRound(round + 1)
@@ -314,7 +314,7 @@ extension ForYouViewController {
         }
         let isAtRest: () -> Bool = { [weak self] in
             guard let self, let nav = navigationController else { return false }
-            return nav.topViewController === self && nav.transitionCoordinator == nil
+            return nav.topViewController === self.stackScreen && nav.transitionCoordinator == nil
         }
         if let (raw, delay) = value(after: "-foryou-open-story"), let index = Int(raw) {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
