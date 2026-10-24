@@ -1690,6 +1690,8 @@ final class SnapFeedViewController: UIViewController {
                 cell.setPostActions(shown: self.isForYouRoot, saved: self.bookmarks.isSaved(id.rawValue))
                 // …and its caption, smaller and greyer over the media (#1697).
                 cell.setCaptionStyle(self.isForYouRoot ? .soft : .standard)
+                // …and its strip full width, the column above it (#1701).
+                cell.setReservesStripRoom(self.isForYouRoot)
                 // …and its author, inside the page without glass (#1699): the
                 // pill's own taps — the card, the profile on a hold, the "+".
                 cell.setAuthorRow(
@@ -3176,6 +3178,8 @@ final class SnapFeedViewController: UIViewController {
             shown: isForYouRoot, saved: bookmarks.isSaved(id.rawValue),
             onSave: { [weak self] in self?.toggleBookmark(for: id) }
         )
+        // …and the composer over the strip's room, on the column's line (#1701).
+        detail.setComposerLift(isForYouRoot ? SnapActionColumn.stripRoomLift : 0)
         // A remote cover the attribution has not fetched yet: fetch it, and
         // redraw the slot once it lands (#680).
         if let face, face.cachedCover == nil, let url = face.coverURL {

@@ -145,6 +145,24 @@ final class SnapChromeView: UIView {
     private var boostStationTop: NSLayoutConstraint?
     private var boostStationBottom: NSLayoutConstraint?
     private var railBottom: NSLayoutConstraint?
+    private var soundStationBottom: NSLayoutConstraint?
+    private var pageBarUnderCaption: NSLayoutConstraint?
+    private var pageBarUnderColumn: NSLayoutConstraint?
+
+    /// EXPERIMENTAL (#1701, the For You root): the page strip runs the full
+    /// width, under the column; the column stands above it, its lowest
+    /// bubble level with the caption's bottom (`stripRoomLift`); and the
+    /// strip's room is kept on a post with none — the caption never drops
+    /// into it.
+    var reservesStripRoom = false {
+        didSet {
+            guard reservesStripRoom != oldValue else { return }
+            pageBarUnderCaption?.isActive = !reservesStripRoom
+            pageBarUnderColumn?.isActive = reservesStripRoom
+            applyPostActionsLayout()
+            applyCaptionSeat()
+        }
+    }
     /// The like pill's bottom above the margin line, without the capsule.
     private static var boostStationBottomInset: CGFloat {
         SnapActionColumn.inputRestingGap + SnapActionColumn.bubbleSize + SnapActionColumn.gap
@@ -517,12 +535,19 @@ final class SnapChromeView: UIView {
         }
         mediaPageBar.constrain(in: self) { parent in
             mediaPageBar.leadingAnchor.constraint(equalTo: captionLabel.leadingAnchor)
-            mediaPageBar.trailingAnchor.constraint(equalTo: captionLabel.trailingAnchor)
             mediaPageBar.bottomAnchor.constraint(
                 equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -Self.pageBarToolbarGap
             )
             mediaPageBar.heightAnchor.constraint(equalToConstant: SnapMediaPageBarView.thickness)
         }
+        // The caption's trailing edge — or, on the For You root, the
+        // column's (#1701: the strip runs under it).
+        let underCaption = mediaPageBar.trailingAnchor.constraint(equalTo: captionLabel.trailingAnchor)
+        pageBarUnderCaption = underCaption
+        pageBarUnderColumn = mediaPageBar.trailingAnchor.constraint(
+            equalTo: layoutMarginsGuide.trailingAnchor, constant: -SnapActionColumn.trailingInset
+        )
+        underCaption.isActive = true
 
 
         // The shortcut rail owns the trailing column, layered OVER the
@@ -659,10 +684,12 @@ final class SnapChromeView: UIView {
             )
             soundStation.widthAnchor.constraint(equalTo: bandSeat.heightAnchor)
             soundStation.heightAnchor.constraint(equalTo: bandSeat.heightAnchor)
-            soundStation.bottomAnchor.constraint(
-                equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
-            )
         }
+        let soundBottom = soundStation.bottomAnchor.constraint(
+            equalTo: layoutMarginsGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
+        )
+        soundStationBottom = soundBottom
+        soundBottom.isActive = true
         captionLabel.trailingAnchor.constraint(
             equalTo: soundStation.leadingAnchor, constant: -Spacing.md
         ).isActive = true
@@ -714,7 +741,10 @@ final class SnapChromeView: UIView {
     /// pill and its rail rise by the capsule's room, the capsule shows on a
     /// media page (the sound bubble's rule).
     private func applyPostActionsLayout() {
-        let lift = showsPostActions ? SnapPostActionsCapsule.columnExtent : 0
+        // Over the strip on the For You root (#1701): the whole column.
+        let stripLift = reservesStripRoom ? SnapActionColumn.stripRoomLift : 0
+        let lift = (showsPostActions ? SnapPostActionsCapsule.columnExtent : 0) + stripLift
+        soundStationBottom?.constant = -(SnapActionColumn.inputRestingGap + stripLift)
         boostStationTop?.constant = -lift
         boostStationBottom?.constant = -(Self.boostStationBottomInset + lift)
         railBottom?.constant = -lift
@@ -1205,7 +1235,8 @@ final class SnapChromeView: UIView {
 
     /// Seats the caption over the strip, or in its place when there is none.
     private func applyCaptionSeat() {
-        let overStrip = !mediaPageBar.isHidden
+        // The strip's room is kept on the For You root, strip or not (#1701).
+        let overStrip = !mediaPageBar.isHidden || reservesStripRoom
         guard captionOverStripConstraint?.isActive != overStrip else { return }
         if overStrip {
             captionOnBarConstraint?.isActive = false
