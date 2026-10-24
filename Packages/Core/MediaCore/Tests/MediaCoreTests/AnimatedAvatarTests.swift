@@ -145,9 +145,10 @@ struct AnimatedAvatarTests {
                 "the first display did not play: \(first.lastRefusal ?? "never asked")")
         let again = await hosted(Self.face, trigger: .firstAppearance(scope), registry: registry, in: window)
         #expect(again.playCount == 0, "a second display in the same screen played again")
-        // And it rests on the still once the loop is over.
-        try? await Task.sleep(for: .milliseconds(400))
-        #expect(!first.isPlaying)
+        // And it rests on the still once the loop is over — waited for on
+        // looks (#1676): a fixed 400 ms ran out on a starved runner before
+        // the 0.2 s loop's end had its turn. Resting is where it stays.
+        #expect(await eventually { !first.isPlaying }, "the first display never came to rest")
     }
 
     /// Too small never plays: a tile's author, a danmaku bubble.
