@@ -102,7 +102,7 @@ final class HashtagViewController: UIViewController {
     private func render() {
         navigationItem.subtitle = viewModel.countText
         page.show(viewModel.top)
-        page.showLeadRow(viewModel.recentRow)
+        page.showLeadRow(viewModel.recentRow, hasMore: viewModel.recentRowHasMore)
         page.setPaging(viewModel.isLoadingMore(.top))
         page.setHasMore(viewModel.hasMore(.top))
         recentScreen?.render()

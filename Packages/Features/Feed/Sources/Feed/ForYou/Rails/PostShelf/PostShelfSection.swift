@@ -22,11 +22,16 @@ import UIKit
 ///   └───────────────┘ └────
 /// ```
 ///
-/// The title, its count and its chevron are the host's (`title`,
-/// `setCount`): For You calls it its follows' section, the place page its
-/// popular posts, a search its recent ones. The section draws and drives the
-/// rest — the cards, their autoplay, their lookahead, their previews and the
-/// hooks a flight out of a card reads.
+/// **The contract (#1671): content, how many each row shows, and where
+/// "View all" goes.** A host applies a `Model` — its title, its posts, each
+/// row's limit and whether its whole list holds more than the posts given —
+/// and sets `onViewAll`, the screen the title, the chevron card and the
+/// end-pull push. The rest is the section's: splitting media from text,
+/// cutting each row at its limit, and ending a row on the chevron card only
+/// when there is more to see than the row shows. For You calls it its
+/// follows' section, the place page its popular posts, a search its recent
+/// ones. The section draws and drives the cards, their autoplay, their
+/// lookahead, their previews and the hooks a flight out of a card reads.
 ///
 /// **Two independent rows** under one heading (`PostShelfRows`):
 /// scrolling one never moves the other. A media card is
@@ -74,11 +79,32 @@ final class PostShelfSection: UIView {
     /// Each row's posts as drawn: the section's order, each row under its
     /// limit (`mediaLimit`, `textLimit`).
     private var shownRows: (media: [GalleryPost], text: [GalleryPost]) {
+        let rows = rowContents
+        return (rows.media.shown, rows.text.shown)
+    }
+
+    /// Each row as the section cuts it: the posts it shows, and whether
+    /// there are more to see than that — posts past its limit, or a list
+    /// holding more than the posts given (`hasMore`).
+    private var rowContents: (media: RowContent, text: RowContent) {
         let rows = PostShelfRows.partition(cards)
         return (
-            mediaLimit.map { Array(rows.media.prefix(max(0, $0))) } ?? rows.media,
-            textLimit.map { Array(rows.text.prefix(max(0, $0))) } ?? rows.text
+            RowContent(rows.media, limit: mediaLimit, listHasMore: hasMore),
+            RowContent(rows.text, limit: textLimit, listHasMore: hasMore)
         )
+    }
+
+    /// One row cut at its limit. Pure, for tests.
+    struct RowContent: Equatable {
+        let shown: [GalleryPost]
+        /// Whether the row's list goes on past what it shows — what the
+        /// chevron card ending it says.
+        let hasMore: Bool
+
+        init(_ posts: [GalleryPost], limit: Int?, listHasMore: Bool) {
+            shown = limit.map { Array(posts.prefix(max(0, $0))) } ?? posts
+            hasMore = listHasMore || shown.count < posts.count
+        }
     }
 
     /// How many cards a row draws by default (the owner, 2026-10-16, #1296).
@@ -87,11 +113,17 @@ final class PostShelfSection: UIView {
     /// The most cards each row draws; nil for all of them (#1271).
     var mediaLimit: Int? = PostShelfSection.rowLimit { didSet { if mediaLimit != oldValue { rowsChanged() } } }
     var textLimit: Int? = PostShelfSection.rowLimit { didSet { if textLimit != oldValue { rowsChanged() } } }
-    /// A chevron card ends EACH row (`ShelfViewAllCell`, the owner,
-    /// 2026-10-16, #1296): the title's action — the shelf's "View all" —
-    /// where a viewer who scrolled a row to its end arrives. No words: the
-    /// chevron is the label. Drawn only while the title has an action.
-    var showsViewAll = true { didSet { if showsViewAll != oldValue { rowsChanged() } } }
+    /// The shelf's whole list holds more posts than it was given — a page
+    /// not loaded, or posts the host left out. Every row then ends on the
+    /// chevron card, however few it shows.
+    ///
+    /// A chevron card ends a row (`ShelfViewAllCell`, the owner, 2026-10-16,
+    /// #1296) — "View all", where a viewer who scrolled the row to its end
+    /// arrives — ONLY WHEN THERE IS MORE (#1671, the owner, 2026-10-24): a
+    /// row showing every post its list has ends on its last card, as the
+    /// place page's Popular with three posts did not. No words: the chevron
+    /// is the label. Drawn only while there is somewhere to go (`onViewAll`).
+    var hasMore = false { didSet { if hasMore != oldValue { rowsChanged() } } }
 
     /// The shelf is waiting for its posts (#1296): its title over a row of
     /// skeleton cards (`SkeletonBoneView`, the app's loading contract #1085)
@@ -112,7 +144,13 @@ final class PostShelfSection: UIView {
     /// The item a "View all" card stands for in a row's data source.
     static let viewAllID = PostID("post-shelf.view-all")
 
-    private var drawsViewAll: Bool { showsViewAll && onTitleTapped != nil }
+    /// Whether `row` ends on the chevron card: somewhere to go, and more to
+    /// see there than the row shows — as last applied, since a scroll asks
+    /// on every tick.
+    private func drawsViewAll(in row: UICollectionView) -> Bool {
+        row === textView ? drawnViewAll.text : drawnViewAll.media
+    }
+    private var drawnViewAll = (media: false, text: false)
 
     /// A limit or the "View all" changed: the rows redraw, and the host
     /// re-sizes if a row's count moved.
@@ -128,17 +166,22 @@ final class PostShelfSection: UIView {
 
     // MARK: - The model
 
-    /// What a host says the shelf is (#1271): its title and count, its posts,
-    /// and how much of them each row draws. Applied in one go (`apply`); the
-    /// actions (the title's tap, a card's open) are wired once beside it.
+    /// What a host says the shelf is (#1271, the contract #1671): its title
+    /// and count, its posts, how much of them each row draws, and whether its
+    /// whole list holds more. Applied in one go (`apply`); the destination
+    /// (`onViewAll`) and the cards' handlers are wired once beside it.
     struct Model: Equatable {
         var title: String
         /// What is new in the shelf, after the title; zero for none.
         var newCount = 0
+        /// Every post the host has for the shelf, in its order — more than a
+        /// row shows is fine: the row cuts at its limit and ends on the
+        /// chevron card.
         var posts: [GalleryPost]
         var mediaLimit: Int? = PostShelfSection.rowLimit
         var textLimit: Int? = PostShelfSection.rowLimit
-        var showsViewAll = true
+        /// The list "View all" opens holds posts beyond `posts`.
+        var hasMore = false
         /// Still waiting for the posts: the title over skeleton cards.
         var isLoading = false
     }
@@ -150,7 +193,7 @@ final class PostShelfSection: UIView {
         if newCount != model.newCount { setCount(new: model.newCount) }
         mediaLimit = model.mediaLimit
         textLimit = model.textLimit
-        showsViewAll = model.showsViewAll
+        hasMore = model.hasMore
         let changed = render(model.posts)
         isLoading = model.isLoading
         return changed
@@ -160,7 +203,7 @@ final class PostShelfSection: UIView {
     var model: Model {
         Model(
             title: title, newCount: newCount, posts: cards,
-            mediaLimit: mediaLimit, textLimit: textLimit, showsViewAll: showsViewAll, isLoading: isLoading
+            mediaLimit: mediaLimit, textLimit: textLimit, hasMore: hasMore, isLoading: isLoading
         )
     }
 
@@ -176,11 +219,13 @@ final class PostShelfSection: UIView {
         newCount = count
         applyHeader()
     }
-    /// The title was tapped: the host pushes the shelf's whole list.
-    var onTitleTapped: (() -> Void)? {
+    /// "View all" — the shelf's DESTINATION: the host pushes its whole list.
+    /// The title's tap, the chevron card and a pull past a row's end all
+    /// come here. Nil: the title is plain and no row ends on the chevron.
+    var onViewAll: (() -> Void)? {
         didSet {
-            header.onTap = onTitleTapped
-            if (oldValue == nil) != (onTitleTapped == nil), showsViewAll { applyCards() }
+            header.onTap = onViewAll
+            if (oldValue == nil) != (onViewAll == nil) { applyCards() }
         }
     }
     /// What VoiceOver says the title does.
@@ -380,22 +425,25 @@ final class PostShelfSection: UIView {
     /// Each row its own posts, in the section's order, under its limit; the
     /// last row ends on "View all" when the shelf offers it.
     private func applyCards() {
-        let rows = shownRows
-        drawnCounts = (rows.media.count, rows.text.count)
-        func snapshot(_ posts: [GalleryPost], endsOnViewAll: Bool) -> NSDiffableDataSourceSnapshot<Int, PostID> {
+        let rows = rowContents
+        drawnCounts = (rows.media.shown.count, rows.text.shown.count)
+        let goesSomewhere = onViewAll != nil
+        drawnViewAll = (
+            goesSomewhere && rows.media.hasMore && !rows.media.shown.isEmpty,
+            goesSomewhere && rows.text.hasMore && !rows.text.shown.isEmpty
+        )
+        func snapshot(_ row: RowContent) -> NSDiffableDataSourceSnapshot<Int, PostID> {
             var snapshot = NSDiffableDataSourceSnapshot<Int, PostID>()
             snapshot.appendSections([0])
-            snapshot.appendItems(posts.map(\.id))
-            if endsOnViewAll, !posts.isEmpty { snapshot.appendItems([Self.viewAllID]) }
+            snapshot.appendItems(row.shown.map(\.id))
+            if goesSomewhere, row.hasMore, !row.shown.isEmpty { snapshot.appendItems([Self.viewAllID]) }
             return snapshot
         }
         let animated = window != nil
-        mediaSource.apply(
-            snapshot(rows.media, endsOnViewAll: drawsViewAll), animatingDifferences: animated
-        ) { [weak self] in
+        mediaSource.apply(snapshot(rows.media), animatingDifferences: animated) { [weak self] in
             self?.updateAutoplay()
         }
-        textSource.apply(snapshot(rows.text, endsOnViewAll: drawsViewAll), animatingDifferences: animated)
+        textSource.apply(snapshot(rows.text), animatingDifferences: animated)
     }
 
     /// A text card: the list's own card (`PostGridListRowCell`) held to the
@@ -983,7 +1031,7 @@ final class PostShelfSection: UIView {
     /// The chevron card follows the pull; crossing the threshold under the
     /// finger is felt once.
     private func followEndPull(_ row: UICollectionView) {
-        guard drawsViewAll else { return }
+        guard drawsViewAll(in: row) else { return }
         let pull = max(0, Self.endPull(of: row))
         let armed = pull >= Self.endPullThreshold
         row.visibleCells.lazy.compactMap { $0 as? ShelfViewAllCell }.first?.setPull(pull, armed: armed)
@@ -1164,7 +1212,7 @@ extension PostShelfSection: UICollectionViewDelegate {
         collectionView.deselectItem(at: indexPath, animated: false)
         guard let id = cardID(in: collectionView, at: indexPath) else { return }
         guard id != Self.viewAllID else {
-            onTitleTapped?()
+            onViewAll?()
             return
         }
         open(id)
@@ -1188,9 +1236,9 @@ extension PostShelfSection: UICollectionViewDelegate {
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        guard owns(scrollView) else { return }
-        snapper.willBeginDragging(scrollView)
-        if drawsViewAll { pullHaptic.prepare() }
+        guard let row = scrollView as? UICollectionView, owns(row) else { return }
+        snapper.willBeginDragging(row)
+        if drawsViewAll(in: row) { pullHaptic.prepare() }
     }
 
     /// The row comes to rest on an item's edge — the text row ONE card per
@@ -1203,8 +1251,8 @@ extension PostShelfSection: UICollectionViewDelegate {
         guard let row = scrollView as? UICollectionView, owns(row) else { return }
         // Released past the end's threshold: "View all", on the next turn so
         // the row's own spring back is under way first.
-        if drawsViewAll, Self.endPull(of: row) >= Self.endPullThreshold {
-            DispatchQueue.main.async { [weak self] in self?.onTitleTapped?() }
+        if drawsViewAll(in: row), Self.endPull(of: row) >= Self.endPullThreshold {
+            DispatchQueue.main.async { [weak self] in self?.onViewAll?() }
         }
         snapper.willEndDragging(
             row, velocity: velocity, targetContentOffset: targetContentOffset, stepped: row === textView

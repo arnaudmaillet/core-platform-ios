@@ -88,6 +88,14 @@ final class HashtagViewModel {
         return .posts(Array(ids.prefix(Self.rowLimit)))
     }
 
+    /// Whether Recent holds more than the row's posts — loaded past
+    /// `rowLimit`, or a page still to fetch: the row then ends on "View all"
+    /// (the shelf contract, #1671).
+    var recentRowHasMore: Bool {
+        guard case .posts(let ids) = recent else { return false }
+        return ids.count > Self.rowLimit || hasMore(.recent)
+    }
+
     /// Whether `tab` is fetching its next page — the footer spinner.
     /// Whether `tab` has a page past what it shows (#638).
     func hasMore(_ tab: Tab) -> Bool {

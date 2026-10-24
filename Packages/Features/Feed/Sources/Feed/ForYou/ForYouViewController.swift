@@ -340,7 +340,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         }
         shelf.onOpen = { [weak self] open in self?.presentCard(open) }
         friendsRow.onTitleTapped = { [weak self] in self?.pushList(.friends) }
-        shelf.onTitleTapped = { [weak self] in self?.pushList(.following) }
+        shelf.onViewAll = { [weak self] in self?.pushList(.following) }
         // "For you ›" and a chunk's "View all" are one way in to one screen.
         lead.onListTitleTapped = { [weak self] in self?.pushDiscoverGallery() }
         friendsRow.storyMenuElements = { [weak self] story in self?.storyMenuElements(for: story) ?? [] }
@@ -478,7 +478,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     private func renderLead(_ rows: ForYouViewModel.Rails, loading: Bool) {
         friendsRow.render(rows.friends, newCount: rows.friendsBadge)
         if shelf.apply(.init(
-            title: "Following", newCount: rows.followingBadge, posts: rows.following, isLoading: loading
+            title: "Following", newCount: rows.followingBadge, posts: rows.following,
+            hasMore: rows.followingHasMore, isLoading: loading
         )) {
             #if DEBUG
             // Which `-foryou-open-card` index opens which row's card.

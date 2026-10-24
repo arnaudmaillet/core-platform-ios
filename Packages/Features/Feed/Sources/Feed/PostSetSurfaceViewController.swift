@@ -65,7 +65,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         // The shelf's title, and the chevron card ending its rows, act only
         // while the host gives them something to do (#1296).
         didSet {
-            shelf?.onTitleTapped = onLeadRowTitleTapped.map { _ in { [weak self] in self?.onLeadRowTitleTapped?() } }
+            shelf?.onViewAll = onLeadRowTitleTapped.map { _ in { [weak self] in self?.onLeadRowTitleTapped?() } }
         }
     }
     /// The media gallery "View all" pushes — For You's own, made by the
@@ -221,7 +221,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         lead?.listTitle = list
     }
 
-    func showLeadRow(_ state: PostSetSurfaceState) {
+    func showLeadRow(_ state: PostSetSurfaceState, hasMore: Bool) {
         loadViewIfNeeded()
         guard let shelf else { return }
         guard case .posts(let ids) = state, !ids.isEmpty else {
@@ -232,6 +232,9 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
             updateLeadHeight()
             return
         }
+        // Said with every answer: a later page can turn it on for the same
+        // posts.
+        shelf.hasMore = hasMore
         guard ids != leadIDs else { return }
         leadIDs = ids
         leadTask?.cancel()
@@ -253,6 +256,11 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     }
 
     #if DEBUG
+    /// The lead row with nothing past its posts — tests' shorthand.
+    func showLeadRow(_ state: PostSetSurfaceState) {
+        showLeadRow(state, hasMore: false)
+    }
+
     /// The lead row's posts as drawn, for tests.
     var debugLeadRowIDs: [PostID] { shelf?.cards.map(\.id) ?? [] }
     /// The lead's shelf (#1296), for tests.

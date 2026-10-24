@@ -28,18 +28,18 @@ struct PostShelfSectionTests {
         #expect(shelf.header.content.title == "Popular")
         #expect(shelf.debugCountText == "4")
         var tapped = 0
-        shelf.onTitleTapped = { tapped += 1 }
+        shelf.onViewAll = { tapped += 1 }
         shelf.debugTapTitle()
         #expect(tapped == 1, "the title's own tap path did not reach the host")
     }
 
     /// The host describes the shelf with ONE model — title, count, posts,
-    /// limits, "View all" — and the shelf draws it (#1271).
+    /// limits, whether there is more — and the shelf draws it (#1271, #1671).
     @Test func aModelDescribesTheWholeShelf() {
         let shelf = Self.shelf()
         let posts = [Self.post("m0", kind: .photo), Self.post("m1", kind: .video), Self.post("t0", kind: .text)]
         let model = PostShelfSection.Model(
-            title: "Recent", newCount: 2, posts: posts, mediaLimit: 1, textLimit: nil, showsViewAll: true
+            title: "Recent", newCount: 2, posts: posts, mediaLimit: 1, textLimit: nil, hasMore: true
         )
         #expect(shelf.apply(model))
         #expect(shelf.model == model)
@@ -112,16 +112,25 @@ struct PostShelfSectionTests {
             == SectionTitleView.Metrics.height + PostShelfRows.height(forWidth: 402, media: 3, text: 0))
     }
 
-    /// EACH ROW ENDS ON THE CHEVRON CARD (the owner, 2026-10-16, #1296): a
-    /// narrow card, no words, the shelf's "View all" — it runs the title's
-    /// action, and is drawn only while the title has one.
-    @Test func eachRowEndsOnTheChevronCardRunningTheTitlesAction() throws {
+    /// A ROW ENDS ON THE CHEVRON CARD ONLY WHEN THERE IS MORE (#1671, the
+    /// owner, 2026-10-24 — before, #1296, every row did): a narrow card, no
+    /// words, the shelf's "View all" — it runs the destination
+    /// (`onViewAll`), and is drawn only while there is one. A row showing
+    /// every post its list has ends on its last card.
+    @Test func aRowEndsOnTheChevronCardOnlyWhenThereIsMore() throws {
         let shelf = Self.shelf()
         shelf.render([Self.post("m", kind: .photo), Self.post("t", kind: .text)])
-        #expect(shelf.showsViewAll, "the chevron card is not on by default")
-        #expect(!shelf.debugTapViewAll(), "drawn with no action behind it")
+        #expect(!shelf.hasMore, "a shelf says it has more by default")
+        #expect(!shelf.debugTapViewAll(), "drawn with nowhere to go")
         var tapped = 0
-        shelf.onTitleTapped = { tapped += 1 }
+        shelf.onViewAll = { tapped += 1 }
+        shelf.layoutIfNeeded()
+        #expect(shelf.mediaView.numberOfItems(inSection: 0) == 1, "a row showing all its posts ends on the chevron")
+        #expect(shelf.textView.numberOfItems(inSection: 0) == 1, "a row showing all its posts ends on the chevron")
+        #expect(!shelf.debugTapViewAll())
+
+        // The list holds more than the posts given: every row ends on it.
+        shelf.hasMore = true
         shelf.layoutIfNeeded()
         #expect(shelf.mediaView.numberOfItems(inSection: 0) == 2, "the media row does not end on it")
         #expect(shelf.textView.numberOfItems(inSection: 0) == 2, "the text row does not end on it")
@@ -144,6 +153,31 @@ struct PostShelfSectionTests {
         #expect(opened.isEmpty, "the chevron card opened a post")
     }
 
+    /// A row cut at its limit ends on the chevron; the other row, showing
+    /// everything it has, does not — each row by itself.
+    @Test func onlyTheRowCutAtItsLimitEndsOnTheChevron() {
+        let shelf = Self.shelf()
+        shelf.onViewAll = {}
+        shelf.apply(.init(
+            title: "Popular",
+            posts: (0..<4).map { Self.post("m\($0)", kind: .photo) } + [Self.post("t0", kind: .text)],
+            mediaLimit: 3, textLimit: 3
+        ))
+        shelf.layoutIfNeeded()
+        #expect(shelf.mediaView.numberOfItems(inSection: 0) == 4, "three cards and the chevron")
+        #expect(shelf.textView.numberOfItems(inSection: 0) == 1, "a row with all its posts ended on the chevron")
+    }
+
+    /// The cut, pure.
+    @Test func aRowHasMoreWhenItIsCutOrItsListGoesOn() {
+        let posts = (0..<3).map { Self.post("m\($0)", kind: .photo) }
+        #expect(!PostShelfSection.RowContent(posts, limit: 3, listHasMore: false).hasMore)
+        #expect(!PostShelfSection.RowContent(posts, limit: nil, listHasMore: false).hasMore)
+        #expect(PostShelfSection.RowContent(posts, limit: 2, listHasMore: false).hasMore)
+        #expect(PostShelfSection.RowContent(posts, limit: 2, listHasMore: false).shown == Array(posts.prefix(2)))
+        #expect(PostShelfSection.RowContent(posts, limit: 10, listHasMore: true).hasMore)
+    }
+
     /// PULLED PAST ITS END, A ROW OPENS "VIEW ALL" (the owner, 2026-10-17):
     /// the chevron card stretches with the pull and turns into a ringed chevron past
     /// the threshold; released there, the title's action runs. Short of it,
@@ -155,7 +189,8 @@ struct PostShelfSectionTests {
         window.isHidden = false
         defer { window.isHidden = true }
         var opened = 0
-        shelf.onTitleTapped = { opened += 1 }
+        shelf.onViewAll = { opened += 1 }
+        shelf.hasMore = true
         shelf.render((0..<6).map { Self.post("m\($0)", kind: .photo) })
         shelf.layoutIfNeeded()
         let row = shelf.mediaView
@@ -284,7 +319,7 @@ struct PostShelfSectionTests {
     @Test func theMediaCardsKeepTheRowsGap() throws {
         let shelf = Self.shelf()
         shelf.render((0..<4).map { Self.post("m\($0)", kind: .photo) })
-        shelf.onTitleTapped = {}
+        shelf.onViewAll = {}
         shelf.layoutIfNeeded()
         shelf.mediaView.layoutIfNeeded()
         let first = try #require(shelf.mediaView.layoutAttributesForItem(at: IndexPath(item: 0, section: 0)))

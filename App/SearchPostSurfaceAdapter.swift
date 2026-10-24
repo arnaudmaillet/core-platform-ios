@@ -68,7 +68,9 @@ struct SearchPostSurfaceAdapter: SearchPostSurfaceProviding {
 
         func setHasMore(_ hasMore: Bool) { surface.setHasMore(hasMore) }
 
-        func showLeadRow(_ state: SearchPostSurfaceState) { surface.showLeadRow(Self.translate(state)) }
+        func showLeadRow(_ state: SearchPostSurfaceState, hasMore: Bool) {
+            surface.showLeadRow(Self.translate(state), hasMore: hasMore)
+        }
 
         func setSectionTitles(row: String, list: String) { surface.setSectionTitles(row: row, list: list) }
 
