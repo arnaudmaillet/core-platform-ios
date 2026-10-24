@@ -64,6 +64,14 @@ final class SnapAuthorIdentityView: UIView {
 
     /// Called when the identity is tapped, with the shown author.
     var onAuthorTapped: ((ProfileID) -> Void)?
+    /// Called when the identity is held, with the shown author — the post
+    /// screen pushes the profile while a tap opens its card (#1669). Opt-in:
+    /// nil, the pill takes no long press (the thread, the composer).
+    var onAuthorLongPressed: ((ProfileID) -> Void)? {
+        didSet { longPress.isEnabled = onAuthorLongPressed != nil }
+    }
+    /// The hold that pushes the profile; a recognised hold fails the tap.
+    private let longPress = UILongPressGestureRecognizer()
     /// Called when the "+" is tapped, with the shown author. Never for a
     /// state mark (`FollowBadge`): those take no tap of their own.
     var onFollowTapped: ((ProfileID) -> Void)?
@@ -128,12 +136,35 @@ final class SnapAuthorIdentityView: UIView {
         // The tap is the HOST's, not the pill's: a swap fades the pill to
         // nothing at its midpoint, and a faded view takes no touch.
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(authorTapped)))
+        longPress.minimumPressDuration = 0.4
+        longPress.addTarget(self, action: #selector(authorHeld(_:)))
+        longPress.isEnabled = false
+        addGestureRecognizer(longPress)
     }
 
     @objc private func authorTapped() {
         guard let authorID else { return }
         onAuthorTapped?(authorID)
     }
+
+    @objc private func authorHeld(_ recognizer: UILongPressGestureRecognizer) {
+        guard recognizer.state == .began else { return }
+        authorLongPressed()
+    }
+
+    /// The hold's answer: a tick, then the callback with the shown author.
+    private func authorLongPressed() {
+        guard let authorID, let onAuthorLongPressed else { return }
+        HapticImpact(style: .medium).impactOccurred()
+        onAuthorLongPressed(authorID)
+    }
+
+    #if DEBUG
+    /// Whether the pill takes a long press now. Tests.
+    var debugTakesLongPress: Bool { longPress.isEnabled }
+    /// A hold, as a finger's would land. Tests.
+    func debugLongPress() { authorLongPressed() }
+    #endif
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
