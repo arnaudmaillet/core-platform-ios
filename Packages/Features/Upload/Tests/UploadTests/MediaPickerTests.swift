@@ -439,8 +439,11 @@ struct MediaPickerTests {
         screen.picker.debugTapItem(at: 0)
         screen.picker.debugTapItem(at: 2)
 
-        #expect(next.isEnabled)
-        #expect(next.title == "Next (2)")
+        // A new count is a NEW item under "Next"'s identifier (#1679, R3).
+        let counted = try #require(screen.picker.navigationItem.rightBarButtonItems?.first)
+        #expect(counted.isEnabled)
+        #expect(counted.title == "Next (2)")
+        #expect(counted.identifier == next.identifier && next.identifier == MediaPickerViewController.ItemID.next)
     }
 
     /// Drafts sits between Cancel and Next, and Next sits at the edge — bar

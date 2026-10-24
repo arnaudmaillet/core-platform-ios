@@ -110,10 +110,31 @@ final class MediaPickerViewController: UIViewController {
     /// has it parked below the screen.
     private var trayBottom: NSLayoutConstraint!
 
-    private lazy var nextItem = UIBarButtonItem(
-        title: "Next",
-        primaryAction: UIAction { [weak self] _ in self?.goNext() }
-    )
+    private lazy var nextItem = makeNextItem(title: nextTitle)
+
+    /// The bar's identifiers, by function (#1679).
+    enum ItemID {
+        static let cancel = "upload.picker.cancel"
+        static let next = "upload.picker.next"
+        static let drafts = "upload.picker.drafts"
+        static let albums = "upload.picker.albums"
+    }
+
+    /// "Next", or "Next (3)": a NEW item for each word, under one identifier,
+    /// so the bar morphs the count (#1679, R3) — never a title changed in place.
+    private func makeNextItem(title: String) -> UIBarButtonItem {
+        let item = BarItems.title(id: ItemID.next, title: title) { [weak self] in self?.goNext() }
+        item.style = .done
+        return item
+    }
+
+    private lazy var draftsItem = BarItems.title(id: ItemID.drafts, title: "Drafts") { [weak self] in
+        self?.openDrafts()
+    }
+
+    /// Right-to-left: the first item is the RIGHTMOST, so "Next" sits at the
+    /// edge and "Drafts" beside it, which is the order the layout asks for.
+    private var trailingItems: [UIBarButtonItem] { onChoose != nil ? [nextItem] : [nextItem, draftsItem] }
 
     init(
         library: any MediaLibraryReading,
@@ -322,32 +343,24 @@ final class MediaPickerViewController: UIViewController {
 
     private func configureBars() {
         navigationItem.leftBarButtonItems = [
-            UIBarButtonItem(
-                title: "Cancel",
-                primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) }
-            )
+            BarItems.title(id: ItemID.cancel, title: "Cancel") { [weak self] in self?.dismiss(animated: true) }
         ]
         // The chevron the EDITOR wears. This screen has no title to lend it, so
         // it already draws bare — `.minimal` keeps it that way if one is ever
         // added. Nothing here affects this screen's own leading group: the picker
         // is the stack's root and shows no back button at all.
         navigationItem.backButtonDisplayMode = .minimal
-        // Right-to-left: the first item is the RIGHTMOST, so "Next" sits at the
-        // edge and "Drafts" beside it, which is the order the layout asks for.
-        navigationItem.rightBarButtonItems = onChoose != nil ? [nextItem] : [
-            nextItem,
-            UIBarButtonItem(
-                title: "Drafts",
-                primaryAction: UIAction { [weak self] _ in self?.openDrafts() }
-            )
-        ]
-        nextItem.style = .done
+        setOwnTrailingBarItems(trailingItems, animated: false)
     }
 
     /// "Next" alone says nothing about what is going; "Next (3)" says what the
     /// step after this one will be handed.
     private func updateNextItem() {
-        nextItem.title = selection.isEmpty ? nextTitle : "\(nextTitle) (\(selection.count))"
+        let title = selection.isEmpty ? nextTitle : "\(nextTitle) (\(selection.count))"
+        if nextItem.title != title {
+            nextItem = makeNextItem(title: title)
+            setOwnTrailingBarItems(trailingItems, animated: view.window != nil)
+        }
         nextItem.isEnabled = !selection.isEmpty
     }
 
@@ -390,7 +403,7 @@ final class MediaPickerViewController: UIViewController {
             // many things are demanding an answer. A library is not an alarm.
             bar.badgeTint = .systemBlue
             albumBar = bar
-            toolbarItems = [UIBarButtonItem(customView: bar), .flexibleSpace()]
+            toolbarItems = [BarItems.container(id: ItemID.albums, view: bar), .flexibleSpace()]
             navigationController?.setToolbarHidden(false, animated: true)
             configurePager(for: albums, bar: bar)
         } else {

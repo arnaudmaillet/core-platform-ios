@@ -160,12 +160,8 @@ final class CaptureViewController: UIViewController {
             flip.identifier = Self.flipItemID
             flip.accessibilityLabel = "Switch camera"
             flip.sharesBackground = false
-            let flash = UIBarButtonItem(
-                image: UIImage(systemName: settings.flash.symbolName),
-                primaryAction: UIAction { [weak self] _ in self?.cycleFlash() }
-            )
-            flash.identifier = Self.flashItemID
-            flash.sharesBackground = false
+            let flash = makeFlashItem()
+            flashSymbol = settings.flash.symbolName
             headerItems = (flip, flash)
             // Left to right: the flip, then the flash.
             navigationItem.setLeftBarButtonItems([flip, flash], animated: animated)
@@ -176,11 +172,31 @@ final class CaptureViewController: UIViewController {
         refreshFlashItem()
     }
 
+    /// The flash item, wearing the current mode's glyph.
+    private func makeFlashItem() -> UIBarButtonItem {
+        let flash = UIBarButtonItem(
+            image: UIImage(systemName: settings.flash.symbolName),
+            primaryAction: UIAction { [weak self] _ in self?.cycleFlash() }
+        )
+        flash.identifier = Self.flashItemID
+        flash.sharesBackground = false
+        return flash
+    }
+
     /// The flash item names its mode, says it, and is live only where the
     /// camera has a flash.
+    ///
+    /// ⚠️ A NEW MODE IS A NEW ITEM under the same identifier, set animated —
+    /// the bar morphs the glyph (#1679, R3) — never an image swapped on the
+    /// item it shows.
     private func refreshFlashItem() {
-        guard let flash = headerItems?.flash else { return }
-        flash.image = UIImage(systemName: settings.flash.symbolName)
+        guard var items = headerItems else { return }
+        if flashSymbol != settings.flash.symbolName {
+            items.flash = makeFlashItem()
+            headerItems = items
+            navigationItem.setLeftBarButtonItems([items.flip, items.flash], animated: view.window != nil)
+        }
+        let flash = items.flash
         flash.accessibilityLabel = source.hasFlash
             ? "Flash, \(settings.flash.label.lowercased())"
             : "Flash, unavailable"
@@ -1546,9 +1562,7 @@ final class CaptureViewController: UIViewController {
     }
 
     private static func barItem(_ view: UIView, as identifier: String) -> UIBarButtonItem {
-        let item = UIBarButtonItem(customView: view)
-        item.identifier = identifier
-        return item
+        BarItems.container(id: identifier, view: view)
     }
 
     /// `setToolbarItems` lays the bar out, and this is called from that layout.

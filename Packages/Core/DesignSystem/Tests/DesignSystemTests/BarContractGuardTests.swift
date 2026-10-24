@@ -33,9 +33,6 @@ struct BarContractGuardTests {
         "Packages/Features/Profile/Sources/Profile/Views/ProfileViewController.swift": 3,
         "Packages/Features/Profile/Sources/Profile/Views/Settings/DecisionDetailViewController.swift": 1,
         "Packages/Features/Search/Sources/Search/Views/SearchResultsViewController.swift": 1,
-        "Packages/Features/Upload/Sources/Upload/Capture/CaptureViewController.swift": 1,
-        "Packages/Features/Upload/Sources/Upload/Views/MediaEditorViewController.swift": 1,
-        "Packages/Features/Upload/Sources/Upload/Views/MediaPickerViewController.swift": 1,
     ]
 
     /// Files whose bar buttons still draw their own glass.

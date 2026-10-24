@@ -71,11 +71,11 @@ final class LoginFlowCoordinator {
     /// flexible space stretching between. The language selector lives in the
     /// credential screens' navigation bars, not here.
     private lazy var flowToolbarItems: [UIBarButtonItem] = {
-        let privacyItem = makeCapsuleItem(title: AuthLegalLink.privacy.displayName) { [weak self] in
-            self?.showLegalPlaceholder(.privacy)
+        let privacyItem = makeCapsuleItem(id: "auth.flow.privacy", title: AuthLegalLink.privacy.displayName) {
+            [weak self] in self?.showLegalPlaceholder(.privacy)
         }
-        let contactItem = makeCapsuleItem(title: AuthLegalLink.contact.displayName) { [weak self] in
-            self?.showLegalPlaceholder(.contact)
+        let contactItem = makeCapsuleItem(id: "auth.flow.contact", title: AuthLegalLink.contact.displayName) {
+            [weak self] in self?.showLegalPlaceholder(.contact)
         }
         return [
             privacyItem,
@@ -104,7 +104,11 @@ final class LoginFlowCoordinator {
         }
         let button = UIButton(configuration: configuration)
         button.accessibilityLabel = String(localized: "Change language")
+        // ⚠️ Still a button in a custom view (R1, #1679): a stock item shows
+        // only its image when given both. It moves to a bar-drawn labelled
+        // item once `StretchedBarLabel` takes a glyph (#1685).
         let item = UIBarButtonItem(customView: button)
+        item.identifier = "auth.language"
         button.addAction(
             UIAction { [weak self, weak item] _ in
                 guard let self, let item else { return }
@@ -117,8 +121,9 @@ final class LoginFlowCoordinator {
     }
 
     /// Standard titled bar item in the system's own capsule.
-    private func makeCapsuleItem(title: String, handler: @escaping () -> Void) -> UIBarButtonItem {
+    private func makeCapsuleItem(id: String, title: String, handler: @escaping () -> Void) -> UIBarButtonItem {
         let item = UIBarButtonItem(primaryAction: UIAction(title: title) { _ in handler() })
+        item.identifier = id
         item.tintColor = .secondaryLabel
         let attributes: [NSAttributedString.Key: Any] = [
             .font: UIFont.appFont(forTextStyle: .footnote)
@@ -155,6 +160,7 @@ final class LoginFlowCoordinator {
                 systemItem: .close,
                 primaryAction: UIAction { _ in onClose() }
             )
+            methodSelection.navigationItem.leftBarButtonItem?.identifier = "auth.close"
         }
         methodSelection.onMethodSelected = { [self] method in
             select(method)
