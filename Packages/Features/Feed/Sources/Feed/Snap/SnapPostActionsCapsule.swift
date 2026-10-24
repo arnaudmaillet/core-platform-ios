@@ -34,7 +34,9 @@ final class SnapPostActionsCapsule: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        glass.isUserInteractionEnabled = false
+        // ⚠️ INTERACTIVE, like the like pill's `.glass()` button (#1703, the
+        // owner): the buttons ride in the glass's content so the touch that
+        // fires them is the glass's too, and it answers it as UIKit's does.
         addSubview(glass)
         let symbols = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
         for button in [saveButton, repostButton] {
@@ -43,7 +45,7 @@ final class SnapPostActionsCapsule: UIView {
             config.baseForegroundColor = .label
             config.preferredSymbolConfigurationForImage = symbols
             button.configuration = config
-            addSubview(button)
+            glass.contentView.addSubview(button)
         }
         saveButton.configuration?.image = SaveStar.image(saved: false, symbols)
         saveButton.accessibilityLabel = "Save"
@@ -61,7 +63,11 @@ final class SnapPostActionsCapsule: UIView {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         // The glass materializes on window attach, like the like pill's.
-        if window != nil, glass.effect == nil { glass.effect = UIGlassEffect() }
+        if window != nil, glass.effect == nil {
+            let effect = UIGlassEffect()
+            effect.isInteractive = true
+            glass.effect = effect
+        }
     }
 
     override func layoutSubviews() {

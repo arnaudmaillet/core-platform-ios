@@ -328,6 +328,16 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     private let discovery: (any FeedProviding)?
     private let localCache: FeedLocalCache?
 
+    public func makeForYouSectorViewController(
+        onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
+    ) -> UIViewController {
+        guard let home = makeForYouViewController(onTabPresentationChange: onTabPresentationChange) as? any ForYouSectorPage,
+              let feed = makeForYouFullScreenFeedViewController() as? any ForYouSectorPage else {
+            return makeForYouFullScreenFeedViewController()
+        }
+        return ForYouSectorViewController(home: home, feed: feed)
+    }
+
     public func makeForYouViewController(
         onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
     ) -> UIViewController {

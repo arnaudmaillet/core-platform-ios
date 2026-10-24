@@ -106,6 +106,27 @@ struct SnapForYouRootTests {
         #expect(!tabs.isTabBarHidden)
     }
 
+    // MARK: - Set aside by the notifications drawer (#1703)
+
+    /// The drawer slides the shell aside with the feed still on screen: its
+    /// lifecycle stops counting it as watched (nothing plays), and counts it
+    /// again when the drawer closes.
+    @Test func theDrawerSetsTheFeedAside() async throws {
+        let root = feed(root: true)
+        let nav = UINavigationController(rootViewController: root)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = nav
+        window.isHidden = false
+        defer { window.isHidden = true }
+        for _ in 0..<200 where !root.debugIsWatchedByLifecycle { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(root.debugIsWatchedByLifecycle, "the feed on screen is not watched")
+
+        root.setSetAside(true)
+        #expect(!root.debugIsWatchedByLifecycle, "the feed plays on behind the drawer")
+        root.setSetAside(false)
+        #expect(root.debugIsWatchedByLifecycle, "the feed did not come back")
+    }
+
     // MARK: - The danmaku replaces the stream (#1699)
 
     private static func streams(reactions: Int) -> FeedViewModel.CommentStreams {
