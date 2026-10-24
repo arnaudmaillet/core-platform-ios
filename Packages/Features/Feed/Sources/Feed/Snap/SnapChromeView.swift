@@ -8,7 +8,7 @@ import UIKit
 
 /// The snap *page's* UI chrome — the caption over the bottom scrim.
 /// Screen-scoped chrome (back item, author identity) lives in the navigation
-/// bar instead (`SnapAuthorIdentityView` / `SnapNavControls`), so it stays
+/// bar instead (`SnapAuthorIdentityView`, stock bar items), so it stays
 /// fixed while pages scroll. (Like/comment affordances were removed with the
 /// engagement rail; they will return on a different surface.)
 ///

@@ -28,12 +28,8 @@ struct BarContractGuardTests {
         "Packages/Core/DesignSystem/Sources/DesignSystem/Components/SelectorToolbarItem.swift": 1,
         "Packages/Core/DesignSystem/Sources/DesignSystem/Components/ToastMessageSheet.swift": 1,
         "Packages/Features/Auth/Sources/Auth/LoginFlowCoordinator.swift": 1,
-        "Packages/Features/Feed/Sources/Feed/Conversation/ConversationThreadViewController.swift": 1,
         "Packages/Features/Feed/Sources/Feed/ForYou/PushedScreenHeader.swift": 1,
-        "Packages/Features/Feed/Sources/Feed/Snap/SnapFeedViewController.swift": 7,
-        "Packages/Features/Feed/Sources/Feed/Snap/SnapFooterToolbar.swift": 3,
         "Packages/Features/Feed/Sources/Feed/Snap/Sound/SoundSheetViewController.swift": 1,
-        "Packages/Features/Feed/Sources/Feed/TextPost/TextPostComposerViewController.swift": 4,
         "Packages/Features/Maps/Sources/Maps/Countries/CountryShopViewController.swift": 1,
         "Packages/Features/Maps/Sources/Maps/Countries/CountryUnlockSheetViewController.swift": 1,
         "Packages/Features/Notifications/Sources/Notifications/Views/NotificationsViewController+Mute.swift": 1,
@@ -57,13 +53,7 @@ struct BarContractGuardTests {
     ]
 
     /// Files still building icon buttons for bars through `SnapNavControls`.
-    static let iconButtonDebt: [String: Int] = [
-        "Packages/Features/Feed/Sources/Feed/Conversation/ConversationThreadViewController.swift": 2,
-        "Packages/Features/Feed/Sources/Feed/Snap/SnapFeedViewController.swift": 5,
-        "Packages/Features/Feed/Sources/Feed/Snap/SnapFooterToolbar.swift": 3,
-        "Packages/Features/Feed/Sources/Feed/Snap/Sound/SoundSheetViewController.swift": 1,
-        "Packages/Features/Feed/Sources/Feed/TextPost/TextPostComposerViewController.swift": 1,
-    ]
+    static let iconButtonDebt: [String: Int] = [:]
 
     /// Files still cross-dissolving a bar by hand.
     static let barMorphDebt: [String: Int] = [

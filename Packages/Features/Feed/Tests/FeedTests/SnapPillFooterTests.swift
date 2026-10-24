@@ -54,12 +54,12 @@ struct SnapPillFooterTests {
         do {
             let feed = feed()
             let items = try #require(feed.toolbarItems)
-            #expect(items.count == 5, "the bar is [pill][flex][actions][fixed][⋯]: \(items.count)")
+            #expect(items.count == 6, "the bar is [pill][flex][save][repost][fixed][⋯]: \(items.count)")
             #expect(items.first?.customView is SnapAuthorIdentityView)
             #expect(items[1].customView == nil, "a dynamic space after the pill")
-            let actions = (items[2].customView?.subviews ?? []).compactMap { ($0 as? UIButton)?.accessibilityLabel }
+            let actions = items.dropFirst(2).prefix(2).compactMap(\.accessibilityLabel)
             #expect(actions == ["Save", "Repost"], "the capsule is not [save, repost]: \(actions)")
-            #expect((items.last?.customView as? UIButton)?.accessibilityLabel == "More actions")
+            #expect(items.last?.accessibilityLabel == "More actions")
             #expect(!items.contains { $0.customView is SnapMediaAttributionView }, "the audio capsule stayed")
 
             let nav = feed.navigationItem.rightBarButtonItems ?? []

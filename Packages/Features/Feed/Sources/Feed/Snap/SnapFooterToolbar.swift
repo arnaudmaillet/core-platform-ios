@@ -1,78 +1,74 @@
 import DesignSystem
 import UIKit
 
-/// The text post's footer, as a composition the conversation screen builds
-/// with its own leading item:
+/// The post footer — the snap feed's, the text post's — and the conversation
+/// screen's, which builds it with its own leading item:
 ///
 /// ```
 ///  [leading] ———————————————— [🔖 ⇄] [⋯]     the post: a pill, then space
-///  [leading ————————————————————————] [⋯]     `leadingFills`, no actions:
-///                                              a conversation's emote strip
+///  [leading] ———————————————— [📷 🖼] [⋯]     a conversation: its media
 /// ```
 ///
-/// Every item is a custom view, so iOS 26 gives each its own glass bubble; the
-/// fixed space is what keeps [🔖 ⇄] and [⋯] two bubbles rather than one shared
-/// platter.
+/// THE BAR CONTRACT (#1679, `dev/BAR_CONTRACT.md`): every action is a STOCK
+/// bar item (`BarItems.icon`) — the bar draws its glass, its press, its menu —
+/// and every item has an identifier, so a footer rebuilt or carried across a
+/// push is matched item by item. Adjacent actions share one platter by
+/// themselves (iOS 26 groups neighbouring items); the separator keeps ⋯ in a
+/// bubble of its own. The leading item is the one container (a person or
+/// media pill, `BarItems.container`).
 ///
-/// ⚠️ The snap feed still builds the SAME composition itself, in
-/// `SnapFeedViewController.configureToolbarItems` (pinned by
-/// `SnapToolbarCompositionTests`); this mirrors it rather than feeding it. Moving
-/// the feed onto this factory is the follow-up that makes the two one.
+/// It used to be custom-view `UIButton`s in a `UIStackView` — each a circle
+/// with a shadow, re-implementing what the bar draws (R1).
+@MainActor
 enum SnapFooterToolbar {
-    /// The bar's items, left to right. `actions` share one capsule between
-    /// the leading item and ⋯ — the post's [🔖 ⇄]; none, and there is no
-    /// capsule (a conversation: nothing there to save or repost).
-    ///
-    /// `leadingFills`: `leading` draws its own capsule and stretches by Auto
-    /// Layout over every point the trailing bubbles leave (lowest hugging, a
-    /// huge lowest-priority width — the text post composer's tool strip). Its
-    /// item hides the bar's shared bubble — a capsule in a bubble would be
-    /// padded inside it, its content cut short of the visible ends — and a
-    /// fixed space takes the flexible one's place, which would otherwise
-    /// claim the room.
-    ///
-    /// ⚠️ A fixed space ADDS to the gap UIKit already leaves between two glass
-    /// groups (12pt on iOS 27: the feed's [🔖 ⇄] capsule stands 12 + 8 = 20pt
-    /// from ⋯). So a filling leading item's separator is ZERO wide: it still
-    /// splits the groups — ⋯ keeps its own bubble — and the strip runs to the
-    /// bar's own 12pt gap, the gap every neighbouring bubble in the bar keeps
-    /// (measured 2026-10-01: 20pt with `sm`, which read as a hole).
+    /// Identifiers by function, the same on every screen that wears the
+    /// footer, so a push from the feed to a text post keeps them in place.
+    enum ID {
+        static let save = "feed.snap.save"
+        static let repost = "feed.snap.repost"
+        static let more = "feed.snap.more"
+    }
+
+    /// The bar's items, left to right: the leading container under
+    /// `leadingID`, the actions sharing one platter, and ⋯ in its own bubble.
+    /// No actions, no platter (nothing there to save or repost); no `more`,
+    /// no ⋯.
     static func items(
-        leading: UIView, leadingFills: Bool = false, actions: [UIButton], more: UIButton
+        leading: UIView, leadingID: String, actions: [UIBarButtonItem], more: UIBarButtonItem?
     ) -> [UIBarButtonItem] {
-        let leadingItem = UIBarButtonItem(customView: leading)
-        leadingItem.hidesSharedBackground = leadingFills
-        var items: [UIBarButtonItem] = [
-            leadingItem,
-            leadingFills ? .fixedSpace(actions.isEmpty ? 0 : Spacing.sm) : .flexibleSpace(),
-        ]
-        if !actions.isEmpty {
-            let cluster = UIStackView(arrangedSubviews: actions)
-            cluster.axis = .horizontal
-            items += [UIBarButtonItem(customView: cluster), .fixedSpace(Spacing.sm)]
+        var items: [UIBarButtonItem] = [BarItems.container(id: leadingID, view: leading), .flexibleSpace()]
+        items += actions
+        if let more {
+            if !actions.isEmpty { items.append(BarItems.separator()) }
+            items.append(more)
         }
-        return items + [UIBarButtonItem(customView: more)]
+        return items
     }
 
-    static func makeSaveButton() -> UIButton {
-        let button = SnapNavControls.makeToolbarActionButton(systemName: AppSymbol.save.rawValue)
-        button.accessibilityLabel = "Save"
-        return button
+    /// The save star, outline at rest (`SaveStar`); `saveImage(saved:)` turns
+    /// it gold once saved — on the ITEM, never through its action, whose
+    /// image a `UIAction` would re-apply when it fires.
+    static func makeSaveItem(action: @escaping () -> Void) -> UIBarButtonItem {
+        BarItems.icon(id: ID.save, image: saveImage(saved: false), label: "Save", action: action)
     }
 
-    /// ⚠️ Drawn without an action — see the feed's note on why repost has no
-    /// client path to publish one yet.
-    static func makeRepostButton() -> UIButton {
-        let button = SnapNavControls.makeToolbarActionButton(systemName: PostActionSymbol.repost)
-        button.accessibilityLabel = "Repost"
-        return button
+    static func saveImage(saved: Bool) -> UIImage? {
+        SaveStar.image(saved: saved)
     }
 
-    static func makeMoreButton(menu: UIMenu) -> UIButton {
-        let button = SnapNavControls.makeToolbarActionButton(systemName: "ellipsis")
-        button.accessibilityLabel = "More actions"
-        button.showsMenuAsPrimaryAction = true
-        button.menu = menu
-        return button
+    /// ⚠️ Drawn without an action — `PostComposer` takes no parent, so there
+    /// is no client path to publish a repost yet (see the feed's note). A
+    /// stock item with no target does nothing when tapped.
+    static func makeRepostItem() -> UIBarButtonItem {
+        let item = UIBarButtonItem(
+            image: UIImage.symbol(named: PostActionSymbol.repost), style: .plain, target: nil, action: nil
+        )
+        item.identifier = ID.repost
+        item.accessibilityLabel = "Repost"
+        return item
+    }
+
+    static func makeMoreItem(menu: UIMenu) -> UIBarButtonItem {
+        BarItems.icon(id: ID.more, image: UIImage(systemName: "ellipsis"), label: "More actions", menu: menu)
     }
 }

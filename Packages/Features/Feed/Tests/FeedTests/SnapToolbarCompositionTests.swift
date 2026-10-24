@@ -22,9 +22,9 @@ import UIKit
 /// (#671, the layout since #680: the author pill leads, where the audio
 /// capsule was; the sound is a bubble on the page.)
 ///
-/// ⚠️ Asserted through the ITEMS, not through a screenshot: a bar item's
-/// custom view is where this composition actually lives, and a picture of it
-/// cannot say which action a glyph carries.
+/// ⚠️ Asserted through the ITEMS, not through a screenshot: a picture
+/// cannot say which action a glyph carries. Every action is a STOCK bar item
+/// with an identifier (#1679, `dev/BAR_CONTRACT.md`) — the bar draws them.
 @MainActor
 struct SnapToolbarCompositionTests {
     private func feed(reporting: (any ContentReporting)? = StubReporter()) -> SnapFeedViewController {
@@ -47,23 +47,17 @@ struct SnapToolbarCompositionTests {
         return controller
     }
 
-    /// Every action button the toolbar draws, in bar order — hidden items
-    /// draw nothing, and the author pill is not an action.
-    private func toolbarButtons(_ feed: SnapFeedViewController) -> [UIButton] {
-        (feed.toolbarItems ?? [])
-            .filter { !$0.isHidden && !($0.customView is SnapAuthorIdentityView) }
-            .compactMap(\.customView)
-            .flatMap { view -> [UIButton] in
-                if let button = view as? UIButton { return [button] }
-                return view.subviews.compactMap { $0 as? UIButton }
-            }
+    /// Every action the toolbar draws, in bar order — hidden items draw
+    /// nothing, spaces are not actions, and the author pill is a container.
+    private func toolbarActions(_ feed: SnapFeedViewController) -> [UIBarButtonItem] {
+        (feed.toolbarItems ?? []).filter { !$0.isHidden && $0.customView == nil && $0.accessibilityLabel != nil }
     }
 
     /// ⚠️ BY LABEL, not by glyph: the label is what a reader using VoiceOver
     /// is offered, so a bar whose composition is right but whose labels are
     /// missing should not pass.
-    private func labels(_ buttons: [UIButton]) -> [String] {
-        buttons.compactMap(\.accessibilityLabel)
+    private func labels(_ items: [UIBarButtonItem]) -> [String] {
+        items.compactMap(\.accessibilityLabel)
     }
 
     // MARK: - The bar
@@ -71,19 +65,22 @@ struct SnapToolbarCompositionTests {
     /// ⚠️ SAVE AND REPOST, in that order (#865), and nothing else beside the
     /// ⋯. Share moved into the menu.
     @Test func theTrailingRunIsSaveRepostAndTheMenu() {
-        let buttons = toolbarButtons(feed())
-        #expect(labels(buttons) == ["Save", "Repost", "More actions"],
-                "the trailing run is not [save, repost, ⋯]: \(labels(buttons))")
+        let actions = toolbarActions(feed())
+        #expect(labels(actions) == ["Save", "Repost", "More actions"],
+                "the trailing run is not [save, repost, ⋯]: \(labels(actions))")
+        #expect(actions.map(\.identifier) == [
+            SnapFooterToolbar.ID.save, SnapFooterToolbar.ID.repost, SnapFooterToolbar.ID.more,
+        ], "an action lost its identity")
     }
 
-    /// The capsule's ARRANGED order is the visual order and the order
-    /// VoiceOver walks: save on the leading side, repost on the trailing one
-    /// (#865) — the order the text post composer's footer draws too.
+    /// Save then repost, SIDE BY SIDE — two stock items with nothing between,
+    /// which the bar puts in one platter (#865, #1679) — the order VoiceOver
+    /// walks and the text post composer's footer draws too.
     @Test func saveLeadsRepostInsideTheCapsule() throws {
         let items = try #require(feed().toolbarItems)
-        let capsule = try #require(items.dropFirst(2).first?.customView as? UIStackView)
-        let order = capsule.arrangedSubviews.compactMap(\.accessibilityLabel)
-        #expect(order == ["Save", "Repost"], "the capsule reads \(order)")
+        let pair = Array(items.dropFirst(2).prefix(2))
+        #expect(pair.map(\.accessibilityLabel) == ["Save", "Repost"], "the capsule reads \(pair.map(\.accessibilityLabel))")
+        #expect(pair.allSatisfy { $0.customView == nil }, "a button in a custom view (#1679)")
     }
 
     /// The author pill keeps the leading end, with the dynamic space between,
@@ -93,11 +90,11 @@ struct SnapToolbarCompositionTests {
         #expect(items.first?.customView is SnapAuthorIdentityView)
         #expect(items.dropFirst().first?.customView == nil, "no dynamic space after the pill")
         #expect(!items.contains { $0.customView is SnapMediaAttributionView }, "the audio capsule is back")
-        #expect(!labels(toolbarButtons(feed())).contains("Mute"))
-        // ⚠️ FIVE, because ⋯ HAS ITS OWN BUBBLE: [pill][flex][actions][fixed]
-        // [⋯]. iOS 26 fuses adjacent bar items into one platter, so the fixed
-        // space between the last two IS the separation.
-        #expect(items.count == 5, "the bar is [pill][flex][actions][fixed][⋯]: \(items.count)")
+        #expect(!labels(toolbarActions(feed())).contains("Mute"))
+        // ⚠️ SIX, because ⋯ HAS ITS OWN BUBBLE: [pill][flex][save][repost]
+        // [fixed][⋯]. iOS 26 fuses adjacent bar items into one platter, so the
+        // fixed space before ⋯ IS the separation.
+        #expect(items.count == 6, "the bar is [pill][flex][save][repost][fixed][⋯]: \(items.count)")
     }
 
     /// And the nav bar no longer wears the pill.
@@ -110,11 +107,12 @@ struct SnapToolbarCompositionTests {
     /// you DO to this post, ⋯ what is folded away.
     @Test func theMenuStandsInItsOwnPlatter() throws {
         let items = try #require(feed().toolbarItems)
-        let actions = try #require(items.dropFirst(2).first?.customView as? UIStackView)
-        #expect(actions.arrangedSubviews.count == 2, "the capsule is not [save, repost]")
-        #expect(items.dropFirst(3).first?.customView == nil, "no separator before the ⋯")
-        let more = try #require(items.last?.customView as? UIButton)
+        let separator = try #require(items.dropFirst(4).first)
+        #expect(separator.customView == nil && separator.accessibilityLabel == nil, "no separator before the ⋯")
+        let more = try #require(items.last)
         #expect(more.accessibilityLabel == "More actions")
+        #expect(more.customView == nil, "⋯ is a button in a custom view (#1679)")
+        #expect(more.menu != nil, "⋯ opens no menu")
     }
 
     // MARK: - The menu

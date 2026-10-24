@@ -158,8 +158,10 @@ struct SnapBarPillWidthsTests {
         // The author pill leads the TOOLBAR (#671, the layout since #680).
         let toolbar = feed.toolbarItems ?? []
         let pill = try #require(toolbar.compactMap { $0.customView as? SnapAuthorIdentityView }.first)
+        // ⋯ is a stock item (#1679): its view is UIKit's.
         let more = try #require(
-            toolbar.compactMap { $0.customView as? UIButton }.first { $0.accessibilityLabel == "More actions" }
+            toolbar.last { $0.accessibilityLabel == "More actions" }.flatMap(SnapActionColumnLayoutTests.hostedView(of:)),
+            "\(width)pt: the more item was folded away"
         )
 
         for (name, view) in [("author", pill), ("wallet", badge), ("sort", sort),

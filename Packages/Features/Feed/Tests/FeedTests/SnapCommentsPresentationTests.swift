@@ -1133,8 +1133,9 @@ struct SnapCommentsPresentationTests {
     }
 
     private static func leadingLabels(_ feed: SnapFeedViewController) -> [String?] {
+        // A stock item carries its label; a container (the sort) its view's.
         (feed.navigationItem.leftBarButtonItems ?? []).map {
-            ($0.customView as? UIButton)?.accessibilityLabel
+            $0.accessibilityLabel ?? $0.customView?.accessibilityLabel
         }
     }
 
@@ -1153,16 +1154,17 @@ struct SnapCommentsPresentationTests {
     @Test func theToolbarsTrailingRunIsTwoPlatters() {
         let (_, feed) = Self.chromeHost()
         let items = feed.toolbarItems ?? []
-        // [author pill][flexible space][🔖 ⇄][fixed space][⋯]
+        // [author pill][flexible space][🔖][⇄][fixed space][⋯] — save and
+        // repost stock items side by side, one platter (#1679)
         //
         // It was one platter holding all three for a while, to save a glass
         // host on the hero flight's push. The arms were then measured and the
         // saving was ~2 ms — inside the noise — so the grouping went back to
         // being a design question. `SnapToolbarCompositionTests` owns the
         // reason; this pins the shape.
-        #expect(items.count == 5)
-        #expect((items.dropFirst(2).first?.customView as? UIStackView)?.arrangedSubviews.count == 2)
-        #expect(items.last?.customView is UIButton)
+        #expect(items.count == 6)
+        #expect(items.dropFirst(2).prefix(2).map(\.accessibilityLabel) == ["Save", "Repost"])
+        #expect(items.last?.accessibilityLabel == "More actions")
     }
 
     /// ⚠️ THE FOOTER'S CORNER KEEPS ITS ⋯ IN EVERY STATE — and the toolbar is
@@ -1179,7 +1181,7 @@ struct SnapCommentsPresentationTests {
         let resting = feed.toolbarItems ?? []
         #expect(!resting.isEmpty)
         func cornerLabel() -> String? {
-            (feed.toolbarItems?.last?.customView as? UIButton)?.accessibilityLabel
+            feed.toolbarItems?.last?.accessibilityLabel
         }
         #expect(cornerLabel() == "More actions")
 
@@ -1200,14 +1202,14 @@ struct SnapCommentsPresentationTests {
     /// comments ARE the page, and there is nothing to close.
     @Test func theExitTakesTheLeadingSlotWhileTheThreadIsOpen() throws {
         let (_, feed) = Self.chromeHost()
-        func leadingFirst() -> UIView? {
-            feed.navigationItem.leftBarButtonItems?.first?.customView
+        func leadingFirst() -> UIBarButtonItem? {
+            feed.navigationItem.leftBarButtonItems?.first
         }
         func closes() -> Bool {
             #expect(!(feed.navigationItem.rightBarButtonItems ?? []).contains {
-                ($0.customView as? UIButton)?.accessibilityLabel == "Close comments"
+                $0.accessibilityLabel == "Close comments"
             }, "a ✕ at the trailing end")
-            return (leadingFirst() as? UIButton)?.accessibilityLabel == "Close comments"
+            return leadingFirst()?.accessibilityLabel == "Close comments"
         }
         #expect(!closes())
 
@@ -1274,7 +1276,7 @@ struct SnapCommentsPresentationTests {
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
         let leading = feed.navigationItem.leftBarButtonItems ?? []
         #expect(leading.count == 3, "[✕][space][sort]: \(leading.count)")
-        #expect((leading.first?.customView as? UIButton)?.accessibilityLabel == "Close comments")
+        #expect(leading.first?.accessibilityLabel == "Close comments")
         #expect(leading.last?.customView is SnapCommentSortButton)
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
@@ -1300,12 +1302,12 @@ struct SnapCommentsPresentationTests {
         let engaged = feed.navigationItem.leftBarButtonItems ?? []
         #expect(engaged.count == 3)
         // The ✕ item takes the edge on a media post (#1197).
-        #expect((engaged[0].customView as? UIButton)?.accessibilityLabel == "Close comments")
+        #expect(engaged[0].accessibilityLabel == "Close comments")
         #expect(engaged[1].customView == nil)   // the fixed space
         #expect(engaged[2].customView is SnapCommentSortButton)
         // …and the trailing run carries no ✕ (#1192).
         #expect(!(feed.navigationItem.rightBarButtonItems ?? []).contains {
-            ($0.customView as? UIButton)?.accessibilityLabel == "Close comments"
+            $0.accessibilityLabel == "Close comments"
         })
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
@@ -1377,7 +1379,7 @@ struct SnapCommentsPresentationTests {
         // the sort.
         let leading = feed.navigationItem.leftBarButtonItems ?? []
         #expect(leading.count == 3, "the leading group is [✕][space][sort]: \(leading.count)")
-        #expect((leading[0].customView as? UIButton)?.accessibilityLabel == "Close comments")
+        #expect(leading[0].accessibilityLabel == "Close comments")
         #expect(leading[1].customView == nil) // the fixed space that keeps them two pills
         #expect(leading[2].customView is SnapCommentSortButton)
 

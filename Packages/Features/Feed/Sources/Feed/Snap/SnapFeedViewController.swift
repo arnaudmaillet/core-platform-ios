@@ -45,9 +45,12 @@ final class SnapFeedViewController: UIViewController {
     /// weakly across its own pop, when `navigationController` is already nil
     /// but the toolbar bookkeeping must still be settled (`viewDidDisappear`).
     private weak var toolbarHost: UINavigationController?
-    /// The share bubble's bookmark action; a property because its glyph
-    /// (bookmark / bookmark.fill) follows the active page's saved state.
-    private let bookmarkButton = SnapNavControls.makeToolbarActionButton(systemName: AppSymbol.save.rawValue)
+    /// The save star — a stock bar item (`SnapFooterToolbar`, #1679); a
+    /// property because its image follows the active page's saved state.
+    private lazy var bookmarkItem = SnapFooterToolbar.makeSaveItem { [weak self] in
+        guard let self, let model = self.activeModel else { return }
+        self.toggleBookmark(for: model.id)
+    }
 
     /// The engaged toolbar's trailing item: the comments sort selector,
     /// occupying the action territory while comments are engaged (the
@@ -77,6 +80,10 @@ final class SnapFeedViewController: UIViewController {
     /// re-minted only invisibly (`reinstallAuthorItem`), and every change of
     /// what the pill draws is the pill's own blur.
     static let authorItemIdentifier = "feed.snap.author-pill"
+    /// The back chevron's and the comments exit's identities (#1679): two
+    /// items for UIKit, so the swap is its morph between them.
+    static let backItemIdentifier = "feed.snap.back"
+    static let closeCommentsItemIdentifier = "feed.snap.close-comments"
 
     /// The viewer's balance, closing the trailing run on its left —
     /// [‹ back] … [🪙 solde] [author pill] — so a spend made on this very
@@ -882,9 +889,9 @@ final class SnapFeedViewController: UIViewController {
         // map-opened feed, not the Timeline tab root — and the stack/
         // presentation relationship is known only here, not at viewDidLoad.
         if isClosable, backItem == nil {
-            let back = SnapNavControls.makeBackButton()
-            back.addAction(UIAction { [weak self] _ in self?.closeFeed() }, for: .primaryActionTriggered)
-            backItem = UIBarButtonItem(customView: back)
+            backItem = BarItems.icon(
+                id: Self.backItemIdentifier, image: UIImage(systemName: "chevron.backward"), label: "Back"
+            ) { [weak self] in self?.closeFeed() }
         }
         // Install through the same resolver the engagement uses, so
         // re-appearing under a LIVE engagement (returning from a pushed
@@ -1830,9 +1837,7 @@ final class SnapFeedViewController: UIViewController {
         pill.addAction(UIAction { [weak self] _ in
             (self?.commentsContentVC as? PostDetailViewController)?.scrollToDay(day)
         }, for: .primaryActionTriggered)
-        let item = UIBarButtonItem(customView: pill)
-        item.identifier = "snap.comments.day.\(Int(day.timeIntervalSince1970))"
-        return item
+        return BarItems.container(id: "snap.comments.day.\(Int(day.timeIntervalSince1970))", view: pill)
     }
 
     /// Hears the day off the panel that holds the engagement.
@@ -2015,9 +2020,7 @@ final class SnapFeedViewController: UIViewController {
             guard let self, let model = self.arrivalModel, !self.isHandingChromeBack else { return }
             self.applyChromeTheme(hasMedia: model.mediaURL != nil)
         }
-        let item = UIBarButtonItem(customView: authorIdentityView)
-        item.identifier = Self.authorItemIdentifier
-        return item
+        return BarItems.container(id: Self.authorItemIdentifier, view: authorIdentityView)
     }
 
     /// Puts `model`'s author in the bar — IN PLACE: same item, same pill, and
@@ -2173,7 +2176,7 @@ final class SnapFeedViewController: UIViewController {
             self.debugProbeBarItemWidth(self.authorIdentityView, slot: "author")
         }
         #endif
-        sortItem = UIBarButtonItem(customView: commentSortButton)
+        sortItem = BarItems.container(id: "feed.snap.sort", view: commentSortButton)
         if wallet != nil {
             // Tappable exactly when a sheet is wired: the badge opens the
             // same claim sheet the map's does, from any post. Without one
@@ -2241,12 +2244,10 @@ final class SnapFeedViewController: UIViewController {
         // out #06123D against a request for red). Baking the colour into the
         // image with `.alwaysOriginal` does defeat it, at the cost of resolving
         // the dynamic colour once at build time.
-        // A NAV control, not a toolbar one: it lives in the bar at the top of
-        // the screen now, and the two sizes are different by design.
-        let close = SnapNavControls.makeNavActionButton(systemName: "xmark")
-        close.accessibilityLabel = "Close comments"
-        close.addAction(UIAction { [weak self] _ in self?.dismissComments() }, for: .primaryActionTriggered)
-        closeCommentsItem = UIBarButtonItem(customView: close)
+        // A stock item (#1679): the bar draws its glass and press.
+        closeCommentsItem = BarItems.icon(
+            id: Self.closeCommentsItemIdentifier, image: UIImage(systemName: "xmark"), label: "Close comments"
+        ) { [weak self] in self?.dismissComments() }
         // ⚠️ THE PILL OPENS THE PROFILE CARD (#1524), not the profile: the
         // viewer's own pill still pushes theirs.
         authorIdentityView.onAuthorTapped = { [weak self] id in
@@ -2280,57 +2281,36 @@ final class SnapFeedViewController: UIViewController {
     /// resolves the active post at action time, so none can act on a page the
     /// user has scrolled past.
     private func configureToolbarItems() {
-        bookmarkButton.accessibilityLabel = "Save"
-        bookmarkButton.addAction(UIAction { [weak self] _ in
-            guard let self, let model = self.activeModel else { return }
-            self.toggleBookmark(for: model.id)
-        }, for: .primaryActionTriggered)
-
         // REPOST takes the share's place in the capsule and SHARE moved into
         // ⋯ (#671, `moreMenuActions`). SAVE LEADS, then repost — [🔖 ⇄]
-        // (#865): the order the text post composer's footer already drew
-        // (`SnapFooterToolbar`), and the order VoiceOver reads.
+        // (#865), the order VoiceOver reads.
         //
         // ⚠️ Repost has no action yet, and is drawn anyway — the same posture the gallery card's band takes
         // for the same glyph, and for the same reason: `CreatePost` carries
         // `parent_id` on the wire and `GalleryPost.isRepost` already reads it,
         // but `PostComposer` takes no parent, so there is no client path that
         // publishes one. Pressing it does nothing today.
-        let repost = SnapNavControls.makeToolbarActionButton(systemName: PostActionSymbol.repost)
-        repost.accessibilityLabel = "Repost"
-        repostToolbarButton = repost
-        let actions = UIStackView(arrangedSubviews: [bookmarkButton, repost])
-        actions.axis = .horizontal
-
-        let more = SnapNavControls.makeToolbarActionButton(systemName: "ellipsis")
-        // ⚠️ NAMED, every one: a glyph with no label reads as "button" to
-        // VoiceOver, and the composition test needs a handle on it.
-        more.accessibilityLabel = "More actions"
-        more.showsMenuAsPrimaryAction = true
-        moreToolbarButton = more
-        more.menu = UIMenu(children: [
+        let repost = SnapFooterToolbar.makeRepostItem()
+        repostToolbarItem = repost
+        let more = SnapFooterToolbar.makeMoreItem(menu: UIMenu(children: [
             UIDeferredMenuElement.uncached { [weak self] completion in
                 guard let self, let model = self.activeModel else { return completion([]) }
                 completion(self.moreMenuActions(for: model.id))
             }
-        ])
+        ]))
+        moreToolbarItem = more
 
         // ONE item set, for every state (#671):
         //
         //   [author pill] … [🔖 ⇄] [⋯]
         //
         // The author pill leads, in the slot the audio capsule had; the sound
-        // lives on the page (`SnapSoundBubbleButton`). TWO bubbles on the
-        // right, held apart by a fixed space — iOS 26 groups ADJACENT items
-        // into one platter, and the capsule (what you DO to this post) is not
-        // the same kind of thing as ⋯ (what is folded away). The toolbar is
-        // STATE-INVARIANT: the comments exit is the nav bar's ✕, and the sort
-        // selector is the nav bar's too (`setEngagedChrome`).
-        let actionsItem = UIBarButtonItem(customView: actions)
-        actionsItem.identifier = "feed.snap.actions"
-        let moreItem = UIBarButtonItem(customView: more)
-        moreItem.identifier = "feed.snap.more"
-        defaultToolbarItems = [authorItem, .flexibleSpace(), actionsItem, .fixedSpace(Spacing.sm), moreItem]
+        // lives on the page (`SnapSoundBubbleButton`). Save and repost are
+        // STOCK items side by side, so the bar puts them in one platter; the
+        // separator gives ⋯ its own (#1679). The toolbar is STATE-INVARIANT:
+        // the comments exit is the nav bar's ✕, and the sort selector is the
+        // nav bar's too (`setEngagedChrome`).
+        defaultToolbarItems = [authorItem, .flexibleSpace(), bookmarkItem, repost, BarItems.separator(), more]
         #if DEBUG
         // `-no-toolbar`: the upper bound on what trimming the footer can buy.
         // Measured (push work, 3 runs): the floating bar's machinery costs ~45
@@ -2408,10 +2388,8 @@ final class SnapFeedViewController: UIViewController {
         drawnBookmarkSymbol = Self.bookmarkSymbol(saved: saved)
         // The label follows the state, like the glyph: "Save" and "Saved" are
         // different offers, and a reader who cannot see the fill has only this.
-        bookmarkButton.accessibilityLabel = saved ? "Saved" : "Save"
-        var config = bookmarkButton.configuration
-        config?.image = Self.bookmarkImage(saved: saved)
-        bookmarkButton.configuration = config
+        bookmarkItem.accessibilityLabel = saved ? "Saved" : "Save"
+        bookmarkItem.image = SnapFooterToolbar.saveImage(saved: saved)
     }
 
     /// The save glyph (#1128): the star, outline at rest; filled in the
@@ -2420,15 +2398,10 @@ final class SnapFeedViewController: UIViewController {
         SaveStar.symbol(saved: saved)
     }
 
-    /// The save glyph as drawn on the page's glass bubble.
-    static func bookmarkImage(saved: Bool) -> UIImage? {
-        SaveStar.image(saved: saved, UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
-    }
-
     #if DEBUG
     /// The save glyph as drawn: its symbol and its spoken label.
     var debugBookmarkGlyph: (symbol: String, label: String?) {
-        (drawnBookmarkSymbol, bookmarkButton.accessibilityLabel)
+        (drawnBookmarkSymbol, bookmarkItem.accessibilityLabel)
     }
     #endif
 
@@ -3004,18 +2977,18 @@ final class SnapFeedViewController: UIViewController {
     /// bar keeps its shape from page to page.
     private func applyToolbarPostActions(for id: PostID) {
         let available = !unavailablePostIDs.contains(id)
-        bookmarkButton.isEnabled = available
-        repostToolbarButton?.isEnabled = available
-        moreToolbarButton?.isEnabled = available
+        bookmarkItem.isEnabled = available
+        repostToolbarItem?.isEnabled = available
+        moreToolbarItem?.isEnabled = available
     }
 
-    private weak var repostToolbarButton: UIButton?
-    private weak var moreToolbarButton: UIButton?
+    private var repostToolbarItem: UIBarButtonItem?
+    private var moreToolbarItem: UIBarButtonItem?
 
     #if DEBUG
     /// The toolbar's post actions, for a test: save, repost, ⋯.
-    var debugToolbarPostActions: [UIButton] {
-        [bookmarkButton, repostToolbarButton, moreToolbarButton].compactMap { $0 }
+    var debugToolbarPostActions: [UIBarButtonItem] {
+        [bookmarkItem, repostToolbarItem, moreToolbarItem].compactMap { $0 }
     }
 
     /// A like staked straight through the wallet, as a tap's spend lands —
