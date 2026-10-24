@@ -122,6 +122,13 @@ enum SnapActionColumn {
     /// line, so this is the glass drop short of the gap (and may be negative).
     static var inputRestingGap: CGFloat { glassGap - toolbarGlassDrop }
 
+    /// EXPERIMENTAL (#1701, the For You root): how far the column — and the
+    /// comments' composer, which rests on its lowest bubble's line — rises
+    /// to stand ABOVE the page strip, its lowest bubble level with the
+    /// caption's bottom (`xl` over the margin line). The strip's room is kept
+    /// under the composer too, empty, and on a post with no strip.
+    static var stripRoomLift: CGFloat { Spacing.xl - inputRestingGap }
+
     // MARK: - The like pill (#669)
 
     /// The like pill's height: from the band's top down to `gap` above the
