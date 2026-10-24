@@ -391,8 +391,9 @@ final class ProfileCardViewController: UIViewController {
     /// The item that takes the toolbar's free width (#1542, the owner): Follow
     /// while the viewer does not follow — `[——Follow——][Message][QR]` — and
     /// Requested once asked, in the same slot — `[——Requested——][Message][QR]`
-    /// (#1668: one item that changes in place, never a bar rebuilt around a
-    /// slot that moves to Message); Message once followed or not followable.
+    /// (#1668: the same item to UIKit, `barIdentifier`, never a bar whose
+    /// stretched slot moves to Message); Message once followed or not
+    /// followable.
     /// Nil: nothing stretches (the viewer's own profile). Pure, for tests.
     nonisolated static func wideItem(in items: [ToolbarItem]) -> ToolbarItem? {
         if items.contains(.follow) { return .follow }
@@ -401,12 +402,23 @@ final class ProfileCardViewController: UIViewController {
         return nil
     }
 
-    /// The bar a relationship shows, with Follow and Requested as one item —
-    /// two states of the same stretched slot. Equal shapes are the same
-    /// items, restyled in place. Pure, for tests.
-    nonisolated static func barShape(_ items: [ToolbarItem]) -> [ToolbarItem] {
-        items.map { $0 == .requested ? .follow : $0 }
+    /// The identity UIKit matches a bar item by across a rebuild
+    /// (`UIBarButtonItem.identifier`): by what it DOES, so Follow and
+    /// Requested are one item in two states, Message stays Message when it
+    /// takes the free width, and Follow is never taken for the bell that
+    /// replaces it once followed (#1678). Pure, for tests.
+    nonisolated static func barIdentifier(for item: ToolbarItem) -> String {
+        switch item {
+        case .follow, .requested: "profileCard.follow"
+        case .message: "profileCard.message"
+        case .openProfile: "profileCard.openProfile"
+        case .bell: "profileCard.bell"
+        case .qr: "profileCard.qr"
+        }
     }
+
+    /// The ••• menu's identity, top left, across rebuilds.
+    nonisolated static let moreIdentifier = "profileCard.more"
 
     /// What the bars last showed: they are rebuilt only when it changes, so
     /// a phase or a refresh that leaves them alone does not redraw them.
@@ -428,21 +440,20 @@ final class ProfileCardViewController: UIViewController {
             )
         )
         guard state != shownBars else { return }
-        // Follow ⇄ Requested: the same bar — the stretched button changes
-        // its look and words in place (#1668).
-        if let shown = shownBars, shown.more == state.more, shown.muted == state.muted,
-           Self.barShape(shown.toolbar) == Self.barShape(state.toolbar),
-           let kind = Self.wideItem(in: state.toolbar), let button = wideButton {
-            shownBars = state
-            restyle(button, as: kind, animated: view.window != nil)
-            return
-        }
+        // ⚠️ REBUILT FOR EVERY CHANGE, AND ANIMATED BY THE BAR (#1678). #1672
+        // restyled a custom-view `UIButton` in place inside a spring of its
+        // own: "Follow" and "Requested" cross-faded over each other while the
+        // tint turned (the owner's recording, 2026-10-24). No button now and
+        // no animation of ours: the bar draws every bubble, and
+        // `setToolbarItems` carries one set into the next, told which items
+        // are the same (`barIdentifier`).
         shownBars = state
         // The ••• menu, top left (#1562).
         var leading: [UIBarButtonItem] = []
         if state.more {
             let more = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), menu: makeMoreMenu())
             more.accessibilityLabel = "More"
+            more.identifier = Self.moreIdentifier
             leading.append(more)
         }
         navigationItem.setLeftBarButtonItems(leading, animated: view.window != nil)
@@ -454,118 +465,83 @@ final class ProfileCardViewController: UIViewController {
             // from joining two items in one shared platter (the sound
             // sheet's toolbar).
             if !items.isEmpty { items.append(.fixedSpace()) }
-            if kind == wide {
-                items.append(wideItem(for: kind))
-                continue
-            }
-            switch kind {
-            case .follow:
-                items.append(followItem(title: "Follow", prominent: true))
-            case .bell:
-                items.append(makeMuteBellItem())
-            case .qr:
-                let qr = UIBarButtonItem(
-                    image: UIImage(systemName: "qrcode"),
-                    primaryAction: UIAction { [weak self] _ in self?.presentShareSheet() }
-                )
-                qr.accessibilityLabel = "QR Code"
-                items.append(qr)
-            case .requested:
-                // Never reached while Follow's slot is the stretched one; kept
-                // for a bar that has no stretched slot.
-                items.append(followItem(title: "Requested", prominent: false))
-            case .openProfile:
-                let open = UIBarButtonItem(title: "View Profile", primaryAction: UIAction { [weak self] _ in
-                    self?.infoTapped()
-                })
-                open.style = .prominent
-                items.append(open)
-            case .message:
-                items.append(UIBarButtonItem(title: "Message", primaryAction: UIAction { [weak self] _ in
-                    self?.messageTapped()
-                }))
-            }
+            let item = kind == wide ? wideItem(for: kind) : barItem(for: kind)
+            item.identifier = Self.barIdentifier(for: kind)
+            items.append(item)
         }
         setToolbarItems(items, animated: view.window != nil)
     }
 
-    /// The stretched item: a custom view, since there is no flexible-width
-    /// bar item and a `.prominent` title item's `width` is ignored on iOS 27.
-    /// It hugs nothing and asks, at the lowest priority, for more room than
-    /// any bar has, so the bar gives it exactly what the other items leave
-    /// (measured for the sound sheet's "Use this sound", #304). Its own glass
-    /// capsule is its background: the item hides the shared one.
-    private func wideItem(for kind: ToolbarItem) -> UIBarButtonItem {
-        let action: UIAction
+    /// A toolbar item that does not stretch: a stock bar item.
+    private func barItem(for kind: ToolbarItem) -> UIBarButtonItem {
         switch kind {
-        case .follow, .requested:
-            action = UIAction { [weak self] _ in self?.followTapped() }
-        default:
-            action = UIAction { [weak self] _ in self?.messageTapped() }
+        case .follow:
+            return followItem(title: "Follow", prominent: true)
+        case .bell:
+            return makeMuteBellItem()
+        case .qr:
+            let qr = UIBarButtonItem(
+                image: UIImage(systemName: "qrcode"),
+                primaryAction: UIAction { [weak self] _ in self?.presentShareSheet() }
+            )
+            qr.accessibilityLabel = "QR Code"
+            return qr
+        case .requested:
+            // Never reached while Follow's slot is the stretched one; kept
+            // for a bar that has no stretched slot.
+            return followItem(title: "Requested", prominent: false)
+        case .openProfile:
+            let open = UIBarButtonItem(title: "View Profile", primaryAction: UIAction { [weak self] _ in
+                self?.infoTapped()
+            })
+            open.style = .prominent
+            return open
+        case .message:
+            return UIBarButtonItem(title: "Message", primaryAction: UIAction { [weak self] _ in
+                self?.messageTapped()
+            })
         }
-        let button = UIButton(configuration: Self.wideConfiguration(for: kind), primaryAction: action)
-        button.accessibilityIdentifier = "profileCard.wide"
-        button.setContentHuggingPriority(.init(1), for: .horizontal)
-        let fill = button.widthAnchor.constraint(equalToConstant: 10_000)
+    }
+
+    /// The stretched item: a plain view holding its word, in an item whose
+    /// bubble the BAR draws — its glass, its press, and its prominence for
+    /// Follow — as the post screen's author pill is (#1678). A custom view,
+    /// since there is no flexible-width bar item (a title item's `width` is
+    /// ignored on iOS 27, measured again 2026-10-24); never a `UIButton`
+    /// drawing a glass of its own. It hugs nothing and asks, at the lowest
+    /// priority, for more room than any bar has, so the bar gives it exactly
+    /// what the other items leave (#304).
+    private func wideItem(for kind: ToolbarItem) -> UIBarButtonItem {
+        let label: StretchedBarLabel
+        switch kind {
+        case .follow:
+            label = StretchedBarLabel(title: "Follow", ink: .white) { [weak self] in self?.followTapped() }
+        case .requested:
+            label = StretchedBarLabel(title: "Requested", ink: .label) { [weak self] in self?.followTapped() }
+        default:
+            label = StretchedBarLabel(title: "Message", ink: .label) { [weak self] in self?.messageTapped() }
+        }
+        label.accessibilityIdentifier = "profileCard.wide"
+        label.setContentHuggingPriority(.init(1), for: .horizontal)
+        let fill = label.widthAnchor.constraint(equalToConstant: 10_000)
         fill.priority = .init(2)
         // 999, never required: the bar's first pass pins its item wrapper to
         // the raw intrinsic size.
-        let height = button.heightAnchor.constraint(equalToConstant: Self.barBubbleHeight)
+        let height = label.heightAnchor.constraint(equalToConstant: Self.barBubbleHeight)
         height.priority = .init(999)
         NSLayoutConstraint.activate([fill, height])
-        let item = UIBarButtonItem(customView: button)
-        item.hidesSharedBackground = true
-        wideButton = button
+        let item = UIBarButtonItem(customView: label)
+        if kind == .follow { item.style = .prominent }
+        wideLabel = label
         return item
-    }
-
-    /// The stretched button's look: Follow on the prominent glass, Requested
-    /// and Message on the plain one.
-    private static func wideConfiguration(for kind: ToolbarItem) -> UIButton.Configuration {
-        var configuration: UIButton.Configuration
-        switch kind {
-        case .follow:
-            configuration = .prominentGlass()
-            configuration.baseBackgroundColor = Palette.prominentGlassTint
-            configuration.baseForegroundColor = .white
-            configuration.title = "Follow"
-        case .requested:
-            configuration = .glass()
-            configuration.baseForegroundColor = .label
-            configuration.title = "Requested"
-        default:
-            configuration = .glass()
-            configuration.baseForegroundColor = .label
-            configuration.title = "Message"
-        }
-        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var attributes = attributes
-            attributes.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
-            return attributes
-        }
-        return configuration
-    }
-
-    /// The stretched button in place, as `kind` — the glass morphing its tint
-    /// and words, the bar left alone.
-    private func restyle(_ button: UIButton, as kind: ToolbarItem, animated: Bool) {
-        let configuration = Self.wideConfiguration(for: kind)
-        guard animated else {
-            button.configuration = configuration
-            return
-        }
-        UIView.animate(springDuration: 0.35, bounce: 0.2) {
-            button.configuration = configuration
-            button.layoutIfNeeded()
-        }
     }
 
     /// The bar's glass bubbles' height on iOS 27 (iPhone 18 Pro), which the
     /// stretched capsule matches (`SoundSheetViewController.barBubbleHeight`).
     static let barBubbleHeight: CGFloat = 48
 
-    /// The stretched item's button — what a test reads.
-    private(set) weak var wideButton: UIButton?
+    /// The stretched item's view — what a test reads.
+    private(set) weak var wideLabel: StretchedBarLabel?
 
     private func followItem(title: String, prominent: Bool) -> UIBarButtonItem {
         let item = UIBarButtonItem(title: title, primaryAction: UIAction { [weak self] _ in
@@ -765,4 +741,49 @@ extension ProfileCardViewController: UIGestureRecognizerDelegate {
         }
         return false
     }
+}
+
+/// The stretched toolbar item's content (#1678): its word, centred, and a
+/// tap — nothing drawn behind it, the bar's bubble is its background. Read
+/// by VoiceOver as the button it stands for.
+final class StretchedBarLabel: UIView {
+    private let label = UILabel()
+    private let action: () -> Void
+
+    var title: String { label.text ?? "" }
+
+    init(title: String, ink: UIColor, action: @escaping () -> Void) {
+        self.action = action
+        super.init(frame: .zero)
+        label.text = title
+        label.textColor = ink
+        label.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
+        label.adjustsFontForContentSizeCategory = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.centerXAnchor.constraint(equalTo: centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: Spacing.md),
+        ])
+        isAccessibilityElement = true
+        accessibilityLabel = title
+        accessibilityTraits = .button
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    @objc private func tapped() { action() }
+
+    override func accessibilityActivate() -> Bool {
+        action()
+        return true
+    }
+
+    #if DEBUG
+    /// The tap's own path, for tests.
+    func debugTap() { action() }
+    #endif
 }
