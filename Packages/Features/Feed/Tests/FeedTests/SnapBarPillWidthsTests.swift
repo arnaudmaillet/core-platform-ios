@@ -249,10 +249,11 @@ struct SnapBarPillWidthsTests {
         }
         let right = feed.navigationItem.rightBarButtonItems ?? []
         let left = feed.navigationItem.leftBarButtonItems ?? []
-        let pill = try #require(right.compactMap { $0.customView as? SnapAuthorIdentityView }.first)
+        // No author pill in the top bar since #1699: it is inside the page.
+        #expect(!right.contains { $0.customView is SnapAuthorIdentityView }, "\(width)pt: a pill in the root's top bar")
         let badge = try #require(right.compactMap { $0.customView as? WalletBadgeButton }.first)
         let sort = try #require(left.compactMap { $0.customView as? SnapCommentSortButton }.first)
-        for (name, view) in [("author", pill), ("wallet", badge), ("sort", sort)] as [(String, UIView)] {
+        for (name, view) in [("wallet", badge), ("sort", sort)] as [(String, UIView)] {
             #expect(view.window != nil, "\(width)pt: the \(name) item was folded away")
         }
         #expect(left.first === bell, "\(width)pt: the bell does not lead")

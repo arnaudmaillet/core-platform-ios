@@ -643,6 +643,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The caption's register over the media: `.soft` on the For You root
     /// (#1697), `.standard` everywhere else.
     func setCaptionStyle(_ style: SnapChromeView.CaptionStyle) { chrome.captionStyle = style }
+    /// The author INSIDE the page, without glass (#1699, the For You root's):
+    /// shown with `model`'s author and the relation `badge`, or hidden.
+    func setAuthorRow(shown: Bool, model: FeedItemDisplayModel, badge: PersonPill.Badge, pipeline: ImagePipeline) {
+        chrome.showsAuthorRow = shown
+        guard shown else { return }
+        chrome.setAuthorRow(model, badge: badge, pipeline: pipeline)
+    }
+    /// The relation the author row's badge says, after a follow.
+    func setAuthorRowBadge(_ badge: PersonPill.Badge) { chrome.setAuthorRowBadge(badge) }
+    /// The author row: a tap (the card), a hold (the profile), its "+".
+    var onRequestAuthorCard: (() -> Void)?
+    var onRequestAuthorProfile: (() -> Void)?
+    var onRequestAuthorFollow: (() -> Void)?
+    /// The author the row names, for the screen's follow updates.
+    var shownAuthorID: ProfileID? { chrome.showsAuthorRow ? representedAuthorID : nil }
+    private(set) var representedAuthorID: ProfileID?
     /// The capsule's star for the post on show, after a save anywhere.
     func setPostSaved(_ saved: Bool) { chrome.postActions.setSaved(saved) }
     /// The capsule's star was tapped: the screen saves or unsaves the post.
@@ -1732,6 +1748,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.onSoundToggleRequested = { [weak self] in self?.onRequestSoundToggle?() }
         chrome.onSoundSheetRequested = { [weak self] in self?.onRequestSoundSheet?() }
         chrome.postActions.onSave = { [weak self] in self?.onRequestSave?() }
+        representedAuthorID = model.authorID
+        chrome.onAuthorTapped = { [weak self] in self?.onRequestAuthorCard?() }
+        chrome.onAuthorLongPressed = { [weak self] in self?.onRequestAuthorProfile?() }
+        chrome.onAuthorFollowTapped = { [weak self] in self?.onRequestAuthorFollow?() }
         #if DEBUG
         // Which projection fields are present the moment the page is
         // configured. Everything listed here is supposed to render at 0ms from

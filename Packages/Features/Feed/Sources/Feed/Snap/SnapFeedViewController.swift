@@ -1690,6 +1690,19 @@ final class SnapFeedViewController: UIViewController {
                 cell.setPostActions(shown: self.isForYouRoot, saved: self.bookmarks.isSaved(id.rawValue))
                 // …and its caption, smaller and greyer over the media (#1697).
                 cell.setCaptionStyle(self.isForYouRoot ? .soft : .standard)
+                // …and its author, inside the page without glass (#1699): the
+                // pill's own taps — the card, the profile on a hold, the "+".
+                cell.setAuthorRow(
+                    shown: self.isForYouRoot, model: model,
+                    badge: self.followStore.badge(for: model.authorID), pipeline: self.imagePipeline
+                )
+                let author = model.authorID
+                cell.onRequestAuthorCard = { [weak self] in
+                    guard let self else { return }
+                    self.viewModel.didTapAuthorPill(author, isViewer: self.followStore.relation(for: author) == .viewer)
+                }
+                cell.onRequestAuthorProfile = { [weak self] in self?.viewModel.didTapAuthor(author) }
+                cell.onRequestAuthorFollow = { [weak self] in self?.followAuthor(author) }
                 cell.onRequestSave = { [weak self] in self?.toggleBookmark(for: id) }
             }
             return cell
@@ -1744,13 +1757,56 @@ final class SnapFeedViewController: UIViewController {
     /// The For You root's tab bar (#1681): it holds the bottom, and steps
     /// aside while a media post's comments are open — their composer takes
     /// the bottom — through UIKit's own animation (`TabBarRevealPolicy`).
+    ///
+    /// EXPERIMENTAL (#1699, the owner 2026-10-24): a bottom TOOLBAR takes the
+    /// tab bar's place while they are open — a placeholder input for now, to
+    /// judge the look (two inputs on screen are fine for this test). The
+    /// composer rests above it: the toolbar raises the safe area it reads.
     private func applyForYouRootTabBar(commentsOpen: Bool) {
         guard isForYouRoot, let tabBarController, view.window != nil else { return }
         if commentsOpen {
             if !tabBarController.isTabBarHidden { tabBarController.hideTabBarNatively() }
-        } else if tabBarController.isTabBarHidden {
-            tabBarController.showTabBarNatively()
+            showRootCommentsToolbar(true)
+        } else {
+            showRootCommentsToolbar(false)
+            if tabBarController.isTabBarHidden { tabBarController.showTabBarNatively() }
         }
+    }
+
+    /// The root's comments toolbar (#1699): its placeholder input, shown or
+    /// hidden through UIKit's own animation.
+    private func showRootCommentsToolbar(_ shown: Bool) {
+        guard let nav = navigationController else { return }
+        if shown {
+            if toolbarItems?.contains(where: { $0.identifier == Self.rootInputItemID }) != true {
+                setToolbarItems([BarItems.container(id: Self.rootInputItemID, view: makeRootPlaceholderInput())], animated: false)
+            }
+            if nav.isToolbarHidden { nav.setToolbarHidden(false, animated: true) }
+            // The bottom glass takes the page's dark, as the post's toolbar
+            // does: it is themed through its custom view, now hosted.
+            DispatchQueue.main.async { [weak self] in self?.applyChromeTheme(hasMedia: true) }
+        } else if !nav.isToolbarHidden {
+            nav.setToolbarHidden(true, animated: true)
+        }
+    }
+
+    static let rootInputItemID = "feed.foryou-root.placeholder-input"
+
+    /// A plain field filling the toolbar — a placeholder (#1699).
+    private func makeRootPlaceholderInput() -> UIView {
+        let field = UITextField()
+        field.placeholder = "Placeholder input"
+        field.borderStyle = .none
+        field.textColor = .label
+        field.font = .appFont(forTextStyle: .body)
+        field.accessibilityIdentifier = "foryou.root.placeholder-input"
+        field.setContentHuggingPriority(.init(1), for: .horizontal)
+        let fill = field.widthAnchor.constraint(equalToConstant: 10_000)
+        fill.priority = .init(2)
+        let tall = field.heightAnchor.constraint(equalToConstant: BarItems.bubbleHeight)
+        tall.priority = .init(999)
+        NSLayoutConstraint.activate([fill, tall])
+        return field
     }
 
     /// Gives both pills their FIXED widths for the bars as they stand — see
@@ -1944,10 +2000,10 @@ final class SnapFeedViewController: UIViewController {
     /// pill with the badge to its left, spacer-separated so iOS 26 never
     /// fuses them into one platter.
     private func restingTrailingItems() -> [UIBarButtonItem] {
-        // The For You root (#1681): the pill inboard of the points, right to
-        // left [points][pill], the fixed space keeping two bubbles.
+        // The For You root (#1681): the points alone — its author is INSIDE
+        // the page since #1699, no longer the top bar's pill.
         if isForYouRoot {
-            return (walletBadgeItem.map { [$0, BarItems.separator()] } ?? []) + [authorItem]
+            return walletBadgeItem.map { [$0] } ?? []
         }
         // The pill is the toolbar's (#671): the nav bar holds the points alone.
         return walletBadgeItem.map { [$0] } ?? []
@@ -2114,10 +2170,8 @@ final class SnapFeedViewController: UIViewController {
         authorItem = makeAuthorItem()
         // The toolbar's leading item (#671).
         defaultToolbarItems = defaultToolbarItems.map { $0 === previousItem ? authorItem : $0 }
-        if isForYouRoot {
-            // The pill is the top bar's on the For You root (#1681).
-            return applyTrailingNavItems(engagedTrailingItems(), animated: false)
-        }
+        // The For You root wears no pill in any bar (#1699).
+        if isForYouRoot { return }
         guard var items = toolbarItems, let index = items.firstIndex(of: previousItem) else { return }
         items[index] = authorItem
         setToolbarItems(items, animated: false)
@@ -2171,6 +2225,13 @@ final class SnapFeedViewController: UIViewController {
     /// and will read the new answer — the badge changes once the screen has
     /// landed, where it can be seen to change.
     private func followRelationDidChange(for author: ProfileID) {
+        // The For You root's author rows (#1699): every visible page by them.
+        if isForYouRoot {
+            let badge = followStore.badge(for: author)
+            for case let cell as SnapFeedCell in collectionView.visibleCells where cell.shownAuthorID == author {
+                cell.setAuthorRowBadge(badge)
+            }
+        }
         guard authorIdentityView.shownAuthor?.authorID == author,
               authorIdentityView.followBadge != followStore.badge(for: author) else { return }
         if authorPillAwaitsLandingInstall, isAwaitingAnyFlight || transitionCoordinator != nil { return }
@@ -2194,6 +2255,7 @@ final class SnapFeedViewController: UIViewController {
         // Named now, while the pill shows them: by the time the graph answers
         // the viewer may have swiped to someone else.
         let name = authorIdentityView.shownAuthor.flatMap { $0.authorID == author ? Self.followName(of: $0) : nil }
+            ?? (isForYouRoot ? modelsByID.values.first { $0.authorID == author }.map(Self.followName(of:)) : nil)
         followStore.follow(author) { [weak self] in
             guard let self else { return }
             // The "+" comes back — and says why (#802): a mark that undoes
@@ -2497,11 +2559,6 @@ final class SnapFeedViewController: UIViewController {
     /// call to prove it on a device.
     private func presentToolbar() {
         guard let nav = navigationController else { return }
-        // The For You root (#1681): the tab bar's bottom, no toolbar.
-        if isForYouRoot {
-            if !nav.isToolbarHidden { nav.setToolbarHidden(true, animated: false) }
-            return
-        }
         toolbarHost = nav
 
         // The stack's toolbar is shown by this screen alone, so configuring
@@ -2514,6 +2571,14 @@ final class SnapFeedViewController: UIViewController {
         nav.toolbar.compactAppearance = appearance
         nav.toolbar.scrollEdgeAppearance = appearance
         nav.toolbar.tintColor = .white
+
+        // The For You root (#1681): the tab bar's bottom — and the comments'
+        // toolbar while they are open (#1699), back with them after a push.
+        if isForYouRoot {
+            let commentsOpen = commentsEngagedID != nil && !commentsEngagementIsResting
+            if commentsOpen != !nav.isToolbarHidden { showRootCommentsToolbar(commentsOpen) }
+            return
+        }
 
         guard nav.isToolbarHidden else { return }
         #if DEBUG
