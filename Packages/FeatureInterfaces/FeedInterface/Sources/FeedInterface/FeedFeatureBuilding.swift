@@ -606,3 +606,13 @@ public enum SettledDeparture {
         return departure != arrival || (mediaPage ?? 0) > 0
     }
 }
+
+/// EXPERIMENTAL (#1703): the For You sector as the shell sees it — which page
+/// is in front, so the tab bar wears Feed's dark style over Feed only.
+@MainActor
+public protocol ForYouSectorPaging: AnyObject {
+    /// Whether Feed (the full-screen posts) is the page in front.
+    var isShowingFeed: Bool { get }
+    /// The page in front changed.
+    var onPageChange: (() -> Void)? { get set }
+}

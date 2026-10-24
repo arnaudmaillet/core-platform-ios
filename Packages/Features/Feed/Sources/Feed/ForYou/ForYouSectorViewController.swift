@@ -1,5 +1,6 @@
 import CoreNavigation
 import DesignSystem
+import FeedInterface
 import UIKit
 
 /// A page of the For You sector (#1703): a whole screen that, while it is in
@@ -41,7 +42,7 @@ protocol ForYouSectorPage: UIViewController {
 ///
 /// **The pager gives away what it cannot use** (`yieldsPastEnds`): on Feed,
 /// the last page, a leftward drag belongs to the feed's own swipe chain.
-final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting {
+final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting, ForYouSectorPaging {
     static let homeIndex = 0
     static let feedIndex = 1
     static let selectorItemID = "foryou.sector.selector"
@@ -53,6 +54,9 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
     /// The page in front — the one whose bar the sector wears.
     private(set) var activeIndex = ForYouSectorViewController.feedIndex
     private var isVisible = false
+
+    var isShowingFeed: Bool { activeIndex == Self.feedIndex }
+    var onPageChange: (() -> Void)?
 
     init(home: any ForYouSectorPage, feed: any ForYouSectorPage) {
         pages = [home, feed]
@@ -189,6 +193,7 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
         }
         outgoing.sectorPageDidChangeActivity(false)
         incoming.sectorPageDidChangeActivity(true)
+        onPageChange?()
     }
 
     /// Everything a page composes in its bar.
