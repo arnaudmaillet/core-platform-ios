@@ -46,14 +46,6 @@ protocol ForYouSectorPage: UIViewController {
 /// — Shots' media plays from there, not from the settle — and the other page
 /// disappears; back under half, they swap back.
 ///
-/// **The page leaving blurs by how little of the screen it fills** (#1707,
-/// the owner): 100% at 0%, nothing from 50% on (`blurAmount`), so the change
-/// of page cross-fades. Only the page the drag LEFT — the settled one — blurs;
-/// the page arriving stays sharp.
-/// The blur exists only mid-drag: at rest neither page wears one
-/// (`PageBlur.clear`), so nothing is left on the paused animator that drives
-/// it when the tab's view leaves the window.
-///
 /// **The pager gives away what it cannot use** (`yieldsPastEnds`): on Shots,
 /// the last page, a leftward drag belongs to its own swipe chain.
 final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting, ForYouSectorPaging {
@@ -68,11 +60,6 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
     private let selector = PagedTabBar(titles: ForYouSectorViewController.titles, style: .navigationTitle)
     private lazy var selectorItem = BarItems.container(id: Self.selectorItemID, view: selector)
     private var pager: HorizontalPagerView?
-    /// Each page's occupancy blur, in page order.
-    private var blurs: [PageBlur] = []
-    /// The page the sector last settled on — the one a drag leaves, and the
-    /// only one that blurs (#1707).
-    private var settledIndex = ForYouSectorViewController.startIndex(arguments: ProcessInfo.processInfo.arguments)
     /// The page in front — the one whose bar the sector wears.
     private(set) var activeIndex = ForYouSectorViewController.startIndex(
         arguments: ProcessInfo.processInfo.arguments
@@ -121,13 +108,7 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
             addChild(page)
             page.sectorSelectorItem = selectorItem
         }
-        // Each page in a host that lays its blur over it (#1707).
-        let hosts = pages.enumerated().map { index, page in
-            let blur = PageBlur(style: index == Self.shotsIndex ? .dark : .regular)
-            blurs.append(blur)
-            return Self.host(page.view, under: blur.view)
-        }
-        let pager = HorizontalPagerView(pages: hosts, initialIndex: activeIndex)
+        let pager = HorizontalPagerView(pages: pages.map(\.view), initialIndex: activeIndex)
         pager.yieldsPastEnds = true
         pager.yieldsDrag = { [weak self] velocity in
             guard let self else { return false }
@@ -198,7 +179,7 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
         pages[activeIndex].endAppearanceTransition()
         #if DEBUG
         // QA (#1707): `-sector-scrub <Shots' share>` holds the pager mid-drag,
-        // to film the occupancy blur and the swap at half.
+        // to film the swap at half.
         let arguments = ProcessInfo.processInfo.arguments
         if let flag = arguments.firstIndex(of: "-sector-scrub"), flag + 1 < arguments.count,
            let share = Double(arguments[flag + 1]) {
@@ -233,37 +214,16 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
         if !animated { settle(on: index) }
     }
 
-    /// The pager's position as each page's share of the screen (`shotsShare`
-    /// = Shots', Feed's the rest): the page over half is brought to the front,
-    /// and each blurs by its share.
+    /// The pager's position as Shots' share of the screen (Feed's the rest):
+    /// the page over half is brought to the front.
     private func applyOccupancy(shotsShare: CGFloat) {
         let shots = min(max(shotsShare, 0), 1)
         if shots > 0.5 { bringToFront(Self.shotsIndex) } else if shots < 0.5 { bringToFront(Self.feedIndex) }
-        // At rest, nothing: a page fully off screen is not seen, and a paused
-        // animator left over it would outlive the window.
-        guard abs(shots - shots.rounded()) > 0.001 else { return blurs.forEach { $0.clear() } }
-        // Only the page leaving: the one the drag started from.
-        let shares = [1 - shots, shots]
-        for (index, blur) in blurs.enumerated() {
-            if index == settledIndex {
-                blur.setAmount(Self.blurAmount(occupancy: shares[index]))
-            } else {
-                blur.clear()
-            }
-        }
-    }
-
-    /// How blurred a page filling `occupancy` of the screen is (#1707):
-    /// fully at 0, not at all from half the screen on, linear between.
-    static func blurAmount(occupancy: CGFloat) -> CGFloat {
-        min(1, max(0, 1 - occupancy / 0.5))
     }
 
     private func settle(on index: Int) {
         selector.select(index)
         bringToFront(index)
-        settledIndex = index
-        blurs.forEach { $0.clear() }
     }
 
     /// Makes `index` the page in front: its bar on the sector's item, its
@@ -289,27 +249,6 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
         incoming.sectorPageDidChangeActivity(true)
         onPageChange?()
     }
-
-    /// `page` filling a plain host, `blur` laid over it — touches pass
-    /// through the blur.
-    private static func host(_ page: UIView, under blur: UIView) -> UIView {
-        let host = UIView()
-        page.translatesAutoresizingMaskIntoConstraints = false
-        blur.translatesAutoresizingMaskIntoConstraints = false
-        blur.isUserInteractionEnabled = false
-        host.addSubview(page)
-        host.addSubview(blur)
-        NSLayoutConstraint.activate([page, blur].flatMap { view in [
-            view.topAnchor.constraint(equalTo: host.topAnchor),
-            view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-            view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
-            view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
-        ] })
-        return host
-    }
-
-    /// Each page's blur amount now (0 = none) — for tests.
-    var debugBlurAmounts: [CGFloat] { blurs.map(\.amount) }
 
     /// Drives the pager as a drag at `shotsShare` would — for tests.
     func debugApplyOccupancy(shotsShare: CGFloat) { applyOccupancy(shotsShare: shotsShare) }
@@ -341,39 +280,3 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
     }
 }
 
-/// A page's occupancy blur (#1707): a blur effect whose strength is the
-/// fraction of a paused animator taking it from none to full — the one way
-/// UIKit animates a blur's radius. Only ever live mid-drag (`clear` at rest).
-@MainActor
-private final class PageBlur {
-    let view = UIVisualEffectView(effect: nil)
-    private let style: UIBlurEffect.Style
-    private var animator: UIViewPropertyAnimator?
-    private(set) var amount: CGFloat = 0
-
-    init(style: UIBlurEffect.Style) {
-        self.style = style
-    }
-
-    func setAmount(_ value: CGFloat) {
-        guard value > 0 else { return clear() }
-        if animator == nil {
-            let animator = UIViewPropertyAnimator(duration: 1, curve: .linear) { [view, style] in
-                view.effect = UIBlurEffect(style: style)
-            }
-            animator.pausesOnCompletion = true
-            self.animator = animator
-        }
-        amount = min(1, value)
-        animator?.fractionComplete = amount
-    }
-
-    /// No blur, and no animator left running.
-    func clear() {
-        amount = 0
-        guard let animator else { return }
-        animator.stopAnimation(true)
-        self.animator = nil
-        view.effect = nil
-    }
-}

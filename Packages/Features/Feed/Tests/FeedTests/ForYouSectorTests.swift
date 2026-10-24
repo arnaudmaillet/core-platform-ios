@@ -92,39 +92,18 @@ struct ForYouSectorTests {
 
     // MARK: - The change of page (#1707)
 
-    /// 100% blur at 0% of the screen, none from half on, linear between.
-    @Test func theBlurFollowsTheShareOfTheScreen() {
-        #expect(ForYouSectorViewController.blurAmount(occupancy: 0) == 1)
-        #expect(abs(ForYouSectorViewController.blurAmount(occupancy: 0.25) - 0.5) < 0.0001)
-        #expect(ForYouSectorViewController.blurAmount(occupancy: 0.5) == 0)
-        #expect(ForYouSectorViewController.blurAmount(occupancy: 0.8) == 0)
-    }
-
     /// Mid-drag, the page over half the screen is the page in front — its
-    /// bar, its appearance (Shots plays) — and only the page the drag left
-    /// blurs, by its share; at rest, no blur is left.
-    @Test func thePageOverHalfIsInFrontAndOnlyTheLeavingOneBlurs() {
+    /// bar, its appearance (Shots plays) — and back under half they swap back.
+    @Test func thePageOverHalfIsInFront() {
         let (sector, home, feed) = sector()
-        // Leaving Shots (the settled page) for Feed.
         sector.debugApplyOccupancy(shotsShare: 0.4)
         #expect(sector.activeIndex == ForYouSectorViewController.feedIndex, "Shots under half kept the front")
         #expect(home.activity == [true])
         #expect(feed.activity == [false])
-        var amounts = sector.debugBlurAmounts
-        #expect(amounts[ForYouSectorViewController.feedIndex] == 0, "the page arriving is blurred")
-        #expect(abs(amounts[ForYouSectorViewController.shotsIndex] - 0.2) < 0.0001)
-
-        // Early in the drag the page arriving fills little — still sharp.
-        sector.debugApplyOccupancy(shotsShare: 0.9)
-        amounts = sector.debugBlurAmounts
-        #expect(amounts[ForYouSectorViewController.feedIndex] == 0, "the page arriving blurs while it is small")
-        #expect(amounts[ForYouSectorViewController.shotsIndex] == 0)
 
         sector.debugApplyOccupancy(shotsShare: 0.6)
         #expect(sector.activeIndex == ForYouSectorViewController.shotsIndex, "back over half, Shots did not come back")
-
-        sector.debugApplyOccupancy(shotsShare: 1)
-        #expect(sector.debugBlurAmounts == [0, 0], "a blur outlived the drag")
+        #expect(feed.activity == [false, true])
     }
 
     /// The sector's insets reach the pages (UIKit gives Feed none in here).
