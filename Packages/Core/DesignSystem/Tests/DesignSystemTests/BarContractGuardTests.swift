@@ -26,7 +26,6 @@ struct BarContractGuardTests {
         "App/Shell/WalletStakesViewController.swift": 1,
         "Packages/Core/DesignSystem/Sources/DesignSystem/Components/NavigationBarToasts.swift": 1,
         "Packages/Core/DesignSystem/Sources/DesignSystem/Components/SelectorToolbarItem.swift": 1,
-        "Packages/Features/Auth/Sources/Auth/LoginFlowCoordinator.swift": 1,
         "Packages/Features/Feed/Sources/Feed/ForYou/PushedScreenHeader.swift": 1,
         "Packages/Features/Maps/Sources/Maps/Countries/CountryShopViewController.swift": 1,
         "Packages/Features/Profile/Sources/Profile/Views/ProfileRelationshipsViewController.swift": 1,

@@ -85,39 +85,24 @@ final class LoginFlowCoordinator {
     }()
 
     /// The language selector as a top-right navigation bar item — globe +
-    /// locale code in ONE glass capsule (a standard item shows only its
-    /// image when given both, so the content is a configured `UIButton`).
-    /// Minted fresh per screen: a `UIBarButtonItem` can't be installed in
-    /// two `navigationItem`s, and nav bar items ride push transitions
-    /// natively, so no instance sharing is needed here.
+    /// locale code in ONE bubble the bar draws (`BarItems.labeled`, #1679: a
+    /// stock item shows only its image when given both, and a `UIButton` in
+    /// a custom view is what the bar contract retires). Minted fresh per
+    /// screen: a `UIBarButtonItem` can't be installed in two
+    /// `navigationItem`s; the shared identifier carries it across a push.
     private func makeLanguageNavItem() -> UIBarButtonItem {
-        var configuration = UIButton.Configuration.plain()
-        configuration.image = UIImage(systemName: "globe")
-        configuration.title = Locale.current.identifier(.bcp47)
-        configuration.imagePadding = 4
-        configuration.baseForegroundColor = .secondaryLabel
-        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(textStyle: .footnote)
-        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var attributes = attributes
-            attributes.font = UIFont.appFont(forTextStyle: .footnote)
-            return attributes
+        // Weak: the item holds the label, which holds this action.
+        weak var anchor: UIBarButtonItem?
+        let made = BarItems.labeled(
+            id: "auth.language", title: Locale.current.identifier(.bcp47), image: UIImage(systemName: "globe"),
+            ink: .secondaryLabel, textStyle: .footnote
+        ) { [weak self] in
+            guard let self, let anchor else { return }
+            presentLanguageSheet(from: anchor)
         }
-        let button = UIButton(configuration: configuration)
-        button.accessibilityLabel = String(localized: "Change language")
-        // ⚠️ Still a button in a custom view (R1, #1679): a stock item shows
-        // only its image when given both. It moves to a bar-drawn labelled
-        // item once `StretchedBarLabel` takes a glyph (#1685).
-        let item = UIBarButtonItem(customView: button)
-        item.identifier = "auth.language"
-        button.addAction(
-            UIAction { [weak self, weak item] _ in
-                guard let self, let item else { return }
-                presentLanguageSheet(from: item)
-            },
-            for: .primaryActionTriggered
-        )
-        button.sizeToFit()
-        return item
+        made.label.accessibilityLabel = String(localized: "Change language")
+        anchor = made.item
+        return made.item
     }
 
     /// Standard titled bar item in the system's own capsule.
