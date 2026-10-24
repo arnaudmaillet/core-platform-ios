@@ -83,11 +83,11 @@ struct SnapForYouRootTests {
         #expect(plain.authorRow.isHidden, "the author row shows off the root")
     }
 
-    // MARK: - The comments toolbar (#1699)
+    // MARK: - The comments keep the tab bar (#1699)
 
-    /// Comments open on the root: the tab bar steps aside and a toolbar with
-    /// the placeholder input takes the bottom; closed, the toolbar goes.
-    @Test func theCommentsOpenAToolbarInTheTabBarsPlace() async throws {
+    /// Comments open on the root: the tab bar stays, and no toolbar comes up
+    /// (a placeholder toolbar in its place was tried and dropped).
+    @Test func theCommentsKeepTheTabBar() async throws {
         let root = feed(root: true)
         let nav = UINavigationController(rootViewController: root)
         let tabs = UITabBarController()
@@ -99,12 +99,60 @@ struct SnapForYouRootTests {
         for _ in 0..<100 where root.view.window == nil { try await Task.sleep(for: .milliseconds(10)) }
 
         root.setEngagedChrome(true, hasMedia: true, animated: false)
-        #expect(root.toolbarItems?.contains { $0.identifier == SnapFeedViewController.rootInputItemID } == true,
-                "no placeholder input in the comments' toolbar")
-        #expect(!nav.isToolbarHidden, "the comments' toolbar is hidden")
+        #expect(!tabs.isTabBarHidden, "the comments hid the tab bar")
+        #expect(nav.isToolbarHidden, "a toolbar came up with the comments")
 
         root.setEngagedChrome(false, hasMedia: true, animated: false)
-        #expect(nav.isToolbarHidden, "the toolbar outlived the comments")
+        #expect(!tabs.isTabBarHidden)
+    }
+
+    // MARK: - The danmaku replaces the stream (#1699)
+
+    private static func streams(reactions: Int) -> FeedViewModel.CommentStreams {
+        FeedViewModel.CommentStreams(
+            reactions: (0..<reactions).map { TickerCommentModel(id: "r\($0)", text: "fire \($0)") },
+            subtitles: [SubtitleCue(id: "s0", text: "A whole sentence worth reading.")],
+            commentCount: reactions + 1
+        )
+    }
+
+    private static func streamZone(of chrome: SnapChromeView) throws -> SnapSubtitleView {
+        try #require(chrome.subviews.lazy.compactMap { $0 as? SnapSubtitleView }.first)
+    }
+
+    /// On the root, a danmaku with bubbles takes the stream's seat on the
+    /// author row and the stream stays down; with none, the stream speaks.
+    @Test func aDanmakuReplacesTheStreamOnTheRoot() throws {
+        let chrome = SnapActionColumnLayoutTests.chrome()
+        let model = SnapActionColumnLayoutTests.mediaModel(mediaURL: URL(string: "mock://media/1"))
+        chrome.configure(with: model)
+        chrome.showsAuthorRow = true
+        chrome.setAuthorRow(model, badge: .follow, pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        let stream = try Self.streamZone(of: chrome)
+
+        chrome.updateCommentStreams(Self.streams(reactions: 8))
+        chrome.setNeedsLayout()
+        chrome.layoutIfNeeded()
+        #expect(stream.isHidden, "the stream shows under a running danmaku")
+        #expect(abs(chrome.debugTickerFrame.maxY - (chrome.authorRow.frame.minY - Spacing.md)) < 0.5,
+                "the danmaku is not in the stream's seat")
+
+        chrome.updateCommentStreams(Self.streams(reactions: 0))
+        chrome.setNeedsLayout()
+        chrome.layoutIfNeeded()
+        #expect(!stream.isHidden, "no danmaku, and the stream stayed down")
+        #expect(abs(chrome.debugStreamFrame.maxY - (chrome.authorRow.frame.minY - Spacing.md)) < 0.5)
+    }
+
+    /// Off the root, the danmaku rides above the stream as it always has.
+    @Test func offTheRootTheDanmakuRidesAboveTheStream() throws {
+        let chrome = SnapActionColumnLayoutTests.chrome()
+        chrome.configure(with: SnapActionColumnLayoutTests.mediaModel(mediaURL: URL(string: "mock://media/1")))
+        let stream = try Self.streamZone(of: chrome)
+        chrome.updateCommentStreams(Self.streams(reactions: 8))
+        chrome.layoutIfNeeded()
+        #expect(!stream.isHidden)
+        #expect(chrome.debugTickerFrame.maxY <= chrome.debugStreamFrame.minY)
     }
 
     // MARK: - The column

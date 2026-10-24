@@ -1751,62 +1751,19 @@ final class SnapFeedViewController: UIViewController {
         applyLeadingNavItem(engaged: engaged, hasMedia: hasMedia, animated: animated)
         // The toolbar is state-invariant: the ⋯ keeps its bubble in every
         // state, because the menu it holds is not about the layout.
-        applyForYouRootTabBar(commentsOpen: engaged && hasMedia)
+        applyForYouRootTabBar()
     }
 
-    /// The For You root's tab bar (#1681): it holds the bottom, and steps
-    /// aside while a media post's comments are open — their composer takes
-    /// the bottom — through UIKit's own animation (`TabBarRevealPolicy`).
-    ///
-    /// EXPERIMENTAL (#1699, the owner 2026-10-24): a bottom TOOLBAR takes the
-    /// tab bar's place while they are open — a placeholder input for now, to
-    /// judge the look (two inputs on screen are fine for this test). The
-    /// composer rests above it: the toolbar raises the safe area it reads.
-    private func applyForYouRootTabBar(commentsOpen: Bool) {
-        guard isForYouRoot, let tabBarController, view.window != nil else { return }
-        if commentsOpen {
-            if !tabBarController.isTabBarHidden { tabBarController.hideTabBarNatively() }
-            showRootCommentsToolbar(true)
-        } else {
-            showRootCommentsToolbar(false)
-            if tabBarController.isTabBarHidden { tabBarController.showTabBarNatively() }
-        }
-    }
-
-    /// The root's comments toolbar (#1699): its placeholder input, shown or
-    /// hidden through UIKit's own animation.
-    private func showRootCommentsToolbar(_ shown: Bool) {
-        guard let nav = navigationController else { return }
-        if shown {
-            if toolbarItems?.contains(where: { $0.identifier == Self.rootInputItemID }) != true {
-                setToolbarItems([BarItems.container(id: Self.rootInputItemID, view: makeRootPlaceholderInput())], animated: false)
-            }
-            if nav.isToolbarHidden { nav.setToolbarHidden(false, animated: true) }
-            // The bottom glass takes the page's dark, as the post's toolbar
-            // does: it is themed through its custom view, now hosted.
-            DispatchQueue.main.async { [weak self] in self?.applyChromeTheme(hasMedia: true) }
-        } else if !nav.isToolbarHidden {
-            nav.setToolbarHidden(true, animated: true)
-        }
-    }
-
-    static let rootInputItemID = "feed.foryou-root.placeholder-input"
-
-    /// A plain field filling the toolbar — a placeholder (#1699).
-    private func makeRootPlaceholderInput() -> UIView {
-        let field = UITextField()
-        field.placeholder = "Placeholder input"
-        field.borderStyle = .none
-        field.textColor = .label
-        field.font = .appFont(forTextStyle: .body)
-        field.accessibilityIdentifier = "foryou.root.placeholder-input"
-        field.setContentHuggingPriority(.init(1), for: .horizontal)
-        let fill = field.widthAnchor.constraint(equalToConstant: 10_000)
-        fill.priority = .init(2)
-        let tall = field.heightAnchor.constraint(equalToConstant: BarItems.bubbleHeight)
-        tall.priority = .init(999)
-        NSLayoutConstraint.activate([fill, tall])
-        return field
+    /// The For You root's tab bar (#1681): it holds the bottom. EXPERIMENTAL
+    /// (#1699, the owner 2026-10-24): it STAYS while a media post's comments
+    /// are open — their composer rests above it — so this only brings it back
+    /// where something hid it, through UIKit's own animation
+    /// (`TabBarRevealPolicy`). A placeholder toolbar in its place was tried
+    /// and dropped the same day.
+    private func applyForYouRootTabBar() {
+        guard isForYouRoot, let tabBarController, view.window != nil,
+              tabBarController.isTabBarHidden else { return }
+        tabBarController.showTabBarNatively()
     }
 
     /// Gives both pills their FIXED widths for the bars as they stand — see
@@ -2559,6 +2516,12 @@ final class SnapFeedViewController: UIViewController {
     /// call to prove it on a device.
     private func presentToolbar() {
         guard let nav = navigationController else { return }
+        // The For You root (#1681): the tab bar's bottom, no toolbar — with
+        // the comments open too (#1699).
+        if isForYouRoot {
+            if !nav.isToolbarHidden { nav.setToolbarHidden(true, animated: false) }
+            return
+        }
         toolbarHost = nav
 
         // The stack's toolbar is shown by this screen alone, so configuring
@@ -2571,14 +2534,6 @@ final class SnapFeedViewController: UIViewController {
         nav.toolbar.compactAppearance = appearance
         nav.toolbar.scrollEdgeAppearance = appearance
         nav.toolbar.tintColor = .white
-
-        // The For You root (#1681): the tab bar's bottom — and the comments'
-        // toolbar while they are open (#1699), back with them after a push.
-        if isForYouRoot {
-            let commentsOpen = commentsEngagedID != nil && !commentsEngagementIsResting
-            if commentsOpen != !nav.isToolbarHidden { showRootCommentsToolbar(commentsOpen) }
-            return
-        }
 
         guard nav.isToolbarHidden else { return }
         #if DEBUG
