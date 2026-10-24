@@ -6153,6 +6153,12 @@ extension SnapFeedViewController: SnapFeedSettleReporting {
 // MARK: - ZoomTransitionDestination
 
 extension SnapFeedViewController: ZoomTransitionDestination {
+    /// A full-bleed feed covers the tab bar — except the For You ROOT
+    /// (#1681), which shows it: the shell's reconciliation
+    /// (`syncTabBarVisibility`) read the default and hid the bar there on a
+    /// tab switch (#1699).
+    public var concealsAppTabBar: Bool { !isForYouRoot }
+
     public func zoomTargetFrame(in container: UICoordinateSpace) -> CGRect {
         view.convert(view.bounds, to: container)
     }

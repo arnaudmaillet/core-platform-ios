@@ -47,8 +47,11 @@ struct SnapTapArbitrationTests {
         // hidden unless its content gate admits it, and hidden views
         // receive no touches, so play/pause keeps the whole page wherever
         // no surface is showing.
+        // …and the author row (#1699, the For You root's): a tap on the
+        // author opens their card, never toggles playback.
         let chrome = SnapChromeView()
-        #expect(chrome.interactionRoots.count == 6)
+        #expect(chrome.interactionRoots.count == 7)
+        #expect(chrome.interactionRoots.contains(where: { $0 === chrome.authorRow }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapShortcutRailView }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapRailBoostButton }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapSoundBubbleButton }))
