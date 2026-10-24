@@ -1237,6 +1237,9 @@ final class SnapChromeView: UIView {
     private func applyCaptionSeat() {
         // The strip's room is kept on the For You root, strip or not (#1701).
         let overStrip = !mediaPageBar.isHidden || reservesStripRoom
+        // A step tighter over the strip on the root (#1701).
+        captionOverStripConstraint?.constant = reservesStripRoom ? -SnapActionColumn.stripSeat : -Spacing.xl
+        setNeedsLayout()
         guard captionOverStripConstraint?.isActive != overStrip else { return }
         if overStrip {
             captionOnBarConstraint?.isActive = false
