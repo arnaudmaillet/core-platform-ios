@@ -961,30 +961,19 @@ final class SnapChromeView: UIView {
     private func renderCaption() {
         lastRenderedCaptionWidth = captionLabel.bounds.width
         captionLabel.attributedText = caption.map {
-            Self.composedCaption($0, timestamp: timestampText, width: captionLabel.bounds.width, style: captionStyle)
+            Self.composedCaption($0, timestamp: timestampText, width: captionLabel.bounds.width)
         }
     }
 
-    /// The caption's register over the media.
-    enum CaptionStyle: Equatable {
-        /// White `.body` — the feed's.
-        case standard
-        /// (#1697, the owner 2026-10-24): one text style
-        /// smaller (`.subheadline`) and a softer grey — the For You root's,
-        /// where the picture is the page and the words step back.
-        case soft
-
-        var textStyle: UIFont.TextStyle { self == .soft ? .subheadline : .body }
-        var ink: UIColor { self == .soft ? UIColor(white: 0.78, alpha: 1) : .white }
-        var timestampInk: UIColor { UIColor.white.withAlphaComponent(self == .soft ? 0.5 : 0.6) }
-    }
-
-    /// The caption's register — `.soft` on the For You root (#1697).
-    var captionStyle: CaptionStyle = .standard {
-        didSet {
-            guard captionStyle != oldValue else { return }
-            renderCaption()
-        }
+    /// The caption's register over the media, on every snap feed (#1697,
+    /// #1708, the owner): one text style below the body (`.subheadline`) in
+    /// a soft grey, the timestamp dimmer still — the picture is the page and
+    /// the words step back. ONE register: it was a per-screen variant (the
+    /// For You root's) until the owner gave it to every vertical feed.
+    enum CaptionRegister {
+        static let textStyle: UIFont.TextStyle = .subheadline
+        static let ink = UIColor(white: 0.78, alpha: 1)
+        static let timestampInk = UIColor.white.withAlphaComponent(0.5)
     }
 
     /// The caption typography — the shared attributes for the caption glyphs
@@ -999,21 +988,21 @@ final class SnapChromeView: UIView {
     /// label has no `shadowPath` and costs an offscreen pass every scrolled
     /// frame.
     private static func captionAttributes(
-        secondary: Bool, style: CaptionStyle = .standard
+        secondary: Bool
     ) -> [NSAttributedString.Key: Any] {
         let shadow = NSShadow()
         shadow.shadowColor = UIColor.black.withAlphaComponent(0.5)
         shadow.shadowBlurRadius = 3
         shadow.shadowOffset = .zero
         return [
-            .font: UIFont.appFont(forTextStyle: secondary ? .footnote : style.textStyle),
-            .foregroundColor: secondary ? style.timestampInk : style.ink,
+            .font: UIFont.appFont(forTextStyle: secondary ? .footnote : CaptionRegister.textStyle),
+            .foregroundColor: secondary ? CaptionRegister.timestampInk : CaptionRegister.ink,
             .shadow: shadow,
             // GEOMETRY LOCK: every line takes the PRIMARY (body) line height —
             // identical on every run — so a line ending on the smaller
             // footnote timestamp is still a full body line: the block is
             // exactly one or two body lines tall.
-            .paragraphStyle: captionParagraphStyle(style),
+            .paragraphStyle: captionParagraphStyle,
         ]
     }
 
@@ -1024,8 +1013,8 @@ final class SnapChromeView: UIView {
     /// one line for any width), and `composedCaption` already fits the text
     /// to two lines by construction, so the label needs no truncation of its
     /// own.
-    private static func captionParagraphStyle(_ style: CaptionStyle) -> NSParagraphStyle {
-        let bodyLineHeight = UIFont.appFont(forTextStyle: style.textStyle).lineHeight
+    private static var captionParagraphStyle: NSParagraphStyle {
+        let bodyLineHeight = UIFont.appFont(forTextStyle: CaptionRegister.textStyle).lineHeight
         let paragraph = NSMutableParagraphStyle()
         paragraph.minimumLineHeight = bodyLineHeight
         paragraph.maximumLineHeight = bodyLineHeight
@@ -1047,7 +1036,7 @@ final class SnapChromeView: UIView {
     /// yardstick. A pure measurement (no label state), so `composedCaption`
     /// can probe candidate renderings before committing one.
     static func captionLineCount(
-        _ string: NSAttributedString, width: CGFloat, style: CaptionStyle = .standard
+        _ string: NSAttributedString, width: CGFloat
     ) -> Int {
         guard width > 0, string.length > 0 else { return 0 }
         // No `.usesFontLeading`: the caption's paragraph style already locks
@@ -1059,7 +1048,7 @@ final class SnapChromeView: UIView {
             options: [.usesLineFragmentOrigin],
             context: nil
         ).height
-        let lineHeight = UIFont.appFont(forTextStyle: style.textStyle).lineHeight
+        let lineHeight = UIFont.appFont(forTextStyle: CaptionRegister.textStyle).lineHeight
         return max(1, Int((height / lineHeight).rounded()))
     }
 
@@ -1085,10 +1074,10 @@ final class SnapChromeView: UIView {
     /// sees the final line, and Case C's bisection — which counts graphemes —
     /// can never cut an emote in half.
     static func composedCaption(
-        _ caption: String, timestamp: String?, width: CGFloat, style: CaptionStyle = .standard
+        _ caption: String, timestamp: String?, width: CGFloat
     ) -> NSAttributedString {
         let marked = NSMutableAttributedString(
-            attributedString: EmoteText.attributedString(caption, attributes: captionAttributes(secondary: false, style: style))
+            attributedString: EmoteText.attributedString(caption, attributes: captionAttributes(secondary: false))
         )
         // `@handle`s and `#tag`s in semibold, white like the rest over the
         // media (#524) — before anything is measured.
@@ -1100,8 +1089,8 @@ final class SnapChromeView: UIView {
         // inline time once ended line one with "20" and began line two with
         // "weeks" (seen on a device, 2026-10-16). Its spaces don't break.
         let unbroken = timestamp.replacingOccurrences(of: " ", with: "\u{00A0}")
-        let timestampString = NSAttributedString(string: unbroken, attributes: captionAttributes(secondary: true, style: style))
-        let gap = NSAttributedString(string: "  ", attributes: captionAttributes(secondary: false, style: style))
+        let timestampString = NSAttributedString(string: unbroken, attributes: captionAttributes(secondary: true))
+        let gap = NSAttributedString(string: "  ", attributes: captionAttributes(secondary: false))
 
         // Case A: the caption and its time inline, on ONE line when they fit
         // there (the owner, 2026-10-16: the block is then one line tall, and
@@ -1110,7 +1099,7 @@ final class SnapChromeView: UIView {
         let inline = NSMutableAttributedString(attributedString: captionString)
         inline.append(gap)
         inline.append(timestampString)
-        if captionLineCount(inline, width: width, style: style) <= 2 { return inline }
+        if captionLineCount(inline, width: width) <= 2 { return inline }
 
         // Case C: bisect for the longest caption prefix that keeps the
         // ellipsis + timestamp inside two lines (prefix length grows the
@@ -1126,14 +1115,14 @@ final class SnapChromeView: UIView {
             if !trimmed.isEmpty, let range = prefix.range(of: trimmed) {
                 out.append(captionString.attributedSubstring(from: NSRange(range, in: prefix)))
             }
-            out.append(NSAttributedString(string: "… ", attributes: captionAttributes(secondary: false, style: style)))
+            out.append(NSAttributedString(string: "… ", attributes: captionAttributes(secondary: false)))
             out.append(timestampString)
             return out
         }
         var low = 0, high = characters.count, best = 0
         while low <= high {
             let mid = (low + high) / 2
-            if captionLineCount(candidate(prefixLength: mid), width: width, style: style) <= 2 {
+            if captionLineCount(candidate(prefixLength: mid), width: width) <= 2 {
                 best = mid
                 low = mid + 1
             } else {

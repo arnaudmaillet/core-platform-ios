@@ -1726,8 +1726,6 @@ final class SnapFeedViewController: UIViewController {
                 cell.onRequestSoundSheet = { [weak self] in self?.presentSoundSheet() }
                 // The For You root's save and repost (#1681), in the column.
                 cell.setPostActions(shown: self.isForYouRoot, saved: self.bookmarks.isSaved(id.rawValue))
-                // …and its caption, smaller and greyer over the media (#1697).
-                cell.setCaptionStyle(self.isForYouRoot ? .soft : .standard)
                 // …and its strip full width, the column above it (#1701).
                 cell.setReservesStripRoom(self.isForYouRoot)
                 // …and its author, inside the page without glass (#1699): the
