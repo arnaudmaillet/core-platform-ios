@@ -44,9 +44,9 @@ import UIKit
 final class PushedScreenHeader: NSObject {
     /// The balance item's identifier — the shell's `WalletBadgeInstaller
     /// .itemIdentifier`, which every root header's badge carries.
-    static let walletItemIdentifier = "shell.wallet-balance"
+    static let walletItemIdentifier = BarItems.SharedID.walletBalance
     /// Search's, shared with For You's own search item.
-    static let searchItemIdentifier = "foryou.search"
+    static let searchItemIdentifier = BarItems.SharedID.search
 
     private let wallet: WalletStore?
     private let makeWalletSheet: (@MainActor () -> UIViewController)?

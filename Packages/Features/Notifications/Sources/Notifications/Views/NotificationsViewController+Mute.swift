@@ -17,7 +17,7 @@ struct MuteLook: Equatable {
 /// See `NotificationsMuteModel` for what each control does.
 extension NotificationsViewController {
     /// The bar's glass bubbles' height on iOS 27, which the stretched
-    /// capsule matches (`ProfileCardViewController.barBubbleHeight`).
+    /// capsule matches (`BarItems.bubbleHeight`).
     static let muteBarBubbleHeight: CGFloat = 48
     /// One slot across re-mints: the bar morphs the timer item in place.
     static let muteTimerIdentifier = "notifications.mute.timer"

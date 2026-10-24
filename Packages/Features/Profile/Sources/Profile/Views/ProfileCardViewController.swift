@@ -512,33 +512,20 @@ final class ProfileCardViewController: UIViewController {
     /// priority, for more room than any bar has, so the bar gives it exactly
     /// what the other items leave (#304).
     private func wideItem(for kind: ToolbarItem) -> UIBarButtonItem {
-        let label: StretchedBarLabel
+        let made: (item: UIBarButtonItem, label: StretchedBarLabel)
+        let id = Self.barIdentifier(for: kind)
         switch kind {
         case .follow:
-            label = StretchedBarLabel(title: "Follow", ink: .white) { [weak self] in self?.followTapped() }
+            made = BarItems.stretched(id: id, title: "Follow", prominent: true) { [weak self] in self?.followTapped() }
         case .requested:
-            label = StretchedBarLabel(title: "Requested", ink: .label) { [weak self] in self?.followTapped() }
+            made = BarItems.stretched(id: id, title: "Requested") { [weak self] in self?.followTapped() }
         default:
-            label = StretchedBarLabel(title: "Message", ink: .label) { [weak self] in self?.messageTapped() }
+            made = BarItems.stretched(id: id, title: "Message") { [weak self] in self?.messageTapped() }
         }
-        label.accessibilityIdentifier = "profileCard.wide"
-        label.setContentHuggingPriority(.init(1), for: .horizontal)
-        let fill = label.widthAnchor.constraint(equalToConstant: 10_000)
-        fill.priority = .init(2)
-        // 999, never required: the bar's first pass pins its item wrapper to
-        // the raw intrinsic size.
-        let height = label.heightAnchor.constraint(equalToConstant: Self.barBubbleHeight)
-        height.priority = .init(999)
-        NSLayoutConstraint.activate([fill, height])
-        let item = UIBarButtonItem(customView: label)
-        if kind == .follow { item.style = .prominent }
-        wideLabel = label
-        return item
+        made.label.accessibilityIdentifier = "profileCard.wide"
+        wideLabel = made.label
+        return made.item
     }
-
-    /// The bar's glass bubbles' height on iOS 27 (iPhone 18 Pro), which the
-    /// stretched capsule matches (`SoundSheetViewController.barBubbleHeight`).
-    static let barBubbleHeight: CGFloat = 48
 
     /// The stretched item's view — what a test reads.
     private(set) weak var wideLabel: StretchedBarLabel?
@@ -741,49 +728,4 @@ extension ProfileCardViewController: UIGestureRecognizerDelegate {
         }
         return false
     }
-}
-
-/// The stretched toolbar item's content (#1678): its word, centred, and a
-/// tap — nothing drawn behind it, the bar's bubble is its background. Read
-/// by VoiceOver as the button it stands for.
-final class StretchedBarLabel: UIView {
-    private let label = UILabel()
-    private let action: () -> Void
-
-    var title: String { label.text ?? "" }
-
-    init(title: String, ink: UIColor, action: @escaping () -> Void) {
-        self.action = action
-        super.init(frame: .zero)
-        label.text = title
-        label.textColor = ink
-        label.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
-        label.adjustsFontForContentSizeCategory = true
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
-        NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: centerXAnchor),
-            label.centerYAnchor.constraint(equalTo: centerYAnchor),
-            label.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: Spacing.md),
-        ])
-        isAccessibilityElement = true
-        accessibilityLabel = title
-        accessibilityTraits = .button
-        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    @objc private func tapped() { action() }
-
-    override func accessibilityActivate() -> Bool {
-        action()
-        return true
-    }
-
-    #if DEBUG
-    /// The tap's own path, for tests.
-    func debugTap() { action() }
-    #endif
 }

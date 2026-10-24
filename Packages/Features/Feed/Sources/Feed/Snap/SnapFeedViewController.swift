@@ -2186,7 +2186,7 @@ final class SnapFeedViewController: UIViewController {
                     for: .primaryActionTriggered
                 )
             }
-            if showsBalance { walletBadgeItem = UIBarButtonItem(customView: walletBadge) }
+            if showsBalance { walletBadgeItem = BarItems.container(id: BarItems.SharedID.walletBalance, view: walletBadge) }
             // A grown count needs a re-measured wrapper, and the wrapper
             // belongs to the ITEM: re-adding the same item hands the bar
             // the same wrapper with the same frozen size (measured in-sim).
@@ -2195,7 +2195,7 @@ final class SnapFeedViewController: UIViewController {
                 guard let self, let old = self.walletBadgeItem,
                       var items = self.navigationItem.rightBarButtonItems,
                       let index = items.firstIndex(of: old) else { return }
-                let fresh = UIBarButtonItem(customView: self.walletBadge)
+                let fresh = BarItems.container(id: BarItems.SharedID.walletBalance, view: self.walletBadge)
                 self.walletBadgeItem = fresh
                 items[index] = fresh
                 // The badge is the run's PRIORITY member: when it grows,

@@ -25,7 +25,7 @@ final class NotificationsBell {
     /// with one identifier as ONE item across a transition, so a push from one
     /// root to a screen that also wears a bell morphs it in place instead of
     /// cross-fading two copies.
-    static let itemIdentifier = "shell.notifications-bell"
+    static let itemIdentifier = BarItems.SharedID.notificationsBell
 
     /// What a tap on ANY bell does. The shell decides where Notifications goes;
     /// the bell only says it was pressed.

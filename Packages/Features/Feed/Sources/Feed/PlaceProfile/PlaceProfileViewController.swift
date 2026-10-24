@@ -1570,7 +1570,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     }
 
     private func makeWalletItem() -> UIBarButtonItem {
-        let item = UIBarButtonItem(customView: walletBadge)
+        let item = BarItems.container(id: BarItems.SharedID.walletBalance, view: walletBadge)
         item.accessibilityLabel = "Likes balance"
         return item
     }

@@ -612,7 +612,7 @@ final class TextPostComposerViewController: UIViewController {
         if makeWalletSheet != nil {
             walletBadge.addAction(UIAction { [weak self] _ in self?.presentWalletSheet() }, for: .primaryActionTriggered)
         }
-        let item = UIBarButtonItem(customView: walletBadge)
+        let item = BarItems.container(id: BarItems.SharedID.walletBalance, view: walletBadge)
         walletBadgeItem = item
         // A grown count needs a FRESH item — re-adding the same one hands the
         // bar the same frozen wrapper (the feed's measured finding).
@@ -644,7 +644,7 @@ final class TextPostComposerViewController: UIViewController {
         guard let old = walletBadgeItem,
               var items = navigationItem.rightBarButtonItems,
               let index = items.firstIndex(of: old) else { return }
-        let fresh = UIBarButtonItem(customView: walletBadge)
+        let fresh = BarItems.container(id: BarItems.SharedID.walletBalance, view: walletBadge)
         walletBadgeItem = fresh
         items[index] = fresh
         navigationItem.rightBarButtonItems = items
