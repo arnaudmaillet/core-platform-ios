@@ -1,8 +1,6 @@
 import AuthInterface
-import UIKit
-#if DEBUG
 import DesignSystem
-#endif
+import UIKit
 
 /// Destinations of the flow-wide toolbar legal links.
 enum AuthLegalLink: CaseIterable {
