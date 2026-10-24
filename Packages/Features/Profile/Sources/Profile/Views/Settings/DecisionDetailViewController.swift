@@ -378,6 +378,7 @@ final class AppealComposerViewController: UIViewController, UITextViewDelegate {
         navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .cancel, primaryAction: UIAction { [weak self] _ in
             self?.dismiss(animated: true)
         })
+        navigationItem.leftBarButtonItem?.identifier = "settings.decision.cancel"
         navigationItem.rightBarButtonItem = sendItem()
 
         let intro = UILabel()
@@ -426,8 +427,13 @@ final class AppealComposerViewController: UIViewController, UITextViewDelegate {
         textView.becomeFirstResponder()
     }
 
+    /// Send, and the spinner that stands in for it while the statement is
+    /// on its way: one identifier, so the bar morphs one into the other
+    /// (#1679, R3).
+    static let sendItemID = "settings.decision.send"
+
     private func sendItem() -> UIBarButtonItem {
-        UIBarButtonItem(title: "Send", style: .prominent, target: self, action: #selector(send))
+        BarItems.title(id: Self.sendItemID, title: "Send", prominent: true) { [weak self] in self?.send() }
     }
 
     static func canSend(_ text: String) -> Bool {
@@ -437,7 +443,7 @@ final class AppealComposerViewController: UIViewController, UITextViewDelegate {
 
     private func refresh() {
         placeholder.isHidden = !textView.text.isEmpty
-        navigationItem.rightBarButtonItem?.isEnabled = Self.canSend(textView.text) && !isSending
+        ownTrailingBarItems.first?.isEnabled = Self.canSend(textView.text) && !isSending
     }
 
     func textViewDidChange(_ textView: UITextView) {
@@ -455,7 +461,7 @@ final class AppealComposerViewController: UIViewController, UITextViewDelegate {
         textView.isEditable = false
         let spinner = AppLoaderView(size: .medium)
         spinner.startAnimating()
-        navigationItem.rightBarButtonItem = UIBarButtonItem(customView: spinner)
+        setOwnTrailingBarItems([BarItems.container(id: Self.sendItemID, view: spinner)], animated: view.window != nil)
         let statement = textView.text ?? ""
         Task { [weak self] in
             guard let self else { return }
@@ -468,7 +474,7 @@ final class AppealComposerViewController: UIViewController, UITextViewDelegate {
                 HapticNotification().notificationOccurred(.error)
                 isSending = false
                 textView.isEditable = true
-                navigationItem.rightBarButtonItem = sendItem()
+                setOwnTrailingBarItems([sendItem()], animated: view.window != nil)
                 refresh()
                 let failure = Self.failure(error)
                 let alert = UIAlertController(title: failure.title, message: failure.message, preferredStyle: .alert)

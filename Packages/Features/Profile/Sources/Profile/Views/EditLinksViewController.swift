@@ -35,6 +35,7 @@ final class EditLinksViewController: UIViewController {
         super.viewDidLoad()
         title = "Links"
         view.backgroundColor = .systemGroupedBackground
+        saveButton.identifier = "profile.editLinks.save"
         navigationItem.rightBarButtonItem = saveButton
         configureLayout()
         for link in initialLinks { appendRow(link) }

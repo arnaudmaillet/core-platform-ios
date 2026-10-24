@@ -529,6 +529,7 @@ final class TwoStepEnrollmentViewController: UIViewController {
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             title: "Turn On", style: .prominent, target: self, action: #selector(confirm)
         )
+        navigationItem.rightBarButtonItem?.identifier = "settings.twoStep.turnOn"
         navigationItem.rightBarButtonItem?.isEnabled = false
 
         scroll.alwaysBounceVertical = true
@@ -824,7 +825,7 @@ final class TwoStepEnrollmentViewController: UIViewController {
     private func codeChanged() {
         let code = Self.cleaned(codeField.text ?? "")
         codeField.text = code
-        navigationItem.rightBarButtonItem?.isEnabled = code.count == 6 && !isConfirming && enrollment != nil
+        ownTrailingBarItems.first?.isEnabled = code.count == 6 && !isConfirming && enrollment != nil
     }
 
     private func openAuthenticator() {
@@ -847,7 +848,7 @@ final class TwoStepEnrollmentViewController: UIViewController {
         let code = Self.cleaned(codeField.text ?? "")
         guard code.count == 6, !isConfirming, enrollment != nil else { return }
         isConfirming = true
-        navigationItem.rightBarButtonItem?.isEnabled = false
+        ownTrailingBarItems.first?.isEnabled = false
         navigationItem.hidesBackButton = true
         Task { [weak self] in
             guard let self else { return }
@@ -916,6 +917,7 @@ final class BackupCodesViewController: UIViewController {
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             systemItem: .done, primaryAction: UIAction { [weak self] _ in self?.onDone() }
         )
+        navigationItem.rightBarButtonItem?.identifier = "settings.twoStep.done"
         var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
         config.footerMode = .supplementary
         let layout = UICollectionViewCompositionalLayout.list(using: config)

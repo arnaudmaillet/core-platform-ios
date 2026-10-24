@@ -47,6 +47,7 @@ final class SupervisionLimitsViewController: UIViewController {
         super.viewDidLoad()
         navigationItem.largeTitleDisplayMode = .never
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Save", style: .prominent, target: self, action: #selector(save))
+        navigationItem.rightBarButtonItem?.identifier = "settings.supervisionLimits.save"
         var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
         config.footerMode = .supplementary
         collectionView = UICollectionView(

@@ -130,6 +130,9 @@ struct ProfileHeaderAccessoryTests {
 
         let items = try #require(screen.navigationItem.rightBarButtonItems)
         #expect(items.map(\.accessibilityLabel) == ["Settings", "Switch Profile", "Balance"])
+        // The bar contract (#1679, R2): the viewer's own items by function.
+        #expect(items[0].identifier == "profile.settings")
+        #expect(items[1].identifier == "profile.switcher")
         #expect(items[0].sharesBackground && items[1].sharesBackground,
                 "the switcher and settings no longer read as one capsule")
     }

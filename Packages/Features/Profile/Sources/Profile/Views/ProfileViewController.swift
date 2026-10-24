@@ -125,9 +125,13 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// The mute bell, on someone else's profile (#689): the scoped Mute menu
     /// that used to sit in the see-more menu. `bell`, or `bell.slash` once
     /// anything is muted. Kept: the trailing run is compared by reference
-    /// (the bar's identical-group guard), so a fresh item is a rebuild — made only when the
-    /// viewer's own change is revealed under its toast (#1447).
+    /// (the bar's identical-group guard), so a fresh item is a rebuild — made
+    /// when its glyph changes (#1679, R3: under the same identifier, the bar
+    /// morphs one into the other), or when the viewer's own change is
+    /// revealed under its toast (#1447).
     private lazy var muteBellItem = makeMuteBellItem()
+    /// Whether the bell on the bar shows `bell.slash`.
+    private var muteBellShowsMuted = false
     /// While the viewer's own mute change is on its way (#1447), the scopes
     /// the bell still shows: its toast reveals the new look; a refusal or an
     /// Undo, back to these, releases it as it is.
@@ -167,7 +171,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         pill.onFollowTapped = { [weak self] _ in self?.headerView.onFollowTapped?() }
         return pill
     }()
-    private lazy var barIdentityItem: UIBarButtonItem? = barIdentityPill.map { UIBarButtonItem(customView: $0.view) }
+    private lazy var barIdentityItem: UIBarButtonItem? = barIdentityPill.map {
+        BarItems.container(id: "profile.identity-pill", view: $0.view)
+    }
     private let relationshipSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     /// Keeps History's day in its own bubble, inboard of the trailing group.
     private let sectionSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
@@ -176,7 +182,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     private var shownBarPill: UIBarButtonItem?
     /// The relationship capsule: Follow / Following.
     ///
-    /// **A stock titled item — deliberately not `UIBarButtonItem(customView:)`,
+    /// **A stock titled item — deliberately not a custom-view item,
     /// and not a `UIButton` of any kind.** Two independent reasons, and both
     /// have bitten this screen:
     ///
@@ -385,7 +391,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
                     // The relationship usually resolves while the push/present
                     // is still animating; bind the bar inside the transition so
                     // the toolbar composes during the animation, not after it.
-                    self.alongsideTransition { $0.applyNavigationState() }
+                    self.alongsideTransition { $0.applyNavigationState(animated: $1) }
                 }
                 self.noteLandingMilestone()
             }
@@ -1260,25 +1266,43 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         if viewModel.muteScopes == before { bellHeldAt = nil }
     }
 
+    static let muteBellID = "profile.mute-bell"
+
     private func makeMuteBellItem() -> UIBarButtonItem {
-        let item = UIBarButtonItem(image: UIImage(systemName: "bell"), menu: makeMuteMenu())
+        let item = BarItems.icon(
+            id: Self.muteBellID, image: UIImage(systemName: "bell"), label: "Notifications", menu: makeMuteMenu()
+        )
         item.tintColor = .label
-        item.accessibilityLabel = "Notifications"
         return item
     }
 
-    /// The glyph and the spoken value follow the scopes; the item stays the
-    /// same object, so the bar is not rebuilt. Not while the viewer's own
-    /// change is held (#1447).
+    /// The spoken value follows the scopes in place; a new glyph is a new
+    /// item under the same identifier, set animated — the bar morphs the
+    /// bell (#1679, R3), never an image swapped on the item it shows. Not
+    /// while the viewer's own change is held (#1447).
     private func refreshMuteBell() {
         guard bellHeldAt == nil else { return }
-        applyMuteLook(to: muteBellItem)
+        let muted = !viewModel.muteScopes.isEmpty
+        guard muted != muteBellShowsMuted, isShowingMuteBell else {
+            applyMuteLook(to: muteBellItem)
+            return
+        }
+        // Never mid-push: an item swapped then lands unanimated at its end (#756).
+        if transitionCoordinator != nil, let navigationController {
+            navigationController.whenAtRest { [weak self] in self?.refreshMuteBell() }
+            return
+        }
+        let item = makeMuteBellItem()
+        applyMuteLook(to: item)
+        muteBellItem = item
+        updateActionBarItem(followButtonState, animated: view.window != nil)
     }
 
     private func applyMuteLook(to item: UIBarButtonItem) {
         let scopes = viewModel.muteScopes
         item.image = UIImage(systemName: scopes.isEmpty ? "bell" : "bell.slash")
         item.accessibilityValue = scopes.isEmpty ? "Nothing muted" : "Muted: " + scopes.summary
+        muteBellShowsMuted = !scopes.isEmpty
     }
 
     /// The held bell's new look, under its toast (#1447): a FRESH item, so
@@ -1577,12 +1601,10 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // Settings gear — the viewer's account entry point. A plain trailing
         // item (no leading item, so it never disturbs the edge-swipe pop),
         // tinted `.label` to read as primary dark chrome over the banner.
-        let settings = UIBarButtonItem(
-            image: UIImage(systemName: "gearshape"),
-            primaryAction: UIAction { [weak self] _ in self?.pushSettings() }
-        )
+        let settings = BarItems.icon(id: "profile.settings", image: UIImage(systemName: "gearshape"), label: "Settings") {
+            [weak self] in self?.pushSettings()
+        }
         settings.tintColor = .label
-        settings.accessibilityLabel = "Settings"
         settingsItem = settings
 
         // Profile switcher — the leading item, opposite the gear (see
@@ -1591,9 +1613,11 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // picked up through `.activeProfileDidChange`, so this screen refreshes
         // whichever switcher was used.
         if switcherFactory != nil {
-            let switcher = UIBarButtonItem(image: UIImage(systemName: "person.2"), menu: UIMenu(children: []))
+            let switcher = BarItems.icon(
+                id: "profile.switcher", image: UIImage(systemName: "person.2"), label: "Switch Profile",
+                menu: UIMenu(children: [])
+            )
             switcher.tintColor = .label
-            switcher.accessibilityLabel = "Switch Profile"
             switcherItem = switcher
             // Pre-load profiles + avatars, then set a SYNCHRONOUS menu — its
             // content lands in the first frame, not popped in after the popover.
@@ -1815,7 +1839,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// action. Idempotent, driven from three places: viewDidLoad (initial
     /// composition), viewWillAppear (synchronous pre-transition bind), and the
     /// async data callbacks (via `alongsideTransition`).
-    private func applyNavigationState() {
+    private func applyNavigationState(animated: Bool = false) {
         // ⚠️ **AND THE CHEVRON KEEPS ITS SILENCE.** A titled root gives every
         // screen pushed from it a WORDED back button, and two pushed bars were
         // budgeted against a bare 44pt chevron: `SearchResultsViewController`
@@ -1876,7 +1900,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         //
         // The identity block says the name in full a finger's width below, and
         // every item up here is a control.
-        updateActionBarItem(followButtonState)
+        updateActionBarItem(followButtonState, animated: animated)
     }
 
     /// Whether the bar wears the bell right now.
@@ -1896,11 +1920,11 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// Runs a navigation-bar mutation eagerly during an active transition:
     /// applied inside the transition coordinator's animation block it tracks
     /// the push/present frame-by-frame instead of snapping in after the
-    /// animation completes. Outside a transition, an on-screen bar gets a
-    /// short cross-dissolve (the skeleton capsule melting into Follow /
-    /// Following when a slow relationship read lands late); off-screen it
-    /// applies immediately.
-    private func alongsideTransition(_ change: @escaping (ProfileViewController) -> Void) {
+    /// animation completes. Outside a transition, an on-screen bar gets its
+    /// items set ANIMATED — UIKit morphs them by identifier (#1679, R3),
+    /// never a cross-dissolve of the bar's snapshot; off-screen it applies
+    /// immediately. `change` is told which.
+    private func alongsideTransition(_ change: @escaping (ProfileViewController, _ animated: Bool) -> Void) {
         // `animate(alongsideTransition:)` DROPS the block (returning false)
         // when the transition is already in its completion phase — the
         // coordinator is still non-nil there, so trusting its existence alone
@@ -1909,17 +1933,11 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         if let coordinator = transitionCoordinator, coordinator.isAnimated,
            coordinator.animate(alongsideTransition: { [weak self] _ in
                guard let self else { return }
-               change(self)
+               change(self, false)
            }) {
             return
         }
-        if let bar = navigationController?.navigationBar, view.window != nil {
-            UIView.transition(with: bar, duration: 0.25, options: .transitionCrossDissolve) {
-                change(self)
-            }
-        } else {
-            change(self)
-        }
+        change(self, view.window != nil)
     }
 
     /// Installs the nav-bar relationship action per the current state, absent
@@ -2433,7 +2451,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             // refresh re-rendering content cross-dissolved the whole bar —
             // a snapshot of it — for nothing.
             if case .content = previous {} else {
-                alongsideTransition { $0.applyNavigationState() }
+                alongsideTransition { $0.applyNavigationState(animated: $1) }
             }
             // Content first — the labels adopt their text while still
             // invisible under the bones — then the alpha-only reveal.

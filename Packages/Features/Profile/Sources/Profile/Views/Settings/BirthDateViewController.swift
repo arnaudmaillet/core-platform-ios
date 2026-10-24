@@ -39,6 +39,7 @@ final class BirthDateViewController: UIViewController {
         view.backgroundColor = .systemGroupedBackground
         navigationItem.largeTitleDisplayMode = .never
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Save", style: .prominent, target: self, action: #selector(confirm))
+        navigationItem.rightBarButtonItem?.identifier = "settings.birthDate.save"
 
         picker.datePickerMode = .date
         picker.preferredDatePickerStyle = .wheels
