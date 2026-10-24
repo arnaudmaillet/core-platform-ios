@@ -158,11 +158,9 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     )
     /// Follows the place — as the map's "pinned" filter reads it: the outline
     /// star, filled in its gold (`SaveStar`) once followed.
-    private let starButton = AppButton(
-        aspect: .pill(.quiet), size: .icon, content: .symbol(SaveStar.symbol(saved: false))
-    )
+    private let starButton = AppIconButton(style: .bubble(.quiet), content: .symbol(SaveStar.symbol(saved: false)))
     /// The place's share link as a QR code.
-    private let qrButton = AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("qrcode"))
+    private let qrButton = AppIconButton(style: .bubble(.quiet), content: .symbol("qrcode"))
     /// The map dock's pin for this place; nil, no pin capsule.
     private let dockPin: ClusterGalleryFollowing?
     private var isDocked = false
@@ -2257,8 +2255,8 @@ extension PlaceProfileViewController {
     /// The bar's trailing items, rightmost first (#1304).
     var debugTrailingItems: [UIBarButtonItem] { navigationItem.rightBarButtonItems ?? [] }
     /// The row's controls, each nil when its seam is (#1598).
-    var debugStarButton: AppButton? { starButton.superview == nil ? nil : starButton }
-    var debugQRButton: AppButton? { qrButton.superview == nil ? nil : qrButton }
+    var debugStarButton: AppIconButton? { starButton.superview == nil ? nil : starButton }
+    var debugQRButton: AppIconButton? { qrButton.superview == nil ? nil : qrButton }
     var debugDockPinButton: AppButton? { dockPinButton.superview == nil ? nil : dockPinButton }
     var debugActionRowFrame: CGRect { heroHeader.convert(heroHeader.debugTrayFrame, to: view) }
     var debugIsDocked: Bool { isDocked }

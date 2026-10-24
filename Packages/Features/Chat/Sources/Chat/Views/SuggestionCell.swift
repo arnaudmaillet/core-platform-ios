@@ -29,8 +29,8 @@ final class SuggestionCell: UITableViewCell {
         return button
     }()
     /// A bare ✕, quiet enough that the eye lands on Follow.
-    private let dismissButton: AppButton = {
-        let button = AppButton(aspect: .bare, size: .inline, content: .symbol("xmark"))
+    private let dismissButton: AppIconButton = {
+        let button = AppIconButton(style: .glyph, content: .symbol("xmark"))
         button.inkColor = .tertiaryLabel
         return button
     }()
@@ -107,7 +107,7 @@ final class SuggestionCell: UITableViewCell {
     /// The follow button. Internal for tests.
     var debugFollowButton: AppButton { followButton }
     /// The ✕. Internal for tests.
-    var debugDismissButton: AppButton { dismissButton }
+    var debugDismissButton: AppIconButton { dismissButton }
     /// The @handle line. Internal for tests.
     var debugHandleLabel: UILabel { handleLabel }
     /// The reason line. Internal for tests.

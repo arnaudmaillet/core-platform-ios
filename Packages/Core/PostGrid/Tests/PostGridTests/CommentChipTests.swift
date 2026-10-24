@@ -10,7 +10,7 @@ import UIKit
 @MainActor
 struct CommentChipTests {
     private func pills(in view: UIView) -> [UIView] {
-        if view is PostMetaPillView || view is AppButton { return [view] }
+        if view is PostMetaPillView || view is AppIconButton { return [view] }
         return view.subviews.flatMap(pills(in:))
     }
 

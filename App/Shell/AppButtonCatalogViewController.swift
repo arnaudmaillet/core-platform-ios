@@ -19,7 +19,7 @@ import UIKit
 final class AppButtonCatalogViewController: UIViewController {
     private let scroll = UIScrollView()
     private let column = UIStackView()
-    private var buttons: [AppButton] = []
+    private var buttons: [AppControl] = []
     private var anchorButtons: [AppButton] = []
 
     init() {
@@ -58,6 +58,7 @@ final class AppButtonCatalogViewController: UIViewController {
         buildTools()
         buildSystemReference()
         buildAnchors()
+        buildIcons()
         buildProfileOther()
         buildProfileOwn()
         buildPlace()
@@ -150,7 +151,7 @@ final class AppButtonCatalogViewController: UIViewController {
     }
 
     /// Every button joins the catalog's colour trials.
-    private func track(_ button: AppButton) -> AppButton {
+    private func track<Button: AppControl>(_ button: Button) -> Button {
         buttons.append(button)
         return button
     }
@@ -299,6 +300,51 @@ final class AppButtonCatalogViewController: UIViewController {
         })
     }
 
+    // MARK: - Icon buttons
+
+    /// `AppIconButton` on its own (#1666): the bubble on each ground, the
+    /// bare glyph with and without a count, and their motions.
+    private func buildIcons() {
+        section("Icon buttons", source: "AppIconButton — a 44pt bubble on a ground, or a bare glyph with its count")
+        let bubbles = [AppControl.Ground.quiet, .prominent, .tinted].map { ground in
+            track(AppIconButton(style: .bubble(ground), content: .symbol("qrcode")))
+        }
+        let more = track(AppIconButton(style: .bubble(.quiet), content: .symbol("ellipsis")))
+        more.menu = UIMenu(children: [UIAction(title: "Report", attributes: .destructive) { _ in print("[catalog] Report") }])
+        more.showsMenuAsPrimaryAction = true
+        row(bubbles + [more])
+
+        var likeCount = 1_284
+        let like = track(AppIconButton(style: .glyph, content: AppIconButton.Content(symbol: LikesSymbol.outlineGlyph, count: likeCount)))
+        like.selectedTint = LikesSymbol.tint
+        like.bouncesSymbolOnTap = true
+        like.haptic = .lightImpact
+        like.addAction(UIAction { [weak like] _ in
+            guard let like else { return }
+            let liked = !like.isSelected
+            likeCount += liked ? 1 : -1
+            like.setContent(
+                AppIconButton.Content(symbol: liked ? LikesSymbol.glyph : LikesSymbol.outlineGlyph, count: likeCount),
+                selected: liked, animated: true
+            )
+        }, for: .primaryActionTriggered)
+        let save = track(AppIconButton(style: .glyph, content: .symbol(SaveStar.symbol(saved: false))))
+        save.selectedTint = SaveStar.tint
+        save.addAction(UIAction { [weak save] _ in
+            guard let save else { return }
+            let saved = !save.isSelected
+            save.setContent(.symbol(SaveStar.symbol(saved: saved)), selected: saved, animated: true)
+        }, for: .primaryActionTriggered)
+        let dismiss = track(AppIconButton(style: .glyph, content: .symbol("xmark")))
+        dismiss.inkColor = .tertiaryLabel
+        row([like, save, dismiss])
+        let all = bubbles + [more, like, save, dismiss]
+        states([
+            ("Go / Appear", { all.forEach { $0.isHidden ? $0.appear(animated: true) : $0.disappear(animated: true) } }),
+            ("Fail", { like.fail() }),
+        ])
+    }
+
     // MARK: - Profile, someone else's
 
     private enum Relationship { case unread, follow, following, requested, unavailable }
@@ -309,8 +355,8 @@ final class AppButtonCatalogViewController: UIViewController {
         follow.isToggle = true
         follow.reservedContents = [.title("Follow"), .title("Following"), .title("Requested")]
         let message = track(AppButton(aspect: .pill(.quiet), size: .header, content: .title("Message")))
-        let qr = track(AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("qrcode")))
-        let more = track(AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("ellipsis")))
+        let qr = track(AppIconButton(style: .bubble(.quiet), content: .symbol("qrcode")))
+        let more = track(AppIconButton(style: .bubble(.quiet), content: .symbol("ellipsis")))
         more.menu = UIMenu(children: [
             UIAction(title: "Share Profile", image: UIImage(systemName: "square.and.arrow.up")) { _ in print("[catalog] Share Profile") },
             UIAction(title: "Report", image: UIImage(systemName: "flag"), attributes: .destructive) { _ in print("[catalog] Report") },
@@ -372,8 +418,8 @@ final class AppButtonCatalogViewController: UIViewController {
         section("Profile · yours", source: "ProfileHeaderView — Edit Profile · QR · ⋯")
         let edit = track(AppButton(aspect: .pill(.quiet), size: .header, content: .title("Edit Profile")))
         edit.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
-        let qr = track(AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("qrcode")))
-        let more = track(AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("ellipsis")))
+        let qr = track(AppIconButton(style: .bubble(.quiet), content: .symbol("qrcode")))
+        let more = track(AppIconButton(style: .bubble(.quiet), content: .symbol("ellipsis")))
         row([edit, qr, more], fills: true)
         for bubble in [qr, more] {
             NSLayoutConstraint.activate([
@@ -395,8 +441,8 @@ final class AppButtonCatalogViewController: UIViewController {
         let pin = track(AppButton(aspect: .pill(.quiet), size: .header, content: pinContent(false)))
         pin.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
         pin.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let star = track(AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol(SaveStar.symbol(saved: false))))
-        let qr = track(AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("qrcode")))
+        let star = track(AppIconButton(style: .bubble(.quiet), content: .symbol(SaveStar.symbol(saved: false))))
+        let qr = track(AppIconButton(style: .bubble(.quiet), content: .symbol("qrcode")))
         row([pin, star, qr], fills: true)
         for bubble in [star, qr] {
             NSLayoutConstraint.activate([
@@ -436,7 +482,7 @@ final class AppButtonCatalogViewController: UIViewController {
         follow.isToggle = true
         // The row's trailing button: it grows and shrinks from its right edge.
         follow.morphAnchor = .trailing
-        let dismiss = track(AppButton(aspect: .bare, size: .inline, content: .symbol("xmark")))
+        let dismiss = track(AppIconButton(style: .glyph, content: .symbol("xmark")))
         dismiss.inkColor = .tertiaryLabel
         let name = UILabel()
         name.text = "Kenji Tanaka"
@@ -472,7 +518,7 @@ final class AppButtonCatalogViewController: UIViewController {
     private func buildMessageRequest() {
         section("Message request", source: "MessageRequestCell — Accept · ✕")
         let accept = track(AppButton(aspect: .pill(.prominent), size: .row, content: .title("Accept")))
-        let decline = track(AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("xmark")))
+        let decline = track(AppIconButton(style: .bubble(.quiet), content: .symbol("xmark")))
         decline.inkColor = .secondaryLabel
         let name = UILabel()
         name.text = "Vera Lindqvist"

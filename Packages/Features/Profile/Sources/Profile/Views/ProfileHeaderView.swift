@@ -29,8 +29,8 @@ final class ProfileHeaderView: HeroHeaderView {
     /// What the capsule last showed, so a change of state morphs and a first
     /// answer simply lands.
     private var shownFollowState: ProfileViewModel.FollowButton?
-    private let qrCodeButton = AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("qrcode"))
-    private let moreButton = AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("ellipsis"))
+    private let qrCodeButton = AppIconButton(style: .bubble(.quiet), content: .symbol("qrcode"))
+    private let moreButton = AppIconButton(style: .bubble(.quiet), content: .symbol("ellipsis"))
 
     init(imagePipeline: ImagePipeline) {
         // The likes the profile's posts have received, summed — the heart
@@ -165,7 +165,7 @@ final class ProfileHeaderView: HeroHeaderView {
 
     /// Shows or hides one of the tray's buttons — through its own motion when
     /// the tray changes on screen, at once otherwise.
-    private func show(_ button: AppButton, _ shown: Bool, animated: Bool) {
+    private func show(_ button: AppControl, _ shown: Bool, animated: Bool) {
         guard button.isHidden == shown else { return }
         if shown {
             button.appear(animated: animated)
@@ -185,7 +185,7 @@ final class ProfileHeaderView: HeroHeaderView {
         followButton.phase == .content && followButton.currentGround == .prominent
     }
     var debugFollowButton: AppButton { followButton }
-    var debugTrayButtons: [AppButton] {
+    var debugTrayButtons: [AppControl] {
         [followButton, messageButton, editButton, qrCodeButton, moreButton]
     }
 
@@ -231,7 +231,7 @@ final class ProfileHeaderView: HeroHeaderView {
         // The menu IS the primary action — one tap opens it, no intermediate
         // callback. The controller supplies the content (see `setMoreMenu`).
         moreButton.showsMenuAsPrimaryAction = true
-        // ⚠️ NO PRESS ATTACHED HERE: every `AppButton` carries the app's one
+        // ⚠️ NO PRESS ATTACHED HERE: every `AppControl` carries the app's one
         // press already, and a second one stacked two shrinks on one finger
         // (#866).
 

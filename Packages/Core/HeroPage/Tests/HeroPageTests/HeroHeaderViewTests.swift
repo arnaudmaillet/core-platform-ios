@@ -28,8 +28,8 @@ struct HeroHeaderViewTests {
         header.chromeTopInset = 103
         header.setActions([
             .capsule(AppButton(aspect: .pill(.quiet), size: .header, content: .title("Pin"))),
-            .bubble(AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("star"))),
-            .bubble(AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("qrcode")))
+            .bubble(AppIconButton(style: .bubble(.quiet), content: .symbol("star"))),
+            .bubble(AppIconButton(style: .bubble(.quiet), content: .symbol("qrcode")))
         ])
         header.configure(with: HeroHeaderContent(
             title: "Paris", subtitle: "France",
@@ -156,7 +156,7 @@ struct HeroHeaderViewTests {
     /// Filling the row again replaces it: the bubbles keep one size each.
     @Test func fillingTheActionRowAgainReplacesIt() {
         let header = makeHeader()
-        let bubble = AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("qrcode"))
+        let bubble = AppIconButton(style: .bubble(.quiet), content: .symbol("qrcode"))
         func activeConstraints() -> Int { bubble.constraints.filter(\.isActive).count }
         let own = activeConstraints()
         header.setActions([.bubble(bubble)])

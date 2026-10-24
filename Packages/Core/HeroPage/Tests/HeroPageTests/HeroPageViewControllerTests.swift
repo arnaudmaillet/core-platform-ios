@@ -28,7 +28,7 @@ struct HeroPageViewControllerTests {
             )
             header.setActions([
                 .capsule(AppButton(aspect: .pill(.quiet), size: .header, content: .title("Add Pin to Map"))),
-                .bubble(AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("qrcode")))
+                .bubble(AppIconButton(style: .bubble(.quiet), content: .symbol("qrcode")))
             ])
             header.configure(with: HeroHeaderContent(title: "Paris", subtitle: "France", counterValues: ["#3", "29.4K"]))
             let page = StubPage()

@@ -130,7 +130,7 @@ private final class GradientFill: UIView {
 }
 
 /// The gradient heart laid over a plain `UIButton`'s glyph (#1128) — for a
-/// button that is not an `AppButton` (which has `drawsLikesHeart`): the
+/// button that is not an `AppIconButton` (which has `drawsLikesHeart`): the
 /// Snap like pill, the comment composer's. The button keeps laying out its
 /// glyph, drawn clear (`clearGlyph`), and the heart sits exactly on it.
 ///

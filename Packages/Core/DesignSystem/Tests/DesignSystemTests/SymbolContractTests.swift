@@ -25,7 +25,7 @@ struct SymbolContractTests {
     /// A heart or star colour picked by hand, or a filled glyph named outside
     /// its contract. The DEBUG button gallery shows the raw cases.
     static let patterns = ["Palette.saveGold", "saveGoldOnMedia", "AppSymbol.saved", "AppSymbol.liked", "\"core.star.fill\"", "\"core.heart.fill\""]
-    static let allowed: Set<String> = ["AppButtonGalleryViewController.swift", "LikesHeartView.swift", "AppButton.swift"]
+    static let allowed: Set<String> = ["AppButtonGalleryViewController.swift", "LikesHeartView.swift", "AppIconButton.swift"]
 
     @Test func everyHeartAndStarComesFromItsContract() throws {
         var found: [String] = []

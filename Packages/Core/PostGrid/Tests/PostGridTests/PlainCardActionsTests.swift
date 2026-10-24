@@ -47,13 +47,13 @@ struct PlainCardActionsTests {
     }
 
     /// The line's actions left to right: save, repost, comments, likes.
-    private func actions(in cell: PostGridListRowCell) -> [AppButton] {
-        walk(cell.contentView, AppButton.self)
+    private func actions(in cell: PostGridListRowCell) -> [AppIconButton] {
+        walk(cell.contentView, AppIconButton.self)
             .filter { !$0.isHidden && $0.superviewChainIsVisible }
             .sorted { $0.convert($0.bounds, to: cell.contentView).minX < $1.convert($1.bounds, to: cell.contentView).minX }
     }
 
-    private func glyph(of action: AppButton) -> String {
+    private func glyph(of action: AppIconButton) -> String {
         action.content.symbol ?? ""
     }
 
@@ -66,7 +66,7 @@ struct PlainCardActionsTests {
         let line = actions(in: cell)
         #expect(line.count == 4)
         for action in line {
-            #expect(action.aspect == .bare)
+            #expect(action.style == .glyph)
             #expect(action.currentGround == nil || action.buttonShapes(), "a ground only for Button Shapes")
             #expect(action.backgroundColor == nil)
         }
@@ -292,7 +292,7 @@ struct PlainCardActionsTests {
     }
 
     /// The colour an action draws in: its configuration's foreground.
-    private func ink(of action: AppButton) -> [UIColor] {
+    private func ink(of action: AppIconButton) -> [UIColor] {
         [action.configuration?.baseForegroundColor].compactMap { $0 }
     }
 
@@ -300,8 +300,8 @@ struct PlainCardActionsTests {
     /// (when it was red): the stand-in's heart at rest, the row's colour, the
     /// colour changing in the landing frame.
     @Test func aStakedHeartFliesHomeAsTheLikesHeart() throws {
-        func heart(_ view: UIView) throws -> AppButton {
-            try #require(walk(view, AppButton.self)
+        func heart(_ view: UIView) throws -> AppIconButton {
+            try #require(walk(view, AppIconButton.self)
                 .filter { !$0.isHidden && $0.superviewChainIsVisible }
                 .max { $0.convert($0.bounds, to: view).minX < $1.convert($1.bounds, to: view).minX })
         }

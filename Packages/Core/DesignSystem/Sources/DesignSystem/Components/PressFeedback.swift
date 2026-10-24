@@ -152,13 +152,12 @@ public final class PressFeedback {
     }
 
     /// The scales a swell takes an element of `size` to, across and down —
-    /// see `Metrics.swellAcross`.
+    /// see `Metrics.swellAcross`. Never more across than down: a circle (a
+    /// 44pt bubble, a lone glyph) swells as a circle, not an ellipse.
     public static func swelledScale(for size: CGSize) -> (x: CGFloat, y: CGFloat) {
         guard size.width > 0, size.height > 0 else { return (1, 1) }
-        return (
-            1 + 2 * Metrics.swellAcross * size.height / size.width,
-            1 + 2 * Metrics.swellDown
-        )
+        let down = 1 + 2 * Metrics.swellDown
+        return (min(1 + 2 * Metrics.swellAcross * size.height / size.width, down), down)
     }
 
     /// The scale a press takes an element of `size` to — see `Metrics.depth`.
@@ -201,7 +200,7 @@ public final class PressFeedback {
     public private(set) var isPressed = false
 
     /// Told when a press starts (true) and ends (false) — for a host that
-    /// dresses the press further, e.g. `AppButton`'s wash (`washesOnPress`), so
+    /// dresses the press further, e.g. `AppControl`'s wash (`washesOnPress`), so
     /// the extra layer follows the SAME finger decisions as the scale rather
     /// than a second opinion on them.
     public var onPressChanged: ((Bool) -> Void)?

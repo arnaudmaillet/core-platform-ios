@@ -310,7 +310,7 @@ extension UIView {
 ///   shows a capsule that was not there a moment before and a held one a
 ///   deeper one — the container appears only while a finger is on it.
 ///
-/// ⚠️ SINCE #934 THE ACTIONS ARE `AppButton`s (`PostCardAction`), which carry
+/// ⚠️ SINCE #934 THE ACTIONS ARE `AppIconButton`s (`PostCardAction`), which carry
 /// every part of that box themselves; this type keeps the line's ink and
 /// padding as the constants they read.
 ///
@@ -391,7 +391,7 @@ public class PostCardPillView: PostMetaPillView {
 
 /// The card's GLYPH metrics: the size and weight every glyph on a card is
 /// drawn at, and the band's "..." control. The closing line's repost and save
-/// were instances of this until #934 made them `AppButton`s (`PostCardAction`).
+/// were instances of this until #934 made them `AppIconButton`s (`PostCardAction`).
 public final class PostActionPillView: PostCardPillView {
     /// The width of the band's "..." — a glyph button carrying its own margin
     /// inside its width, hung from the card's top-right corner.
@@ -476,7 +476,7 @@ final class PostGlyphButton: UIButton {
 }
 
 /// A card's ACTION — likes, comments, repost, save — as the app's one button
-/// (#934, the move to #931's `AppButton`): BARE, card-action size, ink on the
+/// (#934, the move to #931's `AppIconButton`): BARE, card-action size, ink on the
 /// card's own fill.
 ///
 /// What `PostCardPillView` and the deleted `ActionAffordance` gave these, kept:
@@ -489,14 +489,14 @@ final class PostGlyphButton: UIButton {
 ///   held (`washesOnPress`), never a dim;
 /// - the hold that freezes the list and the pager until the lift
 ///   (`holdFreezesScrolling`), and the like's stake menu (`menuProvider`);
-/// - a 44pt region for a finger (`AppButton.hitRegion`).
+/// - a 44pt region for a finger (`AppControl.hitRegion`).
 ///
 /// What the button adds: the count rolls, the glyph is replaced rather than
 /// cut, the state tint fades — each a cross-fade under Reduce Motion.
 @MainActor
 public enum PostCardAction {
-    public static func make(symbol: String, label: String, selectedTint: UIColor? = nil) -> AppButton {
-        let button = AppButton(aspect: .bare, size: .inline, content: .symbol(symbol), dims: false)
+    public static func make(symbol: String, label: String, selectedTint: UIColor? = nil) -> AppIconButton {
+        let button = AppIconButton(style: .glyph, content: .symbol(symbol), dims: false)
         button.inkColor = PostCardPillView.ink
         button.selectedTint = selectedTint
         button.symbolPointSize = PostActionPillView.glyphPointSize
@@ -523,19 +523,19 @@ public enum PostCardAction {
     /// bookmark, not 34) and centres the glyph in it, so the air is half of
     /// what the glyph leaves of the button's width — read off the drawn
     /// image, as the closing line's glyph controls always were.
-    static func inkLeading(_ button: AppButton) -> CGFloat {
+    static func inkLeading(_ button: AppIconButton) -> CGFloat {
         glyphAir(button) ?? button.configuration?.contentInsets.leading ?? 0
     }
 
     /// The same, from the trailing edge.
-    static func inkTrailing(_ button: AppButton) -> CGFloat {
+    static func inkTrailing(_ button: AppIconButton) -> CGFloat {
         glyphAir(button) ?? button.configuration?.contentInsets.trailing ?? 0
     }
 
     /// The air either side of a glyph-only button's glyph; nil for one with
-    /// words or a count.
-    private static func glyphAir(_ button: AppButton) -> CGFloat? {
-        guard button.content.title == nil, button.content.count == nil,
+    /// a count.
+    private static func glyphAir(_ button: AppIconButton) -> CGFloat? {
+        guard button.content.count == nil,
               let configuration = button.configuration, let image = configuration.image else { return nil }
         let drawn = configuration.preferredSymbolConfigurationForImage
             .flatMap { image.applyingSymbolConfiguration($0) } ?? image
