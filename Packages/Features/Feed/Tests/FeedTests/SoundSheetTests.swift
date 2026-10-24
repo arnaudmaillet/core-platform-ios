@@ -223,12 +223,12 @@ struct SoundSheetTests {
 
     /// The actions are bar items, left to right: "Use this sound", save,
     /// share — save and share each in their own bubble (a zero-width fixed
-    /// space between any two). "Use this sound" is a stretchable capsule of
-    /// its own (no shared bubble around it). Without a way to use the sound,
+    /// space between any two). "Use this sound" stretches over the rest, in
+    /// the bar's own prominent bubble. Without a way to use the sound,
     /// save and share keep the trailing edge.
     @Test func theToolbarIsUseSaveShare() throws {
         func label(_ item: UIBarButtonItem) -> String {
-            (item.customView as? UIButton)?.configuration?.title ?? item.title ?? item.accessibilityLabel ?? "space"
+            (item.customView as? StretchedBarLabel)?.title ?? item.title ?? item.accessibilityLabel ?? "space"
         }
         let usable = sheet()
         usable.onUseSound = { _ in }
@@ -238,9 +238,15 @@ struct SoundSheetTests {
         let labels = items.map(label)
         #expect(labels == ["Use this sound", "space", "Save sound", "space", "Share sound"], "\(labels)")
         let use = try #require(items.first)
-        #expect(use.hidesSharedBackground, "a capsule in a bubble")
-        let button = try #require(usable.useButton)
-        #expect(button.contentHuggingPriority(for: .horizontal).rawValue <= 1, "it hugs its title: it will not fill")
+        // The bar contract (#1679): the bar draws its prominent bubble, and
+        // every item keeps its identity across the sheet's pushes.
+        #expect(!use.hidesSharedBackground, "the use draws a glass of its own")
+        #expect(use.style == .prominent)
+        let control = try #require(usable.useControl)
+        #expect(use.customView === control)
+        #expect(control.contentHuggingPriority(for: .horizontal).rawValue <= 1, "it hugs its title: it will not fill")
+        let ids = items.compactMap(\.identifier)
+        #expect(ids == ["soundSheet.use", "soundSheet.save", "soundSheet.share"], "\(ids)")
 
         let shareOnly = sheet()
         _ = shareOnly.wrappedInSheet()

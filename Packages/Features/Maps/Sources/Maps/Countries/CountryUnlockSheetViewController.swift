@@ -51,8 +51,9 @@ final class CountryUnlockSheetViewController: UIViewController {
     private(set) var country: CountryAtlas.Country
     private let access: any CountryAccess
     private let stack = UIStackView()
-    /// The unlock — the toolbar's one item.
-    let unlockButton = UIButton(configuration: .prominentGlass())
+    /// The unlock's view — the toolbar's one item, its bubble the bar's
+    /// (#1679, `BarItems.stretched`). What a test reads.
+    private(set) var unlockControl: StretchedBarLabel?
     private let balanceLabel = UILabel()
     private var closeFlight = OfferCloseFlight()
     private static let detent = UISheetPresentationController.Detent.Identifier("country.unlock")
@@ -109,17 +110,13 @@ final class CountryUnlockSheetViewController: UIViewController {
         super.viewDidLoad()
         // Clear: the sheet's own glass is the surface.
         view.backgroundColor = .clear
-        configureUnlockButton()
-        let unlockItem = UIBarButtonItem(customView: unlockButton)
-        // Its own prominent capsule is its background: no bubble in a bubble.
-        unlockItem.hidesSharedBackground = true
-        toolbarItems = [unlockItem]
         // ✕ top-RIGHT, the sound sheet's side (the owner, 2026-10-22: it was
         // left in #1600, "la croix … doit être à droite").
         let close = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
             (self?.navigationController ?? self)?.dismiss(animated: true)
         })
         close.accessibilityIdentifier = "countryUnlock.close"
+        close.identifier = "countryUnlock.close"
         navigationItem.rightBarButtonItem = close
 
         balanceLabel.font = .appFont(forTextStyle: .footnote)
@@ -150,8 +147,7 @@ final class CountryUnlockSheetViewController: UIViewController {
         pitch.textColor = .secondaryLabel
         pitch.numberOfLines = 0
         let price = standing?.price ?? CountryStanding.price(forRank: .max)
-        unlockButton.configuration?.title = "Unlock · \(price)"
-        refreshBalance(price: price)
+        installUnlock(price: price)
         stack.addArrangedSubview(header)
         stack.setCustomSpacing(Spacing.lg, after: header)
         stack.addArrangedSubview(pitch)
@@ -258,71 +254,52 @@ final class CountryUnlockSheetViewController: UIViewController {
         contentHeight = (Spacing.xl + size.height + Spacing.lg).rounded()
     }
 
-    /// The prominent blue capsule, as tall as a bar's bubbles, filling the
-    /// toolbar.
-    ///
-    /// **IT FILLS THE BAR BY AUTO LAYOUT, NOT BY ARITHMETIC** — the sound
-    /// sheet's "Use this sound": there is no flexible-width bar item, and a
-    /// `.prominent` title item's `width` is ignored on iOS 27. A custom view
-    /// that hugs nothing and asks, at the lowest priority, for more room than
-    /// any bar has is stretched by the bar to exactly what it leaves.
-    private func configureUnlockButton() {
-        var configuration = UIButton.Configuration.prominentGlass()
-        configuration.image = UIImage.symbol(named: GemSymbol.glyph)
-        configuration.imagePadding = Spacing.sm
-        configuration.cornerStyle = .capsule
-        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var attributes = attributes
-            attributes.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
-            return attributes
+    /// The unlock at `price`: a new item under the same identifier whenever
+    /// the price changes (another country, a new price from the server) —
+    /// the bar animates the swap (R3) — and the balance under it.
+    private func installUnlock(price: Int) {
+        let title = "Unlock · \(price)"
+        if unlockControl?.title != title {
+            let made = BarItems.stretched(
+                id: "countryUnlock.unlock", title: title, image: UIImage.symbol(named: GemSymbol.glyph), prominent: true
+            ) { [weak self] in self?.unlockTapped() }
+            made.label.accessibilityIdentifier = "country.unlock.button"
+            unlockControl = made.label
+            setToolbarItems([made.item], animated: viewIfLoaded?.window != nil)
         }
-        unlockButton.configuration = configuration
-        // The brand's prominent glass (#1124): its white label reads on the
-        // deep pink in both appearances.
-        unlockButton.tintColor = Palette.prominentGlassTint
-        unlockButton.accessibilityIdentifier = "country.unlock.button"
-        unlockButton.addAction(UIAction { [weak self] _ in
-            guard let self else { return }
-            guard !access.purchasesRestricted else {
-                let alert = UIAlertController(title: nil, message: PurchaseRestriction.message, preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
-                present(alert, animated: true)
-                return
-            }
-            MemberGates.perform(.unlockCountry, from: self) { [weak self] in
-                Task { [weak self] in await self?.unlock() }
-            }
-        }, for: .primaryActionTriggered)
-        unlockButton.setContentHuggingPriority(.init(1), for: .horizontal)
-        let fill = unlockButton.widthAnchor.constraint(equalToConstant: 10_000)
-        fill.priority = .init(2)
-        // 999, never required: the bar's first pass pins its item wrapper to
-        // the raw intrinsic size.
-        let height = unlockButton.heightAnchor.constraint(equalToConstant: Self.barBubbleHeight)
-        height.priority = .init(999)
-        NSLayoutConstraint.activate([fill, height])
+        refreshBalance(price: price)
     }
 
-    /// A bar's glass bubbles' height: 48 on iOS 27 (the sound sheet's
-    /// measure) — at 44 a capsule stood visibly shorter.
-    static let barBubbleHeight: CGFloat = 48
+    /// A purchase-restricted device is told why; anyone else is asked to
+    /// be a member, then the server is.
+    private func unlockTapped() {
+        guard !access.purchasesRestricted else {
+            let alert = UIAlertController(title: nil, message: PurchaseRestriction.message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+            return
+        }
+        MemberGates.perform(.unlockCountry, from: self) { [weak self] in
+            Task { [weak self] in await self?.unlock() }
+        }
+    }
 
     private func refreshBalance(price: Int) {
         let gems = access.gems
         if gems >= price {
             balanceLabel.text = "You have \(gems) gems"
             balanceLabel.textColor = .secondaryLabel
-            unlockButton.isEnabled = true
+            unlockControl?.isEnabled = true
         } else {
             balanceLabel.text = "You need \(price - gems) more gems"
             balanceLabel.textColor = .systemRed
-            unlockButton.isEnabled = false
+            unlockControl?.isEnabled = false
         }
     }
 
     private func unlock() async {
         // One unlock at a time: the server is being asked.
-        unlockButton.isEnabled = false
+        unlockControl?.isEnabled = false
         let outcome = await access.unlock(country.code)
         switch outcome {
         case .unlocked, .alreadyUnlocked:
@@ -336,10 +313,10 @@ final class CountryUnlockSheetViewController: UIViewController {
         case .priceChanged(let price):
             // The new price, to confirm again (#1475): nothing was charged.
             Feedback.failure("The price changed: now \(price) gems. Nothing was charged.", from: self)
-            refreshBalance(price: price)
+            installUnlock(price: price)
         case .failed:
             Feedback.failure(ShopPurchaseFeedback.unreachable, from: self)
-            unlockButton.isEnabled = true
+            unlockControl?.isEnabled = true
         case .unknownCountry:
             dismiss(animated: true)
         }

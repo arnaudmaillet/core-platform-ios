@@ -82,7 +82,8 @@ struct ToastFullMessageTests {
             #expect(ToastMessageSheet.glyphPointSize >= 44, "the glyph is not large")
             #expect(sheet.toolbarItems?.count == 1 && sheet.toolbarItems?.first?.customView === sheet.actionButton)
             #expect(sheet.navigationController?.isToolbarHidden == false, "the action's toolbar is hidden")
-            #expect(sheet.actionButton?.configuration?.baseForegroundColor == .label, "the action is not neutral")
+            #expect(sheet.toolbarItems?.first?.style == .plain, "the action is not neutral")
+            #expect(sheet.toolbarItems?.first?.hidesSharedBackground == false, "the action draws a glass of its own")
             #expect(toast.countdown?.holds.contains(.sheet) == true, "the toast's time ran under the sheet")
 
             sheet.debugAct()

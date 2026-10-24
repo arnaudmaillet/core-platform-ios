@@ -43,11 +43,13 @@ final class ToastMessageSheet: UIViewController {
     private(set) var glyphView: UIImageView?
     private(set) var messageLabel = UILabel()
     /// The toolbar's one item, filling it — nil without an action.
-    private(set) var actionButton: UIButton?
+    private(set) var actionButton: StretchedBarLabel?
     /// The bar's close ✕.
-    private(set) lazy var closeItem = UIBarButtonItem(
-        systemItem: .close, primaryAction: UIAction { [weak self] _ in self?.close() }
-    )
+    private(set) lazy var closeItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in self?.close() })
+        item.identifier = "toastSheet.close"
+        return item
+    }()
     private var hasGone = false
 
     /// The glyph's size: large, the sheet's headline (the owner, 2026-10-19).
@@ -122,50 +124,17 @@ final class ToastMessageSheet: UIViewController {
         messageLabel.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
 
         if let actionTitle {
-            let button = Self.makeActionButton(title: actionTitle)
-            button.addAction(UIAction { [weak self] _ in self?.act() }, for: .primaryActionTriggered)
-            actionButton = button
-            let item = UIBarButtonItem(customView: button)
-            // Its own glass capsule is its background: no bubble in a bubble.
-            item.hidesSharedBackground = true
-            toolbarItems = [item]
+            // The action, filling the toolbar, in NEUTRAL glass (the owner,
+            // 2026-10-19: never pink here) — the BAR's bubble, plain (#1679,
+            // `BarItems.stretched`: there is no flexible-width bar item, and
+            // a title item's `width` is ignored on iOS 27).
+            let made = BarItems.stretched(id: "toastSheet.action", title: actionTitle) { [weak self] in self?.act() }
+            actionButton = made.label
+            toolbarItems = [made.item]
         }
     }
 
     static let detent = UISheetPresentationController.Detent.Identifier("toast.fullMessage")
-
-    /// The action, filling the toolbar, in NEUTRAL glass (the owner,
-    /// 2026-10-19: never pink here).
-    ///
-    /// It fills the bar by Auto Layout, as the country sheet's unlock does:
-    /// there is no flexible-width bar item, and a title item's `width` is
-    /// ignored on iOS 27. A custom view that hugs nothing and asks, at the
-    /// lowest priority, for more room than any bar has is stretched by the
-    /// bar to exactly what it leaves.
-    private static func makeActionButton(title: String) -> UIButton {
-        var configuration = UIButton.Configuration.glass()
-        configuration.title = title
-        configuration.cornerStyle = .capsule
-        configuration.baseForegroundColor = .label
-        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var attributes = attributes
-            attributes.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
-            return attributes
-        }
-        let button = UIButton(configuration: configuration)
-        button.setContentHuggingPriority(.init(1), for: .horizontal)
-        let fill = button.widthAnchor.constraint(equalToConstant: 10_000)
-        fill.priority = .init(2)
-        // 999, never required: the bar's first pass pins its item wrapper to
-        // the raw intrinsic size.
-        let height = button.heightAnchor.constraint(equalToConstant: barBubbleHeight)
-        height.priority = .init(999)
-        NSLayoutConstraint.activate([fill, height])
-        return button
-    }
-
-    /// A bar's glass bubbles' height on iOS 27 (the country sheet's measure).
-    static let barBubbleHeight: CGFloat = 48
 
     /// The sheet's height: the content at the sheet's width, from its top,
     /// and the toolbar when it shows — measured, never laid out by the
@@ -180,7 +149,7 @@ final class ToastMessageSheet: UIViewController {
         var toolbar: CGFloat = 0
         if actionTitle != nil {
             let estimate = navigationController?.toolbar.sizeThatFits(CGSize(width: width, height: 0)).height ?? 0
-            toolbar = max(estimate, Self.barBubbleHeight + Spacing.sm)
+            toolbar = max(estimate, BarItems.bubbleHeight + Spacing.sm)
         }
         return ceil(Self.inset + content + Spacing.xl + toolbar)
     }

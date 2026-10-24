@@ -57,7 +57,7 @@ final class NotificationsViewController: UIViewController {
     /// reveal (#1447: the old look holds while a write is on its way).
     var shownPause: PushPause = .off
     var shownMuteLook: MuteLook?
-    weak var muteButton: UIButton?
+    weak var muteButton: StretchedBarLabel?
     var muteTimerItem: UIBarButtonItem?
     var muteTick: Timer?
 

@@ -16,10 +16,8 @@ struct MuteLook: Equatable {
 /// ```
 /// See `NotificationsMuteModel` for what each control does.
 extension NotificationsViewController {
-    /// The bar's glass bubbles' height on iOS 27, which the stretched
-    /// capsule matches (`BarItems.bubbleHeight`).
-    static let muteBarBubbleHeight: CGFloat = 48
-    /// One slot across re-mints: the bar morphs the timer item in place.
+    /// One slot each across re-mints: the bar morphs the items in place.
+    static let muteWideIdentifier = "notifications.mute"
     static let muteTimerIdentifier = "notifications.mute.timer"
 
     func installMuteToolbar() {
@@ -47,24 +45,24 @@ extension NotificationsViewController {
         }
     }
 
-    /// Lays the toolbar out for `shownPause`, re-minting the timer item when
-    /// its text changes (a bar measures a NEW item only), and arms the
-    /// minute tick.
+    /// Lays the toolbar out for `shownPause`, re-minting an item whenever
+    /// what it says changes — the timer's text (a bar measures a NEW item
+    /// only), the wide item's word and glyph — under the same identifiers,
+    /// so the bar animates the change itself (#1679), and arms the minute
+    /// tick.
     func applyMuteToolbar() {
         guard let muteModel else { return }
         let now = muteModel.clock
         let look = MuteLook(paused: shownPause.isPaused, timeLeft: NotificationsMuteModel.timeLeft(shownPause, now: now))
         if look != shownMuteLook {
-            let wideChanged = look.paused != shownMuteLook?.paused || muteButton == nil
+            let shown = toolbarItems?.first { $0.identifier == Self.muteWideIdentifier }
+            let kept = look.paused == shownMuteLook?.paused ? shown : nil
+            let animated = view.window != nil && shown != nil
             shownMuteLook = look
-            if wideChanged { configureMuteButton(paused: look.paused) }
+            let wide = kept ?? makeMuteWideItem(paused: look.paused)
             let timer = makeMuteTimerItem(look)
             muteTimerItem = timer
-            if let muteButton, let wide = toolbarItems?.first, wide.customView === muteButton {
-                setToolbarItems([wide, .fixedSpace(), timer], animated: view.window != nil)
-            } else {
-                setToolbarItems([makeMuteWideItem(), .fixedSpace(), timer], animated: false)
-            }
+            setToolbarItems([wide, .fixedSpace(), timer], animated: animated)
         }
         if let timer = muteTimerItem {
             timer.accessibilityValue = NotificationsMuteModel.timeLeftForVoiceOver(shownPause, now: now)
@@ -74,43 +72,20 @@ extension NotificationsViewController {
 
     // MARK: Items
 
-    /// The stretched item: a custom view, since there is no flexible-width
-    /// bar item and a `.prominent` title item's `width` is ignored on iOS 27
-    /// (the profile card's and the sound sheet's recipe).
-    private func makeMuteWideItem() -> UIBarButtonItem {
-        let button = UIButton(primaryAction: UIAction { [weak self] _ in self?.muteButtonTapped() })
-        button.accessibilityIdentifier = "notifications.mute"
-        button.setContentHuggingPriority(.init(1), for: .horizontal)
-        let fill = button.widthAnchor.constraint(equalToConstant: 10_000)
-        fill.priority = .init(2)
-        // 999, never required: the bar's first pass pins its item wrapper to
-        // the raw intrinsic size.
-        let height = button.heightAnchor.constraint(equalToConstant: Self.muteBarBubbleHeight)
-        height.priority = .init(999)
-        NSLayoutConstraint.activate([fill, height])
-        muteButton = button
-        configureMuteButton(paused: shownPause.isPaused)
-        let item = UIBarButtonItem(customView: button)
-        item.hidesSharedBackground = true
-        return item
-    }
-
-    /// The glyph and the word say what a tap WILL do.
-    private func configureMuteButton(paused: Bool) {
-        guard let muteButton else { return }
-        var configuration = UIButton.Configuration.glass()
-        configuration.baseForegroundColor = .label
-        configuration.title = paused ? "Unmute" : "Mute"
-        configuration.image = UIImage(systemName: paused ? "bell" : "bell.slash")
-        configuration.imagePadding = Spacing.sm
-        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(textStyle: .body, scale: .medium)
-        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var attributes = attributes
-            attributes.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
-            return attributes
-        }
-        muteButton.configuration = configuration
-        muteButton.accessibilityLabel = paused ? "Unmute notifications" : "Mute notifications for 8 hours"
+    /// The stretched item (`BarItems.stretched`): there is no flexible-width
+    /// bar item and a `.prominent` title item's `width` is ignored on iOS 27.
+    /// The bar draws its bubble (#1679). The glyph and the word say what a
+    /// tap WILL do.
+    private func makeMuteWideItem(paused: Bool) -> UIBarButtonItem {
+        let made = BarItems.stretched(
+            id: Self.muteWideIdentifier,
+            title: paused ? "Unmute" : "Mute",
+            image: UIImage(systemName: paused ? "bell" : "bell.slash")
+        ) { [weak self] in self?.muteButtonTapped() }
+        made.label.accessibilityIdentifier = "notifications.mute"
+        made.label.accessibilityLabel = paused ? "Unmute notifications" : "Mute notifications for 8 hours"
+        muteButton = made.label
+        return made.item
     }
 
     /// The timer glyph, or the time left; it always opens the menu.
@@ -210,6 +185,6 @@ extension NotificationsViewController {
     /// The timer item's text, nil for the glyph. Tests.
     var debugMuteTimerText: String? { muteTimerItem?.title }
     /// The wide button's word. Tests.
-    var debugMuteButtonTitle: String? { muteButton?.configuration?.title }
+    var debugMuteButtonTitle: String? { muteButton?.title }
     #endif
 }
