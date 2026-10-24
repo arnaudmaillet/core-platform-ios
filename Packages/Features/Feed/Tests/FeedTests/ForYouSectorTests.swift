@@ -101,17 +101,24 @@ struct ForYouSectorTests {
     }
 
     /// Mid-drag, the page over half the screen is the page in front — its
-    /// bar, its appearance (Shots plays) — and each page blurs by its share;
-    /// at rest, no blur is left.
-    @Test func thePageOverHalfIsInFrontAndTheOtherBlurs() {
+    /// bar, its appearance (Shots plays) — and only the page the drag left
+    /// blurs, by its share; at rest, no blur is left.
+    @Test func thePageOverHalfIsInFrontAndOnlyTheLeavingOneBlurs() {
         let (sector, home, feed) = sector()
+        // Leaving Shots (the settled page) for Feed.
         sector.debugApplyOccupancy(shotsShare: 0.4)
         #expect(sector.activeIndex == ForYouSectorViewController.feedIndex, "Shots under half kept the front")
         #expect(home.activity == [true])
         #expect(feed.activity == [false])
-        let amounts = sector.debugBlurAmounts
-        #expect(amounts[ForYouSectorViewController.feedIndex] == 0, "the page over half is blurred")
+        var amounts = sector.debugBlurAmounts
+        #expect(amounts[ForYouSectorViewController.feedIndex] == 0, "the page arriving is blurred")
         #expect(abs(amounts[ForYouSectorViewController.shotsIndex] - 0.2) < 0.0001)
+
+        // Early in the drag the page arriving fills little — still sharp.
+        sector.debugApplyOccupancy(shotsShare: 0.9)
+        amounts = sector.debugBlurAmounts
+        #expect(amounts[ForYouSectorViewController.feedIndex] == 0, "the page arriving blurs while it is small")
+        #expect(amounts[ForYouSectorViewController.shotsIndex] == 0)
 
         sector.debugApplyOccupancy(shotsShare: 0.6)
         #expect(sector.activeIndex == ForYouSectorViewController.shotsIndex, "back over half, Shots did not come back")

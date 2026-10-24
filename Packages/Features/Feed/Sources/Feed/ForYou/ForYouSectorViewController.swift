@@ -46,8 +46,10 @@ protocol ForYouSectorPage: UIViewController {
 /// — Shots' media plays from there, not from the settle — and the other page
 /// disappears; back under half, they swap back.
 ///
-/// **Each page blurs by how little of the screen it fills** (#1707): 100% at
-/// 0%, nothing from 50% on (`blurAmount`), so the change of page cross-fades.
+/// **The page leaving blurs by how little of the screen it fills** (#1707,
+/// the owner): 100% at 0%, nothing from 50% on (`blurAmount`), so the change
+/// of page cross-fades. Only the page the drag LEFT — the settled one — blurs;
+/// the page arriving stays sharp.
 /// The blur exists only mid-drag: at rest neither page wears one
 /// (`PageBlur.clear`), so nothing is left on the paused animator that drives
 /// it when the tab's view leaves the window.
@@ -68,6 +70,9 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
     private var pager: HorizontalPagerView?
     /// Each page's occupancy blur, in page order.
     private var blurs: [PageBlur] = []
+    /// The page the sector last settled on — the one a drag leaves, and the
+    /// only one that blurs (#1707).
+    private var settledIndex = ForYouSectorViewController.startIndex(arguments: ProcessInfo.processInfo.arguments)
     /// The page in front — the one whose bar the sector wears.
     private(set) var activeIndex = ForYouSectorViewController.startIndex(
         arguments: ProcessInfo.processInfo.arguments
@@ -237,8 +242,15 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
         // At rest, nothing: a page fully off screen is not seen, and a paused
         // animator left over it would outlive the window.
         guard abs(shots - shots.rounded()) > 0.001 else { return blurs.forEach { $0.clear() } }
+        // Only the page leaving: the one the drag started from.
         let shares = [1 - shots, shots]
-        for (blur, share) in zip(blurs, shares) { blur.setAmount(Self.blurAmount(occupancy: share)) }
+        for (index, blur) in blurs.enumerated() {
+            if index == settledIndex {
+                blur.setAmount(Self.blurAmount(occupancy: shares[index]))
+            } else {
+                blur.clear()
+            }
+        }
     }
 
     /// How blurred a page filling `occupancy` of the screen is (#1707):
@@ -250,6 +262,7 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
     private func settle(on index: Int) {
         selector.select(index)
         bringToFront(index)
+        settledIndex = index
         blurs.forEach { $0.clear() }
     }
 
