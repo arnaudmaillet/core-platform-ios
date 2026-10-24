@@ -447,6 +447,13 @@ final class MainTabCoordinator: NSObject, Coordinator {
 // MARK: - Tab selection
 
 extension MainTabCoordinator: UITabBarControllerDelegate {
+    /// The tab API's selection — a tap on a tab arrives HERE, not through
+    /// `didSelect viewController` (#1697: the dark bar never came on a real
+    /// tap, only through `selectTab`).
+    func tabBarController(_ tabBarController: UITabBarController, didSelectTab selectedTab: UITab, previousTab: UITab?) {
+        applyTabBarStyle()
+    }
+
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
         refreshUnreadBadge()
         syncTabBarVisibility()
