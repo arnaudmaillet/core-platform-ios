@@ -512,9 +512,24 @@ final class TextPostComposerViewController: UIViewController {
         default: break
         }
         restingFloor = floor
-        guard let sheet = navigationController?.sheetPresentationController else { return }
-        sheet.animateChanges { sheet.invalidateDetents() }
+        guard navigationController?.sheetPresentationController != nil, !detentInvalidationQueued else { return }
+        // ⚠️ NEVER FROM INSIDE THE LAYOUT PASS. This runs from
+        // `viewSafeAreaInsetsDidChange`, and invalidating the sheet's detents
+        // there re-lays the sheet — its safe area again — within the same
+        // pass: on an iPhone SE (no bottom inset) the nesting ran the main
+        // thread's stack out inside the bar's layout and the app died on
+        // opening the composer. One invalidation, on the next turn.
+        detentInvalidationQueued = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            detentInvalidationQueued = false
+            guard let sheet = navigationController?.sheetPresentationController else { return }
+            sheet.animateChanges { sheet.invalidateDetents() }
+        }
     }
+
+    /// A detent invalidation is on its way (`updateRestingFloor`).
+    private var detentInvalidationQueued = false
 
     // MARK: - Published
 
