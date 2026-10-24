@@ -40,11 +40,10 @@ import Upload
 final class MainTabCoordinator: NSObject, Coordinator {
     var childCoordinators: [Coordinator] = []
     let tabBarController = ShellTabBarController()
-    /// The window's appearance is watched once the experimental dark tab bar
-    /// first shows (#1697, `applyTabBarStyle`).
+    /// The window's appearance is watched once the dark tab bar first shows (#1697, `applyTabBarStyle`).
     fileprivate var isObservingWindowStyle = false
-    /// The style `applyTabBarStyle` gave the bars: `.dark` over the
-    /// experimental feed, `.unspecified` (the app's) everywhere else.
+    /// The style `applyTabBarStyle` gave the bars: `.dark` over Shots,
+    /// `.unspecified` (the app's) everywhere else.
     fileprivate var barStyle: UIUserInterfaceStyle = .unspecified
 
     /// Internal (not private) only for the +QA hooks.
@@ -70,10 +69,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // Baked for the shell's traits — the app's appearance, not iOS's
         // (#1501).
         // The WINDOW's traits — the app's appearance — not the tab bar
-        // controller's, which the experimental dark tab bar overrides (#1697):
+        // controller's, which the dark tab bar overrides over Shots (#1697):
         // the bell lives in the pages' bars, which keep the app's look.
-        // …unless the bar the bell stands in is the experimental feed's dark
-        // one (#1703: it stayed black over Feed's dark header).
+        // …unless the bar the bell stands in is Shots' dark one (#1703: it
+        // stayed black over that dark header).
         bell.traits = { [weak self] in self?.barTraits ?? .current }
         return bell
     }()
@@ -488,8 +487,8 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// A viewer standing on a tab that leaves (a member on Messages who logs
     /// out) lands on Explore — set before the bar changes, so the bar never
     /// holds a selection it no longer has.
-    /// EXPERIMENTAL (#1697): the tab bar dark over the For You root's
-    /// full-screen feed, the app's own on every other tab — an appearance,
+    /// The tab bar dark over the For You tab's Shots — the full-screen posts
+    /// (#1697, #1703) — the app's own over Feed and every other tab — an appearance,
     /// never an alpha (`native-chrome-uikit-only`).
     ///
     /// ⚠️ ON THE TAB BAR CONTROLLER: iOS 26's floating bar takes its traits
@@ -499,7 +498,7 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// app draws it.
     /// The traits the bars' baked glyphs are drawn for — the tab icons and
     /// the badged bell: the window's (the app's appearance), darkened over
-    /// the experimental feed. ⚠️ Not read off `tabBar.traitCollection`: it
+    /// Shots. ⚠️ Not read off `tabBar.traitCollection`: it
     /// had not taken the controller's dark override when the glyphs were
     /// baked, and the For You and Messages icons stayed black on the dark
     /// bar (#1703).
@@ -513,7 +512,9 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     private func applyTabBarStyle() {
         let forYou = tabBarController.selectedTab?.identifier == AppTab.forYou.rawValue
             && forYouTab?.wantsDarkTabBar ?? true
-        let style = ForYouFullScreenExperiment.tabBarStyle(forYouSelected: forYou)
+        // Dark over Shots (#1697, #1703): the bar sits over the media as the
+        // post's own chrome does; the app's own everywhere else.
+        let style: UIUserInterfaceStyle = forYou ? .dark : .unspecified
         let window = tabBarController.view.window
         let pages: UIUserInterfaceStyle = style == .unspecified
             ? .unspecified
@@ -586,7 +587,7 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
             guard let glyphTab = coordinator as? any GlyphTab else { continue }
             let tab = glyphTab.tab
             // Baked for the BAR's traits (#1501): the app's appearance, or the
-            // dark the experimental For You tab gives the bar (#1697).
+            // dark Shots gives the bar (#1697).
             let traits = barTraits
             tab.image = glyphTab.glyph.image(selected: false, badged: glyphTab.hasUnread, traits: traits)
             // The badge said aloud (#1196): an image tells VoiceOver nothing.

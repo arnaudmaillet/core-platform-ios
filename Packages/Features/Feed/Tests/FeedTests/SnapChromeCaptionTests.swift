@@ -124,7 +124,7 @@ struct SnapChromeCaptionTests {
         #expect(SnapChromeView.composedCaption(caption, timestamp: timestamp, width: 0).string == caption)
     }
 
-    /// EXPERIMENTAL (#1697): the For You root's caption is one text style
+    /// (#1697): the For You root's caption is one text style
     /// smaller and greyer than the feed's, its time still the smaller,
     /// dimmer register — and the two-line contract holds at its own size.
     @Test func theSoftCaptionIsSmallerAndGreyerAndKeepsTheContract() throws {

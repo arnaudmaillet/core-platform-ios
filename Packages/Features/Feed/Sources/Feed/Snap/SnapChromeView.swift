@@ -138,7 +138,7 @@ final class SnapChromeView: UIView {
     // replica) keeps the layer inside itself, as before.
     private let boostStation = UIView()
     private let soundStation = UIView()
-    /// EXPERIMENTAL (#1681): save and repost upright between the like pill
+    /// (#1681): save and repost upright between the like pill
     /// and the sound bubble (`showsPostActions`).
     private let postActionsStation = UIView()
     let postActions = SnapPostActionsCapsule()
@@ -149,7 +149,7 @@ final class SnapChromeView: UIView {
     private var pageBarUnderCaption: NSLayoutConstraint?
     private var pageBarUnderColumn: NSLayoutConstraint?
 
-    /// EXPERIMENTAL (#1701, the For You root): the page strip runs the full
+    /// (#1701, the For You root): the page strip runs the full
     /// width, under the column; the column stands above it, its lowest
     /// bubble level with the caption's bottom (`stripRoomLift`); and the
     /// strip's room is kept on a post with none — the caption never drops
@@ -168,7 +168,7 @@ final class SnapChromeView: UIView {
         SnapActionColumn.inputRestingGap + SnapActionColumn.bubbleSize + SnapActionColumn.gap
     }
 
-    /// EXPERIMENTAL (#1681, the For You root): the column holds save and
+    /// (#1681, the For You root): the column holds save and
     /// repost between the like pill and the sound bubble, and the pill — with
     /// the emote rail it stands on — rises by the capsule's room.
     var showsPostActions = false {
@@ -230,7 +230,7 @@ final class SnapChromeView: UIView {
         [shortcutRail, boostButton, commentEmptyState, subtitleView, commentTicker, soundBubble, authorRow]
     }
 
-    // MARK: - The author row (EXPERIMENTAL, #1699)
+    // MARK: - The author row (#1699)
 
     /// The post's author INSIDE the page, between the comment stream and the
     /// caption — the For You root's (the owner, 2026-10-24: out of the top
@@ -266,7 +266,7 @@ final class SnapChromeView: UIView {
     /// over (`updateCommentStreams`).
     private var tickerCarriesReactions = false
 
-    /// EXPERIMENTAL (#1699, the owner 2026-10-24): on the For You root, a
+    /// (#1699, the owner 2026-10-24): on the For You root, a
     /// running danmaku REPLACES the comment stream — the band takes the
     /// stream's seat on the author row, and the stream stays down.
     private var tickerReplacesStream: Bool {
@@ -969,7 +969,7 @@ final class SnapChromeView: UIView {
     enum CaptionStyle: Equatable {
         /// White `.body` — the feed's.
         case standard
-        /// EXPERIMENTAL (#1697, the owner 2026-10-24): one text style
+        /// (#1697, the owner 2026-10-24): one text style
         /// smaller (`.subheadline`) and a softer grey — the For You root's,
         /// where the picture is the page and the words step back.
         case soft

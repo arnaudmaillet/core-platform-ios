@@ -23,47 +23,67 @@ protocol ForYouSectorPage: UIViewController {
     /// The page came to the front (true) or went behind (false), after its
     /// appearance callbacks.
     func sectorPageDidChangeActivity(_ isActive: Bool)
-    /// The sector's safe area, handed over (see the sector's note on Home).
+    /// The sector's safe area, handed over (see the sector's note on Feed).
     func sectorSafeAreaDidChange(_ insets: UIEdgeInsets)
     /// Whether a horizontal drag starting now is the page's own — a drawer it
     /// holds open, which the swipe closes — rather than a change of page.
     func sectorPageOwnsHorizontalDrag(velocity: CGPoint) -> Bool
 }
 
-/// EXPERIMENTAL (#1703, the owner 2026-10-24): the For You tab as two pages —
-/// Home (the discovery list the tab shows without the experiment) and Feed
-/// (the full-screen posts) — switched by the app's selector (`PagedTabBar`)
-/// just right of the bell, or by a horizontal swipe. Opens on Feed.
+/// The For You tab (#1703, #1705, the owner 2026-10-24/25): two pages — Feed
+/// (the discovery list: friends, following, the "For you" posts) and Shots
+/// (the full-screen photos and short videos) — switched by the app's selector
+/// (`PagedTabBar`) just right of the bell, or by a horizontal swipe. Opens on
+/// Shots.
 ///
 /// **One page in front.** Appearance callbacks are forwarded by hand to the
 /// page in front only (`shouldAutomaticallyForwardAppearanceMethods`): the
 /// page behind is disappeared — its playback parked, its chrome handed back —
 /// though its view stays in the pager, and the new page appears at the settle.
 ///
-/// **The pager gives away what it cannot use** (`yieldsPastEnds`): on Feed,
-/// the last page, a leftward drag belongs to the feed's own swipe chain.
+/// **The pager gives away what it cannot use** (`yieldsPastEnds`): on Shots,
+/// the last page, a leftward drag belongs to its own swipe chain.
 final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting, ForYouSectorPaging {
-    static let homeIndex = 0
-    static let feedIndex = 1
+    static let feedIndex = 0
+    static let shotsIndex = 1
     static let selectorItemID = "foryou.sector.selector"
 
     private let pages: [any ForYouSectorPage]
-    private let selector = PagedTabBar(titles: ["Home", "Feed"], style: .navigationTitle)
+    /// The selector's words (#1705, the owner's pick): Feed, the discovery
+    /// list; Shots, the full-screen photos and short videos.
+    static let titles = ["Feed", "Shots"]
+    private let selector = PagedTabBar(titles: ForYouSectorViewController.titles, style: .navigationTitle)
     private lazy var selectorItem = BarItems.container(id: Self.selectorItemID, view: selector)
     private var pager: HorizontalPagerView?
     /// The page in front — the one whose bar the sector wears.
-    private(set) var activeIndex = ForYouSectorViewController.feedIndex
+    private(set) var activeIndex = ForYouSectorViewController.startIndex(
+        arguments: ProcessInfo.processInfo.arguments
+    )
     private var isVisible = false
 
-    var isShowingFeed: Bool { activeIndex == Self.feedIndex }
-
-    func setSetAside(_ setAside: Bool) {
-        (pages[Self.feedIndex] as? SnapFeedViewController)?.setSetAside(setAside)
-    }
+    var isShowingShots: Bool { activeIndex == Self.shotsIndex }
     var onPageChange: (() -> Void)?
 
-    init(home: any ForYouSectorPage, feed: any ForYouSectorPage) {
-        pages = [home, feed]
+    /// Shots pauses behind the notifications drawer (#1703).
+    func setSetAside(_ setAside: Bool) {
+        (pages[Self.shotsIndex] as? SnapFeedViewController)?.setSetAside(setAside)
+    }
+
+    /// The page the sector opens on: Shots. DEBUG: Feed under the QA hooks
+    /// that drive its list (`-foryou-*`, `-zoom-repeat*`, `-hero-audit`) —
+    /// they were written for a tab that opened on it.
+    static func startIndex(arguments: [String]) -> Int {
+        #if DEBUG
+        let drivesFeed = arguments.contains {
+            $0.hasPrefix("-foryou-") || $0.hasPrefix("-zoom-repeat") || $0 == "-hero-audit"
+        }
+        if drivesFeed { return feedIndex }
+        #endif
+        return shotsIndex
+    }
+
+    init(feed: any ForYouSectorPage, shots: any ForYouSectorPage) {
+        pages = [feed, shots]
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -119,12 +139,12 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
         front.sectorNavigationItem = navigationItem
     }
 
-    /// ⚠️ HOME GETS NO SAFE AREA FROM UIKIT IN HERE (measured, #1703): its
-    /// root view read 0 at the top while the pager it sits in, and Feed
+    /// ⚠️ FEED GETS NO SAFE AREA FROM UIKIT IN HERE (measured, #1703): its
+    /// root view read 0 at the top while the pager it sits in, and Shots
     /// beside it, read the bars' 116 — on screen or off, first page or not,
     /// even with `additionalSafeAreaInsets` set on it. Its list started under
     /// the bars and stayed there. So every page is HANDED the sector's insets
-    /// (`sectorSafeAreaDidChange`), and Home lays its list out from them.
+    /// (`sectorSafeAreaDidChange`), and Feed lays its list out from them.
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         handOverSafeArea()
@@ -164,8 +184,8 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
 
     // MARK: - Paging
 
-    /// Whether a swipe may change page — off while the feed's comments are
-    /// open (their stream and composer own the screen).
+    /// Whether a swipe may change page — off while Shots' comments are open
+    /// (their stream and composer own the screen).
     func setPagingEnabled(_ enabled: Bool) {
         pager?.isPagingEnabled = enabled
     }
@@ -221,8 +241,8 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
         }
     }
 
-    /// The shell's points badge: Home's (Feed wears its own).
+    /// The shell's points badge: Feed's (Shots wears its own).
     func setTrailingAccessoryItem(_ item: UIBarButtonItem?) {
-        (pages[Self.homeIndex] as? any HeaderAccessoryHosting)?.setTrailingAccessoryItem(item)
+        (pages[Self.feedIndex] as? any HeaderAccessoryHosting)?.setTrailingAccessoryItem(item)
     }
 }

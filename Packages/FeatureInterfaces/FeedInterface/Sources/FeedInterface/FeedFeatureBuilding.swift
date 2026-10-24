@@ -53,15 +53,14 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
     func makeForYouViewController(
         onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
     ) -> UIViewController
-    /// EXPERIMENTAL (#1681, `ForYouFullScreenExperiment`): the For You tab's
-    /// root as the full-screen post feed over the Discover list — the author
-    /// pill in the top bar, save and repost upright in the action column, no
-    /// toolbar, the tab bar at the bottom.
+    /// The For You tab's Shots page (#1681, #1705): the full-screen post feed
+    /// over the Discover list — the author inside the page, save and repost
+    /// upright in the action column, no toolbar, the tab bar at the bottom.
     func makeForYouFullScreenFeedViewController() -> UIViewController
-    /// EXPERIMENTAL (#1703): the For You tab as a Home | Feed sector — Home
-    /// the discovery list (`makeForYouViewController`), Feed the full-screen
+    /// The For You tab (#1703, #1705): the Feed | Shots sector — Feed the
+    /// discovery list (`makeForYouViewController`), Shots the full-screen
     /// posts (`makeForYouFullScreenFeedViewController`) — switched by the
-    /// selector beside the bell or a swipe. Opens on Feed. It hosts the
+    /// selector beside the bell or a swipe. Opens on Shots. It hosts the
     /// shell's bell and points badge (`HeaderAccessoryHosting`).
     func makeForYouSectorViewController(
         onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
@@ -607,12 +606,12 @@ public enum SettledDeparture {
     }
 }
 
-/// EXPERIMENTAL (#1703): the For You sector as the shell sees it — which page
-/// is in front, so the tab bar wears Feed's dark style over Feed only.
+/// The For You sector as the shell sees it (#1703) — which page is in front,
+/// so the tab bar wears Shots' dark style over Shots only.
 @MainActor
 public protocol ForYouSectorPaging: AnyObject {
-    /// Whether Feed (the full-screen posts) is the page in front.
-    var isShowingFeed: Bool { get }
+    /// Whether Shots (the full-screen posts) is the page in front.
+    var isShowingShots: Bool { get }
     /// The page in front changed.
     var onPageChange: (() -> Void)? { get set }
     /// The shell slid the sector aside (the notifications drawer): its media

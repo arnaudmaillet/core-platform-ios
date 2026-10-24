@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import Feed
 
-/// EXPERIMENTAL (#1699): the For You root's source keeps media posts only,
+/// (#1699): the For You root's source keeps media posts only,
 /// tops a short page up from the next ones, and never re-reads what it has
 /// passed.
 struct MediaOnlyFeedProviderTests {
