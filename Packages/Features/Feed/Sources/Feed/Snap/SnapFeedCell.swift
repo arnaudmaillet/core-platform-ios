@@ -643,6 +643,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The caption's register over the media: `.soft` on the For You root
     /// (#1697), `.standard` everywhere else.
     func setCaptionStyle(_ style: SnapChromeView.CaptionStyle) { chrome.captionStyle = style }
+    /// The full-width strip, the column above it, its room kept (#1701, the
+    /// For You root's).
+    func setReservesStripRoom(_ reserves: Bool) { chrome.reservesStripRoom = reserves }
     /// The author INSIDE the page, without glass (#1699, the For You root's):
     /// shown with `model`'s author and the relation `badge`, or hidden.
     func setAuthorRow(shown: Bool, model: FeedItemDisplayModel, badge: PersonPill.Badge, pipeline: ImagePipeline) {
