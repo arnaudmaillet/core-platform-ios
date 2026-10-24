@@ -1798,9 +1798,7 @@ final class SnapFeedViewController: UIViewController {
                 ? SnapBarPillWidths.Sort(glyph: commentSortButton.glyphWidth, titled: commentSortButton.titledWidth)
                 : nil,
             // The footer's glyph items grow with the text size (#1679).
-            toolbarIcon: UIFontMetrics(forTextStyle: .body).scaledValue(
-                for: SnapBarPillWidths.defaultToolbarIcon, compatibleWith: traitCollection
-            )
+            toolbarIcon: SnapBarPillWidths.toolbarIcon(for: traitCollection)
         )
         barPillWidths = widths
         commentSortButton.setTitleHidden(sortOnBar && !widths.sortShowsTitle)
@@ -2056,8 +2054,9 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func applyTrailingNavItems(_ items: [UIBarButtonItem], animated: Bool) {
-        guard navigationItem.rightBarButtonItems ?? [] != items else { return }
-        navigationItem.setRightBarButtonItems(items, animated: animated)
+        // The screen's own items, through the toasts' door (#1420, #1679).
+        guard ownTrailingBarItems != items else { return }
+        setOwnTrailingBarItems(items, animated: animated)
     }
 
     // MARK: - Author pill
@@ -2255,7 +2254,7 @@ final class SnapFeedViewController: UIViewController {
             // A FRESH item is the only thing the bar measures anew.
             walletBadge.onFittedWidthChange = { [weak self] in
                 guard let self, let old = self.walletBadgeItem,
-                      var items = self.navigationItem.rightBarButtonItems,
+                      case var items = self.ownTrailingBarItems,
                       let index = items.firstIndex(of: old) else { return }
                 let fresh = BarItems.container(id: BarItems.SharedID.walletBalance, view: self.walletBadge)
                 self.walletBadgeItem = fresh
@@ -2265,7 +2264,7 @@ final class SnapFeedViewController: UIViewController {
                 // run is handed over, or it overflows into a `•••` on narrow
                 // bars. One of the few things that moves the pill's width.
                 self.applyBarPillWidths()
-                self.navigationItem.rightBarButtonItems = items
+                self.setOwnTrailingBarItems(items, animated: false)
             }
             refreshWalletBadge()
             // The badge (and every visible boost control) re-renders on
@@ -2285,7 +2284,7 @@ final class SnapFeedViewController: UIViewController {
         // Both pills' widths BEFORE their items are handed over: the bar reads
         // a custom view's size at hand-over (memory `bar-item-wrapper-drift`).
         applyBarPillWidths()
-        navigationItem.rightBarButtonItems = restingTrailingItems()
+        setOwnTrailingBarItems(restingTrailingItems(), animated: false)
 
         // The comments exit, built once and held: it takes the TRAILING nav
         // slot whenever a media post's comments are open.

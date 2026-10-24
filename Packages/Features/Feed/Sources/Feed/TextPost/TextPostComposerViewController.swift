@@ -298,7 +298,7 @@ final class TextPostComposerViewController: UIViewController {
         isSoundPillOnTop = onTop
         // RIGHT TO LEFT: Drafts keeps the edge, the pill sits inboard of it,
         // and the fixed space keeps them two bubbles rather than one platter.
-        navigationItem.setRightBarButtonItems(
+        setOwnTrailingBarItems(
             onTop ? [draftsItem, .fixedSpace(Spacing.sm), topSoundItem] : [draftsItem],
             animated: true
         )
@@ -561,7 +561,7 @@ final class TextPostComposerViewController: UIViewController {
         if let walletItem = makeWalletItem() {
             trailing += [.fixedSpace(Spacing.sm), walletItem]
         }
-        navigationItem.setRightBarButtonItems(trailing, animated: true)
+        setOwnTrailingBarItems(trailing, animated: true)
 
         attribution.setOverMedia(false)
         attribution.setPost(model, pipeline: imagePipeline)
@@ -655,12 +655,12 @@ final class TextPostComposerViewController: UIViewController {
 
     private func refreshWalletItem() {
         guard let old = walletBadgeItem,
-              var items = navigationItem.rightBarButtonItems,
+              case var items = ownTrailingBarItems,
               let index = items.firstIndex(of: old) else { return }
         let fresh = BarItems.container(id: BarItems.SharedID.walletBalance, view: walletBadge)
         walletBadgeItem = fresh
         items[index] = fresh
-        navigationItem.rightBarButtonItems = items
+        setOwnTrailingBarItems(items, animated: false)
         fitTrailingRun()
     }
 

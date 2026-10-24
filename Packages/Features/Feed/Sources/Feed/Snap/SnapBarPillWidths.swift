@@ -1,4 +1,5 @@
 import CoreGraphics
+import UIKit
 import DesignSystem
 
 /// The FIXED widths of the snap feed's two bar pills — the author pill in the
@@ -92,7 +93,21 @@ struct SnapBarPillWidths: Equatable {
     /// before the stock items (#1683) — and a long name on an SE folded ⇄
     /// away, at any text size and at once at XXXL.
     static func toolbarReserve(icon: CGFloat) -> CGFloat {
-        28 + 10 + 13 + (2 * icon + 31) + 13 + 48 + 28 + slack
+        toolbarReserve(icon: icon, platter: true)
+    }
+
+    /// The same footer with (`platter`) or without the two-glyph platter —
+    /// the conversation's `[📷 🖼]` is the post's `[☆ ⇄]`, and a thread that
+    /// sends no media wears only ⋯ (#1679: its own arithmetic left the peer
+    /// pill 163pt on an SE, and 🖼 folded into `•••` at XXXL).
+    static func toolbarReserve(icon: CGFloat, platter: Bool) -> CGFloat {
+        28 + 10 + 13 + (platter ? (2 * icon + 31) + 13 : 0) + 48 + 28 + slack
+    }
+
+    /// A stock glyph item's width at `traits`' text size.
+    @MainActor
+    static func toolbarIcon(for traits: UITraitCollection) -> CGFloat {
+        UIFontMetrics(forTextStyle: .body).scaledValue(for: defaultToolbarIcon, compatibleWith: traits)
     }
 
     /// The toolbar author's cap: past it a short name floats in glass.

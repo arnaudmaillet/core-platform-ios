@@ -290,7 +290,8 @@ final class SearchResultsViewController: UIViewController {
     private func applyTrailingItems() {
         let items = [fieldItem, walletItem].compactMap { $0 }
         for item in items { item.sharesBackground = false }
-        navigationItem.rightBarButtonItems = items
+        // Through the toasts' door (#1420, #1679).
+        setOwnTrailingBarItems(items, animated: false)
     }
 
     /// The badge, and the rules that keep it true.
