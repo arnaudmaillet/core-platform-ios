@@ -157,6 +157,41 @@ struct PagerGestureYieldingTests {
         #expect(shouldBegin(pager, at: point, velocity: Self.leftward) == false)
         #expect(shouldBegin(pager, at: point) == false)
     }
+
+    // MARK: - The owner's say (#1703)
+
+    /// Two plain pages, the pager on the last one.
+    private func twoPagePager(onLast: Bool) -> HorizontalPagerView {
+        let pager = HorizontalPagerView(pages: [UIView(), UIView()], initialIndex: onLast ? 1 : 0)
+        pager.frame = CGRect(x: 0, y: 0, width: 390, height: 600)
+        pager.layoutIfNeeded()
+        return pager
+    }
+
+    /// Off by default, a drag past the last page stays the pager's (it
+    /// rubber-bands); turned on, it is left to what lies under it — and a drag
+    /// back towards a page is still the pager's.
+    @Test func yieldingPastTheEndsIsOptIn() {
+        let pager = twoPagePager(onLast: true)
+        let point = CGPoint(x: 390 + 200, y: 300)
+        #expect(shouldBegin(pager, at: point, velocity: Self.leftward), "the default pager gave away its spring")
+
+        pager.yieldsPastEnds = true
+        #expect(!shouldBegin(pager, at: point, velocity: Self.leftward), "a drag past the last page was kept")
+        #expect(shouldBegin(pager, at: point, velocity: Self.rightward), "a drag back to the first page was given away")
+    }
+
+    /// The owner's veto: a drag it claims is given away, whatever the pager
+    /// could do with it.
+    @Test func theOwnerCanClaimADrag() {
+        let pager = twoPagePager(onLast: true)
+        let point = CGPoint(x: 390 + 200, y: 300)
+        var claimed = true
+        pager.yieldsDrag = { _ in claimed }
+        #expect(!shouldBegin(pager, at: point, velocity: Self.rightward))
+        claimed = false
+        #expect(shouldBegin(pager, at: point, velocity: Self.rightward))
+    }
 }
 
 /// A control that scrubs with a pan rather than by scrolling — the case the

@@ -47,14 +47,26 @@ final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
     private var walletBadge: WalletBadgeInstaller?
 
     func start() {
-        // EXPERIMENTAL (#1681): the tab lands on the full-screen post feed —
-        // its own points badge, the shell's bell, no unread badge of its own.
+        // EXPERIMENTAL (#1681, #1703): the tab is a Home | Feed sector,
+        // landing on the full-screen post feed — the shell's bell leads both
+        // pages, Home wears the shell's points badge, Feed its own.
         if ForYouFullScreenExperiment.isOn {
-            let feed = container.feedFeature.makeForYouFullScreenFeedViewController()
-            navigationController.viewControllers = [feed]
-            walletBadge = nil
-            guard container.memberGate.isMember else { return }
-            (feed as? any HeaderAccessoryHosting)?.setLeadingAccessoryItem(notificationsBell.makeItem())
+            let sector = container.feedFeature.makeForYouSectorViewController { [weak self] presentation in
+                self?.apply(presentation)
+            }
+            navigationController.viewControllers = [sector]
+            guard container.memberGate.isMember else {
+                walletBadge = nil
+                return
+            }
+            (sector as? any HeaderAccessoryHosting)?.setLeadingAccessoryItem(notificationsBell.makeItem())
+            walletBadge = WalletBadgeInstaller(
+                wallet: container.walletStore,
+                presenter: navigationController,
+                makeSheet: { [unowned container] in container.makeWalletSheet() }
+            ) { [weak sector] item in
+                (sector as? (any HeaderAccessoryHosting))?.setTrailingAccessoryItem(item)
+            }
             return
         }
         let forYou = container.feedFeature.makeForYouViewController { [weak self] presentation in

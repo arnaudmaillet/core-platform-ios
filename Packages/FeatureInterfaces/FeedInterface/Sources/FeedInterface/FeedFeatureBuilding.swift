@@ -58,6 +58,14 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
     /// pill in the top bar, save and repost upright in the action column, no
     /// toolbar, the tab bar at the bottom.
     func makeForYouFullScreenFeedViewController() -> UIViewController
+    /// EXPERIMENTAL (#1703): the For You tab as a Home | Feed sector — Home
+    /// the discovery list (`makeForYouViewController`), Feed the full-screen
+    /// posts (`makeForYouFullScreenFeedViewController`) — switched by the
+    /// selector beside the bell or a swipe. Opens on Feed. It hosts the
+    /// shell's bell and points badge (`HeaderAccessoryHosting`).
+    func makeForYouSectorViewController(
+        onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
+    ) -> UIViewController
     /// ONE POST SCREEN (#1577, the owner 2026-10-22): the vertical full-screen
     /// feed on `postID`, its comments up when `opensComments` — what the
     /// `.post` and `.comments` routes push (a tapped push notification,

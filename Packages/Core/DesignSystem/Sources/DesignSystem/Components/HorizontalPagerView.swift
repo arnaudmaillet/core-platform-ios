@@ -50,6 +50,25 @@ public final class HorizontalPagerView: UIView {
         set { scrollView.isScrollEnabled = newValue }
     }
 
+    /// Whether a drag pushing PAST the pager's own ends is left to whatever
+    /// lies under it, rather than rubber-banding here. Off by default — the
+    /// inbox, the search results and the relationship lists keep their
+    /// spring. A sector whose last page has horizontal gestures of its own
+    /// (the For You sector's feed: its leftward swipe chain, #1703) turns it
+    /// on, so the pager claims only the drags that change its page.
+    public var yieldsPastEnds: Bool {
+        get { scrollView.yieldsPastEnds }
+        set { scrollView.yieldsPastEnds = newValue }
+    }
+
+    /// The owner's own say over a drag about to begin, by its velocity: true
+    /// gives it to whatever lies under it. For state the pager cannot see —
+    /// a page holding a drawer open that a swipe closes (#1703).
+    public var yieldsDrag: ((CGPoint) -> Bool)? {
+        get { scrollView.yieldsDrag }
+        set { scrollView.yieldsDrag = newValue }
+    }
+
     /// The paging scroll view as a plain `UIScrollView`. Tests drive
     /// fractional offsets through it, which is the only way to exercise the
     /// continuous progress signal without a real gesture.
@@ -407,6 +426,11 @@ extension HorizontalPagerView: UIScrollViewDelegate {
 /// simulator caught and a unit test on this class had just called green. Sharing
 /// the class is what stops it happening a third time.
 public final class HorizontalPagerScrollView: UIScrollView {
+    /// See `HorizontalPagerView.yieldsPastEnds`.
+    public var yieldsPastEnds = false
+    /// See `HorizontalPagerView.yieldsDrag`.
+    public var yieldsDrag: ((CGPoint) -> Bool)?
+
     /// Matches the system's edge-gesture strip — see
     /// `PagedScreenDismissalPolicy.edgeZone`, which is the one definition. This
     /// pager yielding a band the screen above it does not claim is a drag that
@@ -475,6 +499,12 @@ public final class HorizontalPagerScrollView: UIScrollView {
         // change, and one whose meaning depends on how far it got is worse than
         // one that ends against a stop. Direction is read from the pan's
         // velocity at that single moment; nothing re-asks it later.
+        // Past its own ends, the drag can only rubber-band here: given away
+        // when the owner asked (`yieldsPastEnds`).
+        if yieldsPastEnds, velocity.x != 0, !Self.hasTravel(self, towardsVelocityX: velocity.x) {
+            return true
+        }
+        if yieldsDrag?(velocity) == true { return true }
         if let hit = hitTest(point, with: nil),
            Self.ownsHorizontalDrag(hit, within: self, velocity: velocity) {
             return true

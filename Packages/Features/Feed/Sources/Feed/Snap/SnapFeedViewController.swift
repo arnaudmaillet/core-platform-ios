@@ -332,6 +332,21 @@ final class SnapFeedViewController: UIViewController {
     /// arrow or ✕ holds the edge (`HeaderAccessoryHosting`).
     private var leadingAccessoryItem: UIBarButtonItem?
 
+    /// EXPERIMENTAL (#1703): the For You sector's item while this feed is
+    /// its page in front (`ForYouSectorPage`) — what `navigationItem`
+    /// answers then, so every write below lands in the bar on screen.
+    var sectorNavigationItem: UINavigationItem?
+    /// The sector's Home | Feed selector, just inboard of the bell.
+    var sectorSelectorItem: UIBarButtonItem? {
+        didSet {
+            guard isViewLoaded else { return }
+            applyLeadingNavItem(engaged: engagedChromeOnBar, hasMedia: engagedChromeHasMedia, animated: false)
+        }
+    }
+
+    override var navigationItem: UINavigationItem { sectorNavigationItem ?? super.navigationItem }
+    var ownNavigationItem: UINavigationItem { super.navigationItem }
+
     /// The surface currently on loan to a dismissal's flight card, so a
     /// cancelled grab can take it back.
     private var donatedLiveView: VideoRenderView?
@@ -781,6 +796,9 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private var isClosable: Bool {
+        // The For You root never closes — and under the sector (#1703) it is
+        // not its stack's first controller either.
+        if isForYouRoot { return false }
         if presentingViewController != nil { return true }
         guard let nav = navigationController else { return false }
         return nav.viewControllers.first !== self
@@ -1763,6 +1781,8 @@ final class SnapFeedViewController: UIViewController {
     /// (`TabBarRevealPolicy`). A placeholder toolbar in its place was tried
     /// and dropped the same day.
     private func applyForYouRootTabBar() {
+        // The sector does not page under the open comments (#1703).
+        (parent as? ForYouSectorViewController)?.setPagingEnabled(!engagedChromeOnBar)
         guard isForYouRoot, let tabBarController, view.window != nil,
               tabBarController.isTabBarHidden else { return }
         tabBarController.showTabBarNatively()
@@ -2020,6 +2040,11 @@ final class SnapFeedViewController: UIViewController {
         // this is the end that carries what the screen is DOING. The trailing
         // end carries who the post is by.
         var items = [closesComments ? closeCommentsItem : (backItem ?? leadingAccessoryItem)].compactMap { $0 }
+        // The sector's selector (#1703), just inboard of the bell, while the
+        // comments are not holding the edge.
+        if !closesComments, backItem == nil, let selector = sectorSelectorItem {
+            items += items.isEmpty ? [selector] : [BarItems.separator(), selector]
+        }
         if engaged, isCommentSortAvailable {
             items += items.isEmpty ? [sortItem] : [.fixedSpace(Spacing.sm), sortItem]
         }
@@ -7966,6 +7991,28 @@ extension SnapFeedViewController: ArrivalInvariantReporting {
 extension SnapFeedViewController: SwipeStageHosting {}
 
 // MARK: - The For You root's header (#1681)
+
+// MARK: - The For You sector's page (#1703)
+
+extension SnapFeedViewController: ForYouSectorPage {
+    /// In front, the feed lends its bars their style again; behind, it hands
+    /// them back to Home.
+    func sectorPageDidChangeActivity(_ isActive: Bool) {
+        guard isActive else { return releaseChromeTheme() }
+        hasHandedChromeBack = false
+        if let model = activeModel ?? arrivalModel { applyChromeTheme(hasMedia: model.mediaURL != nil) }
+    }
+
+    /// UIKit gives the feed its safe area in the sector: nothing to take.
+    func sectorSafeAreaDidChange(_ insets: UIEdgeInsets) {}
+
+    /// The side list, open or on its way, is closed by the swipe — not left
+    /// for Home.
+    func sectorPageOwnsHorizontalDrag(velocity: CGPoint) -> Bool {
+        guard let sideList else { return false }
+        return sideList.isOpen || sideList.isEngaged
+    }
+}
 
 extension SnapFeedViewController: HeaderAccessoryHosting {
     /// The shell's bell: the root's leading item while nothing else holds
