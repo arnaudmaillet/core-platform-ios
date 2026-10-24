@@ -47,38 +47,32 @@ final class ProfileRelationshipsViewController: UIViewController {
     /// One list per direction, in `Self.directions` order.
     private let pages: [ProfileRelationshipListViewController]
 
-    /// Search, collapsed to a magnifier in the bar's trailing slot until
-    /// tapped — `.integratedButton`, which is UIKit's own name for exactly
-    /// that behaviour.
-    /// This screen's own search, with no `UISearchController` behind it.
+    /// THE SYSTEM'S SEARCH (#1679, the owner 2026-10-24): a `UISearchController`
+    /// whose bar rests as the magnifier — its own item, placed in the trailing
+    /// group by `applySearchAvailability` — and expands into the field in
+    /// place, UIKit's own animation. The lists filter in place (no results
+    /// controller), as the country shop's does. It replaced a field swapped
+    /// into the title slot under a hand-made dissolve of the bar (R3), whose
+    /// caret had to be hidden through the dissolve.
     ///
-    /// The native `.integratedButton` placement collapsed the whole leading group
-    /// — back button, selector and all — into a `•••` on narrow bars, which is
-    /// exactly what the inbox measured before it moved off that placement too.
-    /// Internal, with `presentSearch`/`dismissSearch`, so tests can drive the
-    /// morph and read the caret it hides.
-    let searchField = TracedRelationshipsSearchField()
-    private lazy var searchItem = UIBarButtonItem(
-        image: UIImage(systemName: "magnifyingglass"),
-        primaryAction: UIAction { [weak self] _ in self?.presentSearch() }
-    )
-    private lazy var cancelItem = UIBarButtonItem(
-        title: "Cancel",
-        primaryAction: UIAction { [weak self] _ in self?.dismissSearch() }
-    )
-    private var restingRightItems: [UIBarButtonItem] = []
+    /// ⚠️ The magnifier is PLACED, never left to `.integratedButton`'s own
+    /// placement: that collapsed the leading group into a `•••` on narrow
+    /// bars when the selector still sat there.
+    private(set) lazy var searchController: UISearchController = {
+        let controller = UISearchController(searchResultsController: nil)
+        controller.searchResultsUpdater = self
+        controller.delegate = self
+        controller.obscuresBackgroundDuringPresentation = false
+        let bar = controller.searchBar
+        bar.delegate = self
+        bar.placeholder = "Search..."
+        bar.autocapitalizationType = .none
+        bar.autocorrectionType = .no
+        bar.returnKeyType = .search
+        return controller
+    }()
+    /// From the search's `willPresent` to its `willDismiss`.
     private var isSearching = false
-    /// The caret's real colour while the morph hides it — see `presentSearch`.
-    /// Taken only when nothing is hidden, so a second morph can never save the
-    /// `.clear` of the first as the colour to come back to.
-    private var hiddenCaretTint: UIColor?
-    /// Bumped by every morph into the field: only the newest may show the caret.
-    private var caretMorph = 0
-    /// The Cancel PILL's height, not the button's — see
-    /// `NavigationBarMetrics.itemPlatterHeight`. This was 36 for the same
-    /// reason the inbox's was, and looked short beside Cancel for the same
-    /// reason.
-    private static let searchFieldHeight = NavigationBarMetrics.itemPlatterHeight
 
     /// Segment order, so index ↔ direction never drifts.
     ///
@@ -118,7 +112,6 @@ final class ProfileRelationshipsViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        configureSearch()
         configureNavigationBar()
         configurePager()
 
@@ -230,118 +223,45 @@ final class ProfileRelationshipsViewController: UIViewController {
         return false
     }
 
-    /// Shows or withholds the search field according to privacy.
+    /// Shows or withholds search according to privacy.
     ///
-    /// Only the field is withheld — the selector stays, so the viewer can still
+    /// Only search is withheld — the selector stays, so the viewer can still
     /// switch direction. Restriction is not always symmetric: a backend refusal
     /// applies per tab, so one list can be locked while the other reads fine.
     ///
     /// Idempotent; re-run on every phase change.
     private func applySearchAvailability() {
-        guard !isRestricted else {
-            if isSearching { dismissSearch() }
-            setOwnTrailingBarItems(restingRightItems.filter { $0 !== searchItem }, animated: false)
-            return
-        }
-        guard !isSearching else { return }
         // The screen's own items, never a bar toast's (#1420).
-        var items = ownTrailingBarItems
-        if !items.contains(where: { $0 === searchItem }) {
-            items.insert(searchItem, at: 0)
+        let searchItem = navigationItem.searchBarPlacementBarButtonItem
+        var items = ownTrailingBarItems.filter { $0 !== searchItem }
+        if isRestricted {
+            if searchController.isActive { searchController.isActive = false }
+            navigationItem.searchController = nil
+        } else {
+            if navigationItem.searchController == nil {
+                definesPresentationContext = true
+                navigationItem.searchController = searchController
+                navigationItem.preferredSearchBarPlacement = .integratedButton
+                navigationItem.hidesSearchBarWhenScrolling = false
+            }
+            items.insert(navigationItem.searchBarPlacementBarButtonItem, at: 0)
         }
-        restingRightItems = items
+        guard !items.elementsEqual(ownTrailingBarItems, by: ===) else { return }
         setOwnTrailingBarItems(items, animated: false)
     }
 
-    /// Morphs this header into the field, exactly as the inbox does.
+    /// Opens search, focused — the magnifier's tap, and the QA hooks'.
     func presentSearch() {
-        guard !isSearching else { return }
-        isSearching = true
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-search-layout-trace") {
-            let start = CACurrentMediaTime()
-            searchField.activatedAt = start
-            NotificationCenter.default.addObserver(
-                forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
-            ) { _ in
-                print(String(format: "[keyboard] t=%4.0fms WillShow",
-                             (CACurrentMediaTime() - start) * 1000))
-            }
-        }
-        #endif
-        if ownsAppTabBar { tabBarController?.setTabBarHidden(true, animated: true) }
-        // ⚠️ The caret is HIDDEN for the length of the morph. It is drawn at the
-        // text's insertion point, and that point is only final once the field has
-        // its destination width — so on the way there the caret rendered mid-field
-        // and slid left as the layout resolved. Nothing else in the field moves;
-        // this is the one part that had to wait.
-        if hiddenCaretTint == nil { hiddenCaretTint = searchField.tintColor }
-        searchField.tintColor = .clear
-        caretMorph += 1
-        let morph = caretMorph
-        morphNavigationBar(duration: 0.3) {
-            // ⚠️ The back button goes too, so the field has the full width and
-            // this header reads exactly like the inbox's. Cancel is the way out
-            // while searching — and it restores the button, which restores the
-            // interactive pop with it.
-            self.navigationItem.setHidesBackButton(true, animated: false)
-            self.navigationItem.rightBarButtonItems = [self.cancelItem]
-            self.navigationItem.titleView = self.searchField
-            // ⚠️ LAID OUT FIRST. A title view is installed on the bar's next
-            // layout pass, and `becomeFirstResponder` on a view that is not in a
-            // window yet fails silently — measured as `focusedAtMorph=false`,
-            // which is the focus arriving late and the placeholder re-laying
-            // itself out under the keyboard: the jump.
-            self.navigationController?.navigationBar.layoutIfNeeded()
-
-            // ⚠️ **The FIELD's own layout, not just the bar's.** Laying out the
-            // bar installs the title view and gives it a frame; the field then
-            // still has to place its glyph, placeholder and caret inside that
-            // frame, and it was doing so on a later pass — mid-crossfade, at a
-            // width it was about to leave. Measured from a screen recording of
-            // the relationships header: the placeholder's box walked +14 → +23 →
-            // +11 → +7 → +10 horizontally and 0 → 8 → 10 → 4 vertically before it
-            // settled. Forcing the pass here means the first frame the viewer
-            // sees is already the final one.
-            self.searchField.setNeedsLayout()
-            self.searchField.layoutIfNeeded()
-            self.searchField.becomeFirstResponder()
-        } completion: { [weak self] _ in
-            // Restored when the crossfade ENDS, so it appears already in place
-            // rather than travelling to it.
-            //
-            // ⚠️ **ON THE MORPH'S OWN COMPLETION, NOT A GUESSED 0.32 s.** The
-            // timer outlived a Cancel tapped mid-morph (the dissolve allows
-            // touches): Search → Cancel → Search inside 0.32 s saved `.clear`
-            // as the colour to restore, and the caret was gone for the life of
-            // the screen. Only the newest morph, still searching, shows it.
-            guard let self, morph == self.caretMorph, self.isSearching else { return }
-            self.showCaret()
+        guard navigationItem.searchController != nil, !searchController.isActive else { return }
+        searchController.isActive = true
+        DispatchQueue.main.async { [weak self] in
+            self?.searchController.searchBar.searchTextField.becomeFirstResponder()
         }
     }
 
-    private func showCaret() {
-        guard let tint = hiddenCaretTint else { return }
-        searchField.tintColor = tint
-        hiddenCaretTint = nil
-    }
-
+    /// Closes search: the field folds back into the magnifier.
     func dismissSearch() {
-        guard isSearching else { return }
-        isSearching = false
-        showCaret()
-        searchField.resignFirstResponder()
-        searchField.text = nil
-        applyQuery("")
-        morphNavigationBar(duration: 0.26) {
-            self.navigationItem.setHidesBackButton(false, animated: false)
-            // The morph is title ↔ field now, not selector ↔ field: the strip
-            // is not in this bar to be swapped out.
-            self.navigationItem.titleView = nil
-            self.navigationItem.title = self.viewModel.title
-            self.setOwnTrailingBarItems(self.restingRightItems, animated: false)
-        }
-        if ownsAppTabBar { tabBarController?.setTabBarHidden(false, animated: true) }
+        searchController.isActive = false
     }
 
     /// ⚠️ ONLY A BAR THIS SCREEN SHOWS (#782). Pushed with
@@ -356,10 +276,6 @@ final class ProfileRelationshipsViewController: UIViewController {
     private func applyQuery(_ text: String) {
         viewModel.searchQueryChanged(text)
     }
-
-    // The dissolve is `DesignSystem`'s now, and the opaque-while-searching
-    // appearance is gone with the inbox's — see the note there. This screen
-    // wears the same header as the inbox by design, so it changes with it.
 
     #if DEBUG
     /// The launch-argument hooks in `viewDidAppear` run on the FIRST
@@ -409,7 +325,7 @@ final class ProfileRelationshipsViewController: UIViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             guard let self else { return }
             if clears {
-                let field = self.searchField
+                let field = self.searchController.searchBar.searchTextField
                 print("PROFILE-SEARCH-QA clearButtonMode=\(field.clearButtonMode.rawValue) "
                     + "searching=\(self.isSearching)")
                 field.text = ""
@@ -508,7 +424,7 @@ final class ProfileRelationshipsViewController: UIViewController {
                 guard let self else { return }
                 // Activate exactly as a tap on the magnifier would, then type.
                 self.presentSearch()
-                self.searchField.text = text
+                self.searchController.searchBar.text = text
                 self.applyQuery(text)
                 self.qaContinueSearchSequence(arguments)
             }
@@ -630,51 +546,6 @@ final class ProfileRelationshipsViewController: UIViewController {
         }
     }
 
-    /// The field itself; where the magnifier goes is `applySearchAvailability`'s job.
-    private func configureSearch() {
-        searchField.placeholder = "Search..."
-        searchField.autocapitalizationType = .none
-        searchField.autocorrectionType = .no
-        searchField.returnKeyType = .search
-        searchField.clearButtonMode = .whileEditing
-        searchField.delegate = self
-        searchField.addTarget(self, action: #selector(searchTextChanged), for: .editingChanged)
-        searchField.translatesAutoresizingMaskIntoConstraints = false
-        searchField.heightAnchor.constraint(
-            equalToConstant: Self.searchFieldHeight
-        ).isActive = true
-        prewarmSearchField()
-    }
-
-    /// ⚠️ **Renders the field once, off screen, before it is ever presented.**
-    ///
-    /// A `UISearchTextField` builds its glyph, placeholder label and clear button
-    /// on its first layout, and until then it has no idea how wide any of them
-    /// are. On the FIRST activation that work landed mid-crossfade — the
-    /// magnifier materialised part-way across the bar and slid to its place —
-    /// while every activation afterwards was clean, because by then the subviews
-    /// existed. Forcing the pass here means the first presentation is the second
-    /// render.
-    ///
-    /// A window is required: a field with no window lays out, but its text
-    /// metrics resolve against nothing and the pass proves less than it looks.
-    private func prewarmSearchField() {
-        let host = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: Self.searchFieldHeight))
-        host.isHidden = true
-        view.addSubview(host)
-        searchField.translatesAutoresizingMaskIntoConstraints = true
-        searchField.frame = host.bounds
-        host.addSubview(searchField)
-        host.setNeedsLayout()
-        host.layoutIfNeeded()
-        searchField.setNeedsLayout()
-        searchField.layoutIfNeeded()
-        // Handed back exactly as it was found, so the title slot sizes it.
-        searchField.removeFromSuperview()
-        host.removeFromSuperview()
-        searchField.translatesAutoresizingMaskIntoConstraints = false
-    }
-
     /// A failed row mutation. A toast, not an alert: the row has already
     /// rolled back to its previous state, so there is nothing for the user to
     /// dismiss or decide.
@@ -713,13 +584,23 @@ private extension Array {
     }
 }
 
-extension ProfileRelationshipsViewController: UITextFieldDelegate {
-    @objc fileprivate func searchTextChanged() {
-        applyQuery(searchField.text ?? "")
+extension ProfileRelationshipsViewController: UISearchResultsUpdating, UISearchControllerDelegate, UISearchBarDelegate {
+    func updateSearchResults(for searchController: UISearchController) {
+        applyQuery(searchController.searchBar.text ?? "")
     }
 
-    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-        textField.resignFirstResponder()
-        return true
+    func willPresentSearchController(_ searchController: UISearchController) {
+        isSearching = true
+        if ownsAppTabBar { tabBarController?.setTabBarHidden(true, animated: true) }
+    }
+
+    func willDismissSearchController(_ searchController: UISearchController) {
+        isSearching = false
+        applyQuery("")
+        if ownsAppTabBar { tabBarController?.setTabBarHidden(false, animated: true) }
+    }
+
+    func searchBarSearchButtonClicked(_ searchBar: UISearchBar) {
+        searchBar.searchTextField.resignFirstResponder()
     }
 }

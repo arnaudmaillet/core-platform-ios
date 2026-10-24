@@ -5,10 +5,9 @@ import UIKit
 
 /// **The inbox header's injected items — the shell's bell and balance.**
 ///
-/// The inbox writes its own bar, and REWRITES it: search takes the whole bar
-/// over (field + Cancel) and hands it back on dismissal. Items the shell
-/// injects therefore have to be held by the screen and re-composed into every
-/// resting bar, which is the promise pinned here: `[bell] … [coins][search]`.
+/// Items the shell injects are held by the screen and composed into its bar:
+/// `[bell] … [coins][search]`. These inboxes have no search composed, so no
+/// magnifier (`InboxSystemSearchTests` pins the one with search).
 @MainActor
 struct InboxHeaderAccessoryTests {
     /// The thinnest surface the container accepts: one page, no data.
@@ -64,17 +63,19 @@ struct InboxHeaderAccessoryTests {
         return item
     }
 
-    /// With nothing injected the resting bar is the magnifier alone.
-    @Test func theRestingBarIsTheMagnifierAlone() {
+    /// With nothing injected and no search composed, the bar is empty: no
+    /// magnifier that would open nothing.
+    @Test func withoutSearchTheBarIsEmpty() {
         let screen = inbox()
         screen.loadViewIfNeeded()
 
-        #expect(screen.navigationItem.rightBarButtonItems?.count == 1)
+        #expect(screen.navigationItem.rightBarButtonItems?.isEmpty ?? true)
+        #expect(screen.navigationItem.searchController == nil)
         #expect(screen.navigationItem.leftBarButtonItems?.isEmpty ?? true)
     }
 
-    /// ⚠️ THE BELL LEADS AND THE BALANCE STANDS INBOARD OF SEARCH.
-    /// `rightBarButtonItems[0]` is the screen edge, so search keeps the corner.
+    /// ⚠️ THE BELL LEADS; the balance trails (inboard of search, when there
+    /// is search — `InboxSystemSearchTests`).
     @Test func theShellsItemsFrameTheHeader() throws {
         let screen = inbox()
         let bell = item("Bell")
@@ -88,19 +89,8 @@ struct InboxHeaderAccessoryTests {
         let leading = try #require(screen.navigationItem.leftBarButtonItems)
         let trailing = try #require(screen.navigationItem.rightBarButtonItems)
         #expect(leading.count == 1 && leading.first === bell)
-        #expect(trailing.count == 2)
-        #expect(trailing.last === balance, "the balance took the corner from search")
-    }
-
-    /// The search field names its scope (#918) — what the search really finds:
-    /// people from the directory and chats (conversations and requests) matched
-    /// by name or handle. Not "messages": message text is not searched.
-    /// Pinned as a literal so a revert to a bare "Search..." fails here.
-    @Test func theSearchFieldSaysWhatItSearches() {
-        let screen = inbox()
-        screen.loadViewIfNeeded()
-
-        #expect(screen.searchField.placeholder == "Search people and chats")
+        #expect(trailing.count == 1)
+        #expect(trailing.last === balance)
     }
 
     /// A fresh balance item (the badge re-mints one whenever its width moves)
@@ -114,7 +104,7 @@ struct InboxHeaderAccessoryTests {
         screen.setTrailingAccessoryItem(second)
 
         let trailing = try #require(screen.navigationItem.rightBarButtonItems)
-        #expect(trailing.count == 2)
+        #expect(trailing.count == 1)
         #expect(trailing.last === second)
     }
 }

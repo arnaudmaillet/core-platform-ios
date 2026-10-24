@@ -43,11 +43,9 @@ struct BarContractGuardTests {
     static let iconButtonDebt: [String: Int] = [:]
 
     /// Files still cross-dissolving a bar by hand.
-    static let barMorphDebt: [String: Int] = [
-        "Packages/Core/DesignSystem/Sources/DesignSystem/Components/NavigationBarMorph.swift": 1,
-        "Packages/Features/Chat/Sources/Chat/Inbox/MessagesInboxViewController.swift": 2,
-        "Packages/Features/Profile/Sources/Profile/Views/ProfileRelationshipsViewController.swift": 2,
-    ]
+    /// None: the inbox and relationships searches moved to
+    /// `UISearchController`, and the dissolve helper is deleted (#1679).
+    static let barMorphDebt: [String: Int] = [:]
 
     /// Where custom-view items are MADE: the contract's own factory.
     static let factory = "Packages/Core/DesignSystem/Sources/DesignSystem/Components/BarItems.swift"

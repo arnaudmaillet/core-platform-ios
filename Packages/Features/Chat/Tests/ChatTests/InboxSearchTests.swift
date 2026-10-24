@@ -2,6 +2,7 @@ import CoreModels
 import CoreNetworking
 import Foundation
 import Testing
+import UIKit
 @testable import Chat
 
 // MARK: - Fixtures
@@ -458,5 +459,58 @@ struct InboxSearchViewModelTests {
         viewModel.didSelect(.person(ProfileID("p-9")))
 
         #expect(box.opened == [.draft(peer: ProfileID("p-9"), displayName: "Sofia")])
+    }
+}
+
+// MARK: - The inbox's search is the system's (#1679)
+
+/// The inbox searches through UIKit's `UISearchController` (the owner,
+/// 2026-10-24): the bar rests as the magnifier — the search bar's own item,
+/// at the corner, the balance inboard — and expands into the field in place.
+/// No field in the title slot, no hand-made bar dissolve.
+@MainActor
+struct InboxSystemSearchTests {
+    private final class BlankSurface: UIViewController, InboxSurface {
+        let category: MessagesCategory = .all
+        let chrome = InboxSurfaceChrome()
+        var onChromeChange: ((InboxSurfaceChrome) -> Void)?
+        func surfaceDidBecomeActive() {}
+    }
+
+    private func searchableInbox() -> MessagesInboxViewController {
+        let repository = StubChatProvider()
+        let viewModel = InboxSearchViewModel(
+            catalog: InboxCatalog(repository: repository), viewer: repository,
+            people: StubPeopleDirectory([]), debounce: .zero
+        )
+        return MessagesInboxViewController(
+            surfaces: [BlankSurface()], searchResults: InboxSearchResultsViewController(viewModel: viewModel)
+        )
+    }
+
+    @Test func theMagnifierIsTheSearchBarsOwnItemAtTheCorner() throws {
+        let screen = searchableInbox()
+        let balance = UIBarButtonItem(customView: UIView())
+        screen.setTrailingAccessoryItem(balance)
+        screen.loadViewIfNeeded()
+
+        let search = try #require(screen.navigationItem.searchController)
+        #expect(screen.navigationItem.preferredSearchBarPlacement == .integratedButton)
+        #expect(search.searchResultsController is InboxSearchResultsViewController)
+        let trailing = try #require(screen.navigationItem.rightBarButtonItems)
+        #expect(trailing.count == 2)
+        #expect(trailing.first === screen.navigationItem.searchBarPlacementBarButtonItem, "search lost the corner")
+        #expect(trailing.last === balance)
+        #expect(screen.navigationItem.titleView == nil, "a field in the title slot")
+    }
+
+    /// The field names its scope (#918) — what the search really finds:
+    /// people from the directory and chats (conversations and requests)
+    /// matched by name or handle. Not "messages": message text is not
+    /// searched. Pinned as a literal so a revert to a bare "Search..." fails.
+    @Test func theSearchFieldSaysWhatItSearches() {
+        let screen = searchableInbox()
+        screen.loadViewIfNeeded()
+        #expect(screen.searchPlaceholderShown == "Search people and chats")
     }
 }
