@@ -275,7 +275,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// ([coins] [search]). The shell's bell leads alone: `[bell] …
     /// [coins][search]`.
     private func applyTrailingItems() {
-        navigationItem.rightBarButtonItems = [searchItem, trailingAccessoryItem].compactMap { $0 }
+        // Through the toasts' door (#1420, #1679).
+        setOwnTrailingBarItems([searchItem, trailingAccessoryItem].compactMap { $0 }, animated: false)
     }
 
     /// The shell's item at the head of the leading group — the notifications

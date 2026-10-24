@@ -90,6 +90,12 @@ struct SnapBarPillWidthsTests {
             ).toolbarAuthor
             let run = 27.5 + (pill + 10) + 12.5 + platter + 12.5 + 48 + 27.5
             #expect(run <= width, "\(width)pt, \(icon)pt glyphs: the footer is \(run) — ⇄ folds into •••")
+            // The conversation's footer is the same run: [📷 🖼] for [☆ ⇄],
+            // and a thread that sends no media wears ⋯ alone.
+            let peer = width - SnapBarPillWidths.toolbarReserve(icon: icon, platter: true)
+            #expect(27.5 + (peer + 10) + 12.5 + platter + 12.5 + 48 + 27.5 <= width)
+            let textOnly = width - SnapBarPillWidths.toolbarReserve(icon: icon, platter: false)
+            #expect(27.5 + (textOnly + 10) + 12.5 + 48 + 27.5 <= width)
         }
     }
 

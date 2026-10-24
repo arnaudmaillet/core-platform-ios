@@ -147,17 +147,19 @@ final class ExploreTabCoordinator: TabCoordinator {
     }
 
     private func applyBarItems() {
-        guard let navigationItem = mapViewController?.navigationItem else { return }
+        guard let map = mapViewController else { return }
+        // The trailing group through the toasts' door (#1420, #1679): under a
+        // bar toast these are the items that come back.
         guard container.memberGate.isMember else {
-            navigationItem.leftBarButtonItem = nil
-            navigationItem.rightBarButtonItems = [searchButtonItem]
+            map.navigationItem.leftBarButtonItem = nil
+            map.setOwnTrailingBarItems([searchButtonItem], animated: false)
             return
         }
-        navigationItem.leftBarButtonItem = notificationsButtonItem
+        map.navigationItem.leftBarButtonItem = notificationsButtonItem
         // ⚠️ `[0]` IS THE SCREEN EDGE: search takes the corner the bell used
         // to hold, and the likes badge stays inboard of it — [likes][search]
         // reads right to left here. No Shop door (#1494, the owner
         // 2026-10-21): the Rewards sheet's Shop tile and the stake menu open it.
-        navigationItem.rightBarButtonItems = [searchButtonItem, walletItem].compactMap { $0 }
+        map.setOwnTrailingBarItems([searchButtonItem, walletItem].compactMap { $0 }, animated: false)
     }
 }

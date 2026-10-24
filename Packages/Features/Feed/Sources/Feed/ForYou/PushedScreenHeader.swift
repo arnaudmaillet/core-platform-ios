@@ -126,7 +126,8 @@ final class PushedScreenHeader: NSObject {
         guard let host else { return }
         let items = [searchItem, walletItem].compactMap { $0 }
         for item in items { item.sharesBackground = false }
-        host.navigationItem.rightBarButtonItems = items
+        // Through the toasts' door (#1420, #1679).
+        host.setOwnTrailingBarItems(items, animated: false)
     }
 
     private func makeWalletItem() -> UIBarButtonItem {

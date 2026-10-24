@@ -1438,11 +1438,13 @@ final class ConversationThreadViewController: UIViewController {
         guard bar > 0 else { return }
         let itemPadding: CGFloat = 18
         if pillRidesToolbar {
-            // The toolbar's leading slot (#671): the bar less its margins, the
-            // ⋯ bubble beside it and — sending media (#681) — the camera and
-            // library capsule, the snap feed's repost and save capsule's size.
-            let capsule: CGFloat = mediaItems().isEmpty ? 0 : 2 * 44 + itemPadding + Spacing.sm
-            peerPill.setWidthBudget(bar - 16 * 2 - (48 + itemPadding) - capsule)
+            // The toolbar's leading slot (#671): what the footer's stock items
+            // leave — ⋯ and, sending media (#681), the [📷 🖼] platter — as the
+            // post's footer measures them, at this text size (#1679).
+            let reserve = SnapBarPillWidths.toolbarReserve(
+                icon: SnapBarPillWidths.toolbarIcon(for: traitCollection), platter: !mediaItems().isEmpty
+            )
+            peerPill.setWidthBudget(bar - reserve)
             return
         }
         var budget = bar - 16 * 2 - (36 + itemPadding) - itemPadding

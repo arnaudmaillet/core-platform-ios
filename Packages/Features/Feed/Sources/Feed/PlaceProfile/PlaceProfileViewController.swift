@@ -1528,7 +1528,8 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     private func applyTrailingItems() {
         let items = [walletItem].compactMap { $0 }
         for item in items { item.sharesBackground = false }
-        navigationItem.rightBarButtonItems = items
+        // Through the toasts' door (#1420, #1679).
+        setOwnTrailingBarItems(items, animated: false)
     }
 
     /// The viewer's spendable points, in the toolbar — the fifth host of one
@@ -2266,7 +2267,7 @@ extension PlaceProfileViewController {
     /// The flag standing in the header's disc.
     var debugFlag: UIImageView { flagView }
     /// The bar's trailing items, rightmost first (#1304).
-    var debugTrailingItems: [UIBarButtonItem] { navigationItem.rightBarButtonItems ?? [] }
+    var debugTrailingItems: [UIBarButtonItem] { ownTrailingBarItems }
     /// The row's controls, each nil when its seam is (#1598).
     var debugStarButton: AppIconButton? { starButton.superview == nil ? nil : starButton }
     var debugQRButton: AppIconButton? { qrButton.superview == nil ? nil : qrButton }
