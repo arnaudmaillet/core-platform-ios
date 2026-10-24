@@ -94,17 +94,17 @@ struct ProfileRelationshipsSearchTabBarTests {
         #expect(tabs.requests == [true, false], "Cancel did not give back the bar the list owns")
     }
 
-    /// The magnifier is the search bar's OWN item, placed at the corner of
-    /// the trailing group — no field in the title slot, no hand-made bar
-    /// dissolve (#1679).
+    /// The magnifier is the system search's `.integratedButton`, placed by
+    /// UIKit — no field in the title slot, no hand-made bar dissolve (#1679).
+    /// ⚠️ Never the placement item among the bar's items: iOS 26 throws.
     @Test func theMagnifierIsTheSystemSearchBarsItem() throws {
         let list = makeList(isSelf: true)
         list.loadViewIfNeeded()
         #expect(list.navigationItem.searchController === list.searchController)
         #expect(list.navigationItem.preferredSearchBarPlacement == .integratedButton)
         #expect(list.searchController.searchResultsController == nil, "the lists filter in place")
-        let trailing = try #require(list.navigationItem.rightBarButtonItems)
-        #expect(trailing.first === list.navigationItem.searchBarPlacementBarButtonItem)
+        let trailing = list.navigationItem.rightBarButtonItems ?? []
+        #expect(!trailing.contains { $0 === list.navigationItem.searchBarPlacementBarButtonItem })
         #expect(list.navigationItem.titleView == nil, "a field in the title slot")
     }
 }

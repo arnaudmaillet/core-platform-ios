@@ -48,16 +48,16 @@ final class ProfileRelationshipsViewController: UIViewController {
     private let pages: [ProfileRelationshipListViewController]
 
     /// THE SYSTEM'S SEARCH (#1679, the owner 2026-10-24): a `UISearchController`
-    /// whose bar rests as the magnifier — its own item, placed in the trailing
-    /// group by `applySearchAvailability` — and expands into the field in
+    /// whose bar rests as the magnifier — placed by `.integratedButton` — and
+    /// expands into the field in
     /// place, UIKit's own animation. The lists filter in place (no results
     /// controller), as the country shop's does. It replaced a field swapped
     /// into the title slot under a hand-made dissolve of the bar (R3), whose
     /// caret had to be hidden through the dissolve.
     ///
-    /// ⚠️ The magnifier is PLACED, never left to `.integratedButton`'s own
-    /// placement: that collapsed the leading group into a `•••` on narrow
-    /// bars when the selector still sat there.
+    /// ⚠️ NEVER `searchBarPlacementBarButtonItem` IN THE NAVIGATION BAR: iOS 26
+    /// throws ("only supported in UIToolbar"). The selector that once made
+    /// UIKit's own placement collapse the leading group is in the toolbar now.
     private(set) lazy var searchController: UISearchController = {
         let controller = UISearchController(searchResultsController: nil)
         controller.searchResultsUpdater = self
@@ -231,9 +231,6 @@ final class ProfileRelationshipsViewController: UIViewController {
     ///
     /// Idempotent; re-run on every phase change.
     private func applySearchAvailability() {
-        // The screen's own items, never a bar toast's (#1420).
-        let searchItem = navigationItem.searchBarPlacementBarButtonItem
-        var items = ownTrailingBarItems.filter { $0 !== searchItem }
         if isRestricted {
             if searchController.isActive { searchController.isActive = false }
             navigationItem.searchController = nil
@@ -244,10 +241,7 @@ final class ProfileRelationshipsViewController: UIViewController {
                 navigationItem.preferredSearchBarPlacement = .integratedButton
                 navigationItem.hidesSearchBarWhenScrolling = false
             }
-            items.insert(navigationItem.searchBarPlacementBarButtonItem, at: 0)
         }
-        guard !items.elementsEqual(ownTrailingBarItems, by: ===) else { return }
-        setOwnTrailingBarItems(items, animated: false)
     }
 
     /// Opens search, focused — the magnifier's tap, and the QA hooks'.

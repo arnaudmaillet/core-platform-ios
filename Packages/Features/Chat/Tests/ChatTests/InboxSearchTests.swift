@@ -466,9 +466,9 @@ struct InboxSearchViewModelTests {
 // MARK: - The inbox's search is the system's (#1679)
 
 /// The inbox searches through UIKit's `UISearchController` (the owner,
-/// 2026-10-24): the bar rests as the magnifier — the search bar's own item,
-/// at the corner, the balance inboard — and expands into the field in place.
-/// No field in the title slot, no hand-made bar dissolve.
+/// 2026-10-24): the bar rests as the magnifier — `.integratedButton`, placed
+/// by UIKit — and expands into the field in place. No field in the title
+/// slot, no hand-made bar dissolve.
 @MainActor
 struct InboxSystemSearchTests {
     private final class BlankSurface: UIViewController, InboxSurface {
@@ -489,7 +489,7 @@ struct InboxSystemSearchTests {
         )
     }
 
-    @Test func theMagnifierIsTheSearchBarsOwnItemAtTheCorner() throws {
+    @Test func theSearchIsTheSystemsIntegratedButton() throws {
         let screen = searchableInbox()
         let balance = UIBarButtonItem(customView: UIView())
         screen.setTrailingAccessoryItem(balance)
@@ -498,10 +498,10 @@ struct InboxSystemSearchTests {
         let search = try #require(screen.navigationItem.searchController)
         #expect(screen.navigationItem.preferredSearchBarPlacement == .integratedButton)
         #expect(search.searchResultsController is InboxSearchResultsViewController)
+        // ⚠️ The placement item is NOT among the bar's items: iOS 26 throws
+        // ("only supported in UIToolbar") — UIKit places the magnifier itself.
         let trailing = try #require(screen.navigationItem.rightBarButtonItems)
-        #expect(trailing.count == 2)
-        #expect(trailing.first === screen.navigationItem.searchBarPlacementBarButtonItem, "search lost the corner")
-        #expect(trailing.last === balance)
+        #expect(trailing.count == 1 && trailing.first === balance)
         #expect(screen.navigationItem.titleView == nil, "a field in the title slot")
     }
 

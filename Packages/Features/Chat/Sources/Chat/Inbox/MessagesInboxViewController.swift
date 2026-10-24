@@ -445,12 +445,6 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         return controller
     }
 
-    /// The magnifier: the search bar's OWN item, placed by this screen so the
-    /// balance stands inboard of it — a tap expands the field out of it.
-    private var searchItem: UIBarButtonItem? {
-        searchController == nil ? nil : navigationItem.searchBarPlacementBarButtonItem
-    }
-
     /// What the empty field says it searches (#918). It names the two things
     /// the search actually finds — conversations and requests matched on the
     /// correspondent's name or handle, and people from the directory — and
@@ -502,14 +496,16 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     /// `[ bell ][ New · 8 ]——————————[ coins ][ search ]`
     ///
-    /// The magnifier plus whatever the shell hands in: the bell leading, the
-    /// balance inboard of the magnifier (`[0]` is the screen edge, so search
-    /// keeps the corner — the Maps and For You arrangement) — and, after the
-    /// bell, the section the page in front has scrolled into
-    /// (`applyPinnedSection`, #1301). Written once: search no longer takes
-    /// the bar over — the field grows out of the magnifier by itself.
+    /// What the shell hands in — the bell leading, the balance trailing —
+    /// and, after the bell, the section the page in front has scrolled into
+    /// (`applyPinnedSection`, #1301). The magnifier is NOT among the items:
+    /// `.integratedButton` places it, at the corner.
+    ///
+    /// ⚠️ NEVER `searchBarPlacementBarButtonItem` IN THE NAVIGATION BAR: iOS 26
+    /// throws ("only supported in UIToolbar") — iOS 27 accepts it, which is
+    /// how it shipped in #1689's first push and crashed CI's iOS 26 hosts.
     private func applyRestingBar() {
-        setOwnTrailingBarItems([searchItem, trailingAccessoryItem].compactMap { $0 }, animated: false)
+        setOwnTrailingBarItems([trailingAccessoryItem].compactMap { $0 }, animated: false)
         // The leading group is the contract's: the bell, then the section.
         sectionBinding.leadingPrefix = [leadingAccessoryItem].compactMap { $0 }
         sectionBinding.placeNow()
