@@ -206,9 +206,9 @@ struct HeroBannerFormatTests {
         let message = header.debugTrayButtons[1]
         #expect(follow.configuration?.title == "Follow")
         #expect(follow.configuration?.background.visualEffect == nil)
-        // Follow is the one prominent capsule: the pink-to-white gradient,
-        // white words (#1178).
-        #expect(follow.usesGradient)
+        // Follow is the one prominent capsule: a solid fill, white words
+        // (#1178; solid since #1664).
+        #expect(follow.usesProminentFill)
         #expect(follow.configuration?.baseForegroundColor == .white)
         for style in [UIUserInterfaceStyle.light, .dark] {
             let traits = UITraitCollection(userInterfaceStyle: style)

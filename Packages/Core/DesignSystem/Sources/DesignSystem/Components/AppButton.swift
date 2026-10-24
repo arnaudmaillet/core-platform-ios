@@ -42,9 +42,9 @@ open class AppButton: UIButton {
 
     /// What a pill stands on.
     public enum Ground: Equatable, Sendable {
-        /// The one action that matters (Follow): a pink-to-white gradient
-        /// (`Palette.primaryGradient`), white words (#1178, the owner
-        /// 2026-10-15) — the same in both appearances.
+        /// The one action that matters (Follow): a solid fill,
+        /// `prominentColor`, white words — the same in both appearances
+        /// (the owner, 2026-10-23: no more pink-to-white gradient, #1178).
         case prominent
         /// The profile tray's quiet fill (`HeroTray.fill`): Message, Following.
         case quiet
@@ -139,9 +139,43 @@ open class AppButton: UIButton {
         public static let appearScale: CGFloat = AppearMotion.appearScale
         public static let appearDuration: TimeInterval = AppearMotion.appearDuration
         public static let disappearDuration: TimeInterval = AppearMotion.disappearDuration
-        /// The content change: blur out, swap, unblur in (the 0.36 s the
-        /// profile's Follow morphed in before it became this button).
-        public static let morphDuration: TimeInterval = 0.36
+        /// The content change (`AppButtonBlur`), as measured on a system
+        /// Liquid Glass bar item (2026-10-23): the size's spring — its
+        /// overshoot is the bounce.
+        public static let morphDuration: TimeInterval = 0.33
+        public static let morphBounce: CGFloat = 0.3
+        /// How long the stand-in plays, the spring settled.
+        public static let morphSettle: TimeInterval = 0.55
+        /// How far the capsule swells as it changes size fastest: the most,
+        /// for a change of `morphSwellReach` points or more; the least, for
+        /// a change in place.
+        public static let morphSwell: CGFloat = 0.16
+        public static let morphSwellBase: CGFloat = 0.06
+        public static let morphSwellReach: CGFloat = 100
+        /// The swell's course, measured on the system's bar item: (seconds,
+        /// share of the depth).
+        public static let morphSwellCurve: [(time: TimeInterval, share: CGFloat)] = [
+            (0, 0), (0.125, 1), (0.27, 0), (0.37, -0.14), (0.5, 0),
+        ]
+        /// How far the content blurs, in points.
+        public static let morphBlurRadius: CGFloat = 5
+        /// The content's blur levels, cross-fading into each other.
+        public static let morphBlurLevels = 3
+        /// The samples the frame, the grounds and the swell follow.
+        public static let morphSamples = 33
+        /// When the old content fades out (blurring from the start), the new
+        /// one fades in, and the new one sharpens, in seconds.
+        public static let morphContentOut: ClosedRange<TimeInterval> = 0.03...0.11
+        public static let morphContentIn: ClosedRange<TimeInterval> = 0.04...0.12
+        public static let morphContentSharpens: ClosedRange<TimeInterval> = 0.06...0.22
+        /// When the old ground's look cross-fades into the new one's.
+        public static let morphGroundMix: ClosedRange<TimeInterval> = 0.03...0.2
+        /// The hand-off from the stand-in to the button itself, at the end.
+        public static let morphHandoff: TimeInterval = 0.08
+        /// A load: the sheen's sweep across the blurred content, and the
+        /// content's ink when the load is not drawn (Reduce Motion).
+        public static let loadingSheen: TimeInterval = 1.1
+        public static let loadingInkAlpha: CGFloat = 0.4
         /// A fade: the state tint, the Reduce Motion fallbacks.
         public static let fadeDuration: TimeInterval = 0.22
         /// The fluid resize's spring.
@@ -195,6 +229,11 @@ open class AppButton: UIButton {
     public var notifiesCompletion = false
     /// A tap also bounces the symbol (a like). Off by default.
     public var bouncesSymbolOnTap = false
+    /// The prominent ground's colour (the owner, 2026-10-23: plain colours,
+    /// no gradient), under white words.
+    public var prominentColor: UIColor = Palette.prominentFill {
+        didSet { prominentGround.backgroundColor = prominentColor }
+    }
     /// Whether the button is a toggle (Follow, like, pin): VoiceOver says so.
     public var isToggle = false { didSet { refreshAccessibility() } }
 
@@ -202,7 +241,50 @@ open class AppButton: UIButton {
     public var reservedWidth: CGFloat? { didSet { invalidateIntrinsicContentSize() } }
     /// Or the contents the answer may bring: the placeholder holds the
     /// widest, so the answer never moves its neighbours.
-    public var reservedContents: [Content] = [] { didSet { invalidateIntrinsicContentSize() } }
+    public var reservedContents: [Content] = [] {
+        didSet {
+            reservedSizeCache = nil
+            invalidateIntrinsicContentSize()
+            if holdsReservedSize { refresh() }
+        }
+    }
+    /// Holds a slot the size of the largest of `reservedContents` — the
+    /// widest, the tallest — in EVERY phase, not only the placeholder's: a
+    /// toggle (Follow ⇄ Following ⇄ Requested) never moves its neighbours.
+    /// The ground hugs the content shown, set in the slot by `morphAnchor`
+    /// — centred, or against the edge it keeps (the owner, 2026-10-23).
+    public var holdsReservedSize = false {
+        didSet {
+            refresh()
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    /// The side a content change grows and shrinks from (the owner,
+    /// 2026-10-23): that edge stays put through the whole morph, the spring,
+    /// and its overshoot all on the other side. A row's trailing
+    /// button (Follow beside a ✕) is `.trailing`; a leading one `.leading`.
+    /// `.top` and `.bottom` keep that edge for a change of height; `.center`
+    /// keeps the middle. With `holdsReservedSize` it is also where the
+    /// ground sits in the slot.
+    public enum MorphAnchor: Sendable, CaseIterable {
+        case leading
+        case center
+        case trailing
+        case top
+        case bottom
+    }
+    public var morphAnchor: MorphAnchor = .center {
+        didSet { if holdsReservedSize { refresh() } }
+    }
+    /// `reservedSize`, measured once per text size.
+    private var reservedSizeCache: (category: UIContentSizeCategory, size: CGSize)?
+    /// The content's own size, measured once per content and text size.
+    private var naturalSizeCache: (content: Content, category: UIContentSizeCategory, size: CGSize)?
+    /// The slot's margins the configuration draws now. ⚠️ Not `slotMargins`:
+    /// an animated `setContent` sets the new content before the morph
+    /// draws the old state, which still stands at the old margins.
+    private var drawnSlotMargins: NSDirectionalEdgeInsets = .zero
     /// What VoiceOver hears while an action is in flight ("Following…").
     /// Nil: "In progress".
     public var busyLabel: String? { didSet { refreshAccessibility() } }
@@ -238,8 +320,10 @@ open class AppButton: UIButton {
     private let wash = UIView()
     private lazy var holdDelegate = HoldDelegate(button: self)
 
-    /// Whether motion is reduced — `MotionPreference` unless a test says.
-    public var reducesMotion: @MainActor () -> Bool = { MotionPreference.reducesMotion }
+    /// Whether motion is reduced: never, whatever the system setting (the
+    /// owner, 2026-10-23: "no Reduce Motion on the buttons, always the same
+    /// behaviour"). A test may still ask for the fallbacks.
+    public var reducesMotion: @MainActor () -> Bool = { false }
     /// Whether the iPhone's Button Shapes setting is on — UIKit's unless a
     /// test says.
     public var buttonShapes: @MainActor () -> Bool = { UIAccessibility.buttonShapesEnabled } {
@@ -251,8 +335,8 @@ open class AppButton: UIButton {
 
     private let veil = UIVisualEffectView(effect: nil)
     private let materialGround = UIVisualEffectView(effect: nil)
-    /// The prominent ground's gradient (#1178), under the content.
-    private let gradientGround = BrandGradientView(colors: Palette.primaryGradient)
+    /// The prominent ground's fill, under the content.
+    private let prominentGround = UIView()
     private let flash = UIView()
     private var bone: SkeletonBoneView?
     /// The size an in-flight action holds: the spinner is taller than a
@@ -260,6 +344,16 @@ open class AppButton: UIButton {
     private var heldSize: CGSize?
     private var hold: UILongPressGestureRecognizer?
     private var morphGeneration = 0
+    /// The blurred stand-in drawn over the button while its content changes
+    /// (`blurMorph`); the button itself is transparent under it.
+    private var blurOverlays: [UIView] = []
+    /// The morph those stand-ins play.
+    private var flight: MorphFlight?
+    /// A load drawn as held (`holdLoad`): the content as it stood, at its
+    /// most blurred — where the morph that ends the load starts from.
+    private var heldLoad: MorphSide?
+    /// The stand-in that scales out in the button's place (`disappear`).
+    private weak var ghost: UIView?
     private var impact: HapticImpact?
     private var selection: HapticSelection?
     private var notification: HapticNotification?
@@ -287,12 +381,17 @@ open class AppButton: UIButton {
         // the configuration's `symbolContentTransition` instead.
         isSymbolAnimationEnabled = false
         setUp()
+        // A pill presses as a system glass button does: it swells. A bare
+        // button — a card's action — keeps the app's give.
         pressFeedback = PressFeedback.attach(
-            to: self, sound: sound, dims: dims ?? (aspect == .bare),
-            reducesMotion: { [weak self] in self?.reducesMotion() ?? MotionPreference.reducesMotion }
+            to: self, style: aspect == .bare ? .press : .swell, sound: sound, dims: dims ?? (aspect == .bare),
+            reducesMotion: { [weak self] in self?.reducesMotion() ?? false }
         )
         // The wash follows the SAME finger decisions as the press.
         pressFeedback?.onPressChanged = { [weak self] _ in self?.applyWash() }
+        // The capsule swells by its own size, about its own middle, not
+        // its slot's.
+        pressFeedback?.drawnRect = { [weak self] in self?.groundRect ?? .zero }
         refresh()
     }
 
@@ -309,9 +408,11 @@ open class AppButton: UIButton {
         materialGround.clipsToBounds = true
         insertSubview(materialGround, at: 0)
 
-        gradientGround.clipsToBounds = true
-        gradientGround.alpha = 0
-        insertSubview(gradientGround, aboveSubview: materialGround)
+        prominentGround.isUserInteractionEnabled = false
+        prominentGround.clipsToBounds = true
+        prominentGround.backgroundColor = prominentColor
+        prominentGround.alpha = 0
+        insertSubview(prominentGround, aboveSubview: materialGround)
 
         veil.isUserInteractionEnabled = false
         veil.clipsToBounds = true
@@ -345,24 +446,25 @@ open class AppButton: UIButton {
 
     override open func layoutSubviews() {
         super.layoutSubviews()
+        let ground = groundRect
         let radius = cornerRadius
-        materialGround.frame = bounds
+        materialGround.frame = ground
         materialGround.layer.cornerRadius = radius
         materialGround.layer.cornerCurve = .continuous
         sendSubviewToBack(materialGround)
-        gradientGround.frame = bounds
-        gradientGround.layer.cornerRadius = radius
-        gradientGround.layer.cornerCurve = .continuous
-        insertSubview(gradientGround, aboveSubview: materialGround)
-        wash.frame = bounds
+        prominentGround.frame = ground
+        prominentGround.layer.cornerRadius = radius
+        prominentGround.layer.cornerCurve = .continuous
+        insertSubview(prominentGround, aboveSubview: materialGround)
+        wash.frame = ground
         wash.layer.cornerRadius = radius
         wash.layer.cornerCurve = .continuous
-        insertSubview(wash, aboveSubview: gradientGround)
-        veil.frame = bounds
+        insertSubview(wash, aboveSubview: prominentGround)
+        veil.frame = ground
         veil.layer.cornerRadius = radius
-        flash.frame = bounds
+        flash.frame = ground
         flash.layer.cornerRadius = radius
-        bone?.frame = bounds
+        bone?.frame = ground
         if let likesHeart, let imageView {
             likesHeart.frame = imageView.convert(imageView.bounds, to: self)
             bringSubviewToFront(likesHeart)
@@ -372,9 +474,13 @@ open class AppButton: UIButton {
         if let bone { bringSubviewToFront(bone) }
     }
 
-    private var cornerRadius: CGFloat {
+    private var cornerRadius: CGFloat { cornerRadius(for: groundRect.size) }
+
+    /// A capsule's ends are its shorter side's: a symbol over its words
+    /// stands taller than wide.
+    private func cornerRadius(for size: CGSize) -> CGFloat {
         switch shape {
-        case .capsule: bounds.height / 2
+        case .capsule: min(size.width, size.height) / 2
         case .card: Metrics.cardRadius
         }
     }
@@ -387,6 +493,9 @@ open class AppButton: UIButton {
         var measured = super.intrinsicContentSize
         if phase == .placeholder, let reserved = placeholderWidth {
             measured.width = reserved
+        } else if holdsReservedSize, let reserved = reservedSize {
+            measured.width = max(measured.width, reserved.width)
+            measured.height = max(measured.height, reserved.height)
         }
         return measured
     }
@@ -394,9 +503,57 @@ open class AppButton: UIButton {
     /// The width a placeholder holds: the one given, else the widest of the
     /// contents the answer may bring.
     public var placeholderWidth: CGFloat? {
-        if let reservedWidth { return reservedWidth }
+        reservedWidth ?? reservedSize?.width
+    }
+
+    /// The largest of `reservedContents`: the widest, the tallest.
+    private var reservedSize: CGSize? {
         guard !reservedContents.isEmpty else { return nil }
-        return reservedContents.map { fittingSize(for: $0).width }.max()
+        let category = traitCollection.preferredContentSizeCategory
+        if let cached = reservedSizeCache, cached.category == category { return cached.size }
+        let sizes = reservedContents.map { fittingSize(for: $0) }
+        let size = CGSize(width: sizes.map(\.width).max() ?? 0, height: sizes.map(\.height).max() ?? 0)
+        reservedSizeCache = (category, size)
+        return size
+    }
+
+    /// The slot's margins around the ground, by `morphAnchor`: zero unless
+    /// `holdsReservedSize`.
+    private var slotMargins: NSDirectionalEdgeInsets {
+        guard holdsReservedSize, size != .icon, phase != .placeholder, let reserved = reservedSize else { return .zero }
+        let category = traitCollection.preferredContentSizeCategory
+        let natural: CGSize
+        if let cached = naturalSizeCache, cached.content == content, cached.category == category {
+            natural = cached.size
+        } else {
+            natural = fittingSize(for: content)
+            naturalSizeCache = (content, category, natural)
+        }
+        let spareWidth = max(0, reserved.width - natural.width)
+        let spareHeight = max(0, reserved.height - natural.height)
+        var margins = NSDirectionalEdgeInsets(
+            top: spareHeight / 2, leading: spareWidth / 2, bottom: spareHeight / 2, trailing: spareWidth / 2
+        )
+        switch morphAnchor {
+        case .leading: margins.leading = 0; margins.trailing = spareWidth
+        case .trailing: margins.leading = spareWidth; margins.trailing = 0
+        case .top: margins.top = 0; margins.bottom = spareHeight
+        case .bottom: margins.top = spareHeight; margins.bottom = 0
+        case .center: break
+        }
+        return margins
+    }
+
+    /// Where the ground is drawn: the bounds, less the slot's margins.
+    public var groundRect: CGRect {
+        let margins = drawnSlotMargins
+        let rightToLeft = effectiveUserInterfaceLayoutDirection == .rightToLeft
+        return bounds.inset(by: UIEdgeInsets(
+            top: margins.top,
+            left: rightToLeft ? margins.trailing : margins.leading,
+            bottom: margins.bottom,
+            right: rightToLeft ? margins.leading : margins.trailing
+        ))
     }
 
     /// The size the button takes for `content`, resolved now — not at the
@@ -429,11 +586,12 @@ open class AppButton: UIButton {
         return self
     }
 
-    /// The region a touch counts in: the bounds, grown to at least 44×44.
+    /// The region a touch counts in: the ground, grown to at least 44×44.
     public var hitRegion: CGRect {
-        let dx = max(0, (Metrics.minimumHitSide - bounds.width) / 2)
-        let dy = max(0, (Metrics.minimumHitSide - bounds.height) / 2)
-        return bounds.insetBy(dx: -dx, dy: -dy)
+        let ground = groundRect
+        let dx = max(0, (Metrics.minimumHitSide - ground.width) / 2)
+        let dy = max(0, (Metrics.minimumHitSide - ground.height) / 2)
+        return ground.insetBy(dx: -dx, dy: -dy)
     }
 
     // MARK: - Content
@@ -445,6 +603,12 @@ open class AppButton: UIButton {
         guard content != self.content else { return }
         let old = self.content
         self.content = content
+        // The answer to a load drawn as held: on the model, under the
+        // stand-in, until the load ends and the morph shows it.
+        if heldLoad != nil {
+            refresh()
+            return
+        }
         guard animated, window != nil, phase == .content else {
             land()
             return
@@ -456,7 +620,7 @@ open class AppButton: UIButton {
                   content.symbol != nil, old.symbol != nil {
             replaceSymbol(reduced: reduced)
         } else {
-            morph(reduced: reduced)
+            morph(reduced: reduced, old: old)
         }
     }
 
@@ -472,13 +636,19 @@ open class AppButton: UIButton {
             setSelected(selected, animated: animated)
             return
         }
+        let old = self.content
         self.content = content
+        if heldLoad != nil {
+            isSelected = selected
+            refresh()
+            return
+        }
         guard animated, window != nil, phase == .content else {
             isSelected = selected
             land()
             return
         }
-        morph(reduced: reducesMotion()) { self.isSelected = selected }
+        morph(reduced: reducesMotion(), old: old) { self.isSelected = selected }
     }
 
     /// An immediate change: the content lands whole, at its own width, and a
@@ -486,6 +656,7 @@ open class AppButton: UIButton {
     /// swapping in later.
     private func land() {
         morphGeneration += 1
+        endBlurMorph()
         veil.layer.removeAllAnimations()
         veil.effect = nil
         veil.isHidden = true
@@ -531,7 +702,7 @@ open class AppButton: UIButton {
 
     /// The old content blurs and fades out, the new one unblurs in; a
     /// cross-fade under Reduce Motion.
-    private func morph(reduced: Bool, swap: (() -> Void)? = nil) {
+    private func morph(reduced: Bool, old: Content, swap: (() -> Void)? = nil) {
         morphGeneration += 1
         let generation = morphGeneration
         if reduced {
@@ -545,6 +716,9 @@ open class AppButton: UIButton {
             return
         }
         record(.blurMorph)
+        if blurMorph(old: old, swap: swap) { return }
+        // No host or no picture to draw (a material over a photograph, which
+        // `layer.render` cannot draw): the veil.
         veil.isHidden = false
         let half = Metrics.morphDuration / 2
         UIView.animate(withDuration: half, delay: 0, options: [.beginFromCurrentState, .curveEaseIn, .allowUserInteraction]) {
@@ -563,12 +737,411 @@ open class AppButton: UIButton {
         }
     }
 
+    /// The content change, as a system Liquid Glass button makes it, without
+    /// its look (the owner, 2026-10-23; measured frame by frame on a bar
+    /// item swapped for a longer one): the ground resizes on a spring, the
+    /// neighbours with it, from the side `morphAnchor` keeps; the whole
+    /// capsule swells as it changes size — by how fast it changes, a touch
+    /// under as it springs back — its old and new looks cross-fading; the
+    /// old content blurs out where it stood while the new one blurs in where
+    /// it lands, both cut to the capsule, which reveals the new one as it
+    /// grows.
+    ///
+    /// ⚠️ THE CAPSULE STAYS SHARP: a blur softens the capsule's own edge
+    /// too, and a softened edge reads as an edge that moves (filmed, the
+    /// owner 2026-10-23). Only the content blurs.
+    ///
+    /// ⚠️ A FEW PICTURES, CORE ANIMATION FOR THE REST. Each state is drawn
+    /// once — its ground, its content at a few blur levels — and layers
+    /// carry the motion. Baking every sample cost 400–530 ms before the
+    /// morph began, read as a lag between the press and the change
+    /// (measured, 2026-10-23).
+    ///
+    /// False when the button cannot be drawn: the caller falls back to the
+    /// veil.
+    private func blurMorph(old: Content, swap: (() -> Void)?) -> Bool {
+        guard let host = superview, window != nil, aspect != .pill(.material) else { return false }
+        let generation = morphGeneration
+        let scale = window?.screen.scale ?? traitCollection.displayScale
+        let pad = Metrics.morphBlurRadius * 3
+        let radius = Metrics.morphBlurRadius * scale
+        let spring = Metrics.morphDuration
+        let settle = Metrics.morphSettle
+        // ⚠️ A CHANGE MID-FLIGHT STARTS FROM WHAT IS ON SCREEN (the owner,
+        // 2026-10-23: a double tap turns the morph around on its way): its
+        // rect, its mixed ground, the content on show as blurred as it is;
+        // the neighbours' spring retargets from where they are.
+        let from: MorphSide
+        if let resumed = resumedSide(in: host, scale: scale) {
+            endBlurMorph()
+            from = resumed
+        } else {
+            endBlurMorph()
+            guard let drawn = drawnSide(in: host, pad: pad, scale: scale) else { return false }
+            from = drawn
+        }
+
+        // The new state on the model — the button hidden under its stand-in
+        // from this turn on — and the neighbours on their spring.
+        swap?()
+        refresh()
+        updateConfiguration()
+        invalidateIntrinsicContentSize()
+        host.setNeedsLayout()
+        let root = layoutRoot ?? host
+        UIView.animate(
+            springDuration: spring, bounce: Metrics.morphBounce,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            root.layoutIfNeeded()
+        }
+        layoutIfNeeded()
+        guard let to = drawnSide(in: host, pad: pad, scale: scale) else { return false }
+
+        // The content's blur levels: the old one's rising from where it is,
+        // the new one's falling. Gaussian blurs add in squares.
+        let levels = Metrics.morphBlurLevels
+        let fromLevels = (0...levels).map {
+            let level = from.blur + (1 - from.blur) * CGFloat($0) / CGFloat(levels)
+            return AppButtonBlur.blurred(from.ink, radius: radius * max(0, level * level - from.blur * from.blur).squareRoot())
+        }
+        let toLevels = (0...levels).map { AppButtonBlur.blurred(to.ink, radius: radius * (1 - CGFloat($0) / CGFloat(levels))) }
+
+        // The samples: the rect on its spring.
+        let samples = Metrics.morphSamples
+        let times = (0...samples).map { settle * Double($0) / Double(samples) }
+        func progress(_ time: TimeInterval) -> CGFloat {
+            AppButtonBlur.springProgress(at: time, duration: spring, bounce: Metrics.morphBounce)
+        }
+        // The swell, as the system's (measured): up to its crest at an eighth
+        // of a second, back by a quarter, a touch under, settled by half.
+        let change = max(abs(to.rect.width - from.rect.width), abs(to.rect.height - from.rect.height))
+        let swellDepth = Metrics.morphSwellBase + (Metrics.morphSwell - Metrics.morphSwellBase) * min(1, change / Metrics.morphSwellReach)
+        let swellCurve = Metrics.morphSwellCurve
+        func swell(_ time: TimeInterval) -> CGFloat {
+            guard let next = swellCurve.firstIndex(where: { $0.time >= time }), next > 0 else { return 1 }
+            let (a, b) = (swellCurve[next - 1], swellCurve[next])
+            let share = CGFloat((time - a.time) / (b.time - a.time))
+            return 1 + swellDepth * (a.share + (b.share - a.share) * share)
+        }
+        var flight = MorphFlight(host: host, start: host.layer.convertTime(CACurrentMediaTime(), from: nil), from: from, to: to)
+        for time in times {
+            flight.moments.append(MorphFlight.Moment(
+                time: time,
+                rect: anchoredRect(progress: progress(time), old: from.rect, new: to.rect),
+                mix: AppButtonBlur.smoothstep(CGFloat(time), from: CGFloat(Metrics.morphGroundMix.lowerBound), to: CGFloat(Metrics.morphGroundMix.upperBound)),
+                swell: swell(time)
+            ))
+        }
+
+        // ⚠️ EVERY ANIMATION INSIDE THE TRANSACTION whose completion ends
+        // the morph: one added before it does not count, and an empty
+        // transaction completes at once — the stand-in went with it, and
+        // UIKit's own resize showed instead.
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self] in
+            guard let self, generation == self.morphGeneration else { return }
+            self.endBlurMorph()
+        }
+        let moments = flight.moments
+        let sampleTimes = times.map { NSNumber(value: $0 / settle) }
+        func at(_ time: TimeInterval) -> NSNumber { NSNumber(value: min(max(time / settle, 0), 1)) }
+        func animate(_ layer: CALayer, _ keyPath: String, _ values: [Any], at keyTimes: [NSNumber]) {
+            let animation = AppButtonBlur.keyframes(keyPath, values, duration: settle)
+            animation.keyTimes = keyTimes
+            layer.add(animation, forKey: "appButton.morph.\(keyPath)")
+        }
+
+        // The stand-in: a frame on the ground's rect, cut to its shape,
+        // swelling about its middle.
+        let frame = UIView()
+        frame.isUserInteractionEnabled = false
+        frame.layer.masksToBounds = true
+        frame.layer.cornerCurve = .continuous
+        frame.bounds = CGRect(origin: .zero, size: to.rect.size)
+        frame.center = CGPoint(x: to.rect.midX, y: to.rect.midY)
+        frame.layer.cornerRadius = cornerRadius(for: to.rect.size)
+        animate(frame.layer, "bounds", moments.map { NSValue(cgRect: CGRect(origin: .zero, size: $0.rect.size)) }, at: sampleTimes)
+        animate(frame.layer, "position", moments.map { NSValue(cgPoint: CGPoint(x: $0.rect.midX, y: $0.rect.midY)) }, at: sampleTimes)
+        animate(frame.layer, "cornerRadius", moments.map { cornerRadius(for: $0.rect.size) }, at: sampleTimes)
+        let swelling = AppButtonBlur.keyframes("transform.scale", swellCurve.map { 1 + swellDepth * $0.share } + [1], duration: settle)
+        swelling.keyTimes = swellCurve.map { at($0.time) } + [1]
+        swelling.calculationMode = .cubic
+        frame.layer.add(swelling, forKey: "appButton.morph.swell")
+        let centres = moments.map { NSValue(cgPoint: CGPoint(x: $0.rect.width / 2, y: $0.rect.height / 2)) }
+
+        // The grounds, stretched to the frame, the new one fading in.
+        for (side, opacity) in [(from, { (m: MorphFlight.Moment) in 1 - m.mix }), (to, { (m: MorphFlight.Moment) in m.mix })] {
+            let ground = CALayer()
+            ground.contents = side.inside
+            ground.contentsGravity = .resize
+            ground.frame = frame.bounds
+            ground.opacity = Float(opacity(moments[moments.count - 1]))
+            frame.layer.addSublayer(ground)
+            animate(ground, "bounds", moments.map { NSValue(cgRect: CGRect(origin: .zero, size: $0.rect.size)) }, at: sampleTimes)
+            animate(ground, "position", centres, at: sampleTimes)
+            animate(ground, "opacity", moments.map { Float(opacity($0)) }, at: sampleTimes)
+        }
+
+        // The contents, each where it stands — the old where it was, the new
+        // where it lands — the old blurring out, the new blurring in.
+        for (side, sideLevels, isNew) in [(from, fromLevels, false), (to, toLevels, true)] {
+            let content = CALayer()
+            content.contentsScale = scale
+            content.contentsGravity = .resize
+            content.bounds = CGRect(origin: .zero, size: CGSize(width: side.inkSize.width + pad * 2, height: side.inkSize.height + pad * 2))
+            let positions = moments.map { NSValue(cgPoint: CGPoint(x: side.rect.midX - $0.rect.minX, y: side.rect.midY - $0.rect.minY)) }
+            content.position = positions[positions.count - 1].cgPointValue
+            content.contents = isNew ? sideLevels.last : sideLevels.first
+            content.opacity = isNew ? 1 : 0
+            frame.layer.addSublayer(content)
+            animate(content, "position", positions, at: sampleTimes)
+            let steps = sideLevels.count - 1
+            let blurs = isNew ? Metrics.morphContentSharpens : 0...Metrics.morphContentOut.upperBound
+            let levelTimes = (0...steps).map { at(blurs.lowerBound + (blurs.upperBound - blurs.lowerBound) * Double($0) / Double(steps)) }
+            animate(content, "contents", [sideLevels[0]] + sideLevels + [sideLevels[steps]], at: [0] + levelTimes + [1])
+            let fade = isNew ? Metrics.morphContentIn : Metrics.morphContentOut
+            let (start, end): (Float, Float) = isNew ? (0, 1) : (1, 0)
+            let opacity = AppButtonBlur.keyframes("opacity", [start, start, end, end], duration: settle)
+            opacity.keyTimes = [0, at(fade.lowerBound), at(fade.upperBound), 1]
+            content.add(opacity, forKey: "appButton.morph.fade")
+        }
+
+        // Handed over in two steps, not a cut: a stand-in resampled to its
+        // frame never matches the button to the pixel, and a cut read as the
+        // words twitching as the morph ended (the owner, 2026-10-23). The
+        // button fades in under the stand-in first, then the stand-in fades
+        // out over it: two half-faded layers at once read as a paler flash.
+        func handoff(from: Float, to: Float, between start: TimeInterval, and end: TimeInterval) -> CAKeyframeAnimation {
+            let fade = AppButtonBlur.keyframes("opacity", [from, from, to, to], duration: settle)
+            fade.keyTimes = [0, at(start), at(end), 1]
+            return fade
+        }
+        let handoffStart = settle - Metrics.morphHandoff
+        let handoffMiddle = settle - Metrics.morphHandoff / 2
+        frame.layer.add(handoff(from: 1, to: 0, between: handoffMiddle, and: settle), forKey: "appButton.morph.handoff")
+        frame.layer.opacity = 0
+        // ⚠️ HIDDEN BY A MASK, NOT AN ALPHA: UIKit skips a view under 0.01
+        // alpha in hit-testing, and the second tap of a double tap fell
+        // through the button (the owner, 2026-10-23).
+        let mask = CALayer()
+        mask.backgroundColor = UIColor.black.cgColor
+        mask.frame = bounds.insetBy(dx: -pad, dy: -pad)
+        mask.add(handoff(from: 0, to: 1, between: handoffStart, and: handoffMiddle), forKey: "appButton.morph.handoff")
+        layer.mask = mask
+        // The press goes on over the stand-in: its swell now, its spring
+        // back when the finger lifts.
+        PressFeedback.copyPress(from: layer, to: frame.layer)
+        pressFeedback?.mirrors = [frame.layer]
+        host.insertSubview(frame, aboveSubview: self)
+        blurOverlays = [frame]
+        self.flight = flight
+        CATransaction.commit()
+        return true
+    }
+
+    /// A load, drawn: the content blurs as a morph's first beat does, then
+    /// holds at its most blurred under a sheen sweeping the capsule — a
+    /// skeleton of the button as it stood — until the load ends. False when
+    /// the button cannot be drawn.
+    private func holdLoad() -> Bool {
+        guard let host = superview, window != nil, aspect != .pill(.material) else { return false }
+        endBlurMorph()
+        let scale = window?.screen.scale ?? traitCollection.displayScale
+        let pad = Metrics.morphBlurRadius * 3
+        let radius = Metrics.morphBlurRadius * scale
+        guard let side = drawnSide(in: host, pad: pad, scale: scale) else { return false }
+        let levels = Metrics.morphBlurLevels
+        let images = (0...levels).map { AppButtonBlur.blurred(side.ink, radius: radius * CGFloat($0) / CGFloat(levels)) }
+        let blurIn = Metrics.morphContentOut.upperBound
+
+        CATransaction.begin()
+        let frame = UIView()
+        frame.isUserInteractionEnabled = false
+        frame.layer.masksToBounds = true
+        frame.layer.cornerCurve = .continuous
+        frame.bounds = CGRect(origin: .zero, size: side.rect.size)
+        frame.center = CGPoint(x: side.rect.midX, y: side.rect.midY)
+        frame.layer.cornerRadius = cornerRadius(for: side.rect.size)
+        let ground = CALayer()
+        ground.contents = side.inside
+        ground.contentsGravity = .resize
+        ground.frame = frame.bounds
+        frame.layer.addSublayer(ground)
+        let content = CALayer()
+        content.contentsScale = scale
+        content.contentsGravity = .resize
+        content.bounds = CGRect(origin: .zero, size: CGSize(width: side.inkSize.width + pad * 2, height: side.inkSize.height + pad * 2))
+        content.position = CGPoint(x: frame.bounds.midX, y: frame.bounds.midY)
+        content.contents = images.last
+        frame.layer.addSublayer(content)
+        let blurring = AppButtonBlur.keyframes("contents", images, duration: blurIn)
+        blurring.keyTimes = (0...levels).map { NSNumber(value: Double($0) / Double(levels)) }
+        content.add(blurring, forKey: "appButton.load.blur")
+        // The sheen: a light band crossing the capsule, over and over.
+        let sheen = CAGradientLayer()
+        sheen.colors = [UIColor.white.withAlphaComponent(0).cgColor, UIColor.white.withAlphaComponent(0.45).cgColor, UIColor.white.withAlphaComponent(0).cgColor]
+        sheen.startPoint = CGPoint(x: 0, y: 0.5)
+        sheen.endPoint = CGPoint(x: 1, y: 0.5)
+        let band = max(frame.bounds.height * 2, frame.bounds.width * 0.5)
+        sheen.bounds = CGRect(x: 0, y: 0, width: band, height: frame.bounds.height)
+        sheen.position = CGPoint(x: -band, y: frame.bounds.midY)
+        frame.layer.addSublayer(sheen)
+        let sweep = CABasicAnimation(keyPath: "position.x")
+        sweep.fromValue = -band / 2
+        sweep.toValue = frame.bounds.width + band / 2
+        sweep.duration = Metrics.loadingSheen
+        sweep.beginTime = sheen.convertTime(CACurrentMediaTime(), from: nil) + blurIn
+        sweep.repeatCount = .infinity
+        sweep.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        sheen.add(sweep, forKey: "appButton.load.sheen")
+        // Hidden by a mask, not an alpha (see `blurMorph`).
+        layer.mask = CALayer()
+        host.insertSubview(frame, aboveSubview: self)
+        blurOverlays = [frame]
+        heldLoad = MorphSide(rect: side.rect, inside: side.inside, ink: images[levels], inkSize: side.inkSize, blur: 1)
+        CATransaction.commit()
+        return true
+    }
+
+    /// One end of a morph: where the ground stands in the host, the inside
+    /// of the ground to stretch, and the content as drawn — its own size,
+    /// how blurred it already is.
+    private struct MorphSide {
+        var rect: CGRect
+        /// The ground's inside, clear of its corners: stretched to any size.
+        var inside: CGImage
+        /// The content alone, at the weight the button draws it, on a
+        /// margin for the blur.
+        var ink: CGImage
+        var inkSize: CGSize
+        var blur: CGFloat = 0
+    }
+
+    /// The morph on show: when it started, in its host's time, its two ends,
+    /// and where it stands at each sample — so a change landing mid-flight
+    /// starts from what is on screen.
+    private struct MorphFlight {
+        struct Moment {
+            var time: TimeInterval
+            /// The ground's frame, in the host, before the swell.
+            var rect: CGRect
+            /// The new ground's share.
+            var mix: CGFloat
+            var swell: CGFloat
+        }
+        var host: UIView
+        var start: CFTimeInterval
+        var from: MorphSide
+        var to: MorphSide
+        var moments: [Moment] = []
+    }
+
+    /// The button as it stands now, drawn.
+    ///
+    /// ⚠️ THE CONTENT IS DRAWN ON ITS GROUND, then taken back off it: words
+    /// drawn on a clear canvas come out thinner than on the button (font
+    /// smoothing needs an opaque backdrop) and read as lighter words that
+    /// twitched to their weight as the morph ended (the owner, 2026-10-23).
+    private func drawnSide(in host: UIView, pad: CGFloat, scale: CGFloat) -> MorphSide? {
+        let rect = groundRect
+        guard let ground = drawnGround(pad: pad, scale: scale),
+              let whole = AppButtonBlur.snapshot(of: self, rect: rect, pad: pad, scale: scale),
+              let groundInside = AppButtonBlur.inside(of: ground, pad: pad, cap: cornerRadius(for: rect.size), scale: scale),
+              let content = AppButtonBlur.ink(of: whole, over: ground, foreground: drawnForeground)
+        else { return nil }
+        return MorphSide(rect: convert(rect, to: host), inside: groundInside, ink: content, inkSize: rect.size)
+    }
+
+    /// The words' colour now, for `AppButtonBlur.ink`.
+    private var drawnForeground: UIColor {
+        (configuration?.baseForegroundColor ?? tintColor).resolvedColor(with: traitCollection)
+    }
+
+    /// The moment on show, as the start of the next morph, when one is in
+    /// flight in `host`: the content most on show then, as blurred as it is.
+    private func resumedSide(in host: UIView, scale: CGFloat) -> MorphSide? {
+        if let heldLoad, !blurOverlays.isEmpty { return heldLoad }
+        guard let flight, flight.host === host, !blurOverlays.isEmpty else { return nil }
+        let elapsed = host.layer.convertTime(CACurrentMediaTime(), from: nil) - flight.start
+        guard let moment = flight.moments.last(where: { $0.time <= elapsed }) ?? flight.moments.first,
+              let inside = AppButtonBlur.mixed(flight.from.inside, flight.to.inside, mix: moment.mix)
+        else { return nil }
+        func share(_ time: TimeInterval, _ range: ClosedRange<TimeInterval>) -> CGFloat {
+            CGFloat(min(max((time - range.lowerBound) / (range.upperBound - range.lowerBound), 0), 1))
+        }
+        let showsNew = share(elapsed, Metrics.morphContentIn) >= 1 - share(elapsed, Metrics.morphContentOut)
+        let side = showsNew ? flight.to : flight.from
+        let level = showsNew
+            ? 1 - share(elapsed, Metrics.morphContentSharpens)
+            : side.blur + (1 - side.blur) * share(elapsed, 0...Metrics.morphContentOut.upperBound)
+        let added = showsNew ? level : max(0, level * level - side.blur * side.blur).squareRoot()
+        let shown = AppButtonBlur.blurred(side.ink, radius: Metrics.morphBlurRadius * scale * added)
+        return MorphSide(rect: moment.rect, inside: inside, ink: shown, inkSize: side.inkSize, blur: level)
+    }
+
+    /// The button's ground alone, its content hidden.
+    private func drawnGround(pad: CGFloat, scale: CGFloat) -> CGImage? {
+        let content: [UIView] = [titleLabel, imageView, likesHeart].compactMap { $0 }
+            .filter { $0.isDescendant(of: self) }
+        let was = content.map(\.isHidden)
+        content.forEach { $0.isHidden = true }
+        defer { zip(content, was).forEach { $0.isHidden = $1 } }
+        return AppButtonBlur.snapshot(of: self, rect: groundRect, pad: pad, scale: scale)
+    }
+
+    /// The ground at `progress` between `old` and `new`: its anchored edge
+    /// where the layout moves it — still, for a row's trailing button or a
+    /// reserved slot — the size all on the other side.
+    private func anchoredRect(progress: CGFloat, old: CGRect, new: CGRect) -> CGRect {
+        func lerp(_ a: CGFloat, _ b: CGFloat) -> CGFloat { a + (b - a) * progress }
+        let size = CGSize(width: lerp(old.width, new.width), height: lerp(old.height, new.height))
+        let x: CGFloat = switch horizontalAnchor {
+        case .left: lerp(old.minX, new.minX)
+        case .right: lerp(old.maxX, new.maxX) - size.width
+        case .middle: lerp(old.midX, new.midX) - size.width / 2
+        }
+        let y: CGFloat = switch morphAnchor {
+        case .top: lerp(old.minY, new.minY)
+        case .bottom: lerp(old.maxY, new.maxY) - size.height
+        case .leading, .center, .trailing: lerp(old.midY, new.midY) - size.height / 2
+        }
+        return CGRect(origin: CGPoint(x: x, y: y), size: size)
+    }
+
+    private enum HorizontalAnchor { case left, middle, right }
+
+    /// `morphAnchor` on screen: leading is the right in a right-to-left
+    /// layout.
+    private var horizontalAnchor: HorizontalAnchor {
+        let rightToLeft = effectiveUserInterfaceLayoutDirection == .rightToLeft
+        switch (morphAnchor, rightToLeft) {
+        case (.leading, false), (.trailing, true): return .left
+        case (.trailing, false), (.leading, true): return .right
+        case (.center, _), (.top, _), (.bottom, _): return .middle
+        }
+    }
+
+    /// The button back in its own pixels, its stand-in gone.
+    private func endBlurMorph() {
+        guard !blurOverlays.isEmpty else { return }
+        for overlay in blurOverlays {
+            overlay.layer.removeAllAnimations()
+            overlay.removeFromSuperview()
+        }
+        blurOverlays = []
+        flight = nil
+        heldLoad = nil
+        pressFeedback?.mirrors = []
+        layer.mask = nil
+    }
+
     /// The width follows the content, the neighbours with it — a spring, or
     /// at once under Reduce Motion (the cross-fade covers it).
     private func resize(reduced: Bool) {
         invalidateIntrinsicContentSize()
         superview?.setNeedsLayout()
-        let host = superview ?? self
+        let host = layoutRoot ?? self
         guard !reduced else {
             host.layoutIfNeeded()
             return
@@ -581,13 +1154,28 @@ open class AppButton: UIButton {
         }
     }
 
+    /// Where a change of the button's size is laid out, animated: past the
+    /// stacks it sits in, to the view holding the outermost.
+    ///
+    /// ⚠️ NOT THE SUPERVIEW: laid out alone, a row stack animated its
+    /// arranged views and its own size, but its parent stack moved it in a
+    /// second, unanimated pass — the whole row jumped aside, then slid back
+    /// (filmed, the owner 2026-10-24).
+    private var layoutRoot: UIView? {
+        var view = superview
+        while let current = view, current is UIStackView, let parent = current.superview {
+            view = parent
+        }
+        return view
+    }
+
     // MARK: - Selected
 
     /// Selected (Following, liked, pinned): the ground and ink cross-fade.
     /// A fade, so it stays under Reduce Motion.
     public func setSelected(_ selected: Bool, animated: Bool) {
         guard selected != isSelected else { return }
-        guard animated, window != nil else {
+        guard animated, window != nil, heldLoad == nil else {
             isSelected = selected
             return
         }
@@ -635,6 +1223,25 @@ open class AppButton: UIButton {
         }
         self.phase = phase
         let animates = animated && window != nil
+        // ⚠️ NO SPINNER (the owner, 2026-10-23): a load holds the button as
+        // it stands the instant before its content changes — the content
+        // blurred, a sheen going over it — and when it ends, the morph goes
+        // on from there to whatever the answer brought.
+        if phase == .loading, animates, !reducesMotion(), holdLoad() {
+            refresh()
+            announceBusy()
+            return
+        }
+        if old == .loading, heldLoad != nil {
+            // Into the answer, the morph; into a placeholder, the bone.
+            if phase == .content, animates {
+                invalidateIntrinsicContentSize()
+                morphGeneration += 1
+                record(.blurMorph)
+                if blurMorph(old: content, swap: nil) { return }
+            }
+            endBlurMorph()
+        }
         if phase == .placeholder {
             installBone()
         } else if old == .placeholder {
@@ -814,6 +1421,22 @@ open class AppButton: UIButton {
         UIContextMenuInteractionDelegate.contextMenuInteraction(_:configuration:dismissalPreviewForItemWithIdentifier:)
     )
 
+    /// ⚠️ A PLAIN MENU'S PREVIEWS ARE UIKIT'S. Answering them — even with
+    /// nil — told the interaction this button had previews of its own; a
+    /// nil DISMISSAL preview faded the menu out in place rather than
+    /// morphing it back into the button, which UIKit then showed again only
+    /// once its clean-up ran, a beat with nothing on screen (the owner,
+    /// 2026-10-23). With no `menuProvider`, and no `UIButton` answer to
+    /// defer to (iOS 27), the button says it has none.
+    override open func responds(to aSelector: Selector!) -> Bool {
+        if menuProvider == nil,
+           aSelector == Self.highlightPreviewSelector || aSelector == Self.dismissalPreviewSelector,
+           !UIButton.instancesRespond(to: aSelector) {
+            return false
+        }
+        return super.responds(to: aSelector)
+    }
+
     override open func contextMenuInteraction(
         _ interaction: UIContextMenuInteraction, configuration: UIContextMenuConfiguration,
         highlightPreviewForItemWithIdentifier identifier: any NSCopying
@@ -856,9 +1479,17 @@ open class AppButton: UIButton {
 
     // MARK: - Motion
 
-    /// Comes in: a bounce from small, or a fade under Reduce Motion — the
-    /// shared `AppearMotion`. Its neighbours make room in the same beat.
+    /// Comes in: a bounce from small with a fade, or a fade under Reduce
+    /// Motion — the shared `AppearMotion` — WHERE IT WILL STAND. Its
+    /// neighbours glide to make room in the same beat.
+    ///
+    /// ⚠️ ITS OWN FRAME DOES NOT ANIMATE. Un-hidden inside the animation, a
+    /// stack grew it from the zero frame a hidden arranged view has, at its
+    /// top-left corner — a button that looked not laid out (the owner,
+    /// 2026-10-23). The frame changes the layout gave it and its insides are
+    /// dropped, so only the bounce and the fade run.
     public func appear(animated: Bool) {
+        ghost?.removeFromSuperview()
         guard animated, window != nil else {
             isHidden = false
             alpha = 1
@@ -866,33 +1497,120 @@ open class AppButton: UIButton {
             return
         }
         let host = superview
-        let kind = AppearMotion.appear(self, reducesMotion: reducesMotion()) {
+        // Over its neighbours while it grows, for the same reason.
+        host?.bringSubviewToFront(self)
+        let root = layoutRoot
+        let before = host?.bounds.size ?? .zero
+        let kind = AppearMotion.appear(self, reducesMotion: reducesMotion(), pivot: groundOffset) {
             self.isHidden = false
-            host?.layoutIfNeeded()
+            root?.layoutIfNeeded()
+        }
+        dropLayoutAnimations()
+        // Its middle follows the row's as the row grows to take it, so it
+        // comes in centred on its neighbours, which are on their way too.
+        let shift = midlineShift(in: host, from: before)
+        if shift != .zero {
+            let final = center
+            UIView.performWithoutAnimation { center = CGPoint(x: final.x - shift.x, y: final.y - shift.y) }
+            UIView.animate(springDuration: AppearMotion.appearDuration, bounce: AppearMotion.appearBounce, options: [.allowUserInteraction]) {
+                self.center = final
+            }
         }
         record(Self.event(kind))
     }
 
-    /// Goes: scales out and fades, the stack closing the gap in the same
-    /// beat; a fade under Reduce Motion. Hidden at the end.
+    /// How far a centring stack's midline moved from a size `before` to its
+    /// size now — the line its arranged views ride on: a horizontal stack's
+    /// vertical middle, a vertical one's horizontal middle.
+    private func midlineShift(in host: UIView?, from before: CGSize) -> CGPoint {
+        guard let stack = host as? UIStackView, stack.alignment == .center else { return .zero }
+        let after = stack.bounds.size
+        return stack.axis == .horizontal
+            ? CGPoint(x: 0, y: (after.height - before.height) / 2)
+            : CGPoint(x: (after.width - before.width) / 2, y: 0)
+    }
+
+    /// Removes what a layout inside the appear's animation block added: the
+    /// button's own frame and corner animations, and every animation of its
+    /// insides — only the bounce and the fade run.
+    ///
+    /// ⚠️ THE CORNERS TOO: laid out inside the block, the grounds' corner
+    /// radius grew from the zero frame's — a SQUARE button rounding as it
+    /// bounced in (the owner, 2026-10-23).
+    private func dropLayoutAnimations() {
+        for key in layer.animationKeys() ?? [] where !key.hasPrefix("opacity") && !key.hasPrefix("transform") {
+            layer.removeAnimation(forKey: key)
+        }
+        func dropAll(in view: UIView) {
+            // The placeholder's bone keeps its shimmer.
+            guard view !== bone else { return }
+            view.layer.removeAllAnimations()
+            view.layer.sublayers?.forEach { $0.removeAllAnimations() }
+            view.subviews.forEach(dropAll(in:))
+        }
+        subviews.forEach(dropAll(in:))
+    }
+
+    /// The ground's middle, from the button's: off-centre in a reserved
+    /// slot, where it bounces in and scales out about. Read from the slot's
+    /// margins, so it holds before the first layout.
+    private var groundOffset: CGPoint {
+        let margins = drawnSlotMargins
+        let rightToLeft = effectiveUserInterfaceLayoutDirection == .rightToLeft
+        let across = (margins.leading - margins.trailing) / 2
+        return CGPoint(x: rightToLeft ? -across : across, y: (margins.top - margins.bottom) / 2)
+    }
+
+    /// Goes: scales out and fades WHERE IT STOOD, the stack closing the gap
+    /// in the same beat; a fade under Reduce Motion. Hidden at once — the
+    /// callers read `isHidden` — so what scales out is a stand-in, the
+    /// button's own pixels.
+    ///
+    /// ⚠️ NOT THE BUTTON ITSELF: hidden inside the animation, a stack shrank
+    /// its frame to its top-left corner while it scaled (the owner,
+    /// 2026-10-23).
     public func disappear(animated: Bool, completion: (() -> Void)? = nil) {
-        guard animated, window != nil, !isHidden else {
+        guard animated, window != nil, !isHidden, let host = superview else {
             isHidden = true
             completion?()
             return
         }
-        let host = superview
-        let kind = AppearMotion.disappear(self, reducesMotion: reducesMotion()) {
-            self.isHidden = true
-            host?.layoutIfNeeded()
-        } completion: { finished in
-            // An appear that took over mid-flight owns the alpha and scale.
-            if finished {
-                self.transform = .identity
-                self.alpha = 1
-            }
-            completion?()
+        ghost?.removeFromSuperview()
+        let stand = snapshotView(afterScreenUpdates: false)
+        if let stand {
+            stand.isUserInteractionEnabled = false
+            stand.bounds = bounds
+            stand.center = center
+            stand.transform = transform
+            // Over its neighbours: the one closing the gap slid OVER it and
+            // read as the button pushed aside (the owner, 2026-10-23).
+            host.addSubview(stand)
+            ghost = stand
         }
+        isHidden = true
+        transform = .identity
+        alpha = 1
+        let reduced = reducesMotion()
+        let root = layoutRoot ?? host
+        let before = host.bounds.size
+        UIView.animate(withDuration: reduced ? AppearMotion.fadeDuration : AppearMotion.disappearDuration,
+                       delay: 0, options: [.curveEaseInOut, .allowUserInteraction]) {
+            root.layoutIfNeeded()
+            // The ghost rides the row's midline as the row closes on it.
+            if let stand {
+                let shift = self.midlineShift(in: host, from: before)
+                stand.center = CGPoint(x: stand.center.x + shift.x, y: stand.center.y + shift.y)
+            }
+        }
+        guard let stand else {
+            record(reduced ? .fadeOut : .scaleOut)
+            completion?()
+            return
+        }
+        let kind = AppearMotion.disappear(stand, reducesMotion: reduced, pivot: groundOffset, completion: { _ in
+            stand.removeFromSuperview()
+            completion?()
+        })
         record(Self.event(kind))
     }
 
@@ -1006,13 +1724,24 @@ open class AppButton: UIButton {
     }
 
     private func refresh() {
-        configuration = configuration(for: content, phase: phase)
+        var config = configuration(for: content, phase: phase)
+        let margins = slotMargins
+        drawnSlotMargins = margins
+        if margins != .zero {
+            // The content centred on the ground, the system's own fill on it.
+            config.contentInsets.top += margins.top
+            config.contentInsets.leading += margins.leading
+            config.contentInsets.bottom += margins.bottom
+            config.contentInsets.trailing += margins.trailing
+            config.background.backgroundInsets = margins
+        }
+        configuration = config
         refreshLikesHeart()
         materialGround.effect = usesMaterial ? UIBlurEffect(style: .systemThinMaterial) : nil
         materialGround.isHidden = !usesMaterial
         // An alpha, not `isHidden`: Follow → Following inside a morph fades
         // the gradient into the quiet fill.
-        gradientGround.alpha = usesGradient ? 1 : 0
+        prominentGround.alpha = usesProminentFill ? 1 : 0
         refreshAccessibility()
     }
 
@@ -1032,10 +1761,11 @@ open class AppButton: UIButton {
         }
     }
 
-    /// Whether the prominent gradient is the ground now: not when greyed, nor
-    /// as a placeholder's bone. A busy button keeps it (#1180): its fill is
-    /// clear, so without the gradient its white spinner would stand on nothing.
-    public var usesGradient: Bool {
+    /// Whether the prominent fill is the ground now: not when greyed, nor as
+    /// a placeholder's bone. A busy button keeps it (#1180): the
+    /// configuration's own fill is clear, so without it the white spinner
+    /// would stand on nothing.
+    public var usesProminentFill: Bool {
         currentGround == .prominent && isEnabled && phase != .placeholder
     }
 
@@ -1050,8 +1780,8 @@ open class AppButton: UIButton {
         switch currentGround {
         case .prominent?:
             config = .filled()
-            // The gradient view is the ground (#1178); the fill stays clear
-            // over it.
+            // The prominent view is the ground (#1178); the configuration's
+            // fill stays clear over it.
             config.baseBackgroundColor = .clear
             config.baseForegroundColor = .white
         case .quiet?:
@@ -1127,11 +1857,10 @@ open class AppButton: UIButton {
                 AttributedString($0, attributes: AttributeContainer([.font: font, .foregroundColor: UIColor.clear]))
             }
         case .loading:
-            config.showsActivityIndicator = true
-            if config.image == nil {
-                // Words only: the spinner replaces them, in the held width.
-                config.attributedTitle = nil
-            }
+            // No spinner: drawn, the load is the content blurred under a
+            // sheen (`holdLoad`); undrawn — Reduce Motion, off screen — the
+            // content stays, faded.
+            config.baseForegroundColor = (config.baseForegroundColor ?? .label).withAlphaComponent(Metrics.loadingInkAlpha)
         }
         return config
     }
@@ -1232,7 +1961,11 @@ open class AppButton: UIButton {
     public var debugHasBone: Bool { bone != nil }
     public var debugHoldRecognizer: UILongPressGestureRecognizer? { hold }
 
-    public var debugVeilIsShown: Bool { !veil.isHidden }
+    /// Whether the content change is covering the button — the veil, or
+    /// the blurred stand-in.
+    public var debugVeilIsShown: Bool { !veil.isHidden || !blurOverlays.isEmpty }
+    /// Whether the button's own pixels are hidden under its stand-ins.
+    public var debugIsUnderStandIn: Bool { layer.mask != nil }
     /// The wash's current target.
     public var debugWashAlpha: CGFloat { wash.alpha }
     /// A hold beginning, then lifting inside or outside — the action fires

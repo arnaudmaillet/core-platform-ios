@@ -26,6 +26,7 @@ struct RawHueGuardTests {
         "ShareQRCardView.swift": "the QR card is pinned light: its fixed grouped grey",
         // Debug and simulator art.
         "AppButtonGalleryViewController.swift": "the DEBUG button gallery's sample gradient",
+        "AppButtonCatalogViewController.swift": "the DEBUG button catalog's colour trials for the prominent ground",
         "MapIconDebugHUD.swift": "a DEBUG HUD",
         "AppCoordinator.swift": "a DEBUG stand-in picture",
         "SimulatedCaptureSource.swift": "the simulator camera's synthetic frames",

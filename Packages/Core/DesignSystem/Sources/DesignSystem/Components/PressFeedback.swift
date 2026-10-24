@@ -67,6 +67,12 @@ public final class PressFeedback {
         /// settles back on release, silent (it already clicks through its own
         /// detent haptics).
         case hold
+        /// A button pressed as a system Liquid Glass button is (the owner,
+        /// 2026-10-23: "they scale in, we scale out"): it GROWS under the
+        /// finger, by the same few points whatever its width, overshooting a
+        /// little, and springs back past rest on release — ticking on a tap.
+        /// Its interactive stretch towards a dragging finger is not copied.
+        case swell
     }
 
     public enum Metrics {
@@ -133,6 +139,26 @@ public final class PressFeedback {
         /// alpha (a card's furniture fades in). A fifth of a step off opacity
         /// reads as "held" without the control looking disabled.
         public static let pressedDim: Float = 0.15
+        /// The swell's growth, each side, as a share of the button's height:
+        /// measured on a 52pt system glass button (2026-10-23), 8.7pt across
+        /// and 5pt up and down, whatever its width.
+        public static let swellAcross: CGFloat = 0.167
+        public static let swellDown: CGFloat = 0.096
+        /// The swell's springs, measured on the same button: in, at its
+        /// crest within 0.13s and a little past; out, back in 0.13s and a
+        /// third of the way under rest before it settles.
+        public static let swellIn: (response: TimeInterval, dampingRatio: CGFloat) = (0.23, 0.63)
+        public static let swellOut: (response: TimeInterval, dampingRatio: CGFloat) = (0.4, 0.37)
+    }
+
+    /// The scales a swell takes an element of `size` to, across and down —
+    /// see `Metrics.swellAcross`.
+    public static func swelledScale(for size: CGSize) -> (x: CGFloat, y: CGFloat) {
+        guard size.width > 0, size.height > 0 else { return (1, 1) }
+        return (
+            1 + 2 * Metrics.swellAcross * size.height / size.width,
+            1 + 2 * Metrics.swellDown
+        )
     }
 
     /// The scale a press takes an element of `size` to — see `Metrics.depth`.
@@ -168,6 +194,8 @@ public final class PressFeedback {
     /// copy on every sample of every drag; a drag rarely starts inside that
     /// tenth, and when it does the error is a fraction of the six percent.
     public private(set) var scale: CGFloat = 1
+    /// The scales held, across and down — a swell's differ.
+    private var held: (x: CGFloat, y: CGFloat) = (1, 1)
 
     /// Whether a finger is pressing, as far as this feedback knows.
     public private(set) var isPressed = false
@@ -220,6 +248,7 @@ public final class PressFeedback {
     @discardableResult
     public static func attach(
         to control: UIControl,
+        style: Style = .press,
         moving target: UIView? = nil,
         sound: UISound? = .tap,
         scales: Bool = true,
@@ -227,7 +256,7 @@ public final class PressFeedback {
         reducesMotion: @escaping @MainActor () -> Bool = { MotionPreference.reducesMotion }
     ) -> PressFeedback {
         let feedback = PressFeedback(
-            target: target ?? control, style: .press, sound: sound, scales: scales, dims: dims,
+            target: target ?? control, style: style, sound: sound, scales: scales, dims: dims,
             reducesMotion: reducesMotion
         )
         control.addAction(UIAction { _ in feedback.press() }, for: [.touchDown, .touchDragEnter])
@@ -318,8 +347,26 @@ public final class PressFeedback {
             target.layer.add(Self.dimEasing(), forKey: nil)
         }
         let moves = scales && !reducesMotion()
-        let factor = style == .hold ? Metrics.heldScale : Self.pressedScale(for: target.bounds.size)
+        let drawn = drawnRect?() ?? target.bounds
+        pivotOffset = CGPoint(x: drawn.midX - target.bounds.midX, y: drawn.midY - target.bounds.midY)
+        if style == .swell {
+            let swelled = Self.swelledScale(for: drawn.size)
+            held = moves ? swelled : (1, 1)
+            scale = held.y
+            #if DEBUG
+            record(.pressed(scale: scale))
+            #endif
+            guard moves else { return }
+            // Held, then sprung into from where it stands, in one turn: the
+            // two cancel on the first frame, and the spring's overshoot is
+            // the crest past the swell.
+            move(target.layer, Self.holding(swelled.x, swelled.y), forKey: Self.holdKey)
+            move(target.layer, Self.springing(from: (1 / swelled.x, 1 / swelled.y), Metrics.swellIn), forKey: nil)
+            return
+        }
+        let factor = style == .hold ? Metrics.heldScale : Self.pressedScale(for: drawn.size)
         scale = moves ? factor : 1
+        held = (scale, scale)
         #if DEBUG
         record(.pressed(scale: scale))
         #endif
@@ -328,8 +375,8 @@ public final class PressFeedback {
         // ⚠️ **HELD, THEN EASED INTO — IN THAT ORDER, IN ONE TURN.** The hold
         // puts the element at `factor` at once and the transient starts at
         // `1 / factor`, so on the first frame the two cancel and nothing jumps.
-        layer.add(Self.holding(factor), forKey: Self.holdKey)
-        layer.add(Self.easing(from: 1 / factor), forKey: nil)
+        move(layer, Self.holding(factor), forKey: Self.holdKey)
+        move(layer, Self.easing(from: 1 / factor), forKey: nil)
     }
 
     /// The finger lifted, strayed, or was taken by something else.
@@ -343,9 +390,10 @@ public final class PressFeedback {
     /// animations use, written in multiplication.
     public func release(asTap: Bool) {
         let wasPressed = isPressed
-        let held = scale
+        let heldScales = held
         isPressed = false
         scale = 1
+        held = (1, 1)
         if wasPressed { onPressChanged?(false) }
         if isDimmed, let layer = target?.layer {
             isDimmed = false
@@ -353,10 +401,15 @@ public final class PressFeedback {
             layer.add(Self.dimLifting(), forKey: nil)
         }
         guard wasPressed || asTap else { return }
-        let sprang = wasPressed && held != 1
+        let sprang = wasPressed && (heldScales.x != 1 || heldScales.y != 1)
         if sprang, let layer = target?.layer {
             layer.removeAnimation(forKey: Self.holdKey)
-            layer.add(Self.springing(from: held), forKey: nil)
+            mirrors.forEach { $0.removeAnimation(forKey: Self.holdKey) }
+            if style == .swell {
+                move(layer, Self.springing(from: heldScales, Metrics.swellOut), forKey: nil)
+            } else {
+                move(layer, Self.springing(from: heldScales.y), forKey: nil)
+            }
         }
         // ⚠️ **ONE DECISION GATES THE SOUND AND IS WHAT IS RECORDED** — so a
         // test reading "ticked" reads the very condition the tick plays on.
@@ -365,6 +418,73 @@ public final class PressFeedback {
         #if DEBUG
         record(.released(tap: ticks, sprang: sprang))
         #endif
+    }
+
+    /// Layers that move with the target — a stand-in drawn in its place
+    /// (`AppButton`'s content change): every scale the press adds to the
+    /// target, it adds to them too, so a release lands on what is on screen.
+    public var mirrors: [CALayer] = []
+
+    /// What the target draws, in its own bounds — the bounds when nil. A
+    /// button holding a slot wider than its capsule (`AppButton.groundRect`)
+    /// swells by the capsule's size and about its middle: by the slot's, a
+    /// leading capsule grew to the left only, and too little (the owner,
+    /// 2026-10-23).
+    public var drawnRect: (@MainActor () -> CGRect)?
+    /// The pivot's offset from the target's middle, for the press under way.
+    private var pivotOffset: CGPoint = .zero
+
+    /// ⚠️ EVERY SCALE GOES ON UNDER A KEY of its own: an animation added
+    /// under none cannot be found again, and a stand-in taking the target's
+    /// place could not pick up the spring back already running. The stand-in
+    /// is drawn on the capsule's middle: it scales about its own.
+    private func move(_ layer: CALayer, _ animation: CAAnimation, forKey key: String?) {
+        motions += 1
+        let named = key ?? "\(Self.motionKey).\(motions)"
+        layer.add(Self.pivoted(animation, by: pivotOffset), forKey: named)
+        mirrors.forEach { $0.add(animation, forKey: named) }
+    }
+
+    /// `animation`'s scales taken about a point `offset` from the layer's
+    /// middle: each scale `s` moved by `(1 − s) · offset`, which keeps that
+    /// point still.
+    private static func pivoted(_ animation: CAAnimation, by offset: CGPoint) -> CAAnimation {
+        guard offset != .zero, let basic = animation.copy() as? CABasicAnimation, basic.keyPath == "transform" else { return animation }
+        func moved(_ value: Any?) -> Any? {
+            guard let transform = (value as? NSValue)?.caTransform3DValue else { return value }
+            let (across, down) = (transform.m11, transform.m22)
+            return NSValue(caTransform3D: CATransform3DConcat(
+                CATransform3DMakeScale(across, down, 1),
+                CATransform3DMakeTranslation((1 - across) * offset.x, (1 - down) * offset.y, 0)
+            ))
+        }
+        basic.fromValue = moved(basic.fromValue)
+        basic.toValue = moved(basic.toValue)
+        return basic
+    }
+
+    /// `animation`'s scales alone, any pivot's shift taken out.
+    private static func unpivoted(_ animation: CAAnimation) -> CAAnimation {
+        guard let basic = animation.copy() as? CABasicAnimation, basic.keyPath == "transform" else { return animation }
+        func scaleOnly(_ value: Any?) -> Any? {
+            guard let transform = (value as? NSValue)?.caTransform3DValue else { return value }
+            return NSValue(caTransform3D: CATransform3DMakeScale(transform.m11, transform.m22, 1))
+        }
+        basic.fromValue = scaleOnly(basic.fromValue)
+        basic.toValue = scaleOnly(basic.toValue)
+        return basic
+    }
+
+    private var motions = 0
+    private static let motionKey = "designSystem.pressFeedback.motion"
+
+    /// The press's scales now on `layer`, onto `mirror` — a stand-in that
+    /// takes the target's place mid-press.
+    public static func copyPress(from layer: CALayer, to mirror: CALayer) {
+        for key in layer.animationKeys() ?? [] where key == holdKey || key.hasPrefix(motionKey) {
+            guard let running = layer.animation(forKey: key) else { continue }
+            mirror.add(unpivoted(running), forKey: key)
+        }
     }
 
     // MARK: - The curves
@@ -412,9 +532,13 @@ public final class PressFeedback {
     /// Core Animation's own words for `isAdditive` are "for affine transforms
     /// the two matrices are concatenated".
     private static func holding(_ factor: CGFloat) -> CABasicAnimation {
+        holding(factor, factor)
+    }
+
+    private static func holding(_ across: CGFloat, _ down: CGFloat) -> CABasicAnimation {
         let hold = CABasicAnimation(keyPath: "transform")
         hold.isAdditive = true
-        let value = NSValue(caTransform3D: CATransform3DMakeScale(factor, factor, 1))
+        let value = NSValue(caTransform3D: CATransform3DMakeScale(across, down, 1))
         hold.fromValue = value
         hold.toValue = value
         hold.duration = 1
@@ -446,6 +570,23 @@ public final class PressFeedback {
         spring.mass = 1
         spring.stiffness = omega * omega
         spring.damping = 2 * releaseDampingRatio(travel: 1 - factor) * omega
+        spring.duration = spring.settlingDuration
+        return spring
+    }
+
+    /// A spring from `scales` home, at the response and damping ratio given
+    /// — the swell's, both measured.
+    private static func springing(
+        from scales: (x: CGFloat, y: CGFloat), _ curve: (response: TimeInterval, dampingRatio: CGFloat)
+    ) -> CASpringAnimation {
+        let spring = CASpringAnimation(keyPath: "transform")
+        spring.isAdditive = true
+        spring.fromValue = NSValue(caTransform3D: CATransform3DMakeScale(scales.x, scales.y, 1))
+        spring.toValue = NSValue(caTransform3D: CATransform3DIdentity)
+        let omega = 2 * CGFloat.pi / CGFloat(curve.response)
+        spring.mass = 1
+        spring.stiffness = omega * omega
+        spring.damping = 2 * curve.dampingRatio * omega
         spring.duration = spring.settlingDuration
         return spring
     }

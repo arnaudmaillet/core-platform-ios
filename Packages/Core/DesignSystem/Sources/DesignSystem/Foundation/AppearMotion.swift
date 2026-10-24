@@ -35,16 +35,23 @@ public enum AppearMotion {
         return keys.contains { $0.contains("opacity") || $0.contains("transform") }
     }
 
+    /// A scale by `factor` about a point `pivot` from the view's middle —
+    /// what a view draws off-centre in its bounds (a capsule in a wider
+    /// slot) grows and shrinks about its own middle.
+    public static func scaled(_ factor: CGFloat, about pivot: CGPoint) -> CGAffineTransform {
+        CGAffineTransform(a: factor, b: 0, c: 0, d: factor, tx: (1 - factor) * pivot.x, ty: (1 - factor) * pivot.y)
+    }
+
     /// Brings `view` in. `alongside` runs inside the animation (a stack
     /// making room); the caller has made the view visible, or does it there.
     @MainActor @discardableResult
     public static func appear(
-        _ view: UIView, reducesMotion: Bool, alongside: @escaping () -> Void = {}
+        _ view: UIView, reducesMotion: Bool, pivot: CGPoint = .zero, alongside: @escaping () -> Void = {}
     ) -> Kind {
         let inFlight = isInFlight(view)
         if !inFlight {
             view.alpha = 0
-            if !reducesMotion { view.transform = CGAffineTransform(scaleX: appearScale, y: appearScale) }
+            if !reducesMotion { view.transform = scaled(appearScale, about: pivot) }
         }
         let options: UIView.AnimationOptions = inFlight
             ? [.allowUserInteraction, .beginFromCurrentState]
@@ -71,7 +78,7 @@ public enum AppearMotion {
     /// the view must stay.
     @MainActor @discardableResult
     public static func disappear(
-        _ view: UIView, reducesMotion: Bool, alongside: @escaping () -> Void = {},
+        _ view: UIView, reducesMotion: Bool, pivot: CGPoint = .zero, alongside: @escaping () -> Void = {},
         completion: @escaping (Bool) -> Void = { _ in }
     ) -> Kind {
         let options: UIView.AnimationOptions = isInFlight(view)
@@ -81,7 +88,7 @@ public enum AppearMotion {
             withDuration: reducesMotion ? fadeDuration : disappearDuration, delay: 0, options: options
         ) {
             view.alpha = 0
-            if !reducesMotion { view.transform = CGAffineTransform(scaleX: appearScale, y: appearScale) }
+            if !reducesMotion { view.transform = scaled(appearScale, about: pivot) }
             alongside()
         } completion: { finished in
             completion(finished)

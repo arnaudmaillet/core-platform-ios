@@ -48,23 +48,23 @@ struct AppButtonTests {
     /// Follow is the pink-to-white gradient with white words (#1178);
     /// Following, the quiet grey in the label's ink; a greyed button and a
     /// placeholder wear no gradient.
-    @Test func followIsThePinkGradientWithWhiteWordsAndFollowingTheQuietGrey() {
+    @Test func followIsTheSolidPinkWithWhiteWordsAndFollowingTheQuietGrey() {
         let button = follow()
-        #expect(button.usesGradient)
-        #expect(button.configuration?.baseBackgroundColor == .clear, "the gradient view is the ground")
+        #expect(button.usesProminentFill)
+        #expect(button.configuration?.baseBackgroundColor == .clear, "the solid view is the ground")
         #expect(button.configuration?.baseForegroundColor == .white)
         button.setSelected(true, animated: false)
-        #expect(!button.usesGradient)
+        #expect(!button.usesProminentFill)
         #expect(button.configuration?.baseBackgroundColor == HeroTray.fill)
         #expect(button.configuration?.baseForegroundColor == .label)
         button.setSelected(false, animated: false)
         button.isEnabled = false
-        #expect(!button.usesGradient, "greyed")
+        #expect(!button.usesProminentFill, "greyed")
         button.isEnabled = true
         button.setPhase(.loading, animated: false)
-        #expect(button.usesGradient, "a busy Follow keeps its ground under the white spinner (#1180)")
+        #expect(button.usesProminentFill, "a busy Follow keeps its ground under the white spinner (#1180)")
         button.setPhase(.placeholder, animated: false)
-        #expect(!button.usesGradient, "the bone is the whole picture")
+        #expect(!button.usesProminentFill, "the bone is the whole picture")
     }
 
     @Test func theCardShapeIsARoundedRectangle() {
@@ -161,10 +161,10 @@ struct AppButtonTests {
         button.busyLabel = "Following…"
         button.setPhase(.loading, animated: false)
         host.layoutIfNeeded()
-        #expect(button.configuration?.showsActivityIndicator == true)
-        #expect(button.configuration?.title == nil, "the spinner replaces words-only content")
+        #expect(button.configuration?.showsActivityIndicator == false, "a load has no spinner (the owner, 2026-10-23)")
+        #expect(button.configuration?.title == "Follow", "an undrawn load keeps its words, faded")
         #expect(abs(button.bounds.width - width) < 0.5, "the width moved while loading: \(width) → \(button.bounds.width)")
-        #expect(abs(button.bounds.height - height) < 0.5, "the spinner grew the pill: \(height) → \(button.bounds.height)")
+        #expect(abs(button.bounds.height - height) < 0.5, "the load grew the pill: \(height) → \(button.bounds.height)")
         button.sendActions(for: .primaryActionTriggered)
         #expect(tapped == 0, "a re-tap reached the action while loading")
         #expect(button.isAccessibilityElement)
@@ -179,16 +179,48 @@ struct AppButtonTests {
 
     /// A load started before the first layout holds the content's real
     /// size, not the unresolved one (it came out "S…").
-    @Test func aSymbolButtonKeepsItsWordsWhileTheSpinnerReplacesTheImage() {
+    @Test func aLoadStartedBeforeLayoutHoldsTheContentsSize() {
         let content = AppButton.Content(title: "Save", symbol: "bookmark")
         let button = AppButton(aspect: .pill(.quiet), size: .header, content: content)
         button.setPhase(.loading, animated: false)
-        #expect(button.configuration?.showsActivityIndicator == true)
+        #expect(button.configuration?.showsActivityIndicator == false)
         #expect(button.configuration?.title == "Save")
         let (window, host) = hosted(button)
         defer { window.isHidden = true }
         host.layoutIfNeeded()
         #expect(abs(button.bounds.width - button.fittingSize(for: content).width) < 0.5, "held \(button.bounds)")
+    }
+
+    /// A drawn load holds the button as it stands the instant before its
+    /// content changes — blurred under a sheen — takes the answer on the
+    /// model unseen, and morphs to it when the load ends (the owner,
+    /// 2026-10-23).
+    @Test func aDrawnLoadHoldsTheBlurAndMorphsToTheAnswer() async {
+        let button = follow()
+        let (window, _) = hosted(button)
+        defer { window.isHidden = true }
+        button.setPhase(.loading, animated: true)
+        #expect(button.debugVeilIsShown, "the load was not drawn")
+        #expect(button.debugIsUnderStandIn)
+        button.setContent(.title("Following"), selected: true, animated: true)
+        #expect(button.debugVeilIsShown, "the answer showed before the load ended")
+        button.setPhase(.content, animated: true)
+        #expect(button.events.last == .blurMorph)
+        #expect(await settle { button.configuration?.title == "Following" && !button.debugVeilIsShown && !button.debugIsUnderStandIn })
+        #expect(button.isSelected)
+    }
+
+    /// A drawn load that ends in a placeholder shows the bone, not a morph.
+    @Test func aDrawnLoadIntoAPlaceholderShowsTheBone() {
+        let button = follow()
+        let (window, _) = hosted(button)
+        defer { window.isHidden = true }
+        button.setPhase(.loading, animated: true)
+        #expect(button.debugIsUnderStandIn)
+        button.setPhase(.placeholder, animated: true)
+        #expect(button.debugHasBone, "the load into a placeholder skipped the bone")
+        #expect(!button.debugIsUnderStandIn)
+        #expect(!button.debugVeilIsShown)
     }
 
     @Test func aPlaceholderHoldsTheWidestAnswerAndClaimsNone() {
@@ -231,6 +263,33 @@ struct AppButtonTests {
         #expect(button.intrinsicContentSize.width == 120)
     }
 
+    /// A reserved slot holds the largest content whatever is shown, and the
+    /// ground hugs the content shown, set in the slot by the anchor.
+    @Test(arguments: AppButton.MorphAnchor.allCases)
+    func aReservedSlotHoldsItsSizeAndSetsTheGroundByTheAnchor(_ anchor: AppButton.MorphAnchor) {
+        let button = follow()
+        button.reservedContents = [.title("Follow"), .title("Follow Back")]
+        button.morphAnchor = anchor
+        button.holdsReservedSize = true
+        let (window, host) = hosted(button)
+        defer { window.isHidden = true }
+        let slot = button.bounds
+        let ground = button.groundRect
+        let natural = button.fittingSize(for: .title("Follow"))
+        #expect(abs(slot.width - button.fittingSize(for: .title("Follow Back")).width) < 0.5)
+        #expect(abs(ground.width - natural.width) < 0.5, "the ground hugs \"Follow\": \(ground.width) vs \(natural.width)")
+        switch anchor {
+        case .leading: #expect(abs(ground.minX - slot.minX) < 0.5)
+        case .trailing: #expect(abs(ground.maxX - slot.maxX) < 0.5)
+        case .center, .top, .bottom: #expect(abs(ground.midX - slot.midX) < 0.5)
+        }
+
+        button.setContent(.title("Follow Back"), animated: false)
+        host.layoutIfNeeded()
+        #expect(button.bounds.size == slot.size, "the slot moved its neighbours")
+        #expect(abs(button.groundRect.width - slot.width) < 0.5, "the widest fills the slot")
+    }
+
     // MARK: - Motion, and each fallback
 
     @Test(arguments: [false, true])
@@ -266,12 +325,33 @@ struct AppButtonTests {
         button.setContent(.title("Follow Back"), animated: true)
         #expect(button.events.last == (reduced ? .crossFade : .blurMorph))
         if !reduced {
+            // The new words are on the model at once, but never on screen
+            // before the blur covers them: the button is hidden under its
+            // stand-in, which draws the old words blurring.
             #expect(button.debugVeilIsShown)
-            #expect(button.configuration?.title == "Follow", "the words changed before the blur covered them")
+            #expect(button.debugIsUnderStandIn, "the new words showed before the blur covered them")
         }
         #expect(await settle { button.configuration?.title == "Follow Back" && !button.debugVeilIsShown })
         host.layoutIfNeeded()
         #expect(button.bounds.width > narrow, "the width did not follow the content")
+    }
+
+    /// A double tap turns the morph around on its way: the button still
+    /// takes the second tap, and the second change starts from what is on
+    /// screen, not from the end of the first.
+    @Test func aChangeMidMorphTurnsItAround() async {
+        let button = follow()
+        let (window, _) = hosted(button)
+        defer { window.isHidden = true }
+        button.setContent(.title("Follow Back"), animated: true)
+        #expect(button.debugIsUnderStandIn)
+        #expect(button.alpha == 1, "a button under 0.01 alpha takes no tap: the second tap fell through")
+        let middle = CGPoint(x: button.bounds.midX, y: button.bounds.midY)
+        #expect(button.hitTest(middle, with: nil) === button, "the second tap did not reach the button")
+        button.setContent(.title("Follow"), animated: true)
+        #expect(button.events.last == .blurMorph)
+        #expect(button.debugVeilIsShown)
+        #expect(await settle { button.configuration?.title == "Follow" && !button.debugVeilIsShown && !button.debugIsUnderStandIn })
     }
 
     @Test(arguments: [false, true])
@@ -341,7 +421,10 @@ struct AppButtonTests {
         button.setContent(.title("Following"), selected: true, animated: true)
         #expect(button.events.last == (reduced ? .crossFade : .blurMorph))
         if !reduced {
-            #expect(!button.isSelected, "the ground changed before the blur covered it")
+            // The ground changes on the model under the stand-in, which
+            // draws the old one blurring.
+            #expect(button.debugVeilIsShown)
+            #expect(button.debugIsUnderStandIn, "the ground changed before the blur covered it")
         }
         #expect(await settle { button.isSelected && button.configuration?.title == "Following" && !button.debugVeilIsShown })
         #expect(button.currentGround == .quiet)
@@ -384,17 +467,20 @@ struct AppButtonTests {
     // MARK: - Press, haptic, sound
 
     /// One press per button (#866): a held press scales once, springs back
-    /// once — and Reduce Motion takes the scale away.
+    /// once — and Reduce Motion takes the scale away. A pill SWELLS, as a
+    /// system glass button does (the owner, 2026-10-23); a bare button gives.
     @Test(arguments: [false, true])
     func oneHeldPressScalesOnceAndSpringsBackOnce(_ reduced: Bool) throws {
         let button = follow(reduced: reduced)
         let (window, _) = hosted(button)
         defer { window.isHidden = true }
         let press = try #require(button.pressFeedback)
+        #expect(press.style == .swell)
         button.sendActions(for: .touchDown)
         button.sendActions(for: .touchDragEnter)
         #expect(press.isPressed)
-        #expect(press.scale == (reduced ? 1 : PressFeedback.pressedScale(for: button.bounds.size)))
+        #expect(press.scale == (reduced ? 1 : PressFeedback.swelledScale(for: button.bounds.size).y))
+        #expect(reduced || press.scale > 1, "a pill gave under the finger instead of swelling")
         button.sendActions(for: .touchUpInside)
         let presses = press.debugEvents.filter { if case .pressed = $0 { true } else { false } }
         let releases = press.debugEvents.filter { if case .released = $0 { true } else { false } }
@@ -402,6 +488,18 @@ struct AppButtonTests {
         #expect(releases.count == 1)
         #expect(press.debugEvents.last == .released(tap: false, sprang: !reduced), "silent unless a sound is asked")
         #expect(PressFeedback.attached(to: button) === press, "a second press was attached")
+    }
+
+    @Test func aBareButtonGivesUnderTheFinger() throws {
+        let button = AppButton(aspect: .bare, size: .inline, content: AppButton.Content(symbol: "heart", count: 3))
+        button.reducesMotion = { false }
+        let (window, _) = hosted(button)
+        defer { window.isHidden = true }
+        let press = try #require(button.pressFeedback)
+        #expect(press.style == .press)
+        button.sendActions(for: .touchDown)
+        #expect(press.scale == PressFeedback.pressedScale(for: button.bounds.size))
+        #expect(press.scale < 1)
     }
 
     @Test func aSoundIsTheTapsTick() throws {
