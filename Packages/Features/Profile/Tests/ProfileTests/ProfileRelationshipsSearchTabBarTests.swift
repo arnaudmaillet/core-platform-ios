@@ -13,6 +13,10 @@ import UIKit
 /// with nothing to take it away again after the pop. A list at the root of a
 /// tab's stack still hides the bar for the search and gives it back after.
 ///
+/// The search is the system's (`UISearchController`, #1679): its delegate's
+/// `willPresent` / `willDismiss` are what ask, and are called here as UIKit
+/// calls them — a windowless test host never runs the presentation itself.
+///
 /// What is asserted is what the screen ASKS its tab bar controller for, read
 /// through a recording subclass. The bar's visible state cannot tell the two
 /// apart: an explicit hide and show leave `isTabBarHidden` where it started,
@@ -66,8 +70,8 @@ struct ProfileRelationshipsSearchTabBarTests {
         try #require(list.tabBarController === tabs, "guard: the list is not inside the tab bar controller")
         try #require(list.hidesBottomBarWhenPushed, "guard: the list no longer hides the bar when pushed")
 
-        list.presentSearch()
-        list.dismissSearch()
+        list.willPresentSearchController(list.searchController)
+        list.willDismissSearchController(list.searchController)
 
         #expect(!tabs.requests.contains(false),
                 "Cancel showed the tab bar over a pushed list: \(tabs.requests)")
@@ -83,11 +87,25 @@ struct ProfileRelationshipsSearchTabBarTests {
         list.loadViewIfNeeded()
         try #require(list.tabBarController === tabs, "guard: the list is not inside the tab bar controller")
 
-        list.presentSearch()
+        list.willPresentSearchController(list.searchController)
         #expect(tabs.requests == [true], "the search did not hide the bar it owns")
 
-        list.dismissSearch()
+        list.willDismissSearchController(list.searchController)
         #expect(tabs.requests == [true, false], "Cancel did not give back the bar the list owns")
+    }
+
+    /// The magnifier is the system search's `.integratedButton`, placed by
+    /// UIKit — no field in the title slot, no hand-made bar dissolve (#1679).
+    /// ⚠️ Never the placement item among the bar's items: iOS 26 throws.
+    @Test func theMagnifierIsTheSystemSearchBarsItem() throws {
+        let list = makeList(isSelf: true)
+        list.loadViewIfNeeded()
+        #expect(list.navigationItem.searchController === list.searchController)
+        #expect(list.navigationItem.preferredSearchBarPlacement == .integratedButton)
+        #expect(list.searchController.searchResultsController == nil, "the lists filter in place")
+        let trailing = list.navigationItem.rightBarButtonItems ?? []
+        #expect(!trailing.contains { $0 === list.navigationItem.searchBarPlacementBarButtonItem })
+        #expect(list.navigationItem.titleView == nil, "a field in the title slot")
     }
 }
 
