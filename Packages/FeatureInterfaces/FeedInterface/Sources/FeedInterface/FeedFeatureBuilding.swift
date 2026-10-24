@@ -53,6 +53,11 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
     func makeForYouViewController(
         onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
     ) -> UIViewController
+    /// EXPERIMENTAL (#1681, `ForYouFullScreenExperiment`): the For You tab's
+    /// root as the full-screen post feed over the Discover list — the author
+    /// pill in the top bar, save and repost upright in the action column, no
+    /// toolbar, the tab bar at the bottom.
+    func makeForYouFullScreenFeedViewController() -> UIViewController
     /// ONE POST SCREEN (#1577, the owner 2026-10-22): the vertical full-screen
     /// feed on `postID`, its comments up when `opensComments` — what the
     /// `.post` and `.comments` routes push (a tapped push notification,

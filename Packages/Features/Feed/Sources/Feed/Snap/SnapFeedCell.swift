@@ -633,6 +633,21 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     var onRequestSoundToggle: (() -> Void)?
     /// The sound bubble was held: the screen opens the sound sheet (#671).
     var onRequestSoundSheet: (() -> Void)?
+
+    /// EXPERIMENTAL (#1681, the For You root): save and repost upright in
+    /// the column (`SnapPostActionsCapsule`), the star drawn for `saved`.
+    func setPostActions(shown: Bool, saved: Bool) {
+        chrome.showsPostActions = shown
+        chrome.postActions.setSaved(saved)
+    }
+    /// The capsule's star for the post on show, after a save anywhere.
+    func setPostSaved(_ saved: Bool) { chrome.postActions.setSaved(saved) }
+    /// The capsule's star was tapped: the screen saves or unsaves the post.
+    var onRequestSave: (() -> Void)?
+    #if DEBUG
+    /// The column's post actions, for tests (#1681).
+    var debugPostActions: SnapPostActionsCapsule { chrome.postActions }
+    #endif
     /// The anchor's wallet context (affordability + undoable tally) —
     /// pushed at configure and on every wallet change.
     func setBoostContext(balance: Int, undoable: Int, stakeShots: Int = 0) {
@@ -1713,6 +1728,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         chrome.onSoundToggleRequested = { [weak self] in self?.onRequestSoundToggle?() }
         chrome.onSoundSheetRequested = { [weak self] in self?.onRequestSoundSheet?() }
+        chrome.postActions.onSave = { [weak self] in self?.onRequestSave?() }
         #if DEBUG
         // Which projection fields are present the moment the page is
         // configured. Everything listed here is supposed to render at 0ms from

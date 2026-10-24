@@ -34,6 +34,7 @@ struct CareModeSettingsTests {
     }
 
     @Test func theDisplayPageOffersCareMode() {
-        #expect(AppPreferencesViewController.sections(for: .display) == [.appearance, .care, .motion])
+        #expect(AppPreferencesViewController.sections(for: .display) == [.appearance, .care, .motion, .experiments],
+                "a test build is a DEBUG build: the experiments switch shows (#1681)")
     }
 }

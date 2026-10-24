@@ -162,10 +162,32 @@ final class CommentsInputBar: UIView {
     }
 
     private func applyReservedColumn() {
+        postActions.isUserInteractionEnabled = hostsActionColumn
+        postActions.alpha = hostsActionColumn ? 1 : 0
         guard !hostsActionColumn else { return }
         railButton.alpha = 0
         boostButton.alpha = 0
         railRecord.setSpinning(false)
+    }
+
+    /// EXPERIMENTAL (#1681, the For You root): save and repost upright
+    /// between the stake and the slot — drawn here on a text page, whose
+    /// column is the composer's; only its room reserved under a media page's
+    /// column, which draws its own (`SnapChromeView.showsPostActions`).
+    let postActions = SnapPostActionsCapsule()
+    var showsPostActions = false {
+        didSet {
+            guard showsPostActions != oldValue else { return }
+            applyPostActions()
+        }
+    }
+    private var boostAboveRail: NSLayoutConstraint!
+
+    private func applyPostActions() {
+        boostAboveRail.constant = -(SnapActionColumn.gap + (showsPostActions ? SnapPostActionsCapsule.columnExtent : 0))
+        postActions.isHidden = !showsPostActions || !showsStake
+        applyReservedColumn()
+        setNeedsLayout()
     }
 
     /// Whether the column carries the stake bubble. A conversation's does not:
@@ -193,10 +215,11 @@ final class CommentsInputBar: UIView {
     /// bubble without — and the field grows beside the stake rather than
     /// under it.
     static func restingHeight(
-        for category: UIContentSizeCategory, showsStake: Bool = true, likeFace: Bool = true
+        for category: UIContentSizeCategory, showsStake: Bool = true, likeFace: Bool = true, postActions: Bool = false
     ) -> CGFloat {
         let bubble = SnapActionColumn.bubbleSize
-        let column = bubble + (showsStake ? stakeSide(likeFace: likeFace) + SnapActionColumn.gap : 0)
+        let actions = showsStake && postActions ? SnapPostActionsCapsule.columnExtent : 0
+        let column = bubble + (showsStake ? stakeSide(likeFace: likeFace) + SnapActionColumn.gap : 0) + actions
         return max(column, restingInputRowHeight(for: category))
     }
 
@@ -628,6 +651,10 @@ final class CommentsInputBar: UIView {
         // avatar opens the row (a composer says who is speaking before it
         // offers anything else); it is silent and rides with the field.
         let bubble = SnapActionColumn.bubbleSize
+        boostAboveRail = boostButton.bottomAnchor.constraint(equalTo: railButton.topAnchor, constant: -SnapActionColumn.gap)
+        postActions.translatesAutoresizingMaskIntoConstraints = false
+        postActions.isHidden = true
+        addSubview(postActions)
         fieldTrailing = field.trailingAnchor.constraint(
             equalTo: trailingAnchor, constant: -Self.fieldTrailingInset(progress: 0)
         )
@@ -653,7 +680,11 @@ final class CommentsInputBar: UIView {
             railButton.heightAnchor.constraint(equalToConstant: bubble),
             railButton.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
             boostButton.trailingAnchor.constraint(equalTo: trailingAnchor),
-            boostButton.bottomAnchor.constraint(equalTo: railButton.topAnchor, constant: -SnapActionColumn.gap),
+            boostAboveRail,
+            postActions.trailingAnchor.constraint(equalTo: trailingAnchor),
+            postActions.widthAnchor.constraint(equalToConstant: bubble),
+            postActions.heightAnchor.constraint(equalToConstant: SnapPostActionsCapsule.height),
+            postActions.bottomAnchor.constraint(equalTo: railButton.topAnchor, constant: -SnapActionColumn.gap),
             boostButton.widthAnchor.constraint(equalToConstant: bubble),
             stakeHeight,
             // The boost's own station: the two never show at once.
@@ -742,6 +773,7 @@ final class CommentsInputBar: UIView {
         // A reserved column is the page's, drawn above: not the bar's touch.
         guard hostsActionColumn else { return false }
         if !railButton.isHidden, railButton.frame.contains(point) { return true }
+        if !postActions.isHidden, postActions.frame.contains(point) { return true }
         guard showsStake else { return false }
         let station = visibilityMenu == nil ? boostButton : visibilityButton
         return station.frame.contains(point)
@@ -787,6 +819,7 @@ final class CommentsInputBar: UIView {
         }
         boostButton.isHidden = !showsStake || visibilityMenu != nil
         visibilityButton.isHidden = !showsStake || visibilityMenu == nil
+        postActions.isHidden = !showsPostActions || !showsStake
         applyLikeBadge(animated: false)
         applyReservedColumn()
         setNeedsLayout()
