@@ -1796,7 +1796,11 @@ final class SnapFeedViewController: UIViewController {
                 ? nil : walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width,
             sort: sortOnBar
                 ? SnapBarPillWidths.Sort(glyph: commentSortButton.glyphWidth, titled: commentSortButton.titledWidth)
-                : nil
+                : nil,
+            // The footer's glyph items grow with the text size (#1679).
+            toolbarIcon: UIFontMetrics(forTextStyle: .body).scaledValue(
+                for: SnapBarPillWidths.defaultToolbarIcon, compatibleWith: traitCollection
+            )
         )
         barPillWidths = widths
         commentSortButton.setTitleHidden(sortOnBar && !widths.sortShowsTitle)

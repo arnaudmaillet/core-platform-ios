@@ -51,17 +51,46 @@ struct SnapBarPillWidthsTests {
         }
     }
 
-    /// The toolbar: the capsule the attribution shares with the mute button
-    /// is the SAME width with and without the button, and the whole row fits.
+    /// The toolbar: the author pill and the footer's stock items fit on every
+    /// phone, at the default text size and at XXXL, whose glyph items are
+    /// wider (#1679: measured 49 on the iPhone SE).
     @Test(arguments: phoneWidths)
-    func theAudioCapsuleKeepsItsWidthWithOrWithoutTheMuteButton(_ width: CGFloat) {
-        let widths = SnapBarPillWidths.resolve(
-            navBarWidth: width, toolbarWidth: width, walletWidth: Self.wallet, sort: nil
+    func theFooterRunFitsAtEveryTextSize(_ width: CGFloat) {
+        for icon in [SnapBarPillWidths.defaultToolbarIcon, 49, 52] as [CGFloat] {
+            let widths = SnapBarPillWidths.resolve(
+                navBarWidth: width, toolbarWidth: width, walletWidth: Self.wallet, sort: nil, toolbarIcon: icon
+            )
+            #expect(widths.toolbarAuthor + SnapBarPillWidths.toolbarReserve(icon: icon) <= width,
+                    "\(width)pt, icon \(icon): the footer run overflows")
+            #expect(widths.toolbarAuthor >= 80, "\(width)pt, icon \(icon): a pill of \(widths.toolbarAuthor) shows no name")
+        }
+        // A larger text size only ever takes room from the pill.
+        let base = SnapBarPillWidths.resolve(navBarWidth: width, toolbarWidth: width, walletWidth: nil, sort: nil)
+        let large = SnapBarPillWidths.resolve(
+            navBarWidth: width, toolbarWidth: width, walletWidth: nil, sort: nil, toolbarIcon: 49
         )
-        let slot = SnapBarPillWidths.soundSlot
-        #expect(widths.attribution(soundShown: true) + slot == widths.attribution(soundShown: false))
-        #expect(widths.attribution(soundShown: true) + SnapBarPillWidths.toolbarReserve <= width)
-        #expect(widths.attribution(soundShown: true) > 0)
+        #expect(large.toolbarAuthor < base.toolbarAuthor)
+    }
+
+    /// ⚠️ THE FOOTER AGAINST THE BAR AS MEASURED, NOT AGAINST ITSELF (#1679).
+    /// The test host draws no Liquid Glass platters — its stock items come
+    /// out narrower than a device's, so a fold the app shows never happens in
+    /// a window here (checked: at 375pt and XXXL every item was hosted). So the
+    /// gate is the run read off the app's own frames (`-dump-bars`, iPhone SE,
+    /// iOS 27), literal here and never derived from `toolbarReserve`: 27.5pt
+    /// margins, the pill's glass +10, 12.5pt gaps, ⋯'s 48, and the [☆ ⇄]
+    /// platter — 107 at the default size; at XXXL ☆ alone measured 59 (49 +
+    /// 10), so the two in one platter are 2 × 49 + 31.
+    @Test(arguments: phoneWidths)
+    func theFooterFitsTheRunTheAppDrew(_ width: CGFloat) {
+        let measured: [(icon: CGFloat, platter: CGFloat)] = [(38, 107), (49, 129)]
+        for (icon, platter) in measured {
+            let pill = SnapBarPillWidths.resolve(
+                navBarWidth: width, toolbarWidth: width, walletWidth: Self.wallet, sort: nil, toolbarIcon: icon
+            ).toolbarAuthor
+            let run = 27.5 + (pill + 10) + 12.5 + platter + 12.5 + 48 + 27.5
+            #expect(run <= width, "\(width)pt, \(icon)pt glyphs: the footer is \(run) — ⇄ folds into •••")
+        }
     }
 
     /// What a pill's width depends on is the bars — and the one input that
@@ -90,7 +119,7 @@ struct SnapBarPillWidthsTests {
     /// keeps the old one. On the iPhone 18 Pro with a "250" balance (71pt) the
     /// pill is the cap, no longer the bar's 193pt of room.
     @Test func theAuthorPillIsNarrowerThanTheAudioCapsuleCap() {
-        #expect(SnapBarPillWidths.authorCap < SnapBarPillWidths.attributionCap)
+        #expect(SnapBarPillWidths.authorCap < SnapBarPillWidths.toolbarAuthorCap)
         #expect(SnapBarPillWidths.authorCap >= SnapBarPillWidths.comfortableAuthor)
         let pro = SnapBarPillWidths.resolve(navBarWidth: 402, toolbarWidth: 402, walletWidth: 71, sort: nil)
         #expect(pro.author == SnapBarPillWidths.authorCap)
@@ -103,7 +132,7 @@ struct SnapBarPillWidthsTests {
             navBarWidth: 200, toolbarWidth: 200, walletWidth: 180, sort: Self.sort
         )
         #expect(widths.author == SnapBarPillWidths.minimum)
-        #expect(widths.attributionWithSound == SnapBarPillWidths.minimum)
+        #expect(widths.toolbarAuthor == SnapBarPillWidths.minimum)
     }
 
     // MARK: - On a real bar
