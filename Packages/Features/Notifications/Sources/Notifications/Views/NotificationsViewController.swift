@@ -90,6 +90,7 @@ final class NotificationsViewController: UIViewController {
         super.init(nibName: nil, bundle: nil)
         if let clearItem {
             clearItem.accessibilityLabel = "Clear All"
+            clearItem.identifier = "notifications.clear-all"
             clearItem.isEnabled = false
             clearItem.primaryAction = UIAction(image: UIImage(systemName: "trash")) { [weak self] _ in
                 self?.clearTapped()

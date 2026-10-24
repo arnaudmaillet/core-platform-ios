@@ -189,6 +189,7 @@ final class ProfileCardViewController: UIViewController {
             systemItem: .close,
             primaryAction: UIAction { [weak self] _ in self?.close() }
         )
+        close.identifier = "profileCard.close"
         navigationItem.rightBarButtonItem = close
     }
 

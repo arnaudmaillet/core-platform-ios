@@ -93,9 +93,7 @@ final class ChangeContactViewController: UIViewController {
         super.viewDidLoad()
         navigationItem.largeTitleDisplayMode = .never
         view.backgroundColor = .systemGroupedBackground
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: "Send Code", style: .prominent, target: self, action: #selector(primaryTapped)
-        )
+        navigationItem.rightBarButtonItem = primaryItem(title: "Send Code")
 
         for label in [promptLabel, footerLabel] {
             label.numberOfLines = 0
@@ -181,8 +179,8 @@ final class ChangeContactViewController: UIViewController {
             codeField.isHidden = true
             resendButton.isHidden = true
             editAddressButton.isHidden = true
-            navigationItem.rightBarButtonItem?.title = "Send Code"
-            navigationItem.rightBarButtonItem?.isEnabled = address != nil && address != current && !isWorking
+            showPrimary(title: "Send Code")
+            ownTrailingBarItems.first?.isEnabled = address != nil && address != current && !isWorking
         case .code(let challenge):
             promptLabel.text = Self.codePrompt(challenge)
             footerLabel.text = nil
@@ -190,8 +188,8 @@ final class ChangeContactViewController: UIViewController {
             codeField.isHidden = false
             resendButton.isHidden = false
             editAddressButton.isHidden = false
-            navigationItem.rightBarButtonItem?.title = "Confirm"
-            navigationItem.rightBarButtonItem?.isEnabled = code.count == 6 && !isWorking
+            showPrimary(title: "Confirm")
+            ownTrailingBarItems.first?.isEnabled = code.count == 6 && !isWorking
             updateResend()
         }
         navigationItem.hidesBackButton = isWorking
@@ -199,6 +197,20 @@ final class ChangeContactViewController: UIViewController {
     }
 
     // MARK: - Actions
+
+    /// The primary action — Send Code, then Confirm — one identifier for
+    /// both words, so a new word is a new item the bar morphs to (#1679,
+    /// R3), never a title changed in place.
+    private func primaryItem(title: String) -> UIBarButtonItem {
+        BarItems.title(id: "settings.changeContact.primary", title: title, prominent: true) { [weak self] in
+            self?.primaryTapped()
+        }
+    }
+
+    private func showPrimary(title: String) {
+        guard ownTrailingBarItems.first?.title != title else { return }
+        setOwnTrailingBarItems([primaryItem(title: title)], animated: view.window != nil)
+    }
 
     @objc private func primaryTapped() {
         switch phase {

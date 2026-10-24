@@ -43,6 +43,7 @@ final class VideoBannerPickerViewController: UIViewController {
             navigationItem.rightBarButtonItem = UIBarButtonItem(
                 title: "Remove", primaryAction: UIAction { [weak self] _ in self?.pick(nil) }
             )
+            navigationItem.rightBarButtonItem?.identifier = "profile.videoBanner.remove"
         }
         configureCollectionView()
         configureStates()

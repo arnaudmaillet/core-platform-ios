@@ -129,7 +129,9 @@ struct ProfileBellAndMapMenuTests {
     }
 
     /// The glyph follows the scopes: `bell.slash` once one is muted, `bell`
-    /// again when none is — and the menu's checkmarks with it.
+    /// again when none is — and the menu's checkmarks with it. A new glyph
+    /// is a NEW item under the same identifier (#1679, R3): the bar morphs
+    /// it, never an image swapped in place.
     @Test func theBellsGlyphFollowsTheMutedScopes() async throws {
         let (screen, viewModel, repository) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
         // The bell comes once the read says the viewer follows (#1398).
@@ -137,10 +139,15 @@ struct ProfileBellAndMapMenuTests {
             await settle { screen.debugMuteBellItem != nil && viewModel.canModerate } ? screen.debugMuteBellItem : nil
         )
         #expect(bell.image == UIImage(systemName: "bell"))
+        #expect(bell.identifier == ProfileViewController.muteBellID)
 
         viewModel.toggleMute(.posts)
-        try #require(await settle { bell.image == UIImage(systemName: "bell.slash") })
-        #expect(bell.accessibilityValue == "Muted: Posts")
+        try #require(await settle { screen.debugMuteBellItem?.image == UIImage(systemName: "bell.slash") })
+        let muted = try #require(screen.debugMuteBellItem)
+        #expect(muted !== bell, "the glyph was swapped on the item the bar shows")
+        #expect(muted.identifier == bell.identifier)
+        #expect(bell.image == UIImage(systemName: "bell"), "the old item was restyled")
+        #expect(muted.accessibilityValue == "Muted: Posts")
         let menu = try #require(screen.debugMuteMenuElements().first as? UIMenu)
         #expect(menu.title == "Muted")
         #expect(menu.subtitle == "Posts")
@@ -152,8 +159,9 @@ struct ProfileBellAndMapMenuTests {
         // Wait for the first write to land before the second toggle: one at a time.
         try #require(await settle { !viewModel.muteInFlight })
         viewModel.toggleMute(.posts)
-        try #require(await settle { bell.image == UIImage(systemName: "bell") })
-        #expect(bell.accessibilityValue == "Nothing muted")
+        try #require(await settle { screen.debugMuteBellItem?.image == UIImage(systemName: "bell") })
+        #expect(screen.debugMuteBellItem?.accessibilityValue == "Nothing muted")
+        #expect(screen.debugMuteBellItem?.identifier == ProfileViewController.muteBellID)
         #expect((screen.debugMuteMenuElements().first as? UIMenu)?.title == "Mute")
     }
 

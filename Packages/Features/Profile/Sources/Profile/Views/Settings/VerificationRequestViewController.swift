@@ -43,6 +43,7 @@ final class VerificationRequestViewController: UIViewController {
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             title: "Submit", style: .prominent, target: self, action: #selector(submit)
         )
+        navigationItem.rightBarButtonItem?.identifier = "settings.verification.submit"
         var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
         config.headerMode = .supplementary
         config.footerMode = .supplementary

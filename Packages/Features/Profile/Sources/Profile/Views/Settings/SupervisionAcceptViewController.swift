@@ -79,6 +79,7 @@ final class SupervisionAcceptViewController: UIViewController {
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             title: "Link", style: .prominent, target: self, action: #selector(link)
         )
+        navigationItem.rightBarButtonItem?.identifier = "settings.supervisionAccept.link"
 
         let scroll = UIScrollView()
         scroll.alwaysBounceVertical = true

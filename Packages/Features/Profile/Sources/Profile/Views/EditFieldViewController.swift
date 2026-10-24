@@ -55,6 +55,7 @@ final class EditFieldViewController: UIViewController {
         super.viewDidLoad()
         title = config.title
         view.backgroundColor = .systemGroupedBackground
+        saveButton.identifier = "profile.editField.save"
         navigationItem.rightBarButtonItem = saveButton
         configureInput()
         configureFooter()
