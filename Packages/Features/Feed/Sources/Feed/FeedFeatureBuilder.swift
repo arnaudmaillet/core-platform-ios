@@ -194,6 +194,25 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         )
     }
 
+    /// EXPERIMENTAL (#1681): the timeline feed's construction over the
+    /// Discover list (For You's "For you", every author, ranked and paged),
+    /// laid out as the For You root (`SnapFeedViewController.isForYouRoot`).
+    public func makeForYouFullScreenFeedViewController() -> UIViewController {
+        let feed = makeSnapFeed(
+            viewModel: FeedViewModel(
+                repository: discovery ?? repository,
+                engagementProvider: engagementProvider,
+                commentsProvider: commentsProvider,
+                realtime: realtime,
+                composedPosts: composedPosts,
+                router: router,
+                entities: entities
+            )
+        )
+        (feed as? SnapFeedViewController)?.isForYouRoot = true
+        return feed
+    }
+
     public func galleryPosts(_ ids: [PostID]) async -> [PostID: GalleryPost] {
         var found: [PostID: FeedEntry] = [:]
         var missing: [PostID] = []

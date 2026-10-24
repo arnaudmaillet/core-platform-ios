@@ -174,6 +174,55 @@ struct SnapBarPillWidthsTests {
         #expect(abs(pill.bounds.width - cap) < 1, "\(width)pt: the bar drew the pill \(pill.bounds.width), not its cap \(cap)")
         #expect(cap >= 80, "\(width)pt: a pill of \(cap) shows no name at all")
     }
+
+    /// EXPERIMENTAL (#1681): the For You root's TOP bar on every phone —
+    /// [bell][sort] … [pill][points], the busiest it gets (a text page's
+    /// thread, a long name) — hosts every item: nothing folds into "•••".
+    @Test(arguments: phoneWidths)
+    func theForYouRootsTopBarFoldsNothingOnAPhone(_ width: CGFloat) async throws {
+        let suite = "bar-pill-widths-root-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        let feed = SnapFeedViewController(
+            viewModel: FeedViewModel(repository: InertPillFeedProvider()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            wallet: WalletStore(defaults: defaults)
+        )
+        feed.isForYouRoot = true
+        let nav = UINavigationController(rootViewController: feed)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: width, height: 812))
+        window.rootViewController = nav
+        window.isHidden = false
+        defer { window.isHidden = true }
+        for _ in 0..<100 where feed.view.window == nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let bell = BarItems.icon(id: BarItems.SharedID.notificationsBell, image: UIImage(systemName: "bell"), label: "Notifications") {}
+        feed.setLeadingAccessoryItem(bell)
+        feed.showAuthor(FeedItemDisplayModel(
+            id: PostID("p1"), authorID: ProfileID("prof-1"),
+            authorName: "Maximilian Alexander Featherstonehaugh",
+            metaText: "@maximilian.featherstonehaugh · 3w", avatarURL: nil,
+            caption: "c", mediaURL: nil, mediaKind: .image, thumbnailURL: nil, audioText: nil
+        ))
+        feed.setCommentSortAvailable(true)
+        feed.setEngagedChrome(true, hasMedia: false, animated: false)
+        for _ in 0..<30 {
+            nav.view.setNeedsLayout()
+            nav.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let right = feed.navigationItem.rightBarButtonItems ?? []
+        let left = feed.navigationItem.leftBarButtonItems ?? []
+        let pill = try #require(right.compactMap { $0.customView as? SnapAuthorIdentityView }.first)
+        let badge = try #require(right.compactMap { $0.customView as? WalletBadgeButton }.first)
+        let sort = try #require(left.compactMap { $0.customView as? SnapCommentSortButton }.first)
+        for (name, view) in [("author", pill), ("wallet", badge), ("sort", sort)] as [(String, UIView)] {
+            #expect(view.window != nil, "\(width)pt: the \(name) item was folded away")
+        }
+        #expect(left.first === bell, "\(width)pt: the bell does not lead")
+        #expect(SnapActionColumnLayoutTests.hostedView(of: bell) != nil, "\(width)pt: the bell was folded away")
+    }
 }
 
 /// No pages: the tests drive the bars directly.

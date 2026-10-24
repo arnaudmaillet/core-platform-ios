@@ -319,6 +319,19 @@ final class SnapFeedViewController: UIViewController {
     /// is exactly the bug this would otherwise become.
     public var zoomOwnsInteractiveDismissal = true
 
+    /// EXPERIMENTAL (#1681, `ForYouFullScreenExperiment`): this feed IS the
+    /// For You tab's root. The author pill leads the TOP bar's trailing run
+    /// (beside the points), the shell's bell leads its other end, there is no
+    /// toolbar — save and repost stand upright in the action column, the ⋯
+    /// is gone — and the tab bar holds the bottom, stepping aside while a
+    /// media post's comments are open. Set by the builder before the view
+    /// loads.
+    public var isForYouRoot = false
+
+    /// The shell's bell — the For You root's leading item while no back
+    /// arrow or ✕ holds the edge (`HeaderAccessoryHosting`).
+    private var leadingAccessoryItem: UIBarButtonItem?
+
     /// The surface currently on loan to a dismissal's flight card, so a
     /// cancelled grab can take it back.
     private var donatedLiveView: VideoRenderView?
@@ -1673,6 +1686,9 @@ final class SnapFeedViewController: UIViewController {
                 cell.setSoundFace(self.soundFace(for: model))
                 cell.onRequestSoundToggle = { [weak self] in self?.toggleSound() }
                 cell.onRequestSoundSheet = { [weak self] in self?.presentSoundSheet() }
+                // The For You root's save and repost (#1681), in the column.
+                cell.setPostActions(shown: self.isForYouRoot, saved: self.bookmarks.isSaved(id.rawValue))
+                cell.onRequestSave = { [weak self] in self?.toggleBookmark(for: id) }
             }
             return cell
         }
@@ -1720,6 +1736,19 @@ final class SnapFeedViewController: UIViewController {
         applyLeadingNavItem(engaged: engaged, hasMedia: hasMedia, animated: animated)
         // The toolbar is state-invariant: the ⋯ keeps its bubble in every
         // state, because the menu it holds is not about the layout.
+        applyForYouRootTabBar(commentsOpen: engaged && hasMedia)
+    }
+
+    /// The For You root's tab bar (#1681): it holds the bottom, and steps
+    /// aside while a media post's comments are open — their composer takes
+    /// the bottom — through UIKit's own animation (`TabBarRevealPolicy`).
+    private func applyForYouRootTabBar(commentsOpen: Bool) {
+        guard isForYouRoot, let tabBarController, view.window != nil else { return }
+        if commentsOpen {
+            if !tabBarController.isTabBarHidden { tabBarController.hideTabBarNatively() }
+        } else if tabBarController.isTabBarHidden {
+            tabBarController.showTabBarNatively()
+        }
     }
 
     /// Gives both pills their FIXED widths for the bars as they stand — see
@@ -1791,7 +1820,22 @@ final class SnapFeedViewController: UIViewController {
         }
         // The toolbar's leading slot (#671): the room the audio capsule had —
         // the CAP, since #925: the pill takes its own width under it.
-        authorIdentityView.setWidthBudget(widths.toolbarAuthor)
+        authorIdentityView.setWidthBudget(isForYouRoot ? forYouRootPillBudget(bar: bar, sortOnBar: sortOnBar) : widths.toolbarAuthor)
+    }
+
+    /// The For You root's pill (#1681): what the top bar leaves it — its
+    /// margins, the leading bubble (bell, arrow or ✕) and the sort beside
+    /// it, the points — each with UIKit's item padding and the gap between
+    /// bubbles, so the run never folds into "•••".
+    private func forYouRootPillBudget(bar: CGFloat, sortOnBar: Bool) -> CGFloat {
+        let padding: CGFloat = 18
+        let gap = Spacing.sm
+        var used: CGFloat = 16 * 2 + padding + 44 + padding + gap
+        if sortOnBar { used += commentSortButton.glyphWidth + padding + gap }
+        if walletBadgeItem != nil {
+            used += walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + padding + gap
+        }
+        return max(80, bar - used)
     }
 
     /// The widths `applyBarPillWidths` last gave the pills.
@@ -1801,7 +1845,9 @@ final class SnapFeedViewController: UIViewController {
     /// post's thread is open, the points, and — engaged under Recent, once a
     /// day chip has gone under the header — the day (#757).
     private func engagedTrailingItems() -> [UIBarButtonItem] {
-        guard engagedChromeOnBar else { return restingTrailingItems() }
+        // The For You root keeps its author in every state (#1681): the
+        // thread's day would crowd it off a phone's bar.
+        guard engagedChromeOnBar, !isForYouRoot else { return restingTrailingItems() }
         // The comments' ✕ is the LEADING button now (#1192), not a trailing
         // item.
         var items: [UIBarButtonItem] = []
@@ -1894,8 +1940,13 @@ final class SnapFeedViewController: UIViewController {
     /// pill with the badge to its left, spacer-separated so iOS 26 never
     /// fuses them into one platter.
     private func restingTrailingItems() -> [UIBarButtonItem] {
+        // The For You root (#1681): the pill inboard of the points, right to
+        // left [points][pill], the fixed space keeping two bubbles.
+        if isForYouRoot {
+            return (walletBadgeItem.map { [$0, BarItems.separator()] } ?? []) + [authorItem]
+        }
         // The pill is the toolbar's (#671): the nav bar holds the points alone.
-        walletBadgeItem.map { [$0] } ?? []
+        return walletBadgeItem.map { [$0] } ?? []
     }
 
     #if DEBUG
@@ -1949,7 +2000,7 @@ final class SnapFeedViewController: UIViewController {
         // The sort belongs at this end: it is a control over the thread, and
         // this is the end that carries what the screen is DOING. The trailing
         // end carries who the post is by.
-        var items = [closesComments ? closeCommentsItem : backItem].compactMap { $0 }
+        var items = [closesComments ? closeCommentsItem : (backItem ?? leadingAccessoryItem)].compactMap { $0 }
         if engaged, isCommentSortAvailable {
             items += items.isEmpty ? [sortItem] : [.fixedSpace(Spacing.sm), sortItem]
         }
@@ -2058,6 +2109,10 @@ final class SnapFeedViewController: UIViewController {
         authorItem = makeAuthorItem()
         // The toolbar's leading item (#671).
         defaultToolbarItems = defaultToolbarItems.map { $0 === previousItem ? authorItem : $0 }
+        if isForYouRoot {
+            // The pill is the top bar's on the For You root (#1681).
+            return applyTrailingNavItems(engagedTrailingItems(), animated: false)
+        }
         guard var items = toolbarItems, let index = items.firstIndex(of: previousItem) else { return }
         items[index] = authorItem
         setToolbarItems(items, animated: false)
@@ -2311,6 +2366,10 @@ final class SnapFeedViewController: UIViewController {
         // the comments exit is the nav bar's ✕, and the sort selector is the
         // nav bar's too (`setEngagedChrome`).
         defaultToolbarItems = [authorItem, .flexibleSpace(), bookmarkItem, repost, BarItems.separator(), more]
+        // The For You root wears no toolbar (#1681): the tab bar holds the
+        // bottom, the pill is the top bar's, save and repost are the action
+        // column's.
+        if isForYouRoot { defaultToolbarItems = [] }
         #if DEBUG
         // `-no-toolbar`: the upper bound on what trimming the footer can buy.
         // Measured (push work, 3 runs): the floating bar's machinery costs ~45
@@ -2390,6 +2449,14 @@ final class SnapFeedViewController: UIViewController {
         // different offers, and a reader who cannot see the fill has only this.
         bookmarkItem.accessibilityLabel = saved ? "Saved" : "Save"
         bookmarkItem.image = SnapFooterToolbar.saveImage(saved: saved)
+        // The For You root draws it in the column (#1681) — the page's, and
+        // the composer's on a text page.
+        if isForYouRoot {
+            snapCell(for: id)?.setPostSaved(saved)
+            if let detail = commentsContentVC as? PostDetailViewController, detail.postID == id {
+                detail.setPostSaved(saved)
+            }
+        }
     }
 
     /// The save glyph (#1128): the star, outline at rest; filled in the
@@ -2425,6 +2492,11 @@ final class SnapFeedViewController: UIViewController {
     /// call to prove it on a device.
     private func presentToolbar() {
         guard let nav = navigationController else { return }
+        // The For You root (#1681): the tab bar's bottom, no toolbar.
+        if isForYouRoot {
+            if !nav.isToolbarHidden { nav.setToolbarHidden(true, animated: false) }
+            return
+        }
         toolbarHost = nav
 
         // The stack's toolbar is shown by this screen alone, so configuring
@@ -3073,6 +3145,12 @@ final class SnapFeedViewController: UIViewController {
         let face = soundFace(for: model)
         detail.setRailSoundFace(face)
         detail.setLikesHidden(model.likeCountHidden)
+        // The For You root's save and repost (#1681), in the composer's
+        // column too — drawn on a text page, reserved under a media page's.
+        detail.setPostActions(
+            shown: isForYouRoot, saved: bookmarks.isSaved(id.rawValue),
+            onSave: { [weak self] in self?.toggleBookmark(for: id) }
+        )
         // A remote cover the attribution has not fetched yet: fetch it, and
         // redraw the slot once it lands (#680).
         if let face, face.cachedCover == nil, let url = face.coverURL {
@@ -7851,3 +7929,18 @@ extension SnapFeedViewController: ArrivalInvariantReporting {
 #endif
 
 extension SnapFeedViewController: SwipeStageHosting {}
+
+// MARK: - The For You root's header (#1681)
+
+extension SnapFeedViewController: HeaderAccessoryHosting {
+    /// The shell's bell: the root's leading item while nothing else holds
+    /// the edge.
+    public func setLeadingAccessoryItem(_ item: UIBarButtonItem?) {
+        leadingAccessoryItem = item
+        applyLeadingNavItem(engaged: engagedChromeOnBar, hasMedia: engagedChromeHasMedia, animated: view.window != nil)
+    }
+
+    /// The feed wears its own points badge (`walletBadgeItem`): the shell's
+    /// is not installed here.
+    public func setTrailingAccessoryItem(_ item: UIBarButtonItem?) {}
+}

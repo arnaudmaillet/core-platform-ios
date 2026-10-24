@@ -984,7 +984,7 @@ final class PostDetailViewController: UIViewController {
     /// edge, where a resting row's ♥ would be.
     private var engagedFooterClearance: CGFloat {
         composerRestingGap
-            + CommentsInputBar.restingHeight(for: .large)
+            + CommentsInputBar.restingHeight(for: .large, postActions: composeBar.showsPostActions)
             + Self.composerTopBreath
     }
 
@@ -1334,6 +1334,20 @@ final class PostDetailViewController: UIViewController {
     /// this panel takes its own actions away (#1404). For a host that draws
     /// post actions outside the panel: the snap page (#1409).
     var onPostUnavailable: ((PostID) -> Void)?
+
+    /// EXPERIMENTAL (#1681, the For You root): save and repost upright in
+    /// the composer's column — drawn on a text page, reserved under a media
+    /// page's (which draws its own) — the star for `saved`.
+    func setPostActions(shown: Bool, saved: Bool, onSave: (() -> Void)?) {
+        composeBar.showsPostActions = shown
+        composeBar.postActions.setSaved(saved)
+        composeBar.postActions.onSave = onSave
+    }
+
+    /// The composer's star after a save anywhere (#1681).
+    func setPostSaved(_ saved: Bool) {
+        composeBar.postActions.setSaved(saved)
+    }
 
     /// The snap feed's page draws the action column above this panel (#695):
     /// the composer only reserves its room.
@@ -2241,7 +2255,9 @@ final class PostDetailViewController: UIViewController {
         let restingBottomInset = engaged.bottom - engagedFooterClearance
         let category = traitCollection.preferredContentSizeCategory
         let composerBottom = view.bounds.height - restingBottomInset - composerRestingGap
-        var composerTop = composerBottom - CommentsInputBar.restingHeight(for: category)
+        var composerTop = composerBottom - CommentsInputBar.restingHeight(
+            for: category, postActions: composeBar.showsPostActions
+        )
         // ⚠️ CONVERTED HERE, NEVER STORED CONVERTED. The sheet grows to its
         // large height FOR the keyboard, which moves this view under a frame
         // that has not moved: a top converted when the notification arrived
@@ -2334,7 +2350,9 @@ final class PostDetailViewController: UIViewController {
         // line (accessibility sizes: the field reaches ~80pt).
         let rowTop = engaged.top + caption
         let restingBottomInset = engaged.bottom - engagedFooterClearance
-        let composerHeight = CommentsInputBar.restingHeight(for: contentSizeCategory)
+        let composerHeight = CommentsInputBar.restingHeight(
+            for: contentSizeCategory, postActions: composeBar.showsPostActions
+        )
         let blockClearsComposer = rowTop + block + composerRestingGap + composerHeight + restingBottomInset
         return ceil(max(rowHoldsBlock, blockClearsComposer))
     }

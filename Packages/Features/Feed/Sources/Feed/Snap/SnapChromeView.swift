@@ -138,6 +138,27 @@ final class SnapChromeView: UIView {
     // replica) keeps the layer inside itself, as before.
     private let boostStation = UIView()
     private let soundStation = UIView()
+    /// EXPERIMENTAL (#1681): save and repost upright between the like pill
+    /// and the sound bubble (`showsPostActions`).
+    private let postActionsStation = UIView()
+    let postActions = SnapPostActionsCapsule()
+    private var boostStationTop: NSLayoutConstraint?
+    private var boostStationBottom: NSLayoutConstraint?
+    private var railBottom: NSLayoutConstraint?
+    /// The like pill's bottom above the margin line, without the capsule.
+    private static var boostStationBottomInset: CGFloat {
+        SnapActionColumn.inputRestingGap + SnapActionColumn.bubbleSize + SnapActionColumn.gap
+    }
+
+    /// EXPERIMENTAL (#1681, the For You root): the column holds save and
+    /// repost between the like pill and the sound bubble, and the pill — with
+    /// the emote rail it stands on — rises by the capsule's room.
+    var showsPostActions = false {
+        didSet {
+            guard showsPostActions != oldValue else { return }
+            applyPostActionsLayout()
+        }
+    }
     private let columnLayer = SnapActionColumnLayer()
     /// Where `columnLayer` is mounted: this chrome, or the cell's content.
     private weak var columnHost: UIView?
@@ -430,7 +451,7 @@ final class SnapChromeView: UIView {
             )
             shortcutRail.widthAnchor.constraint(equalTo: bandSeat.heightAnchor)
             railTop
-            shortcutRail.bottomAnchor.constraint(equalTo: bandSeat.bottomAnchor)
+            railBottomConstraint()
         }
 
         // The boost anchor fills 100% of the overlap square, above the rail:
@@ -458,14 +479,11 @@ final class SnapChromeView: UIView {
                 equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -SnapActionColumn.trailingInset
             )
             boostStation.widthAnchor.constraint(equalTo: bandSeat.heightAnchor)
-            boostStation.topAnchor.constraint(equalTo: bandSeat.topAnchor)
+            boostStationTopConstraint()
             // The like pill (#669) runs down to `gap` above the lower bubble,
             // measured from the margin line rather than off the sound bubble —
             // a text page's station keeps the same frame.
-            boostStation.bottomAnchor.constraint(
-                equalTo: parent.layoutMarginsGuide.bottomAnchor,
-                constant: -(SnapActionColumn.inputRestingGap + SnapActionColumn.bubbleSize + SnapActionColumn.gap)
-            )
+            boostStationBottomConstraint(margins: parent.layoutMarginsGuide)
         }
         // The subtitle zone extends the same one-directional chain one link
         // up (caption ← band ← subtitles): nothing constrains back onto it,
@@ -541,12 +559,60 @@ final class SnapChromeView: UIView {
         captionLabel.trailingAnchor.constraint(
             equalTo: soundStation.leadingAnchor, constant: -Spacing.md
         ).isActive = true
-        // The two buttons, in the column's own layer, on their stations.
+        // The post's actions (#1681): one bubble wide, two tall, `gap` over
+        // the sound bubble.
+        postActionsStation.isUserInteractionEnabled = false
+        postActionsStation.constrain(in: self) { parent in
+            postActionsStation.trailingAnchor.constraint(
+                equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -SnapActionColumn.trailingInset
+            )
+            postActionsStation.widthAnchor.constraint(equalTo: bandSeat.heightAnchor)
+            postActionsStation.heightAnchor.constraint(equalTo: bandSeat.heightAnchor, multiplier: 2)
+            postActionsStation.bottomAnchor.constraint(equalTo: soundStation.topAnchor, constant: -SnapActionColumn.gap)
+        }
+        postActions.isHidden = true
+        // The buttons, in the column's own layer, on their stations.
         columnLayer.addSubview(boostButton)
         columnLayer.addSubview(soundBubble)
+        columnLayer.addSubview(postActions)
         mountColumn(in: self)
         soundBubble.onTap = { [weak self] in self?.onSoundSheetRequested?() }
         soundBubble.onLongPress = { [weak self] in self?.onSoundToggleRequested?() }
+    }
+
+    private func railBottomConstraint() -> NSLayoutConstraint {
+        let constraint = shortcutRail.bottomAnchor.constraint(equalTo: bandSeat.bottomAnchor)
+        railBottom = constraint
+        return constraint
+    }
+
+    private func boostStationTopConstraint() -> NSLayoutConstraint {
+        let constraint = boostStation.topAnchor.constraint(equalTo: bandSeat.topAnchor)
+        boostStationTop = constraint
+        return constraint
+    }
+
+    /// The like pill (#669) runs down to `gap` above the lower bubble,
+    /// measured from the margin line rather than off the sound bubble — a
+    /// text page's station keeps the same frame.
+    private func boostStationBottomConstraint(margins: UILayoutGuide) -> NSLayoutConstraint {
+        let constraint = boostStation.bottomAnchor.constraint(
+            equalTo: margins.bottomAnchor, constant: -Self.boostStationBottomInset
+        )
+        boostStationBottom = constraint
+        return constraint
+    }
+
+    /// The column with or without the post's actions (#1681): the like
+    /// pill and its rail rise by the capsule's room, the capsule shows on a
+    /// media page (the sound bubble's rule).
+    private func applyPostActionsLayout() {
+        let lift = showsPostActions ? SnapPostActionsCapsule.columnExtent : 0
+        boostStationTop?.constant = -lift
+        boostStationBottom?.constant = -(Self.boostStationBottomInset + lift)
+        railBottom?.constant = -lift
+        applySoundVisibility()
+        setNeedsLayout()
     }
 
     /// The sound bubble is MEDIA chrome, like the like pill above it: a text
@@ -555,6 +621,9 @@ final class SnapChromeView: UIView {
     /// with a face — every media post has one, greyed when it has no sound.
     private func applySoundVisibility() {
         soundBubble.isHidden = soundFace == nil
+        // The post's actions (#1681) are media chrome too: a text page's
+        // composer holds them.
+        postActions.isHidden = !showsPostActions || soundFace == nil
     }
 
     /// The sound bubble's face for the represented post (#671): its cover, the
@@ -1321,7 +1390,9 @@ final class SnapChromeView: UIView {
             columnLayer.topAnchor.constraint(equalTo: topAnchor),
             columnLayer.bottomAnchor.constraint(equalTo: bottomAnchor),
         ]
-        for (button, station) in [(boostButton as UIView, boostStation), (soundBubble, soundStation)] {
+        for (button, station) in [
+            (boostButton as UIView, boostStation), (soundBubble, soundStation), (postActions, postActionsStation),
+        ] {
             button.translatesAutoresizingMaskIntoConstraints = false
             constraints += [
                 button.leadingAnchor.constraint(equalTo: station.leadingAnchor),

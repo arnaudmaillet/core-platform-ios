@@ -47,6 +47,16 @@ final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
     private var walletBadge: WalletBadgeInstaller?
 
     func start() {
+        // EXPERIMENTAL (#1681): the tab lands on the full-screen post feed —
+        // its own points badge, the shell's bell, no unread badge of its own.
+        if ForYouFullScreenExperiment.isOn {
+            let feed = container.feedFeature.makeForYouFullScreenFeedViewController()
+            navigationController.viewControllers = [feed]
+            walletBadge = nil
+            guard container.memberGate.isMember else { return }
+            (feed as? any HeaderAccessoryHosting)?.setLeadingAccessoryItem(notificationsBell.makeItem())
+            return
+        }
         let forYou = container.feedFeature.makeForYouViewController { [weak self] presentation in
             self?.apply(presentation)
         }
