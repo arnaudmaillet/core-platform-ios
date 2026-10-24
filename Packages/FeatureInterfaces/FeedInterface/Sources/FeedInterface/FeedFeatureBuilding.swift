@@ -615,4 +615,7 @@ public protocol ForYouSectorPaging: AnyObject {
     var isShowingFeed: Bool { get }
     /// The page in front changed.
     var onPageChange: (() -> Void)? { get set }
+    /// The shell slid the sector aside (the notifications drawer): its media
+    /// pauses until it comes back.
+    func setSetAside(_ setAside: Bool)
 }

@@ -365,6 +365,19 @@ final class SnapFeedViewController: UIViewController {
     private weak var soundSheet: SoundSheetViewController?
     private var coverSpinTimer: Timer?
     private var isForeground = true
+    /// Slid aside by the shell — the notifications drawer open over it
+    /// (#1703): on screen, not watched, so nothing plays.
+    private var isSetAside = false
+
+    func setSetAside(_ setAside: Bool) {
+        guard setAside != isSetAside else { return }
+        isSetAside = setAside
+        refreshVisibility()
+    }
+
+    /// Whether the pages' lifecycle counts the screen as watched — what lets
+    /// the post on show play. Internal for tests.
+    var debugIsWatchedByLifecycle: Bool { lifecycle.isVisible }
     /// Background Play (#483): this screen's clip went on playing when the
     /// app left the screen, and the screen was left exactly as it was.
     private var isPlayingInBackground = false
@@ -4643,10 +4656,11 @@ final class SnapFeedViewController: UIViewController {
     // MARK: - Active-item lifecycle
 
     private func refreshVisibility() {
+        let isWatched = isOnScreen && isForeground && !isSetAside
         // Off screen, nothing is planned ahead: the warmed and kept players go
         // back and every head preload is cancelled. The next activation plans
         // again (`warmSettledWindow`).
-        if !(isOnScreen && isForeground) {
+        if !isWatched {
             videoLookahead?.stop()
             emotePrefetch.cancelAll()
             // The stay's pictures too: what only this feed wanted is cancelled.
@@ -4656,10 +4670,10 @@ final class SnapFeedViewController: UIViewController {
             // Shown: the plan a settle made off screen starts this stay.
             applyImagePlan(pending)
         }
-        apply(lifecycle.setVisible(isOnScreen && isForeground))
+        apply(lifecycle.setVisible(isWatched))
         lifecycleActiveID = lifecycle.activeIndex.flatMap { orderedIDs.indices.contains($0) ? orderedIDs[$0] : nil }
         refreshAudibleSurface()
-        setCoverSpinWatch(isOnScreen && isForeground)
+        setCoverSpinWatch(isWatched)
     }
 
     /// The page playback follows: the one covering most of the screen.
