@@ -31,7 +31,7 @@ final class WalletBadgeInstaller: NSObject {
     /// root wearing the balance to a profile wearing it keeps it in place
     /// rather than cross-fading two copies — and a re-minted item on a width
     /// change is the same slot, not a new one.
-    static let itemIdentifier = "shell.wallet-balance"
+    static let itemIdentifier = BarItems.SharedID.walletBalance
 
     // A MEMBER'S ONLY (#1146, the owner 2026-10-14): a guest has no badge
     // anywhere, so no host builds one for a guest — the hosts ask

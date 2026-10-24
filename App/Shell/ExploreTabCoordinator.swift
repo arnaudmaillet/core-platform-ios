@@ -49,16 +49,11 @@ final class ExploreTabCoordinator: TabCoordinator {
     /// coordinator so the tap is owned by navigation and the Maps package stays
     /// navigation-agnostic — exactly as the header "+" that stood opposite it
     /// used to be.
-    private lazy var searchButtonItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: "magnifyingglass"),
-            primaryAction: UIAction { [weak self] _ in
-                self?.container.router.route(to: .search)
-            }
-        )
-        item.accessibilityLabel = "Search"
-        return item
-    }()
+    private lazy var searchButtonItem: UIBarButtonItem = BarItems.icon(
+        id: BarItems.SharedID.search, image: UIImage(systemName: "magnifyingglass"), label: "Search"
+    ) { [weak self] in
+        self?.container.router.route(to: .search)
+    }
 
     /// The wallet's toolbar face: coin + balance, pulsing while a claim waits.
     /// Everything around it — the store observation, the claim wake-up, the

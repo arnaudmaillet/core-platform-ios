@@ -79,6 +79,7 @@ final class HeaderSelectorAudit {
             if let problem = await collapseProblem(surface: tab.rawValue) {
                 finding.problems.append(problem)
             }
+            reportBarContract(surface: tab.rawValue)
             findings.append(finding)
         }
         for finding in findings {
@@ -92,6 +93,37 @@ final class HeaderSelectorAudit {
         }
         let failed = findings.filter { !$0.isClean }
         print("[header-audit] done: \(findings.count - failed.count)/\(findings.count) clean")
+    }
+
+    /// The bar contract (#1679, `dev/BAR_CONTRACT.md`) on this surface's bars:
+    /// items with no identifier (R2) and items that are a button in a custom
+    /// view (R1, R5). Reported as `CONTRACT` lines, not problems — the
+    /// screens still being converted would fail every run until #1679 is
+    /// done; the guard test (`BarContractGuardTests`) is what stops new ones.
+    private func reportBarContract(surface: String) {
+        guard let top = topNavigationController?.topViewController else { return }
+        let groups: [(String, [UIBarButtonItem])] = [
+            ("left", top.navigationItem.leftBarButtonItems ?? []),
+            ("right", top.navigationItem.rightBarButtonItems ?? []),
+            ("toolbar", top.toolbarItems ?? []),
+        ]
+        var anonymous: [String] = []
+        var buttons: [String] = []
+        for (group, items) in groups {
+            for item in items {
+                // A space has nothing to show and nothing to do.
+                let isSpace = item.customView == nil && item.title == nil && item.image == nil
+                    && item.menu == nil && item.primaryAction == nil
+                guard !isSpace else { continue }
+                let name = item.customView.map { String(describing: type(of: $0)) }
+                    ?? item.title ?? item.accessibilityLabel ?? "image"
+                if item.identifier == nil { anonymous.append("\(group):\(name)") }
+                if item.customView is UIControl { buttons.append("\(group):\(name)") }
+            }
+        }
+        print("[header-audit] \(surface) CONTRACT"
+            + " noIdentifier=[\(anonymous.joined(separator: ", "))]"
+            + " controlInCustomView=[\(buttons.joined(separator: ", "))]")
     }
 
     /// Where the visible selector is, and which chrome is carrying it.
