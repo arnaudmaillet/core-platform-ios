@@ -7,11 +7,24 @@ import UIKit
 @MainActor
 @Suite(.serialized, .sharesMainThread)
 struct EmoteTileArrivalTests {
+    /// Art that takes 300 ms to come, then lands — INJECTED, never a real
+    /// Lottie bake (#1686). What these tests check is the tile: empty while
+    /// the art is on its way, then the bounce. A real bake runs on the ONE
+    /// serial bake thread the whole test process shares, and commits only
+    /// while the main thread sleeps (`EmoteBakeQueue`): on a loaded CI runner
+    /// this test's bake waited behind every parallel suite's for its whole
+    /// 8 000-look budget (~136 s, runs 39822335612 and 40085406750) and its
+    /// art "never came". The baker has suites of its own.
     private func slowEngine(_ answers: Bool = true) -> EmoteEngine {
-        EmoteEngine(diskCache: nil, animationProvider: { emote in
+        let engine = EmoteEngine(diskCache: nil, animationProvider: { _ in nil })
+        engine.artProvider = { _, side, _ in
             try? await Task.sleep(for: .milliseconds(300))
-            return answers ? await EmoteEngine.bundledAnimation(for: emote) : nil
-        })
+            return answers ? EmoteLabelTests.syntheticArt(side: side, frames: 4) : nil
+        }
+        // The skeleton under default conditions, whatever the host's Low
+        // Power or Reduce Motion says: the bounce is what is counted.
+        engine.skeletonConditions = { EmoteSkeleton.Conditions() }
+        return engine
     }
 
     private func hostedTile() -> (EmoteTileView, UIWindow) {
@@ -24,14 +37,14 @@ struct EmoteTileArrivalTests {
 
     @Test func anAnimatedTileOnItsWayShowsNothingThenBouncesIn() async throws {
         let engine = slowEngine()
-        // An emoji: its loop is a Lottie, made by the provider above.
+        // An emoji, as the keyboard shows them.
         let lol = try #require(engine.catalog.emote(id: "noto:1f525"))
         let (tile, window) = hostedTile()
         defer { window.isHidden = true }
         tile.configure(lol, engine: engine, prefersAnimation: true)
         #expect(!tile.isShowingArt)
-        // A bake on a starved runner can take a while: many looks, no clock.
-        #expect(await settle(looks: 8_000) { tile.isShowingArt }, "the art never came")
+        // 300 ms of art on its way: looks, not a clock, for a frozen process.
+        #expect(await settle(looks: 4_000) { tile.isShowingArt }, "the art never came")
         #expect(tile.bounceInCount == 1, "the art landed without its bounce")
     }
 
@@ -42,7 +55,7 @@ struct EmoteTileArrivalTests {
         let (tile, window) = hostedTile()
         defer { window.isHidden = true }
         tile.configure(lol, engine: engine, prefersAnimation: true)
-        #expect(await settle(looks: 8_000) { tile.showsFailedSkeleton }, "an emote with no art showed no still skeleton")
+        #expect(await settle(looks: 4_000) { tile.showsFailedSkeleton }, "an emote with no art showed no still skeleton")
         #expect(!tile.isShowingArt)
     }
 
