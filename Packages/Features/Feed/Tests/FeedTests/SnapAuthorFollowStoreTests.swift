@@ -69,6 +69,24 @@ struct SnapAuthorFollowStoreTests {
         withExtendedLifetime(subscription) {}
     }
 
+    /// ⚠️ #1670: a request asked from the author's profile CARD reaches the
+    /// pill — its "+" turns pending, and back to "+" once withdrawn.
+    @Test func aRequestOnTheChannelIsTheFeedsPendingMark() {
+        let entities = EntityStore()
+        let events = FollowGraphEvents()
+        let subscription = entities.follow(events)
+        let store = SnapAuthorFollowStore(writer: GatedGraph(), reader: GatedGraph(), entities: entities)
+        store.setRelation(.notFollowing, for: ava)
+
+        events.publish(FollowRequestChange(profileID: ava, isPending: true))
+        #expect(store.badge(for: ava) == .pending)
+        #expect(!store.offersFollow(to: ava))
+
+        events.publish(FollowRequestChange(profileID: ava, isPending: false))
+        #expect(store.offersFollow(to: ava))
+        withExtendedLifetime(subscription) {}
+    }
+
     @Test func anUnknownAuthorDrawsNoBadge() {
         let store = Self.store(GatedGraph())
         #expect(store.badge(for: ava) == .none)

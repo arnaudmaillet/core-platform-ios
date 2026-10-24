@@ -406,6 +406,8 @@ public final class ProfileViewModel {
 
     private var load: Task<Void, Never>?
     private var relationshipLoad: Task<Void, Never>?
+    /// Whether a relationship read is out — for tests that wait on its answer.
+    var isLoadingRelationship: Bool { relationshipLoad != nil }
     /// Whether the follow state on screen is an answer rather than a wait:
     /// a relationship read has come back (or failed), or a cache seeded one.
     public private(set) var isRelationshipSettled = false {

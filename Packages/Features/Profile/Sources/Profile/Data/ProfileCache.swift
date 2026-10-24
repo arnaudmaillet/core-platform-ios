@@ -52,6 +52,9 @@ public final class ProfileCache {
     /// Keeps cached relationships agreeing with a follow made anywhere else
     /// while no screen for that profile is alive to hear it.
     private var followSubscription: FollowGraphSubscription?
+    /// The same for follow REQUESTS (#1670): a request asked from a feed's
+    /// "+" while no card for that person was alive.
+    private var requestSubscription: FollowGraphSubscription?
     /// Every relationship here is the VIEWER's ("you follow them"): once the
     /// viewer is someone else, none of it is true any more.
     private var viewerObserver: NSObjectProtocol?
@@ -230,6 +233,33 @@ public final class ProfileCache {
         followSubscription = events.subscribeOnMain { [weak self] change in
             self?.followGraphDidChange(change)
         }
+        requestSubscription = events.subscribeToRequestsOnMain { [weak self] change in
+            self?.followRequestDidChange(change)
+        }
+    }
+
+    /// ⚠️ #1670: a request asked from a feed's "+" reached no card — a card
+    /// seen before reopened on the "Follow" it had cached. Pending turns a
+    /// cached Follow (or nothing) into Requested; a withdrawal turns
+    /// Requested back into Follow. Someone followed, blocked or the viewer
+    /// does not move.
+    private func followRequestDidChange(_ change: FollowRequestChange) {
+        loadFromDisk(change.profileID)
+        let known = entries[change.profileID]?.relationship
+        let next: ProfileRelationship
+        if change.isPending {
+            switch known {
+            case nil, .other(isFollowing: false, isMutual: _, isBlocked: false)?: next = .requested
+            default: return
+            }
+        } else {
+            guard known == .requested else { return }
+            next = .other(isFollowing: false, isMutual: false, isBlocked: false)
+        }
+        dropGalleryIfHidden(by: next, for: change.profileID)
+        entries[change.profileID, default: Entry()].relationship = next
+        touch(change.profileID)
+        persist(change.profileID)
     }
 
     private func followGraphDidChange(_ change: FollowChange) {

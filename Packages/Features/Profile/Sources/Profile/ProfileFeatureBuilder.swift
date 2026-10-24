@@ -528,7 +528,13 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// The app's one follow-change channel: the header's Follow button and
     /// the followers lists keep agreeing with a follow made anywhere else.
     /// Nil leaves each screen with the answer it loaded.
-    public var followEvents: FollowGraphEvents?
+    ///
+    /// The shared cache hears it from the moment it is set, not from the
+    /// first profile made (#1670): a request asked from a feed's "+" before
+    /// any card was opened must still reach the card opened next.
+    public var followEvents: FollowGraphEvents? {
+        didSet { cache.observe(followEvents) }
+    }
     /// A post of the viewer's own the server deleted here, and one restored
     /// from Recently Deleted (#896): the composition root writes them to the
     /// app's `EntityStore`, so the feeds and For You drop the post — and let

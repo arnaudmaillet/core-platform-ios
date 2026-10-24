@@ -339,6 +339,12 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
     /// Where an accepted follow or unfollow is announced — see
     /// `FollowGraphEvents`. Nil announces nothing.
     let followEvents: FollowGraphEvents?
+    /// The requests this session asked or heard of, which a status read
+    /// cannot always say (`PendingFollowRequests`, #1670).
+    let pendingRequests: PendingFollowRequests
+    /// Keeps `pendingRequests` hearing requests made by the other writers
+    /// (a list row, a suggestion).
+    private let requestSubscription: FollowGraphSubscription?
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "profile")
 
     /// Who is signed in, and as which profile — shared with every other
@@ -355,6 +361,9 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         followEvents: FollowGraphEvents? = nil
     ) {
         self.followEvents = followEvents
+        let pendingRequests = PendingFollowRequests()
+        self.pendingRequests = pendingRequests
+        requestSubscription = followEvents?.subscribeToRequests { change in pendingRequests.record(change) }
         self.profileClient = profileClient
         self.counterClient = counterClient
         self.socialGraphClient = socialGraphClient
@@ -428,6 +437,8 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         }
     }
 
+    /// The viewer's status toward `profileID`, with a request this session
+    /// knows of put back in where the wire hides it (`PendingFollowRequests`).
     private func relationStatus(
         from viewer: ProfileID, to profileID: ProfileID
     ) async throws -> SocialGraph_V1_RelationStatus {
@@ -437,7 +448,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         let response = await socialGraphClient.getRelationStatus(request: request, headers: [:])
         switch response.result {
         case .success(let view):
-            return view.status
+            return pendingRequests.resolve(view.status, viewer: viewer, target: profileID)
         case .failure(let error):
             throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
@@ -455,7 +466,10 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
             try Self.ensureAccepted(response)
             // A private profile was asked, not followed: no edge to announce.
             // The profile screen reads the outcome through `follow(_:)`.
-            if response.message?.requested == true { return }
+            if response.message?.requested == true {
+                pendingRequests.record(true, viewer: viewer, target: profileID)
+                return
+            }
         } else {
             var request = SocialGraph_V1_UnfollowRequest()
             request.actorID = viewer.rawValue
