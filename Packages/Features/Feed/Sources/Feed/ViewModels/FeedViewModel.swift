@@ -618,6 +618,7 @@ public final class FeedViewModel {
             if !Task.isCancelled { pagingLoad = nil }
             return
         }
+        var addedNothing = false
         do {
             let page = try await repository.loadPage(afterToken: token)
             if let models = await build(page.entries) {
@@ -635,6 +636,7 @@ public final class FeedViewModel {
                 }
                 let known = Set(items.map(\.id))
                 let fresh = withoutDeleted(models).filter { !known.contains($0.id) }
+                addedNothing = fresh.isEmpty
                 items += fresh
                 seedEngagement(from: page.entries)
                 subscribeToCounters(for: fresh.map(\.id))
@@ -648,6 +650,13 @@ public final class FeedViewModel {
         // A cancelled page (a `repoint`) leaves the slot to its successor.
         if !Task.isCancelled { pagingLoad = nil }
         emit()
+        // ⚠️ A PAGE THAT ADDED NOTHING (every post filtered — the For You
+        // root's media-only source, #1699 — or already shown) displays
+        // nothing new, so no `willDisplay` would ask again: the feed would
+        // stall at its last post. The next page is asked for now.
+        if addedNothing, !Task.isCancelled, nextPageToken != nil, let index = lastDisplayedIndex {
+            startPagingIfNearEnd(index)
+        }
     }
 
     // MARK: - Realtime

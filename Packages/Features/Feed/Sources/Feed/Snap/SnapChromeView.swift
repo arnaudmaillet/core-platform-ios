@@ -209,7 +209,104 @@ final class SnapChromeView: UIView {
     /// engagement's entry points; hidden views receive no touches, so each
     /// claims taps only while shown).
     var interactionRoots: [UIView] {
-        [shortcutRail, boostButton, commentEmptyState, subtitleView, commentTicker, soundBubble]
+        [shortcutRail, boostButton, commentEmptyState, subtitleView, commentTicker, soundBubble, authorRow]
+    }
+
+    // MARK: - The author row (EXPERIMENTAL, #1699)
+
+    /// The post's author INSIDE the page, between the comment stream and the
+    /// caption — the For You root's (the owner, 2026-10-24: out of the top
+    /// bar). NO GLASS: the pill's face and lines over the media, their
+    /// shadows (`setOverMedia`) keeping them legible, as the caption's do.
+    /// The bar's glass was only ever the bar item's platter, never the
+    /// pill's own.
+    let authorRow = PersonPill(height: 40, carriesBadge: true, ceiling: 260)
+
+    /// Whether the page shows its author row (the For You root only).
+    var showsAuthorRow = false {
+        didSet {
+            guard showsAuthorRow != oldValue else { return }
+            applyAuthorRowLayout()
+        }
+    }
+
+    /// A tap on the author: the screen opens the author's card.
+    var onAuthorTapped: (() -> Void)?
+    /// A hold on the author: the screen pushes the profile.
+    var onAuthorLongPressed: (() -> Void)?
+    /// The "+" on the face: the screen follows the author.
+    var onAuthorFollowTapped: (() -> Void)?
+
+    private var subtitleOverCaption: NSLayoutConstraint!
+    private var subtitleOverAuthor: NSLayoutConstraint!
+    private var emptyStateOverCaption: NSLayoutConstraint!
+    private var emptyStateOverAuthor: NSLayoutConstraint!
+    private var tickerOverStream: NSLayoutConstraint!
+    private var tickerOverAuthor: NSLayoutConstraint!
+
+    /// Whether the danmaku has bubbles to show, from the streams last handed
+    /// over (`updateCommentStreams`).
+    private var tickerCarriesReactions = false
+
+    /// EXPERIMENTAL (#1699, the owner 2026-10-24): on the For You root, a
+    /// running danmaku REPLACES the comment stream — the band takes the
+    /// stream's seat on the author row, and the stream stays down.
+    private var tickerReplacesStream: Bool {
+        showsAuthorRow && hasMedia && tickerCarriesReactions
+    }
+
+    private func installAuthorRow() {
+        authorRow.setOverMedia(true)
+        authorRow.isHidden = true
+        authorRow.onTap = { [weak self] in self?.onAuthorTapped?() }
+        authorRow.onFollowTapped = { [weak self] in self?.onAuthorFollowTapped?() }
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(authorRowHeld(_:)))
+        authorRow.addGestureRecognizer(hold)
+        authorRow.constrain(in: self) { parent in
+            // The face on the caption's text axis.
+            authorRow.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg - 2)
+            authorRow.trailingAnchor.constraint(lessThanOrEqualTo: shortcutRail.leadingAnchor, constant: -Spacing.md)
+            authorRow.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.xs)
+        }
+    }
+
+    @objc private func authorRowHeld(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        onAuthorLongPressed?()
+    }
+
+    /// The stream stands on the author row while it shows, on the caption
+    /// otherwise; the danmaku stands on the author row in the stream's place
+    /// while it replaces it (`tickerReplacesStream`), on the stream otherwise.
+    private func applyAuthorRowLayout() {
+        let shown = showsAuthorRow && hasMedia
+        authorRow.isHidden = !shown
+        let overAuthor: [NSLayoutConstraint] = [subtitleOverAuthor, emptyStateOverAuthor]
+        let overCaption: [NSLayoutConstraint] = [subtitleOverCaption, emptyStateOverCaption]
+        // Off before on: two required bottoms at once would conflict.
+        NSLayoutConstraint.deactivate(shown ? overCaption : overAuthor)
+        NSLayoutConstraint.activate(shown ? overAuthor : overCaption)
+        let replaces = tickerReplacesStream
+        let tickerOff: NSLayoutConstraint = replaces ? tickerOverStream : tickerOverAuthor
+        let tickerOn: NSLayoutConstraint = replaces ? tickerOverAuthor : tickerOverStream
+        tickerOff.isActive = false
+        tickerOn.isActive = true
+    }
+
+    /// The author the row names, and the relation its badge says.
+    func setAuthorRow(_ model: FeedItemDisplayModel, badge: PersonPill.Badge, pipeline: ImagePipeline) {
+        let meta = SnapAuthorIdentityView.pillMetaLine(fromMeta: model.metaText)
+        authorRow.setName(model.authorName, handle: meta)
+        authorRow.avatar.setMonogram(MonogramAvatarView.monogram(name: model.authorName, handle: String(meta.dropFirst())))
+        authorRow.avatar.setPicture(model.avatarURL, pipeline: pipeline)
+        authorRow.avatar.frameID = model.avatarFrameID
+        authorRow.setBadge(badge, animated: false)
+        applyAuthorRowLayout()
+    }
+
+    /// The relation changed (a follow, from here or elsewhere).
+    func setAuthorRowBadge(_ badge: PersonPill.Badge) {
+        authorRow.setBadge(badge, animated: authorRow.window != nil)
     }
 
     /// A comments surface was tapped (empty-state pill, subtitle zone, or
@@ -503,12 +600,16 @@ final class SnapChromeView: UIView {
         // surface starts at one position. The band stands on the zone, md
         // above it, and stops short of the rail like the zone does: with no
         // glass to nest in there, its trailing end dissolves.
+        // On the caption as it stands — one line or two (the owner,
+        // 2026-10-16: a short caption with its time on one line lets the
+        // stream and the band above it come down a line) — or on the author
+        // row standing on it, on the For You root (#1699).
+        subtitleOverCaption = subtitleView.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md)
+        subtitleOverAuthor = subtitleView.bottomAnchor.constraint(equalTo: authorRow.topAnchor, constant: -Spacing.md)
+        tickerOverStream = commentTicker.bottomAnchor.constraint(equalTo: subtitleView.topAnchor, constant: -Spacing.md)
         NSLayoutConstraint.activate([
-            // On the caption as it stands — one line or two (the owner,
-            // 2026-10-16: a short caption with its time on one line lets
-            // the stream and the band above it come down a line).
-            subtitleView.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md),
-            commentTicker.bottomAnchor.constraint(equalTo: subtitleView.topAnchor, constant: -Spacing.md),
+            subtitleOverCaption,
+            tickerOverStream,
             commentTicker.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md),
         ])
         commentTicker.fadesTrailingEdge = true
@@ -524,10 +625,16 @@ final class SnapChromeView: UIView {
         commentEmptyState.constrain(in: self) { parent in
             commentEmptyState.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
             commentEmptyState.trailingAnchor.constraint(lessThanOrEqualTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.lg)
-            // md: it stands in the band's seat, so it keeps the band's
-            // harmonized seam against the caption.
-            commentEmptyState.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md)
         }
+        // md: it stands in the band's seat, so it keeps the band's harmonized
+        // seam against the caption — or against the author row (#1699).
+        emptyStateOverCaption = commentEmptyState.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md)
+        emptyStateOverAuthor = commentEmptyState.bottomAnchor.constraint(equalTo: authorRow.topAnchor, constant: -Spacing.md)
+        emptyStateOverCaption.isActive = true
+        installAuthorRow()
+        // The danmaku in the stream's seat (#1699): md over the author row,
+        // as the stream stands.
+        tickerOverAuthor = commentTicker.bottomAnchor.constraint(equalTo: authorRow.topAnchor, constant: -Spacing.md)
         commentEmptyState.onTap = { [weak self] in self?.onCommentsTapped?() }
         subtitleView.onTap = { [weak self] in self?.onCommentsTapped?() }
         commentTicker.onTap = { [weak self] in self?.onCommentsTapped?() }
@@ -716,6 +823,7 @@ final class SnapChromeView: UIView {
         // chrome (seeded on every post type below); the "+" that rides it
         // is not — see its assignment.
         hasMedia = model.mediaURL != nil
+        applyAuthorRowLayout()
         // ⚠️ THE CHROME CARRIES ITS OWN THEME (#683). The live cell's content
         // view is themed when it joins a window, and the hero flight's
         // replica never was: the like pill and the sound bubble flew as LIGHT
@@ -758,6 +866,7 @@ final class SnapChromeView: UIView {
         applyLikeBadge(animated: false)
         applySoundVisibility()
         if !hasMedia {
+            tickerCarriesReactions = false
             commentTicker.setComments([])
             subtitleView.setCues([])
             commentEmptyState.setVisible(false)
@@ -1024,7 +1133,12 @@ final class SnapChromeView: UIView {
             commentTicker.setReservesBand(!streams.reactions.isEmpty)
         }
         subtitleView.setCommentCount(streams.commentCount)
-        subtitleView.setCues(streams.subtitles)
+        // A danmaku WITH BUBBLES TO SHOW replaces the stream on the For You
+        // root (#1699): no cues, so the zone hides itself. None — or Reduce
+        // Motion, which keeps the band down — and the stream stays.
+        tickerCarriesReactions = !streams.reactions.isEmpty && !MotionPreference.reducesMotion
+        subtitleView.setCues(tickerReplacesStream ? [] : streams.subtitles)
+        applyAuthorRowLayout()
         // THE COUNT IS THE WHOLE CONDITION (product rule 2026-08-08): no
         // comments → the pill; one or more → the comment stream speaks for
         // the post and the pill stays down. The zone is never blank on
@@ -1227,7 +1341,7 @@ final class SnapChromeView: UIView {
     /// the available one — the way out of a post should not blink away because
     /// a thumb landed on a clip's bar.
     private var scrubFadedViews: [UIView] {
-        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton, soundBubble]
+        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton, soundBubble, authorRow]
     }
 
     /// What each faded view was worth before the scrub took it, so the fade
@@ -1487,6 +1601,7 @@ final class SnapChromeView: UIView {
         onBoostRequested = nil
         onBoostUndoRequested = nil
         hasMedia = true
+        tickerCarriesReactions = false
         commentTicker.reset()
         boostButton.isHidden = true
         likesHidden = false
