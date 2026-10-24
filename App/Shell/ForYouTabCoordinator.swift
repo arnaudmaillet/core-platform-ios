@@ -23,6 +23,14 @@ final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
     /// Whether For You has something new — its glyph's badge (#1191).
     private(set) var hasUnread = false
     var onUnreadChange: (() -> Void)?
+    /// The tab's wish for a dark bar changed (`wantsDarkTabBar`).
+    var onTabBarStyleChange: (() -> Void)?
+
+    /// EXPERIMENTAL (#1697, #1703): the tab bar goes dark over the For You
+    /// tab — unless the sector shows Home.
+    var wantsDarkTabBar: Bool {
+        (navigationController.viewControllers.first as? any ForYouSectorPaging)?.isShowingFeed ?? true
+    }
     var childCoordinators: [Coordinator] = []
     let navigationController: UINavigationController = ChevronBackNavigationController()
 
@@ -55,6 +63,9 @@ final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
                 self?.apply(presentation)
             }
             navigationController.viewControllers = [sector]
+            // The tab bar is Feed's dark over Feed only (#1703): Home wears
+            // the app's.
+            (sector as? any ForYouSectorPaging)?.onPageChange = { [weak self] in self?.onTabBarStyleChange?() }
             guard container.memberGate.isMember else {
                 walletBadge = nil
                 return

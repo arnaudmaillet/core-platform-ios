@@ -249,6 +249,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         self.profileTab = profileTab
         let forYouTab = ForYouTabCoordinator(container: container, notificationsBell: notificationsBell)
         self.forYouTab = forYouTab
+        forYouTab.onTabBarStyleChange = { [weak self] in self?.applyTabBarStyle() }
         let messagesTab = MessagesTabCoordinator(
             container: container, notificationsBell: notificationsBell, onSignIn: onSignIn
         )
@@ -491,6 +492,7 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// app draws it.
     private func applyTabBarStyle() {
         let forYou = tabBarController.selectedTab?.identifier == AppTab.forYou.rawValue
+            && forYouTab?.wantsDarkTabBar ?? true
         let style = ForYouFullScreenExperiment.tabBarStyle(forYouSelected: forYou)
         let window = tabBarController.view.window
         let pages: UIUserInterfaceStyle = style == .unspecified

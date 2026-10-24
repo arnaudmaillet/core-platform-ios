@@ -1456,6 +1456,13 @@ final class SnapFeedViewController: UIViewController {
         if isMovingFromParent || isBeingDismissed || navigationController == nil {
             closeSideListForDismissal()
         }
+        // …and the For You root's, left for Home or another tab (#1703, the
+        // owner) — not for a screen pushed over it (the swipe chain's
+        // profile), which comes back to the list it left.
+        else if isForYouRoot, let nav = navigationController,
+                nav.topViewController === self || nav.topViewController === parent {
+            closeSideListForDismissal()
+        }
         // ⚠️ HERE, NOT IN `viewWillDisappear`. A cancelled drag-back fires that
         // one, and on a cold open a grab is possible for the whole wait — so
         // tearing down there would strip the skeletons and leave the viewer
@@ -7371,7 +7378,16 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         async let similar = sideListEntries?() ?? []
         async let shown = viewModel.entry(for: anchor)
         let (entries, anchorEntry) = await (similar, shown)
-        let inFeed = Set(orderedIDs)
+        // ⚠️ THE FOR YOU ROOT'S FEED IS THE POOL ITSELF (#1703): every post
+        // the list draws from is already loaded there, so leaving out the
+        // whole feed left the list with the post on show alone. There, only
+        // what the viewer has already scrolled past is left out.
+        let inFeed: Set<PostID>
+        if isForYouRoot, let index = orderedIDs.firstIndex(of: anchor) {
+            inFeed = Set(orderedIDs[...index])
+        } else {
+            inFeed = Set(orderedIDs)
+        }
         let kind: SnapFeedKindScope? = modelsByID[anchor].map { $0.mediaURL == nil ? .text : .media }
         var seen: Set<PostID> = [anchor]
         let others = entries.filter { entry in
