@@ -406,10 +406,13 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
                 let rows = lists.first.map { list in
                     (0..<list.numberOfSections).map { list.numberOfItems(inSection: $0) }
                 } ?? []
-                print("[inbox-search] searching=\(self.isSearching) "
-                    + "focused=\(self.searchController?.searchBar.searchTextField.isFirstResponder == true) "
-                    + "resultsOnScreen=\(results.view.window != nil) "
-                    + "sections=\(rows) text=\(self.searchController?.searchBar.text ?? "-")")
+                // One literal over typed locals: Xcode 26 times out type-checking
+                // a `+` chain with `==`/`??` inside its interpolations.
+                let searching: Bool = self.isSearching
+                let focused: Bool = self.searchController?.searchBar.searchTextField.isFirstResponder ?? false
+                let onScreen: Bool = results.view.window != nil
+                let typed: String = self.searchController?.searchBar.text ?? "-"
+                print("[inbox-search] searching=\(searching) focused=\(focused) resultsOnScreen=\(onScreen) sections=\(rows) text=\(typed)")
             }
             guard arguments.contains("-inbox-search-cancel") else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
