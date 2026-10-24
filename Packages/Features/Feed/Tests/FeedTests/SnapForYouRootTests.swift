@@ -26,14 +26,14 @@ struct SnapForYouRootTests {
 
     // MARK: - The bars
 
-    /// No toolbar on the root: the tab bar holds the bottom; the pill is the
-    /// top bar's, trailing.
-    @Test func theRootHasNoToolbarAndThePillInTheTopBar() {
+    /// No toolbar on the root at rest: the tab bar holds the bottom. And no
+    /// pill in the top bar either (#1699): the author is inside the page.
+    @Test func theRootHasNoToolbarAndNoPillInTheTopBar() {
         let root = feed(root: true)
         root.setEngagedChrome(false, hasMedia: true, animated: false)
         #expect(root.toolbarItems?.isEmpty ?? true, "the root wears a toolbar: \(root.toolbarItems ?? [])")
         let trailing = root.navigationItem.rightBarButtonItems ?? []
-        #expect(trailing.contains { $0.customView is SnapAuthorIdentityView }, "the pill is not in the top bar")
+        #expect(!trailing.contains { $0.customView is SnapAuthorIdentityView }, "a pill in the root's top bar")
         #expect(trailing.allSatisfy { $0.identifier != nil || ($0.customView == nil && $0.accessibilityLabel == nil) },
                 "an item without an identity (#1679)")
     }
@@ -56,11 +56,55 @@ struct SnapForYouRootTests {
 
         root.setEngagedChrome(true, hasMedia: true, animated: false)
         #expect(root.navigationItem.leftBarButtonItems?.first?.accessibilityLabel == "Close comments")
-        #expect((root.navigationItem.rightBarButtonItems ?? []).contains { $0.customView is SnapAuthorIdentityView },
-                "the pill left the bar with the comments open")
+        #expect(!(root.navigationItem.rightBarButtonItems ?? []).contains { $0.customView is SnapAuthorIdentityView })
 
         root.setEngagedChrome(false, hasMedia: true, animated: false)
         #expect(root.navigationItem.leftBarButtonItems?.first === bell)
+    }
+
+    // MARK: - The author inside the page (#1699)
+
+    /// The page shows its author between the stream and the caption, with no
+    /// glass — the stream stands on it; off the root it does not show.
+    @Test func theAuthorRowStandsBetweenTheStreamAndTheCaption() {
+        let chrome = SnapActionColumnLayoutTests.chrome()
+        let model = SnapActionColumnLayoutTests.mediaModel(mediaURL: URL(string: "mock://media/1"))
+        chrome.configure(with: model)
+        chrome.showsAuthorRow = true
+        chrome.setAuthorRow(model, badge: .follow, pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        chrome.layoutIfNeeded()
+        #expect(!chrome.authorRow.isHidden)
+        #expect(!(chrome.authorRow.subviews.contains { $0 is UIVisualEffectView }), "the author row draws glass")
+        #expect(chrome.interactionRoots.contains { $0 === chrome.authorRow }, "a tap on the author would toggle playback")
+
+        let plain = SnapActionColumnLayoutTests.chrome()
+        plain.configure(with: model)
+        plain.layoutIfNeeded()
+        #expect(plain.authorRow.isHidden, "the author row shows off the root")
+    }
+
+    // MARK: - The comments toolbar (#1699)
+
+    /// Comments open on the root: the tab bar steps aside and a toolbar with
+    /// the placeholder input takes the bottom; closed, the toolbar goes.
+    @Test func theCommentsOpenAToolbarInTheTabBarsPlace() async throws {
+        let root = feed(root: true)
+        let nav = UINavigationController(rootViewController: root)
+        let tabs = UITabBarController()
+        tabs.viewControllers = [nav]
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = tabs
+        window.isHidden = false
+        defer { window.isHidden = true }
+        for _ in 0..<100 where root.view.window == nil { try await Task.sleep(for: .milliseconds(10)) }
+
+        root.setEngagedChrome(true, hasMedia: true, animated: false)
+        #expect(root.toolbarItems?.contains { $0.identifier == SnapFeedViewController.rootInputItemID } == true,
+                "no placeholder input in the comments' toolbar")
+        #expect(!nav.isToolbarHidden, "the comments' toolbar is hidden")
+
+        root.setEngagedChrome(false, hasMedia: true, animated: false)
+        #expect(nav.isToolbarHidden, "the toolbar outlived the comments")
     }
 
     // MARK: - The column
