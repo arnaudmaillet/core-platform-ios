@@ -4,6 +4,14 @@ import UIKit
 
 /// Pausing stops the clock where it is and resuming plays on from there; a
 /// paused install rests on its first frame.
+///
+/// ⚠️ EVERY VIEW STATES ITS OWN POLICY (`playbackPolicy`, #1676), never the
+/// process-wide `AnimatedIconView.forcedPolicy`: a test that forced it and
+/// then awaited left it to whatever a suite beside it did in between, and
+/// the device's own answer (thermal, Low Power) stays out of it too. Where a
+/// test needs the loop to move, it moves the media clock
+/// (`AnimatedIconView.mediaTime`) synchronously rather than sleeping on the
+/// wall clock (`playing(_:)`).
 @MainActor
 @Suite(.serialized)
 struct AnimatedIconViewPauseTests {
@@ -19,10 +27,15 @@ struct AnimatedIconViewPauseTests {
         return .sheet(AnimatedIconSheet(sheet: image, frameCount: frames, columns: frames, frameDuration: step))
     }
 
-    @Test func aPausedInstallRestsOnItsPhase() {
-        AnimatedIconView.forcedPolicy = .full
-        defer { AnimatedIconView.forcedPolicy = nil }
+    /// A view playing under `policy` whatever the app's answer is.
+    private func makeView(_ policy: AnimatedIconView.MotionPolicy = .full) -> AnimatedIconView {
         let view = AnimatedIconView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        view.playbackPolicy = policy
+        return view
+    }
+
+    @Test func aPausedInstallRestsOnItsPhase() {
+        let view = makeView()
         view.setArt(art(frames: 10, step: 0.1), phase: 3, paused: true)
         #expect(view.isPaused)
         #expect(!view.isAnimating, "posed on the model, nothing left for a renderer to play")
@@ -31,35 +44,49 @@ struct AnimatedIconViewPauseTests {
         #expect(!view.isPaused, "a plain install plays")
     }
 
-    @Test func pauseHoldsTheFrameAndResumePlaysOnFromIt() async throws {
-        AnimatedIconView.forcedPolicy = .full
-        defer { AnimatedIconView.forcedPolicy = nil }
+    /// ⚠️ #1676: this slept 200 ms on the wall clock with the policy forced
+    /// process-wide, and once held frame 0 on CI — the loop had not run on
+    /// screen. The clock is now moved by the test, with no await.
+    @Test func pauseHoldsTheFrameAndResumePlaysOnFromIt() throws {
         let frames = 40
-        let view = AnimatedIconView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        let view = makeView()
         view.setArt(art(frames: frames, step: 0.1), paused: true)
         #expect(view.displayedFrame == 0)
 
-        view.resume()
-        #expect(!view.isPaused)
-        try await Task.sleep(for: .milliseconds(200))
-        view.pause()
-        let held = try #require(view.displayedFrame)
-        #expect(held > 0, "the clock ran while it played")
+        try playing { advance in
+            view.resume()
+            #expect(!view.isPaused)
+            advance(0.25) // two and a half keys, from wherever in its key it resumed
+            view.pause()
+            let held = try #require(view.displayedFrame)
+            #expect((2...3).contains(held), "the clock ran while it played: \(held)")
 
-        try await Task.sleep(for: .milliseconds(300))
-        #expect(view.displayedFrame == held, "held, not reset")
+            advance(0.3)
+            #expect(view.displayedFrame == held, "held, not reset")
 
-        view.resume()
-        let resumed = try #require(view.displayedFrame)
-        #expect(resumed == held || resumed == (held + 1) % frames, "from \(held), got \(resumed)")
+            view.resume()
+            let resumed = try #require(view.displayedFrame)
+            #expect(resumed == held, "from \(held), got \(resumed)")
+            advance(0.1)
+            #expect(view.displayedFrame == (held + 1) % frames, "plays on from the held frame")
+        }
+    }
+
+    /// Runs `body` with the media clock standing still, moved only by the
+    /// `advance` it is handed, and puts the clock back before returning —
+    /// with no `await` in between: other suites read it.
+    private func playing(_ body: (_ advance: (CFTimeInterval) -> Void) throws -> Void) throws {
+        let previous = AnimatedIconView.mediaTime
+        defer { AnimatedIconView.mediaTime = previous }
+        var now = previous()
+        AnimatedIconView.mediaTime = { now }
+        try body { now += $0 }
     }
 
     /// Finishing the loop (#559) plays out the loop on screen, then rests on
     /// the frame the art was dressed on — never mid-gesture.
     @Test func finishingTheLoopRestsOnTheDressedFrame() async throws {
-        AnimatedIconView.forcedPolicy = .full
-        defer { AnimatedIconView.forcedPolicy = nil }
-        let view = AnimatedIconView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        let view = makeView()
         view.setArt(art(frames: 8, step: 0.05), phase: 2) // a 0.4 s loop
         try await Task.sleep(for: .milliseconds(120))
         var finished = false
@@ -74,9 +101,7 @@ struct AnimatedIconViewPauseTests {
 
     /// Asked to play again before the loop ends, it just carries on.
     @Test func cancellingTheFinishKeepsItPlaying() async throws {
-        AnimatedIconView.forcedPolicy = .full
-        defer { AnimatedIconView.forcedPolicy = nil }
-        let view = AnimatedIconView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        let view = makeView()
         view.setArt(art(frames: 8, step: 0.05), phase: 0)
         var finished = false
         view.finishLoop { finished = true }
@@ -90,9 +115,7 @@ struct AnimatedIconViewPauseTests {
     /// The time left is the loop minus how far the clock is into it, on the
     /// same grid `displayedFrame` reads.
     @Test func theRemainingTimeIsWhatIsLeftOfTheLoop() throws {
-        AnimatedIconView.forcedPolicy = .full
-        defer { AnimatedIconView.forcedPolicy = nil }
-        let view = AnimatedIconView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        let view = makeView()
         view.setArt(art(frames: 10, step: 0.1), phase: 0) // a 1 s loop
         let remaining = try #require(view.remainingLoopTime)
         let frame = try #require(view.displayedFrame)
@@ -108,9 +131,7 @@ struct AnimatedIconViewPauseTests {
     /// Low Power decimates the keys (stride 2), not the loop's duration: the
     /// finish still ends on the last key and rests on the dressed frame.
     @Test func aDecimatedLoopFinishesWhereItsKeysEnd() async throws {
-        AnimatedIconView.forcedPolicy = .reduced
-        defer { AnimatedIconView.forcedPolicy = nil }
-        let view = AnimatedIconView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        let view = makeView(.reduced)
         view.setArt(art(frames: 8, step: 0.05), phase: 4) // 0.4 s, four keys of 0.1 s
         let remaining = try #require(view.remainingLoopTime)
         #expect(remaining > 0 && remaining <= 0.4, "the loop keeps its duration")
@@ -166,13 +187,9 @@ struct AnimatedIconViewPauseTests {
     private func atLoopTime(
         _ time: CFTimeInterval, of loop: CFTimeInterval, _ body: (AnimatedIconView) throws -> Void
     ) throws {
-        AnimatedIconView.forcedPolicy = .full
         let previous = AnimatedIconView.mediaTime
-        defer {
-            AnimatedIconView.mediaTime = previous
-            AnimatedIconView.forcedPolicy = nil
-        }
-        let view = AnimatedIconView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+        defer { AnimatedIconView.mediaTime = previous }
+        let view = makeView()
         view.setArt(art(frames: 100, step: loop / 100), phase: 0)
         // Frozen now, then moved on by what is left of the loop — to its
         // next start — plus `time`.
