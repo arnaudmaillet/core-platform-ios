@@ -389,13 +389,23 @@ final class ProfileCardViewController: UIViewController {
     }
 
     /// The item that takes the toolbar's free width (#1542, the owner): Follow
-    /// while the viewer does not follow — `[——Follow——][Message][•••]` — and
-    /// Message otherwise — `[Following][——Message——][•••]`. Nil: nothing
-    /// stretches (the viewer's own profile). Pure, for tests.
+    /// while the viewer does not follow — `[——Follow——][Message][QR]` — and
+    /// Requested once asked, in the same slot — `[——Requested——][Message][QR]`
+    /// (#1668: one item that changes in place, never a bar rebuilt around a
+    /// slot that moves to Message); Message once followed or not followable.
+    /// Nil: nothing stretches (the viewer's own profile). Pure, for tests.
     nonisolated static func wideItem(in items: [ToolbarItem]) -> ToolbarItem? {
         if items.contains(.follow) { return .follow }
+        if items.contains(.requested) { return .requested }
         if items.contains(.message) { return .message }
         return nil
+    }
+
+    /// The bar a relationship shows, with Follow and Requested as one item —
+    /// two states of the same stretched slot. Equal shapes are the same
+    /// items, restyled in place. Pure, for tests.
+    nonisolated static func barShape(_ items: [ToolbarItem]) -> [ToolbarItem] {
+        items.map { $0 == .requested ? .follow : $0 }
     }
 
     /// What the bars last showed: they are rebuilt only when it changes, so
@@ -418,6 +428,15 @@ final class ProfileCardViewController: UIViewController {
             )
         )
         guard state != shownBars else { return }
+        // Follow ⇄ Requested: the same bar — the stretched button changes
+        // its look and words in place (#1668).
+        if let shown = shownBars, shown.more == state.more, shown.muted == state.muted,
+           Self.barShape(shown.toolbar) == Self.barShape(state.toolbar),
+           let kind = Self.wideItem(in: state.toolbar), let button = wideButton {
+            shownBars = state
+            restyle(button, as: kind, animated: view.window != nil)
+            return
+        }
         shownBars = state
         // The ••• menu, top left (#1562).
         var leading: [UIBarButtonItem] = []
@@ -452,6 +471,8 @@ final class ProfileCardViewController: UIViewController {
                 qr.accessibilityLabel = "QR Code"
                 items.append(qr)
             case .requested:
+                // Never reached while Follow's slot is the stretched one; kept
+                // for a bar that has no stretched slot.
                 items.append(followItem(title: "Requested", prominent: false))
             case .openProfile:
                 let open = UIBarButtonItem(title: "View Profile", primaryAction: UIAction { [weak self] _ in
@@ -475,27 +496,14 @@ final class ProfileCardViewController: UIViewController {
     /// (measured for the sound sheet's "Use this sound", #304). Its own glass
     /// capsule is its background: the item hides the shared one.
     private func wideItem(for kind: ToolbarItem) -> UIBarButtonItem {
-        var configuration: UIButton.Configuration
         let action: UIAction
         switch kind {
-        case .follow:
-            configuration = .prominentGlass()
-            configuration.baseBackgroundColor = Palette.prominentGlassTint
-            configuration.baseForegroundColor = .white
-            configuration.title = "Follow"
+        case .follow, .requested:
             action = UIAction { [weak self] _ in self?.followTapped() }
         default:
-            configuration = .glass()
-            configuration.baseForegroundColor = .label
-            configuration.title = "Message"
             action = UIAction { [weak self] _ in self?.messageTapped() }
         }
-        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var attributes = attributes
-            attributes.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
-            return attributes
-        }
-        let button = UIButton(configuration: configuration, primaryAction: action)
+        let button = UIButton(configuration: Self.wideConfiguration(for: kind), primaryAction: action)
         button.accessibilityIdentifier = "profileCard.wide"
         button.setContentHuggingPriority(.init(1), for: .horizontal)
         let fill = button.widthAnchor.constraint(equalToConstant: 10_000)
@@ -509,6 +517,47 @@ final class ProfileCardViewController: UIViewController {
         item.hidesSharedBackground = true
         wideButton = button
         return item
+    }
+
+    /// The stretched button's look: Follow on the prominent glass, Requested
+    /// and Message on the plain one.
+    private static func wideConfiguration(for kind: ToolbarItem) -> UIButton.Configuration {
+        var configuration: UIButton.Configuration
+        switch kind {
+        case .follow:
+            configuration = .prominentGlass()
+            configuration.baseBackgroundColor = Palette.prominentGlassTint
+            configuration.baseForegroundColor = .white
+            configuration.title = "Follow"
+        case .requested:
+            configuration = .glass()
+            configuration.baseForegroundColor = .label
+            configuration.title = "Requested"
+        default:
+            configuration = .glass()
+            configuration.baseForegroundColor = .label
+            configuration.title = "Message"
+        }
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
+            return attributes
+        }
+        return configuration
+    }
+
+    /// The stretched button in place, as `kind` — the glass morphing its tint
+    /// and words, the bar left alone.
+    private func restyle(_ button: UIButton, as kind: ToolbarItem, animated: Bool) {
+        let configuration = Self.wideConfiguration(for: kind)
+        guard animated else {
+            button.configuration = configuration
+            return
+        }
+        UIView.animate(springDuration: 0.35, bounce: 0.2) {
+            button.configuration = configuration
+            button.layoutIfNeeded()
+        }
     }
 
     /// The bar's glass bubbles' height on iOS 27 (iPhone 18 Pro), which the
@@ -551,6 +600,12 @@ final class ProfileCardViewController: UIViewController {
     /// The profile's ••• menu (`ProfileMenuBuilder`), the same state and
     /// handlers. The QR is the bar's, never in it.
     #if DEBUG
+    /// The relationship arriving as the view model would send it. Tests.
+    func debugApplyFollowButton(_ state: ProfileViewModel.FollowButton) {
+        followButtonState = state
+        applyBars()
+    }
+
     /// The ••• menu's rows, flattened. Tests.
     var debugMoreMenuTitles: [String] {
         func titles(_ elements: [UIMenuElement]) -> [String] {

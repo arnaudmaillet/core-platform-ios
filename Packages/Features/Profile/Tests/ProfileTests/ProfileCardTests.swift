@@ -87,13 +87,16 @@ struct ProfileCardTests {
         #expect(!ProfileCardViewController.showsMoreMenu(for: .edit))
     }
 
-    /// The free width (#1542): Follow while not following, Message once
-    /// following (or asked, or not followable); nothing on the viewer's own.
+    /// The free width (#1542): Follow while not following, Requested in the
+    /// same slot once asked (#1668), Message once following (or not
+    /// followable); nothing on the viewer's own.
     @Test func thePrimaryActionTakesTheFreeWidth() {
         typealias Card = ProfileCardViewController
         #expect(Card.wideItem(in: Card.toolbarItems(for: .follow)) == .follow)
         #expect(Card.wideItem(in: Card.toolbarItems(for: .following)) == .message)
-        #expect(Card.wideItem(in: Card.toolbarItems(for: .requested)) == .message)
+        #expect(Card.wideItem(in: Card.toolbarItems(for: .requested)) == .requested)
+        #expect(Card.barShape(Card.toolbarItems(for: .follow)) == Card.barShape(Card.toolbarItems(for: .requested)),
+                "Follow and Requested are not one bar")
         #expect(Card.wideItem(in: Card.toolbarItems(for: .unavailable)) == .message)
         #expect(Card.wideItem(in: Card.toolbarItems(for: .edit)) == nil)
     }
@@ -144,6 +147,22 @@ struct ProfileCardTests {
         #expect(card.navigationItem.rightBarButtonItem != nil, "no ✕")
         #expect(!card.headerView.showsActionTray, "the header kept its tray")
         #expect(card.wideButton?.configuration?.title == "Follow", "Follow is not the stretched item")
+    }
+
+    /// Follow → Requested changes the stretched button in place: the same
+    /// bar items, the same button, its words changed (#1668).
+    @Test func followToRequestedKeepsTheBar() async throws {
+        let host = Host()
+        let card = try await makeCard(following: false, host: host)
+        let items = try #require(card.toolbarItems)
+        let button = try #require(card.wideButton)
+        card.debugApplyFollowButton(.requested)
+        #expect(card.toolbarItems?.count == items.count)
+        #expect(zip(card.toolbarItems ?? [], items).allSatisfy { $0 === $1 }, "the bar was rebuilt")
+        #expect(card.wideButton === button, "the stretched button was replaced")
+        #expect(button.configuration?.title == "Requested")
+        card.debugApplyFollowButton(.follow)
+        #expect(button.configuration?.title == "Follow")
     }
 
     /// Followed: Message takes the free width (#1542), Following is gone
