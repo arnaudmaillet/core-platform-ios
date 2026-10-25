@@ -3226,8 +3226,6 @@ final class SnapFeedViewController: UIViewController {
             onSave: { [weak self] in self?.toggleBookmark(for: id) },
             onShare: { [weak self] in self?.presentShareSheet(for: id) }
         )
-        // …and the composer over the strip's room, on the column's line (#1701).
-        detail.setComposerLift(isForYouRoot ? SnapActionColumn.tabBarBreath : 0)
         // A remote cover the attribution has not fetched yet: fetch it, and
         // redraw the slot once it lands (#680).
         if let face, face.cachedCover == nil, let url = face.coverURL {

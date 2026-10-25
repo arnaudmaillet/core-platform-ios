@@ -135,7 +135,8 @@ struct PostDetailStreamShapeTests {
         #expect(abs(stream.contentInset.top - 120) < 0.5)
         // The bar's rest gap above the footer line, the resting bar (its
         // two-bubble column over the input row), and the 16pt breath above it.
-        let clearance = SnapActionColumn.inputRestingGap + CommentsInputBar.restingHeight(for: .large) + 16
+        let clearance = SnapActionColumn.inputRestingGap + SnapActionColumn.bottomBreath
+            + CommentsInputBar.restingHeight(for: .large) + 16
         #expect(abs(stream.contentInset.bottom - (34 + clearance)) < 0.5)
         let topTwo = controller.view.subviews.suffix(2)
         #expect(topTwo.first is ProgressiveFrostView, "the footer's frost sits under the composer")

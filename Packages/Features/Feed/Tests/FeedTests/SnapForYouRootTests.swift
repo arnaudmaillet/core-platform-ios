@@ -179,9 +179,9 @@ struct SnapForYouRootTests {
     // MARK: - The bottom block (#1716)
 
     /// Shots wears every feed's bottom layout — the strip left of the sound
-    /// cover — one breath higher over the tab bar; with no strip, its caption
-    /// comes down to the cover's line.
-    @Test func shotsWearsTheFeedsLayoutOneBreathHigher() {
+    /// cover — and every feed stands one breath over its bottom bar (#1716,
+    /// #1722); with no strip, Shots' caption comes down to the cover's line.
+    @Test func everyFeedStandsOneBreathOverItsBar() {
         func laidOut(pages: Int, shots: Bool) -> SnapChromeView {
             let chrome = SnapActionColumnLayoutTests.chrome()
             chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
@@ -200,12 +200,14 @@ struct SnapForYouRootTests {
         #expect(abs(bar.maxX - shots.debugCaptionFrame.maxX) < 0.5, "the strip does not end with the caption")
         #expect(bar.maxX < sound.minX, "the strip runs under the cover")
 
-        let breath = SnapActionColumn.tabBarBreath
-        let plainBar = frame(plain.debugPageBar, in: plain)
+        // The cover's bottom: the bar's line, less the breath and the rest gap
+        // — on Shots and on another feed alike.
+        let barLine = shots.bounds.height - SnapActionColumnLayoutTests.insets.bottom
+        let expected = barLine - SnapActionColumn.bottomBreath - SnapActionColumn.inputRestingGap
         let plainSound = frame(plain.debugSoundBubble, in: plain)
-        #expect(abs(bar.minY - (plainBar.minY - breath)) < 0.5, "the strip is not one breath higher")
-        #expect(abs(sound.maxY - (plainSound.maxY - breath)) < 0.5, "the cover is not one breath higher")
-        #expect(abs(shots.debugCaptionFrame.maxY - (plain.debugCaptionFrame.maxY - breath)) < 0.5)
+        #expect(abs(sound.maxY - expected) < 0.5, "Shots' cover is not one breath over the bar")
+        #expect(abs(plainSound.maxY - expected) < 0.5, "another feed's cover is not one breath over the bar")
+        #expect(abs(frame(plain.debugPageBar, in: plain).minY - bar.minY) < 0.5, "the strips stand apart")
 
         let lone = laidOut(pages: 1, shots: true)
         let loneSound = frame(lone.debugSoundBubble, in: lone)

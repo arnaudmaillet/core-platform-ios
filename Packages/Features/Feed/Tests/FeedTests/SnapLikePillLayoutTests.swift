@@ -38,7 +38,7 @@ struct SnapLikePillLayoutTests {
     /// wide.
     @Test func theSoundSitsOnTheFieldLineAndTheLikeIsAPill() {
         let column = Layout.mediaColumn()
-        #expect(abs(column.sound.maxY - (Layout.toolbarGlassTop - SnapActionColumn.glassGap)) < 0.5,
+        #expect(abs(column.sound.maxY - (Layout.toolbarGlassTop - SnapActionColumn.glassGap - SnapActionColumn.bottomBreath)) < 0.5,
                 "the sound ends at \(column.sound.maxY), not glassGap above the glass at \(Layout.toolbarGlassTop)")
         #expect(abs(column.like.maxY - (column.sound.minY - SnapActionColumn.gap)) < 0.5)
         #expect(column.like.width == column.sound.width)

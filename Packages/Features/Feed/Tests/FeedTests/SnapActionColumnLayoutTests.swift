@@ -279,7 +279,7 @@ struct SnapActionColumnLayoutTests {
         #expect(composer.bar.debugRailSymbol == CommentsInputBar.soundRailSymbol)
         #expect(!composer.bar.debugFieldActionButton.isHidden, "the waveform is in the field")
         #expect(composer.bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
-        #expect(abs(composer.field.maxY - (Self.toolbarGlassTop - SnapActionColumn.glassGap)) < 0.5,
+        #expect(abs(composer.field.maxY - (Self.toolbarGlassTop - SnapActionColumn.glassGap - SnapActionColumn.bottomBreath)) < 0.5,
                 "the field ends at \(composer.field.maxY), not glassGap above the glass at \(Self.toolbarGlassTop)")
         _ = window
     }

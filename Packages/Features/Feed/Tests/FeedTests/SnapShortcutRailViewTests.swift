@@ -641,7 +641,8 @@ struct SnapShortcutRailViewTests {
         cell.applyChromeInsets(UIEdgeInsets(top: 116, left: 0, bottom: 83, right: 0))
         let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
         #expect(chrome.layoutMargins.top == 116)
-        #expect(chrome.layoutMargins.bottom == 83)
+        // The screen's footer, plus the breath every feed stands on (#1722).
+        #expect(chrome.layoutMargins.bottom == 83 + SnapActionColumn.bottomBreath)
         #expect(chrome.insetsLayoutMarginsFromSafeArea == false)
     }
 

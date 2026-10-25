@@ -150,20 +150,17 @@ final class SnapChromeView: UIView {
         }
     }
 
-    /// The insets the cell handed over (`setFixedInsets`), before Shots'
-    /// breath is added to their bottom.
+    /// The insets the cell handed over (`setFixedInsets`), before the
+    /// bottom breath is added to them.
     private var fixedInsets: UIEdgeInsets?
 
-    /// Shots — the For You root (#1716, the owner): every other feed's
-    /// bottom layout (the strip left of the sound cover, beside the column),
-    /// the whole block one breath higher over the tab bar
-    /// (`SnapActionColumn.tabBarBreath`, added to the bottom margin every
-    /// piece of it hangs off), and on a post with no strip the caption down
-    /// to the cover's line — no room kept for a strip that is not there.
+    /// Shots — the For You root (#1716, the owner): on a post with no strip
+    /// the caption comes down to the cover's line — no room kept for a strip
+    /// that is not there. (Its breath over the bar is every feed's now,
+    /// #1722: `applyFixedInsets`.)
     var sitsOverTabBar = false {
         didSet {
             guard sitsOverTabBar != oldValue else { return }
-            applyFixedInsets()
             applyCaptionSeat()
         }
     }
@@ -833,10 +830,11 @@ final class SnapChromeView: UIView {
         applyFixedInsets()
     }
 
-    /// The handed-over insets, Shots' breath added to the bottom (#1716).
+    /// The handed-over insets, the breath over the bottom bar added (#1716,
+    /// #1722: every feed, the flight replica included).
     private func applyFixedInsets() {
         guard var insets = fixedInsets else { return }
-        if sitsOverTabBar { insets.bottom += SnapActionColumn.tabBarBreath }
+        insets.bottom += SnapActionColumn.bottomBreath
         insetsLayoutMarginsFromSafeArea = false
         layoutMargins = insets
     }
