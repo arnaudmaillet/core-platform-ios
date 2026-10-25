@@ -1730,8 +1730,9 @@ final class SnapFeedViewController: UIViewController {
                 cell.onRequestSoundSheet = { [weak self] in self?.presentSoundSheet() }
                 // The For You root's save and repost (#1681), in the column.
                 cell.setPostActions(shown: self.isForYouRoot, saved: self.bookmarks.isSaved(id.rawValue))
-                // …and its strip full width, the column above it (#1701).
-                cell.setReservesStripRoom(self.isForYouRoot)
+                // …and its bottom block one breath higher over the tab bar,
+                // no room for an absent strip (#1716).
+                cell.setSitsOverTabBar(self.isForYouRoot)
                 // …and its author, inside the page without glass (#1699): the
                 // pill's own taps — the card, the profile on a hold, the "+".
                 cell.setAuthorRow(
@@ -3226,7 +3227,7 @@ final class SnapFeedViewController: UIViewController {
             onShare: { [weak self] in self?.presentShareSheet(for: id) }
         )
         // …and the composer over the strip's room, on the column's line (#1701).
-        detail.setComposerLift(isForYouRoot ? SnapActionColumn.stripRoomLift : 0)
+        detail.setComposerLift(isForYouRoot ? SnapActionColumn.tabBarBreath : 0)
         // A remote cover the attribution has not fetched yet: fetch it, and
         // redraw the slot once it lands (#680).
         if let face, face.cachedCover == nil, let url = face.coverURL {

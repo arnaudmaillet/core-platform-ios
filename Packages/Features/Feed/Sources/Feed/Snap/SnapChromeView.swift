@@ -139,21 +139,20 @@ final class SnapChromeView: UIView {
     private var boostStationTop: NSLayoutConstraint?
     private var boostStationBottom: NSLayoutConstraint?
     private var railBottom: NSLayoutConstraint?
-    private var soundStationBottom: NSLayoutConstraint?
-    private var pageBarUnderCaption: NSLayoutConstraint?
-    private var pageBarUnderColumn: NSLayoutConstraint?
+    /// The insets the cell handed over (`setFixedInsets`), before Shots'
+    /// breath is added to their bottom.
+    private var fixedInsets: UIEdgeInsets?
 
-    /// (#1701, the For You root): the page strip runs the full
-    /// width, under the column; the column stands above it, its lowest
-    /// bubble level with the caption's bottom (`stripRoomLift`); and the
-    /// strip's room is kept on a post with none — the caption never drops
-    /// into it.
-    var reservesStripRoom = false {
+    /// Shots — the For You root (#1716, the owner): every other feed's
+    /// bottom layout (the strip left of the sound cover, beside the column),
+    /// the whole block one breath higher over the tab bar
+    /// (`SnapActionColumn.tabBarBreath`, added to the bottom margin every
+    /// piece of it hangs off), and on a post with no strip the caption down
+    /// to the cover's line — no room kept for a strip that is not there.
+    var sitsOverTabBar = false {
         didSet {
-            guard reservesStripRoom != oldValue else { return }
-            pageBarUnderCaption?.isActive = !reservesStripRoom
-            pageBarUnderColumn?.isActive = reservesStripRoom
-            applyPostActionsLayout()
+            guard sitsOverTabBar != oldValue else { return }
+            applyFixedInsets()
             applyCaptionSeat()
         }
     }
@@ -534,14 +533,9 @@ final class SnapChromeView: UIView {
             )
             mediaPageBar.heightAnchor.constraint(equalToConstant: SnapMediaPageBarView.thickness)
         }
-        // The caption's trailing edge — or, on the For You root, the
-        // column's (#1701: the strip runs under it).
-        let underCaption = mediaPageBar.trailingAnchor.constraint(equalTo: captionLabel.trailingAnchor)
-        pageBarUnderCaption = underCaption
-        pageBarUnderColumn = mediaPageBar.trailingAnchor.constraint(
-            equalTo: layoutMarginsGuide.trailingAnchor, constant: -SnapActionColumn.trailingInset
-        )
-        underCaption.isActive = true
+        // The caption's trailing edge: the strip ends left of the sound
+        // cover, on every feed (#1716).
+        mediaPageBar.trailingAnchor.constraint(equalTo: captionLabel.trailingAnchor).isActive = true
 
 
         // The shortcut rail owns the trailing column, layered OVER the
@@ -679,11 +673,9 @@ final class SnapChromeView: UIView {
             soundStation.widthAnchor.constraint(equalTo: bandSeat.heightAnchor)
             soundStation.heightAnchor.constraint(equalTo: bandSeat.heightAnchor)
         }
-        let soundBottom = soundStation.bottomAnchor.constraint(
+        soundStation.bottomAnchor.constraint(
             equalTo: layoutMarginsGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
-        )
-        soundStationBottom = soundBottom
-        soundBottom.isActive = true
+        ).isActive = true
         captionLabel.trailingAnchor.constraint(
             equalTo: soundStation.leadingAnchor, constant: -Spacing.md
         ).isActive = true
@@ -735,10 +727,7 @@ final class SnapChromeView: UIView {
     /// pill and its rail rise by the capsule's room, the capsule shows on a
     /// media page (the sound bubble's rule).
     private func applyPostActionsLayout() {
-        // Over the strip on the For You root (#1701): the whole column.
-        let stripLift = reservesStripRoom ? SnapActionColumn.stripRoomLift : 0
-        let lift = (showsPostActions ? SnapPostActionsCapsule.columnExtent : 0) + stripLift
-        soundStationBottom?.constant = -(SnapActionColumn.inputRestingGap + stripLift)
+        let lift = showsPostActions ? SnapPostActionsCapsule.columnExtent : 0
         boostStationTop?.constant = -lift
         boostStationBottom?.constant = -(Self.boostStationBottomInset + lift)
         railBottom?.constant = -lift
@@ -818,6 +807,14 @@ final class SnapChromeView: UIView {
     /// geometry equals the live cell's regardless of what the transition
     /// container resolves.
     func setFixedInsets(_ insets: UIEdgeInsets) {
+        fixedInsets = insets
+        applyFixedInsets()
+    }
+
+    /// The handed-over insets, Shots' breath added to the bottom (#1716).
+    private func applyFixedInsets() {
+        guard var insets = fixedInsets else { return }
+        if sitsOverTabBar { insets.bottom += SnapActionColumn.tabBarBreath }
         insetsLayoutMarginsFromSafeArea = false
         layoutMargins = insets
     }
@@ -1217,10 +1214,12 @@ final class SnapChromeView: UIView {
 
     /// Seats the caption over the strip, or in its place when there is none.
     private func applyCaptionSeat() {
-        // The strip's room is kept on the For You root, strip or not (#1701).
-        let overStrip = !mediaPageBar.isHidden || reservesStripRoom
-        // A step tighter over the strip on the root (#1701).
-        captionOverStripConstraint?.constant = reservesStripRoom ? -SnapActionColumn.stripSeat : -Spacing.xl
+        let overStrip = !mediaPageBar.isHidden
+        // No strip on Shots: the caption's bottom on the sound cover's line
+        // (#1716, the owner) — elsewhere, in the strip's place.
+        captionOnBarConstraint?.constant = sitsOverTabBar
+            ? -SnapActionColumn.inputRestingGap
+            : -Self.captionToBarWithoutStrip
         setNeedsLayout()
         guard captionOverStripConstraint?.isActive != overStrip else { return }
         if overStrip {
