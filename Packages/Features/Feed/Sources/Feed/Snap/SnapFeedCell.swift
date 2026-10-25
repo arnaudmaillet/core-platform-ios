@@ -640,9 +640,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.showsPostActions = shown
         chrome.postActions.setSaved(saved)
     }
-    /// The caption's register over the media: `.soft` on the For You root
-    /// (#1697), `.standard` everywhere else.
-    func setCaptionStyle(_ style: SnapChromeView.CaptionStyle) { chrome.captionStyle = style }
     /// The full-width strip, the column above it, its room kept (#1701, the
     /// For You root's).
     func setReservesStripRoom(_ reserves: Bool) { chrome.reservesStripRoom = reserves }

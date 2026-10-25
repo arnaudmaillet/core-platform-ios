@@ -90,6 +90,22 @@ struct ForYouSectorTests {
         #expect(sector.navigationItem.rightBarButtonItems?.first === written, "the page in front wrote off screen")
     }
 
+    // MARK: - The change of page (#1707)
+
+    /// Mid-drag, the page over half the screen is the page in front — its
+    /// bar, its appearance (Shots plays) — and back under half they swap back.
+    @Test func thePageOverHalfIsInFront() {
+        let (sector, home, feed) = sector()
+        sector.debugApplyOccupancy(shotsShare: 0.4)
+        #expect(sector.activeIndex == ForYouSectorViewController.feedIndex, "Shots under half kept the front")
+        #expect(home.activity == [true])
+        #expect(feed.activity == [false])
+
+        sector.debugApplyOccupancy(shotsShare: 0.6)
+        #expect(sector.activeIndex == ForYouSectorViewController.shotsIndex, "back over half, Shots did not come back")
+        #expect(feed.activity == [false, true])
+    }
+
     /// The sector's insets reach the pages (UIKit gives Feed none in here).
     @Test func thePagesAreHandedTheSectorsInsets() {
         let (_, home, feed) = sector()

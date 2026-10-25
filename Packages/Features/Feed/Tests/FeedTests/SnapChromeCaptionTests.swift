@@ -93,11 +93,12 @@ struct SnapChromeCaptionTests {
         }
     }
 
-    /// The GEOMETRY LOCK, per line: every line is one body line tall, so a
-    /// one-line caption is exactly one body line and a two-line one exactly
-    /// two — the smaller footnote time never shrinks the line it ends.
+    /// The GEOMETRY LOCK, per line: every line is one caption line tall (the
+    /// caption's register, `.subheadline` since #1708), so a one-line caption
+    /// is exactly one line and a two-line one exactly two — the smaller
+    /// footnote time never shrinks the line it ends.
     @Test func captionContainerIsWholeBodyLines() {
-        let bodyLineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
+        let bodyLineHeight = UIFont.preferredFont(forTextStyle: SnapChromeView.CaptionRegister.textStyle).lineHeight
         let cases: [(String, Int)] = [
             ("Golden hour.", 1), // A — one line, time inline
             ("Rebuilt the whole deploy pipeline over a slow rainy weekend.", 2), // B — inline on line two
@@ -124,23 +125,22 @@ struct SnapChromeCaptionTests {
         #expect(SnapChromeView.composedCaption(caption, timestamp: timestamp, width: 0).string == caption)
     }
 
-    /// (#1697): the For You root's caption is one text style
-    /// smaller and greyer than the feed's, its time still the smaller,
-    /// dimmer register — and the two-line contract holds at its own size.
-    @Test func theSoftCaptionIsSmallerAndGreyerAndKeepsTheContract() throws {
+    /// (#1697, #1708): every snap feed's caption is one text style below the
+    /// body (`.subheadline`) in a soft grey, its time still the smaller,
+    /// dimmer register — and the two-line contract holds at its size.
+    @Test func theCaptionIsSmallerAndGreyerAndKeepsTheContract() throws {
         let caption = "Weekend build log: rebuilt the pipeline end to end, found two race conditions that only reproduce on cold caches, and learned more about backpressure than I ever wanted to."
-        let standard = SnapChromeView.composedCaption(caption, timestamp: timestamp, width: width)
-        let soft = SnapChromeView.composedCaption(caption, timestamp: timestamp, width: width, style: .soft)
-        let standardFont = try #require(standard.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
+        let soft = SnapChromeView.composedCaption(caption, timestamp: timestamp, width: width)
         let softFont = try #require(soft.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
-        #expect(softFont.pointSize < standardFont.pointSize, "the soft caption is not smaller")
+        #expect(softFont.pointSize == UIFont.appFont(forTextStyle: .subheadline).pointSize, "not the subheadline register")
+        #expect(softFont.pointSize < UIFont.appFont(forTextStyle: .body).pointSize, "the caption is not smaller than the body")
         let softInk = try #require(soft.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor)
         var white: CGFloat = 0
         softInk.getWhite(&white, alpha: nil)
-        #expect(white < 0.9, "the soft caption is not grey: \(white)")
+        #expect(white < 0.9, "the caption is not grey: \(white)")
         let timeFont = try #require(soft.attribute(.font, at: soft.length - 1, effectiveRange: nil) as? UIFont)
         #expect(timeFont.pointSize < softFont.pointSize, "the time is not the smaller register")
-        #expect(SnapChromeView.captionLineCount(soft, width: width, style: .soft) <= 2)
+        #expect(SnapChromeView.captionLineCount(soft, width: width) <= 2)
         #expect(soft.string.hasSuffix(timestamp.replacingOccurrences(of: " ", with: "\u{00A0}")))
     }
 

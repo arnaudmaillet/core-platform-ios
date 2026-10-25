@@ -41,6 +41,11 @@ protocol ForYouSectorPage: UIViewController {
 /// page behind is disappeared — its playback parked, its chrome handed back —
 /// though its view stays in the pager, and the new page appears at the settle.
 ///
+/// **The page over half the screen is the page in front** (#1707, the owner):
+/// mid-drag, as soon as it fills more than 50%, it wears the bar and appears
+/// — Shots' media plays from there, not from the settle — and the other page
+/// disappears; back under half, they swap back.
+///
 /// **The pager gives away what it cannot use** (`yieldsPastEnds`): on Shots,
 /// the last page, a leftward drag belongs to its own swipe chain.
 final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting, ForYouSectorPaging {
@@ -124,7 +129,10 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
 
         selector.select(activeIndex)
         // The selector follows the swipe; the pages follow the selector.
-        pager.onProgress = { [weak self] progress in self?.selector.setProgress(progress) }
+        pager.onProgress = { [weak self] progress in
+            self?.selector.setProgress(progress)
+            self?.applyOccupancy(shotsShare: progress)
+        }
         pager.onSettled = { [weak self] index in self?.settle(on: index) }
         selector.onScrub = { [weak self] progress in self?.pager?.scrub(to: progress) }
         selector.onScrubEnd = { [weak self] velocity in self?.pager?.settleAfterScrub(velocityInPages: velocity) }
@@ -169,6 +177,15 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         pages[activeIndex].endAppearanceTransition()
+        #if DEBUG
+        // QA (#1707): `-sector-scrub <Shots' share>` holds the pager mid-drag,
+        // to film the swap at half.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let flag = arguments.firstIndex(of: "-sector-scrub"), flag + 1 < arguments.count,
+           let share = Double(arguments[flag + 1]) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.pager?.scrub(to: share) }
+        }
+        #endif
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -197,8 +214,21 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
         if !animated { settle(on: index) }
     }
 
+    /// The pager's position as Shots' share of the screen (Feed's the rest):
+    /// the page over half is brought to the front.
+    private func applyOccupancy(shotsShare: CGFloat) {
+        let shots = min(max(shotsShare, 0), 1)
+        if shots > 0.5 { bringToFront(Self.shotsIndex) } else if shots < 0.5 { bringToFront(Self.feedIndex) }
+    }
+
     private func settle(on index: Int) {
         selector.select(index)
+        bringToFront(index)
+    }
+
+    /// Makes `index` the page in front: its bar on the sector's item, its
+    /// appearance — the other page's taken back.
+    private func bringToFront(_ index: Int) {
         guard index != activeIndex, pages.indices.contains(index) else { return }
         let outgoing = pages[activeIndex]
         let incoming = pages[index]
@@ -219,6 +249,9 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
         incoming.sectorPageDidChangeActivity(true)
         onPageChange?()
     }
+
+    /// Drives the pager as a drag at `shotsShare` would — for tests.
+    func debugApplyOccupancy(shotsShare: CGFloat) { applyOccupancy(shotsShare: shotsShare) }
 
     /// Everything a page composes in its bar.
     static func copy(_ source: UINavigationItem, to target: UINavigationItem) {
@@ -246,3 +279,4 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
         (pages[Self.feedIndex] as? any HeaderAccessoryHosting)?.setTrailingAccessoryItem(item)
     }
 }
+
