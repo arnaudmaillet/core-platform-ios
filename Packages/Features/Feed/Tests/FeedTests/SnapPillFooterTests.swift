@@ -59,7 +59,7 @@ struct SnapPillFooterTests {
             #expect(items[1].customView == nil, "a dynamic space after the pill")
             let actions = items.dropFirst(2).prefix(2).compactMap(\.accessibilityLabel)
             #expect(actions == ["Save", "Repost"], "the capsule is not [save, repost]: \(actions)")
-            #expect(items.last?.accessibilityLabel == "More actions")
+            #expect(items.last?.accessibilityLabel == "Share")
             #expect(!items.contains { $0.customView is SnapMediaAttributionView }, "the audio capsule stayed")
 
             let nav = feed.navigationItem.rightBarButtonItems ?? []
@@ -67,10 +67,12 @@ struct SnapPillFooterTests {
         }
     }
 
-    /// Share moved into ⋯, first.
-    @Test func shareIsInTheMenu() {
+    /// Share is the footer's last item (#1728), and its sheet holds Not
+    /// interested and Report.
+    @Test func shareEndsTheFooter() {
         do {
-            #expect(feed().debugMoreMenuTitles(for: PostID("p1")) == ["Share", "Not interested", "Report"])
+            #expect(feed().toolbarItems?.last?.accessibilityLabel == "Share")
+            #expect(feed().shareSheetActions(for: PostID("p1")).map(\.title) == ["Not interested", "Report"])
         }
     }
 

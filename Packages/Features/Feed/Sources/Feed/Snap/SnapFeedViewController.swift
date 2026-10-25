@@ -2421,25 +2421,26 @@ final class SnapFeedViewController: UIViewController {
         // publishes one. Pressing it does nothing today.
         let repost = SnapFooterToolbar.makeRepostItem()
         repostToolbarItem = repost
-        let more = SnapFooterToolbar.makeMoreItem(menu: UIMenu(children: [
-            UIDeferredMenuElement.uncached { [weak self] completion in
-                guard let self, let model = self.activeModel else { return completion([]) }
-                completion(self.moreMenuActions(for: model.id))
-            }
-        ]))
-        moreToolbarItem = more
+        // ⋯ became Share (#1728, the owner): the share sheet, whose tray holds
+        // Not interested and Report — the menu's two — and no Repost, which
+        // stands right beside it in this bar.
+        let share = SnapFooterToolbar.makeShareItem { [weak self] in
+            guard let self, let model = self.activeModel else { return }
+            self.presentShareSheet(for: model.id)
+        }
+        shareToolbarItem = share
 
         // ONE item set, for every state (#671):
         //
-        //   [author pill] … [🔖 ⇄] [⋯]
+        //   [author pill] … [🔖 ⇄] [↪]
         //
         // The author pill leads, in the slot the audio capsule had; the sound
         // lives on the page (`SnapSoundBubbleButton`). Save and repost are
         // STOCK items side by side, so the bar puts them in one platter; the
-        // separator gives ⋯ its own (#1679). The toolbar is STATE-INVARIANT:
+        // separator gives Share its own (#1679). The toolbar is STATE-INVARIANT:
         // the comments exit is the nav bar's ✕, and the sort selector is the
         // nav bar's too (`setEngagedChrome`).
-        defaultToolbarItems = [authorItem, .flexibleSpace(), bookmarkItem, repost, BarItems.separator(), more]
+        defaultToolbarItems = [authorItem, .flexibleSpace(), bookmarkItem, repost, BarItems.separator(), share]
         // The For You root wears no toolbar (#1681): the tab bar holds the
         // bottom, the pill is the top bar's, save and repost are the action
         // column's.
@@ -3126,16 +3127,16 @@ final class SnapFeedViewController: UIViewController {
         let available = !unavailablePostIDs.contains(id)
         bookmarkItem.isEnabled = available
         repostToolbarItem?.isEnabled = available
-        moreToolbarItem?.isEnabled = available
+        shareToolbarItem?.isEnabled = available
     }
 
     private var repostToolbarItem: UIBarButtonItem?
-    private var moreToolbarItem: UIBarButtonItem?
+    private var shareToolbarItem: UIBarButtonItem?
 
     #if DEBUG
-    /// The toolbar's post actions, for a test: save, repost, ⋯.
+    /// The toolbar's post actions, for a test: save, repost, share.
     var debugToolbarPostActions: [UIBarButtonItem] {
-        [bookmarkItem, repostToolbarItem, moreToolbarItem].compactMap { $0 }
+        [bookmarkItem, repostToolbarItem, shareToolbarItem].compactMap { $0 }
     }
 
     /// A like staked straight through the wallet, as a tap's spend lands —
@@ -3506,7 +3507,6 @@ final class SnapFeedViewController: UIViewController {
     /// The ⋯ menu's rows, as built for `id`. The menu itself is a deferred
     /// element UIKit resolves when it opens, so there is nothing to read off
     /// the button — the composition has to be asked for.
-    func debugMoreMenuActions(for id: PostID) -> [UIMenuElement] { moreMenuActions(for: id) }
 
     /// Which text page has had its interface built ahead. Kept separately from
     /// the live field so a test can see a warm that was CONSUMED — which is the
@@ -5569,15 +5569,20 @@ final class SnapFeedViewController: UIViewController {
         present(sheet, animated: true)
     }
 
-    /// The post sheet's own chips, after Share and Copy Link: Repost (#1710),
-    /// then Not interested and Report (#1712) — the ⋯ menu's two, on the same
-    /// terms: neither on a post no one may read (#1409), Report only with
-    /// somewhere to file it. Both leave the sheet first, then act as the menu
-    /// does.
+    /// The post sheet's own chips, after Share and Copy Link: Repost (#1710,
+    /// Shots only since #1728), then Not interested and Report (#1712) — the
+    /// old ⋯ menu's two, which live only here now: neither on a post no one
+    /// may read (#1409), Report only with somewhere to file it. Both leave
+    /// the sheet first.
     func shareSheetActions(for id: PostID) -> [ShareSheetAction] {
-        var actions = [ShareSheetAction(title: "Repost", symbol: PostActionSymbol.repost, dismissesSheet: false) {
-            [weak self] in self?.repostRequested()
-        }]
+        // Repost on Shots only: a pushed post's toolbar carries it already
+        // (#1728, the owner).
+        var actions: [ShareSheetAction] = []
+        if isForYouRoot {
+            actions.append(ShareSheetAction(title: "Repost", symbol: PostActionSymbol.repost, dismissesSheet: false) {
+                [weak self] in self?.repostRequested()
+            })
+        }
         guard !unavailablePostIDs.contains(id) else { return actions }
         actions.append(ShareSheetAction(title: "Not interested", symbol: "hand.thumbsdown") { [weak self] in
             self?.markNotInterested(id)
@@ -5597,46 +5602,6 @@ final class SnapFeedViewController: UIViewController {
     private func repostRequested() {
         // Over the sheet, which is still up.
         Feedback.info("Reposting is coming soon", symbol: PostActionSymbol.repost, from: presentedViewController ?? self)
-    }
-
-    /// The "more" menu routes to existing view-model seams; grow it as
-    /// social affordances (save, report) gain real backends.
-    /// What ⋯ folds up.
-    ///
-    /// ⚠️ NOT NAVIGATION. It carried "View comments" and "View profile", and
-    /// both were second doors to places the screen already opens with one tap —
-    /// the comment count opens the thread, the author pill opens the profile. A
-    /// menu of things you can reach anyway is a menu nobody reads, and it
-    /// crowded out the things that have nowhere else to live.
-    ///
-    /// So it is the two that do: ask for less like it, and report it. Report
-    /// is destructive and last, which is the ordering the gallery card's own
-    /// menu uses.
-    ///
-    /// Share is not here: it has its own button in the toolbar's capsule
-    /// (`configureToolbarItems`), and a second door to it in a menu would be
-    /// the kind of duplicate this menu exists to avoid.
-    private func moreMenuActions(for id: PostID) -> [UIMenuElement] {
-        // Nothing to share, hide or report of a post no one may read (#1409).
-        guard !unavailablePostIDs.contains(id) else { return [] }
-        var actions: [UIMenuElement] = []
-        // Share left the toolbar's capsule for here (#671), with the same sheet.
-        actions.append(UIAction(title: "Share", image: AppSymbol.share.image()) { [weak self] _ in
-            self?.presentShareSheet(for: id)
-        })
-        actions.append(UIAction(title: "Not interested", image: UIImage(systemName: "hand.thumbsdown")) { [weak self] _ in
-            self?.markNotInterested(id)
-        })
-        // Withheld rather than disabled when there is nobody to file with — an
-        // action that cannot act is not offered.
-        if reporting != nil {
-            actions.append(UIAction(
-                title: "Report", image: UIImage(systemName: "flag"), attributes: .destructive
-            ) { [weak self] _ in
-                self?.presentReportReasons(for: id)
-            })
-        }
-        return actions
     }
 
     /// The posts the viewer has asked not to see again, for as long as this
@@ -7350,8 +7315,10 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// photo left to turn to — or a drag born in the trailing edge strip,
     /// which opens it from any photo.
     func sideListMayOpen(from origin: CGPoint) -> Bool {
+        // ⚠️ THE COMMENTS LAYOUT TOO (#1728, the owner): the open thread no
+        // longer blocks the chain — its list scrolls vertically, the chain is
+        // horizontal, and its composer still keeps its drags (below).
         guard !collectionView.isDecelerating, !isKeyboardOnScreen, !orderedIDs.isEmpty else { return false }
-        guard commentsEngagedID == nil || commentsEngagementIsResting else { return false }
         // ⚠️ THE EDGE FIRST (#1592, the owner): the trailing strip — and the
         // trailing column standing at it — win over everything under them.
         if isInTrailingEdge(origin) || isOnTrailingColumn(origin) { return true }
@@ -8093,6 +8060,19 @@ extension SnapFeedViewController: ArrivalInvariantReporting {
 #endif
 
 extension SnapFeedViewController: SwipeStageHosting {}
+
+// MARK: - The full-surface back swipe (#1728)
+
+extension SnapFeedViewController: ContentPopGating {
+    /// ⚠️ NOT WHILE THE SIDE LIST IS OPEN OR MOVING (#1728): a rightward drag
+    /// then closes the list (the arbiter's panel). With the comments layout
+    /// open the stack's full-surface back swipe began alongside it and
+    /// closed the whole post — filmed on the simulator. The same rule the
+    /// grab follows (`isReadyForInteractiveDismissal`).
+    public func allowsContentPop(beginningAt point: CGPoint, in view: UIView) -> Bool {
+        !(sideList?.isEngaged ?? false) && !(sideList?.isOpen ?? false)
+    }
+}
 
 // MARK: - The For You root's header (#1681)
 

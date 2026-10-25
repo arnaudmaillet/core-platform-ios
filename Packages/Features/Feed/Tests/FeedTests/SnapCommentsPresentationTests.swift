@@ -1164,7 +1164,7 @@ struct SnapCommentsPresentationTests {
         // reason; this pins the shape.
         #expect(items.count == 6)
         #expect(items.dropFirst(2).prefix(2).map(\.accessibilityLabel) == ["Save", "Repost"])
-        #expect(items.last?.accessibilityLabel == "More actions")
+        #expect(items.last?.accessibilityLabel == "Share")
     }
 
     /// ⚠️ THE FOOTER'S CORNER KEEPS ITS ⋯ IN EVERY STATE — and the toolbar is
@@ -1183,10 +1183,10 @@ struct SnapCommentsPresentationTests {
         func cornerLabel() -> String? {
             feed.toolbarItems?.last?.accessibilityLabel
         }
-        #expect(cornerLabel() == "More actions")
+        #expect(cornerLabel() == "Share")
 
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
-        #expect(cornerLabel() == "More actions")
+        #expect(cornerLabel() == "Share")
         #expect(feed.toolbarItems ?? [] == resting)
 
         feed.setEngagedChrome(true, hasMedia: false, animated: false)
