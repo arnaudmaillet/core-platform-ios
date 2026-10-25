@@ -3,8 +3,9 @@ import Testing
 import UIKit
 @testable import DesignSystem
 
-/// The branded loader (#1329): its three forms' outlines, the pull's frames,
-/// the loop's seam, and the view's lifecycle rules.
+/// The branded loader (#1329, #1744): its two forms' outlines, the entry's
+/// timeline and the pull's frames, the loop's seam, and the view's lifecycle
+/// rules.
 @MainActor
 struct AppLoaderTests {
     private typealias Geometry = AppLoaderGeometry
@@ -12,8 +13,16 @@ struct AppLoaderTests {
 
     nonisolated private static let pieces = 0..<4
 
-    private static func forms(_ piece: Int) -> [(String, [CGPoint])] {
-        [("square", Geometry.square(piece)), ("disc", Geometry.disc(piece)), ("ring", Geometry.restingRing(piece))]
+    /// Each form with the anchor its outline starts on: an icon piece's
+    /// centroid direction, a resting arc's middle (its diagonal turned as the
+    /// icon).
+    private static func forms(_ piece: Int) -> [(String, [CGPoint], CGFloat)] {
+        let icon = Geometry.icon(piece)
+        let middle = Geometry.centroid(icon)
+        return [
+            ("icon", icon, atan2(middle.y - 0.5, middle.x - 0.5)),
+            ("ring", Geometry.restingRing(piece), Geometry.diagonal(piece) + Geometry.iconTurn),
+        ]
     }
 
     private static func reach(_ point: CGPoint, along angle: CGFloat) -> CGFloat {
@@ -23,17 +32,16 @@ struct AppLoaderTests {
     // MARK: - Outlines
 
     /// ⚠️ ONE STRUCTURE IN EVERY FORM: the same point count, clockwise on
-    /// screen, starting at the point furthest along the piece's diagonal —
-    /// or a morph between two forms twists.
+    /// screen, starting at the point furthest along the piece's anchor —
+    /// or the morph between the forms twists.
     @Test(arguments: 0..<4)
     func everyFormSharesOneOutlineStructure(_ piece: Int) {
-        let diagonal = (-135 + 90 * CGFloat(piece)) * .pi / 180
-        for (name, outline) in Self.forms(piece) {
+        for (name, outline, anchor) in Self.forms(piece) {
             #expect(outline.count == Geometry.pointCount, "\(name) \(piece): \(outline.count) points")
             #expect(Geometry.signedArea(outline) > 0, "\(name) \(piece) runs anticlockwise")
-            let furthest = outline.map { Self.reach($0, along: diagonal) }.max() ?? 0
-            #expect(Self.reach(outline[0], along: diagonal) > furthest - 0.01,
-                    "\(name) \(piece) does not start at its diagonal's extreme")
+            let furthest = outline.map { Self.reach($0, along: anchor) }.max() ?? 0
+            #expect(Self.reach(outline[0], along: anchor) > furthest - 0.01,
+                    "\(name) \(piece) does not start at its anchor's extreme")
         }
     }
 
@@ -43,21 +51,33 @@ struct AppLoaderTests {
     func everyPieceKeepsItsQuadrant(_ piece: Int) {
         let signX: CGFloat = piece == 0 || piece == 3 ? -1 : 1
         let signY: CGFloat = piece < 2 ? -1 : 1
-        for (name, outline) in Self.forms(piece) {
+        for (name, outline, _) in Self.forms(piece) {
             let c = Geometry.centroid(outline)
             #expect((c.x - 0.5) * signX > 0 && (c.y - 0.5) * signY > 0, "\(name) \(piece) left its quadrant: \(c)")
         }
     }
 
-    /// The square's pills keep the cut gap between neighbours.
-    @Test func theSquaresPiecesKeepTheGap() {
-        let gap = minimumDistance(Geometry.square(0), Geometry.square(1))
-        #expect(abs(gap - Geometry.gap) < 0.003, "TL–TR gap \(gap)")
-        let across = minimumDistance(Geometry.square(1), Geometry.square(2))
-        #expect(abs(across - Geometry.gap) < 0.003, "TR–BR gap \(across)")
+    /// The mark is the icon's (#1744): four rounded pieces inscribed in the
+    /// disc, as the ring is, each turned ≈`iconTurn` off its diagonal — so
+    /// it lands on the turned ring with no arc travelling round to its slot —
+    /// the big pink and mauve across from the small violet and orchid, apart
+    /// from one another.
+    @Test func theMarkIsTheIcons() {
+        let icons = Self.pieces.map(Geometry.icon)
+        let reach = icons.map { $0.map { hypot($0.x - 0.5, $0.y - 0.5) }.max() ?? 0 }
+        #expect(abs((reach.max() ?? 0) - 0.5) < 0.002 && (reach.min() ?? 0) > 0.495, "not inscribed in the disc: \(reach)")
+        for piece in Self.pieces {
+            let c = Geometry.centroid(icons[piece])
+            let turn = atan2(c.y - 0.5, c.x - 0.5) - Geometry.diagonal(piece)
+            #expect(abs(turn - Geometry.iconTurn) < 6 * .pi / 180, "piece \(piece) is turned \(turn * 180 / .pi)°")
+            let gap = minimumDistance(icons[piece], icons[(piece + 1) % Geometry.pieceCount])
+            #expect(gap > 0.03, "piece \(piece) touches the next one: \(gap)")
+        }
+        let areas = icons.map(Geometry.signedArea)
+        #expect(areas[0] > areas[1] && areas[2] > areas[3] && areas[2] > areas[0], "the pieces' sizes: \(areas)")
     }
 
-    /// The ring's caps stand the square's gap apart, whatever the fractions.
+    /// The ring's caps stand `gap` apart, whatever the fractions.
     @Test func theRingsCapGapIsConstant() {
         for fractions in [Geometry.equalQuarters] + Timeline.loopFractions().prefix(20) {
             let ring = Geometry.ring(fractions: fractions)
@@ -71,8 +91,55 @@ struct AppLoaderTests {
     /// Everything stays inside the loader's square.
     @Test(arguments: 0..<4)
     func noFormLeavesTheSquare(_ piece: Int) {
-        for (name, outline) in Self.forms(piece) {
+        for (name, outline, _) in Self.forms(piece) {
             #expect(outline.allSatisfy { (-0.001...1.001).contains($0.x) && (-0.001...1.001).contains($0.y) }, "\(name) \(piece)")
+        }
+    }
+
+    // MARK: - The entry (#1744)
+
+    /// The target timeline, no pull: the pieces in by 0.4 s, the icon still
+    /// until 0.7 s, at loop speed by 1.5 s, three turns in all and the ring
+    /// at ≈4.7 s.
+    @Test func theEntryFollowsTheTargetTimeline() {
+        let speed = 2 * CGFloat.pi / CGFloat(Timeline.rotationPeriod)
+        func turning(at time: TimeInterval) -> CGFloat {
+            (Timeline.rotation(at: time + 0.001) - Timeline.rotation(at: time - 0.001)) / 0.002
+        }
+        #expect(Timeline.entry(at: 0).opacities == [0, 0, 0, 0])
+        #expect(abs(Timeline.appearEnd - 0.4) < 0.0001)
+        #expect(Timeline.entry(at: 0.4).opacities == [1, 1, 1, 1])
+        #expect(Timeline.entry(at: 0.4).outlines == Self.pieces.map(Geometry.icon), "the icon is not whole at 0.4 s")
+        #expect(Timeline.entry(at: 0.69).outlines == Self.pieces.map(Geometry.icon), "the icon did not hold")
+        #expect(Timeline.entry(at: 0.69).rotation == 0)
+        #expect(turning(at: 1.1) > 0.3 * speed && turning(at: 1.1) < 0.7 * speed, "no spin-up: \(turning(at: 1.1))")
+        #expect(abs(turning(at: 1.5) - speed) < 0.01, "not at loop speed by 1.5 s")
+        #expect(abs(Timeline.entryDuration - 4.7) < 0.001, "the ring at \(Timeline.entryDuration) s")
+        #expect(abs(Timeline.rotation(at: Timeline.entryDuration) - 6 * .pi) < 0.0001, "not three turns")
+        let landing = Timeline.entry(at: Timeline.entryDuration)
+        #expect(landing.outlines == Self.pieces.map(Geometry.restingRing))
+        #expect(abs(turning(at: Timeline.entryDuration) - speed) < 0.01, "the landing changes speed")
+        // …which is the loop's speed: the loop turns on with no jump.
+        let loopSpeed = 2 * CGFloat.pi * CGFloat(Timeline.turnsPerLoop / Timeline.loopDuration)
+        #expect(abs(loopSpeed - speed) < 0.0001)
+    }
+
+    /// ⚠️ THE MORPH IS KEYED TO THE TURN, AND EVEN: each of the three turns
+    /// thins the pieces by about a third — none does most of it — and the
+    /// frame is the icon → ring mix at that turn.
+    @Test func theMorphThinsEvenlyTurnByTurn() {
+        let turns = (0...3).map { Timeline.morph(atRotation: 2 * .pi * CGFloat($0)) }
+        #expect(turns.first == 0 && turns.last == 1)
+        for turn in 0..<3 {
+            let share = turns[turn + 1] - turns[turn]
+            #expect(share > 0.28 && share < 0.40, "turn \(turn + 1) does \(share) of the morph")
+        }
+        let time = Timeline.time(atTurns: 1.5)
+        let frame = Timeline.entry(at: time)
+        let halfway = Timeline.morph(atRotation: Timeline.rotation(at: time))
+        #expect(abs(halfway - 0.5) < 0.0001, "halfway round, \(halfway) of the morph")
+        for piece in Self.pieces {
+            #expect(frame.outlines[piece] == Geometry.mix(Geometry.icon(piece), Geometry.restingRing(piece), halfway))
         }
     }
 
@@ -88,18 +155,40 @@ struct AppLoaderTests {
         #expect(Timeline.pull(3) == Timeline.pull(1))
     }
 
-    /// The pills appear one after another, clockwise from the pink; the mark
-    /// is still until ≈0.35 and half a turn round at the threshold, a ring.
-    @Test func thePullAppearsMorphsAndTurns() {
+    /// The pull scrubs the start of the entry: the icon's pieces appear one
+    /// after another, clockwise from the pink; the mark holds, then turns —
+    /// half a turn by the threshold, a little thinned, far from the ring.
+    @Test func thePullScrubsTheStartOfTheEntry() {
         #expect(Timeline.pull(0).opacities == [0, 0, 0, 0])
         let early = Timeline.pull(0.08).opacities
         #expect(early[0] > early[1] && early[1] > early[2] && early[2] >= early[3], "not clockwise: \(early)")
-        #expect(Timeline.pull(Timeline.appearEnd).opacities == [1, 1, 1, 1])
-        #expect(Timeline.pull(Timeline.appearEnd).outlines[0] == Geometry.square(0))
-        #expect(Timeline.pull(Timeline.discAt).outlines[0] == Geometry.disc(0))
-        #expect(Timeline.pull(0.3).rotation == 0)
+        let whole = CGFloat(Timeline.appearEnd / Timeline.pullDuration)
+        #expect(Timeline.pull(whole).opacities == [1, 1, 1, 1])
+        #expect(Timeline.pull(whole).outlines[0] == Geometry.icon(0))
+        #expect(Timeline.pull(CGFloat(Timeline.spinStart / Timeline.pullDuration) - 0.01).rotation == 0)
         #expect(abs(Timeline.pull(1).rotation - .pi) < 0.0001)
-        #expect(Timeline.pull(1).outlines[2] == Geometry.restingRing(2))
+        let thinned = Timeline.morph(atRotation: .pi)
+        #expect(thinned > 0.1 && thinned < 0.25, "a full pull thinned it by \(thinned)")
+        for p in stride(from: CGFloat(0), through: 1, by: 0.1) {
+            #expect(Timeline.pull(p) == Timeline.entry(at: Timeline.pullTime(p)), "the pull left the entry at \(p)")
+        }
+    }
+
+    /// ⚠️ NO JUMP ON RELEASE: the rest of the entry opens on the very frame
+    /// the pull reached, keeps the entry's own pace (even steps in time), and
+    /// closes on the resting ring at `landingRotation`.
+    @Test(arguments: [CGFloat(0), 0.3, 0.7, 1])
+    func releasePlaysOnFromThePull(_ progress: CGFloat) {
+        let start = Timeline.pullTime(progress)
+        let route = Timeline.entryRoute(from: start)
+        #expect(route.first == Timeline.pull(progress))
+        #expect(route.last == Timeline.entry(at: Timeline.entryDuration))
+        #expect(abs((route.last?.rotation ?? 0) - Timeline.landingRotation) < 0.0001)
+        let step = (Timeline.entryDuration - start) / Double(route.count - 1)
+        #expect(step <= 1 / Timeline.entryFrameRate + 0.0001)
+        for (index, frame) in route.enumerated() where index % 10 == 0 {
+            #expect(isClose(frame, Timeline.entry(at: start + step * Double(index))), "keyframe \(index) off the entry's pace")
+        }
     }
 
     // MARK: - The loop
@@ -125,11 +214,12 @@ struct AppLoaderTests {
         #expect(Set(frames.map { $0.map { ($0 * 1000).rounded() } }).count > 4, "the arcs never traded length")
     }
 
-    /// The loop's rest is exactly where the pull ends, so release does not jump.
-    @Test func theLoopStartsWhereThePullEnds() {
+    /// The loop's rest is exactly where the entry lands, so it turns on
+    /// with no jump.
+    @Test func theLoopStartsWhereTheEntryLands() {
         let loop = Timeline.loopKeyframes()
         for piece in Self.pieces {
-            #expect(loop[piece].first == Timeline.pull(1).outlines[piece])
+            #expect(loop[piece].first == Timeline.entry(at: Timeline.entryDuration).outlines[piece])
             #expect(loop[piece].first == loop[piece].last)
         }
     }
@@ -161,17 +251,19 @@ struct AppLoaderTests {
         #expect(!view.isHidden)
     }
 
-    /// From a full pull the ring turns at once from the pull's angle; the
-    /// scrub no longer drives it while loading.
-    @Test func aFullPullLoopsFromItsAngle() {
+    /// Even a full pull has only started the entry (#1744): released, the
+    /// rest plays on towards the ring; the scrub no longer drives it.
+    @Test func aFullPullPlaysOnFromWhereItWas() {
         let (view, window) = loader()
         defer { window.isHidden = true }
         view.setProgress(1)
         view.startAnimating()
-        #expect(view.debugIsLooping)
-        #expect(abs(view.debugModelFrame.rotation - .pi) < 0.001)
+        #expect(view.debugIsEntering, "a full pull skipped the rest of the entry")
+        #expect(view.debugAnimationCount > 0)
+        let landing = Timeline.entry(at: Timeline.entryDuration)
+        #expect(isClose(view.debugModelFrame, landing), "the entry does not end on the ring")
         view.setProgress(0.2)
-        #expect(abs(view.debugModelFrame.rotation - .pi) < 0.001, "a pull scrubbed a loading loader")
+        #expect(isClose(view.debugModelFrame, landing), "a pull scrubbed a loading loader")
         view.stopAnimating()
         #expect(!view.isAnimating && view.debugIsExiting)
     }
@@ -188,7 +280,7 @@ struct AppLoaderTests {
         view.stopAnimating()
         #expect(view.debugIsExiting)
         #expect(view.debugAnimationCount > loops, "the loop stopped instead of fading on")
-        #expect(isClose(view.debugModelFrame, AppLoaderTimeline.pull(1)), "it closed back into the square")
+        #expect(isClose(view.debugModelFrame, Timeline.entry(at: Timeline.entryDuration)), "it closed back into the mark")
     }
 
     /// ⚠️ #580: nothing animates off-window, and the loop comes back with it.
@@ -204,9 +296,9 @@ struct AppLoaderTests {
         #expect(view.debugAnimationCount > 0, "the loop did not come back")
     }
 
-    /// Reduce Motion: no morph and no turn — the square, upright, fading in
-    /// with the pull.
-    @Test func reducedMotionIsTheStillSquare() {
+    /// Reduce Motion: no morph and no turn — the icon, as on the app icon,
+    /// fading in with the pull.
+    @Test func reducedMotionIsTheStillIcon() {
         let (view, window) = loader(reducesMotion: true)
         defer { window.isHidden = true }
         view.setProgress(0.9)
@@ -215,7 +307,7 @@ struct AppLoaderTests {
         #expect(frame.opacities.allSatisfy { abs($0 - 0.9) < 0.001 })
         for piece in Self.pieces {
             let still = AppLoaderTimeline.Frame(
-                outlines: [Geometry.square(piece)], opacities: [frame.opacities[piece]], rotation: 0
+                outlines: [Geometry.icon(piece)], opacities: [frame.opacities[piece]], rotation: 0
             )
             #expect(isClose(AppLoaderTimeline.Frame(
                 outlines: [frame.outlines[piece]], opacities: [frame.opacities[piece]], rotation: 0
@@ -225,8 +317,8 @@ struct AppLoaderTests {
 
     // MARK: - Pull-to-refresh (#1329 slice 2)
 
-    /// The pull draws the mark out; release turns it on from there; the end
-    /// closes it. The indicator is the loader's only driver.
+    /// The pull draws the mark out; release plays it on from there; the end
+    /// fades it. The indicator is the loader's only driver.
     @Test func thePullToRefreshDrivesTheLoader() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 200))
         let indicator = HeroPullToRefreshView(frame: CGRect(x: 0, y: 0, width: 200, height: 60))
@@ -242,7 +334,7 @@ struct AppLoaderTests {
 
         indicator.setPull(HeroPullToRefreshView.threshold * 2)
         indicator.beginRefreshing()
-        #expect(loader.isAnimating && loader.debugIsLooping, "a full pull did not turn on from where it was")
+        #expect(loader.isAnimating && loader.debugIsEntering, "a full pull did not play on from where it was")
 
         indicator.endRefreshing()
         #expect(!loader.isAnimating && loader.debugIsExiting)
@@ -329,9 +421,10 @@ struct AppLoaderTests {
     }
 
     /// Two frames within float noise — the view's model reads back through a
-    /// path in points.
+    /// path in points, and its turn through a transform (so modulo a turn).
     private func isClose(_ a: AppLoaderTimeline.Frame, _ b: AppLoaderTimeline.Frame) -> Bool {
-        guard a.outlines.count == b.outlines.count, abs(a.rotation - b.rotation) < 0.0001 else { return false }
+        let turn: CGFloat = remainder(a.rotation - b.rotation, 2 * .pi)
+        guard a.outlines.count == b.outlines.count, abs(turn) < 0.0001 else { return false }
         for (lhs, rhs) in zip(a.opacities, b.opacities) where abs(lhs - rhs) >= 0.001 { return false }
         for (lhs, rhs) in zip(a.outlines, b.outlines) {
             guard lhs.count == rhs.count else { return false }
