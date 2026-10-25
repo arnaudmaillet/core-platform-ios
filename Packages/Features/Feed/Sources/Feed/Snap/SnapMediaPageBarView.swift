@@ -172,6 +172,18 @@ final class SnapMediaPageBarView: UIView {
         return scrub
     }()
 
+    /// The viewer is sliding along the strip through the pages (#1734): the
+    /// strip took the drag (`onBrowseBegan`), the page under the finger
+    /// changed (`onBrowse`, at every crossing), and the finger let go on a
+    /// page (`onBrowseEnded`). The HOST moves the carousel and the previews.
+    var onBrowseBegan: ((Int) -> Void)?
+    var onBrowse: ((Int) -> Void)?
+    var onBrowseEnded: ((Int) -> Void)?
+
+    /// One tick per page crossed while browsing — the app's selection haptic,
+    /// behind the Haptics setting (`Haptics.swift`).
+    private let browseTick = HapticSelection()
+
     /// The viewer asked to move the playhead of the clip the strip is drawing.
     /// The HOST owns playback, for the reason it owns the carousel.
     var onSeekRequested: ((Double) -> Void)?
@@ -311,6 +323,8 @@ final class SnapMediaPageBarView: UIView {
         isAwake = false
         handling.settle(at: 0)
         awakeness.settle(at: 0)
+        isBrowsing = false
+        clipHold.settle(at: 0)
         pageCount = count
         isHidden = !hasStrip
         guard hasStrip else { return }
@@ -513,7 +527,10 @@ final class SnapMediaPageBarView: UIView {
         // of the width it claimed and a tap could land on a segment with no
         // width at all. What a seam is worth is what the SEGMENTS either side
         // are drawn as, clip shape included.
-        let clipness = clipPageProximity
+        // ⚠️ HELD BACK WHILE BROWSING (#1734, the owner): a clip's page the
+        // finger passes keeps its segment — it grows into the bar only once
+        // the finger lets go on it (`clipHold` eases back to 0).
+        let clipness = clipPageProximity * (1 - clipHold.value)
         let clipWeights = clipness > 0 ? clipShapeWeights(available: runWidth) : nil
         // ONE thickness, a carousel's segments and a clip's bar alike (#1712,
         // the owner: the segments stood thicker than the progress bar) — thin
@@ -743,13 +760,15 @@ final class SnapMediaPageBarView: UIView {
     private var handling = Tween()
     /// How awake the strip is: 1 from a touch until it rests.
     private var awakeness = Tween()
+    /// How far a clip's bar is held back as segments: 1 while browsing.
+    private var clipHold = Tween()
     private let cursor = UIView()
     private var tweenLink: CADisplayLink?
 
     private func animate(_ tween: ReferenceWritableKeyPath<SnapMediaPageBarView, Tween>, to target: CGFloat, duration: TimeInterval) {
         let moves = window != nil && !UIAccessibility.isReduceMotionEnabled
         self[keyPath: tween].move(to: target, duration: moves ? duration : 0, now: CACurrentMediaTime())
-        guard handling.isMoving || awakeness.isMoving else { return layoutSegments() }
+        guard handling.isMoving || awakeness.isMoving || clipHold.isMoving else { return layoutSegments() }
         guard tweenLink == nil else { return }
         let link = CADisplayLink(target: TweenTarget(self), selector: #selector(TweenTarget.tick))
         link.add(to: .main, forMode: .common)
@@ -760,8 +779,9 @@ final class SnapMediaPageBarView: UIView {
         let now = CACurrentMediaTime()
         handling.step(now: now)
         awakeness.step(now: now)
+        clipHold.step(now: now)
         layoutSegments()
-        guard !handling.isMoving, !awakeness.isMoving else { return }
+        guard !handling.isMoving, !awakeness.isMoving, !clipHold.isMoving else { return }
         tweenLink?.invalidate()
         tweenLink = nil
     }
@@ -784,6 +804,7 @@ final class SnapMediaPageBarView: UIView {
         tweenLink?.invalidate()
         tweenLink = nil
         handling.settle(at: 0)
+        clipHold.settle(at: isBrowsing ? 1 : 0)
     }
 
     // MARK: - Loading (#1537)
@@ -1005,6 +1026,11 @@ final class SnapMediaPageBarView: UIView {
             touchDownX = x
             travelled = false
             isDraggingPlayhead = false
+            // A drag that lands on the clip's bar means its playhead; anywhere
+            // else on the strip (a photograph's segments, a clip's slivers),
+            // the pages (#1734).
+            dragMeansPlayhead = isScrubbingAClip
+                && segmentFrame(Int(position.rounded())).map { x >= $0.minX && x <= $0.maxX } == true
             // From what the bar SHOWS, which is a hold still waiting for the
             // player after the last release — anchoring on the player instead
             // would throw the bar back to where it was before that release.
@@ -1013,19 +1039,15 @@ final class SnapMediaPageBarView: UIView {
             wake()
             if abs(x - touchDownX) > Self.travelThreshold { travelled = true }
             guard travelled else { return }
+            guard dragMeansPlayhead else { return browse(toX: x) }
             if !isDraggingPlayhead, isScrubbingAClip {
                 isDraggingPlayhead = true
                 heldReleasedAt = nil
                 onScrubBegan?()
             }
-            // ⚠️ A DRAG MEANS THE PLAYHEAD OR IT MEANS NOTHING. It used to page
-            // the carousel as well, one slot per segment — a second way to do
-            // what a swipe on the picture already does, on a control the width
-            // of the column, where the pages it walks past are the pages the
-            // media is flying through underneath. Selecting is what a strip of
-            // segments is for, and a tap says it exactly; dragging is for the
-            // one thing that has no other control, which is where you are
-            // inside a clip.
+            // On the bar, a drag is the playhead. Off it, it browses the
+            // pages (#1734, the owner 2026-10-25: a quick way through a long
+            // carousel, with previews over the strip — `browse(toX:)`).
             guard isScrubbingAClip else { return }
             seek(draggedTo: x)
         case .ended, .cancelled, .failed:
@@ -1035,6 +1057,10 @@ final class SnapMediaPageBarView: UIView {
             onScrubPreview(nil)
             wake()
             animate(\.handling, to: 0, duration: Self.handleDuration)
+            if isBrowsing {
+                endBrowsing()
+                return
+            }
             if isDraggingPlayhead {
                 isDraggingPlayhead = false
                 // The hold stays up, released, until the player agrees.
@@ -1069,6 +1095,70 @@ final class SnapMediaPageBarView: UIView {
         }
     }
 
+    // MARK: - Browsing (#1734)
+
+    /// Whether the finger is sliding through the pages.
+    private(set) var isBrowsing = false
+    /// The page under the finger while browsing.
+    private var browsedPage = 0
+    /// Whether this touch went down on the clip's bar (a drag = the playhead).
+    private var dragMeansPlayhead = false
+
+    /// The page a browsing finger at `x` points at: the run cut into one equal
+    /// slot per page — not the drawn segments, whose widths reflow as the page
+    /// changes and would move the target out from under the finger. The
+    /// previews over the strip stand on the same slots (`browseSlotCenter`).
+    func browsePage(atX x: CGFloat) -> Int {
+        guard pageCount > 0 else { return 0 }
+        let slot = runWidth / CGFloat(pageCount)
+        return min(max(Int(floor(x / max(slot, 0.0001))), 0), pageCount - 1)
+    }
+
+    /// The centre of `page`'s browsing slot, in the strip's coordinates.
+    func browseSlotCenter(_ page: Int) -> CGFloat {
+        let slot = runWidth / CGFloat(max(pageCount, 1))
+        return slot * (CGFloat(page) + 0.5)
+    }
+
+    /// How many pages the strip browses.
+    var browsablePageCount: Int { pageCount }
+
+    /// The width of one browsing slot.
+    var browseSlotWidth: CGFloat { runWidth / CGFloat(max(pageCount, 1)) }
+
+    private func browse(toX x: CGFloat) {
+        guard pageCount >= 2 else { return }
+        let page = browsePage(atX: x)
+        if !isBrowsing {
+            isBrowsing = true
+            browsedPage = Int(position.rounded())
+            // The bar a clip's page was drawn as goes back to segments.
+            animate(\.clipHold, to: 1, duration: Self.handleDuration)
+            browseTick.prepare()
+            onBrowseBegan?(browsedPage)
+        }
+        guard page != browsedPage else { return }
+        browsedPage = page
+        browseTick.selectionChanged()
+        browseTick.prepare()
+        browseTicks += 1
+        onBrowse?(page)
+    }
+
+    /// The finger let go: the page under it stays, and if it is a clip its
+    /// segment now grows into the bar.
+    private func endBrowsing() {
+        isBrowsing = false
+        animate(\.clipHold, to: 0, duration: Self.clipReleaseDuration)
+        onBrowseEnded?(browsedPage)
+    }
+
+    /// How long a clip's segment takes to grow into its bar after a browse.
+    static let clipReleaseDuration: TimeInterval = 0.3
+
+    /// Pages crossed while browsing, one haptic tick each. Tests.
+    private(set) var browseTicks = 0
+
     /// Whether this drag is moving the playhead rather than the pages: the page
     /// the viewer is ON carries a clip, and the strip is drawn as its bar.
     private var isScrubbingAClip: Bool { isBar(Int(position.rounded())) }
@@ -1076,7 +1166,7 @@ final class SnapMediaPageBarView: UIView {
     /// Whether a page is currently drawn as a clip's bar — a clip, watched, and
     /// with a playhead worth drawing.
     private func isBar(_ index: Int) -> Bool {
-        clipPages.contains(index) && index == Int(position.rounded()) && playhead != nil
+        !isBrowsing && clipPages.contains(index) && index == Int(position.rounded()) && playhead != nil
     }
 
     /// Where along a bar a point falls, as a fraction of the clip.
@@ -1195,6 +1285,8 @@ final class SnapMediaPageBarView: UIView {
         return (segments[index].layer.animationKeys() ?? []).isEmpty == false
     }
 
+    static var debugTravelThreshold: CGFloat { travelThreshold }
+
     /// Drives the scrub without a finger; the simulator injects none.
     func debugScrub(_ state: UIGestureRecognizer.State, atX x: CGFloat) {
         handleScrub(state, atX: x)
@@ -1267,6 +1359,7 @@ final class SnapMediaPageBarView: UIView {
         let later = CACurrentMediaTime() + 10
         handling.step(now: later)
         awakeness.step(now: later)
+        clipHold.step(now: later)
         tweenLink?.invalidate()
         tweenLink = nil
         layoutSegments()

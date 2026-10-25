@@ -178,7 +178,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // fresh decode. Paused, the page keeps its last frame and returning is
         // free. The player is released when the page itself goes: `didResignActive`
         // and `prepareForReuse` both already stop it.
-        guard isActive, !isPostUnavailable, let url = activeVideoURL else {
+        guard isActive, !isPostUnavailable, !isBrowsingMedia, let url = activeVideoURL else {
             #if DEBUG
             CarouselPlaybackAudit.trace("post setPaused true page=\(mediaCard.currentPage)")
             #endif
@@ -538,6 +538,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     var debugShownPhoto: UIImage? { mediaCard.imageView.image }
     #endif
     private var isActive = false
+    /// A finger is sliding through the carousel's pages on the strip (#1734):
+    /// pages turn under it without playing; the clip it lets go on plays.
+    private var isBrowsingMedia = false
 
     // MARK: Comments engagement
 
@@ -847,6 +850,23 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         chrome.onMediaScrubBegan = { [weak self] in self?.playback.beginScrub() }
         chrome.onMediaScrubEnded = { [weak self] fraction in self?.playback.endScrub(at: fraction) }
+        // Browsing (#1734): the carousel jumps to the page under the finger,
+        // nothing plays until the finger lets go.
+        chrome.onMediaBrowseBegan = { [weak self] in
+            guard let self else { return }
+            isBrowsingMedia = true
+            reconcilePagePlayback()
+        }
+        chrome.onMediaBrowse = { [weak self] page in
+            self?.mediaCard.setPage(page, animated: false)
+        }
+        chrome.onMediaBrowseEnded = { [weak self] page in
+            guard let self else { return }
+            isBrowsingMedia = false
+            if mediaCard.currentPage != page { mediaCard.setPage(page, animated: false) }
+            reconcilePagePlayback()
+            updatePlayheadFeed()
+        }
         chrome.onMediaPageRequested = { [weak self] page in
             guard let self else { return }
             // ⚠️ A NEIGHBOUR IS A PAGE TURN; ANYTHING FURTHER IS A JUMP.
@@ -1868,6 +1888,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 current: mediaCard.currentPage,
                 clipPages: Set(mediaCard.videoPageIndices)
             )
+            chrome.setMediaPreviews(
+                thumbnails: model.mediaPages.map(\.thumbnailURL),
+                videoPages: Set(mediaCard.videoPageIndices), pipeline: pipeline
+            )
             updatePlayheadFeed()
             #if DEBUG
             // ⚠️ Published HERE as well as from the window, because the window
@@ -1905,6 +1929,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // the strip is drawn for one page and becomes that clip's bar. A lone
         // photograph reports nothing and keeps no strip.
         chrome.setMediaPageCount(isVideo ? 1 : 0, current: 0, clipPages: isVideo ? [0] : [])
+        chrome.setMediaPreviews(thumbnails: [], videoPages: [], pipeline: nil)
         updatePlayheadFeed()
 
         if isImage {
@@ -3229,6 +3254,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        isBrowsingMedia = false
         setSideListOverlayOffset(0)
         // A frozen carousel never goes on to another post (#1738): the next
         // display takes the screen's freeze state again.
