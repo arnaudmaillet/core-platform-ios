@@ -293,7 +293,7 @@ final class SnapCellPlayback: NSObject {
         Task { [weak self] in
             let image = await pool.previewFrame(
                 atFraction: fraction, in: view,
-                maximumWidth: SnapScrubPreviewView.frameSize.width
+                maximumWidth: SnapScrubPreviewView.maxFrameWidth
             )
             guard let self else { return }
             isFetchingPreview = false

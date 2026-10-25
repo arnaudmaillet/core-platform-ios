@@ -537,7 +537,11 @@ final class SnapChromeView: UIView {
         // they are two things — less than the seam between two containers in
         // the band above (md), because these two are closer kin than that.
         scrubPreview.translatesAutoresizingMaskIntoConstraints = true
-        scrubPreview.frame = CGRect(origin: .zero, size: SnapScrubPreviewView.totalSize)
+        scrubPreview.frame = CGRect(origin: .zero, size: scrubPreview.totalSize)
+        scrubPreview.onShapeChange = { [weak self] in
+            guard let self, let last = lastScrubPreview else { return }
+            placeScrubPreview(at: last.x)
+        }
         addSubview(scrubPreview)
         mediaPageBar.onScrubPreview = { [weak self] preview in
             self?.showScrubPreview(preview)
@@ -866,6 +870,15 @@ final class SnapChromeView: UIView {
         // is not — see its assignment.
         hasMedia = model.mediaURL != nil
         applyAuthorRowLayout()
+        // ⚠️ THE CAPTION'S SEAT AT CONFIGURE (#1724): it was only re-read when
+        // a page count arrived, which the flight replica of a single picture
+        // never gets — it flew at the old seat and the caption jumped at the
+        // landing (filmed by the owner with `-caption-cover-line`).
+        applyCaptionSeat()
+        // Each page's declared shape, for the scrub card (#1724).
+        pageAspects = model.mediaPages.enumerated().map { index, page in
+            CGFloat(index == 0 ? (model.headAspectRatio ?? page.aspectRatio) : page.aspectRatio)
+        }
         // ⚠️ THE CHROME CARRIES ITS OWN THEME (#683). The live cell's content
         // view is themed when it joins a window, and the hero flight's
         // replica never was: the like pill and the sound bubble flew as LIGHT
@@ -1229,6 +1242,7 @@ final class SnapChromeView: UIView {
     }
 
     func setMediaPageCount(_ count: Int, current: Int, clipPages: Set<Int> = []) {
+        mediaPosition = CGFloat(current)
         mediaPageBar.configure(count: count, current: current, clipPages: clipPages)
         applyCaptionSeat()
     }
@@ -1298,6 +1312,7 @@ final class SnapChromeView: UIView {
     /// strip: width and ink are read off it, so the strip reflows for the whole
     /// gesture rather than at the crossing. See `SnapMediaPageBarView`.
     func setMediaScrollPosition(_ position: CGFloat) {
+        mediaPosition = position
         mediaPageBar.setPosition(position)
     }
 
@@ -1343,15 +1358,11 @@ final class SnapChromeView: UIView {
             return
         }
         setScrubFocus(true)
-        let size = SnapScrubPreviewView.totalSize
-        let alongTheStrip = mediaPageBar.frame.minX + preview.x
-        let leftMost = mediaPageBar.frame.minX + size.width / 2
-        let rightMost = mediaPageBar.frame.maxX - size.width / 2
-        scrubPreview.frame = CGRect(
-            x: min(max(alongTheStrip, leftMost), rightMost) - size.width / 2,
-            y: mediaPageBar.frame.minY - size.height - Spacing.sm,
-            width: size.width, height: size.height
-        )
+        lastScrubPreview = preview
+        // The clip's own shape (#1724): the page the viewer is on.
+        let page = Int(mediaPosition.rounded())
+        if pageAspects.indices.contains(page) { scrubPreview.aspect = pageAspects[page] }
+        placeScrubPreview(at: preview.x)
         // ⚠️ ABOVE EVERYTHING, and re-stated on every show. The card is built
         // with the strip, and the surfaces added after it — the shortcut wheel,
         // the boost anchor, the subtitle zone, the comment empty state — are
@@ -1360,6 +1371,26 @@ final class SnapChromeView: UIView {
         bringSubviewToFront(scrubPreview)
         scrubPreview.show(fraction: preview.fraction, seconds: clipSeconds)
         onScrubPreviewRequested?(preview.fraction)
+    }
+
+    /// The last point the card was asked over, for a re-place after a reshape.
+    private var lastScrubPreview: (fraction: Double, x: CGFloat)?
+    /// Each page's declared shape, width / height (#1724) — `configure`'s.
+    private var pageAspects: [CGFloat] = []
+    /// The carousel's position in pages — which page's shape the card takes.
+    private var mediaPosition: CGFloat = 0
+
+    /// Sizes the card to its shape and puts it over `x` along the strip.
+    private func placeScrubPreview(at x: CGFloat) {
+        let size = scrubPreview.totalSize
+        let alongTheStrip = mediaPageBar.frame.minX + x
+        let leftMost = mediaPageBar.frame.minX + size.width / 2
+        let rightMost = mediaPageBar.frame.maxX - size.width / 2
+        scrubPreview.frame = CGRect(
+            x: min(max(alongTheStrip, leftMost), rightMost) - size.width / 2,
+            y: mediaPageBar.frame.minY - size.height - Spacing.sm,
+            width: size.width, height: size.height
+        )
     }
 
     // MARK: - The scrub's focus

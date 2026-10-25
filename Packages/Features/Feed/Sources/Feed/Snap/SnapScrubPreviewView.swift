@@ -17,10 +17,37 @@ import UIKit
 /// gesture is pointing at — and the difference shows the moment the clip is
 /// long enough that the two ends mean different things.
 final class SnapScrubPreviewView: UIView {
-    /// The frame's box. 16:9 because that is what the fixtures and most posts
-    /// are; a taller frame letterboxes inside it rather than resizing the card,
-    /// which would make the card move while the thumb did not.
-    static let frameSize = CGSize(width: 118, height: 66)
+    /// The frame's box budget (#1724, the owner): the card takes the clip's
+    /// own shape — 118 pt wide for a landscape clip, at most 150 pt tall for a
+    /// portrait one — instead of a fixed 16:9 box a vertical clip letterboxed
+    /// in. The shape is the page's declared aspect, known before the first
+    /// frame, so the card does not resize under a still thumb.
+    static let maxFrameWidth: CGFloat = 118
+    static let maxFrameHeight: CGFloat = 150
+
+    /// The frame's box for a clip `aspect` (width / height) wide.
+    static func frameSize(aspect: CGFloat) -> CGSize {
+        let ratio = aspect.isFinite && aspect > 0 ? aspect : 16.0 / 9.0
+        if ratio >= maxFrameWidth / maxFrameHeight {
+            return CGSize(width: maxFrameWidth, height: (maxFrameWidth / ratio).rounded())
+        }
+        return CGSize(width: (maxFrameHeight * ratio).rounded(), height: maxFrameHeight)
+    }
+
+    /// The clip's shape, width / height. Set by the host before it places
+    /// the card; a frame of another shape resets it (`setPicture`).
+    var aspect: CGFloat = 16.0 / 9.0 {
+        didSet {
+            guard aspect != oldValue else { return }
+            setNeedsLayout()
+        }
+    }
+
+    /// The frame came in another shape than declared: the host re-places
+    /// the card at its new size.
+    var onShapeChange: (() -> Void)?
+
+    var frameSize: CGSize { Self.frameSize(aspect: aspect) }
 
     private let picture = UIImageView()
     private let time = UILabel()
@@ -83,19 +110,23 @@ final class SnapScrubPreviewView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// The card's whole size: the frame, and the readout under it.
-    static var totalSize: CGSize {
-        CGSize(width: frameSize.width, height: frameSize.height + 18)
+    var totalSize: CGSize {
+        CGSize(width: max(frameSize.width, 84), height: frameSize.height + 18)
     }
 
-    override var intrinsicContentSize: CGSize { Self.totalSize }
+    override var intrinsicContentSize: CGSize { totalSize }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        plate.frame = CGRect(origin: .zero, size: Self.frameSize)
+        // Centred over the readout, which keeps room for "0:00 / 0:00".
+        plate.frame = CGRect(
+            x: ((bounds.width - frameSize.width) / 2).rounded(), y: 0,
+            width: frameSize.width, height: frameSize.height
+        )
         picture.frame = plate.bounds
         spinner.center = CGPoint(x: plate.bounds.midX, y: plate.bounds.midY)
         time.frame = CGRect(
-            x: 0, y: Self.frameSize.height + 2,
+            x: 0, y: frameSize.height + 2,
             width: bounds.width, height: 16
         )
     }
@@ -122,9 +153,16 @@ final class SnapScrubPreviewView: UIView {
         // The preview frames the clip by the page's own rule
         // (`SnapMediaAspect`): a clip the page shows whole is shown whole here,
         // on the plate's dark ground; a clip the page fills is cropped to fill.
-        picture.contentMode = SnapMediaAspect.presentation(
-            for: CGSize(width: image.width, height: image.height)
-        ).contentMode
+        // The card has the clip's shape: the frame fills it. A frame of
+        // another shape than declared reshapes the card (#1724).
+        picture.contentMode = .scaleAspectFill
+        if image.width > 0, image.height > 0 {
+            let actual = CGFloat(image.width) / CGFloat(image.height)
+            if abs(actual - aspect) > 0.02 {
+                aspect = actual
+                onShapeChange?()
+            }
+        }
         picture.image = UIImage(cgImage: image)
         setLoading(false)
     }
