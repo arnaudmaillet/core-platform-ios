@@ -231,7 +231,7 @@ final class SnapChromeView: UIView {
     /// engagement's entry points; hidden views receive no touches, so each
     /// claims taps only while shown).
     var interactionRoots: [UIView] {
-        [shortcutRail, boostButton, commentEmptyState, subtitleView, commentTicker, soundBubble, authorRow]
+        [shortcutRail, boostButton, commentEmptyState, subtitleView, commentTicker, soundBubble, authorRow, captionLabel]
     }
 
     // MARK: - The author row (#1699)
@@ -291,6 +291,13 @@ final class SnapChromeView: UIView {
             authorRow.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.xs)
         }
     }
+
+    @objc private func captionTapped() {
+        onCommentsTapped?()
+    }
+
+    /// A tap on the caption — for tests.
+    func debugTapCaption() { captionTapped() }
 
     @objc private func authorRowHeld(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began else { return }
@@ -662,6 +669,10 @@ final class SnapChromeView: UIView {
         commentEmptyState.onTap = { [weak self] in self?.onCommentsTapped?() }
         subtitleView.onTap = { [weak self] in self?.onCommentsTapped?() }
         commentTicker.onTap = { [weak self] in self?.onCommentsTapped?() }
+        // …and the caption (#1720, the owner): the post's words lead to what
+        // is said about them.
+        captionLabel.isUserInteractionEnabled = true
+        captionLabel.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(captionTapped)))
     }
 
     /// The action column's media half (`SnapActionColumn`): the SOUND bubble

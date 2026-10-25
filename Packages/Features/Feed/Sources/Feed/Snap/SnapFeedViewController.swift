@@ -7397,8 +7397,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// - the list **open**: a leftward drag pushes the author of the post on
     ///   the CARD (the list's current item, not the anchor); a rightward one
     ///   closes the list;
-    /// - from the **right edge** (#1592, the owner 2026-10-22), any post: the
-    ///   author's profile at once, skipping the list.
+    /// - from the **right edge** or the action column (#1592, the owner
+    ///   2026-10-22): the author's profile at once, skipping the list — except
+    ///   on a **carousel**, where it opens the list (#1720).
     func swipeStage(for direction: SwipeDirection, at origin: CGPoint) -> SwipeStage? {
         guard let sideList, !sideList.isSettling else { return nil }
         if sideList.isOpen {
@@ -7411,8 +7412,15 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             }
         }
         guard direction == .leftward, sideListMayOpen(from: origin) else { return nil }
-        if isInTrailingEdge(origin) || isOnTrailingColumn(origin) { return authorPushStage() }
-        guard let model = activePostID.flatMap({ modelsByID[$0] }) else { return nil }
+        let model = activePostID.flatMap { modelsByID[$0] }
+        if isInTrailingEdge(origin) || isOnTrailingColumn(origin) {
+            // ⚠️ A CAROUSEL'S EDGE OPENS THE LIST (#1720, the owner): its
+            // middle pages through its photos, so the edge is the way to the
+            // similar posts. Any other post's edge pushes the author.
+            if let model, model.isCollection { return .panel(sideList) }
+            return authorPushStage()
+        }
+        guard let model else { return nil }
         return model.mediaURL != nil ? .panel(sideList) : authorPushStage()
     }
 
