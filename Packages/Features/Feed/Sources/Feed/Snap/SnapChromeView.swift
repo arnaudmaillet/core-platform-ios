@@ -139,30 +139,17 @@ final class SnapChromeView: UIView {
     private var boostStationTop: NSLayoutConstraint?
     private var boostStationBottom: NSLayoutConstraint?
     private var railBottom: NSLayoutConstraint?
-    /// TRIAL (#1718, the owner): `-caption-cover-line` gives every snap feed
-    /// Shots' no-strip caption — its bottom on the sound cover's line — to
-    /// judge it over a pushed post's toolbar, shorter than the tab bar.
-    /// Read per chrome, so a test can set it.
-    var alignsCaptionWithCover = ProcessInfo.processInfo.arguments.contains("-caption-cover-line") {
-        didSet {
-            guard alignsCaptionWithCover != oldValue else { return }
-            applyCaptionSeat()
-        }
-    }
 
     /// The insets the cell handed over (`setFixedInsets`), before the
     /// bottom breath is added to them.
     private var fixedInsets: UIEdgeInsets?
 
-    /// Shots — the For You root (#1716, the owner): on a post with no strip
-    /// the caption comes down to the cover's line — no room kept for a strip
-    /// that is not there — and its breath over the bar is Shots' own
-    /// (`shotsBottomBreath`, `applyFixedInsets`).
+    /// Shots — the For You root (#1716, the owner): its breath over the tab
+    /// bar is its own (`shotsBottomBreath`, `applyFixedInsets`).
     var sitsOverTabBar = false {
         didSet {
             guard sitsOverTabBar != oldValue else { return }
             applyFixedInsets()
-            applyCaptionSeat()
         }
     }
     /// The like pill's bottom above the margin line, without the capsule.
@@ -206,15 +193,10 @@ final class SnapChromeView: UIView {
     /// The floor guide's height constraint — its constant is the caption's
     /// two-line box, refreshed on Dynamic Type changes alongside the caption.
     private var captionFloorHeightConstraint: NSLayoutConstraint?
-    /// The caption's two seats: xl above the bar over a page strip, or down
-    /// in the strip's place without one (`applyCaptionSeat`).
+    /// The caption's two seats: xl above the bar over a page strip, or — with
+    /// no strip — its bottom on the sound cover's line (`applyCaptionSeat`).
     private var captionOverStripConstraint: NSLayoutConstraint?
     private var captionOnBarConstraint: NSLayoutConstraint?
-    /// The caption's bottom above the bar with no strip: xl less the strip's
-    /// footprint (its thickness and its gap to the bar).
-    static var captionToBarWithoutStrip: CGFloat {
-        Spacing.xl - SnapMediaPageBarView.thickness - pageBarToolbarGap
-    }
     /// Top margins beyond this are transition churn (safe-area insets
     /// re-propagating into a cell mid-flight), not a settled state — a real
     /// settled top (status bar + transparent nav bar) stays well under it
@@ -437,15 +419,14 @@ final class SnapChromeView: UIView {
         captionLabel.constrain(in: self) { parent in
             captionLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
         }
-        // ⚠️ THE CAPTION TAKES THE STRIP'S PLACE when there is none (the
-        // owner, 2026-10-16: a lone photograph's caption sat a strip's height
-        // above the bar, as if the strip were only hidden). Above the strip
-        // it sits xl up; with no strip it drops by the strip's footprint.
+        // ⚠️ NO ROOM FOR A STRIP THAT IS NOT THERE (the owner, 2026-10-16,
+        // then #1716/#1726): above a strip the caption sits xl up; with none,
+        // its bottom sits on the sound cover's line, on every feed.
         let captionOverStrip = captionLabel.bottomAnchor.constraint(
             equalTo: layoutMarginsGuide.bottomAnchor, constant: -Spacing.xl
         )
         let captionOnBar = captionLabel.bottomAnchor.constraint(
-            equalTo: layoutMarginsGuide.bottomAnchor, constant: -Self.captionToBarWithoutStrip
+            equalTo: layoutMarginsGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
         )
         captionOverStripConstraint = captionOverStrip
         captionOnBarConstraint = captionOnBar
@@ -873,7 +854,7 @@ final class SnapChromeView: UIView {
         // ⚠️ THE CAPTION'S SEAT AT CONFIGURE (#1724): it was only re-read when
         // a page count arrived, which the flight replica of a single picture
         // never gets — it flew at the old seat and the caption jumped at the
-        // landing (filmed by the owner with `-caption-cover-line`).
+        // landing (filmed by the owner, #1724).
         applyCaptionSeat()
         // Each page's declared shape, for the scrub card (#1724).
         pageAspects = model.mediaPages.enumerated().map { index, page in
@@ -1250,12 +1231,6 @@ final class SnapChromeView: UIView {
     /// Seats the caption over the strip, or in its place when there is none.
     private func applyCaptionSeat() {
         let overStrip = !mediaPageBar.isHidden
-        // No strip on Shots: the caption's bottom on the sound cover's line
-        // (#1716, the owner) — elsewhere, in the strip's place, unless the
-        // owner's trial flag gives every feed Shots' rule (#1718).
-        captionOnBarConstraint?.constant = sitsOverTabBar || alignsCaptionWithCover
-            ? -SnapActionColumn.inputRestingGap
-            : -Self.captionToBarWithoutStrip
         setNeedsLayout()
         guard captionOverStripConstraint?.isActive != overStrip else { return }
         if overStrip {
