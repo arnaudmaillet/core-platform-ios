@@ -1422,12 +1422,12 @@ final class SnapChromeView: UIView {
         placeBrowseStrip()
         // Above everything, re-stated on every show — the scrub card's rule.
         bringSubviewToFront(browseStrip)
-        browseStrip.show(selecting: page)
+        browseStrip.show(selecting: page, anchorX: browseAnchor(page))
         onMediaBrowseBegan?()
     }
 
     private func browse(to page: Int) {
-        browseStrip.select(page)
+        browseStrip.select(page, anchorX: browseAnchor(page))
         onMediaBrowse?(page)
     }
 
@@ -1437,17 +1437,20 @@ final class SnapChromeView: UIView {
         onMediaBrowseEnded?(page)
     }
 
-    /// The previews right over the strip, the strip's width, each tile on its
-    /// page's browsing slot.
+    /// The filmstrip across the chrome's width, its counter on the strip's
+    /// line — the row takes the caption's room above it, faded for the
+    /// browse — as the reference app lays it out.
     private func placeBrowseStrip() {
         let bar = mediaPageBar.frame
-        let slot = mediaPageBar.browseSlotWidth
-        let height = SnapBrowseStripView.height(slotWidth: slot)
-        browseStrip.frame = CGRect(x: bar.minX, y: bar.minY - height - Spacing.sm, width: bar.width, height: height)
-        browseStrip.setSlots(
-            centers: (0..<mediaPageBar.browsablePageCount).map { mediaPageBar.browseSlotCenter($0) },
-            width: slot
-        )
+        let height = SnapBrowseStripView.height
+        let counterMid = height - SnapBrowseStripView.counterHeight / 2
+        browseStrip.frame = CGRect(x: 0, y: bar.midY - counterMid, width: bounds.width, height: height)
+    }
+
+    /// Where the chosen tile stands: over the finger's slot on the strip, in
+    /// the filmstrip's space.
+    private func browseAnchor(_ page: Int) -> CGFloat {
+        mediaPageBar.frame.minX + mediaPageBar.browseSlotCenter(page) - browseStrip.frame.minX
     }
 
     #if DEBUG

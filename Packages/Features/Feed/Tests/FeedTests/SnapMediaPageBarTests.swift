@@ -1444,16 +1444,29 @@ struct SnapStripBrowseTests {
         let strip = view.debugBrowseStrip
         #expect(strip.debugIsShown)
         #expect(strip.debugTileCount == 4)
-        #expect(strip.frame.maxY <= view.debugPageBarFrame.minY)
+        // The segments step aside for the filmstrip, whose counter takes
+        // their line ("3 / 4").
+        #expect(bar.debugContainerOpacity == 0, "the segments stayed on screen under the filmstrip")
+        #expect(strip.debugCounterText == "3 / 4")
+        let counterMid = strip.frame.minY + strip.debugCounterFrame.midY
+        #expect(abs(counterMid - view.debugPageBarFrame.midY) < 0.5, "the counter is not on the strip's line")
+        // The chosen tile, larger, stands over the finger's slot; the row is
+        // contiguous — no two tiles overlap.
         let chosen = try #require(strip.debugTileFrame(2))
         let other = try #require(strip.debugTileFrame(1))
         #expect(chosen.width > other.width, "the page under the finger is not enlarged")
         #expect(abs(strip.frame.minX + chosen.midX - (view.debugPageBarFrame.minX + bar.browseSlotCenter(2))) < 0.5,
-                "the chosen tile is not over its slot")
+                "the chosen tile is not over the finger's slot")
+        let frames = try (0..<4).map { try #require(strip.debugTileFrame($0)) }
+        for index in 1..<4 {
+            #expect(frames[index].minX >= frames[index - 1].maxX, "tiles \(index - 1) and \(index) overlap")
+        }
+        #expect(other.width >= SnapBrowseStripView.tileSize.width)
         #expect(browsed == [2])
 
         bar.debugScrub(.ended, atX: slot * 2.5)
         #expect(view.debugScrubFadedAlphas == resting)
         #expect(!strip.debugIsShown)
+        #expect(bar.debugContainerOpacity == 1, "the segments did not come back")
     }
 }

@@ -2,66 +2,68 @@ import DesignSystem
 import MediaCore
 import UIKit
 
-/// The carousel's pages as a row of previews over the segment strip, while a
-/// finger slides along it (#1734, the owner 2026-10-25, after another app's
-/// filmstrip): one tile per page, the page under the finger enlarged.
+/// The carousel's pages as a filmstrip IN PLACE of the segment strip while a
+/// finger slides along it (#1734) — Kuaishou's quick browse, which the owner
+/// asked for as is (2026-10-25, after a first version with small tiles over
+/// the segments): the segments step aside, a row of portrait previews takes
+/// their line, the page under the finger drawn larger with a white edge, and
+/// "4 / 14" centred under the row.
 ///
-/// ⚠️ EACH TILE STANDS ON ITS PAGE'S BROWSING SLOT, not on its drawn segment.
-/// The strip cuts its run into equal slots to read the finger
-/// (`SnapMediaPageBarView.browsePage(atX:)`) because the drawn segments reflow
-/// as the page changes; tiles on those same slots keep the tile under the
-/// finger the page the finger picks.
+/// ⚠️ THE ROW IS CONTIGUOUS AND WIDER THAN THE SCREEN, and the chosen tile
+/// stands under the finger. Tiles on equal slots of the strip's width (the
+/// first version) were too small to read and still overlapped at twelve
+/// pages. Here every tile keeps a legible size and the row slides: the chosen
+/// tile is centred on the finger's slot (`anchorX`), its neighbours packed
+/// either side of it, running off the edges when there are many.
 ///
-/// The view is the strip's width and sits right above it; the chrome places
-/// it (`SnapChromeView.placeBrowseStrip`).
+/// The view spans the chrome's width; the chrome places it so the counter sits
+/// on the strip's line (`SnapChromeView.placeBrowseStrip`).
 final class SnapBrowseStripView: UIView {
-    /// A tile's widest, and its shape (width / height): portrait, like most
-    /// of what a carousel holds.
-    static let maxTileWidth: CGFloat = 34
-    static let tileAspect: CGFloat = 3.0 / 4.0
-    /// How much larger the page under the finger is drawn.
-    static let selectedScale: CGFloat = 1.5
-    /// The room between two tiles at the least.
-    static let tileGap: CGFloat = 3
-    /// How long the enlarged tile takes to move to the next page.
+    /// A tile at rest, portrait like the reference's.
+    static let tileSize = CGSize(width: 36, height: 50)
+    /// The chosen tile: larger, on the same centre line.
+    static let selectedTileSize = CGSize(width: 44, height: 61)
+    static let tileGap: CGFloat = 4
+    static let selectedBorder: CGFloat = 2
+    /// The room between the row and the counter.
+    static let counterGap: CGFloat = 10
+    static let counterHeight: CGFloat = 18
+    /// How long the row takes to slide to the next page.
     static let selectionDuration: TimeInterval = 0.15
     static let fadeDuration: TimeInterval = 0.15
+
+    /// The strip's height: the chosen tile, the gap, the counter.
+    static var height: CGFloat { selectedTileSize.height + counterGap + counterHeight }
 
     private var tiles: [UIImageView] = []
     private var videoMarks: [UIImageView] = []
     private var loads: [Task<Void, Never>] = []
     private(set) var selectedPage = 0
-    /// Each page's slot centre and the slot's width, in this view's space.
-    private var slotCenters: [CGFloat] = []
-    private var slotWidth: CGFloat = 0
+    /// Where the chosen tile's centre goes, in this view's space.
+    private var anchorX: CGFloat = 0
+    private let counter: UILabel = {
+        let label = UILabel()
+        label.textAlignment = .center
+        label.isUserInteractionEnabled = false
+        return label
+    }()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
         alpha = 0
         isHidden = true
+        addSubview(counter)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// The height the strip needs: an enlarged tile.
-    static func height(slotWidth: CGFloat) -> CGFloat {
-        tileSize(slotWidth: slotWidth).height * selectedScale
-    }
-
-    /// A tile at rest, for a slot `slotWidth` wide.
-    static func tileSize(slotWidth: CGFloat) -> CGSize {
-        let width = max(min(maxTileWidth, slotWidth - tileGap), 4)
-        return CGSize(width: width, height: (width / tileAspect).rounded())
-    }
 
     /// The pages' previews: their thumbnails, and which pages are clips.
     func configure(thumbnails: [URL?], videoPages: Set<Int>, pipeline: ImagePipeline?) {
         loads.forEach { $0.cancel() }
         loads = []
         tiles.forEach { $0.removeFromSuperview() }
-        videoMarks.forEach { $0.removeFromSuperview() }
         tiles = thumbnails.indices.map { _ in
             let tile = UIImageView()
             tile.contentMode = .scaleAspectFill
@@ -84,6 +86,9 @@ final class SnapBrowseStripView: UIView {
             tiles[index].addSubview(mark)
             return mark
         }
+        selectedPage = min(selectedPage, max(thumbnails.count - 1, 0))
+        updateCounter()
+        setNeedsLayout()
         guard let pipeline else { return }
         for (index, url) in thumbnails.enumerated() {
             guard let url else { continue }
@@ -99,16 +104,10 @@ final class SnapBrowseStripView: UIView {
         }
     }
 
-    /// Puts the tiles on the strip's slots: `centers` in this view's space,
-    /// one per page.
-    func setSlots(centers: [CGFloat], width: CGFloat) {
-        slotCenters = centers
-        slotWidth = width
-        layoutTiles()
-    }
-
-    func show(selecting page: Int) {
+    func show(selecting page: Int, anchorX: CGFloat) {
         selectedPage = page
+        self.anchorX = anchorX
+        updateCounter()
         layoutTiles()
         guard isHidden || alpha < 1 else { return }
         isHidden = false
@@ -117,9 +116,13 @@ final class SnapBrowseStripView: UIView {
         }
     }
 
-    func select(_ page: Int) {
-        guard page != selectedPage else { return }
+    /// The finger chose `page`, whose slot is centred at `anchorX`: the row
+    /// slides to put that tile there.
+    func select(_ page: Int, anchorX: CGFloat) {
+        guard page != selectedPage || anchorX != self.anchorX else { return }
         selectedPage = page
+        self.anchorX = anchorX
+        updateCounter()
         guard window != nil, UIView.areAnimationsEnabled else { return layoutTiles() }
         UIView.animate(
             withDuration: Self.selectionDuration, delay: 0,
@@ -148,23 +151,52 @@ final class SnapBrowseStripView: UIView {
         layoutTiles()
     }
 
-    /// Every tile on its slot, resting on the strip's bottom; the selected one
-    /// enlarged upward from there.
+    /// "4 / 14": the page in white, the count dimmer.
+    private func updateCounter() {
+        guard !tiles.isEmpty else { counter.attributedText = nil; return }
+        let font = UIFont.monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
+        let text = NSMutableAttributedString(
+            string: "\(selectedPage + 1)", attributes: [.font: font, .foregroundColor: UIColor.white]
+        )
+        text.append(NSAttributedString(
+            string: " / \(tiles.count)",
+            attributes: [.font: UIFont.monospacedDigitSystemFont(ofSize: 15, weight: .regular),
+                         .foregroundColor: UIColor.white.withAlphaComponent(0.6)]
+        ))
+        counter.attributedText = text
+    }
+
+    /// The chosen tile centred on `anchorX`, the others packed either side,
+    /// every tile on the row's centre line; the counter centred under the row.
     private func layoutTiles() {
-        guard tiles.count == slotCenters.count, slotWidth > 0 else { return }
-        let rest = Self.tileSize(slotWidth: slotWidth)
+        let rowMidY = Self.selectedTileSize.height / 2
+        counter.frame = CGRect(
+            x: 0, y: Self.selectedTileSize.height + Self.counterGap,
+            width: bounds.width, height: Self.counterHeight
+        )
+        guard !tiles.isEmpty else { return }
+        let rest = Self.tileSize
+        let chosen = Self.selectedTileSize
         for (index, tile) in tiles.enumerated() {
-            let selected = index == selectedPage
-            let scale = selected ? Self.selectedScale : 1
-            let size = CGSize(width: rest.width * scale, height: rest.height * scale)
-            // bounds + centre: the selected tile's growth animates as a size.
+            let offset = index - selectedPage
+            let x: CGFloat
+            if offset == 0 {
+                x = anchorX
+            } else {
+                // From the chosen tile's edge, whole resting tiles outward.
+                let side: CGFloat = offset > 0 ? 1 : -1
+                let steps = CGFloat(abs(offset))
+                x = anchorX + side * (chosen.width / 2 + Self.tileGap + rest.width / 2
+                    + (steps - 1) * (rest.width + Self.tileGap))
+            }
+            let size = offset == 0 ? chosen : rest
+            // bounds + centre: the chosen tile's growth animates as a size.
             tile.bounds = CGRect(origin: .zero, size: size)
-            tile.center = CGPoint(x: slotCenters[index], y: bounds.height - size.height / 2)
-            tile.layer.cornerRadius = 4 * scale
-            tile.layer.borderWidth = selected ? 1.5 : 0
-            tile.alpha = selected ? 1 : 0.7
+            tile.center = CGPoint(x: x, y: rowMidY)
+            tile.layer.cornerRadius = offset == 0 ? 6 : 4
+            tile.layer.borderWidth = offset == 0 ? Self.selectedBorder : 0
             let mark = videoMarks[index]
-            let side = min(10 * scale, size.width / 2)
+            let side = min(offset == 0 ? 16 : 12, size.width / 2)
             mark.frame = CGRect(x: (size.width - side) / 2, y: (size.height - side) / 2, width: side, height: side)
         }
     }
@@ -181,5 +213,7 @@ final class SnapBrowseStripView: UIView {
     }
     var debugTileCount: Int { tiles.count }
     var debugIsShown: Bool { !isHidden && alpha > 0 }
+    var debugCounterText: String? { counter.attributedText?.string }
+    var debugCounterFrame: CGRect { counter.frame }
     #endif
 }

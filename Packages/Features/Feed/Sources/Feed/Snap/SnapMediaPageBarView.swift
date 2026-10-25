@@ -180,9 +180,10 @@ final class SnapMediaPageBarView: UIView {
     var onBrowse: ((Int) -> Void)?
     var onBrowseEnded: ((Int) -> Void)?
 
-    /// One tick per page crossed while browsing — the app's selection haptic,
-    /// behind the Haptics setting (`Haptics.swift`).
-    private let browseTick = HapticSelection()
+    /// One tick per page crossed while browsing, behind the Haptics setting
+    /// (`Haptics.swift`). An IMPACT, not the selection tick: the owner found
+    /// the selection one too faint on the device (2026-10-25).
+    private let browseTick = HapticImpact(style: .medium)
 
     /// The viewer asked to move the playhead of the clip the strip is drawing.
     /// The HOST owns playback, for the reason it owns the carousel.
@@ -442,6 +443,9 @@ final class SnapMediaPageBarView: UIView {
         wakeTimer = Timer.scheduledTimer(withTimeInterval: Self.wakeDuration, repeats: false) {
             [weak self] _ in self?.rest()
         }
+        // While browsing the filmstrip stands in the strip's place (#1734):
+        // the strip stays out of sight until the finger lets go.
+        guard !isBrowsing else { return }
         guard alpha < 1 || !isAwake else { return }
         isAwake = true
         animate(\.awakeness, to: 1, duration: 0.18)
@@ -455,6 +459,7 @@ final class SnapMediaPageBarView: UIView {
     private func rest() {
         wakeTimer?.invalidate()
         wakeTimer = nil
+        guard !isBrowsing else { return }
         isAwake = false
         // The cursor shrinks back into the bar as the strip dims, together.
         animate(\.awakeness, to: 0, duration: 0.45)
@@ -1134,12 +1139,15 @@ final class SnapMediaPageBarView: UIView {
             browsedPage = Int(position.rounded())
             // The bar a clip's page was drawn as goes back to segments.
             animate(\.clipHold, to: 1, duration: Self.handleDuration)
+            // The segments step aside for the filmstrip (Kuaishou's browse,
+            // the owner): out of sight, still holding the touch.
+            setBrowseHidden(true)
             browseTick.prepare()
             onBrowseBegan?(browsedPage)
         }
         guard page != browsedPage else { return }
         browsedPage = page
-        browseTick.selectionChanged()
+        browseTick.impactOccurred()
         browseTick.prepare()
         browseTicks += 1
         onBrowse?(page)
@@ -1150,7 +1158,22 @@ final class SnapMediaPageBarView: UIView {
     private func endBrowsing() {
         isBrowsing = false
         animate(\.clipHold, to: 0, duration: Self.clipReleaseDuration)
+        setBrowseHidden(false)
         onBrowseEnded?(browsedPage)
+    }
+
+    /// The strip out of sight for the browse, and back — awake — after it.
+    ///
+    /// ⚠️ `alpha` 0 still holds the touch: a touch belongs to the view it
+    /// began on whatever happens to that view afterwards, so the scrub keeps
+    /// reporting the finger while the strip is invisible.
+    private func setBrowseHidden(_ hidden: Bool) {
+        guard !hidden else {
+            UIView.animate(withDuration: SnapBrowseStripView.fadeDuration, delay: 0,
+                           options: [.allowUserInteraction, .beginFromCurrentState]) { self.alpha = 0 }
+            return
+        }
+        wake()
     }
 
     /// How long a clip's segment takes to grow into its bar after a browse.
