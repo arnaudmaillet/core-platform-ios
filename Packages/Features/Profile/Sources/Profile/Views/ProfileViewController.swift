@@ -18,17 +18,10 @@ typealias ProfileGridPageFactory = (_ style: PostGridPageStyle, _ savesPosts: Bo
 /// A person's hero page (`HeroPageViewController`, #1655): the container's
 /// layout, travel, dock and bar dress, with the profile's own data, tabs,
 /// bar items, menus and post opening.
-final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAccessoryHosting, ProfileRouteAnswering,
-    DrawerSwipeHosting {
+final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAccessoryHosting, ProfileRouteAnswering {
     /// For You's grid page (#1273, epic #1269): the profile's pages and its
     /// media gallery are For You's, so every tile behaves as For You's does.
     private let makeGridPage: ProfileGridPageFactory
-
-    /// The profile tab's root, not a pushed profile.
-    private var isTabRoot: Bool { navigationController?.viewControllers.first === self }
-
-    /// On the first tab of the profile TAB's root (#1739): see `DrawerSwipeHosting`.
-    var opensDrawerOnRightwardSwipe: Bool { isTabRoot && galleryPager.activePageIndex == 0 }
 
     /// Internal (not private) only for the +QA hooks.
     let viewModel: ProfileViewModel
@@ -534,9 +527,12 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        // The tab ROOT's first tab hands a rightward swipe to the drawer
-        // (#1739); a pushed profile's first tab is its own dismissal.
-        galleryPager.yieldsRightwardDragOnFirstPage = isTabRoot
+        // The profile TAB's root: the notifications drawer is "page −1", pulled
+        // past the first tab with the tabs' own gesture, from the very edge
+        // (#1739). A pushed profile keeps its first-tab dismissal and its back swipe.
+        let isTabRoot = navigationController?.viewControllers.first === self
+        galleryPager.leadingPullTarget = isTabRoot ? DrawerPull.shared : nil
+        galleryPager.reservesLeadingEdge = !isTabRoot
         Task { [weak self] in await self?.viewModel.refreshShareToken() }
         // ⚠️ **AS EARLY AS THE TRANSITION ALLOWS, AND `viewDidAppear` IS NOT
         // EARLY.** Measured on a tab switch, headless: `viewWillAppear` at

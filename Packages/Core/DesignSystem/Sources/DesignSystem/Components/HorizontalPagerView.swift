@@ -69,6 +69,29 @@ public final class HorizontalPagerView: UIView {
         set { scrollView.yieldsDrag = newValue }
     }
 
+    /// What a drag pulling PAST the first page drives — "page −1" (#1739: a
+    /// tab root's notifications drawer). Set, a rightward drag on the first
+    /// page is this pager's own (never yielded past the end) and pulls the
+    /// target instead of rubber-banding. Nil: unchanged.
+    public var leadingPullTarget: (any LeadingPullTarget)? {
+        get { leadingPull.target }
+        set {
+            leadingPull.target = newValue
+            scrollView.pullsPastLeadingEdge = newValue != nil
+        }
+    }
+
+    /// Whether a drag starting in the leading strip is left to the navigation
+    /// stack's back swipe (`PagedScreenDismissalPolicy.edgeZone`). On by
+    /// default; a stack ROOT has no back swipe and turns it off, so its tabs
+    /// page — and reach "page −1" — from the very edge too (#1739).
+    public var reservesLeadingEdge: Bool {
+        get { scrollView.reservesLeadingEdge }
+        set { scrollView.reservesLeadingEdge = newValue }
+    }
+
+    private let leadingPull = LeadingPullTracker()
+
     /// The paging scroll view as a plain `UIScrollView`. Tests drive
     /// fractional offsets through it, which is the only way to exercise the
     /// continuous progress signal without a real gesture.
@@ -375,6 +398,7 @@ public final class HorizontalPagerView: UIView {
 extension HorizontalPagerView: UIScrollViewDelegate {
     public func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard bounds.width > 0 else { return }
+        leadingPull.scrollViewDidScroll(scrollView)
         installPages(around: progress)
         onProgress?(progress)
     }
@@ -386,7 +410,14 @@ extension HorizontalPagerView: UIScrollViewDelegate {
     /// A drag released without enough velocity to decelerate still lands on a
     /// page; without this the header would keep the old selection.
     public func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        leadingPull.scrollViewDidEndDragging(scrollView)
         if !decelerate { settle() }
+    }
+
+    public func scrollViewWillEndDragging(
+        _ scrollView: UIScrollView, withVelocity velocity: CGPoint, targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+        leadingPull.scrollViewWillEndDragging(scrollView, targetContentOffset: targetContentOffset)
     }
 
     public func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
@@ -430,6 +461,10 @@ public final class HorizontalPagerScrollView: UIScrollView {
     public var yieldsPastEnds = false
     /// See `HorizontalPagerView.yieldsDrag`.
     public var yieldsDrag: ((CGPoint) -> Bool)?
+    /// See `HorizontalPagerView.leadingPullTarget`.
+    public var pullsPastLeadingEdge = false
+    /// See `HorizontalPagerView.reservesLeadingEdge`.
+    public var reservesLeadingEdge = true
 
     /// Matches the system's edge-gesture strip — see
     /// `PagedScreenDismissalPolicy.edgeZone`, which is the one definition. This
@@ -473,7 +508,8 @@ public final class HorizontalPagerScrollView: UIScrollView {
         // ⚠️ FIRST AND ABSOLUTE, ahead of any question about direction or
         // travel. Remove the offset to get the viewport-relative x the edge zone
         // is defined in.
-        if point.x - contentOffset.x <= Self.popEdgeZone { return true }
+        // (Not on a stack root, which has no back swipe: `reservesLeadingEdge`.)
+        if reservesLeadingEdge, point.x - contentOffset.x <= Self.popEdgeZone { return true }
         // A horizontal drag that STARTS on content with somewhere to go belongs
         // to that content, not to the tab pager.
         //
@@ -501,7 +537,10 @@ public final class HorizontalPagerScrollView: UIScrollView {
         // velocity at that single moment; nothing re-asks it later.
         // Past its own ends, the drag can only rubber-band here: given away
         // when the owner asked (`yieldsPastEnds`).
-        if yieldsPastEnds, velocity.x != 0, !Self.hasTravel(self, towardsVelocityX: velocity.x) {
+        // A rightward drag on the first page pulls "page −1" instead, when
+        // there is one (`pullsPastLeadingEdge`, #1739).
+        if yieldsPastEnds, velocity.x != 0, !Self.hasTravel(self, towardsVelocityX: velocity.x),
+           !(pullsPastLeadingEdge && velocity.x > 0) {
             return true
         }
         if yieldsDrag?(velocity) == true { return true }

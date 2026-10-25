@@ -99,12 +99,24 @@ open class HeroPagePager<Tab: Equatable>: UIView {
     /// the whole surface when there is no page to the left.
     public var activePageIndex: Int { activeIndex }
 
-    /// Whether a rightward drag on the FIRST page is declined, for a surface
-    /// behind the pager to take — a tab root's drawer (#1739). Off by default:
-    /// a pushed page's first tab belongs to its own dismissal.
-    public var yieldsRightwardDragOnFirstPage: Bool {
-        get { scrollView.yieldsRightwardDragAtStart }
-        set { scrollView.yieldsRightwardDragAtStart = newValue }
+    /// What a drag pulling past the FIRST page drives — "page −1" (#1739: the
+    /// profile tab root's notifications drawer), with this pager's own pan.
+    /// Nil by default: a pushed profile's first tab belongs to its dismissal.
+    public var leadingPullTarget: (any LeadingPullTarget)? {
+        get { scrollDelegate.leadingPull.target }
+        set {
+            scrollDelegate.leadingPull.target = newValue
+            // One tab is one page of content: without the bounce the pan
+            // would never move, and "page −1" could not be reached.
+            scrollView.alwaysBounceHorizontal = newValue != nil
+        }
+    }
+
+    /// Whether a drag starting in the leading strip is left to the stack's back
+    /// swipe. On by default; a stack root, which has none, turns it off (#1739).
+    public var reservesLeadingEdge: Bool {
+        get { scrollView.reservesLeadingEdge }
+        set { scrollView.reservesLeadingEdge = newValue }
     }
 
     private let scrollView = PagerScrollView()
@@ -710,6 +722,8 @@ extension HeroPagePager {
 /// Forwards the paging scroll view's callbacks to its generic pager.
 @MainActor
 private final class PagerScrollDelegate: NSObject, UIScrollViewDelegate {
+    /// Overscroll past the first page as a pull (`HeroPagePager.leadingPullTarget`).
+    let leadingPull = LeadingPullTracker()
     private var scroll: ((UIScrollView) -> Void)?
     private var endDragging: ((UIScrollView, Bool) -> Void)?
     private var endDecelerating: ((UIScrollView) -> Void)?
@@ -722,8 +736,17 @@ private final class PagerScrollDelegate: NSObject, UIScrollViewDelegate {
         endAnimation = { [weak pager] in pager?.pagerDidEndScrollingAnimation($0) }
     }
 
-    func scrollViewDidScroll(_ scrollView: UIScrollView) { scroll?(scrollView) }
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        leadingPull.scrollViewDidScroll(scrollView)
+        scroll?(scrollView)
+    }
+    func scrollViewWillEndDragging(
+        _ scrollView: UIScrollView, withVelocity velocity: CGPoint, targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+        leadingPull.scrollViewWillEndDragging(scrollView, targetContentOffset: targetContentOffset)
+    }
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        leadingPull.scrollViewDidEndDragging(scrollView)
         endDragging?(scrollView, decelerate)
     }
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) { endDecelerating?(scrollView) }
@@ -757,20 +780,15 @@ private final class PagerScrollView: UIScrollView {
     /// believes the other has the drag.
     private static var popEdgeZone: CGFloat { PagedScreenDismissalPolicy.edgeZone }
 
-    /// See `HeroPagePager.yieldsRightwardDragOnFirstPage`.
-    var yieldsRightwardDragAtStart = false
+    /// See `HeroPagePager.reservesLeadingEdge`.
+    var reservesLeadingEdge = true
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if gestureRecognizer === panGestureRecognizer {
-            let drag = panGestureRecognizer.velocity(in: self)
-            if yieldsRightwardDragAtStart, drag.x > 0, abs(drag.x) > abs(drag.y),
-               contentOffset.x <= -adjustedContentInset.left + 0.5 {
-                return false
-            }
             // Location is in content coordinates; remove the offset to get
             // the viewport-relative x the edge zone is defined in.
             let viewportX = gestureRecognizer.location(in: self).x - contentOffset.x
-            if viewportX <= Self.popEdgeZone { return false }
+            if reservesLeadingEdge, viewportX <= Self.popEdgeZone { return false }
             // ⚠️ AND A CAROUSEL WITH SOMEWHERE TO GO KEEPS ITS DRAG (#691) — the
             // shared pager's rule (`HorizontalPagerScrollView.shouldYield`): a
             // rightward drag on photograph 2/3 goes to 1/3, not to the previous

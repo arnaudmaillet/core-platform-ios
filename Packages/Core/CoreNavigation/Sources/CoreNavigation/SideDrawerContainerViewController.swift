@@ -55,9 +55,9 @@ import UIKit
 ///   under the finger WAIT for it to fail, so a horizontal scroller at the
 ///   edge (a pager, the map) never steals an edge swipe — and, because it
 ///   only receives touches that land in the edge band, never delays a drag
-///   that starts anywhere else. With `openRegion = .anywhere` (#1739) it takes
-///   a touch anywhere and goes BEHIND the main screen's horizontal scrollers
-///   instead — see `OpenRegion`.
+///   that starts anywhere else. With `openRegion = .hostDriven` (#1739) it
+///   takes no touch at all: the host's own drag drives the drawer instead,
+///   through `LeadingPullTarget` (a tab pager pulled past its first tab).
 /// - `closePan` — once open, a horizontal drag anywhere (sliver or drawer)
 ///   moves the main screen back with the finger.
 /// - `dimTap` — a tap on the sliver closes.
@@ -95,29 +95,18 @@ public final class SideDrawerContainerViewController: UIViewController {
     /// touch that lands in the edge band, so keep it cheap.
     public var canOpenInteractively: () -> Bool = { true }
 
-    /// Where a rightward drag may open the drawer.
+    /// Where an interactive open comes from.
     public enum OpenRegion: Equatable, Sendable {
-        /// From the left edge band, ahead of every drag on the main screen.
+        /// The drawer's own pan, from the left edge band.
         case leadingEdge
-        /// From anywhere on the main screen, BEHIND its horizontal scrollers
-        /// (#1739, the owner 2026-10-25): a scroller under the finger that can
-        /// still travel back (a rail scrolled along, a carousel past its first
-        /// page) or is already moving keeps the drag; one at its start — a
-        /// pager on its first page, a rail at rest at its beginning — would
-        /// only rubber-band, and the drawer takes the drag ahead of it.
-        /// Vertical lists recognise alongside and are cancelled once the
-        /// drawer moves. `canOpenInteractively` decides where (the shell: a
-        /// root showing its first tab).
-        case anywhere
+        /// The host's drag only, through `LeadingPullTarget` — the drawer as
+        /// "page −1" before a tab pager's first page (#1739, the owner
+        /// 2026-10-25: reached by the tabs' own gesture, with their priority
+        /// over the content). The edge pan takes no touch.
+        case hostDriven
     }
 
     public var openRegion: OpenRegion = .leadingEdge
-
-    /// The vertical lists recognising alongside an `.anywhere` drag, cancelled
-    /// once the drawer starts moving so the list does not scroll under it.
-    private let simultaneousLists = NSHashTable<UIGestureRecognizer>.weakObjects()
-    /// Where the current `.anywhere` touch landed, in the main host.
-    private var anywhereOrigin: CGPoint?
     /// The drawer settled open.
     public var onDidOpen: (() -> Void)?
     /// The drawer settled closed.
@@ -452,7 +441,6 @@ public final class SideDrawerContainerViewController: UIViewController {
         }
         switch recognizer.state {
         case .began:
-            if recognizer === edgePan { cancelSimultaneousLists() }
             beginTracking()
             updateTracking(translation: recognizer.translation(in: view).x)
         case .changed:
@@ -705,6 +693,33 @@ public final class SideDrawerContainerViewController: UIViewController {
     #endif
 }
 
+// MARK: - Host-driven open (#1739)
+
+extension SideDrawerContainerViewController: LeadingPullTarget {
+    /// A tab pager pulled past its first page: the drawer follows the finger
+    /// as the page before it — gated as the edge swipe is (`canOpenInteractively`).
+    public func beginLeadingPull() -> Bool {
+        guard edgeOpenIsAllowed else { return false }
+        beginTracking()
+        return true
+    }
+
+    public func updateLeadingPull(_ distance: CGFloat) {
+        guard phase == .tracking else { return }
+        updateTracking(translation: distance)
+    }
+
+    public func endLeadingPull(velocity: CGFloat) {
+        guard phase == .tracking else { return }
+        endTracking(velocity: velocity)
+    }
+
+    public func cancelLeadingPull() {
+        guard phase == .tracking else { return }
+        cancelTracking()
+    }
+}
+
 // MARK: - Gesture arbitration
 
 extension SideDrawerContainerViewController: UIGestureRecognizerDelegate {
@@ -713,8 +728,7 @@ extension SideDrawerContainerViewController: UIGestureRecognizerDelegate {
             // Only touches that land in the edge band — anywhere else this
             // recogniser takes no part, and nothing waits on it.
             let x = touch.location(in: view).x
-            guard openRegion == .anywhere || x <= Self.edgeTouchBand else { return false }
-            anywhereOrigin = touch.location(in: mainHost)
+            guard openRegion == .leadingEdge, x <= Self.edgeTouchBand else { return false }
             let allowed = edgeOpenIsAllowed
             Self.trace("edge receive x=\(Int(x)) allowed=\(allowed)")
             return allowed
@@ -733,11 +747,7 @@ extension SideDrawerContainerViewController: UIGestureRecognizerDelegate {
             let translation = edgePan.translation(in: view)
             let dx = translation.x != 0 ? translation.x : velocity.x
             let dy = translation.y != 0 ? translation.y : velocity.y
-            var allowed = edgeOpenIsAllowed && Self.isRightwardSwipe(dx: dx, dy: dy)
-            if allowed, openRegion == .anywhere, let origin = anywhereOrigin,
-               scrollerKeepsRightwardDrag(at: origin) {
-                allowed = false
-            }
+            let allowed = edgeOpenIsAllowed && Self.isRightwardSwipe(dx: dx, dy: dy)
             Self.trace("edge shouldBegin \(allowed) dx=\(Int(dx)) dy=\(Int(dy))")
             return allowed
         }
@@ -765,16 +775,6 @@ extension SideDrawerContainerViewController: UIGestureRecognizerDelegate {
         // The edge swipe beats every drag on the main screen that starts in
         // the band: a pager at its first page would bounce, a map would pan.
         if gestureRecognizer === edgePan {
-            // From anywhere: the page's HORIZONTAL scrollers wait for the drawer,
-            // which declines at once a drag one of them can use
-            // (`scrollerKeepsRightwardDrag`); vertical lists recognise alongside.
-            if openRegion == .anywhere {
-                guard otherGestureRecognizer.view?.isDescendant(of: mainHost) == true,
-                      let scroller = otherGestureRecognizer.view as? UIScrollView else { return false }
-                let waits = Self.scrollsHorizontally(scroller)
-                Self.trace("anywhere makes wait: \(type(of: scroller)) → \(waits)")
-                return waits
-            }
             // Only the main screen's own drags: UIKit's window-level gates
             // (`_UISystemGestureGateGestureRecognizer` turned up here) are the
             // system's to schedule, not ours.
@@ -786,54 +786,6 @@ extension SideDrawerContainerViewController: UIGestureRecognizerDelegate {
         // fails at once for a vertical one, and the list scrolls.
         if gestureRecognizer === closePan { return otherIsInDrawer }
         return false
-    }
-
-    /// …and recognises alongside a vertical list, which a horizontal drag
-    /// must not keep from it.
-    public func gestureRecognizer(
-        _ gestureRecognizer: UIGestureRecognizer,
-        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-    ) -> Bool {
-        guard gestureRecognizer === edgePan, openRegion == .anywhere,
-              otherGestureRecognizer.view?.isDescendant(of: mainHost) == true,
-              let scroller = otherGestureRecognizer.view as? UIScrollView,
-              !Self.scrollsHorizontally(scroller) else { return false }
-        simultaneousLists.add(otherGestureRecognizer)
-        return true
-    }
-
-    /// Whether a horizontal scroller under `point` (main host space) can use a
-    /// rightward drag: it has content behind its offset, or it is already
-    /// moving sideways.
-    func scrollerKeepsRightwardDrag(at point: CGPoint) -> Bool {
-        guard let hit = mainHost.hitTest(point, with: nil) else { return false }
-        var view: UIView? = hit
-        while let current = view, current !== mainHost {
-            if let scroller = current as? UIScrollView, Self.scrollsHorizontally(scroller) {
-                let start = -scroller.adjustedContentInset.left
-                if scroller.contentOffset.x > start + 1 || scroller.isDragging || scroller.isDecelerating {
-                    Self.trace("anywhere: \(type(of: scroller)) keeps the drag")
-                    return true
-                }
-            }
-            view = current.superview
-        }
-        return false
-    }
-
-    /// Whether `scroller` moves sideways at all: content wider than itself.
-    static func scrollsHorizontally(_ scroller: UIScrollView) -> Bool {
-        scroller.isScrollEnabled && scroller.contentSize.width > scroller.bounds.width + 1
-    }
-
-    /// Cancels the vertical lists that recognised alongside the drag that has
-    /// just started moving the drawer.
-    func cancelSimultaneousLists() {
-        for recognizer in simultaneousLists.allObjects where recognizer.isEnabled {
-            recognizer.isEnabled = false
-            recognizer.isEnabled = true
-        }
-        simultaneousLists.removeAllObjects()
     }
 
     /// A drag heading right, within 45° of the horizontal.

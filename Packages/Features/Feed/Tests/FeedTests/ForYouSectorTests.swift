@@ -106,15 +106,6 @@ struct ForYouSectorTests {
         #expect(feed.activity == [false, true])
     }
 
-    /// #1739: only Feed, the first page, hands a rightward swipe to the
-    /// notifications drawer; on Shots it pages back to Feed.
-    @Test func onlyFeedOpensTheDrawerOnARightwardSwipe() {
-        let (sector, _, _) = sector()
-        #expect(!sector.opensDrawerOnRightwardSwipe, "Shots handed its swipe to the drawer")
-        sector.debugApplyOccupancy(shotsShare: 0)
-        #expect(sector.opensDrawerOnRightwardSwipe)
-    }
-
     /// The sector's insets reach the pages (UIKit gives Feed none in here).
     @Test func thePagesAreHandedTheSectorsInsets() {
         let (_, home, feed) = sector()

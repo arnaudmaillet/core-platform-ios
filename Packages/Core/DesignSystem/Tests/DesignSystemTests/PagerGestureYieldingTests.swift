@@ -181,6 +181,32 @@ struct PagerGestureYieldingTests {
         #expect(shouldBegin(pager, at: point, velocity: Self.rightward), "a drag back to the first page was given away")
     }
 
+    /// #1739: with a "page −1" before the first page (a tab root's drawer),
+    /// a rightward drag on the first page is the pager's own — it pulls the
+    /// drawer — even when the pager yields past its ends; a root that has no
+    /// back swipe pages from the very edge too.
+    @Test func aPageBeforeTheFirstKeepsTheRightwardDrag() {
+        let pager = twoPagePager(onLast: false)
+        pager.yieldsPastEnds = true
+        let point = CGPoint(x: 200, y: 300)
+        #expect(!shouldBegin(pager, at: point, velocity: Self.rightward), "premise: yielded past the first page")
+
+        final class Target: LeadingPullTarget {
+            func beginLeadingPull() -> Bool { true }
+            func updateLeadingPull(_ distance: CGFloat) {}
+            func endLeadingPull(velocity: CGFloat) {}
+            func cancelLeadingPull() {}
+        }
+        let target = Target()
+        pager.leadingPullTarget = target
+        #expect(shouldBegin(pager, at: point, velocity: Self.rightward), "the pull towards page −1 was given away")
+
+        let edge = CGPoint(x: 10, y: 300)
+        #expect(!shouldBegin(pager, at: edge, velocity: Self.rightward), "the leading strip is the back swipe's by default")
+        pager.reservesLeadingEdge = false
+        #expect(shouldBegin(pager, at: edge, velocity: Self.rightward), "a root kept the leading strip back")
+    }
+
     /// The owner's veto: a drag it claims is given away, whatever the pager
     /// could do with it.
     @Test func theOwnerCanClaimADrag() {
