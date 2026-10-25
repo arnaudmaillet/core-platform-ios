@@ -175,7 +175,8 @@ public struct MockSocialDataset: Sendable {
     ///
     /// - clips: the main corpus's 40 videos (`index / 3`), the viewer's 3,
     ///   the arrivals' 2 heads, the collections' 5 clip pages, then the
-    ///   world's videos in placement order (`worldClipBase`);
+    ///   world's videos in placement order (`worldClipBase`), then one clip
+    ///   page per main-corpus carousel (`carouselClips`, #1736);
     /// - single photos: the main corpus's single-photo posts (its carousels
     ///   skipped), the viewer's 3, arrival 0, the world's photos in
     ///   placement order, then the chat's one picture (`MockPhotoCatalog
@@ -192,6 +193,9 @@ public struct MockSocialDataset: Sendable {
         static let bigGalleryClips = 45
         static let overCapacityClips = 47
         static let worldClips = 50
+        /// The main corpus's carousels' clip pages (#1736): after the
+        /// world's, so the world keeps the clips it has always drawn.
+        static var carouselClips: Int { worldClips + MockWorldSeed.videoCount }
         /// The main corpus's photo posts (120 posts, one in three).
         static let mainPhotoPosts = 40
     }
@@ -987,7 +991,21 @@ public struct MockSocialDataset: Sendable {
                 publishedAtMS: newestMS - Int64(index) * 180_000, // 3 minutes apart, newest first
                 parentID: isRepost ? String(format: "post-%04d", index - 8) : ""
             )
-            record.extraMedia = carousel?.pages ?? []
+            // ⚠️ ONE CLIP PAGE IN EVERY CAROUSEL (#1736, the owner: "insère
+            // une vidéo dans chaque carrousel" — to check the strip's browse
+            // over a clip on any of them), in the middle of the gallery's
+            // photos, which stay the gallery whole and in order. Its own run
+            // of slots, one per carousel in timeline order.
+            if let carousel, let gallery = carouselGallery {
+                var pages = carousel.pages
+                let ordinal = Self.carouselsBefore(photoOrdinal: index / 3)
+                pages.insert(
+                    Self.syntheticVideo(slot: Ordinals.carouselClips + ordinal,
+                                        fallback: "mock://video/carousel-\(gallery)", shape: shape),
+                    at: pages.count / 2
+                )
+                record.extraMedia = pages
+            }
             records.append(record)
         }
         // Five posts that arrived AFTER the viewer last looked, at the head of

@@ -465,6 +465,12 @@ public enum MockWorldSeed {
         public let post: Post
     }
 
+    /// How many of the world's posts are videos — the run of clip slots it
+    /// draws (`MockSocialDataset.Ordinals.worldClips`).
+    static var videoCount: Int {
+        placements.filter { if case .video = $0.post.kind { true } else { false } }.count
+    }
+
     public static var placements: [Placement] {
         var result: [Placement] = []
         for country in countries {
