@@ -978,7 +978,9 @@ final class AppContainer {
         localCache: feedLocalCache,
         entities: entityStore,
         // A place page pages the place's posts past the map's pins (#643).
-        placePosts: PlacePostsRepository(geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: authenticatedRPCClient))
+        placePosts: PlacePostsRepository(geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: authenticatedRPCClient)),
+        // A post's share sheet sends to the profile sheet's people (#1710).
+        shareTargeting: profileShareTargetsRepository
     )
 
     /// Discover's pool (`timeline.v1.GetDiscoveryFeed`, backend B3 / #512):

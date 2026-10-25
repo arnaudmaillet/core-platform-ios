@@ -25,4 +25,7 @@ public enum PostActionSymbol {
     public static let commentsFilled = AppSymbol.commentFilled.rawValue
     /// Reposting a post, and the reposts it has.
     public static let repost = AppSymbol.repost.rawValue
+    /// Sharing a post (#1710): the system's forward arrow — the action
+    /// column's, which opens the share sheet.
+    public static let share = "arrowshape.turn.up.forward"
 }

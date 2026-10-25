@@ -9,6 +9,7 @@ import EntityStore
 import FeedInterface
 import MediaPlayback
 import PostGrid
+import ShareSheet
 import UIKit
 
 /// The full-screen, page-snapping timeline. Drives the *same* `FeedViewModel`
@@ -519,6 +520,9 @@ final class SnapFeedViewController: UIViewController {
     /// The current posts the side list samples from (#1425). Nil: an empty
     /// list.
     public var sideListEntries: (@MainActor () async -> [FeedEntry])?
+    /// The share sheet's quick-send row (#1710): the people the viewer can
+    /// send a post to — the profile sheet's own source, handed in.
+    var shareTargeting: (any ShareTargeting)?
     /// The page whose comments panel is BUILT but not engaged (the settle
     /// seam's warm). Distinct from `commentsEngagedID`, which means on
     /// screen and interactive.
@@ -1742,6 +1746,7 @@ final class SnapFeedViewController: UIViewController {
                 cell.onRequestAuthorProfile = { [weak self] in self?.viewModel.didTapAuthor(author) }
                 cell.onRequestAuthorFollow = { [weak self] in self?.followAuthor(author) }
                 cell.onRequestSave = { [weak self] in self?.toggleBookmark(for: id) }
+                cell.onRequestShare = { [weak self] in self?.presentShareSheet(for: id) }
             }
             return cell
         }
@@ -3218,7 +3223,8 @@ final class SnapFeedViewController: UIViewController {
         // column too — drawn on a text page, reserved under a media page's.
         detail.setPostActions(
             shown: isForYouRoot, saved: bookmarks.isSaved(id.rawValue),
-            onSave: { [weak self] in self?.toggleBookmark(for: id) }
+            onSave: { [weak self] in self?.toggleBookmark(for: id) },
+            onShare: { [weak self] in self?.presentShareSheet(for: id) }
         )
         // …and the composer over the strip's room, on the column's line (#1701).
         detail.setComposerLift(isForYouRoot ? SnapActionColumn.stripRoomLift : 0)
@@ -5523,17 +5529,58 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Media toolbar actions
 
-    /// Shares what the model actually carries — the BFF exposes no canonical
-    /// post web URL yet, so caption + media URL stand in until it does.
-    private func presentShareSheet(for id: PostID) {
-        guard let model = modelsByID[id] else { return }
-        var items: [Any] = []
-        if let caption = model.caption { items.append(caption) }
-        if let url = model.mediaURL { items.append(url) }
-        if items.isEmpty { items.append(model.authorName) }
-        let activity = UIActivityViewController(activityItems: items, applicationActivities: nil)
-        activity.popoverPresentationController?.sourceView = view
-        present(activity, animated: true)
+    /// The post's share sheet (#1710) — the app's ONE share surface
+    /// (`ShareSheet`, the profile's and the place's), tuned rather than
+    /// cloned (`ShareSheetConfiguration`): the post's author on the QR card,
+    /// the post's own link (`AppRoute.postLink`), Repost after Copy Link, and
+    /// dark over a media page. Its escape hatches come back here once it is
+    /// gone: the system sheet, and a send to someone (the link, in a DM).
+    func presentShareSheet(for id: PostID) {
+        guard presentedViewController == nil, let model = modelsByID[id],
+              let link = AppRoute.postLink(id) else { return }
+        let card = ShareCard(
+            displayName: model.authorName,
+            handle: SnapAuthorIdentityView.pillMetaLine(fromMeta: model.metaText),
+            avatarURL: model.avatarURL,
+            url: link
+        )
+        let sheet = ShareSheetViewController(
+            card: card,
+            imagePipeline: imagePipeline,
+            targeting: shareTargeting,
+            // Read HERE, where there is a window (the sheet has none yet).
+            deviceCornerRadius: ScreenGeometry.cornerRadius(behind: view),
+            fallbackWidth: view.bounds.width,
+            configuration: ShareSheetConfiguration(
+                extraActions: [ShareSheetAction(title: "Repost", symbol: PostActionSymbol.repost, dismissesSheet: false) {
+                    [weak self] in self?.repostRequested()
+                }],
+                interfaceStyle: model.mediaURL != nil ? .dark : .unspecified
+            )
+        )
+        sheet.onSystemShare = { [weak self] card, image in
+            guard let self else { return }
+            let activity = UIActivityViewController(
+                activityItems: [ShareItemSource(card: card, icon: image), image], applicationActivities: nil
+            )
+            activity.popoverPresentationController?.sourceView = view
+            present(activity, animated: true)
+        }
+        sheet.onSendToTarget = { [weak self] target, card in
+            self?.viewModel.sendLink(card.url.absoluteString, to: target.id, stub: ProfileIdentityStub(
+                handle: target.handle, displayName: target.displayName
+            ))
+        }
+        present(sheet, animated: true)
+    }
+
+    /// Repost, from the share sheet (#1710). ⚠️ No client path publishes a
+    /// repost yet (`PostComposer` takes no parent — the action column's old
+    /// repost button had no action either), so the sheet says so instead of
+    /// pretending.
+    private func repostRequested() {
+        // Over the sheet, which is still up.
+        Feedback.info("Reposting is coming soon", symbol: PostActionSymbol.repost, from: presentedViewController ?? self)
     }
 
     /// The "more" menu routes to existing view-model seams; grow it as
@@ -7317,7 +7364,10 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         let point = collectionView.convert(origin, from: view)
         guard let hit = collectionView.hitTest(point, with: nil) else { return false }
         return sequence(first: hit, next: { $0.superview }).contains {
+            // …and save / share between them (#1710, the owner): a drag born
+            // there opened the side list.
             $0 is SnapShortcutRailView || $0 is SnapRailBoostButton || $0 is SnapSoundBubbleButton
+                || $0 is SnapPostActionsCapsule
         }
     }
 

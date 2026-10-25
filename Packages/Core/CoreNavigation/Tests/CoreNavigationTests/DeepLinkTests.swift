@@ -1,3 +1,4 @@
+import CoreModels
 import Foundation
 import Testing
 @testable import CoreNavigation
@@ -16,6 +17,15 @@ struct DeepLinkTests {
         )
         #expect(route("https://core-platform.click/@kenji.dev/") == .profileHandle("kenji.dev"))
         #expect(route("https://core-platform.click/@kenji.dev?ref=share") == .profileHandle("kenji.dev"))
+    }
+
+    /// A post's link (#1710): read back to the post, and built from it.
+    @Test func aPostLink() {
+        #expect(route("https://core-platform.click/p/post-0042") == .post(PostID("post-0042")))
+        #expect(route("wynn:/p/post-0042") == .post(PostID("post-0042")))
+        #expect(route("https://core-platform.click/p/bad%20id") == nil)
+        #expect(AppRoute.postLink(PostID("post-0042"))?.absoluteString == "https://core-platform.click/p/post-0042")
+        #expect(AppRoute.postLink(PostID("post-0042")).flatMap(AppRoute.init(deepLink:)) == .post(PostID("post-0042")))
     }
 
     @Test func aTagLink() {

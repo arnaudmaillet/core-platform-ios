@@ -254,7 +254,7 @@ struct SnapForYouRootTests {
         capsule.setSaved(true)
         #expect(capsule.saveButton.accessibilityLabel == "Saved")
         capsule.setActionsEnabled(false)
-        #expect(!capsule.saveButton.isEnabled && !capsule.repostButton.isEnabled)
+        #expect(!capsule.saveButton.isEnabled && !capsule.shareButton.isEnabled)
     }
 
     // MARK: - The composer

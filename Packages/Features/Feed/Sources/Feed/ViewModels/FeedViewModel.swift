@@ -322,6 +322,12 @@ public final class FeedViewModel {
         generation == initialLoadGeneration
     }
 
+    /// A post's link sent to someone from its share sheet (#1710): a DM
+    /// carrying it — the profile sheet's own send (`ProfileViewModel.sendProfile`).
+    public func sendLink(_ link: String, to target: ProfileID, stub: ProfileIdentityStub?) {
+        router?.route(to: .sendLink(link, to: target, stub: stub))
+    }
+
     /// Author tapped in a cell — hand off to cross-feature routing. The feed
     /// never imports Profile; it only emits a route. The identity slice the
     /// cell already renders (handle, name) rides along so the profile screen

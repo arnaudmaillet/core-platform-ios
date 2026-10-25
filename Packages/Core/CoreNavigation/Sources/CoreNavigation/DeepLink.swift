@@ -1,3 +1,4 @@
+import CoreModels
 import Foundation
 
 /// Links into the app (#524): the web addresses it shares, opened as
@@ -6,6 +7,7 @@ import Foundation
 ///     https://core-platform.click/@kenji.dev     →  .profileHandle("kenji.dev")
 ///     https://core-platform.click/tag/travel     →  .hashtag("travel")
 ///     https://core-platform.click/s/Ab3_x-…      →  .profileShareToken("Ab3_x-…")
+///     https://core-platform.click/p/post-0042    →  .post("post-0042")
 ///     https://core-platform.click/family/K7M2…   →  .supervisionInvite("K7M2…")
 ///     https://core-platform.click/place/country/FR  →  .place(.country(code: "FR"))
 ///     https://core-platform.click/place/city/48.8566,2.3522?name=Paris&country=FR
@@ -38,6 +40,9 @@ public extension AppRoute {
         case 2 where parts[0].lowercased() == "s":
             guard let token = Self.shareToken(parts[1]) else { return nil }
             self = .profileShareToken(token)
+        case 2 where parts[0].lowercased() == "p":
+            guard let id = Self.postID(parts[1]) else { return nil }
+            self = .post(PostID(id))
         case 2 where parts[0].lowercased() == "family":
             guard let code = SupervisionInviteCode.normalized(parts[1]) else { return nil }
             self = .supervisionInvite(code)
@@ -83,6 +88,24 @@ public extension AppRoute {
     private static func shareToken(_ raw: String) -> String? {
         let allowed = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
         guard (8...64).contains(raw.count), raw.allSatisfy(allowed.contains) else { return nil }
+        return raw
+    }
+
+    /// A post's link (#1710): `https://core-platform.click/p/<id>` — what a
+    /// post's share sheet hands out and its QR code holds.
+    static func postLink(_ id: PostID) -> URL? {
+        guard postID(id.rawValue) != nil else { return nil }
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = webHost
+        components.path = "/p/" + id.rawValue
+        return components.url
+    }
+
+    /// A post id as a link carries it: kept as is, 1–64 of `A-Z a-z 0-9 - _`.
+    private static func postID(_ raw: String) -> String? {
+        let allowed = Set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+        guard (1...64).contains(raw.count), raw.allSatisfy(allowed.contains) else { return nil }
         return raw
     }
 

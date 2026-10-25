@@ -42,6 +42,38 @@ struct ShareSheetTests {
         }
     }
 
+    /// A screen's own actions follow Share and Copy Link in the tray, and its
+    /// forced appearance is the sheet's (#1710) — the ONE sheet, configured.
+    @Test func aConfigurationAddsActionsAndForcesTheAppearance() {
+        let sheet = ShareSheetViewController(
+            card: Self.card, imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            targeting: nil, deviceCornerRadius: 0, fallbackWidth: 402,
+            configuration: ShareSheetConfiguration(
+                extraActions: [ShareSheetAction(title: "Repost", symbol: "arrow.2.squarepath") {}],
+                interfaceStyle: .dark
+            )
+        )
+        sheet.loadViewIfNeeded()
+        #expect(sheet.overrideUserInterfaceStyle == .dark)
+        #expect(Self.chipTitles(in: sheet.view) == ["Share", "Copy Link", "Repost"])
+
+        let plain = self.sheet(targeting: nil)
+        #expect(plain.overrideUserInterfaceStyle == .unspecified, "the default sheet changed its appearance")
+        #expect(Self.chipTitles(in: plain.view) == ["Share", "Copy Link"], "the default tray changed")
+    }
+
+    /// The tray's chips, in order, by their buttons' labels.
+    private static func chipTitles(in root: UIView) -> [String] {
+        func chips(_ view: UIView) -> [ShareActionChip] {
+            view.subviews.flatMap { ($0 as? ShareActionChip).map { [$0] } ?? chips($0) }
+        }
+        func label(_ view: UIView) -> String? {
+            if let button = view as? UIButton, let title = button.accessibilityLabel { return title }
+            return view.subviews.lazy.compactMap(label).first
+        }
+        return chips(root).compactMap(label)
+    }
+
     @Test func noSourceOfPeopleDrawsNoRow() {
         #expect(!sheet(targeting: nil).debugShowsTargetsRow)
     }

@@ -663,6 +663,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func setPostSaved(_ saved: Bool) { chrome.postActions.setSaved(saved) }
     /// The capsule's star was tapped: the screen saves or unsaves the post.
     var onRequestSave: (() -> Void)?
+    /// The capsule's share was tapped: the screen opens the share sheet (#1710).
+    var onRequestShare: (() -> Void)?
     #if DEBUG
     /// The column's post actions, for tests (#1681).
     var debugPostActions: SnapPostActionsCapsule { chrome.postActions }
@@ -1748,6 +1750,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.onSoundToggleRequested = { [weak self] in self?.onRequestSoundToggle?() }
         chrome.onSoundSheetRequested = { [weak self] in self?.onRequestSoundSheet?() }
         chrome.postActions.onSave = { [weak self] in self?.onRequestSave?() }
+        chrome.postActions.onShare = { [weak self] in self?.onRequestShare?() }
         representedAuthorID = model.authorID
         chrome.onAuthorTapped = { [weak self] in self?.onRequestAuthorCard?() }
         chrome.onAuthorLongPressed = { [weak self] in self?.onRequestAuthorProfile?() }

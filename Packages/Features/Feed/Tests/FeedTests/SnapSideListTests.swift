@@ -841,6 +841,26 @@ struct SnapSwipeChainTests {
         #expect(profile.title == "author-p1")
     }
 
+    /// …and so is the save / share capsule between the like and the sound
+    /// (#1710, the owner): a leftward drag born on it pushes the author — it
+    /// opened the side list.
+    @Test func aLeftwardDragFromTheCapsulePushesTheAuthor() async throws {
+        let feed = try await tests.openableFeedForChain(["p1", "p2"], router: ProfileRouter())
+        let chrome = try #require(
+            feed.collectionView.visibleCells
+                .compactMap { $0.contentView.subviews.compactMap { $0 as? SnapChromeView }.first }.first,
+            "guard: a page's chrome"
+        )
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        chrome.showsPostActions = true
+        chrome.layoutIfNeeded()
+        let capsule = chrome.postActions
+        let point = capsule.convert(CGPoint(x: capsule.bounds.midX, y: capsule.bounds.midY), to: feed.view)
+        #expect(feed.isOnTrailingColumn(point), "the capsule is not the column")
+        let profile = try #require(Self.pushed(Self.stage(feed, for: .leftward, at: point)), "the capsule opened the list")
+        #expect(profile.title == "author-p1")
+    }
+
     /// The emote rail never takes an edge drag: wherever it is, the edge
     /// strip — and the column itself — is tested first.
     @Test func theEdgeWinsOverTheRail() async throws {

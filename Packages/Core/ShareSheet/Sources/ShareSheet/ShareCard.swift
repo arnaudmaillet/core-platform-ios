@@ -55,3 +55,38 @@ public protocol ShareTargeting: Sendable {
     func searchTargets(query: String, limit: Int) async -> [ShareTarget]
 }
 
+/// What a screen adds to the share sheet beyond what every share offers
+/// (#1710): the ONE sheet — the profile's, the place's, a post's — tuned per
+/// use instead of cloned per use.
+public struct ShareSheetConfiguration {
+    /// Actions after Share and Copy Link in the tray, in order — a post's
+    /// Repost.
+    public var extraActions: [ShareSheetAction]
+    /// The sheet's appearance: `.unspecified` follows the app; `.dark` for a
+    /// sheet over a dark page (Shots).
+    public var interfaceStyle: UIUserInterfaceStyle
+
+    public init(extraActions: [ShareSheetAction] = [], interfaceStyle: UIUserInterfaceStyle = .unspecified) {
+        self.extraActions = extraActions
+        self.interfaceStyle = interfaceStyle
+    }
+}
+
+/// One more chip in the share sheet's tray.
+public struct ShareSheetAction {
+    public let title: String
+    /// An SF Symbol or the app's own symbol name (`UIImage.symbol(named:)`).
+    public let symbol: String
+    /// Whether the sheet is dismissed before `handler` runs — what an action
+    /// that LEAVES (opens a screen, a composer) needs; one that acts in place
+    /// keeps the sheet up, as Copy Link does.
+    public let dismissesSheet: Bool
+    public let handler: @MainActor () -> Void
+
+    public init(title: String, symbol: String, dismissesSheet: Bool = true, handler: @escaping @MainActor () -> Void) {
+        self.title = title
+        self.symbol = symbol
+        self.dismissesSheet = dismissesSheet
+        self.handler = handler
+    }
+}
