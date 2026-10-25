@@ -156,11 +156,12 @@ final class SnapChromeView: UIView {
 
     /// Shots — the For You root (#1716, the owner): on a post with no strip
     /// the caption comes down to the cover's line — no room kept for a strip
-    /// that is not there. (Its breath over the bar is every feed's now,
-    /// #1722: `applyFixedInsets`.)
+    /// that is not there — and its breath over the bar is Shots' own
+    /// (`shotsBottomBreath`, `applyFixedInsets`).
     var sitsOverTabBar = false {
         didSet {
             guard sitsOverTabBar != oldValue else { return }
+            applyFixedInsets()
             applyCaptionSeat()
         }
     }
@@ -834,7 +835,7 @@ final class SnapChromeView: UIView {
     /// #1722: every feed, the flight replica included).
     private func applyFixedInsets() {
         guard var insets = fixedInsets else { return }
-        insets.bottom += SnapActionColumn.bottomBreath
+        insets.bottom += sitsOverTabBar ? SnapActionColumn.shotsBottomBreath : SnapActionColumn.bottomBreath
         insetsLayoutMarginsFromSafeArea = false
         layoutMargins = insets
     }

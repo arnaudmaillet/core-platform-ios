@@ -122,11 +122,14 @@ enum SnapActionColumn {
     /// line, so this is the glass drop short of the gap (and may be negative).
     static var inputRestingGap: CGFloat { glassGap - toolbarGlassDrop }
 
-    /// The breath over the bottom bar (#1716 on Shots, #1722 on every feed,
-    /// the owner): the whole bottom block — strip, cover, caption, column —
-    /// stands this much higher over the tab bar or the toolbar, and the
-    /// comments' composer rises by it too, so the column keeps its place.
-    static let bottomBreath: CGFloat = Spacing.md
+    /// The breath over the bottom bar (#1722, the owner): every feed's whole
+    /// bottom block — strip, cover, caption, column — stands this much higher
+    /// over its toolbar, and the comments' composer rises by it too, so the
+    /// column keeps its place. 6 pt: 12 was too much over a toolbar (the
+    /// owner tries 4, 6 or 8).
+    static let bottomBreath: CGFloat = 6
+    /// Shots' breath over the tab bar (#1716): the For You root keeps 12 pt.
+    static let shotsBottomBreath: CGFloat = Spacing.md
 
     // MARK: - The like pill (#669)
 

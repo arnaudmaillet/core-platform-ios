@@ -3226,6 +3226,8 @@ final class SnapFeedViewController: UIViewController {
             onSave: { [weak self] in self?.toggleBookmark(for: id) },
             onShare: { [weak self] in self?.presentShareSheet(for: id) }
         )
+        // …and the composer on the page's breath over the bar (#1716, #1722).
+        detail.setComposerLift(isForYouRoot ? SnapActionColumn.shotsBottomBreath : SnapActionColumn.bottomBreath)
         // A remote cover the attribution has not fetched yet: fetch it, and
         // redraw the slot once it lands (#680).
         if let face, face.cachedCover == nil, let url = face.coverURL {
@@ -7293,6 +7295,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         guard orderedIDs.indices.contains(index),
               let model = modelsByID[orderedIDs[index]] else { return }
         chrome.configure(with: model)
+        // The page's own breath over the bar (#1722): the replica lands where
+        // the live chrome stands.
+        chrome.sitsOverTabBar = isForYouRoot
         chrome.setPostLikeCount(viewModel.visibleLikeCount(for: model))
         chrome.setImagePipeline(imagePipeline)
         // ⚠️ THE REPLICA CARRIES EVERYTHING THE PAGE'S CHROME WILL SHOW AT

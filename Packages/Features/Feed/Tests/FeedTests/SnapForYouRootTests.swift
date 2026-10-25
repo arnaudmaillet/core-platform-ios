@@ -179,8 +179,9 @@ struct SnapForYouRootTests {
     // MARK: - The bottom block (#1716)
 
     /// Shots wears every feed's bottom layout — the strip left of the sound
-    /// cover — and every feed stands one breath over its bottom bar (#1716,
-    /// #1722); with no strip, Shots' caption comes down to the cover's line.
+    /// cover — and every feed stands a breath over its bottom bar (Shots 12 pt,
+    /// the rest 6, #1716/#1722); with no strip, Shots' caption comes down to
+    /// the cover's line.
     @Test func everyFeedStandsOneBreathOverItsBar() {
         func laidOut(pages: Int, shots: Bool) -> SnapChromeView {
             let chrome = SnapActionColumnLayoutTests.chrome()
@@ -201,13 +202,15 @@ struct SnapForYouRootTests {
         #expect(bar.maxX < sound.minX, "the strip runs under the cover")
 
         // The cover's bottom: the bar's line, less the breath and the rest gap
-        // — on Shots and on another feed alike.
+        // — Shots' 12 pt, another feed's 6 (#1722).
         let barLine = shots.bounds.height - SnapActionColumnLayoutTests.insets.bottom
-        let expected = barLine - SnapActionColumn.bottomBreath - SnapActionColumn.inputRestingGap
         let plainSound = frame(plain.debugSoundBubble, in: plain)
-        #expect(abs(sound.maxY - expected) < 0.5, "Shots' cover is not one breath over the bar")
-        #expect(abs(plainSound.maxY - expected) < 0.5, "another feed's cover is not one breath over the bar")
-        #expect(abs(frame(plain.debugPageBar, in: plain).minY - bar.minY) < 0.5, "the strips stand apart")
+        #expect(abs(sound.maxY - (barLine - SnapActionColumn.shotsBottomBreath - SnapActionColumn.inputRestingGap)) < 0.5,
+                "Shots' cover is not its breath over the bar")
+        #expect(abs(plainSound.maxY - (barLine - SnapActionColumn.bottomBreath - SnapActionColumn.inputRestingGap)) < 0.5,
+                "another feed's cover is not its breath over the bar")
+        #expect(abs(frame(plain.debugPageBar, in: plain).minY - bar.minY
+            - (SnapActionColumn.shotsBottomBreath - SnapActionColumn.bottomBreath)) < 0.5, "the strips are not a breath apart")
 
         let lone = laidOut(pages: 1, shots: true)
         let loneSound = frame(lone.debugSoundBubble, in: lone)
