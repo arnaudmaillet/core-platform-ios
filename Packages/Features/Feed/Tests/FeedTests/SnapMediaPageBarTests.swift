@@ -184,27 +184,37 @@ struct SnapMediaPageBarTests {
         #expect(bar(pages: 2).isHidden == false)
     }
 
-    /// ⚠️ A DRAG ON A PHOTOGRAPH'S STRIP ASKS FOR NOTHING AT ALL.
-    ///
-    /// It used to page the carousel, one slot per segment — a second way to do
-    /// what a swipe on the picture already does, on a control the width of the
-    /// column, where the pages it walked past were the pages the media was
-    /// flying through underneath. Selecting is what a strip of segments is for
-    /// and a tap says it exactly; dragging is left to the one thing with no
-    /// other control, which is where you are inside a clip.
-    @Test func draggingAPhotographsStripAsksForNothing() {
+    /// A DRAG ON A PHOTOGRAPH'S STRIP BROWSES THE PAGES (#1734, the owner
+    /// 2026-10-25) — and still never asks for a page the way a TAP does: the
+    /// browse has its own channel, which turns the carousel without an
+    /// animation, one page per crossing under the finger.
+    @Test func draggingAPhotographsStripBrowsesWithoutTapping() {
         let width: CGFloat = 370
         let view = bar(pages: 4, width: width)
         var asked: [Int] = []
+        var browsed: [Int] = []
+        var began: [Int] = []
+        var ended: [Int] = []
         view.onPageRequested = { asked.append($0) }
+        view.onBrowseBegan = { began.append($0) }
+        view.onBrowse = { browsed.append($0) }
+        view.onBrowseEnded = { ended.append($0) }
 
-        let stride = (width + SnapMediaPageBarView.gap) / 4
-        view.debugScrub(.began, atX: 20)
-        view.debugScrub(.changed, atX: 20 + stride)
-        view.debugScrub(.changed, atX: 20 + stride * 2)
-        view.debugScrub(.ended, atX: 20 + stride * 2)
+        let slot = view.browseSlotWidth
+        view.debugScrub(.began, atX: slot * 0.5)
+        view.debugScrub(.changed, atX: slot * 0.5 + 10)
+        view.debugScrub(.changed, atX: slot * 1.5)
+        view.debugScrub(.changed, atX: slot * 1.6)
+        view.debugScrub(.changed, atX: slot * 3.5)
+        view.debugScrub(.ended, atX: slot * 3.5)
 
         #expect(asked.isEmpty)
+        #expect(began == [0])
+        #expect(browsed == [1, 3])
+        #expect(ended == [3])
+        // One haptic tick per page crossed.
+        #expect(view.browseTicks == 2)
+        #expect(!view.isBrowsing)
     }
 
     // MARK: - The window, past ten pictures
@@ -509,6 +519,17 @@ struct SnapMediaPageBarTests {
         let view = bar(pages: 4)
         #expect(view.debugTrackHeight(1) == SnapMediaPageBarView.clipTrackHeight)
         #expect(view.debugCursorSize == nil)
+    }
+
+    /// …and stays thin under the thumb (the owner, 2026-10-25): a drag hands
+    /// the segments' line to the filmstrip (#1734), so only a clip's bar —
+    /// the playhead's handle — grows when touched.
+    @Test func touchedSegmentsStayThin() {
+        let view = bar(pages: 4)
+        view.debugScrub(.began, atX: 30)
+        view.debugFinishTweens()
+        #expect(view.debugTrackHeight(1) == SnapMediaPageBarView.clipTrackHeight)
+        view.debugScrub(.ended, atX: 30)
     }
 
     /// ⚠️ LOADING SHOWS THE PULSE, AND THE TWO CROSS-FADE (#1537): the
@@ -1342,5 +1363,136 @@ private extension CALayer {
     func removeAllAnimationsDeep() {
         removeAllAnimations()
         sublayers?.forEach { $0.removeAllAnimationsDeep() }
+    }
+}
+
+/// #1734: sliding along the strip browses the carousel's pages.
+@MainActor
+struct SnapStripBrowseTests {
+    private func bar(pages: Int, current: Int = 0, clips: Set<Int> = [], playhead: Double? = nil) -> SnapMediaPageBarView {
+        let view = SnapMediaPageBarView(frame: CGRect(x: 0, y: 0, width: 370, height: SnapMediaPageBarView.thickness))
+        view.configure(count: pages, current: current, clipPages: clips)
+        view.setPlayhead(playhead)
+        view.layoutIfNeeded()
+        return view
+    }
+
+    /// The clip the post plays shows live in its preview — that tile only —
+    /// and leaves it when the finger moves on (the owner, 2026-10-25).
+    @Test func onlyThePlayedTileIsLive() {
+        let strip = SnapBrowseStripView(frame: CGRect(x: 0, y: 0, width: 402, height: SnapBrowseStripView.height))
+        strip.configure(thumbnails: [nil, nil, nil], videoPages: [1], pipeline: nil)
+        strip.show(selecting: 1, anchorX: 200)
+        let live = UIView()
+        strip.setLiveView(live, page: 1)
+        #expect(strip.debugLivePage == 1)
+        strip.select(2, anchorX: 260)
+        strip.setLiveView(nil, page: 2)
+        #expect(strip.debugLivePage == nil)
+        #expect(live.superview == nil, "the previous tile kept the live picture")
+    }
+
+    /// The finger picks from equal slots across the run, not from the drawn
+    /// segments, whose widths reflow as the page changes.
+    @Test func theFingerPicksFromEqualSlots() {
+        let view = bar(pages: 5)
+        let slot = view.browseSlotWidth
+        #expect(slot > 0)
+        #expect(view.browsePage(atX: -20) == 0)
+        #expect(view.browsePage(atX: slot * 0.5) == 0)
+        #expect(view.browsePage(atX: slot * 2.5) == 2)
+        #expect(view.browsePage(atX: slot * 4.99) == 4)
+        #expect(view.browsePage(atX: 2000) == 4)
+        #expect(abs(view.browseSlotCenter(2) - slot * 2.5) < 0.001)
+    }
+
+    /// ⚠️ A CLIP'S PAGE PASSED WHILE BROWSING KEEPS ITS SEGMENT (the owner):
+    /// it grows into the bar only once the finger lets go on it.
+    @Test func aClipsBarWaitsForTheRelease() throws {
+        let view = bar(pages: 5, current: 0, clips: [2])
+        let slot = view.browseSlotWidth
+        view.debugScrub(.began, atX: slot * 0.5)
+        view.debugScrub(.changed, atX: slot * 2.5)
+        // The host turns the carousel to the browsed page, and the clip on it
+        // reports its playhead.
+        view.setPosition(2)
+        view.setPlayhead(0.3)
+        view.debugFinishTweens()
+        let browsing = try #require(view.debugSegmentFrame(2)).width
+        #expect(browsing < 370 * 0.5, "the clip's segment grew to \(browsing) while browsing")
+        #expect(view.debugFillFrame(2) == nil, "a playhead was drawn while browsing")
+
+        view.debugScrub(.ended, atX: slot * 2.5)
+        view.debugFinishTweens()
+        let released = try #require(view.debugSegmentFrame(2)).width
+        #expect(released > 370 * 0.5, "the clip's segment did not grow into the bar after the release (\(released))")
+    }
+
+    /// A drag that lands on a clip's bar still means its playhead.
+    @Test func aDragOnTheBarStillScrubsThePlayhead() throws {
+        let view = bar(pages: 3, current: 1, clips: [1], playhead: 0.5)
+        let frame = try #require(view.debugSegmentFrame(1))
+        var browsed: [Int] = []
+        var seeks: [Double] = []
+        view.onBrowse = { browsed.append($0) }
+        view.onSeekRequested = { seeks.append($0) }
+        view.debugScrub(.began, atX: frame.midX)
+        view.debugScrub(.changed, atX: frame.midX + 40)
+        view.debugScrub(.ended, atX: frame.midX + 40)
+        #expect(browsed.isEmpty)
+        #expect(!seeks.isEmpty)
+    }
+
+    /// The chrome: the page's talk recedes and the previews come up over the
+    /// strip, one tile per page on its slot; both go back on release.
+    @Test func theChromeShowsThePreviewsAndFadesTheTalk() throws {
+        let view = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        view.setFixedInsets(UIEdgeInsets(top: 103, left: 0, bottom: 83, right: 0))
+        view.configure(with: FeedItemDisplayModel(
+            id: PostID("post-1"), authorID: ProfileID("a"), authorName: "Ava",
+            metaText: "@ava · 3m", avatarURL: nil,
+            caption: "A caption long enough to take the two lines the page reserves for it.",
+            mediaURL: URL(string: "mock://image/1"), mediaKind: .image,
+            thumbnailURL: nil, audioText: nil, likeCount: 0, timestampText: "now"
+        ))
+        view.setMediaPageCount(4, current: 0)
+        view.setMediaPreviews(thumbnails: [nil, nil, nil, nil], videoPages: [2], pipeline: nil)
+        view.layoutIfNeeded()
+        let resting = view.debugScrubFadedAlphas
+        var browsed: [Int] = []
+        view.onMediaBrowse = { browsed.append($0) }
+
+        let bar = view.debugPageBar
+        let slot = bar.browseSlotWidth
+        bar.debugScrub(.began, atX: slot * 0.5)
+        bar.debugScrub(.changed, atX: slot * 2.5)
+        #expect(view.debugScrubFadedAlphas.allSatisfy { $0 == 0 })
+        let strip = view.debugBrowseStrip
+        #expect(strip.debugIsShown)
+        #expect(strip.debugTileCount == 4)
+        // The segments step aside for the filmstrip, whose counter takes
+        // their line ("3 / 4").
+        #expect(bar.debugContainerOpacity == 0, "the segments stayed on screen under the filmstrip")
+        #expect(strip.debugCounterText == "3 / 4")
+        let counterMid = strip.frame.minY + strip.debugCounterFrame.midY
+        #expect(abs(counterMid - view.debugPageBarFrame.midY) < 0.5, "the counter is not on the strip's line")
+        // The chosen tile, larger, stands over the finger's slot; the row is
+        // contiguous — no two tiles overlap.
+        let chosen = try #require(strip.debugTileFrame(2))
+        let other = try #require(strip.debugTileFrame(1))
+        #expect(chosen.width > other.width, "the page under the finger is not enlarged")
+        #expect(abs(strip.frame.minX + chosen.midX - (view.debugPageBarFrame.minX + bar.browseSlotCenter(2))) < 0.5,
+                "the chosen tile is not over the finger's slot")
+        let frames = try (0..<4).map { try #require(strip.debugTileFrame($0)) }
+        for index in 1..<4 {
+            #expect(frames[index].minX >= frames[index - 1].maxX, "tiles \(index - 1) and \(index) overlap")
+        }
+        #expect(other.width >= SnapBrowseStripView.tileSize.width)
+        #expect(browsed == [2])
+
+        bar.debugScrub(.ended, atX: slot * 2.5)
+        #expect(view.debugScrubFadedAlphas == resting)
+        #expect(!strip.debugIsShown)
+        #expect(bar.debugContainerOpacity == 1, "the segments did not come back")
     }
 }

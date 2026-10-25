@@ -64,6 +64,8 @@ final class SnapChromeView: UIView {
     /// layout entirely: it exists only during a gesture, it follows the thumb,
     /// and nothing else on this screen may move because it appeared.
     private let scrubPreview = SnapScrubPreviewView()
+    /// The pages' previews while a finger browses the strip (#1734).
+    private let browseStrip = SnapBrowseStripView()
 
     /// The clip's length, kept because the card's readout is a time and the
     /// strip speaks in fractions.
@@ -527,6 +529,10 @@ final class SnapChromeView: UIView {
         mediaPageBar.onScrubPreview = { [weak self] preview in
             self?.showScrubPreview(preview)
         }
+        addSubview(browseStrip)
+        mediaPageBar.onBrowseBegan = { [weak self] page in self?.beginBrowse(at: page) }
+        mediaPageBar.onBrowse = { [weak self] page in self?.browse(to: page) }
+        mediaPageBar.onBrowseEnded = { [weak self] page in self?.endBrowse(at: page) }
         mediaPageBar.constrain(in: self) { parent in
             mediaPageBar.leadingAnchor.constraint(equalTo: captionLabel.leadingAnchor)
             mediaPageBar.bottomAnchor.constraint(
@@ -1226,7 +1232,35 @@ final class SnapChromeView: UIView {
         mediaPosition = CGFloat(current)
         mediaPageBar.configure(count: count, current: current, clipPages: clipPages)
         applyCaptionSeat()
+        #if DEBUG
+        runBrowseQAIfAsked(count: count)
+        #endif
     }
+
+    #if DEBUG
+    /// QA (#1734): `-strip-browse <fraction>` holds a finger on the first
+    /// carousel's strip at that fraction of its width, to film the browse
+    /// (`-strip-browse-release` lets go after 4 s).
+    private static var ranBrowseQA = false
+    private func runBrowseQAIfAsked(count: Int) {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard count >= 2, !Self.ranBrowseQA, let flag = arguments.firstIndex(of: "-strip-browse"),
+              flag + 1 < arguments.count, let share = Double(arguments[flag + 1]) else { return }
+        Self.ranBrowseQA = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self else { return }
+            let bar = mediaPageBar
+            bar.debugScrub(.began, atX: 2)
+            bar.debugScrub(.changed, atX: 2 + SnapMediaPageBarView.debugTravelThreshold + 1)
+            bar.debugScrub(.changed, atX: bar.bounds.width * CGFloat(share))
+            // `-strip-browse-release`: and lets go 4 s later.
+            guard arguments.contains("-strip-browse-release") else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                bar.debugScrub(.ended, atX: bar.bounds.width * CGFloat(share))
+            }
+        }
+    }
+    #endif
 
     /// Seats the caption over the strip, or in its place when there is none.
     private func applyCaptionSeat() {
@@ -1367,6 +1401,67 @@ final class SnapChromeView: UIView {
             width: size.width, height: size.height
         )
     }
+
+    // MARK: - Browsing the pages (#1734)
+
+    /// The carousel's previews: each page's thumbnail, and which are clips.
+    func setMediaPreviews(thumbnails: [URL?], videoPages: Set<Int>, pipeline: ImagePipeline?) {
+        browseStrip.configure(thumbnails: thumbnails, videoPages: videoPages, pipeline: pipeline)
+    }
+
+    /// The clip the post is playing on `page`, mirrored into its preview while
+    /// browsing (nil: none) — the CELL owns playback and hands the surface.
+    func setBrowseLiveSurface(_ view: UIView?, page: Int) {
+        browseStrip.setLiveView(view, page: page)
+    }
+
+    /// A finger started sliding through the pages: the page's talk fades as
+    /// it does under a clip's scrub, and the previews come up over the strip.
+    var onMediaBrowseBegan: (() -> Void)?
+    /// The page under the finger changed — the CELL turns the carousel.
+    var onMediaBrowse: ((Int) -> Void)?
+    /// The finger let go on this page.
+    var onMediaBrowseEnded: ((Int) -> Void)?
+
+    private func beginBrowse(at page: Int) {
+        setScrubFocus(true)
+        placeBrowseStrip()
+        // Above everything, re-stated on every show — the scrub card's rule.
+        bringSubviewToFront(browseStrip)
+        browseStrip.show(selecting: page, anchorX: browseAnchor(page))
+        onMediaBrowseBegan?()
+    }
+
+    private func browse(to page: Int) {
+        browseStrip.select(page, anchorX: browseAnchor(page))
+        onMediaBrowse?(page)
+    }
+
+    private func endBrowse(at page: Int) {
+        browseStrip.hide()
+        setScrubFocus(false)
+        onMediaBrowseEnded?(page)
+    }
+
+    /// The filmstrip across the chrome's width, its counter on the strip's
+    /// line — the row takes the caption's room above it, faded for the
+    /// browse — as the reference app lays it out.
+    private func placeBrowseStrip() {
+        let bar = mediaPageBar.frame
+        let height = SnapBrowseStripView.height
+        let counterMid = height - SnapBrowseStripView.counterHeight / 2
+        browseStrip.frame = CGRect(x: 0, y: bar.midY - counterMid, width: bounds.width, height: height)
+    }
+
+    /// Where the chosen tile stands: over the finger's slot on the strip, in
+    /// the filmstrip's space.
+    private func browseAnchor(_ page: Int) -> CGFloat {
+        mediaPageBar.frame.minX + mediaPageBar.browseSlotCenter(page) - browseStrip.frame.minX
+    }
+
+    #if DEBUG
+    var debugBrowseStrip: SnapBrowseStripView { browseStrip }
+    #endif
 
     // MARK: - The scrub's focus
 
@@ -1634,6 +1729,8 @@ final class SnapChromeView: UIView {
         // trap as the line below, one gesture further in. Unanimated: there is
         // nothing on screen to dissolve, and the next configure is immediate.
         setScrubFocus(false, animated: false)
+        // …and a browse in flight takes its previews with it (#1734).
+        browseStrip.hide(animated: false)
         // A scaffold handed the next post while still faded would keep that
         // post's chrome invisible.
         alpha = 1

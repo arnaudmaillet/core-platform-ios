@@ -5169,6 +5169,10 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func toggleSound() {
+        // Every mute and unmute — the cover's hold, the bubble's, the sound
+        // sheet's record — is felt (the owner, 2026-10-25): a crisp click,
+        // unlike the carousel browse's tick.
+        HapticImpact(style: .rigid).impactOccurred()
         soundState.toggle()
         refreshAudibleSurface()
         // The page's sound bubble and the panel's slot wear the new state.

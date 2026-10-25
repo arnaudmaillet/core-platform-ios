@@ -538,6 +538,48 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     var debugShownPhoto: UIImage? { mediaCard.imageView.image }
     #endif
     private var isActive = false
+    /// A finger is sliding through the carousel's pages on the strip (#1734).
+    private var isBrowsingMedia = false
+    /// The clip's preview while browsing: a passive surface bound to the
+    /// page's own player, so the tile shows the post's frames in step.
+    private var browseMirror: VideoRenderView?
+    /// The page the mirror is drawing, nil when it draws nothing.
+    private var browseMirrorPage: Int?
+
+    /// Puts the clip the post is playing into its preview — the same player
+    /// (`attachSurface(_:alongsideSurface:)`), so the two cannot drift — or
+    /// takes the preview's picture out when the page under the finger is a
+    /// photograph, or its clip has no player yet (retried from the playhead).
+    private func refreshBrowseMirror() {
+        let page = mediaCard.currentPage
+        guard isBrowsingMedia, let videoPlayback, mediaCard.videoPageIndices.contains(page),
+              let surface = mediaCard.currentPageSurface else { return tearDownBrowseMirror() }
+        let mirror = browseMirror ?? {
+            let view = VideoRenderView()
+            // The tile's thumbnail shows through until the first frame.
+            view.paintsOpaqueGround = false
+            view.isUserInteractionEnabled = false
+            browseMirror = view
+            return view
+        }()
+        if browseMirrorPage != page || !videoPlayback.sharesPlayback(mirror, with: surface) {
+            videoPlayback.detachSurface(mirror, reason: "browse-mirror")
+            guard videoPlayback.attachSurface(mirror, alongsideSurface: surface) else {
+                browseMirrorPage = nil
+                chrome.setBrowseLiveSurface(nil, page: page)
+                return
+            }
+        }
+        browseMirrorPage = page
+        chrome.setBrowseLiveSurface(mirror, page: page)
+    }
+
+    private func tearDownBrowseMirror() {
+        guard let mirror = browseMirror else { return }
+        videoPlayback?.detachSurface(mirror, reason: "browse-mirror")
+        browseMirrorPage = nil
+        chrome.setBrowseLiveSurface(nil, page: 0)
+    }
 
     // MARK: Comments engagement
 
@@ -823,7 +865,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // The playback's outputs land on the chrome, and the chrome's scrub
         // lands on the playback: the bar and the clip meet here.
         playback.onPlayhead = { [weak self] fraction, seconds in
-            self?.chrome.setMediaPlayhead(fraction, seconds: seconds)
+            guard let self else { return }
+            chrome.setMediaPlayhead(fraction, seconds: seconds)
+            // A clip browsed onto may only start after the page turned: its
+            // preview joins it as soon as it has a player.
+            if isBrowsingMedia, browseMirrorPage != mediaCard.currentPage,
+               mediaCard.videoPageIndices.contains(mediaCard.currentPage) { refreshBrowseMirror() }
         }
         playback.onLoading = { [weak self] loading in
             self?.chrome.setMediaLoading(loading)
@@ -847,6 +894,27 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         chrome.onMediaScrubBegan = { [weak self] in self?.playback.beginScrub() }
         chrome.onMediaScrubEnded = { [weak self] fraction in self?.playback.endScrub(at: fraction) }
+        // Browsing (#1734): the carousel jumps to the page under the finger,
+        // and a clip landed on PLAYS at once — in the post and in its preview,
+        // one player for both (the owner, 2026-10-25; `refreshBrowseMirror`).
+        chrome.onMediaBrowseBegan = { [weak self] in
+            guard let self else { return }
+            isBrowsingMedia = true
+            refreshBrowseMirror()
+        }
+        chrome.onMediaBrowse = { [weak self] page in
+            guard let self else { return }
+            mediaCard.setPage(page, animated: false)
+            refreshBrowseMirror()
+        }
+        chrome.onMediaBrowseEnded = { [weak self] page in
+            guard let self else { return }
+            isBrowsingMedia = false
+            tearDownBrowseMirror()
+            if mediaCard.currentPage != page { mediaCard.setPage(page, animated: false) }
+            reconcilePagePlayback()
+            updatePlayheadFeed()
+        }
         chrome.onMediaPageRequested = { [weak self] page in
             guard let self else { return }
             // ⚠️ A NEIGHBOUR IS A PAGE TURN; ANYTHING FURTHER IS A JUMP.
@@ -1868,6 +1936,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
                 current: mediaCard.currentPage,
                 clipPages: Set(mediaCard.videoPageIndices)
             )
+            chrome.setMediaPreviews(
+                thumbnails: model.mediaPages.map(\.thumbnailURL),
+                videoPages: Set(mediaCard.videoPageIndices), pipeline: pipeline
+            )
             updatePlayheadFeed()
             #if DEBUG
             // ⚠️ Published HERE as well as from the window, because the window
@@ -1905,6 +1977,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // the strip is drawn for one page and becomes that clip's bar. A lone
         // photograph reports nothing and keeps no strip.
         chrome.setMediaPageCount(isVideo ? 1 : 0, current: 0, clipPages: isVideo ? [0] : [])
+        chrome.setMediaPreviews(thumbnails: [], videoPages: [], pipeline: nil)
         updatePlayheadFeed()
 
         if isImage {
@@ -3229,6 +3302,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        isBrowsingMedia = false
+        tearDownBrowseMirror()
         setSideListOverlayOffset(0)
         // A frozen carousel never goes on to another post (#1738): the next
         // display takes the screen's freeze state again.
