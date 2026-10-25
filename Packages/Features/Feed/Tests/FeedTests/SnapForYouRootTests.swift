@@ -155,6 +155,41 @@ struct SnapForYouRootTests {
         #expect(chrome.debugTickerFrame.maxY <= chrome.debugStreamFrame.minY)
     }
 
+    // MARK: - The strip's room (#1701)
+
+    /// On the root the page strip runs under the column, the column's lowest
+    /// bubble ends level with the caption's bottom, and a post with no strip
+    /// keeps its caption where a post with one has it.
+    @Test func theColumnStandsAboveAFullWidthStrip() {
+        func laidOut(pages: Int) -> SnapChromeView {
+            let chrome = SnapActionColumnLayoutTests.chrome()
+            chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+            chrome.showsPostActions = true
+            chrome.reservesStripRoom = true
+            chrome.setMediaPageCount(pages, current: 0)
+            chrome.setNeedsLayout()
+            chrome.layoutIfNeeded()
+            return chrome
+        }
+        let strip = laidOut(pages: 9)
+        let bar = strip.debugPageBar.convert(strip.debugPageBar.bounds, to: strip)
+        let sound = strip.debugSoundBubble.convert(strip.debugSoundBubble.bounds, to: strip)
+        #expect(!strip.debugPageBar.isHidden)
+        #expect(abs(bar.maxX - sound.maxX) < 0.5, "the strip stops short of the column: \(bar) vs \(sound)")
+        #expect(abs(sound.maxY - strip.debugCaptionFrame.maxY) < 0.5, "the column is not level with the caption")
+        #expect(sound.maxY < bar.minY, "the column stands on the strip")
+
+        let lone = laidOut(pages: 1)
+        #expect(abs(lone.debugCaptionFrame.maxY - strip.debugCaptionFrame.maxY) < 0.5,
+                "a post with no strip lost the strip's room")
+
+        let plain = SnapActionColumnLayoutTests.chrome()
+        plain.setMediaPageCount(9, current: 0)
+        plain.setNeedsLayout()
+        plain.layoutIfNeeded()
+        #expect(abs(plain.debugPageBar.frame.maxX - plain.debugCaptionFrame.maxX) < 0.5, "the strip widened off the root")
+    }
+
     // MARK: - The column
 
     /// Save and repost stand upright between the like pill and the sound

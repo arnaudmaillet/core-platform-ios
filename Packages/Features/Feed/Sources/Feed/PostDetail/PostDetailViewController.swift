@@ -994,7 +994,18 @@ final class PostDetailViewController: UIViewController {
     /// The composer's resting gap above the footer line: its input row
     /// `glassGap` above the toolbar's glass — the bar lifts its own column
     /// (`SnapActionColumn`).
-    private var composerRestingGap: CGFloat { SnapActionColumn.inputRestingGap }
+    private var composerRestingGap: CGFloat { SnapActionColumn.inputRestingGap + composerLift }
+
+    /// EXPERIMENTAL (#1701, the For You root): the composer rises with the
+    /// page's action column, over the page strip's room — kept empty here.
+    private var composerLift: CGFloat = 0
+
+    func setComposerLift(_ lift: CGFloat) {
+        guard lift != composerLift else { return }
+        // A rest line already drawn moves by the difference.
+        composeBottomEngaged.first?.constant -= lift - composerLift
+        composerLift = lift
+    }
 
     /// Freezes the comment stream for the length of a gesture that owns the
     /// screen — a dismissal swipe.
