@@ -482,8 +482,6 @@ final class SnapFeedViewController: UIViewController {
     /// never aborted (the pager lock can only land once the page has
     /// settled — disabling it mid-drag would freeze the user's scroll).
     private var commentsEngagementIsResting = false
-    /// TRIAL (#1730): the composer focuses as a media post's comments open.
-    static var autofocusesComments: Bool { ProcessInfo.processInfo.arguments.contains("-comments-autofocus") }
     /// The next captions' emotes, warmed at each settle (#1504).
     private let emotePrefetch = EmotePrefetch()
     /// The side list (#1425): nil on a screen that opted out.
@@ -3365,14 +3363,6 @@ final class SnapFeedViewController: UIViewController {
         }
         // A panel opened over an open side list stands where the page does.
         detail?.setOverlayOffset(sideListOverlayOffset)
-        // TRIAL (#1730, the owner): `-comments-autofocus` puts the focus in
-        // the composer once the layout has settled.
-        if Self.autofocusesComments, let detail {
-            DispatchQueue.main.asyncAfter(deadline: .now() + SnapCommentsLayout.engageDuration) { [weak self, weak detail] in
-                guard let self, let detail, commentsEngagedID == id, commentsContentVC === detail else { return }
-                detail.focusComposer()
-            }
-        }
         #if DEBUG
         // The discriminating measurement: frame gaps once the animation is
         // OVER and the engaged interface is simply sitting there. If it drops
