@@ -22,11 +22,6 @@ public struct PostEntity: Sendable, Equatable {
         self.commentCount = commentCount
     }
 
-    /// The count to draw, or nil when the author hides it from this reader
-    /// (#397): a hidden count is no number at all, never a 0.
-    public var visibleLikeCount: Int64? {
-        post?.likeCountsHidden == true ? nil : likeCount
-    }
 }
 
 /// One person as every screen sees it. Where the VIEWER stands with them is

@@ -101,15 +101,4 @@ struct LiveCountSurfacesTests {
         #expect(origin.post.reactionCount == 124)
         #expect(origin.stream.map(\.reactionCount) == [124])
     }
-
-    /// A count the author hides stays hidden on every copy.
-    @Test func aHiddenCountStaysHiddenOnTheFlight() {
-        let entities = EntityStore()
-        let lead = ForYouLeadFixture(pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), videoPlayback: nil)
-        lead.shelf.staking = PostCardStaking(wallet: Self.wallet(), entities: entities)
-        var card = Self.post("c1", likes: nil)
-        card.likeCountsHidden = true
-        entities.setLikeCount(99, for: card.id)
-        #expect(lead.shelf.livePost(card).reactionCount == nil)
-    }
 }

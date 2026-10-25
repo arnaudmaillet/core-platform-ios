@@ -347,7 +347,7 @@ extension ForYouRepository {
             authorName: entry.author.displayName,
             authorHandle: entry.author.handle,
             authorAvatarURL: entry.author.avatarURL,
-            reactionCount: entry.visibleLikeCount
+            reactionCount: entry.likeCount
         )
     }
 }

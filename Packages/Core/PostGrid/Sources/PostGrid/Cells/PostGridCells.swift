@@ -1662,15 +1662,13 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
     private var baseReactionCount: Int64?
     private var viewerStake = 0
-    /// What `configure` drew, and whether the author hides the count from
-    /// this reader — `postLikeCount`, `showLikeCount`.
+    /// What `configure` drew — `postLikeCount`, `showLikeCount`.
     private var configuredReactionCount: Int64?
-    private var likeCountsHidden = false
 
-    public var postLikeCount: Int64? { likeCountsHidden ? nil : configuredReactionCount }
+    public var postLikeCount: Int64? { configuredReactionCount }
 
     public func showLikeCount(_ count: Int64) {
-        guard !likeCountsHidden, baseReactionCount != nil, baseReactionCount != count else { return }
+        guard baseReactionCount != nil, baseReactionCount != count else { return }
         baseReactionCount = count
         applyReactionCount(animated: true)
     }
@@ -2545,7 +2543,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         }
         baseReactionCount = post.reactionCount
         configuredReactionCount = post.reactionCount
-        likeCountsHidden = post.likeCountsHidden
         applyReactionCount(animated: false)
         // A number the post does not have draws no action at all.
         applyCommentCount(post.commentCount, animated: false)
@@ -3005,12 +3002,11 @@ public final class PostGridTileCell: UICollectionViewCell {
     private var configuredLikeCount: Int64?
 
     public var postLikeCount: Int64? {
-        infoPost?.likeCountsHidden == true ? nil : configuredLikeCount
+        configuredLikeCount
     }
 
     public func showLikeCount(_ count: Int64) {
-        guard var post = infoPost, !post.likeCountsHidden,
-              let shown = post.reactionCount, shown != count else { return }
+        guard var post = infoPost, let shown = post.reactionCount, shown != count else { return }
         // Kept on the post too: the words' overlay is rebuilt from it when
         // the tile changes size.
         post.reactionCount = count

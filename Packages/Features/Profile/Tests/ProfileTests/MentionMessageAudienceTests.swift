@@ -39,7 +39,7 @@ struct MentionMessageAudienceTests {
     @Test func eachAudienceRoundTripsAndKeepsTheRest() async throws {
         let repository = makeRepository()
         try await repository.setCommentAudience(.followers)
-        try await repository.setPostSharing(PostSharing(showsLikeCounts: false, allowsDownloads: true))
+        try await repository.setPostSharing(PostSharing(allowsDownloads: true))
         #expect(try await repository.audience(for: .mentions) == .everyone)
         #expect(try await repository.audience(for: .messages) == .everyone)
 
@@ -48,7 +48,7 @@ struct MentionMessageAudienceTests {
         #expect(try await repository.audience(for: .mentions) == .mutuals)
         #expect(try await repository.audience(for: .messages) == .noOne)
         #expect(try await repository.commentAudience() == .followers)
-        #expect(try await repository.postSharing() == PostSharing(showsLikeCounts: false, allowsDownloads: true))
+        #expect(try await repository.postSharing() == PostSharing(allowsDownloads: true))
     }
 
     @Test func thePrivacyScreenReadsAndWritesThem() async throws {

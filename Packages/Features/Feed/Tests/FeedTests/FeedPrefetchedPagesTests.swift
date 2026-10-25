@@ -49,7 +49,7 @@ final class FeedPrefetchedPagesTests {
                     url: URL(string: "https://cdn.example/\(id).jpg"), thumbnailURL: nil,
                     mimeType: "image/jpeg", pixelWidth: 1080, pixelHeight: 1350
                 )],
-                publishedAt: Date(timeIntervalSince1970: 1_760_000_000), likeCountsHidden: false
+                publishedAt: Date(timeIntervalSince1970: 1_760_000_000)
             ),
             author: AuthorSummary(id: ProfileID("author-\(id)"), handle: "h-\(id)", displayName: "Name \(id)", avatarURL: nil),
             likeCount: 0

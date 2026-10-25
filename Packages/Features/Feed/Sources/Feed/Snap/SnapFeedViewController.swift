@@ -3218,7 +3218,6 @@ final class SnapFeedViewController: UIViewController {
         detail.setActionColumnHostedByPage(hostedByPage)
         let face = soundFace(for: model)
         detail.setRailSoundFace(face)
-        detail.setLikesHidden(model.likeCountHidden)
         // The For You root's save and repost (#1681), in the composer's
         // column too — drawn on a text page, reserved under a media page's.
         detail.setPostActions(
@@ -3821,7 +3820,7 @@ final class SnapFeedViewController: UIViewController {
                 monogram: CommentsInputBar.monogram(model.authorName),
                 avatarURL: model.avatarURL,
                 metrics: model.cardMetrics
-                    ?? PostCardMetrics(reactions: model.visibleLikeCount, comments: nil)
+                    ?? PostCardMetrics(reactions: model.likeCount, comments: nil)
             )
         }
         // No close handler — a resting page is undismissable; the swipe
@@ -5266,7 +5265,7 @@ final class SnapFeedViewController: UIViewController {
         let known: (PostID) -> Known? = { [modelsByID] id in
             if let model = modelsByID[id] {
                 return (
-                    model.thumbnailURL, model.caption, model.mediaURL != nil, model.visibleLikeCount,
+                    model.thumbnailURL, model.caption, model.mediaURL != nil, model.likeCount,
                     model.mediaKind == .video ? model.mediaURL : nil
                 )
             }

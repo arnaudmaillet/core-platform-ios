@@ -284,7 +284,7 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
         return posts.map { post in
             guard let counts = byPostID[post.id.rawValue] else { return post }
             var decorated = post
-            decorated.reactionCount = post.likeCountsHidden ? nil : counts.likes
+            decorated.reactionCount = counts.likes
             decorated.commentCount = counts.comments
             return decorated
         }
@@ -368,7 +368,6 @@ struct HydratedPost {
             caption: view.caption,
             publishedAtMS: view.publishedAtMs
         )
-        built.likeCountsHidden = view.likeCountsHidden
         post = built
         authorProfileID = ProfileID(view.profileID)
     }

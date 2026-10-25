@@ -33,7 +33,7 @@ private final class ViewerBox: Sendable {
 }
 
 private func cachedEntry(
-    _ id: String, author: String = "author-1", likes: Int64 = 0, hidden: Bool = false,
+    _ id: String, author: String = "author-1", likes: Int64 = 0,
     attachments: [MediaAttachment]? = nil, avatar: URL? = nil
 ) -> FeedEntry {
     FeedEntry(
@@ -47,8 +47,7 @@ private func cachedEntry(
                 mimeType: "image/jpeg", pixelWidth: 1080, pixelHeight: 1350
             )],
             // Whole seconds: the contract carries milliseconds.
-            publishedAt: Date(timeIntervalSince1970: 1_760_000_000),
-            likeCountsHidden: hidden
+            publishedAt: Date(timeIntervalSince1970: 1_760_000_000)
         ),
         author: AuthorSummary(
             id: ProfileID(author), handle: "h-\(author)", displayName: "Name \(author)", avatarURL: avatar,
@@ -121,7 +120,7 @@ final class FeedLocalCacheTests {
     @Test func entriesRoundTripThroughTheirProtobufBytes() throws {
         let entries = [
             cachedEntry("p1", likes: 0, avatar: URL(string: "https://cdn.example/a.jpg")),
-            cachedEntry("p2", author: "author-2", likes: 42, hidden: true, attachments: [
+            cachedEntry("p2", author: "author-2", likes: 42, attachments: [
                 MediaAttachment(url: URL(string: "https://cdn.example/v.mp4"), thumbnailURL: nil, mimeType: "video/mp4", pixelWidth: 720, pixelHeight: 1280),
                 MediaAttachment(url: URL(string: "https://cdn.example/i.jpg"), thumbnailURL: URL(string: "https://cdn.example/i-t.jpg"), mimeType: "image/jpeg", pixelWidth: 0, pixelHeight: 0)
             ]),

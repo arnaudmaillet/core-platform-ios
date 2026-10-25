@@ -1251,7 +1251,7 @@ final class PostDetailViewController: UIViewController {
         // screen, and a zero before the fetch is not a count — it is the
         // absence of one, and the row would assert "nobody liked this" over
         // the number the opener actually handed it.
-        setCaptionLikeCount(latestPost == nil || state.countHidden ? nil : state.likeCount)
+        setCaptionLikeCount(latestPost == nil ? nil : state.likeCount)
     }
 
     /// The count the caption row's closing line shows: the live one once the
@@ -1329,13 +1329,6 @@ final class PostDetailViewController: UIViewController {
     /// the sound, a hold opens the sound sheet, as the media page's sound
     /// bubble does. A text post's page has no bubble of its own: this slot is
     /// its sound control.
-    /// A post that hides its likes from this reader has no stake pill — the
-    /// media layout's like pill is gone too (#680).
-    func setLikesHidden(_ hidden: Bool) {
-        guard !viewModel.isDraft else { return }
-        composeBar.showsStake = !hidden
-    }
-
     /// Redraws the rail slot's cover once a fetched one has landed (#680).
     func redrawRailSoundFace() {
         composeBar.redrawRailFace()
@@ -1378,9 +1371,9 @@ final class PostDetailViewController: UIViewController {
     }
 
     /// The stake bubble's like badge reads the caption row's count — one
-    /// number on one panel — and none when the author hides it (#397).
+    /// number on one panel.
     private func pushComposerLikeCount() {
-        composeBar.setLikeCount(viewModel.engagementState.countHidden ? nil : captionLikeCount)
+        composeBar.setLikeCount(captionLikeCount)
     }
 
     /// Where the caption bubble is drawn, in `space` — the reveal transition's

@@ -332,16 +332,6 @@ struct EntityStoreTests {
         #expect(store.post(PostID("p1"))?.likeCount == 10)
     }
 
-    @Test func aHiddenCountIsNoNumber() {
-        let store = EntityStore()
-        let hidden = Post(
-            id: PostID("p1"), authorID: ProfileID("a1"), caption: "", attachments: [],
-            publishedAt: Date(timeIntervalSince1970: 0), likeCountsHidden: true
-        )
-        store.upsert([FeedEntry(post: hidden, author: author("a1"), likeCount: 10)])
-        #expect(store.post(PostID("p1"))?.visibleLikeCount == nil)
-    }
-
     // MARK: - Saves (#896)
 
     /// The app's saved pile writes the store's fact: a save made on one

@@ -52,13 +52,12 @@ public final class MockSocialServices: @unchecked Sendable {
     public static let seededShareToken = "mockShareToken-prof1_A"
     /// `SetInteractionSettings` writes, by profile (backend #714). prof-13 —
     /// public, and not followed by the viewer — takes comments from its
-    /// followers only, so a refused comment can be seen without setup, and
-    /// hides its like counts (#809), so a post without a count can be too.
+    /// followers only, so a refused comment can be seen without setup. (It
+    /// no longer hides its like counts: likes always show, #1713.)
     private var interactionSettings: [String: Profile_V1_InteractionSettings] = [
         "prof-13": {
             var settings = MockSocialServices.defaultInteractionSettings
             settings.comments = .followers
-            settings.showLikeCounts = false
             return settings
         }()
     ]
@@ -851,13 +850,8 @@ public final class MockSocialServices: @unchecked Sendable {
             view.deletedAtMs = Int64(deletedAt.timeIntervalSince1970 * 1_000)
             result = .success(view)
         }
-        // The author's "Show Like Counts" off hides them from every reader
-        // but the author (backend #809). The viewer is the only reader here.
-        if case .success(var view) = result, view.profileID != MockSocialDataset.viewerProfileID,
-           !storedInteractionSettings(for: view.profileID).showLikeCounts {
-            view.likeCountsHidden = true
-            result = .success(view)
-        }
+        // No "Show Like Counts" hiding (#1713, the owner): a post's likes
+        // always show, so the mock serves no `like_counts_hidden`.
         return result
     }
 

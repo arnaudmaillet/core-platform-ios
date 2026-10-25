@@ -16,12 +16,12 @@ struct SnapLikePillLayoutTests {
             && abs(a.width - b.width) < 0.01 && abs(a.height - b.height) < 0.01
     }
 
-    private static func model(likes: Int64 = 1_203, hidden: Bool = false, media: Bool = true) -> FeedItemDisplayModel {
+    private static func model(likes: Int64 = 1_203, media: Bool = true) -> FeedItemDisplayModel {
         FeedItemDisplayModel(
             id: PostID("post-1"), authorID: ProfileID("profile-1"), authorName: "Ana",
             metaText: "@ana", avatarURL: nil, caption: "A caption",
             mediaURL: media ? URL(string: "mock://media/1") : nil, mediaKind: .image,
-            thumbnailURL: nil, audioText: nil, likeCount: likes, likeCountHidden: hidden
+            thumbnailURL: nil, audioText: nil, likeCount: likes
         )
     }
 
@@ -97,17 +97,12 @@ struct SnapLikePillLayoutTests {
         #expect(Self.chrome(Self.model(likes: 1_203)).debugLikeBadgeText == "1.2K")
     }
 
-    /// ⚠️ A POST THAT HIDES ITS LIKES HAS NO LIKE PILL (#680): no heart, no
-    /// count. The band no longer runs under the pill (it rides the stream,
-    /// short of the rail, 2026-10-16), so it keeps its width either way.
-    @Test func hiddenLikesTakeThePillAway() {
-        let shown = Self.chrome(Self.model())
-        let hidden = Self.chrome(Self.model(hidden: true))
-
-        #expect(!shown.debugBoostButton.isHidden)
-        #expect(hidden.debugBoostButton.isHidden, "a post that hides its likes kept its like button")
-        #expect(hidden.debugLikeBadgeText == nil)
-        #expect(hidden.debugTickerFrame.maxX == shown.debugTickerFrame.maxX)
+    /// ⚠️ THE LIKE PILL IS ALWAYS THERE (#1713, the owner): no post hides
+    /// its likes — the heart and its count show on every page.
+    @Test func theLikePillIsAlwaysThere() {
+        let chrome = Self.chrome(Self.model())
+        #expect(!chrome.debugBoostButton.isHidden, "a post lost its like button")
+        #expect(chrome.debugLikeBadgeText != nil, "a post lost its like count")
     }
 
     /// The composer with no stake — the Messages thread — rests its rail

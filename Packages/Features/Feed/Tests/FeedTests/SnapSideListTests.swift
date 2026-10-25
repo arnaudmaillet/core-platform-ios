@@ -148,7 +148,7 @@ struct SnapSideListTests {
                     url: URL(string: "https://cdn.example/\(id).jpg"), thumbnailURL: nil,
                     mimeType: "image/jpeg", pixelWidth: 1080, pixelHeight: 1350
                 )] : [],
-                publishedAt: Date(timeIntervalSince1970: 1_760_000_000), likeCountsHidden: false
+                publishedAt: Date(timeIntervalSince1970: 1_760_000_000)
             ),
             author: AuthorSummary(id: ProfileID("author-\(id)"), handle: "h-\(id)", displayName: "Name \(id)", avatarURL: nil),
             likeCount: 0
@@ -255,7 +255,7 @@ struct SnapSideListTests {
                     url: URL(string: "mock://video/side-\(id)"), thumbnailURL: nil,
                     mimeType: "video/mp4", pixelWidth: 1080, pixelHeight: 1920
                 )],
-                publishedAt: Date(timeIntervalSince1970: 1_760_000_000), likeCountsHidden: false
+                publishedAt: Date(timeIntervalSince1970: 1_760_000_000)
             ),
             author: AuthorSummary(id: ProfileID("author-\(id)"), handle: "h", displayName: "N", avatarURL: nil),
             likeCount: 812

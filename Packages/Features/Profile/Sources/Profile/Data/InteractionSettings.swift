@@ -111,21 +111,19 @@ extension ProfileRepository: CommentAudienceManaging {
     }
 }
 
-/// How others may use the active profile's posts (#397, backend #809): see
-/// how many likes they have, and download them. Enforced by the server: a
-/// post's view tells each reader whether counts are hidden from them and
-/// whether they may download it.
+/// How others may use the active profile's posts (#397, backend #809):
+/// download them. Enforced by the server: a post's view tells each reader
+/// whether they may download it. (Hiding like counts is gone, #1713: a post's
+/// likes always show.)
 public struct PostSharing: Equatable, Sendable {
-    public var showsLikeCounts: Bool
     public var allowsDownloads: Bool
 
-    public init(showsLikeCounts: Bool, allowsDownloads: Bool) {
-        self.showsLikeCounts = showsLikeCounts
+    public init(allowsDownloads: Bool) {
         self.allowsDownloads = allowsDownloads
     }
 }
 
-/// Settings → Privacy → Show Like Counts and Allow Downloads.
+/// Settings → Privacy → Allow Downloads.
 public protocol PostSharingManaging: Sendable {
     func postSharing() async throws -> PostSharing
     func setPostSharing(_ sharing: PostSharing) async throws
@@ -134,12 +132,14 @@ public protocol PostSharingManaging: Sendable {
 extension ProfileRepository: PostSharingManaging {
     public func postSharing() async throws -> PostSharing {
         let settings = try await fetchProfileView(id: try await resolveViewerProfileID()).interactionSettings
-        return PostSharing(showsLikeCounts: settings.showLikeCounts, allowsDownloads: settings.allowDownloads)
+        return PostSharing(allowsDownloads: settings.allowDownloads)
     }
 
     public func setPostSharing(_ sharing: PostSharing) async throws {
         try await writeInteractionSettings(as: "setPostSharing") {
-            $0.showLikeCounts = sharing.showsLikeCounts
+            // Likes always show (#1713): a count an older build hid is shown
+            // again on the next write.
+            $0.showLikeCounts = true
             $0.allowDownloads = sharing.allowsDownloads
         }
     }
