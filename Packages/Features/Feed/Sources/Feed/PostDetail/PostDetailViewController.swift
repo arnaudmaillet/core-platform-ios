@@ -942,7 +942,15 @@ final class PostDetailViewController: UIViewController {
         let bar = composeBar.layer
         let fromStream = (stream.presentation() ?? stream).transform
         let fromBarOpacity = (bar.presentation() ?? bar).opacity
-        let fromBarTransform = (bar.presentation() ?? bar).transform
+        // ⚠️ FROM THE MODEL unless an entrance is in flight (the owner's
+        // video, 2026-10-25): the side list's offset (`setOverlayOffset`) is
+        // set just before this, and the presentation layer still shows the
+        // transform of the last commit — identity for a panel released at 0.
+        // Read from there, the bar was drawn without the offset for the whole
+        // engagement and jumped into place at its end.
+        let fromBarTransform = bar.animation(forKey: "comments-engage-transform") != nil
+            ? (bar.presentation() ?? bar).transform
+            : bar.transform
 
         UIView.performWithoutAnimation {
             setStreamTransitionProgress(engaged ? 0 : 1)
@@ -1359,6 +1367,16 @@ final class PostDetailViewController: UIViewController {
     func setActionColumnHostedByPage(_ hosted: Bool) {
         composeBar.hostsActionColumn = !hosted
     }
+
+    /// The page's overlay offset as the side list opens (#1730): the
+    /// composer moves down with the caption and the action column, so its
+    /// input row stays on the sound cover's line.
+    func setOverlayOffset(_ offset: CGFloat) {
+        composeBar.setOverlayOffset(offset)
+    }
+
+    /// The composer's offset now. Tests.
+    var debugComposerOverlayOffset: CGFloat { composeBar.transform.ty }
 
     /// The slot's cover turns while the post plays aloud (#692).
     func setRailSoundSpinning(_ spinning: Bool) {

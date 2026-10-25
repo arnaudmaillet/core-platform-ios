@@ -579,17 +579,31 @@ final class CommentsInputBar: UIView {
         railButton.addGestureRecognizer(railHold)
         installRailCover()
 
-        // The keyboard axis: the page-swipe gate and the idle-dismiss seam.
+        // The keyboard axis: the page-swipe gate, the idle-dismiss seam and
+        // the ceiling through transforms (`refreshKeyboardCeiling`).
         keyboardObservers.tokens = [
             NotificationCenter.default.addObserver(
                 forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.setKeyboardOpen(true) }
+            ) { [weak self] note in
+                let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+                MainActor.assumeIsolated {
+                    self?.setKeyboardTop(endFrame: frame)
+                    self?.setKeyboardOpen(true)
+                }
+            },
+            NotificationCenter.default.addObserver(
+                forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main
+            ) { [weak self] note in
+                let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+                MainActor.assumeIsolated { self?.setKeyboardTop(endFrame: frame) }
             },
             NotificationCenter.default.addObserver(
                 forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
             ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.setKeyboardOpen(false) }
+                MainActor.assumeIsolated {
+                    self?.setKeyboardTop(endFrame: nil)
+                    self?.setKeyboardOpen(false)
+                }
             },
         ]
 
@@ -841,7 +855,100 @@ final class CommentsInputBar: UIView {
         let ceiling = field.bottomAnchor.constraint(lessThanOrEqualTo: guide.topAnchor, constant: -Spacing.sm)
         keyboardCeiling = ceiling
         ceiling.isActive = tracksKeyboard
+        refreshKeyboardCeiling()
         setNeedsLayout()
+    }
+
+    /// How far the host has moved the bar down with the page (#1730: the
+    /// side list's overlay offset), drawn as a transform.
+    private(set) var overlayOffset: CGFloat = 0
+
+    /// The keyboard's resting top in window space, from the will-show /
+    /// will-change-frame notifications; nil while it is down.
+    private var keyboardTopInWindow: CGFloat?
+
+    func setOverlayOffset(_ offset: CGFloat) {
+        overlayOffset = offset
+        transform = offset == 0 ? .identity : CGAffineTransform(translationX: 0, y: offset)
+        refreshKeyboardCeiling()
+        setNeedsLayout()
+    }
+
+    /// Re-solves the keyboard ceiling's constant for the bar's offset and
+    /// its ancestors' transforms (the host calls `setOverlayOffset` at every
+    /// step of the side list's pose).
+    ///
+    /// ⚠️ THE KEYBOARD GUIDE IGNORES TRANSFORMS — the bar's own AND the
+    /// page's (measured on the SE, 2026-10-25, the owner's video): with the
+    /// side list open the page is a card scaled ×0.82, yet the guide's top
+    /// in the page's space read 407, the keyboard's top on SCREEN, as though
+    /// nothing were scaled; the risen row was drawn 9 pt into the keyboard.
+    /// Taking back only the bar's offset (42 pt) overshot to 17 pt too high.
+    /// So the constant puts the field's DRAWN bottom `sm` over the keyboard's
+    /// real top, through the transforms as they are drawn
+    /// (`keyboardCeilingConstant`). With no offset it is `-sm`, the plain
+    /// ceiling.
+    private func refreshKeyboardCeiling() {
+        guard let ceiling = keyboardCeiling else { return }
+        var constant = -Spacing.sm - overlayOffset
+        // Only while the host moves the bar (the side list's pose, whose
+        // every step calls `setOverlayOffset`): elsewhere a transform is a
+        // transition in flight, and a constant read off it would outlive it.
+        if overlayOffset != 0, let keyboardTop = keyboardTopInWindow,
+           let owner = (ceiling.secondItem as? UILayoutGuide)?.owningView {
+            let origin = owner.convert(CGPoint.zero, to: nil).y
+            let scale = owner.convert(CGPoint(x: 0, y: 1), to: nil).y - origin
+            constant = Self.keyboardCeilingConstant(
+                keyboardTop: keyboardTop, ownerDrawnOrigin: origin, ownerScale: scale,
+                ownerLaidOutOrigin: Self.laidOutMinY(of: owner), barOffset: overlayOffset
+            )
+        }
+        guard abs(ceiling.constant - constant) > 0.01 else { return }
+        ceiling.constant = constant
+    }
+
+    /// The ceiling's constant that draws the field's bottom `sm` over the
+    /// keyboard's top (window space): the guide reads that top as if nothing
+    /// were transformed — `keyboardTop - ownerLaidOutOrigin` in the owner's
+    /// space — while the owner is drawn at `ownerDrawnOrigin + ownerScale ·
+    /// y`, and the bar `barOffset` lower in it. Pure, for tests.
+    static func keyboardCeilingConstant(
+        keyboardTop: CGFloat, ownerDrawnOrigin: CGFloat, ownerScale: CGFloat,
+        ownerLaidOutOrigin: CGFloat, barOffset: CGFloat
+    ) -> CGFloat {
+        guard ownerScale > 0.01 else { return -Spacing.sm - barOffset }
+        let guideTop = keyboardTop - ownerLaidOutOrigin
+        let drawnTarget = (keyboardTop - Spacing.sm - ownerDrawnOrigin) / ownerScale
+        return drawnTarget - barOffset - guideTop
+    }
+
+    /// `view`'s top in its window's space as laid out — every ancestor's
+    /// frame and scroll offset, no transform.
+    static func laidOutMinY(of view: UIView) -> CGFloat {
+        var y: CGFloat = 0
+        var current = view
+        while let parent = current.superview {
+            y += current.center.y - current.bounds.height * current.layer.anchorPoint.y - parent.bounds.origin.y
+            current = parent
+        }
+        return y + current.frame.minY
+    }
+
+    /// The keyboard's resting top from a notification's end frame (screen
+    /// space). Internal for tests, which raise no keyboard.
+    func setKeyboardTop(endFrame: CGRect?) {
+        if let endFrame, let window {
+            let top = window.convert(endFrame, from: window.screen.coordinateSpace).minY
+            keyboardTopInWindow = top < window.bounds.maxY ? top : nil
+        } else {
+            keyboardTopInWindow = nil
+        }
+        refreshKeyboardCeiling()
+    }
+
+    func debugSetKeyboardTop(inWindow top: CGFloat?) {
+        keyboardTopInWindow = top
+        refreshKeyboardCeiling()
     }
 
     /// Whether the input row may rise with the keyboard at all.
