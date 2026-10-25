@@ -5,6 +5,7 @@ import Foundation
 import MediaCore
 import MediaPlayback
 import PostGrid
+import ShareSheet
 import DesignSystem
 import Testing
 import UIKit
@@ -166,6 +167,20 @@ struct SnapSideListTests {
         controller.seedProjection([Self.photo("p1")])
         controller.view.layoutIfNeeded()
         return controller
+    }
+
+    /// The post share sheet's own chips (#1710, #1712): Repost, then the ⋯
+    /// menu's Not interested and Report — Report only with somewhere to file.
+    @Test func theShareSheetOffersRepostNotInterestedAndReport() {
+        let feed = feed(sideList: false)
+        #expect(feed.shareSheetActions(for: PostID("p1")).map(\.title) == ["Repost", "Not interested", "Report"])
+
+        let unfiled = SnapFeedViewController(
+            viewModel: FeedViewModel(repository: SideListProvider()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        #expect(unfiled.shareSheetActions(for: PostID("p1")).map(\.title) == ["Repost", "Not interested"],
+                "Report offered with nowhere to file it")
     }
 
     /// On by default (#1473): a vertical feed installs it with no flag.
