@@ -1,9 +1,9 @@
 import QuartzCore
 import UIKit
 
-/// The app's branded loader (#1329), replacing the stock spinner: four pills
-/// sharing a square (the mark) that round into a disc and open into a turning
-/// ring while loading, and close back into the square when done.
+/// The app's branded loader (#1329), replacing the stock spinner: the app
+/// icon's four rounded pieces (the mark) that spin up and thin, over three
+/// turns, into a turning ring while loading (#1744).
 ///
 /// Its API mirrors `UIActivityIndicatorView` — `startAnimating()`,
 /// `stopAnimating()`, `isAnimating`, `hidesWhenStopped`, a size — so a call site
@@ -12,11 +12,12 @@ import UIKit
 /// - **Pulled** (`setProgress`): the frame follows the finger exactly
 ///   (`AppLoaderTimeline.pull`); pulling back plays it in reverse.
 /// - **Loading** (`startAnimating`): from wherever the pull left it — the rest
-///   of the entry if it had not reached the ring, then the loop, turning on
-///   from the angle the pull reached, with no jump.
+///   of the entry (`AppLoaderTimeline.entryRoute`), which a pull only ever
+///   starts, then the loop, turning on at the same speed, with no jump.
 /// - **Done** (`stopAnimating`): the mark fades where it is, still turning —
-///   no closing back into the square (the owner, 2026-10-17), so a short
-///   load never plays more than it showed.
+///   no closing back into the mark (the owner, 2026-10-17), so a short
+///   load never plays more than it showed — the entry lasts ≈4.7 s, and many
+///   loads end during it.
 ///
 /// ⚠️ **CORE ANIMATION, NOT LOTTIE.** DesignSystem is under every package and
 /// does not pull Lottie in, and CA animations run on the render server, so the
@@ -27,7 +28,7 @@ import UIKit
 /// when it returns.
 ///
 /// Reduce Motion, the app's switch or Power Saving (`MotionPreference`): no
-/// morph and no turn — the static square, fading in with the pull and pulsing
+/// morph and no turn — the static icon, fading in with the pull and pulsing
 /// slowly while loading.
 public final class AppLoaderView: UIView {
     public enum Size: Sendable {
@@ -68,8 +69,9 @@ public final class AppLoaderView: UIView {
 
     private enum Phase: Equatable {
         case idle
-        /// Pills in and morphing, from pull `progress` to the ring.
-        case entering(begin: CFTimeInterval, from: CGFloat, duration: CFTimeInterval)
+        /// The icon appearing and thinning into the ring, from `from` seconds
+        /// into the entry.
+        case entering(begin: CFTimeInterval, from: TimeInterval, duration: CFTimeInterval)
         /// The ring turning, from `angle`.
         case looping(angle: CGFloat)
         case exiting
@@ -140,15 +142,16 @@ public final class AppLoaderView: UIView {
             if window != nil { addPulse() }
             return
         }
-        guard window != nil, progress < 1 else {
-            // Off-window, the loop waits for the window (`didMoveToWindow`);
-            // from a full pull it starts at once, where the pull left it.
-            apply(AppLoaderTimeline.pull(1))
-            phase = .looping(angle: AppLoaderTimeline.pullRotation(1))
-            if window != nil { beginLoop(at: AppLoaderTimeline.pullRotation(1)) }
+        guard window != nil else {
+            // Off-window, the loop waits for the window (`didMoveToWindow`),
+            // on the ring the entry lands on.
+            apply(AppLoaderTimeline.entry(at: AppLoaderTimeline.entryDuration))
+            phase = .looping(angle: AppLoaderTimeline.landingRotation)
             return
         }
-        enter(from: progress)
+        // Even a full pull has only started the entry: the rest plays from
+        // the frame it reached.
+        enter(from: AppLoaderTimeline.pullTime(progress))
     }
 
     /// Stops at once, with no fade of its own — for a host that has already
@@ -190,7 +193,7 @@ public final class AppLoaderView: UIView {
         if window == nil {
             // #580: nothing turns where nobody can see it.
             if phase == .exiting { return finishExit() }
-            if case .entering = phase { phase = .looping(angle: AppLoaderTimeline.pullRotation(1)) }
+            if case .entering = phase { phase = .looping(angle: AppLoaderTimeline.landingRotation) }
             removeAllAnimations()
             return
         }
@@ -209,21 +212,38 @@ public final class AppLoaderView: UIView {
     // MARK: - Animations
 
     private static let loopKeyframes = AppLoaderTimeline.loopKeyframes()
+    /// The whole entry, without a pull — most loaders play it.
+    private static let fullEntry = AppLoaderTimeline.entryRoute(from: 0)
+    /// Its paths per side, `[piece][keyframe]`, shared by every loader of that
+    /// side: ≈140 keyframes × 4 pieces would be a megabyte per loader.
+    private static var fullEntryShapes: [CGFloat: [[CGPath]]] = [:]
 
-    /// The rest of the entry, from pull `start` to the ring, then the loop.
-    private func enter(from start: CGFloat) {
-        let duration = max(0.15, AppLoaderTimeline.entryDuration * Double(1 - start))
-        let route = stride(from: 0, through: 20, by: 1).map { step in
-            AppLoaderTimeline.pull(start + (1 - start) * CGFloat(step) / 20)
+    /// The rest of the entry, from `start` seconds in to the ring, at the
+    /// entry's own pace, then the loop.
+    private func enter(from start: TimeInterval) {
+        let duration = AppLoaderTimeline.entryDuration - start
+        let route: [AppLoaderTimeline.Frame]
+        let routeShapes: [[CGPath]]
+        if start == 0 {
+            route = Self.fullEntry
+            if let shared = Self.fullEntryShapes[side] {
+                routeShapes = shared
+            } else {
+                routeShapes = shapes(of: route)
+                Self.fullEntryShapes[side] = routeShapes
+            }
+        } else {
+            route = AppLoaderTimeline.entryRoute(from: start)
+            routeShapes = shapes(of: route)
         }
         let run = generation
         phase = .entering(begin: CACurrentMediaTime(), from: start, duration: duration)
         CATransaction.begin()
         CATransaction.setCompletionBlock { [weak self] in
             guard let self, generation == run, isAnimating, window != nil else { return }
-            beginLoop(at: AppLoaderTimeline.pullRotation(1))
+            beginLoop(at: AppLoaderTimeline.landingRotation)
         }
-        play(route, duration: duration, timing: .linear)
+        play(route, shapes: routeShapes, duration: duration, timing: .linear)
         CATransaction.commit()
     }
 
@@ -246,12 +266,16 @@ public final class AppLoaderView: UIView {
         mark.add(spin, forKey: Self.loopKey)
     }
 
-    /// Keyframes through `route`, over `duration`; the model left on its last.
-    private func play(_ route: [AppLoaderTimeline.Frame], duration: CFTimeInterval, timing: CAMediaTimingFunctionName) {
+    /// Keyframes through `route` — its outlines already made `shapes`,
+    /// `[piece][keyframe]` — over `duration`; the model left on its last.
+    private func play(
+        _ route: [AppLoaderTimeline.Frame], shapes routeShapes: [[CGPath]],
+        duration: CFTimeInterval, timing: CAMediaTimingFunctionName
+    ) {
         guard let last = route.last else { return }
         for (index, piece) in pieces.enumerated() {
             let shapes = CAKeyframeAnimation(keyPath: "path")
-            shapes.values = route.map { path($0.outlines[index]) }
+            shapes.values = routeShapes[index]
             let fades = CAKeyframeAnimation(keyPath: "opacity")
             fades.values = route.map { Float($0.opacities[index]) }
             for animation in [shapes, fades] {
@@ -302,7 +326,7 @@ public final class AppLoaderView: UIView {
         updateVisibility()
     }
 
-    /// Reduced motion while loading: the square breathing slowly.
+    /// Reduced motion while loading: the icon breathing slowly.
     private func addPulse() {
         let pulse = CABasicAnimation(keyPath: "opacity")
         pulse.fromValue = 1
@@ -334,13 +358,18 @@ public final class AppLoaderView: UIView {
         CATransaction.commit()
     }
 
-    /// Reduced motion: the square, upright, at `opacity`.
+    /// Reduced motion: the icon, as on the app icon, at `opacity`.
     private func applyStill(opacity: CGFloat) {
         apply(AppLoaderTimeline.Frame(
-            outlines: (0..<AppLoaderGeometry.pieceCount).map(AppLoaderGeometry.square),
+            outlines: (0..<AppLoaderGeometry.pieceCount).map(AppLoaderGeometry.icon),
             opacities: Array(repeating: opacity, count: AppLoaderGeometry.pieceCount),
             rotation: 0
         ))
+    }
+
+    /// `route`'s outlines as paths, `[piece][keyframe]`.
+    private func shapes(of route: [AppLoaderTimeline.Frame]) -> [[CGPath]] {
+        (0..<AppLoaderGeometry.pieceCount).map { index in route.map { path($0.outlines[index]) } }
     }
 
     private func path(_ points: [CGPoint]) -> CGPath {
@@ -357,6 +386,7 @@ public final class AppLoaderView: UIView {
     #if DEBUG
     /// What a test reads.
     var debugIsLooping: Bool { if case .looping = phase { return true } else { return false } }
+    var debugIsEntering: Bool { if case .entering = phase { return true } else { return false } }
     var debugIsExiting: Bool { phase == .exiting }
     var debugAnimationCount: Int {
         (mark.animationKeys()?.count ?? 0) + pieces.reduce(0) { $0 + ($1.animationKeys()?.count ?? 0) }

@@ -19,11 +19,11 @@ import UIKit
 ///
 /// **Two states, deliberately, and no third.** Below the threshold the branded
 /// loader (`AppLoaderView`, #1329) follows the finger frame for frame — the
-/// pills appear, the square rounds into the disc and opens into the ring,
-/// turning — so the gesture feels connected. At the threshold it is the ring.
-/// Nothing snaps, and there is no "release to refresh" text — the mark taking
-/// shape IS the message. Released past it, the ring turns on from where the
-/// pull left it; done, it closes back into the square and fades.
+/// icon's pieces appear, then the mark starts to turn and to thin (#1744) —
+/// so the gesture feels connected. At the threshold it is half a turn into
+/// its spin. Nothing snaps, and there is no "release to refresh" text — the
+/// mark taking shape IS the message. Released past it, it turns on from where
+/// the pull left it, thinning into the ring; done, it fades where it is.
 ///
 /// ⚠️ **ON THE PLACE PAGE THE STOCK CONTROL WAS WORSE THAN MISPLACED.** Its
 /// lists kept a `UIRefreshControl` under the same floating header, and a real
@@ -108,7 +108,7 @@ public final class HeroPullToRefreshView: UIView {
         guard isRefreshing else { return }
         isRefreshing = false
         isSettling = true
-        // Ring → disc → square, then a fade.
+        // The mark fades where it is.
         loader.stopAnimating()
     }
 
