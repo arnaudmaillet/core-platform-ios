@@ -96,6 +96,11 @@ public struct MockClipCatalog: Sendable {
         file(named: "\(id)-sound.m4a")
     }
 
+    /// The bundled video file of the clip named `id`.
+    public func videoFileURL(clipID id: String) -> URL? {
+        file(named: "\(id).mp4")
+    }
+
     /// The poster of the clip named `id`.
     public func posterFileURL(clipID id: String) -> URL? {
         file(named: "\(id).jpg")

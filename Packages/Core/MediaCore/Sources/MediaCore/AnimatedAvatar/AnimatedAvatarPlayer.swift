@@ -326,6 +326,17 @@ public final class AnimatedAvatarPlayer: UIView {
         requestPlay()
     }
 
+    /// How many times one play runs the sheet's loop, back to back (the owner,
+    /// 2026-10-25): the sheet is baked as a seamless loop, so two passes read
+    /// as one longer clip, and the second still ends on the last frame — the
+    /// rest.
+    static let loopsPerPlay = 2
+
+    /// How long one play lasts on the sheet's clock.
+    static func playDuration(of sheet: AnimatedIconSheet) -> CFTimeInterval {
+        sheet.loopDuration * CFTimeInterval(loopsPerPlay)
+    }
+
     private func requestPlay(viewerAsked: Bool = false) {
         guard let sheet, let last = sheet.frameRects.last else { return refuse("no sheet") }
         guard !isPlaying else { return refuse("already playing") }
@@ -354,15 +365,22 @@ public final class AnimatedAvatarPlayer: UIView {
         animation.values = sheet.frameRects.map { NSValue(cgRect: $0) }
         animation.keyTimes = (0...count).map { NSNumber(value: Double($0) / Double(count)) }
         animation.duration = sheet.loopDuration
+        animation.repeatCount = Float(Self.loopsPerPlay)
         let fps = Float(min(60, max(1, (1 / sheet.frameDuration).rounded())))
         animation.preferredFrameRateRange = CAFrameRateRange(minimum: fps, maximum: fps, preferred: fps)
         animation.delegate = PlayEnd(player: self, token: token)
         sheetView.layer.contentsRect = last
         sheetView.layer.add(animation, forKey: Self.playKey)
         lastPlayAnimation = animation
+        #if DEBUG
+        playStartedAt = CACurrentMediaTime()
+        if Self.logsPlays {
+            print(String(format: "[avatar] play frames=%d loop=%.2fs loops=%d", count, sheet.loopDuration, Self.loopsPerPlay))
+        }
+        #endif
         // The slot comes back with the animation's end — and, should its
         // delegate never be told (a test host, a stripped layer), a beat after.
-        DispatchQueue.main.asyncAfter(deadline: .now() + sheet.loopDuration + 0.25) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.playDuration(of: sheet) + 0.25) { [weak self] in
             self?.playEnded(token)
         }
     }
@@ -397,6 +415,12 @@ public final class AnimatedAvatarPlayer: UIView {
     }
 
     private func release() {
+        #if DEBUG
+        if Self.logsPlays, let started = playStartedAt {
+            print(String(format: "[avatar] play ended after %.2fs", CACurrentMediaTime() - started))
+        }
+        playStartedAt = nil
+        #endif
         isPlaying = false
         concurrency.playing = max(0, concurrency.playing - 1)
     }
@@ -405,6 +429,10 @@ public final class AnimatedAvatarPlayer: UIView {
     public var still: UIImage? { sheet == nil ? nil : stillImage }
 
     #if DEBUG
+    /// `-avatar-play-log`: each play's frames and loops, and when it ended.
+    private static let logsPlays = ProcessInfo.processInfo.arguments.contains("-avatar-play-log")
+    private var playStartedAt: CFTimeInterval?
+
     /// What a test reads.
     var debugSheet: AnimatedIconSheet? { sheet }
     var debugStill: UIImage? { stillImage }
