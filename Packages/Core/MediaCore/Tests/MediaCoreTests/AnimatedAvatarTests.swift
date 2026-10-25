@@ -199,9 +199,10 @@ struct AnimatedAvatarTests {
 
     // MARK: - #1424
 
-    /// A play is ONE pass of the sheet, frame 0 to the last, on Core
-    /// Animation's clock, and the layer's model is the last frame: the end of
-    /// the play is the rest, however late the bookkeeping.
+    /// A play is TWO passes of the sheet back to back (the owner, 2026-10-25),
+    /// frame 0 to the last each time, on Core Animation's clock, and the
+    /// layer's model is the last frame: the end of the play is the rest,
+    /// however late the bookkeeping.
     @Test func aPlayEndsOnTheLastFrameOnTheSheetsClock() async throws {
         let window = makeWindow()
         defer { window.isHidden = true }
@@ -209,7 +210,8 @@ struct AnimatedAvatarTests {
         #expect(player.debugRestingRect == Self.sheet.frameRects.last, "at rest, not on the last frame")
         #expect(await eventually { player.playCount > 0 }, "never played: \(player.lastRefusal ?? "never asked")")
         let animation = try #require(player.lastPlayAnimation)
-        #expect(animation.repeatCount == 0, "a play loops")
+        #expect(animation.repeatCount == Float(AnimatedAvatarPlayer.loopsPerPlay), "a play is not two loops")
+        #expect(AnimatedAvatarPlayer.loopsPerPlay == 2)
         #expect(animation.calculationMode == .discrete)
         #expect((animation.values as? [NSValue])?.map(\.cgRectValue) == Self.sheet.frameRects)
         #expect(animation.keyTimes?.count == Self.sheet.frameRects.count + 1, "a frame without its own time")
@@ -428,6 +430,24 @@ struct AnimatedAvatarTests {
         #expect(AnimatedAvatars.anchorWeight(index: 2, count: 4, blend: 1) == 0.5)
         #expect(AnimatedAvatars.anchorWeight(index: 0, count: 4, blend: 1) == 0.5)
         #expect(AnimatedAvatars.anchorWeight(index: 1, count: 4, blend: 1) == 0)
+    }
+
+    /// #1742: a sheet baked straight from a clip's frames — 48 at 12 fps,
+    /// any shape, each cut to its centre square — four to a row.
+    @Test func aSheetBakesFromFramesCutFromAClip() throws {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let frame = UIGraphicsImageRenderer(size: CGSize(width: 16, height: 9), format: format).image { context in
+            UIColor.blue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 16, height: 9))
+        }.cgImage
+        let baked = try #require(AnimatedAvatars.bakeSquareSheet(
+            cells: Array(repeating: frame, count: 48), frameDuration: 1.0 / 12.0, cellPX: 8
+        ))
+        #expect(baked.frameCount == 48)
+        #expect(abs(baked.loopDuration - 4) < 0.0001, "48 frames at 12 fps are not 4 s")
+        #expect(baked.sheet.cgImage?.width == 4 * 8)
+        #expect(baked.sheet.cgImage?.height == 12 * 8)
     }
 
     /// Without a face, the clip's OWN last frame is the rest (the owner,

@@ -1948,11 +1948,48 @@ private struct MockAnimatedAvatarResolver: AnimatedAvatarResolving, @unchecked S
     func sheet(for avatarURL: URL, rung: AnimatedAvatars.Rung) async -> AnimatedIconSheet? {
         guard let index = MockSocialDataset.sheetAvatarIndex(avatarURL) else { return nil }
         let clips = await MainActor.run { catalog.ids.filter { $0.hasSuffix("-0") } }
-        guard !clips.isEmpty,
-              case .sheet(let source)? = try? await catalog.art(for: clips[index % clips.count])
-        else { return nil }
+        guard !clips.isEmpty else { return nil }
+        let previewID = clips[index % clips.count]
+        // 48 frames, 4 s at 12 fps, cut from the clip itself (the owner,
+        // 2026-10-25: avatars twice as long) — the map preview carries only
+        // 24 frames over 2 s. The preview stays the fallback.
+        let clipID = String(previewID.dropLast(2))
+        if let video = MockClipCatalog.shared.videoFileURL(clipID: clipID),
+           let sheet = await Self.bakeFromVideo(video, rung: rung) {
+            return sheet
+        }
+        guard case .sheet(let source)? = try? await catalog.art(for: previewID) else { return nil }
         return await Task.detached(priority: .utility) {
             AnimatedAvatars.bakeSquareSheet(from: source, cellPX: rung.rawValue)
+        }.value
+    }
+
+    /// Frames of an avatar sheet, per the backend's geometry: 48 at 12 fps.
+    static let sheetFrames = 48
+    static let sheetFrameDuration: CFTimeInterval = 1.0 / 12.0
+
+    /// 48 frames of `video` from 1 s in (earlier when the clip is short),
+    /// baked as a seamless square sheet at `rung`.
+    private static func bakeFromVideo(_ video: URL, rung: AnimatedAvatars.Rung) async -> AnimatedIconSheet? {
+        let asset = AVURLAsset(url: video)
+        guard let duration = try? await asset.load(.duration).seconds, duration > 0 else { return nil }
+        let span = Double(sheetFrames) * sheetFrameDuration
+        let start = max(0, min(1.0, duration - span))
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: rung.rawValue * 2, height: rung.rawValue * 2)
+        let tolerance = CMTime(seconds: sheetFrameDuration / 2, preferredTimescale: 600)
+        generator.requestedTimeToleranceBefore = tolerance
+        generator.requestedTimeToleranceAfter = tolerance
+        var cells: [CGImage?] = []
+        for index in 0..<sheetFrames {
+            let time = CMTime(seconds: min(start + Double(index) * sheetFrameDuration, duration - 0.01), preferredTimescale: 600)
+            cells.append(try? await generator.image(at: time).image)
+        }
+        guard cells.contains(where: { $0 != nil }) else { return nil }
+        let frames = cells
+        return await Task.detached(priority: .utility) {
+            AnimatedAvatars.bakeSquareSheet(cells: frames, frameDuration: sheetFrameDuration, cellPX: rung.rawValue)
         }.value
     }
 }

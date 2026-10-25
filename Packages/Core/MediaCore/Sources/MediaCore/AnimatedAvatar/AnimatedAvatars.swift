@@ -65,7 +65,11 @@ public final class AnimatedAvatars {
 
     /// The decoded sheets and their stills, by avatar and rung — on
     /// CacheKit, budgeted by bytes like the map's previews
-    /// (`AnimatedIconCatalog`). 1.5 MB a face at the 128 px rung. Read from
+    /// (`AnimatedIconCatalog`). 3 MB a face at the 128 px rung since sheets
+    /// carry 48 frames (4 s at 12 fps, the owner 2026-10-25: twice as long);
+    /// the budget doubled with them, so a list's worth of faces still stays
+    /// decoded when the viewer scrolls back (measured worst case: 9 faces on
+    /// a following list, 27 MB). Read from
     /// any thread (`cachedStill`): the cache is its own lock.
     private nonisolated let arts: MemoryCache<Key, Art>
     /// Sheets known to be missing.
@@ -81,7 +85,7 @@ public final class AnimatedAvatars {
 
     nonisolated init(registry: UIAssetCaches? = .shared) {
         arts = UIAssetCaches.memoryCache(
-            "UIAssets.avatarSheets", budget: .fixed(bytes: 32 * CacheBytes.mebibyte), priorityClass: .standard
+            "UIAssets.avatarSheets", budget: .fixed(bytes: 64 * CacheBytes.mebibyte), priorityClass: .standard
         )
         registry?.adopt(arts)
     }
@@ -165,13 +169,6 @@ public final class AnimatedAvatars {
         from source: AnimatedIconSheet, cellPX: Int = 128, endingOn face: UIImage? = nil, blendFrames: Int = 6
     ) -> AnimatedIconSheet? {
         guard let image = source.sheet.cgImage else { return nil }
-        let columns = 4
-        let count = source.frameCount
-        let rows = Int(ceil(Double(count) / Double(columns)))
-        let size = CGSize(width: columns * cellPX, height: rows * cellPX)
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = true
         let width = CGFloat(image.width)
         let height = CGFloat(image.height)
         let cells: [CGImage?] = source.frameRects.map { unit in
@@ -180,6 +177,28 @@ public final class AnimatedAvatars {
             let side = min(frame.width, frame.height)
             return image.cropping(to: CGRect(x: frame.midX - side / 2, y: frame.midY - side / 2, width: side, height: side).integral)
         }
+        return bakeSquareSheet(
+            cells: cells, frameDuration: source.frameDuration, cellPX: cellPX, endingOn: face, blendFrames: blendFrames
+        )
+    }
+
+    /// The same bake from frames already cut: each centre-cropped to a square
+    /// (`cells` may be any shape), four to a row at `cellPX` — what the mock
+    /// bakes its 48-frame sheets with, straight from a clip's frames (the
+    /// owner, 2026-10-25: 4 s at 12 fps; the map previews carry only 2 s).
+    public nonisolated static func bakeSquareSheet(
+        cells rawCells: [CGImage?], frameDuration: CFTimeInterval, cellPX: Int = 128,
+        endingOn face: UIImage? = nil, blendFrames: Int = 6
+    ) -> AnimatedIconSheet? {
+        let cells = rawCells.map { cell in cell.flatMap { squareCrop(UIImage(cgImage: $0))?.cgImage } }
+        guard !cells.isEmpty else { return nil }
+        let columns = 4
+        let count = cells.count
+        let rows = Int(ceil(Double(count) / Double(columns)))
+        let size = CGSize(width: columns * cellPX, height: rows * cellPX)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
         let anchor: UIImage? = face.flatMap(squareCrop) ?? cells.last.flatMap { $0 }.map { UIImage(cgImage: $0) }
         let blend = max(0, min(blendFrames, (count - 1) / 2))
         let baked = UIGraphicsImageRenderer(size: size, format: format).image { _ in
@@ -192,7 +211,7 @@ public final class AnimatedAvatars {
             }
         }
         return AnimatedIconSheet(
-            sheet: baked, frameCount: count, columns: columns, frameDuration: source.frameDuration
+            sheet: baked, frameCount: count, columns: columns, frameDuration: frameDuration
         )
     }
 
