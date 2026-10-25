@@ -1377,6 +1377,21 @@ struct SnapStripBrowseTests {
         return view
     }
 
+    /// The clip the post plays shows live in its preview — that tile only —
+    /// and leaves it when the finger moves on (the owner, 2026-10-25).
+    @Test func onlyThePlayedTileIsLive() {
+        let strip = SnapBrowseStripView(frame: CGRect(x: 0, y: 0, width: 402, height: SnapBrowseStripView.height))
+        strip.configure(thumbnails: [nil, nil, nil], videoPages: [1], pipeline: nil)
+        strip.show(selecting: 1, anchorX: 200)
+        let live = UIView()
+        strip.setLiveView(live, page: 1)
+        #expect(strip.debugLivePage == 1)
+        strip.select(2, anchorX: 260)
+        strip.setLiveView(nil, page: 2)
+        #expect(strip.debugLivePage == nil)
+        #expect(live.superview == nil, "the previous tile kept the live picture")
+    }
+
     /// The finger picks from equal slots across the run, not from the drawn
     /// segments, whose widths reflow as the page changes.
     @Test func theFingerPicksFromEqualSlots() {

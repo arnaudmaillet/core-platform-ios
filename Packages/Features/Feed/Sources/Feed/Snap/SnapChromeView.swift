@@ -1409,6 +1409,12 @@ final class SnapChromeView: UIView {
         browseStrip.configure(thumbnails: thumbnails, videoPages: videoPages, pipeline: pipeline)
     }
 
+    /// The clip the post is playing on `page`, mirrored into its preview while
+    /// browsing (nil: none) — the CELL owns playback and hands the surface.
+    func setBrowseLiveSurface(_ view: UIView?, page: Int) {
+        browseStrip.setLiveView(view, page: page)
+    }
+
     /// A finger started sliding through the pages: the page's talk fades as
     /// it does under a clip's scrub, and the previews come up over the strip.
     var onMediaBrowseBegan: (() -> Void)?

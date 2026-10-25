@@ -63,6 +63,8 @@ final class SnapBrowseStripView: UIView {
     func configure(thumbnails: [URL?], videoPages: Set<Int>, pipeline: ImagePipeline?) {
         loads.forEach { $0.cancel() }
         loads = []
+        liveView?.removeFromSuperview()
+        liveView = nil
         tiles.forEach { $0.removeFromSuperview() }
         tiles = thumbnails.indices.map { _ in
             let tile = UIImageView()
@@ -103,6 +105,31 @@ final class SnapBrowseStripView: UIView {
             })
         }
     }
+
+    /// The live picture in a tile: the clip the post is playing on `page`,
+    /// mirrored from the post's own player — the same frames, so the tile
+    /// and the post play in step (the owner, 2026-10-25). Only that tile
+    /// moves; nil takes it out.
+    func setLiveView(_ view: UIView?, page: Int) {
+        if liveView !== view || livePage != page {
+            liveView?.removeFromSuperview()
+            if videoMarks.indices.contains(livePage) { videoMarks[livePage].alpha = 1 }
+        }
+        liveView = view
+        livePage = page
+        guard let view, tiles.indices.contains(page) else { return }
+        let tile = tiles[page]
+        if view.superview !== tile {
+            view.frame = tile.bounds
+            view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            view.isUserInteractionEnabled = false
+            tile.insertSubview(view, belowSubview: videoMarks[page])
+        }
+        videoMarks[page].alpha = 0
+    }
+
+    private var liveView: UIView?
+    private var livePage = 0
 
     func show(selecting page: Int, anchorX: CGFloat) {
         selectedPage = page
@@ -212,6 +239,11 @@ final class SnapBrowseStripView: UIView {
         )
     }
     var debugTileCount: Int { tiles.count }
+    /// The page whose tile holds a live picture, nil when none does. Tests.
+    var debugLivePage: Int? {
+        guard let liveView, tiles.indices.contains(livePage), liveView.superview === tiles[livePage] else { return nil }
+        return livePage
+    }
     var debugIsShown: Bool { !isHidden && alpha > 0 }
     var debugCounterText: String? { counter.attributedText?.string }
     var debugCounterFrame: CGRect { counter.frame }
