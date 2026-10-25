@@ -996,8 +996,8 @@ final class PostDetailViewController: UIViewController {
     /// (`SnapActionColumn`).
     private var composerRestingGap: CGFloat { SnapActionColumn.inputRestingGap + composerLift }
 
-    /// (#1701, the For You root): the composer rises with the
-    /// page's action column, over the page strip's room — kept empty here.
+    /// Shots (#1701, #1716): the composer rises with the page's bottom block
+    /// — one breath over the tab bar — so the action column keeps its place.
     private var composerLift: CGFloat = 0
 
     func setComposerLift(_ lift: CGFloat) {

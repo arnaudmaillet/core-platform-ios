@@ -122,17 +122,11 @@ enum SnapActionColumn {
     /// line, so this is the glass drop short of the gap (and may be negative).
     static var inputRestingGap: CGFloat { glassGap - toolbarGlassDrop }
 
-    /// (#1701, the For You root): how far the column — and the
-    /// comments' composer, which rests on its lowest bubble's line — rises
-    /// to stand ABOVE the page strip, its lowest bubble level with the
-    /// caption's bottom (`stripSeat` over the margin line). The strip's room
-    /// is kept under the composer too, empty, and on a post with no strip.
-    static var stripRoomLift: CGFloat { stripSeat - inputRestingGap }
-
-    /// The caption's bottom over the margin line on the For You root: `lg`,
-    /// a step tighter over the strip than elsewhere's `xl` (the owner,
-    /// 2026-10-24: a little less room above the strip).
-    static let stripSeat: CGFloat = Spacing.lg
+    /// Shots' extra breath over the tab bar (#1716, the owner): its whole
+    /// bottom block — strip, cover, caption, column — stands this much
+    /// higher than another feed's, and the comments' composer rises by it
+    /// too, so the column keeps its place.
+    static let tabBarBreath: CGFloat = Spacing.md
 
     // MARK: - The like pill (#669)
 

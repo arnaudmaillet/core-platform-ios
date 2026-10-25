@@ -176,39 +176,40 @@ struct SnapForYouRootTests {
         #expect(chrome.debugTickerFrame.maxY <= chrome.debugStreamFrame.minY)
     }
 
-    // MARK: - The strip's room (#1701)
+    // MARK: - The bottom block (#1716)
 
-    /// On the root the page strip runs under the column, the column's lowest
-    /// bubble ends level with the caption's bottom, and a post with no strip
-    /// keeps its caption where a post with one has it.
-    @Test func theColumnStandsAboveAFullWidthStrip() {
-        func laidOut(pages: Int) -> SnapChromeView {
+    /// Shots wears every feed's bottom layout — the strip left of the sound
+    /// cover — one breath higher over the tab bar; with no strip, its caption
+    /// comes down to the cover's line.
+    @Test func shotsWearsTheFeedsLayoutOneBreathHigher() {
+        func laidOut(pages: Int, shots: Bool) -> SnapChromeView {
             let chrome = SnapActionColumnLayoutTests.chrome()
             chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
-            chrome.showsPostActions = true
-            chrome.reservesStripRoom = true
+            chrome.showsPostActions = shots
+            chrome.sitsOverTabBar = shots
             chrome.setMediaPageCount(pages, current: 0)
             chrome.setNeedsLayout()
             chrome.layoutIfNeeded()
             return chrome
         }
-        let strip = laidOut(pages: 9)
-        let bar = strip.debugPageBar.convert(strip.debugPageBar.bounds, to: strip)
-        let sound = strip.debugSoundBubble.convert(strip.debugSoundBubble.bounds, to: strip)
-        #expect(!strip.debugPageBar.isHidden)
-        #expect(abs(bar.maxX - sound.maxX) < 0.5, "the strip stops short of the column: \(bar) vs \(sound)")
-        #expect(abs(sound.maxY - strip.debugCaptionFrame.maxY) < 0.5, "the column is not level with the caption")
-        #expect(sound.maxY < bar.minY, "the column stands on the strip")
+        func frame(_ view: UIView, in chrome: SnapChromeView) -> CGRect { view.convert(view.bounds, to: chrome) }
+        let shots = laidOut(pages: 9, shots: true)
+        let plain = laidOut(pages: 9, shots: false)
+        let bar = frame(shots.debugPageBar, in: shots)
+        let sound = frame(shots.debugSoundBubble, in: shots)
+        #expect(abs(bar.maxX - shots.debugCaptionFrame.maxX) < 0.5, "the strip does not end with the caption")
+        #expect(bar.maxX < sound.minX, "the strip runs under the cover")
 
-        let lone = laidOut(pages: 1)
-        #expect(abs(lone.debugCaptionFrame.maxY - strip.debugCaptionFrame.maxY) < 0.5,
-                "a post with no strip lost the strip's room")
+        let breath = SnapActionColumn.tabBarBreath
+        let plainBar = frame(plain.debugPageBar, in: plain)
+        let plainSound = frame(plain.debugSoundBubble, in: plain)
+        #expect(abs(bar.minY - (plainBar.minY - breath)) < 0.5, "the strip is not one breath higher")
+        #expect(abs(sound.maxY - (plainSound.maxY - breath)) < 0.5, "the cover is not one breath higher")
+        #expect(abs(shots.debugCaptionFrame.maxY - (plain.debugCaptionFrame.maxY - breath)) < 0.5)
 
-        let plain = SnapActionColumnLayoutTests.chrome()
-        plain.setMediaPageCount(9, current: 0)
-        plain.setNeedsLayout()
-        plain.layoutIfNeeded()
-        #expect(abs(plain.debugPageBar.frame.maxX - plain.debugCaptionFrame.maxX) < 0.5, "the strip widened off the root")
+        let lone = laidOut(pages: 1, shots: true)
+        let loneSound = frame(lone.debugSoundBubble, in: lone)
+        #expect(abs(lone.debugCaptionFrame.maxY - loneSound.maxY) < 0.5, "with no strip the caption is not on the cover's line")
     }
 
     // MARK: - The column

@@ -640,9 +640,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.showsPostActions = shown
         chrome.postActions.setSaved(saved)
     }
-    /// The full-width strip, the column above it, its room kept (#1701, the
-    /// For You root's).
-    func setReservesStripRoom(_ reserves: Bool) { chrome.reservesStripRoom = reserves }
+    /// Shots' bottom layout: one breath higher, no strip room (#1716).
+    func setSitsOverTabBar(_ sits: Bool) { chrome.sitsOverTabBar = sits }
     /// The author INSIDE the page, without glass (#1699, the For You root's):
     /// shown with `model`'s author and the relation `badge`, or hidden.
     func setAuthorRow(shown: Bool, model: FeedItemDisplayModel, badge: PersonPill.Badge, pipeline: ImagePipeline) {
