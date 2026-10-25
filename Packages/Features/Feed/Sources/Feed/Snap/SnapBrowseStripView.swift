@@ -94,7 +94,9 @@ final class SnapBrowseStripView: UIView {
         guard let pipeline else { return }
         for (index, url) in thumbnails.enumerated() {
             guard let url else { continue }
-            if let image = pipeline.cachedImage(for: url, size: .px256) ?? pipeline.cachedImage(for: url) {
+            // The carousel's own full decode, when it is already cached: read,
+            // never decoded here (`UnsizedImageDecodesGuardTests`).
+            if let image = pipeline.cachedImage(for: url, size: .px256) ?? pipeline.cachedImage(for: url, size: .full) {
                 tiles[index].image = image
                 continue
             }
