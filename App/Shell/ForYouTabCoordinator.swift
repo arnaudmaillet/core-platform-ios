@@ -23,6 +23,20 @@ final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
     /// Whether For You has something new — its glyph's badge (#1191).
     private(set) var hasUnread = false
     var onUnreadChange: (() -> Void)?
+    /// The tab's wish for a dark bar changed (`wantsDarkTabBar`).
+    var onTabBarStyleChange: (() -> Void)?
+
+    /// EXPERIMENTAL (#1697, #1703): the tab bar goes dark over the For You
+    /// tab — unless the sector shows Home.
+    /// The notifications drawer slid the shell aside (true) or closed: the
+    /// feed pauses behind it (#1703).
+    func setSetAside(_ setAside: Bool) {
+        (navigationController.viewControllers.first as? any ForYouSectorPaging)?.setSetAside(setAside)
+    }
+
+    var wantsDarkTabBar: Bool {
+        (navigationController.viewControllers.first as? any ForYouSectorPaging)?.isShowingFeed ?? true
+    }
     var childCoordinators: [Coordinator] = []
     let navigationController: UINavigationController = ChevronBackNavigationController()
 
@@ -47,14 +61,29 @@ final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
     private var walletBadge: WalletBadgeInstaller?
 
     func start() {
-        // EXPERIMENTAL (#1681): the tab lands on the full-screen post feed —
-        // its own points badge, the shell's bell, no unread badge of its own.
+        // EXPERIMENTAL (#1681, #1703): the tab is a Home | Feed sector,
+        // landing on the full-screen post feed — the shell's bell leads both
+        // pages, Home wears the shell's points badge, Feed its own.
         if ForYouFullScreenExperiment.isOn {
-            let feed = container.feedFeature.makeForYouFullScreenFeedViewController()
-            navigationController.viewControllers = [feed]
-            walletBadge = nil
-            guard container.memberGate.isMember else { return }
-            (feed as? any HeaderAccessoryHosting)?.setLeadingAccessoryItem(notificationsBell.makeItem())
+            let sector = container.feedFeature.makeForYouSectorViewController { [weak self] presentation in
+                self?.apply(presentation)
+            }
+            navigationController.viewControllers = [sector]
+            // The tab bar is Feed's dark over Feed only (#1703): Home wears
+            // the app's.
+            (sector as? any ForYouSectorPaging)?.onPageChange = { [weak self] in self?.onTabBarStyleChange?() }
+            guard container.memberGate.isMember else {
+                walletBadge = nil
+                return
+            }
+            (sector as? any HeaderAccessoryHosting)?.setLeadingAccessoryItem(notificationsBell.makeItem())
+            walletBadge = WalletBadgeInstaller(
+                wallet: container.walletStore,
+                presenter: navigationController,
+                makeSheet: { [unowned container] in container.makeWalletSheet() }
+            ) { [weak sector] item in
+                (sector as? (any HeaderAccessoryHosting))?.setTrailingAccessoryItem(item)
+            }
             return
         }
         let forYou = container.feedFeature.makeForYouViewController { [weak self] presentation in

@@ -58,6 +58,14 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
     /// pill in the top bar, save and repost upright in the action column, no
     /// toolbar, the tab bar at the bottom.
     func makeForYouFullScreenFeedViewController() -> UIViewController
+    /// EXPERIMENTAL (#1703): the For You tab as a Home | Feed sector — Home
+    /// the discovery list (`makeForYouViewController`), Feed the full-screen
+    /// posts (`makeForYouFullScreenFeedViewController`) — switched by the
+    /// selector beside the bell or a swipe. Opens on Feed. It hosts the
+    /// shell's bell and points badge (`HeaderAccessoryHosting`).
+    func makeForYouSectorViewController(
+        onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
+    ) -> UIViewController
     /// ONE POST SCREEN (#1577, the owner 2026-10-22): the vertical full-screen
     /// feed on `postID`, its comments up when `opensComments` — what the
     /// `.post` and `.comments` routes push (a tapped push notification,
@@ -597,4 +605,17 @@ public enum SettledDeparture {
         guard let departure else { return false }
         return departure != arrival || (mediaPage ?? 0) > 0
     }
+}
+
+/// EXPERIMENTAL (#1703): the For You sector as the shell sees it — which page
+/// is in front, so the tab bar wears Feed's dark style over Feed only.
+@MainActor
+public protocol ForYouSectorPaging: AnyObject {
+    /// Whether Feed (the full-screen posts) is the page in front.
+    var isShowingFeed: Bool { get }
+    /// The page in front changed.
+    var onPageChange: (() -> Void)? { get set }
+    /// The shell slid the sector aside (the notifications drawer): its media
+    /// pauses until it comes back.
+    func setSetAside(_ setAside: Bool)
 }

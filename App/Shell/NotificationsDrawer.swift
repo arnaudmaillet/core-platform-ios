@@ -43,6 +43,10 @@ final class NotificationsDrawer {
         BottomEdgeBlurView.install(in: navigation)
         container = SideDrawerContainerViewController(main: tabBarController, drawer: navigation)
         container.dimmingAccessibilityLabel = "Close notifications"
+        // The screen it slides aside is still on screen but not watched: its
+        // media pauses (#1703, the owner: the feed played on behind it).
+        container.onDidOpen = { [weak self] in self?.onSetAsideChange?(true) }
+        container.onDidClose = { [weak self] in self?.onSetAsideChange?(false) }
         // A guest has no notifications: the edge swipe stays shut for them (the
         // bell asks them to sign up instead). The bell's own `open()` is left
         // ungated, so it opens the drawer once they have.
@@ -53,6 +57,10 @@ final class NotificationsDrawer {
     }
 
     var isOpen: Bool { container.isOpen }
+
+    /// The main screen was set aside (true: the drawer is opening or open) or
+    /// brought back (false: closed).
+    var onSetAsideChange: ((Bool) -> Void)?
 
     #if DEBUG
     /// How many foot blurs the drawer's stack carries — one (#1576). QA.
@@ -65,6 +73,8 @@ final class NotificationsDrawer {
     /// The bell's action.
     func open() {
         guard edgeBelongsToDrawer else { return }
+        // At the tap, not at the settle: the media stops as the drawer moves.
+        onSetAsideChange?(true)
         container.open(animated: true)
     }
 
