@@ -107,10 +107,9 @@ final class SnapMediaPageBarView: UIView {
 
     // MARK: The clip's bar and its cursor (#1544, the owner 2026-10-21)
 
-    /// A clip's bar at rest: thinner than the strip's footprint
+    /// The strip's drawn thickness at rest, a clip's bar and a carousel's
+    /// segments alike (#1712): thinner than the strip's footprint
     /// (`thickness`, which the layout keeps, so nothing around it moves).
-    /// A carousel's segments keep the full thickness; the bar thins as the
-    /// strip becomes one (`clipness`).
     static let clipTrackHeight: CGFloat = 3
     /// The bar while it is handled — a touch, a scrub: taller, so the thumb
     /// sees what it holds. It grows into the band around the strip, outside
@@ -516,11 +515,11 @@ final class SnapMediaPageBarView: UIView {
         // are drawn as, clip shape included.
         let clipness = clipPageProximity
         let clipWeights = clipness > 0 ? clipShapeWeights(available: runWidth) : nil
-        // The bar's thickness: the strip's own on a carousel, the clip's
-        // (thin at rest, taller when handled) as the strip becomes its bar.
-        let clipTrack = Self.clipTrackHeight
+        // ONE thickness, a carousel's segments and a clip's bar alike (#1712,
+        // the owner: the segments stood thicker than the progress bar) — thin
+        // at rest, taller when handled.
+        let trackHeight = Self.clipTrackHeight
             + (Self.handledTrackHeight - Self.clipTrackHeight) * handling.value
-        let trackHeight = bounds.height + (clipTrack - bounds.height) * clipness
         let shown = segments.indices.map { index -> CGFloat in
             guard let clipWeights else { return rooms[index] }
             // ⚠️ A DISTANCE, NOT A BOOLEAN — the same mistake this file made in

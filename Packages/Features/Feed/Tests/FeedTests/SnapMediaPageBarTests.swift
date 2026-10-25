@@ -503,11 +503,11 @@ struct SnapMediaPageBarTests {
         view.debugScrub(.ended, atX: 150)
     }
 
-    /// A carousel keeps its segments at the strip's own thickness, and draws
-    /// no cursor.
-    @Test func aCarouselKeepsItsThickness() {
+    /// A carousel's segments are as thin as a clip's bar (#1712, the owner:
+    /// they stood thicker than the progress bar), and it draws no cursor.
+    @Test func aCarouselIsAsThinAsTheBar() {
         let view = bar(pages: 4)
-        #expect(view.debugTrackHeight(1) == SnapMediaPageBarView.thickness)
+        #expect(view.debugTrackHeight(1) == SnapMediaPageBarView.clipTrackHeight)
         #expect(view.debugCursorSize == nil)
     }
 

@@ -5552,9 +5552,7 @@ final class SnapFeedViewController: UIViewController {
             deviceCornerRadius: ScreenGeometry.cornerRadius(behind: view),
             fallbackWidth: view.bounds.width,
             configuration: ShareSheetConfiguration(
-                extraActions: [ShareSheetAction(title: "Repost", symbol: PostActionSymbol.repost, dismissesSheet: false) {
-                    [weak self] in self?.repostRequested()
-                }],
+                extraActions: shareSheetActions(for: id),
                 interfaceStyle: model.mediaURL != nil ? .dark : .unspecified
             )
         )
@@ -5572,6 +5570,27 @@ final class SnapFeedViewController: UIViewController {
             ))
         }
         present(sheet, animated: true)
+    }
+
+    /// The post sheet's own chips, after Share and Copy Link: Repost (#1710),
+    /// then Not interested and Report (#1712) — the ⋯ menu's two, on the same
+    /// terms: neither on a post no one may read (#1409), Report only with
+    /// somewhere to file it. Both leave the sheet first, then act as the menu
+    /// does.
+    func shareSheetActions(for id: PostID) -> [ShareSheetAction] {
+        var actions = [ShareSheetAction(title: "Repost", symbol: PostActionSymbol.repost, dismissesSheet: false) {
+            [weak self] in self?.repostRequested()
+        }]
+        guard !unavailablePostIDs.contains(id) else { return actions }
+        actions.append(ShareSheetAction(title: "Not interested", symbol: "hand.thumbsdown") { [weak self] in
+            self?.markNotInterested(id)
+        })
+        if reporting != nil {
+            actions.append(ShareSheetAction(title: "Report", symbol: "flag") { [weak self] in
+                self?.presentReportReasons(for: id)
+            })
+        }
+        return actions
     }
 
     /// Repost, from the share sheet (#1710). ⚠️ No client path publishes a
