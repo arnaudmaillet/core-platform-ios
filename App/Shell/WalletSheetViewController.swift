@@ -195,8 +195,9 @@ final class WalletSheetViewController: UIViewController {
                 sheet.backgroundEffect = UIColorEffect(color: Surface.page)
             }
             // Collapsed first (#1494, the owner 2026-10-21): the daily glance.
-            // Pulled up, it expands — and from there a drag down closes it,
-            // never back to collapsed (`expand`).
+            // Pulled up, it expands — and from there a drag down stops at the
+            // collapsed height before closing (#1732, the owner 2026-10-25:
+            // the halfway detent is back).
             sheet.detents = [small, large]
             sheet.selectedDetentIdentifier = Self.smallDetent
             #if DEBUG
@@ -224,13 +225,12 @@ final class WalletSheetViewController: UIViewController {
         return large
     }()
 
-    /// Expanded, the sheet keeps the large detent alone (#1494, the owner
-    /// 2026-10-21): a drag down then closes it outright rather than stopping
-    /// at the collapsed height on its way out.
+    /// Grows the sheet to its large height, KEEPING the collapsed detent
+    /// (#1732, the owner): a drag down from expanded stops there first. It
+    /// used to drop it (#1494), so a drag down closed the sheet outright.
     private func expand(_ sheet: UISheetPresentationController) {
-        guard sheet.detents.count > 1 else { return }
+        guard sheet.selectedDetentIdentifier != .large else { return }
         sheet.animateChanges {
-            sheet.detents = [largeDetent]
             sheet.selectedDetentIdentifier = .large
         }
     }
@@ -933,12 +933,8 @@ extension WalletSheetViewController: UICollectionViewDelegate {
 }
 
 extension WalletSheetViewController: UISheetPresentationControllerDelegate {
-    /// Pulled up (or scrolled) to large: large alone from then on — the next
-    /// drag down closes the sheet.
-    func sheetPresentationControllerDidChangeSelectedDetentIdentifier(_ sheet: UISheetPresentationController) {
-        guard sheet.selectedDetentIdentifier == .large else { return }
-        expand(sheet)
-    }
+    // Pulled up (or scrolled) to large, the sheet keeps both detents (#1732):
+    // nothing to do on a detent change any more.
 }
 
 /// Holds notification tokens and unregisters them on its own deallocation

@@ -115,7 +115,7 @@ final class WalletSheetUITests: XCTestCase {
     /// screens in the sheet — the filter in the bar — and back returns to
     /// Rewards; pulled up, a drag down then closes it outright, never back
     /// to collapsed (the owner, 2026-10-21).
-    func testTheDoorsPushAndASwipeFromLargeCloses() {
+    func testTheDoorsPushAndASwipeFromLargeCollapsesThenCloses() {
         let app = launch()
 
         let close = app.buttons["wallet.close"]
@@ -144,13 +144,21 @@ final class WalletSheetUITests: XCTestCase {
         let large = NSPredicate { _, _ in close.frame.minY < smallTop - Self.heightStep }
         wait(for: [expectation(for: large, evaluatedWith: nil)], timeout: 8)
 
-        // …a swipe down closes it outright: with large its only height, the
-        // sheet has nowhere to stop on the way.
+        // …a drag down stops at the collapsed height first (#1732: the
+        // halfway detent is back)…
+        rewards.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
+            forDuration: 0.05, thenDragTo: rewards.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 3)),
+            withVelocity: .slow, thenHoldForDuration: 0
+        )
+        let collapsed = NSPredicate { _, _ in abs(close.frame.minY - smallTop) < 2 }
+        wait(for: [expectation(for: collapsed, evaluatedWith: nil)], timeout: 8)
+
+        // …and the next one closes it.
         rewards.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
             forDuration: 0.05, thenDragTo: rewards.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 6)),
             withVelocity: .fast, thenHoldForDuration: 0
         )
-        XCTAssertTrue(close.waitForNonExistence(timeout: 8), "a drag down from large did not close Rewards")
+        XCTAssertTrue(close.waitForNonExistence(timeout: 8), "a drag down from collapsed did not close Rewards")
         app.terminate()
     }
 }
