@@ -176,6 +176,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         pendingCategory = nil
         pagerView = HorizontalPagerView(lazyPages: surfaces.map { surface in { surface.view } }, initialIndex: startIndex)
         pagerView.pin(to: view)
+        // The notifications drawer is "page −1": pulled past Chats with the
+        // tabs' own gesture, from the very edge (a root has no back swipe) (#1739).
+        pagerView.leadingPullTarget = DrawerPull.shared
+        pagerView.reservesLeadingEdge = false
         // ⚠️ AFTER the pager, every time. `configureSearch` runs first and adds the
         // search host, so the pager lands on top of it — the bar was mounted,
         // inset for, and completely invisible behind an opaque page.

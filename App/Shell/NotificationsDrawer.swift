@@ -12,9 +12,15 @@ import UIKit
 /// an iPhone). This object is the shell's half: what goes in the drawer, WHEN
 /// the edge may open it.
 ///
-/// ## Where the left edge belongs to the drawer
+/// ## How a finger opens it
 ///
-/// Only on a tab ROOT — Explore, For You, Messages, Profile — at rest:
+/// ⚠️ AS "PAGE −1" OF THE TAB ROOTS' PAGERS (#1739, the owner 2026-10-25), not
+/// by an edge swipe: For You, Messages and Profile page between tabs, and
+/// pulling past the FIRST tab opens the drawer with that same gesture
+/// (`DrawerPull`, `LeadingPullTarget`) — the tabs' own pan, with their
+/// priority over the content. Explore (the map) opens it from the bell only.
+///
+/// And only on a tab ROOT at rest:
 /// - on a pushed screen the edge is the stack's own back swipe (see
 ///   `NativePopGestureEnabler`), and the drawer must not compete with it;
 /// - with anything presented over the shell (a sheet, the composer, a
@@ -43,6 +49,8 @@ final class NotificationsDrawer {
         BottomEdgeBlurView.install(in: navigation)
         container = SideDrawerContainerViewController(main: tabBarController, drawer: navigation)
         container.dimmingAccessibilityLabel = "Close notifications"
+        container.openRegion = .hostDriven
+        DrawerPull.shared.drawer = container
         // The screen it slides aside is still on screen but not watched: its
         // media pauses (#1703, the owner: the feed played on behind it).
         container.onDidOpen = { [weak self] in self?.onSetAsideChange?(true) }

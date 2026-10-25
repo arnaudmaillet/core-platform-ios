@@ -55,7 +55,9 @@ import UIKit
 ///   under the finger WAIT for it to fail, so a horizontal scroller at the
 ///   edge (a pager, the map) never steals an edge swipe — and, because it
 ///   only receives touches that land in the edge band, never delays a drag
-///   that starts anywhere else.
+///   that starts anywhere else. With `openRegion = .hostDriven` (#1739) it
+///   takes no touch at all: the host's own drag drives the drawer instead,
+///   through `LeadingPullTarget` (a tab pager pulled past its first tab).
 /// - `closePan` — once open, a horizontal drag anywhere (sliver or drawer)
 ///   moves the main screen back with the finger.
 /// - `dimTap` — a tap on the sliver closes.
@@ -92,6 +94,19 @@ public final class SideDrawerContainerViewController: UIViewController {
     /// Whether a left-edge swipe may open the drawer RIGHT NOW. Asked on every
     /// touch that lands in the edge band, so keep it cheap.
     public var canOpenInteractively: () -> Bool = { true }
+
+    /// Where an interactive open comes from.
+    public enum OpenRegion: Equatable, Sendable {
+        /// The drawer's own pan, from the left edge band.
+        case leadingEdge
+        /// The host's drag only, through `LeadingPullTarget` — the drawer as
+        /// "page −1" before a tab pager's first page (#1739, the owner
+        /// 2026-10-25: reached by the tabs' own gesture, with their priority
+        /// over the content). The edge pan takes no touch.
+        case hostDriven
+    }
+
+    public var openRegion: OpenRegion = .leadingEdge
     /// The drawer settled open.
     public var onDidOpen: (() -> Void)?
     /// The drawer settled closed.
@@ -678,6 +693,33 @@ public final class SideDrawerContainerViewController: UIViewController {
     #endif
 }
 
+// MARK: - Host-driven open (#1739)
+
+extension SideDrawerContainerViewController: LeadingPullTarget {
+    /// A tab pager pulled past its first page: the drawer follows the finger
+    /// as the page before it — gated as the edge swipe is (`canOpenInteractively`).
+    public func beginLeadingPull() -> Bool {
+        guard edgeOpenIsAllowed else { return false }
+        beginTracking()
+        return true
+    }
+
+    public func updateLeadingPull(_ distance: CGFloat) {
+        guard phase == .tracking else { return }
+        updateTracking(translation: distance)
+    }
+
+    public func endLeadingPull(velocity: CGFloat) {
+        guard phase == .tracking else { return }
+        endTracking(velocity: velocity)
+    }
+
+    public func cancelLeadingPull() {
+        guard phase == .tracking else { return }
+        cancelTracking()
+    }
+}
+
 // MARK: - Gesture arbitration
 
 extension SideDrawerContainerViewController: UIGestureRecognizerDelegate {
@@ -686,7 +728,7 @@ extension SideDrawerContainerViewController: UIGestureRecognizerDelegate {
             // Only touches that land in the edge band — anywhere else this
             // recogniser takes no part, and nothing waits on it.
             let x = touch.location(in: view).x
-            guard x <= Self.edgeTouchBand else { return false }
+            guard openRegion == .leadingEdge, x <= Self.edgeTouchBand else { return false }
             let allowed = edgeOpenIsAllowed
             Self.trace("edge receive x=\(Int(x)) allowed=\(allowed)")
             return allowed

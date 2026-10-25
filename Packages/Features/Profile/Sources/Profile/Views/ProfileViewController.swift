@@ -527,6 +527,12 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // The profile TAB's root: the notifications drawer is "page −1", pulled
+        // past the first tab with the tabs' own gesture, from the very edge
+        // (#1739). A pushed profile keeps its first-tab dismissal and its back swipe.
+        let isTabRoot = navigationController?.viewControllers.first === self
+        galleryPager.leadingPullTarget = isTabRoot ? DrawerPull.shared : nil
+        galleryPager.reservesLeadingEdge = !isTabRoot
         Task { [weak self] in await self?.viewModel.refreshShareToken() }
         // ⚠️ **AS EARLY AS THE TRANSITION ALLOWS, AND `viewDidAppear` IS NOT
         // EARLY.** Measured on a tab switch, headless: `viewWillAppear` at

@@ -110,6 +110,10 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
         }
         let pager = HorizontalPagerView(pages: pages.map(\.view), initialIndex: activeIndex)
         pager.yieldsPastEnds = true
+        // The notifications drawer is "page −1": pulled past Feed with the
+        // pages' own gesture, from the very edge (a root has no back swipe) (#1739).
+        pager.leadingPullTarget = DrawerPull.shared
+        pager.reservesLeadingEdge = false
         pager.yieldsDrag = { [weak self] velocity in
             guard let self else { return false }
             return self.pages[self.activeIndex].sectorPageOwnsHorizontalDrag(velocity: velocity)

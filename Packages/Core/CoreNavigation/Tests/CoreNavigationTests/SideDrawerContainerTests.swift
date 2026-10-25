@@ -293,6 +293,44 @@ struct SideDrawerContainerTests {
         }
     }
 
+    /// #1739: the drawer as "page −1" of a tab pager — the pager's own pan
+    /// drives it through `LeadingPullTarget`, gated as the edge swipe is.
+    @Test func aPagerPulledPastItsFirstPageDrivesTheDrawer() {
+        hosting { container, _, _ in
+            container.openRegion = .hostDriven
+            var allowed = false
+            container.canOpenInteractively = { allowed }
+            #expect(!container.beginLeadingPull(), "a pull was let through a closed gate")
+            #expect(container.phase == .closed)
+
+            allowed = true
+            #expect(container.beginLeadingPull())
+            #expect(container.phase == .tracking)
+            container.updateLeadingPull(container.drawerWidth * 0.5)
+            #expect(abs(container.progress - 0.5) < 0.01, "the drawer did not follow the finger")
+            container.endLeadingPull(velocity: 900)
+            #expect(container.isOpen)
+
+            container.close(animated: false)
+            #expect(container.beginLeadingPull())
+            container.updateLeadingPull(40)
+            container.cancelLeadingPull()
+            #expect(!container.isOpen)
+        }
+    }
+
+    /// The relay hands the pulls to the registered drawer, and refuses them
+    /// with none.
+    @Test func theRelayRefusesWithNoDrawer() {
+        let relay = DrawerPull()
+        #expect(!relay.beginLeadingPull())
+        hosting { container, _, _ in
+            relay.drawer = container
+            #expect(relay.beginLeadingPull())
+            relay.cancelLeadingPull()
+        }
+    }
+
     @Test func openIsIdempotentAndTheStatusBarFollowsTheDrawer() {
         hosting { container, main, drawer in
             #expect(container.childForStatusBarStyle === main)
