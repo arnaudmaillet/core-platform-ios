@@ -1323,16 +1323,16 @@ struct SnapMediaPageBarTests {
         #expect(view.debugScrubPreview.alpha == 1)
     }
 
-    /// With no strip, the caption takes its place (the owner, 2026-10-16):
-    /// down by exactly the strip's footprint — and nothing on the trailing
-    /// column moves.
+    /// With no strip, the caption comes down (the owner, 2026-10-16, then
+    /// #1726): from xl over the bar to the sound cover's line — and nothing
+    /// on the trailing column moves.
     @Test func noStripLetsTheCaptionTakeItsPlace() {
         let withStrip = chrome(pages: 4)
         let without = chrome(pages: 0)
 
         #expect(without.debugPageBar.isHidden)
         let drop = without.debugCaptionFrame.maxY - withStrip.debugCaptionFrame.maxY
-        #expect(abs(drop - (SnapMediaPageBarView.thickness + SnapChromeView.pageBarToolbarGap)) < 0.5)
+        #expect(abs(drop - (Spacing.xl - SnapActionColumn.inputRestingGap)) < 0.5, "the caption dropped \(drop)")
         #expect(without.debugBoostButton.frame == withStrip.debugBoostButton.frame)
     }
 }

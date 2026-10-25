@@ -217,26 +217,16 @@ struct SnapForYouRootTests {
         #expect(abs(lone.debugCaptionFrame.maxY - loneSound.maxY) < 0.5, "with no strip the caption is not on the cover's line")
     }
 
-    /// TRIAL (#1718): with the flag, any feed's no-strip caption sits on the
-    /// cover's line; without it, a feed other than Shots keeps it in the
-    /// strip's place.
-    @Test func theTrialFlagPutsEveryFeedsCaptionOnTheCoversLine() {
-        func lone(flag: Bool) -> SnapChromeView {
-            let chrome = SnapActionColumnLayoutTests.chrome()
-            chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
-            chrome.alignsCaptionWithCover = flag
-            chrome.setMediaPageCount(1, current: 0)
-            chrome.setNeedsLayout()
-            chrome.layoutIfNeeded()
-            return chrome
-        }
-        let flagged = lone(flag: true)
-        let cover = flagged.debugSoundBubble.convert(flagged.debugSoundBubble.bounds, to: flagged)
-        #expect(abs(flagged.debugCaptionFrame.maxY - cover.maxY) < 0.5, "the flag left the caption off the cover's line")
-
-        let plain = lone(flag: false)
-        let plainCover = plain.debugSoundBubble.convert(plain.debugSoundBubble.bounds, to: plain)
-        #expect(plain.debugCaptionFrame.maxY < plainCover.maxY - 0.5, "without the flag the caption moved")
+    /// Every feed's no-strip caption sits on the cover's line (#1726: the
+    /// #1718 trial, made the default).
+    @Test func everyFeedsCaptionSitsOnTheCoversLineWithNoStrip() {
+        let chrome = SnapActionColumnLayoutTests.chrome()
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        chrome.setMediaPageCount(1, current: 0)
+        chrome.setNeedsLayout()
+        chrome.layoutIfNeeded()
+        let cover = chrome.debugSoundBubble.convert(chrome.debugSoundBubble.bounds, to: chrome)
+        #expect(abs(chrome.debugCaptionFrame.maxY - cover.maxY) < 0.5, "the caption is off the cover's line")
     }
 
     // MARK: - The column

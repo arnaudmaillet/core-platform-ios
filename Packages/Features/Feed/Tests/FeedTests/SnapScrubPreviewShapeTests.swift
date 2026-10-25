@@ -36,17 +36,15 @@ struct SnapScrubPreviewShapeTests {
 
     /// ⚠️ The caption's seat is applied at `configure`: a replica that never
     /// receives a page count (a single picture's flight) stands where the page
-    /// will — flag on, the caption on the cover's line.
+    /// will — the caption on the cover's line.
     @Test func aReplicaTakesTheCaptionSeatAtConfigure() {
         let replica = SnapChromeView(frame: SnapActionColumnLayoutTests.screen)
         replica.setFixedInsets(SnapActionColumnLayoutTests.insets)
-        replica.alignsCaptionWithCover = true
         replica.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
         replica.configure(with: SnapActionColumnLayoutTests.mediaModel(mediaURL: URL(string: "mock://media/1")))
         replica.layoutIfNeeded()
 
         let page = SnapActionColumnLayoutTests.chrome()
-        page.alignsCaptionWithCover = true
         page.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
         page.setMediaPageCount(1, current: 0)
         page.layoutIfNeeded()
