@@ -140,6 +140,22 @@ struct SnapSideListTests {
         )
     }
 
+    /// A post of three pictures — a carousel.
+    private static func carouselEntry(_ id: String) -> FeedEntry {
+        FeedEntry(
+            post: Post(
+                id: PostID(id), authorID: ProfileID("author-\(id)"), caption: "caption \(id)",
+                attachments: (0..<3).map { page in MediaAttachment(
+                    url: URL(string: "https://cdn.example/\(id)-\(page).jpg"), thumbnailURL: nil,
+                    mimeType: "image/jpeg", pixelWidth: 1080, pixelHeight: 1350
+                ) },
+                publishedAt: Date(timeIntervalSince1970: 1_760_000_000)
+            ),
+            author: AuthorSummary(id: ProfileID("author-\(id)"), handle: "h-\(id)", displayName: "Name \(id)", avatarURL: nil),
+            likeCount: 0
+        )
+    }
+
     private static func entry(_ id: String, media: Bool = true) -> FeedEntry {
         FeedEntry(
             post: Post(
@@ -399,13 +415,16 @@ struct SnapSideListTests {
 
     /// A feed of `ids`, the side list installed, its "similar posts" `others`.
     private func openableFeed(
-        _ ids: [String], others: [String], text: Set<String> = [], router: (any Router)? = nil
+        _ ids: [String], others: [String], text: Set<String> = [], carousels: Set<String> = [],
+        router: (any Router)? = nil
     ) async throws -> SnapFeedViewController {
         let controller = SnapFeedViewController(
             // Its first page IS the feed: a seed alone is replaced by the
             // first page when it lands.
             viewModel: FeedViewModel(
-                repository: PostsProvider(entries: ids.map { Self.entry($0, media: !text.contains($0)) }), router: router
+                repository: PostsProvider(entries: ids.map {
+                    carousels.contains($0) ? Self.carouselEntry($0) : Self.entry($0, media: !text.contains($0))
+                }), router: router
             ),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             reporting: SideListReporter()
@@ -425,9 +444,10 @@ struct SnapSideListTests {
     }
 
     func openableFeedForChain(
-        _ ids: [String], others: [String] = [], text: Set<String> = [], router: (any Router)?
+        _ ids: [String], others: [String] = [], text: Set<String> = [], carousels: Set<String> = [],
+        router: (any Router)?
     ) async throws -> SnapFeedViewController {
-        let feed = try await openableFeed(ids, others: others, text: text, router: router)
+        let feed = try await openableFeed(ids, others: others, text: text, carousels: carousels, router: router)
         // The chain reads the post on show: settled under a loaded suite too.
         try #require(await settle { feed.activePostID == PostID(ids[0]) && !feed.collectionView.isDecelerating },
                      "guard: the first post on show")
@@ -823,6 +843,25 @@ struct SnapSwipeChainTests {
         #expect(!sideList.isOpen)
         #expect(feed.activePostID == shown, "the post on show did not stay")
         #expect(feed.orderedIDs == [PostID("p1"), shown, PostID("p2")])
+    }
+
+    /// ⚠️ A CAROUSEL'S EDGE OPENS THE LIST (#1720, the owner): from the
+    /// trailing strip or the action column, a carousel opens the similar
+    /// posts — any other post still pushes the author (the test below).
+    @Test func aCarouselsEdgeAndColumnOpenTheList() async throws {
+        let feed = try await tests.openableFeedForChain(["c1", "p2"], carousels: ["c1"], router: ProfileRouter())
+        let edge = CGPoint(x: feed.view.bounds.maxX - 6, y: feed.view.bounds.midY)
+        #expect(feed.isInTrailingEdge(edge))
+        #expect(Self.isPanel(Self.stage(feed, for: .leftward, at: edge)), "a carousel's edge pushed the author")
+        let chrome = try #require(
+            feed.collectionView.visibleCells
+                .compactMap { $0.contentView.subviews.compactMap { $0 as? SnapChromeView }.first }.first,
+            "guard: a page's chrome"
+        )
+        let boost = chrome.debugBoostButton
+        let column = boost.convert(CGPoint(x: boost.bounds.minX + 3, y: boost.bounds.midY), to: feed.view)
+        #expect(feed.isOnTrailingColumn(column))
+        #expect(Self.isPanel(Self.stage(feed, for: .leftward, at: column)), "a carousel's column pushed the author")
     }
 
     /// ⚠️ FROM THE RIGHT EDGE, THE PROFILE AT ONCE (#1592, the owner): a

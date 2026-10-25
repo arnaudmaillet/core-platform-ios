@@ -49,8 +49,9 @@ struct SnapTapArbitrationTests {
         // no surface is showing.
         // …and the author row (#1699, the For You root's): a tap on the
         // author opens their card, never toggles playback.
+        // …and the caption (#1720): a tap on it opens the comments.
         let chrome = SnapChromeView()
-        #expect(chrome.interactionRoots.count == 7)
+        #expect(chrome.interactionRoots.count == 8)
         #expect(chrome.interactionRoots.contains(where: { $0 === chrome.authorRow }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapShortcutRailView }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapRailBoostButton }))
@@ -58,6 +59,16 @@ struct SnapTapArbitrationTests {
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapCommentEmptyStateView }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapSubtitleView }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapCommentTickerView }))
+    }
+
+    /// A tap on the caption opens the comments (#1720, the owner).
+    @Test func aTapOnTheCaptionOpensTheComments() {
+        let chrome = SnapChromeView()
+        var opened = false
+        chrome.onCommentsTapped = { opened = true }
+        chrome.debugTapCaption()
+        #expect(opened, "the caption opened nothing")
+        #expect(chrome.interactionRoots.contains { $0 is UILabel }, "a tap on the caption would toggle playback")
     }
 
     @Test func touchesInsideCommentSurfacesAreInteractive() {
