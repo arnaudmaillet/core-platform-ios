@@ -12,8 +12,6 @@ import UIKit
 final class AppPreferencesViewController: UIViewController {
     enum Section: Int, CaseIterable {
         case playback, players, sounds, appearance, care, motion, emojis, band, subtitles, commentsScreen, muted, language
-        /// DEBUG builds only (`sections(for:)`): switches for experiments.
-        case experiments
     }
 
     private enum Item: Hashable {
@@ -28,19 +26,13 @@ final class AppPreferencesViewController: UIViewController {
         case subtitlesSwitch, subtitleBackground
         case commentsBackdrop
         case appLanguage
-        case forYouFullScreen
     }
 
     /// The sections each App and Device page shows.
     static func sections(for page: SettingsSection) -> [Section] {
         switch page {
         case .playback: [.playback, .players, .sounds]
-        case .display:
-            #if DEBUG
-            [.appearance, .care, .motion, .experiments]
-            #else
-            [.appearance, .care, .motion]
-            #endif
+        case .display: [.appearance, .care, .motion]
         case .emojis: [.emojis]
         case .mediaComments: [.band, .subtitles, .commentsScreen, .muted]
         case .language: [.language]
@@ -133,7 +125,6 @@ final class AppPreferencesViewController: UIViewController {
         case .muted: "Muted on Media"
         case .subtitles: "Subtitles"
         case .commentsScreen: "Comments Screen"
-        case .experiments: "Experiments"
         }
     }
 
@@ -163,7 +154,6 @@ final class AppPreferencesViewController: UIViewController {
         case .muted: "Comments with these words, or from these accounts, never appear in the reaction band or the subtitles. They still show in the comments."
         case .subtitles: "Comments shown as captions above the reaction band. Background is the shade behind each caption."
         case .commentsScreen: "How dark a video or photo gets behind its comments when you open them. Darker reads more easily; lighter keeps more of the post."
-        case .experiments: "Debug builds only. For You opens on full-screen posts, with the tab bar at the bottom. Applies from the next launch."
         }
     }
 
@@ -275,7 +265,6 @@ final class AppPreferencesViewController: UIViewController {
         case .subtitles: [.subtitlesSwitch, .subtitleBackground]
         case .commentsScreen: [.commentsBackdrop]
         case .language: [.appLanguage]
-        case .experiments: [.forYouFullScreen]
         }
     }
 
@@ -330,11 +319,6 @@ final class AppPreferencesViewController: UIViewController {
                 isOn: EmoteAnimationPreference.animatesEmotes, isEnabled: !isPowerSaving
             ) { isOn in
                 EmoteAnimationPreference.isOn = isOn
-            }]
-        case .forYouFullScreen:
-            cell.contentConfiguration = Self.label("Full-Screen For You", symbol: "rectangle.portrait")
-            cell.accessories = [switchAccessory(isOn: ForYouFullScreenExperiment.storedSwitch) { isOn in
-                ForYouFullScreenExperiment.storedSwitch = isOn
             }]
         case .appLanguage:
             var content = Self.label("App Language", symbol: "globe")

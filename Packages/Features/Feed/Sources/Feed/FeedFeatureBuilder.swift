@@ -194,7 +194,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         )
     }
 
-    /// EXPERIMENTAL (#1681): the timeline feed's construction over the
+    /// (#1681): the timeline feed's construction over the
     /// Discover list (For You's "For you", every author, ranked and paged),
     /// laid out as the For You root (`SnapFeedViewController.isForYouRoot`).
     public func makeForYouFullScreenFeedViewController() -> UIViewController {
@@ -335,7 +335,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
               let feed = makeForYouFullScreenFeedViewController() as? any ForYouSectorPage else {
             return makeForYouFullScreenFeedViewController()
         }
-        return ForYouSectorViewController(home: home, feed: feed)
+        return ForYouSectorViewController(feed: home, shots: feed)
     }
 
     public func makeForYouViewController(

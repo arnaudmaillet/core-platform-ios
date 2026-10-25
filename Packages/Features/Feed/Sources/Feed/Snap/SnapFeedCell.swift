@@ -634,7 +634,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The sound bubble was held: the screen opens the sound sheet (#671).
     var onRequestSoundSheet: (() -> Void)?
 
-    /// EXPERIMENTAL (#1681, the For You root): save and repost upright in
+    /// (#1681, the For You root): save and repost upright in
     /// the column (`SnapPostActionsCapsule`), the star drawn for `saved`.
     func setPostActions(shown: Bool, saved: Bool) {
         chrome.showsPostActions = shown

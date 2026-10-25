@@ -319,7 +319,7 @@ final class SnapFeedViewController: UIViewController {
     /// is exactly the bug this would otherwise become.
     public var zoomOwnsInteractiveDismissal = true
 
-    /// EXPERIMENTAL (#1681, `ForYouFullScreenExperiment`): this feed IS the
+    /// (#1681): this feed IS the
     /// For You tab's root. The author pill leads the TOP bar's trailing run
     /// (beside the points), the shell's bell leads its other end, there is no
     /// toolbar — save and repost stand upright in the action column, the ⋯
@@ -332,11 +332,11 @@ final class SnapFeedViewController: UIViewController {
     /// arrow or ✕ holds the edge (`HeaderAccessoryHosting`).
     private var leadingAccessoryItem: UIBarButtonItem?
 
-    /// EXPERIMENTAL (#1703): the For You sector's item while this feed is
+    /// (#1703): the For You sector's item while this feed is
     /// its page in front (`ForYouSectorPage`) — what `navigationItem`
     /// answers then, so every write below lands in the bar on screen.
     var sectorNavigationItem: UINavigationItem?
-    /// The sector's Home | Feed selector, just inboard of the bell.
+    /// The sector's Feed | Shots selector, just inboard of the bell.
     var sectorSelectorItem: UIBarButtonItem? {
         didSet {
             guard isViewLoaded else { return }
@@ -1469,7 +1469,7 @@ final class SnapFeedViewController: UIViewController {
         if isMovingFromParent || isBeingDismissed || navigationController == nil {
             closeSideListForDismissal()
         }
-        // …and the For You root's, left for Home or another tab (#1703, the
+        // …and the For You root's, left for Feed or another tab (#1703, the
         // owner) — not for a screen pushed over it (the swipe chain's
         // profile), which comes back to the list it left.
         else if isForYouRoot, let nav = navigationController,
@@ -1794,8 +1794,7 @@ final class SnapFeedViewController: UIViewController {
         applyForYouRootTabBar()
     }
 
-    /// The For You root's tab bar (#1681): it holds the bottom. EXPERIMENTAL
-    /// (#1699, the owner 2026-10-24): it STAYS while a media post's comments
+    /// The For You root's tab bar (#1681): it holds the bottom (#1699, the owner 2026-10-24): it STAYS while a media post's comments
     /// are open — their composer rests above it — so this only brings it back
     /// where something hid it, through UIKit's own animation
     /// (`TabBarRevealPolicy`). A placeholder toolbar in its place was tried
@@ -8026,7 +8025,7 @@ extension SnapFeedViewController: SwipeStageHosting {}
 
 extension SnapFeedViewController: ForYouSectorPage {
     /// In front, the feed lends its bars their style again; behind, it hands
-    /// them back to Home.
+    /// them back to Feed.
     func sectorPageDidChangeActivity(_ isActive: Bool) {
         guard isActive else { return releaseChromeTheme() }
         hasHandedChromeBack = false
@@ -8037,7 +8036,7 @@ extension SnapFeedViewController: ForYouSectorPage {
     func sectorSafeAreaDidChange(_ insets: UIEdgeInsets) {}
 
     /// The side list, open or on its way, is closed by the swipe — not left
-    /// for Home.
+    /// for Feed.
     func sectorPageOwnsHorizontalDrag(velocity: CGPoint) -> Bool {
         guard let sideList else { return false }
         return sideList.isOpen || sideList.isEngaged

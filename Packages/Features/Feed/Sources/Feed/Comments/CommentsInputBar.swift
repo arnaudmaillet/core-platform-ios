@@ -170,7 +170,7 @@ final class CommentsInputBar: UIView {
         railRecord.setSpinning(false)
     }
 
-    /// EXPERIMENTAL (#1681, the For You root): save and repost upright
+    /// (#1681, the For You root): save and repost upright
     /// between the stake and the slot — drawn here on a text page, whose
     /// column is the composer's; only its room reserved under a media page's
     /// column, which draws its own (`SnapChromeView.showsPostActions`).

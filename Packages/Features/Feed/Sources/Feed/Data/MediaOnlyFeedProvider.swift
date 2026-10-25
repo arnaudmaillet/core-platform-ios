@@ -1,7 +1,7 @@
 import CoreModels
 import Foundation
 
-/// EXPERIMENTAL (#1699, the owner 2026-10-24): the For You root lists MEDIA
+/// (#1699, the owner 2026-10-24): the For You root lists MEDIA
 /// posts only — a text-only post is filtered out of every page its source
 /// serves.
 ///

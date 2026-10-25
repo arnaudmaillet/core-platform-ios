@@ -210,7 +210,7 @@ struct SnapBarPillWidthsTests {
         #expect(cap >= 80, "\(width)pt: a pill of \(cap) shows no name at all")
     }
 
-    /// EXPERIMENTAL (#1681): the For You root's TOP bar on every phone —
+    /// (#1681): the For You root's TOP bar on every phone —
     /// [bell][sort] … [pill][points], the busiest it gets (a text page's
     /// thread, a long name) — hosts every item: nothing folds into "•••".
     @Test(arguments: phoneWidths)

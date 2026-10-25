@@ -996,7 +996,7 @@ final class PostDetailViewController: UIViewController {
     /// (`SnapActionColumn`).
     private var composerRestingGap: CGFloat { SnapActionColumn.inputRestingGap + composerLift }
 
-    /// EXPERIMENTAL (#1701, the For You root): the composer rises with the
+    /// (#1701, the For You root): the composer rises with the
     /// page's action column, over the page strip's room — kept empty here.
     private var composerLift: CGFloat = 0
 
@@ -1346,7 +1346,7 @@ final class PostDetailViewController: UIViewController {
     /// post actions outside the panel: the snap page (#1409).
     var onPostUnavailable: ((PostID) -> Void)?
 
-    /// EXPERIMENTAL (#1681, the For You root): save and repost upright in
+    /// (#1681, the For You root): save and repost upright in
     /// the composer's column — drawn on a text page, reserved under a media
     /// page's (which draws its own) — the star for `saved`.
     func setPostActions(shown: Bool, saved: Bool, onSave: (() -> Void)?) {

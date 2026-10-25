@@ -5,7 +5,7 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// EXPERIMENTAL (#1681, `ForYouFullScreenExperiment`): the full-screen post
+/// (#1681): the full-screen post
 /// feed as the For You tab's root — the author pill in the top bar, the
 /// shell's bell leading, no toolbar, save and repost upright in the action
 /// column. Off, the feed is exactly what it was (the other suites).

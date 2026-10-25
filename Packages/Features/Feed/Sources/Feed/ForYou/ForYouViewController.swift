@@ -293,7 +293,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     /// The bell alone, in its own bubble (it opts out of the shared
     /// background; see `NotificationsBell`) — and, as the For You sector's
-    /// Home page (#1703), the sector's selector just inboard of it.
+    /// Feed page (#1703), the sector's selector just inboard of it.
     private func applyLeadingItems() {
         var items = [leadingAccessoryItem].compactMap { $0 }
         if let selector = sectorSelectorItem {
@@ -302,10 +302,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         navigationItem.leftBarButtonItems = items
     }
 
-    /// EXPERIMENTAL (#1703): the sector's item while this is its page in
+    /// (#1703): the sector's item while this is its page in
     /// front (`ForYouSectorPage`).
     var sectorNavigationItem: UINavigationItem?
-    /// The sector's Home | Feed selector.
+    /// The sector's Feed | Shots selector.
     var sectorSelectorItem: UIBarButtonItem? {
         didSet {
             guard isViewLoaded else { return }
@@ -316,7 +316,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     override var navigationItem: UINavigationItem { sectorNavigationItem ?? super.navigationItem }
     var ownNavigationItem: UINavigationItem { super.navigationItem }
 
-    /// The sector's insets while this is its Home page (#1703) — UIKit gives
+    /// The sector's insets while this is its Feed page (#1703) — UIKit gives
     /// the screen none in there. Read in place of the view's own.
     var sectorSafeAreaInsets: UIEdgeInsets?
     private var safeArea: UIEdgeInsets { sectorSafeAreaInsets ?? view.safeAreaInsets }
@@ -2402,7 +2402,7 @@ extension ForYouViewController: TabReselectScrolling {
     }
 }
 
-// MARK: - The For You sector's Home page (#1703)
+// MARK: - The For You sector's Feed page (#1703)
 
 extension ForYouViewController: ForYouSectorPage {
     func sectorPageDidChangeActivity(_ isActive: Bool) {}

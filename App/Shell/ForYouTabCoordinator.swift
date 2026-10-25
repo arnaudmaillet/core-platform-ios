@@ -26,16 +26,16 @@ final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
     /// The tab's wish for a dark bar changed (`wantsDarkTabBar`).
     var onTabBarStyleChange: (() -> Void)?
 
-    /// EXPERIMENTAL (#1697, #1703): the tab bar goes dark over the For You
-    /// tab — unless the sector shows Home.
-    /// The notifications drawer slid the shell aside (true) or closed: the
-    /// feed pauses behind it (#1703).
+    /// The notifications drawer slid the shell aside (true) or closed: Shots
+    /// pauses behind it (#1703).
     func setSetAside(_ setAside: Bool) {
         (navigationController.viewControllers.first as? any ForYouSectorPaging)?.setSetAside(setAside)
     }
 
+    /// The tab bar goes dark over the For You tab's Shots (#1697, #1703) —
+    /// not over Feed.
     var wantsDarkTabBar: Bool {
-        (navigationController.viewControllers.first as? any ForYouSectorPaging)?.isShowingFeed ?? true
+        (navigationController.viewControllers.first as? any ForYouSectorPaging)?.isShowingShots ?? true
     }
     var childCoordinators: [Coordinator] = []
     let navigationController: UINavigationController = ChevronBackNavigationController()
@@ -61,43 +61,22 @@ final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
     private var walletBadge: WalletBadgeInstaller?
 
     func start() {
-        // EXPERIMENTAL (#1681, #1703): the tab is a Home | Feed sector,
-        // landing on the full-screen post feed — the shell's bell leads both
-        // pages, Home wears the shell's points badge, Feed its own.
-        if ForYouFullScreenExperiment.isOn {
-            let sector = container.feedFeature.makeForYouSectorViewController { [weak self] presentation in
-                self?.apply(presentation)
-            }
-            navigationController.viewControllers = [sector]
-            // The tab bar is Feed's dark over Feed only (#1703): Home wears
-            // the app's.
-            (sector as? any ForYouSectorPaging)?.onPageChange = { [weak self] in self?.onTabBarStyleChange?() }
-            guard container.memberGate.isMember else {
-                walletBadge = nil
-                return
-            }
-            (sector as? any HeaderAccessoryHosting)?.setLeadingAccessoryItem(notificationsBell.makeItem())
-            walletBadge = WalletBadgeInstaller(
-                wallet: container.walletStore,
-                presenter: navigationController,
-                makeSheet: { [unowned container] in container.makeWalletSheet() }
-            ) { [weak sector] item in
-                (sector as? (any HeaderAccessoryHosting))?.setTrailingAccessoryItem(item)
-            }
-            return
-        }
-        let forYou = container.feedFeature.makeForYouViewController { [weak self] presentation in
+        // The tab is the Feed | Shots sector (#1703, #1705), landing on Shots
+        // (the full-screen posts). The shell's bell leads both pages; Feed
+        // wears the shell's points badge, Shots its own.
+        let sector = container.feedFeature.makeForYouSectorViewController { [weak self] presentation in
             self?.apply(presentation)
         }
-        navigationController.viewControllers = [forYou]
+        navigationController.viewControllers = [sector]
         // ⚠️ LOADED WITHOUT BEING SHOWN (#748). The tab item's badge comes from
-        // the screen's counts, bound and loaded in its `viewDidLoad`: never
-        // opened, it never counted, and the badge stayed blank until For You
-        // was selected. Loaded a beat later, off the launch's first frame.
-        DispatchQueue.main.async { [weak forYou] in forYou?.loadViewIfNeeded() }
-        // The header reads `[bell][lens] … [coins][search]`: the bell leads,
-        // ahead of the lens the screen composes itself, and — like the balance
-        // — reaches it through the screen for the reason given just below.
+        // Feed's counts, bound and loaded in its `viewDidLoad` — reached
+        // through the sector's, which loads both pages. Never opened, it never
+        // counted, and the badge stayed blank until For You was selected.
+        // Loaded a beat later, off the launch's first frame.
+        DispatchQueue.main.async { [weak sector] in sector?.loadViewIfNeeded() }
+        // The tab bar is Shots' dark over Shots only (#1703): Feed wears the
+        // app's.
+        (sector as? any ForYouSectorPaging)?.onPageChange = { [weak self] in self?.onTabBarStyleChange?() }
         // A guest gets neither the bell nor the balance (#1146, the owner
         // 2026-10-14). This stack is rebuilt on every change of viewer
         // (`MainTabCoordinator.viewerDidChange`), so a sign-up brings both.
@@ -105,17 +84,16 @@ final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
             walletBadge = nil
             return
         }
-        (forYou as? any HeaderAccessoryHosting)?
-            .setLeadingAccessoryItem(notificationsBell.makeItem())
-        // ⚠️ Installed through the SCREEN, not onto its `navigationItem`: For
-        // You composes its own trailing run at `viewDidLoad`, so an item
-        // written from out here would be erased by it.
+        (sector as? any HeaderAccessoryHosting)?.setLeadingAccessoryItem(notificationsBell.makeItem())
+        // ⚠️ Installed through the SCREEN, not onto its `navigationItem`: each
+        // page composes its own trailing run, so an item written from out
+        // here would be erased by it.
         walletBadge = WalletBadgeInstaller(
             wallet: container.walletStore,
             presenter: navigationController,
             makeSheet: { [unowned container] in container.makeWalletSheet() }
-        ) { [weak forYou] item in
-            (forYou as? (any HeaderAccessoryHosting))?.setTrailingAccessoryItem(item)
+        ) { [weak sector] item in
+            (sector as? (any HeaderAccessoryHosting))?.setTrailingAccessoryItem(item)
         }
     }
 

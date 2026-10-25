@@ -1,7 +1,7 @@
 import DesignSystem
 import UIKit
 
-/// EXPERIMENTAL (#1681): save and repost UPRIGHT in the action column,
+/// (#1681): save and repost UPRIGHT in the action column,
 /// between the like pill and the sound bubble — what the post's toolbar
 /// held, on the For You root where the tab bar has taken the bottom.
 ///
