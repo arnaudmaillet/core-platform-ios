@@ -1249,7 +1249,8 @@ struct SnapMediaPageBarTests {
         let toolbarLine = view.bounds.height - 83
 
         let gap = toolbarLine - view.debugPageBarFrame.maxY
-        #expect(abs(gap - SnapChromeView.pageBarToolbarGap) < 0.5,
+        // …and one breath over it (#1722).
+        #expect(abs(gap - SnapChromeView.pageBarToolbarGap - SnapActionColumn.bottomBreath) < 0.5,
                 Comment(rawValue: "the strip left \(gap)pt"))
     }
 

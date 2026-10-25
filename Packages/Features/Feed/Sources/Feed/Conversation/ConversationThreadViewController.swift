@@ -568,8 +568,11 @@ final class ConversationThreadViewController: UIViewController {
             composeBar.trailingAnchor.constraint(
                 equalTo: view.trailingAnchor, constant: -SnapActionColumn.trailingInset
             ),
+            // One breath over the toolbar, as a post's composer rests (#1722):
+            // the pin keeps the feed's sound bubble's place.
             composeBar.bottomAnchor.constraint(
-                equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
+                equalTo: view.safeAreaLayoutGuide.bottomAnchor,
+                constant: -(SnapActionColumn.inputRestingGap + SnapActionColumn.bottomBreath)
             ),
             composerBackdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composerBackdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),

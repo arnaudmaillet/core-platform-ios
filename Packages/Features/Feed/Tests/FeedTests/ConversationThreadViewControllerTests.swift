@@ -421,7 +421,7 @@ struct ConversationThreadViewControllerTests {
         let footerLine = screen.view.convert(
             CGPoint(x: 0, y: screen.view.bounds.height - screen.view.safeAreaInsets.bottom), to: window
         ).y
-        #expect(abs(composer.field.maxY - (footerLine + SnapActionColumn.toolbarGlassDrop - SnapActionColumn.glassGap)) < 0.5,
+        #expect(abs(composer.field.maxY - (footerLine + SnapActionColumn.toolbarGlassDrop - SnapActionColumn.glassGap - SnapActionColumn.bottomBreath)) < 0.5,
                 "the field ends at \(composer.field.maxY), not glassGap above the toolbar's glass")
         #expect(!composer.bar.debugRailButton.isHidden, "the slot is the pin")
     }
@@ -445,7 +445,8 @@ struct ConversationThreadViewControllerTests {
         let composer = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
         let glass = try #require(SnapActionColumnLayoutTests.glassFrame(of: more, in: window))
         let gap = glass.minY - composer.field.maxY
-        #expect(abs(gap - SnapActionColumn.glassGap) < 0.5,
+        // `glassGap`, and the breath every composer stands on (#1722).
+        #expect(abs(gap - SnapActionColumn.glassGap - SnapActionColumn.bottomBreath) < 0.5,
                 "iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion): the field stands \(gap)pt above the toolbar's glass (field \(composer.field.maxY), glass \(glass))")
     }
 
