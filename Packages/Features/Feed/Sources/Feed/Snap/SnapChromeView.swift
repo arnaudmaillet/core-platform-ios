@@ -139,6 +139,17 @@ final class SnapChromeView: UIView {
     private var boostStationTop: NSLayoutConstraint?
     private var boostStationBottom: NSLayoutConstraint?
     private var railBottom: NSLayoutConstraint?
+    /// TRIAL (#1718, the owner): `-caption-cover-line` gives every snap feed
+    /// Shots' no-strip caption — its bottom on the sound cover's line — to
+    /// judge it over a pushed post's toolbar, shorter than the tab bar.
+    /// Read per chrome, so a test can set it.
+    var alignsCaptionWithCover = ProcessInfo.processInfo.arguments.contains("-caption-cover-line") {
+        didSet {
+            guard alignsCaptionWithCover != oldValue else { return }
+            applyCaptionSeat()
+        }
+    }
+
     /// The insets the cell handed over (`setFixedInsets`), before Shots'
     /// breath is added to their bottom.
     private var fixedInsets: UIEdgeInsets?
@@ -1216,8 +1227,9 @@ final class SnapChromeView: UIView {
     private func applyCaptionSeat() {
         let overStrip = !mediaPageBar.isHidden
         // No strip on Shots: the caption's bottom on the sound cover's line
-        // (#1716, the owner) — elsewhere, in the strip's place.
-        captionOnBarConstraint?.constant = sitsOverTabBar
+        // (#1716, the owner) — elsewhere, in the strip's place, unless the
+        // owner's trial flag gives every feed Shots' rule (#1718).
+        captionOnBarConstraint?.constant = sitsOverTabBar || alignsCaptionWithCover
             ? -SnapActionColumn.inputRestingGap
             : -Self.captionToBarWithoutStrip
         setNeedsLayout()
