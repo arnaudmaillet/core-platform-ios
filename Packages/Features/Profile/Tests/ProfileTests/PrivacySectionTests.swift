@@ -111,7 +111,7 @@ struct PrivacySectionTests {
         #expect(model.failedSides.isEmpty)
         #expect(model.postWindow == .sixMonths)
         #expect(model.commentAudience == .followers)
-        #expect(model.postSharing == PostSharing(showsLikeCounts: false, allowsDownloads: true))
+        #expect(model.postSharing == PostSharing(allowsDownloads: true))
     }
 
     /// A double tap on a failed row: one read, so offline one toast.
@@ -244,7 +244,7 @@ private actor StubSides:PostWindowManaging, CommentAudienceManaging, PostSharing
 
     func postSharing() async throws -> PostSharing {
         try check()
-        return PostSharing(showsLikeCounts: false, allowsDownloads: true)
+        return PostSharing(allowsDownloads: true)
     }
 
     func setPostSharing(_ sharing: PostSharing) async throws {}

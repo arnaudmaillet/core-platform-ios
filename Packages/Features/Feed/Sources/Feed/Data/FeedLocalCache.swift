@@ -308,7 +308,6 @@ public final class FeedLocalCache: Sendable {
             return media
         }
         view.publishedAtMs = Int64((post.publishedAt.timeIntervalSince1970 * 1000).rounded())
-        view.likeCountsHidden = post.likeCountsHidden
         return view
     }
 

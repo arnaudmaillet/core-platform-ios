@@ -48,9 +48,6 @@ public final class PostDetailViewModel {
     public struct EngagementState: Equatable, Sendable {
         public var likeCount: Int64
         public var isLiked: Bool
-        /// The author hides like counts from this reader (#397): the screen
-        /// shows none, the heart still works.
-        public var countHidden = false
     }
 
     /// The comments section state.
@@ -512,7 +509,7 @@ public final class PostDetailViewModel {
         postID = entry.post.id
         authorID = entry.author.id
         authorStub = ProfileIdentityStub(handle: entry.author.handle, displayName: entry.author.displayName)
-        engagement = EngagementState(likeCount: entry.likeCount, isLiked: false, countHidden: entry.post.likeCountsHidden)
+        engagement = EngagementState(likeCount: entry.likeCount, isLiked: false)
         observeEntity(entry.post.id)
         entities.upsert([entry])
         phase = .content(PostDetailDisplayModel(entry: entry, now: now()))
@@ -637,7 +634,7 @@ public final class PostDetailViewModel {
             handle: entry.author.handle,
             displayName: entry.author.displayName
         )
-        engagement = EngagementState(likeCount: entry.likeCount, isLiked: false, countHidden: entry.post.likeCountsHidden)
+        engagement = EngagementState(likeCount: entry.likeCount, isLiked: false)
         // The repository's copy may be older than the store's count (its
         // cache keeps a post as it was fetched): it only fills one.
         entities.upsert([entry], counts: .ifUnknown)

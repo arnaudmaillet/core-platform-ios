@@ -230,12 +230,11 @@ public final class FeedViewModel {
         return EngagementState(likeCount: entities.post(id)?.likeCount ?? own.likeCount, isLiked: own.isLiked)
     }
 
-    /// The like count `model`'s page draws: the post's live one (#896), nil
-    /// when its author hides it. What a cell is configured with, so a page
-    /// scrolled back to shows a like placed meanwhile, here or elsewhere.
+    /// The like count `model`'s page draws: the post's live one (#896). What
+    /// a cell is configured with, so a page scrolled back to shows a like
+    /// placed meanwhile, here or elsewhere.
     func visibleLikeCount(for model: FeedItemDisplayModel) -> Int64? {
-        guard !model.likeCountHidden else { return nil }
-        return entities.post(model.id)?.likeCount ?? model.likeCount
+        entities.post(model.id)?.likeCount ?? model.likeCount
     }
 
     /// Optimistic like: one point on the post (#676), shown at once, taken

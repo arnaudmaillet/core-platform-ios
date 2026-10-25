@@ -7,8 +7,8 @@ import Foundation
 import Testing
 @testable import Profile
 
-/// Settings → Privacy → Show Like Counts and Allow Downloads (#397, backend
-/// #809), over the mock.
+/// Settings → Privacy → Allow Downloads (#397, backend
+/// #809), over the mock. Show Like Counts is gone (#1713).
 @MainActor
 struct PostSharingTests {
     private struct Session: AuthSessionProviding {
@@ -39,18 +39,18 @@ struct PostSharingTests {
     @Test func eachSwitchRoundTripsAndKeepsTheRest() async throws {
         let repository = makeRepository()
         try await repository.setCommentAudience(.followers)
-        #expect(try await repository.postSharing() == PostSharing(showsLikeCounts: true, allowsDownloads: true))
+        #expect(try await repository.postSharing() == PostSharing(allowsDownloads: true))
 
-        try await repository.setPostSharing(PostSharing(showsLikeCounts: false, allowsDownloads: true))
-        #expect(try await repository.postSharing() == PostSharing(showsLikeCounts: false, allowsDownloads: true))
+        try await repository.setPostSharing(PostSharing(allowsDownloads: true))
+        #expect(try await repository.postSharing() == PostSharing(allowsDownloads: true))
 
-        try await repository.setPostSharing(PostSharing(showsLikeCounts: false, allowsDownloads: false))
-        #expect(try await repository.postSharing() == PostSharing(showsLikeCounts: false, allowsDownloads: false))
+        try await repository.setPostSharing(PostSharing(allowsDownloads: false))
+        #expect(try await repository.postSharing() == PostSharing(allowsDownloads: false))
         #expect(try await repository.commentAudience() == .followers)
 
         // And who can comment keeps them in turn.
         try await repository.setCommentAudience(.everyone)
-        #expect(try await repository.postSharing() == PostSharing(showsLikeCounts: false, allowsDownloads: false))
+        #expect(try await repository.postSharing() == PostSharing(allowsDownloads: false))
     }
 
     /// The screen's state follows the server: it reads both, and a change
@@ -62,9 +62,9 @@ struct PostSharingTests {
         for _ in 0..<2_000 where viewModel.postSharing == nil {
             try await Task.sleep(for: .milliseconds(5))
         }
-        #expect(viewModel.postSharing == PostSharing(showsLikeCounts: true, allowsDownloads: true))
+        #expect(viewModel.postSharing == PostSharing(allowsDownloads: true))
 
-        try await viewModel.setPostSharing(PostSharing(showsLikeCounts: true, allowsDownloads: false))
+        try await viewModel.setPostSharing(PostSharing(allowsDownloads: false))
         #expect(viewModel.postSharing?.allowsDownloads == false)
         #expect(try await repository.postSharing().allowsDownloads == false)
     }

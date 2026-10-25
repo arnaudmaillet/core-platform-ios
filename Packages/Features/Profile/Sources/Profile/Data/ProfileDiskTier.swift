@@ -165,7 +165,6 @@ struct ProfileDiskRecord: Codable, Equatable {
         var authorAvatarURL: URL?
         var reactionCount: Int64?
         var commentCount: Int64?
-        var likeCountsHidden: Bool
 
         struct Page: Codable, Equatable {
             var thumbnailURL: URL?
@@ -323,7 +322,6 @@ extension ProfileDiskRecord.Post {
         authorAvatarURL = post.authorAvatarURL
         reactionCount = post.reactionCount
         commentCount = post.commentCount
-        likeCountsHidden = post.likeCountsHidden
     }
 
     var galleryPost: GalleryPost? {
@@ -350,7 +348,6 @@ extension ProfileDiskRecord.Post {
             reactionCount: reactionCount,
             commentCount: commentCount
         )
-        post.likeCountsHidden = likeCountsHidden
         return post
     }
 }

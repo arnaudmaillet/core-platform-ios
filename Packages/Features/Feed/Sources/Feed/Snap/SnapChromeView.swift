@@ -108,14 +108,8 @@ final class SnapChromeView: UIView {
     /// The post's like count on the like button's corner (#668) — or, in the
     /// like pill (#669), under its heart.
     /// The post's like count — `configure`'s, then the live one
-    /// (`setPostLikeCount`), the viewer's stake in it; nil when the author
-    /// hides it (#397).
+    /// (`setPostLikeCount`), the viewer's stake in it.
     private var postLikeCount: Int64?
-    /// The band's trailing edge: under the like pill's glass, or — a post
-    /// whose likes are hidden, which has no like pill (#680) — the screen's.
-    /// The post hides its like count from this reader (#397): no like pill
-    /// at all, and the band takes the whole width (#680).
-    private var likesHidden = false
     /// The SOUND bubble (#671), under the like pill on the field line, beside
     /// the caption and the page strip — see `SnapActionColumn`. Media chrome,
     /// like the pill (`applySoundVisibility`).
@@ -885,14 +879,13 @@ final class SnapChromeView: UIView {
         // Owned by `configure` (static chrome, like the rail's emotes), so
         // it needs no stream to appear and the flight replica — which never
         // receives one — draws the identical corner.
-        // ⚠️ A POST THAT HIDES ITS LIKES HAS NO LIKE PILL (#680): no heart,
-        // no count — and the band runs to the screen's edge in its place.
-        likesHidden = model.likeCountHidden
-        // On every page (#695): a text page's composer reserves its room.
-        boostButton.isHidden = likesHidden
+        // ⚠️ THE LIKE PILL IS ALWAYS THERE (#1713, the owner): no post hides
+        // its likes. On every page (#695): a text page's composer reserves its
+        // room.
+        boostButton.isHidden = false
         // The badge's count, from what the card knew; the screen then pushes
         // the post's live one (`setPostLikeCount`).
-        postLikeCount = model.visibleLikeCount
+        postLikeCount = model.likeCount
         applyLikeBadge(animated: false)
         applySoundVisibility()
         if !hasMedia {
@@ -1627,7 +1620,6 @@ final class SnapChromeView: UIView {
         tickerCarriesReactions = false
         commentTicker.reset()
         boostButton.isHidden = true
-        likesHidden = false
         boostButton.setSpentTotal(0)
         postLikeCount = nil
         applyLikeBadge(animated: false)
@@ -1661,10 +1653,9 @@ final class SnapChromeView: UIView {
     }
 
     /// The post's live like count (#896) — the app's `EntityStore`, where
-    /// the viewer's stakes already are (`WalletStakeLikes`). Nothing for a
-    /// post whose author hides it: the pill stays without a number.
+    /// the viewer's stakes already are (`WalletStakeLikes`).
     func setPostLikeCount(_ count: Int64?) {
-        guard !likesHidden, count != postLikeCount else { return }
+        guard count != postLikeCount else { return }
         postLikeCount = count
         applyLikeBadge(animated: false)
     }

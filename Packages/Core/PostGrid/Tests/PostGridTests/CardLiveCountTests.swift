@@ -19,14 +19,12 @@ struct CardLiveCountTests {
         return defaults
     }
 
-    private static func post(_ id: String, likes: Int64?, hidden: Bool = false) -> GalleryPost {
-        var post = GalleryPost(
+    private static func post(_ id: String, likes: Int64?) -> GalleryPost {
+        GalleryPost(
             id: PostID(id), kind: .photo, isRepost: false,
             thumbnailURL: URL(string: "https://example.com/\(id).jpg"),
             caption: "", publishedAtMS: 0, reactionCount: likes
         )
-        post.likeCountsHidden = hidden
-        return post
     }
 
     private func tile(_ post: GalleryPost) -> PostGridTileCell {
@@ -99,15 +97,6 @@ struct CardLiveCountTests {
         _ = wallet.undoBoost(targetID: "p1", amount: 2)
         #expect(card.debugReactionCount == 40)
         withExtendedLifetime(bridge) {}
-    }
-
-    @Test func aHiddenCountStaysHidden() {
-        let entities = EntityStore()
-        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults()), entities: entities)
-        let cell = tile(Self.post("p1", likes: nil, hidden: true))
-        staking.bindReadout(cell, to: PostID("p1"))
-        entities.setLikeCount(99, for: PostID("p1"))
-        #expect(cell.debugCounterText == nil)
     }
 
     /// A recycled tile shows another post: a change to the first one leaves

@@ -42,20 +42,17 @@ public struct Post: Sendable, Equatable, Codable {
     public let caption: String
     public let attachments: [MediaAttachment]
     public let publishedAt: Date
-    /// The author hides like counts from this reader (#397, backend #809):
-    /// the server withholds the number, and the app shows none — not a 0.
-    public let likeCountsHidden: Bool
+    // No "likes hidden" (#1713, the owner): a post's likes always show — the
+    // client honours no hiding, and an old snapshot's key is ignored.
 
     public init(
-        id: PostID, authorID: ProfileID, caption: String, attachments: [MediaAttachment], publishedAt: Date,
-        likeCountsHidden: Bool = false
+        id: PostID, authorID: ProfileID, caption: String, attachments: [MediaAttachment], publishedAt: Date
     ) {
         self.id = id
         self.authorID = authorID
         self.caption = caption
         self.attachments = attachments
         self.publishedAt = publishedAt
-        self.likeCountsHidden = likeCountsHidden
     }
 
     public init(from decoder: any Decoder) throws {
@@ -65,8 +62,6 @@ public struct Post: Sendable, Equatable, Codable {
         caption = try container.decode(String.self, forKey: .caption)
         attachments = try container.decode([MediaAttachment].self, forKey: .attachments)
         publishedAt = try container.decode(Date.self, forKey: .publishedAt)
-        // Default keeps pre-existing snapshots decodable.
-        likeCountsHidden = try container.decodeIfPresent(Bool.self, forKey: .likeCountsHidden) ?? false
     }
 }
 
@@ -101,12 +96,6 @@ public struct FeedEntry: Sendable, Equatable, Codable {
         self.post = post
         self.author = author
         self.likeCount = likeCount
-    }
-
-    /// The like count to show, or nil when the author hides it from this
-    /// reader (#397): a hidden count is no number at all, never a 0.
-    public var visibleLikeCount: Int64? {
-        post.likeCountsHidden ? nil : likeCount
     }
 
     public init(from decoder: any Decoder) throws {

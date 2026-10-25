@@ -261,11 +261,11 @@ struct FeedEntityStoreTests {
         return viewModel
     }
 
-    private func model(_ id: String, likes: Int64, hidden: Bool = false) -> FeedItemDisplayModel {
+    private func model(_ id: String, likes: Int64) -> FeedItemDisplayModel {
         FeedItemDisplayModel(
             id: PostID(id), authorID: ProfileID("prof-1"), authorName: "Ava", metaText: "@ava",
             avatarURL: nil, caption: "c", mediaURL: nil, mediaKind: .image, thumbnailURL: nil,
-            audioText: nil, likeCount: likes, likeCountHidden: hidden
+            audioText: nil, likeCount: likes
         )
     }
 
@@ -299,7 +299,6 @@ struct FeedEntityStoreTests {
         let viewModel = await loaded([makeEntry("post-a", likeCount: 10)], entities: entities)
         entities.addLikes(3, to: PostID("post-a"))
         #expect(viewModel.visibleLikeCount(for: model("post-a", likes: 10)) == 13)
-        #expect(viewModel.visibleLikeCount(for: model("post-a", likes: 10, hidden: true)) == nil)
     }
 
     /// Deleted from the profile: the post leaves the feed, and a page that

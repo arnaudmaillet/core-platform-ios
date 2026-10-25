@@ -122,15 +122,14 @@ final class PostShelfMediaCardCell: UICollectionViewCell {
     /// The post's live count (`PostCardStaking`, #896) — kept on the post
     /// too, which the flight's copy of the overlay is built from.
     func showLikeCount(_ count: Int64) {
-        guard var post, !post.likeCountsHidden, let shown = post.reactionCount, shown != count else { return }
+        guard var post, let shown = post.reactionCount, shown != count else { return }
         post.reactionCount = count
         self.post = post
         overlay?.setLikeCount(count)
     }
 
     var postLikeCount: Int64? {
-        guard let post, !post.likeCountsHidden else { return nil }
-        return post.reactionCount
+        post?.reactionCount
     }
 
     #if DEBUG

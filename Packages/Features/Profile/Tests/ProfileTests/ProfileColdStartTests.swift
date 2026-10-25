@@ -39,7 +39,6 @@ private func tile(_ id: String, at ms: Int64) -> GalleryPost {
         authorID: ProfileID("prof-1"), authorName: "Ada", authorHandle: "ada",
         authorAvatarURL: URL(string: "https://cdn.example/ada.jpg"), reactionCount: 12, commentCount: 0
     )
-    post.likeCountsHidden = true
     return post
 }
 

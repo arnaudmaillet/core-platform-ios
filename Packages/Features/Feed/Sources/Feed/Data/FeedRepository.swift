@@ -565,8 +565,7 @@ public actor FeedRepository: FeedProviding {
                     assetID: attachment.assetID.isEmpty ? nil : attachment.assetID
                 )
             },
-            publishedAt: Date(timeIntervalSince1970: TimeInterval(view.publishedAtMs) / 1000),
-            likeCountsHidden: view.likeCountsHidden
+            publishedAt: Date(timeIntervalSince1970: TimeInterval(view.publishedAtMs) / 1000)
         )
     }
 }

@@ -315,13 +315,13 @@ struct BoostControlTests {
 
     // MARK: - The like badge (#668)
 
-    private static func chrome(likes: Int64, hidden: Bool = false, media: Bool = true) -> SnapChromeView {
+    private static func chrome(likes: Int64, media: Bool = true) -> SnapChromeView {
         let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         chrome.configure(with: FeedItemDisplayModel(
             id: PostID("post-1"), authorID: ProfileID("profile-1"), authorName: "Ana",
             metaText: "@ana", avatarURL: nil, caption: "A caption",
             mediaURL: media ? URL(string: "mock://media/1") : nil, mediaKind: .image,
-            thumbnailURL: nil, audioText: nil, likeCount: likes, likeCountHidden: hidden
+            thumbnailURL: nil, audioText: nil, likeCount: likes
         ))
         chrome.layoutIfNeeded()
         return chrome
@@ -370,15 +370,15 @@ struct BoostControlTests {
         #expect(pill.configuration?.title == "1")
     }
 
-    /// A post whose likes are hidden (#397) has no like button at all, stake
-    /// or not (#680). A text page wears the page's pill like any other
-    /// (#695).
-    @Test func noLikeButtonForAHiddenCountButOnATextPage() {
-        let hidden = Self.chrome(likes: 900, hidden: true)
-        hidden.setBoostTotal(3)
-        hidden.setPostLikeCount(903)
-        #expect(hidden.debugBoostButton.isHidden, "the like button stayed on a hidden-likes post")
-        #expect(hidden.debugLikeBadgeText == nil)
+    /// The like button is on every page (#1713: no post hides its likes),
+    /// its count following the live one; a text page wears the page's pill
+    /// like any other (#695).
+    @Test func theLikeButtonIsOnEveryPage() {
+        let media = Self.chrome(likes: 900)
+        media.setBoostTotal(3)
+        media.setPostLikeCount(903)
+        #expect(!media.debugBoostButton.isHidden, "a post lost its like button")
+        #expect(media.debugLikeBadgeText == "903")
 
         let text = Self.chrome(likes: 900, media: false)
         #expect(text.debugLikeBadgeText == "900")

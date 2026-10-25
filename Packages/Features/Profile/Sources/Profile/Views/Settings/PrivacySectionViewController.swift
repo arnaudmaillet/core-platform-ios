@@ -19,7 +19,6 @@ final class PrivacySectionViewController: UIViewController {
         case commentAudience
         case mentionAudience
         case messageAudience
-        case likeCounts
         case downloads
         case loading
         case failed
@@ -240,23 +239,21 @@ final class PrivacySectionViewController: UIViewController {
                     self?.setAudience(audience, for: kind)
                 }
             }), displayed: .always)]
-        case .likeCounts, .downloads:
-            let isLikes = item == .likeCounts
-            content.text = isLikes ? "Show Like Counts" : "Allow Downloads"
-            content.secondaryText = isLikes
-                ? "Others see how many likes your posts get. You always do."
-                : "Others can save your photos and videos."
+        case .downloads:
+            // No "Show Like Counts" (#1713, the owner): likes always show.
+            content.text = "Allow Downloads"
+            content.secondaryText = "Others can save your photos and videos."
             content.secondaryTextProperties.color = .secondaryLabel
-            content.image = UIImage.symbol(named: isLikes ? AppSymbol.like.rawValue : "arrow.down.circle")
+            content.image = UIImage.symbol(named: "arrow.down.circle")
             content.imageProperties.tintColor = .label
             let toggle = UISwitch()
             if let sharing = viewModel.postSharing {
-                toggle.isOn = isLikes ? sharing.showsLikeCounts : sharing.allowsDownloads
+                toggle.isOn = sharing.allowsDownloads
             }
             toggle.accessibilityLabel = content.text
             toggle.addAction(UIAction { [weak self] action in
                 guard let self, let toggle = action.sender as? UISwitch, var next = viewModel.postSharing else { return }
-                if isLikes { next.showsLikeCounts = toggle.isOn } else { next.allowsDownloads = toggle.isOn }
+                next.allowsDownloads = toggle.isOn
                 setPostSharing(next)
             }, for: .valueChanged)
             cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
@@ -346,8 +343,8 @@ final class PrivacySectionViewController: UIViewController {
             snapshot.appendItems([.sideFailed(.interactionAudiences)], toSection: .visibility)
         }
         if viewModel.sharing != nil, viewModel.postSharing != nil {
-            snapshot.appendItems([.likeCounts, .downloads], toSection: .visibility)
-            snapshot.reconfigureItems([.likeCounts, .downloads])
+            snapshot.appendItems([.downloads], toSection: .visibility)
+            snapshot.reconfigureItems([.downloads])
         } else if viewModel.failedSides.contains(.postSharing) {
             snapshot.appendItems([.sideFailed(.postSharing)], toSection: .visibility)
         }

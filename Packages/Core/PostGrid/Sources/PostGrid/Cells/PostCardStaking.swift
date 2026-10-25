@@ -172,7 +172,7 @@ public final class PostCardStaking {
     /// draws, or the count changes in the landing frame. `post` itself when
     /// the store knows no count, or the card draws none.
     public func liveCopy(of post: GalleryPost) -> GalleryPost {
-        guard let entities, !post.likeCountsHidden, post.reactionCount != nil,
+        guard let entities, post.reactionCount != nil,
               let live = entities.post(post.id)?.likeCount else { return post }
         var copy = post
         copy.reactionCount = live
