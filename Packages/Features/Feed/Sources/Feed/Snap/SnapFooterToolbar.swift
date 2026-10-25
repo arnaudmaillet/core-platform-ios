@@ -27,6 +27,7 @@ enum SnapFooterToolbar {
         static let save = "feed.snap.save"
         static let repost = "feed.snap.repost"
         static let more = "feed.snap.more"
+        static let share = "feed.snap.share"
     }
 
     /// The bar's items, left to right: the leading container under
@@ -68,7 +69,14 @@ enum SnapFooterToolbar {
         return item
     }
 
+    /// ⋯ — the thread's and the text composer's menu.
     static func makeMoreItem(menu: UIMenu) -> UIBarButtonItem {
         BarItems.icon(id: ID.more, image: UIImage(systemName: "ellipsis"), label: "More actions", menu: menu)
+    }
+
+    /// Share (#1728, the owner): on the post screen, ⋯ and its menu gave way
+    /// to the share sheet — where Not interested and Report now live.
+    static func makeShareItem(action: @escaping () -> Void) -> UIBarButtonItem {
+        BarItems.icon(id: ID.share, image: UIImage(systemName: "arrowshape.turn.up.right"), label: "Share", action: action)
     }
 }

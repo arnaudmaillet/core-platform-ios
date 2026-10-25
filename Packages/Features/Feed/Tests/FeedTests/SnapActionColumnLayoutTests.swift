@@ -773,17 +773,17 @@ struct SnapActionColumnLayoutTests {
         #expect(!controller.debugTrailingItems.contains { $0.identifier?.hasPrefix("snap.comments.day.") == true })
     }
 
-    // MARK: - The toolbar and the menu
+    // MARK: - The toolbar and the share sheet
 
-    /// Share left the toolbar's capsule for the repost (#671), so ⋯ leads
-    /// with it.
-    @Test func theMenuLeadsWithShare() {
+    /// The ⋯ gave way to Share (#1728): its sheet holds what the menu did,
+    /// with nowhere to file a report, no Report.
+    @Test func theShareSheetHoldsWhatTheMenuDid() {
         let controller = SnapFeedViewController(
             viewModel: FeedViewModel(repository: ColumnSilentProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             reporting: nil
         )
-        #expect(controller.debugMoreMenuTitles(for: PostID("p1")) == ["Share", "Not interested"])
+        #expect(controller.shareSheetActions(for: PostID("p1")).map(\.title) == ["Not interested"])
     }
 }
 

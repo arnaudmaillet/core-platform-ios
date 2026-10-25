@@ -236,10 +236,6 @@ extension SnapFeedViewController {
         openComments(for: id, revealingFrom: CGRect(x: 28, y: 601, width: 312, height: 195))
         setZoomContentHidden(true)
     }
-
-    func debugMoreMenuTitles(for id: PostID) -> [String] {
-        debugMoreMenuActions(for: id).compactMap { ($0 as? UIAction)?.title }
-    }
 }
 
 // MARK: - Pages

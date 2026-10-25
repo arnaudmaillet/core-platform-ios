@@ -62,14 +62,14 @@ struct SnapToolbarCompositionTests {
 
     // MARK: - The bar
 
-    /// ⚠️ SAVE AND REPOST, in that order (#865), and nothing else beside the
-    /// ⋯. Share moved into the menu.
-    @Test func theTrailingRunIsSaveRepostAndTheMenu() {
+    /// ⚠️ SAVE AND REPOST, in that order (#865), then Share (#1728: the ⋯
+    /// and its menu gave way to it).
+    @Test func theTrailingRunIsSaveRepostAndShare() {
         let actions = toolbarActions(feed())
-        #expect(labels(actions) == ["Save", "Repost", "More actions"],
-                "the trailing run is not [save, repost, ⋯]: \(labels(actions))")
+        #expect(labels(actions) == ["Save", "Repost", "Share"],
+                "the trailing run is not [save, repost, share]: \(labels(actions))")
         #expect(actions.map(\.identifier) == [
-            SnapFooterToolbar.ID.save, SnapFooterToolbar.ID.repost, SnapFooterToolbar.ID.more,
+            SnapFooterToolbar.ID.save, SnapFooterToolbar.ID.repost, SnapFooterToolbar.ID.share,
         ], "an action lost its identity")
     }
 
@@ -109,33 +109,20 @@ struct SnapToolbarCompositionTests {
         let items = try #require(feed().toolbarItems)
         let separator = try #require(items.dropFirst(4).first)
         #expect(separator.customView == nil && separator.accessibilityLabel == nil, "no separator before the ⋯")
-        let more = try #require(items.last)
-        #expect(more.accessibilityLabel == "More actions")
-        #expect(more.customView == nil, "⋯ is a button in a custom view (#1679)")
-        #expect(more.menu != nil, "⋯ opens no menu")
+        let share = try #require(items.last)
+        #expect(share.accessibilityLabel == "Share")
+        #expect(share.customView == nil, "Share is a button in a custom view (#1679)")
+        #expect(share.menu == nil, "Share still opens a menu (#1728: it opens the sheet)")
     }
 
-    // MARK: - The menu
+    // MARK: - Share (#1728)
 
-    /// Share first (it left the capsule, #671), then Not interested and Report.
-    @Test func theMenuOffersShareNotInterestedAndReport() {
-        let titles = feed().debugMoreMenuTitles(for: PostID("p1"))
-        #expect(titles == ["Share", "Not interested", "Report"], "the menu reads: \(titles)")
-    }
-
-    /// Report is destructive and LAST — the gallery card's own menu ordering.
-    @Test func reportIsTheDestructiveRowAtTheEnd() throws {
-        let actions = feed().debugMoreMenuActions(for: PostID("p1"))
-        let report = try #require(actions.last as? UIAction)
-        #expect(report.title == "Report")
-        #expect(report.attributes.contains(.destructive))
-    }
-
-    /// ⚠️ WITHHELD, NOT DISABLED. With nobody to file a report with, the row
-    /// is absent — an action that cannot act is not offered.
-    @Test func theReportRowIsAbsentWithoutSomewhereToFileIt() {
-        let titles = feed(reporting: nil).debugMoreMenuTitles(for: PostID("p1"))
-        #expect(titles == ["Share", "Not interested"])
+    /// A pushed post's share sheet has no Repost (the toolbar carries it):
+    /// Not interested and Report — what the ⋯ menu held — and Report only
+    /// with somewhere to file it.
+    @Test func theSheetOffersNotInterestedAndReportButNoRepost() {
+        #expect(feed().shareSheetActions(for: PostID("p1")).map(\.title) == ["Not interested", "Report"])
+        #expect(feed(reporting: nil).shareSheetActions(for: PostID("p1")).map(\.title) == ["Not interested"])
     }
 }
 

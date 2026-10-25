@@ -188,13 +188,17 @@ struct SnapSideListTests {
     /// The post share sheet's own chips (#1710, #1712): Repost, then the ⋯
     /// menu's Not interested and Report — Report only with somewhere to file.
     @Test func theShareSheetOffersRepostNotInterestedAndReport() {
+        // Shots — the For You root — offers Repost; a pushed post does not
+        // (its toolbar carries it, #1728).
         let feed = feed(sideList: false)
+        feed.isForYouRoot = true
         #expect(feed.shareSheetActions(for: PostID("p1")).map(\.title) == ["Repost", "Not interested", "Report"])
 
         let unfiled = SnapFeedViewController(
             viewModel: FeedViewModel(repository: SideListProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
+        unfiled.isForYouRoot = true
         #expect(unfiled.shareSheetActions(for: PostID("p1")).map(\.title) == ["Repost", "Not interested"],
                 "Report offered with nowhere to file it")
     }
@@ -843,6 +847,16 @@ struct SnapSwipeChainTests {
         #expect(!sideList.isOpen)
         #expect(feed.activePostID == shown, "the post on show did not stay")
         #expect(feed.orderedIDs == [PostID("p1"), shown, PostID("p2")])
+    }
+
+    /// ⚠️ THE STACK'S BACK SWIPE WAITS FOR THE LIST (#1728): while the side
+    /// list is open, a rightward drag closes it — the screen's full-surface
+    /// back swipe is refused.
+    @Test func theBackSwipeIsRefusedWhileTheListIsOpen() async throws {
+        let feed = try await tests.openableFeedForChain(["p1", "p2"], others: ["o1", "o2"], router: ProfileRouter())
+        #expect(feed.allowsContentPop(beginningAt: CGPoint(x: 200, y: 400), in: feed.view))
+        _ = try await tests.openForChain(feed)
+        #expect(!feed.allowsContentPop(beginningAt: CGPoint(x: 200, y: 400), in: feed.view), "the back swipe may close the post over the list")
     }
 
     /// ⚠️ A CAROUSEL'S EDGE OPENS THE LIST (#1720, the owner): from the
