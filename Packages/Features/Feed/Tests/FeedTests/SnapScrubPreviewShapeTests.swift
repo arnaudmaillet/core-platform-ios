@@ -52,3 +52,25 @@ struct SnapScrubPreviewShapeTests {
                 "the replica's caption flies at \(replica.debugCaptionFrame.maxY), the page's lands at \(page.debugCaptionFrame.maxY)")
     }
 }
+
+/// #1730: the comments' composer follows the page as the side list opens;
+/// the autofocus is a trial, off by default.
+@MainActor
+struct ComposerSideListTests {
+    @Test func theComposerFollowsThePagesOverlay() {
+        let (controller, _) = SnapActionColumnLayoutTests.engagedPanel()
+        let composer = SnapActionColumnLayoutTests.firstView(CommentsInputBar.self, in: controller.view)
+        let before = composer.map { $0.convert($0.bounds, to: nil) }
+        controller.setOverlayOffset(40)
+        #expect(controller.debugComposerOverlayOffset == 40)
+        if let composer, let before {
+            #expect(abs(composer.convert(composer.bounds, to: nil).minY - before.minY - 40) < 0.5, "the composer did not move with the page")
+        }
+        controller.setOverlayOffset(0)
+        #expect(controller.debugComposerOverlayOffset == 0)
+    }
+
+    @Test func theAutofocusIsOffByDefault() {
+        #expect(!SnapFeedViewController.autofocusesComments)
+    }
+}

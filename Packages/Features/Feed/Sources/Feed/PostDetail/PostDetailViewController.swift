@@ -1360,6 +1360,21 @@ final class PostDetailViewController: UIViewController {
         composeBar.hostsActionColumn = !hosted
     }
 
+    /// The page's overlay offset as the side list opens (#1730): the
+    /// composer moves down with the caption and the action column, so its
+    /// input row stays on the sound cover's line.
+    func setOverlayOffset(_ offset: CGFloat) {
+        composeBar.transform = offset == 0 ? .identity : CGAffineTransform(translationX: 0, y: offset)
+    }
+
+    /// The composer's offset now. Tests.
+    var debugComposerOverlayOffset: CGFloat { composeBar.transform.ty }
+
+    /// Puts the focus in the composer — the keyboard rises (#1730's trial).
+    func focusComposer() {
+        composeBar.focusComposer()
+    }
+
     /// The slot's cover turns while the post plays aloud (#692).
     func setRailSoundSpinning(_ spinning: Bool) {
         composeBar.setRailSpinning(spinning)
