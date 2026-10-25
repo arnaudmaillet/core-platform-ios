@@ -5532,8 +5532,7 @@ final class SnapFeedViewController: UIViewController {
     /// The post's share sheet (#1710) — the app's ONE share surface
     /// (`ShareSheet`, the profile's and the place's), tuned rather than
     /// cloned (`ShareSheetConfiguration`): the post's author on the QR card,
-    /// the post's own link (`AppRoute.postLink`), Repost after Copy Link, and
-    /// dark over a media page. Its escape hatches come back here once it is
+    /// the post's own link (`AppRoute.postLink`), Repost after Copy Link. Its escape hatches come back here once it is
     /// gone: the system sheet, and a send to someone (the link, in a DM).
     func presentShareSheet(for id: PostID) {
         guard presentedViewController == nil, let model = modelsByID[id],
@@ -5551,10 +5550,8 @@ final class SnapFeedViewController: UIViewController {
             // Read HERE, where there is a window (the sheet has none yet).
             deviceCornerRadius: ScreenGeometry.cornerRadius(behind: view),
             fallbackWidth: view.bounds.width,
-            configuration: ShareSheetConfiguration(
-                extraActions: shareSheetActions(for: id),
-                interfaceStyle: model.mediaURL != nil ? .dark : .unspecified
-            )
+            // The app's appearance (#1718, the owner: no forced dark).
+            configuration: ShareSheetConfiguration(extraActions: shareSheetActions(for: id))
         )
         sheet.onSystemShare = { [weak self] card, image in
             guard let self else { return }
