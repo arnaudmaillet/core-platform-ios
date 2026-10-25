@@ -26,14 +26,14 @@ struct SnapForYouRootTests {
 
     // MARK: - The bars
 
-    /// No toolbar on the root: the tab bar holds the bottom; the pill is the
-    /// top bar's, trailing.
-    @Test func theRootHasNoToolbarAndThePillInTheTopBar() {
+    /// No toolbar on the root at rest: the tab bar holds the bottom. And no
+    /// pill in the top bar either (#1699): the author is inside the page.
+    @Test func theRootHasNoToolbarAndNoPillInTheTopBar() {
         let root = feed(root: true)
         root.setEngagedChrome(false, hasMedia: true, animated: false)
         #expect(root.toolbarItems?.isEmpty ?? true, "the root wears a toolbar: \(root.toolbarItems ?? [])")
         let trailing = root.navigationItem.rightBarButtonItems ?? []
-        #expect(trailing.contains { $0.customView is SnapAuthorIdentityView }, "the pill is not in the top bar")
+        #expect(!trailing.contains { $0.customView is SnapAuthorIdentityView }, "a pill in the root's top bar")
         #expect(trailing.allSatisfy { $0.identifier != nil || ($0.customView == nil && $0.accessibilityLabel == nil) },
                 "an item without an identity (#1679)")
     }
@@ -56,11 +56,103 @@ struct SnapForYouRootTests {
 
         root.setEngagedChrome(true, hasMedia: true, animated: false)
         #expect(root.navigationItem.leftBarButtonItems?.first?.accessibilityLabel == "Close comments")
-        #expect((root.navigationItem.rightBarButtonItems ?? []).contains { $0.customView is SnapAuthorIdentityView },
-                "the pill left the bar with the comments open")
+        #expect(!(root.navigationItem.rightBarButtonItems ?? []).contains { $0.customView is SnapAuthorIdentityView })
 
         root.setEngagedChrome(false, hasMedia: true, animated: false)
         #expect(root.navigationItem.leftBarButtonItems?.first === bell)
+    }
+
+    // MARK: - The author inside the page (#1699)
+
+    /// The page shows its author between the stream and the caption, with no
+    /// glass — the stream stands on it; off the root it does not show.
+    @Test func theAuthorRowStandsBetweenTheStreamAndTheCaption() {
+        let chrome = SnapActionColumnLayoutTests.chrome()
+        let model = SnapActionColumnLayoutTests.mediaModel(mediaURL: URL(string: "mock://media/1"))
+        chrome.configure(with: model)
+        chrome.showsAuthorRow = true
+        chrome.setAuthorRow(model, badge: .follow, pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        chrome.layoutIfNeeded()
+        #expect(!chrome.authorRow.isHidden)
+        #expect(!(chrome.authorRow.subviews.contains { $0 is UIVisualEffectView }), "the author row draws glass")
+        #expect(chrome.interactionRoots.contains { $0 === chrome.authorRow }, "a tap on the author would toggle playback")
+
+        let plain = SnapActionColumnLayoutTests.chrome()
+        plain.configure(with: model)
+        plain.layoutIfNeeded()
+        #expect(plain.authorRow.isHidden, "the author row shows off the root")
+    }
+
+    // MARK: - The comments keep the tab bar (#1699)
+
+    /// Comments open on the root: the tab bar stays, and no toolbar comes up
+    /// (a placeholder toolbar in its place was tried and dropped).
+    @Test func theCommentsKeepTheTabBar() async throws {
+        let root = feed(root: true)
+        let nav = UINavigationController(rootViewController: root)
+        let tabs = UITabBarController()
+        tabs.viewControllers = [nav]
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = tabs
+        window.isHidden = false
+        defer { window.isHidden = true }
+        for _ in 0..<100 where root.view.window == nil { try await Task.sleep(for: .milliseconds(10)) }
+
+        root.setEngagedChrome(true, hasMedia: true, animated: false)
+        #expect(!tabs.isTabBarHidden, "the comments hid the tab bar")
+        #expect(nav.isToolbarHidden, "a toolbar came up with the comments")
+
+        root.setEngagedChrome(false, hasMedia: true, animated: false)
+        #expect(!tabs.isTabBarHidden)
+    }
+
+    // MARK: - The danmaku replaces the stream (#1699)
+
+    private static func streams(reactions: Int) -> FeedViewModel.CommentStreams {
+        FeedViewModel.CommentStreams(
+            reactions: (0..<reactions).map { TickerCommentModel(id: "r\($0)", text: "fire \($0)") },
+            subtitles: [SubtitleCue(id: "s0", text: "A whole sentence worth reading.")],
+            commentCount: reactions + 1
+        )
+    }
+
+    private static func streamZone(of chrome: SnapChromeView) throws -> SnapSubtitleView {
+        try #require(chrome.subviews.lazy.compactMap { $0 as? SnapSubtitleView }.first)
+    }
+
+    /// On the root, a danmaku with bubbles takes the stream's seat on the
+    /// author row and the stream stays down; with none, the stream speaks.
+    @Test func aDanmakuReplacesTheStreamOnTheRoot() throws {
+        let chrome = SnapActionColumnLayoutTests.chrome()
+        let model = SnapActionColumnLayoutTests.mediaModel(mediaURL: URL(string: "mock://media/1"))
+        chrome.configure(with: model)
+        chrome.showsAuthorRow = true
+        chrome.setAuthorRow(model, badge: .follow, pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        let stream = try Self.streamZone(of: chrome)
+
+        chrome.updateCommentStreams(Self.streams(reactions: 8))
+        chrome.setNeedsLayout()
+        chrome.layoutIfNeeded()
+        #expect(stream.isHidden, "the stream shows under a running danmaku")
+        #expect(abs(chrome.debugTickerFrame.maxY - (chrome.authorRow.frame.minY - Spacing.md)) < 0.5,
+                "the danmaku is not in the stream's seat")
+
+        chrome.updateCommentStreams(Self.streams(reactions: 0))
+        chrome.setNeedsLayout()
+        chrome.layoutIfNeeded()
+        #expect(!stream.isHidden, "no danmaku, and the stream stayed down")
+        #expect(abs(chrome.debugStreamFrame.maxY - (chrome.authorRow.frame.minY - Spacing.md)) < 0.5)
+    }
+
+    /// Off the root, the danmaku rides above the stream as it always has.
+    @Test func offTheRootTheDanmakuRidesAboveTheStream() throws {
+        let chrome = SnapActionColumnLayoutTests.chrome()
+        chrome.configure(with: SnapActionColumnLayoutTests.mediaModel(mediaURL: URL(string: "mock://media/1")))
+        let stream = try Self.streamZone(of: chrome)
+        chrome.updateCommentStreams(Self.streams(reactions: 8))
+        chrome.layoutIfNeeded()
+        #expect(!stream.isHidden)
+        #expect(chrome.debugTickerFrame.maxY <= chrome.debugStreamFrame.minY)
     }
 
     // MARK: - The column

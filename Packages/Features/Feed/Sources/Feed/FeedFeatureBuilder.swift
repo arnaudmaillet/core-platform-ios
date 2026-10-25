@@ -200,11 +200,15 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     public func makeForYouFullScreenFeedViewController() -> UIViewController {
         let feed = makeSnapFeed(
             viewModel: FeedViewModel(
-                repository: discovery ?? repository,
+                // Media posts only (#1699): a text-only post is filtered out
+                // of every page the Discover list serves.
+                repository: MediaOnlyFeedProvider(base: discovery ?? repository),
                 engagementProvider: engagementProvider,
                 commentsProvider: commentsProvider,
                 realtime: realtime,
-                composedPosts: composedPosts,
+                // No composed posts at the top: the viewer's own TEXT post
+                // would land in a media-only feed (#1699).
+                composedPosts: nil,
                 router: router,
                 entities: entities
             )
