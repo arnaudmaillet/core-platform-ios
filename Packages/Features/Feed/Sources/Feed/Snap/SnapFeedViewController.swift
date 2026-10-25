@@ -549,6 +549,8 @@ final class SnapFeedViewController: UIViewController {
     /// Held for the length of a dismissal gesture, so the release restores the
     /// pager's engagement-owned state instead of enabling it. See `ScrollLock`.
     private var pagerLock = ScrollLock()
+    /// Every page whose media carousel the content freeze holds (#1738).
+    private let carouselFreeze = CarouselFreezeLedger<SnapFeedCell>()
     /// The pager's `contentOffset.y` captured when an interactive page-swipe
     /// begins — the datum the drive offsets from. Nil when no drive is
     /// live. The drive hand-moves `contentOffset` while the pager's own pan
@@ -5865,6 +5867,10 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         }
         // A page coming on while the side list is open wears its pose (#1509).
         (cell as? SnapFeedCell)?.setSideListOverlayOffset(sideListOverlayOffset)
+        // …and the content freeze's state, frozen or not (#1738).
+        if let snapCell = cell as? SnapFeedCell {
+            carouselFreeze.display(snapCell) { $0.setCarouselScrollEnabled($1) }
+        }
         viewModel.willDisplayItem(at: indexPath.item)
         // Recompute the active index (a new page may have become active), then —
         // crucially — activate THIS cell if it's the active one. The dispatcher
@@ -8017,10 +8023,15 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // brought within reach can be under the finger by the time the grab
         // begins, and a frozen carousel that is never thawed is a post whose
         // media cannot be paged for the rest of its life.
-        var carousels = 0
-        for case let cell as SnapFeedCell in collectionView.visibleCells {
-            cell.setCarouselScrollEnabled(enabled)
-            if cell.hasMediaCarousel { carousels += 1 }
+        //
+        // ⚠️ AND THE THAW REACHES EVERY CELL THE FREEZE TOUCHED (#1738): the
+        // cells visible at the thaw are not always the ones visible at the
+        // freeze — see `CarouselFreezeLedger`.
+        let visible = collectionView.visibleCells.compactMap { $0 as? SnapFeedCell }
+        if enabled {
+            carouselFreeze.thaw(visible) { $0.setCarouselScrollEnabled($1) }
+        } else {
+            carouselFreeze.freeze(visible) { $0.setCarouselScrollEnabled($1) }
         }
         #if DEBUG
         // `-dismiss-lock-log`: whether the freeze actually REACHED a stream.
@@ -8031,6 +8042,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // an engaged panel at swipe time, which is the assumption the forward
         // above rests on. A `stream=nil` here would mean the lock is a no-op.
         if ProcessInfo.processInfo.arguments.contains("-dismiss-lock-log") {
+            let carousels = visible.filter(\.hasMediaCarousel).count
             print("[dismiss-lock] contentScroll=\(enabled ? "on" : "OFF") "
                   + "stream=\(stream == nil ? "nil" : "engaged") "
                   + "pager=\(collectionView.isScrollEnabled ? "SCROLLABLE" : "frozen") "

@@ -3230,6 +3230,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     override func prepareForReuse() {
         super.prepareForReuse()
         setSideListOverlayOffset(0)
+        // A frozen carousel never goes on to another post (#1738): the next
+        // display takes the screen's freeze state again.
+        setCarouselScrollEnabled(true)
         isActive = false
         // A recycled cell owns nothing: the next post to land here is told
         // whether it has the screen, and a stale `true` would make that
