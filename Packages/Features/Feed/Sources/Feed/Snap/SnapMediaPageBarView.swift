@@ -181,9 +181,10 @@ final class SnapMediaPageBarView: UIView {
     var onBrowseEnded: ((Int) -> Void)?
 
     /// One tick per page crossed while browsing, behind the Haptics setting
-    /// (`Haptics.swift`). An IMPACT, not the selection tick: the owner found
-    /// the selection one too faint on the device (2026-10-25).
-    private let browseTick = HapticImpact(style: .medium)
+    /// (`Haptics.swift`). A LIGHT IMPACT (the owner on the device,
+    /// 2026-10-25): the selection tick was too faint, the medium impact too
+    /// strong.
+    private let browseTick = HapticImpact(style: .light)
 
     /// The viewer asked to move the playhead of the clip the strip is drawing.
     /// The HOST owns playback, for the reason it owns the carousel.
@@ -1027,7 +1028,6 @@ final class SnapMediaPageBarView: UIView {
         switch state {
         case .began:
             wake()
-            animate(\.handling, to: 1, duration: Self.handleDuration)
             touchDownX = x
             travelled = false
             isDraggingPlayhead = false
@@ -1036,6 +1036,10 @@ final class SnapMediaPageBarView: UIView {
             // the pages (#1734).
             dragMeansPlayhead = isScrubbingAClip
                 && segmentFrame(Int(position.rounded())).map { x >= $0.minX && x <= $0.maxX } == true
+            // Only the clip's bar grows under the thumb — it is the playhead's
+            // handle. Segments do not (the owner, 2026-10-25): a drag hands
+            // their line to the filmstrip, and a tap selects at once.
+            if dragMeansPlayhead { animate(\.handling, to: 1, duration: Self.handleDuration) }
             // From what the bar SHOWS, which is a hold still waiting for the
             // player after the last release — anchoring on the player instead
             // would throw the bar back to where it was before that release.

@@ -521,6 +521,17 @@ struct SnapMediaPageBarTests {
         #expect(view.debugCursorSize == nil)
     }
 
+    /// …and stays thin under the thumb (the owner, 2026-10-25): a drag hands
+    /// the segments' line to the filmstrip (#1734), so only a clip's bar —
+    /// the playhead's handle — grows when touched.
+    @Test func touchedSegmentsStayThin() {
+        let view = bar(pages: 4)
+        view.debugScrub(.began, atX: 30)
+        view.debugFinishTweens()
+        #expect(view.debugTrackHeight(1) == SnapMediaPageBarView.clipTrackHeight)
+        view.debugScrub(.ended, atX: 30)
+    }
+
     /// ⚠️ LOADING SHOWS THE PULSE, AND THE TWO CROSS-FADE (#1537): the
     /// indicator gives way to the centre pulse while the clip loads, and comes
     /// back, at its position, when it is ready.
