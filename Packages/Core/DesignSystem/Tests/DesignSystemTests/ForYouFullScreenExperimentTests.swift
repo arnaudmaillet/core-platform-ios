@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UIKit
 @testable import DesignSystem
 
 /// EXPERIMENTAL (#1681): off by default; on by the launch argument or the
@@ -20,6 +21,18 @@ struct ForYouFullScreenExperimentTests {
             ForYouFullScreenExperiment.arguments = savedArguments
         }
         body(defaults)
+    }
+
+    /// The tab bar dark on the For You tab only, and only in the experiment
+    /// (#1697).
+    @Test func theTabBarIsDarkOnTheForYouTabOnlyInTheExperiment() {
+        withSeams(arguments: ["app", "-foryou-fullscreen"]) { _ in
+            #expect(ForYouFullScreenExperiment.tabBarStyle(forYouSelected: true) == .dark)
+            #expect(ForYouFullScreenExperiment.tabBarStyle(forYouSelected: false) == .unspecified)
+        }
+        withSeams(arguments: []) { _ in
+            #expect(ForYouFullScreenExperiment.tabBarStyle(forYouSelected: true) == .unspecified)
+        }
     }
 
     @Test func itIsOffByDefault() {

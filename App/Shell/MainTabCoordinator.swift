@@ -40,6 +40,9 @@ import Upload
 final class MainTabCoordinator: NSObject, Coordinator {
     var childCoordinators: [Coordinator] = []
     let tabBarController = ShellTabBarController()
+    /// The window's appearance is watched once the experimental dark tab bar
+    /// first shows (#1697, `applyTabBarStyle`).
+    fileprivate var isObservingWindowStyle = false
 
     /// Internal (not private) only for the +QA hooks.
     let container: AppContainer
@@ -63,7 +66,12 @@ final class MainTabCoordinator: NSObject, Coordinator {
         }
         // Baked for the shell's traits — the app's appearance, not iOS's
         // (#1501).
-        bell.traits = { [weak self] in self?.tabBarController.view.traitCollection ?? .current }
+        // The WINDOW's traits — the app's appearance — not the tab bar
+        // controller's, which the experimental dark tab bar overrides (#1697):
+        // the bell lives in the pages' bars, which keep the app's look.
+        bell.traits = { [weak self] in
+            self?.tabBarController.view.window?.traitCollection ?? self?.tabBarController.view.traitCollection ?? .current
+        }
         return bell
     }()
     /// Notifications, as a drawer BEHIND the shell: the whole tab bar
@@ -337,6 +345,8 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // On screen, the bar's buttons exist: redraw them once (#694).
         tabBarController.onAppear = { [weak self] in
             DispatchQueue.main.async { self?.refreshTabLabelsIfNeeded() }
+            // The window exists now: the pages take its appearance (#1697).
+            self?.applyTabBarStyle()
         }
 
         loadAvatar()
@@ -437,9 +447,17 @@ final class MainTabCoordinator: NSObject, Coordinator {
 // MARK: - Tab selection
 
 extension MainTabCoordinator: UITabBarControllerDelegate {
+    /// The tab API's selection — a tap on a tab arrives HERE, not through
+    /// `didSelect viewController` (#1697: the dark bar never came on a real
+    /// tap, only through `selectTab`).
+    func tabBarController(_ tabBarController: UITabBarController, didSelectTab selectedTab: UITab, previousTab: UITab?) {
+        applyTabBarStyle()
+    }
+
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
         refreshUnreadBadge()
         syncTabBarVisibility()
+        applyTabBarStyle()
         // Selection resizes the tab buttons (the selected one carries the
         // lens), so the overlays have to follow.
         alignMenuOverlays()
@@ -462,6 +480,41 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// A viewer standing on a tab that leaves (a member on Messages who logs
     /// out) lands on Explore — set before the bar changes, so the bar never
     /// holds a selection it no longer has.
+    /// EXPERIMENTAL (#1697): the tab bar dark over the For You root's
+    /// full-screen feed, the app's own on every other tab — an appearance,
+    /// never an alpha (`native-chrome-uikit-only`).
+    ///
+    /// ⚠️ ON THE TAB BAR CONTROLLER: iOS 26's floating bar takes its traits
+    /// from it and ignores the `tabBar`'s own override (measured: no change).
+    /// Its pages are given the app's appearance back — the window's — so a
+    /// text page, a pushed profile or a sheet the feed presents stays as the
+    /// app draws it.
+    private func applyTabBarStyle() {
+        let forYou = tabBarController.selectedTab?.identifier == AppTab.forYou.rawValue
+        let style = ForYouFullScreenExperiment.tabBarStyle(forYouSelected: forYou)
+        let window = tabBarController.view.window
+        let pages: UIUserInterfaceStyle = style == .unspecified
+            ? .unspecified
+            : (window?.traitCollection.userInterfaceStyle ?? .unspecified)
+        // Through the TABS (`UITab.viewController`): with the tab API,
+        // `viewControllers` does not list them.
+        let tabPages = tabBarController.tabs.compactMap(\.viewController) + (tabBarController.viewControllers ?? [])
+        for page in tabPages where page.overrideUserInterfaceStyle != pages {
+            page.overrideUserInterfaceStyle = pages
+        }
+        if tabBarController.overrideUserInterfaceStyle != style {
+            tabBarController.overrideUserInterfaceStyle = style
+        }
+        // The app's appearance can change under a dark bar (iOS's switch, the
+        // app's theme): the pages follow the window, not the bar.
+        if style != .unspecified, let window, !isObservingWindowStyle {
+            isObservingWindowStyle = true
+            window.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: UIWindow, _) in
+                self?.applyTabBarStyle()
+            }
+        }
+    }
+
     private func applyBar(animated: Bool) {
         createItem.showSignIn(!isMember)
         createHold.isEnabled = isMember
@@ -476,6 +529,7 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
            let explore = orderedTabs.first(where: { $0.0 == .explore })?.1.tab {
             tabBarController.selectedTab = explore
         }
+        applyTabBarStyle()
         let current = tabBarController.tabs
         guard current.count != wanted.count || zip(current, wanted).contains(where: { $0 !== $1 }) else { return }
         tabBarController.setTabs(wanted, animated: animated)
@@ -504,8 +558,9 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         for (_, coordinator) in orderedTabs {
             guard let glyphTab = coordinator as? any GlyphTab else { continue }
             let tab = glyphTab.tab
-            // Baked for the window's traits — the app's appearance (#1501).
-            let traits = tabBarController.view.traitCollection
+            // Baked for the BAR's traits (#1501): the app's appearance, or the
+            // dark the experimental For You tab gives the bar (#1697).
+            let traits = tabBarController.tabBar.traitCollection
             tab.image = glyphTab.glyph.image(selected: false, badged: glyphTab.hasUnread, traits: traits)
             // The badge said aloud (#1196): an image tells VoiceOver nothing.
             tab.accessibilityValue = glyphTab.hasUnread ? glyphTab.glyph.unreadAccessibilityValue : nil
@@ -735,6 +790,7 @@ extension MainTabCoordinator: AppNavigating {
             tabBarController.dismiss(animated: true)
         }
         tabBarController.selectedTab = match.1.tab
+        applyTabBarStyle()
         // Programmatic selection skips `didSelect` — reconcile the bar here.
         syncTabBarVisibility()
     }

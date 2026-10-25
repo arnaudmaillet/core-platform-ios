@@ -640,6 +640,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.showsPostActions = shown
         chrome.postActions.setSaved(saved)
     }
+    /// The caption's register over the media: `.soft` on the For You root
+    /// (#1697), `.standard` everywhere else.
+    func setCaptionStyle(_ style: SnapChromeView.CaptionStyle) { chrome.captionStyle = style }
     /// The capsule's star for the post on show, after a save anywhere.
     func setPostSaved(_ saved: Bool) { chrome.postActions.setSaved(saved) }
     /// The capsule's star was tapped: the screen saves or unsaves the post.
