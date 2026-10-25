@@ -48,7 +48,8 @@ protocol ForYouSectorPage: UIViewController {
 ///
 /// **The pager gives away what it cannot use** (`yieldsPastEnds`): on Shots,
 /// the last page, a leftward drag belongs to its own swipe chain.
-final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting, ForYouSectorPaging {
+final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting, ForYouSectorPaging,
+    DrawerSwipeHosting {
     static let feedIndex = 0
     static let shotsIndex = 1
     static let selectorItemID = "foryou.sector.selector"
@@ -67,6 +68,10 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
     private var isVisible = false
 
     var isShowingShots: Bool { activeIndex == Self.shotsIndex }
+
+    /// On Feed, the first page (#1739): a rightward swipe, which the pager
+    /// yields past its first page, opens the notifications drawer.
+    var opensDrawerOnRightwardSwipe: Bool { activeIndex == Self.feedIndex }
     var onPageChange: (() -> Void)?
 
     /// Shots pauses behind the notifications drawer (#1703).

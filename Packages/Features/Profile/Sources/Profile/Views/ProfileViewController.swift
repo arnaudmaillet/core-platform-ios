@@ -18,10 +18,17 @@ typealias ProfileGridPageFactory = (_ style: PostGridPageStyle, _ savesPosts: Bo
 /// A person's hero page (`HeroPageViewController`, #1655): the container's
 /// layout, travel, dock and bar dress, with the profile's own data, tabs,
 /// bar items, menus and post opening.
-final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAccessoryHosting, ProfileRouteAnswering {
+final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAccessoryHosting, ProfileRouteAnswering,
+    DrawerSwipeHosting {
     /// For You's grid page (#1273, epic #1269): the profile's pages and its
     /// media gallery are For You's, so every tile behaves as For You's does.
     private let makeGridPage: ProfileGridPageFactory
+
+    /// The profile tab's root, not a pushed profile.
+    private var isTabRoot: Bool { navigationController?.viewControllers.first === self }
+
+    /// On the first tab of the profile TAB's root (#1739): see `DrawerSwipeHosting`.
+    var opensDrawerOnRightwardSwipe: Bool { isTabRoot && galleryPager.activePageIndex == 0 }
 
     /// Internal (not private) only for the +QA hooks.
     let viewModel: ProfileViewModel
@@ -527,6 +534,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // The tab ROOT's first tab hands a rightward swipe to the drawer
+        // (#1739); a pushed profile's first tab is its own dismissal.
+        galleryPager.yieldsRightwardDragOnFirstPage = isTabRoot
         Task { [weak self] in await self?.viewModel.refreshShareToken() }
         // ⚠️ **AS EARLY AS THE TRANSITION ALLOWS, AND `viewDidAppear` IS NOT
         // EARLY.** Measured on a tab switch, headless: `viewWillAppear` at

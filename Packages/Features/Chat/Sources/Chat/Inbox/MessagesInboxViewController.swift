@@ -37,7 +37,10 @@ import UIKit
 /// notifications bell leading and the balance beside the magnifier — which
 /// are the app's rather than the inbox's, and so page with nothing either.
 final class MessagesInboxViewController: UIViewController, MessagesInboxCategorySelecting,
-    HeaderAccessoryHosting {
+    HeaderAccessoryHosting, DrawerSwipeHosting {
+    /// On All, the first category (#1739): see `DrawerSwipeHosting`.
+    var opensDrawerOnRightwardSwipe: Bool { (pagerView?.activeIndex ?? initialIndex) == 0 }
+
     /// The inbox's surfaces, in paging order.
     private let surfaces: [any InboxSurface]
     /// The shared glass tab capsule, hosted in the navigation bar's title slot.
@@ -176,6 +179,11 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         pendingCategory = nil
         pagerView = HorizontalPagerView(lazyPages: surfaces.map { surface in { surface.view } }, initialIndex: startIndex)
         pagerView.pin(to: view)
+        // On the first category a rightward swipe has nothing to page back to:
+        // it is the notifications drawer's (#1739, `DrawerSwipeHosting`).
+        pagerView.yieldsDrag = { [weak self] velocity in
+            velocity.x > 0 && abs(velocity.x) > abs(velocity.y) && self?.opensDrawerOnRightwardSwipe == true
+        }
         // ⚠️ AFTER the pager, every time. `configureSearch` runs first and adds the
         // search host, so the pager lands on top of it — the bar was mounted,
         // inset for, and completely invisible behind an opaque page.

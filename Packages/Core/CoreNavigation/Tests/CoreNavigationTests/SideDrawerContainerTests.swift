@@ -293,6 +293,42 @@ struct SideDrawerContainerTests {
         }
     }
 
+    /// #1739 (the owner, 2026-10-25): from ANYWHERE on a first tab, the drag
+    /// goes behind the page's horizontal scrollers — one with somewhere to go
+    /// keeps it, one at its start (a pager on its first page, a rail at rest)
+    /// would only rubber-band and makes way — and alongside vertical lists.
+    @Test func fromAnywhereTheDrawerGoesBehindTheMainScrollers() {
+        hosting { container, main, _ in
+            container.openRegion = .anywhere
+            let rail = UIScrollView(frame: CGRect(x: 0, y: 100, width: 402, height: 120))
+            rail.contentSize = CGSize(width: 1200, height: 120)
+            main.view.addSubview(rail)
+            let list = UIScrollView(frame: CGRect(x: 0, y: 300, width: 402, height: 400))
+            list.contentSize = CGSize(width: 402, height: 2000)
+            main.view.addSubview(list)
+            main.view.layoutIfNeeded()
+
+            // The rail waits for the drawer, which declines at once a drag the
+            // rail can use; the list recognises alongside.
+            #expect(container.gestureRecognizer(container.edgePan, shouldBeRequiredToFailBy: rail.panGestureRecognizer))
+            #expect(!container.gestureRecognizer(container.edgePan, shouldBeRequiredToFailBy: list.panGestureRecognizer))
+            #expect(container.gestureRecognizer(container.edgePan, shouldRecognizeSimultaneouslyWith: list.panGestureRecognizer))
+            #expect(!container.gestureRecognizer(container.edgePan, shouldRecognizeSimultaneouslyWith: rail.panGestureRecognizer))
+
+            // At rest at its start, the rail makes way; scrolled along, it keeps it.
+            let onRail = rail.convert(CGPoint(x: 200, y: 60), to: main.view)
+            #expect(!container.scrollerKeepsRightwardDrag(at: onRail))
+            rail.contentOffset = CGPoint(x: 300, y: 0)
+            #expect(container.scrollerKeepsRightwardDrag(at: rail.convert(CGPoint(x: 500, y: 60), to: main.view)))
+            // Over the list (no sideways content), nothing keeps it.
+            #expect(!container.scrollerKeepsRightwardDrag(at: list.convert(CGPoint(x: 200, y: 100), to: main.view)))
+
+            // The default region is unchanged: every main-screen drag waits.
+            container.openRegion = .leadingEdge
+            #expect(container.gestureRecognizer(container.edgePan, shouldBeRequiredToFailBy: list.panGestureRecognizer))
+        }
+    }
+
     @Test func openIsIdempotentAndTheStatusBarFollowsTheDrawer() {
         hosting { container, main, drawer in
             #expect(container.childForStatusBarStyle === main)

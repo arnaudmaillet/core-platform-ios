@@ -12,9 +12,16 @@ import UIKit
 /// an iPhone). This object is the shell's half: what goes in the drawer, WHEN
 /// the edge may open it.
 ///
-/// ## Where the left edge belongs to the drawer
+/// ## Where a rightward swipe belongs to the drawer
 ///
-/// Only on a tab ROOT — Explore, For You, Messages, Profile — at rest:
+/// ⚠️ ON THE FIRST TAB OF FOR YOU, MESSAGES OR PROFILE, FROM ANYWHERE (#1739,
+/// the owner 2026-10-25), not from the left edge of every root as before:
+/// those roots are horizontally paged tabs, and on the first one a rightward
+/// swipe has nothing to page back to (`DrawerSwipeHosting`). The drag waits
+/// for the page's own horizontal scrollers (`OpenRegion.anywhere`). Explore
+/// (the map) opens it only from the bell.
+///
+/// And only on a tab ROOT at rest:
 /// - on a pushed screen the edge is the stack's own back swipe (see
 ///   `NativePopGestureEnabler`), and the drawer must not compete with it;
 /// - with anything presented over the shell (a sheet, the composer, a
@@ -43,6 +50,7 @@ final class NotificationsDrawer {
         BottomEdgeBlurView.install(in: navigation)
         container = SideDrawerContainerViewController(main: tabBarController, drawer: navigation)
         container.dimmingAccessibilityLabel = "Close notifications"
+        container.openRegion = .anywhere
         // The screen it slides aside is still on screen but not watched: its
         // media pauses (#1703, the owner: the feed played on behind it).
         container.onDidOpen = { [weak self] in self?.onSetAsideChange?(true) }
@@ -52,7 +60,8 @@ final class NotificationsDrawer {
         // ungated, so it opens the drawer once they have.
         container.canOpenInteractively = { [weak self, weak tabBarController] in
             guard let self, let tabBarController else { return false }
-            return edgeBelongsToDrawer && MemberGates.gate(from: tabBarController)?.isMember != false
+            return edgeBelongsToDrawer && rootOpensOnSwipe
+                && MemberGates.gate(from: tabBarController)?.isMember != false
         }
     }
 
@@ -80,6 +89,12 @@ final class NotificationsDrawer {
 
     func close(completion: (() -> Void)? = nil) {
         container.close(animated: true, completion: completion)
+    }
+
+    /// The selected root is showing its first tab (`DrawerSwipeHosting`).
+    var rootOpensOnSwipe: Bool {
+        let stack = tabBarController.selectedViewController as? UINavigationController
+        return (stack?.viewControllers.first as? DrawerSwipeHosting)?.opensDrawerOnRightwardSwipe == true
     }
 
     /// True on a tab root at rest with nothing over it. See the type's header.

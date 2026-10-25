@@ -99,6 +99,14 @@ open class HeroPagePager<Tab: Equatable>: UIView {
     /// the whole surface when there is no page to the left.
     public var activePageIndex: Int { activeIndex }
 
+    /// Whether a rightward drag on the FIRST page is declined, for a surface
+    /// behind the pager to take — a tab root's drawer (#1739). Off by default:
+    /// a pushed page's first tab belongs to its own dismissal.
+    public var yieldsRightwardDragOnFirstPage: Bool {
+        get { scrollView.yieldsRightwardDragAtStart }
+        set { scrollView.yieldsRightwardDragAtStart = newValue }
+    }
+
     private let scrollView = PagerScrollView()
     /// The scroll view's delegate: a generic class cannot implement an
     /// Objective-C protocol in an extension, so a plain object forwards.
@@ -749,8 +757,16 @@ private final class PagerScrollView: UIScrollView {
     /// believes the other has the drag.
     private static var popEdgeZone: CGFloat { PagedScreenDismissalPolicy.edgeZone }
 
+    /// See `HeroPagePager.yieldsRightwardDragOnFirstPage`.
+    var yieldsRightwardDragAtStart = false
+
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if gestureRecognizer === panGestureRecognizer {
+            let drag = panGestureRecognizer.velocity(in: self)
+            if yieldsRightwardDragAtStart, drag.x > 0, abs(drag.x) > abs(drag.y),
+               contentOffset.x <= -adjustedContentInset.left + 0.5 {
+                return false
+            }
             // Location is in content coordinates; remove the offset to get
             // the viewport-relative x the edge zone is defined in.
             let viewportX = gestureRecognizer.location(in: self).x - contentOffset.x
