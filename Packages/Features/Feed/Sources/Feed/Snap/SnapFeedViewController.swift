@@ -3339,6 +3339,10 @@ final class SnapFeedViewController: UIViewController {
         // frame is what we want the spring to animate FROM, not something
         // for it to interpolate towards.
         UIView.performWithoutAnimation { cell.contentView.layoutIfNeeded() }
+        // A panel opened over an open side list stands where the page does —
+        // BEFORE the entrance, which would otherwise carry the bar from where
+        // it was released (0) for the whole engagement (#1730).
+        detail?.setOverlayOffset(sideListOverlayOffset)
         // ⚠️ NOTHING TO ANIMATE FROM. A post opened AT its comments has never
         // been seen in the other layout, so there is no previous state for a
         // spring to carry the eye between — animating here would show the
@@ -3361,8 +3365,6 @@ final class SnapFeedViewController: UIViewController {
             toEngaged: true, duration: SnapCommentsLayout.engageDuration
         )
         }
-        // A panel opened over an open side list stands where the page does.
-        detail?.setOverlayOffset(sideListOverlayOffset)
         #if DEBUG
         // The discriminating measurement: frame gaps once the animation is
         // OVER and the engaged interface is simply sitting there. If it drops

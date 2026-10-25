@@ -71,6 +71,25 @@ struct ComposerSideListTests {
         #expect(controller.debugComposerOverlayOffset == 0)
     }
 
+    /// The owner's video (2026-10-25): comments closed and reopened over the
+    /// open side list — the panel released at 0, re-engaged at the list's
+    /// offset — drew the composer without the offset for the whole entrance,
+    /// then jumped. The entrance carries the bar from its MODEL transform.
+    @Test func aReengagedPanelEntersAtTheOffset() throws {
+        let (controller, window) = SnapActionColumnLayoutTests.engagedPanel()
+        defer { window.isHidden = true }
+        let composer = try #require(SnapActionColumnLayoutTests.firstView(CommentsInputBar.self, in: controller.view))
+        // Released at 0 and committed — the presentation layer shows identity.
+        controller.setOverlayOffset(0)
+        CATransaction.flush()
+        // Re-engaged over the open list.
+        controller.setOverlayOffset(40)
+        controller.animateEngagedTransition(toEngaged: true, duration: 0.3)
+        let entrance = try #require(composer.layer.animation(forKey: "comments-engage-transform") as? CABasicAnimation)
+        let from = try #require((entrance.fromValue as? NSValue)?.caTransform3DValue ?? entrance.fromValue as? CATransform3D)
+        #expect(abs(from.m42 - 40) < 0.5, "the entrance starts the composer at \(from.m42), not at the list's offset")
+    }
+
     /// The owner's video (2026-10-25): with the side list open, the keyboard
     /// left the risen row `offset` too low, half behind its suggestion bar.
     /// The row rides `sm` above the keyboard whatever the bar's offset, and
