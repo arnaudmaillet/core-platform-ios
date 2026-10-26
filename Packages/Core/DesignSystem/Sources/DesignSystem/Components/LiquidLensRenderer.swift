@@ -96,6 +96,16 @@ final class LiquidLensRenderer {
         var capsuleHalfWidth: Float = 0
         var capsuleHalfHeight: Float = 0
         var capsuleCover: Float = 0
+        /// The native glass's ring shadow (`glassBackground` ringShadow, read
+        /// off the live lens: opacity 0.1, offset 8, stroke 4, blur 3): a soft
+        /// dark ring along the lens's outline, dropped by `ringOffsetY` px.
+        /// Its top run lies inside the lens (the band ~9pt under the top), its
+        /// bottom run below it (the soft shadow under the lens), and where it
+        /// crosses the rim the fringe splits it into the pastel colours.
+        var ringOpacity: Float = 0
+        var ringOffsetY: Float = 0
+        var ringStroke: Float = 1
+        var ringBlur: Float = 1
         /// The native lens's key/fill highlight (`CASDFKeyFillHighlightEffect`,
         /// read off the live tab bar lens): a key light on the rim facing UP
         /// and a fill light facing DOWN, each over `keySpread` radians, a thin
@@ -292,6 +302,7 @@ final class LiquidLensRenderer {
         float iridescence, iridescenceWidth, backdropLuma;
         float bevel, bevelWidth, bevelShade, topBand, topBandDepth;
         float capsuleCentreX, capsuleCentreY, capsuleHalfWidth, capsuleHalfHeight, capsuleCover;
+        float ringOpacity, ringOffsetY, ringStroke, ringBlur;
         float keyAmount, fillAmount, keySpread, keyHeight, diffuseHeight, diffuseAmount, diffuseSpread;
         float pageR, pageG, pageB, pageRefraction, refractAmount, refractHeight, refractSplit;
         float aberrationAmount, aberrationDirX, aberrationDirY, aberrationWidth;
@@ -325,6 +336,13 @@ final class LiquidLensRenderer {
         return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
     }
 
+    static inline float ringShadowAt(float2 q, constant Uniforms &u) {
+        if (u.ringOpacity <= 0.0) { return 0.0; }
+        float ds = lensSDF(q - float2(0.0, u.ringOffsetY), u);
+        float halfStroke = u.ringStroke * 0.5;
+        return u.ringOpacity * (1.0 - smoothstep(halfStroke, halfStroke + max(u.ringBlur, 0.5), abs(ds)));
+    }
+
     static inline float4 over(float4 c, float3 rgb, float a) {
         return float4(c.rgb * (1.0 - a) + rgb * a, c.a + a * (1.0 - c.a));
     }
@@ -341,6 +359,14 @@ final class LiquidLensRenderer {
             float ds = lensSDF(p - float2(0.0, u.shadowOffsetY), u);
             float s = 1.0 - smoothstep(0.0, max(u.shadowRadius, 1.0), ds);
             shadow = u.shadowOpacity * s * s;
+        }
+        // Outside the lens the ring shadow is drawn as it is: the soft shade
+        // under the native lens.
+        if (d > -1.0) {
+            // (A quarter of it: filmed next to the native control, whose
+            // shade under the lens is barely there — its ring is mostly
+            // composited inside the glass.)
+            shadow = max(shadow, 0.25 * ringShadowAt(p, u) * smoothstep(-1.0, 1.0, d));
         }
         const float aa = 0.75;
         if (d > aa && shadow <= 0.002) { return float4(0.0); }
@@ -407,6 +433,22 @@ final class LiquidLensRenderer {
             }
         }
 
+        // The ring shadow inside the lens, through the native fringe: split per
+        // channel along the fixed −15° direction within the 14pt band, so its
+        // soft edges turn into the native lens's pastel colours where they
+        // cross the rim, and stay grey further in (the band under the top).
+        if (u.ringOpacity > 0.0) {
+            float band = 1.0 - smoothstep(0.0, max(u.aberrationWidth, 1.0), -d);
+            float2 split = float2(u.aberrationDirX, u.aberrationDirY) * u.aberrationAmount * band;
+            // (At 60%: the native's pastels are paler than the full ring gave.)
+            float3 r = 0.6 * float3(ringShadowAt(p - split, u), ringShadowAt(p, u), ringShadowAt(p + split, u));
+            float A = max(r.r, max(r.g, r.b));
+            if (A > 0.002) {
+                float3 rgb = u.backdropLuma * (float3(A) - r);
+                c = float4(c.rgb * (1.0 - A) + rgb, c.a + A * (1.0 - c.a));
+            }
+        }
+
         // The measured rim.
         if (u.outline > 0.0) {
             float s1 = u.scale;
@@ -417,22 +459,8 @@ final class LiquidLensRenderer {
             c = over(c, float3(0.0), u.outline * darkLine * (0.18 + 0.02 * side));
             float brightLine = smoothstep(0.6 * s1, 1.0 * s1, -d) * (1.0 - smoothstep(1.4 * s1, 2.1 * s1, -d));
             c = over(c, float3(1.0), u.outline * brightLine * (0.10 + 0.12 * abs(n2.y)));
-            float top = u.centreY - u.halfHeight;
-            float dyTop = (p.y - top) / s1;
-            float bump = smoothstep(1.7, 9.0, dyTop) * (1.0 - smoothstep(9.0, 19.0, dyTop));
-            // The ring shadow (`glassBackground` ringShadow: opacity 0.1, offset
-            // 8, stroke 4, blur 3 — read off the native tab bar lens): a dark
-            // band ~7% centred ~9pt under the top edge, gone by 19pt.
-            // (Tuned to the tab bar lens's measured band: 235 on a 251 page.)
-            c = over(c, float3(0.0), 0.025 * u.outline * bump);
-            // And the native lens's interior darkens near its rim all round
-            // (measured on a white page: ~5% for the first 8pt, fading by
-            // 15pt) — the backdrop refracted inwards; it is what reads as
-            // volume, with no light from any side.
-            float rimShade = 1.0 - smoothstep(6.0 * s1, 15.0 * s1, -d);
-            // (Light: next to the native segmented control the ring under the
-            // rim stays white; a 5% shade read as a second grey outline.)
-            c = over(c, float3(0.0), 0.02 * u.outline * rimShade * smoothstep(0.8 * s1, 1.6 * s1, -d));
+            // (The band ~9pt under the top and the interior's shade near the
+            // rim are the ring shadow above, no longer approximated here.)
             float bottom = u.centreY + u.halfHeight;
             float dyBot = (bottom - p.y) / s1;
             float fill = pow(saturate(1.0 - dyBot / 6.0), 1.5) * smoothstep(0.6 * s1, 1.2 * s1, -d);

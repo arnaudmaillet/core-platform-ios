@@ -154,6 +154,12 @@ final class SelectorLiquidLens {
         /// No drop shadow: the native lens has none, and one under ours read
         /// oddly on device (owner, 2026-10-26).
         static let shadowOpacity: Float = 0
+        /// The native glass's ring shadow, as read: opacity 0.1, dropped 8pt,
+        /// a 4pt stroke blurred 3pt (see `LiquidLensRenderer`).
+        static let ringOpacity: Float = 0.1
+        static let ringOffsetY: CGFloat = 8
+        static let ringStroke: CGFloat = 4
+        static let ringBlur: CGFloat = 3
         static let shadowRadius: CGFloat = 10
         static let shadowOffsetY: CGFloat = 6
         /// How far the glass may draw beyond the capsule: the grown lens and its shadow.
@@ -796,7 +802,11 @@ final class SelectorLiquidLens {
         u.shadowOpacity = Tuning.shadowOpacity * Float(lift)
         u.shadowRadius = Float(Tuning.shadowRadius * scale)
         u.shadowOffsetY = Float(Tuning.shadowOffsetY * scale)
-        let margin = (Tuning.shadowRadius + Tuning.shadowOffsetY + 4) * scale
+        u.ringOpacity = Tuning.ringOpacity * Float(lift)
+        u.ringOffsetY = Float(Tuning.ringOffsetY * scale)
+        u.ringStroke = Float(Tuning.ringStroke * scale)
+        u.ringBlur = Float(Tuning.ringBlur * scale)
+        let margin = (max(Tuning.shadowRadius + Tuning.shadowOffsetY, Tuning.ringOffsetY + Tuning.ringStroke + Tuning.ringBlur) + 4) * scale
         u.quadMinX = Float(max(0, inGlass.minX * scale - margin))
         u.quadMinY = Float(max(0, inGlass.minY * scale - margin))
         u.quadMaxX = Float(min(glass.bounds.width * scale, inGlass.maxX * scale + margin))
