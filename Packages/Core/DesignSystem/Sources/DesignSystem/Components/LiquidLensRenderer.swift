@@ -106,6 +106,17 @@ final class LiquidLensRenderer {
         var ringOffsetY: Float = 0
         var ringStroke: Float = 1
         var ringBlur: Float = 1
+        /// The portal's displacement is evaluated on a grid this many px wide:
+        /// the native displacement map is LOW-RESOLUTION, which is what makes
+        /// a glyph smeared to the rim look stepped, almost pixelated.
+        var portalCell: Float = 1
+        /// The low-pass on what the portal displaces, in px at the rim (fading
+        /// to nothing at `overlayReach`): QuartzCore's glass foreground and
+        /// displacement shaders are `_lpf` variants, and a glyph stretched to
+        /// the rim reads as one soft dark shape, not as stripes.
+        var portalBlur: Float = 0
+        /// How close to the lens's axis (px) an inward pull may reach.
+        var portalClear: Float = 0
         /// The native lens's key/fill highlight (`CASDFKeyFillHighlightEffect`,
         /// read off the live tab bar lens): a key light on the rim facing UP
         /// and a fill light facing DOWN, each over `keySpread` radians, a thin
@@ -302,7 +313,7 @@ final class LiquidLensRenderer {
         float iridescence, iridescenceWidth, backdropLuma;
         float bevel, bevelWidth, bevelShade, topBand, topBandDepth;
         float capsuleCentreX, capsuleCentreY, capsuleHalfWidth, capsuleHalfHeight, capsuleCover;
-        float ringOpacity, ringOffsetY, ringStroke, ringBlur;
+        float ringOpacity, ringOffsetY, ringStroke, ringBlur, portalCell, portalBlur, portalClear;
         float keyAmount, fillAmount, keySpread, keyHeight, diffuseHeight, diffuseAmount, diffuseSpread;
         float pageR, pageG, pageB, pageRefraction, refractAmount, refractHeight, refractSplit;
         float aberrationAmount, aberrationDirX, aberrationDirY, aberrationWidth;
@@ -320,6 +331,50 @@ final class LiquidLensRenderer {
         Varyings o;
         o.position = float4(ndc, 0.0, 1.0);
         return o;
+    }
+
+    // Five taps, a centre and a diagonal cross `r` px away (in titles px).
+    static inline float4 overlayLPF(texture2d<float> overlay, sampler smp, float2 q, float r, float2 size) {
+        if (r < 0.25) return overlay.sample(smp, q / size);
+        float4 s = 2.0 * overlay.sample(smp, q / size);
+        s += overlay.sample(smp, (q + float2( r,  r)) / size);
+        s += overlay.sample(smp, (q + float2(-r,  r)) / size);
+        s += overlay.sample(smp, (q + float2( r, -r)) / size);
+        s += overlay.sample(smp, (q + float2(-r, -r)) / size);
+        return s / 6.0;
+    }
+
+    static inline float lensSDF(float2 p, constant Uniforms &u);
+
+    // Where the portal reads the titles for the glass point `p` (both in glass
+    // px); `t` is how deep `p` is in the portal's band (0 at the rim, 1 past
+    // `overlayReach`).
+    static inline float2 portalPoint(float2 p, constant Uniforms &u, thread float &t) {
+        // The displacement read off a coarse grid (see `portalCell`).
+        float cell = max(u.portalCell, 1.0);
+        float2 pq = (floor(p / cell) + 0.5) * cell;
+        float dq = lensSDF(pq, u);
+        float2 gq = float2(lensSDF(pq + float2(1, 0), u) - lensSDF(pq - float2(1, 0), u),
+                           lensSDF(pq + float2(0, 1), u) - lensSDF(pq - float2(0, 1), u));
+        float2 nq = normalize(gq + float2(1e-5, 0.0));
+        t = saturate(-dq / max(u.overlayReach, 1.0));
+        float2 c0 = float2(u.centreX, u.centreY);
+        // Not clamped to the lens's box: a clamped sample repeated the rim's
+        // pixel into a streak ("Ch=ats") where the native control's title is
+        // pushed out and simply vanishes at the rim (filmed side by side on
+        // the lens bench). A sample that leaves the lens reads nothing.
+        float2 sp = c0 + (p - c0) / max(u.magnification, 0.01) + nq * (u.overlayAmount * (1.0 - t));
+        // A pull never brings a point from above or below the titles' band
+        // (`portalClear` either side of the axis) into it: a full −17.5 from
+        // the top and bottom rims of a 48pt lens fetched the title up there,
+        // which the native control never shows. Its ends, where the titles
+        // do cross, keep the whole pull.
+        float oy = p.y - c0.y;
+        if (abs(oy) > u.portalClear) {
+            float side = sign(oy);
+            sp.y = c0.y + side * max(side * (sp.y - c0.y), u.portalClear);
+        }
+        return sp;
     }
 
     static inline float lensSDF(float2 p, constant Uniforms &u) {
@@ -471,33 +526,33 @@ final class LiquidLensRenderer {
         // clamped to the lens's box (a glyph crossing the rim trails, as the
         // native portal's does), fringed along a fixed direction.
         if (u.overlayEnabled > 0.5) {
-            float t2 = saturate(-d / max(u.overlayReach, 1.0));
-            float2 disp = n2 * (u.overlayAmount * (1.0 - t2));
-            float2 lo = float2(u.centreX - u.halfWidth, u.centreY - u.halfHeight);
-            float2 hi = float2(u.centreX + u.halfWidth, u.centreY + u.halfHeight);
-            float2 c0 = float2(u.centreX, u.centreY);
-            // Not clamped to the lens's box: a clamped sample repeated the
-            // rim's pixel into a streak ("Ch=ats") where the native control's
-            // title is pushed out and simply vanishes at the rim (filmed side
-            // by side on the lens bench). A sample that leaves the lens reads
-            // nothing.
-            float2 sp = c0 + (p - c0) / max(u.magnification, 0.01) + disp;
+            float t2;
+            float2 sp = portalPoint(p, u, t2);
             float leaves = smoothstep(-0.5 * u.scale, 0.5 * u.scale, lensSDF(sp, u));
-            (void)lo; (void)hi;
             float2 origin = float2(u.overlayOriginX, u.overlayOriginY);
             float2 size = float2(u.overlayWidth, u.overlayHeight);
             float4 oc;
+            float lpf = u.portalBlur * (1.0 - t2) * u.overlayScale;
             float band = 1.0 - smoothstep(0.0, max(u.aberrationWidth, 1.0), -d);
             if (u.aberrationAmount > 0.0 && band > 0.01) {
                 // Along the rim's normal when no direction is given: what
                 // crosses the rim splits into a rainbow across it (native).
+                // The split is in SCREEN space, each channel then pulled
+                // through the portal on its own: `glassForeground` splits the
+                // portal's already displaced result. Split before the pull, a
+                // stretched glyph spread its colours over 8pt, where the
+                // native control keeps a dark core with thin blue and orange
+                // edges.
                 float2 dir = (u.aberrationDirX == 0.0 && u.aberrationDirY == 0.0) ? n2 : float2(u.aberrationDirX, u.aberrationDirY);
                 float2 cd = dir * (u.aberrationAmount * band);
                 float3 acc = float3(0.0), cover = float3(0.0), wsum = float3(0.0);
                 for (int i = 0; i < 6; ++i) {
                     float t = (float(i) + 0.5) / 6.0;
                     float3 w = saturate(1.0 - abs(float3(t) - float3(0.0, 0.5, 1.0)) * 2.0);
-                    float4 s = overlay.sample(smp, ((sp + cd * (t * 2.0 - 1.0)) * u.overlayScale + origin) / size);
+                    float tk;
+                    float2 sk = portalPoint(p + cd * (t * 2.0 - 1.0), u, tk);
+                    float4 s = overlayLPF(overlay, smp, sk * u.overlayScale + origin, lpf, size);
+                    s *= 1.0 - smoothstep(-0.5 * u.scale, 0.5 * u.scale, lensSDF(sk, u));
                     acc += w * s.rgb;
                     cover += w * s.a;
                     wsum += w;
@@ -512,9 +567,8 @@ final class LiquidLensRenderer {
                 float A = max(cover.r, max(cover.g, cover.b));
                 oc = float4(acc + u.backdropLuma * (A - cover), A);
             } else {
-                oc = overlay.sample(smp, (sp * u.overlayScale + origin) / size);
+                oc = overlayLPF(overlay, smp, sp * u.overlayScale + origin, lpf, size) * (1.0 - leaves);
             }
-            oc *= 1.0 - leaves;
             c = float4(c.rgb * (1.0 - oc.a) + oc.rgb, c.a + oc.a * (1.0 - c.a));
         }
 

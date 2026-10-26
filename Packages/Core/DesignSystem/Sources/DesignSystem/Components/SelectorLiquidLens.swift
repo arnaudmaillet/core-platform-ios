@@ -93,7 +93,23 @@ final class SelectorLiquidLens {
         /// over a 14pt band fading inwards (edge opacity 1 → 0). No
         /// magnification. (Guesses before this — a 6pt stretch, a fringe that
         /// grew with speed — were tuned against videos.)
-        static let portalAmount: CGFloat = 17.5
+        /// Negative samples INWARDS, so a glyph reaching the rim is stretched
+        /// out to it in one dark smear, as the native control's is (filmed
+        /// frame by frame, 2026-10-26: "Chats"' C becomes a solid blot split
+        /// blue/orange at its edges); positive (the prototype's reading)
+        /// squeezed it small. The dump reads −17.5 over an SDF of 11.2, in
+        /// QuartzCore's units: taken as points, a pull longer than its band
+        /// MIRRORS the band (the rim reads deeper than the band's inner edge),
+        /// and the C came back as a hollow "(". Below the band the mapping
+        /// only stretches: −9 over 11.2 magnifies the last 2.2pt five times.
+        static let portalAmount: CGFloat = -9
+        /// The native displacement map's coarseness (see `LiquidLensRenderer`).
+        static let portalCell: CGFloat = 0
+        /// The low-pass radius at the rim (see `LiquidLensRenderer`).
+        static let portalBlur: CGFloat = 0.75
+        /// An inward pull stops this far either side of the lens's axis, a
+        /// third of its half-height: past a 13pt title's ascenders.
+        static let portalClearFraction: CGFloat = 1.0 / 3.0
         static let portalReachTabBar: CGFloat = 11.2
         static let portalReach: CGFloat = 11.2
         static let aberration: CGFloat = 3.684211
@@ -758,6 +774,8 @@ final class SelectorLiquidLens {
             u.overlayAmount = Float(Tuning.portalAmount * lift * scale)
             u.magnification = Float(1 + (Tuning.magnification - 1) * lift)
             u.overlayReach = Float(Tuning.portalReachTabBar * scale)
+            u.portalClear = Float(min(inGlass.width, inGlass.height) / 2 * Tuning.portalClearFraction * scale)
+            u.portalBlur = Float(Tuning.portalBlur * lift * scale)
             let speed = min(abs(knobV) / Tuning.aberrationFullSpeed, 1)
             u.aberrationAmount = Float((Tuning.aberration + (Tuning.aberrationInMotion - Tuning.aberration) * speed) * lift * scale)
             // The native fringe's fixed direction (−15°).
@@ -802,6 +820,7 @@ final class SelectorLiquidLens {
         u.shadowOpacity = Tuning.shadowOpacity * Float(lift)
         u.shadowRadius = Float(Tuning.shadowRadius * scale)
         u.shadowOffsetY = Float(Tuning.shadowOffsetY * scale)
+        u.portalCell = Float(Tuning.portalCell * scale)
         u.ringOpacity = Tuning.ringOpacity * Float(lift)
         u.ringOffsetY = Float(Tuning.ringOffsetY * scale)
         u.ringStroke = Float(Tuning.ringStroke * scale)
