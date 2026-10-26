@@ -3,10 +3,30 @@ import Testing
 import UIKit
 @testable import MediaCore
 
-/// The shared avatar (#943): initials first, the picture over them.
+/// The shared avatar (#943, #1750): a picture's skeleton, then the picture;
+/// the initials only without a picture, or when it fails.
 @MainActor
 struct AvatarViewTests {
     private func makePipeline() -> ImagePipeline { ImagePipeline(fetcher: PlaceholderImageFetcher()) }
+
+    /// A clock a test steps by hand.
+    @MainActor
+    final class ManualClock {
+        var now: TimeInterval = 0
+        private var pending: [(at: TimeInterval, work: @MainActor () -> Void)] = []
+        var clock: LoadingLadder.Clock {
+            LoadingLadder.Clock(now: { [weak self] in self?.now ?? 0 }, after: { [weak self] delay, work in
+                guard let self else { return }
+                pending.append((now + delay, work))
+            })
+        }
+        func advance(_ seconds: TimeInterval) {
+            now += seconds
+            while let index = pending.indices.filter({ pending[$0].at <= now }).min(by: { pending[$0].at < pending[$1].at }) {
+                pending.remove(at: index).work()
+            }
+        }
+    }
 
     private func solid() -> UIImage {
         UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
@@ -15,16 +35,35 @@ struct AvatarViewTests {
         }
     }
 
-    /// The initials are the rendered state: shown at once, never hidden by
-    /// a load.
-    @Test func theInitialsShowAtOnce() {
-        let avatar = AvatarView(diameter: 40, size: .avatar)
+    /// ⚠️ #1505 option A: a face that exists is never stood in for by the
+    /// initials. Cold, nothing for `skeletonDelay`, then the skeleton — the
+    /// initials stay hidden throughout.
+    @Test func aColdPictureShowsTheSkeletonNeverTheInitials() {
+        let time = ManualClock()
+        let avatar = AvatarView(diameter: 40, size: .avatar, clock: time.clock)
         avatar.setMonogram("AL")
         avatar.setPicture(URL(string: "mock://face/cold"), pipeline: makePipeline())
+        #expect(avatar.monogram.isHidden, "the initials stood in for a face")
+        #expect(avatar.skeleton.isHidden, "a bone for a load that may land at once")
+        time.advance(0.15)
+        #expect(!avatar.skeleton.isHidden)
+        #expect(avatar.ladder.rung == .skeleton)
+        #expect(avatar.monogram.isHidden)
+        #expect(avatar.shownPicture == nil)
+    }
+
+    /// A picture that fails: the initials, and the bone goes.
+    @Test func aFailedPictureShowsTheInitials() throws {
+        let time = ManualClock()
+        let avatar = AvatarView(diameter: 40, size: .avatar, clock: time.clock)
+        avatar.setMonogram("AL")
+        // No pipeline: the load fails at once.
+        avatar.setPicture(try #require(URL(string: "mock://face/broken")), pipeline: nil)
         #expect(!avatar.monogram.isHidden)
         #expect(avatar.monogram.debugMonogramText == "AL")
-        #expect(!avatar.monogram.isCovered)
-        #expect(avatar.shownPicture == nil)
+        time.advance(1)
+        #expect(avatar.skeleton.isHidden)
+        #expect(avatar.isSettled)
     }
 
     /// A warm picture lands in the configure pass and covers the initials.
@@ -40,13 +79,14 @@ struct AvatarViewTests {
         #expect(avatar.isSettled)
     }
 
-    /// A late picture lands and covers the initials.
-    @Test func aLatePictureLandsOverTheInitials() async throws {
+    /// A late picture lands (after the skeleton's minimum, if it showed).
+    @Test func aLatePictureLands() async throws {
         let avatar = AvatarView(diameter: 40, size: .avatar)
         avatar.setPicture(try #require(URL(string: "mock://face/late")), pipeline: makePipeline())
-        for _ in 0..<200 where avatar.debugIsLoading { try? await Task.sleep(for: .milliseconds(5)) }
+        for _ in 0..<200 where avatar.ladder.rung != .content { try? await Task.sleep(for: .milliseconds(5)) }
         #expect(avatar.picture.image != nil)
         #expect(avatar.ladder.rung == .content)
+        #expect(avatar.monogram.isHidden || avatar.monogram.isCovered)
     }
 
     /// ⚠️ A recycled avatar never shows the previous person: a new person cuts
@@ -60,7 +100,7 @@ struct AvatarViewTests {
         #expect(avatar.monogram.isCovered)
         avatar.setPicture(try #require(URL(string: "mock://face/grace")), pipeline: pipeline)
         #expect(avatar.shownPicture == nil, "the previous face stayed")
-        #expect(!avatar.monogram.isCovered)
+        #expect(avatar.picture.isHidden, "the previous face stayed")
         avatar.reset()
         try? await Task.sleep(for: .milliseconds(100))
         #expect(avatar.picture.image == nil, "a late face landed on a reset avatar")
@@ -79,6 +119,7 @@ struct AvatarViewTests {
         let avatar = AvatarView(diameter: 40, size: .avatar)
         avatar.shape = .superellipse(exponent: 4)
         #expect(avatar.monogram.shape == .superellipse(exponent: 4))
+        #expect(avatar.skeleton.shape == .superellipse(exponent: 4))
         #expect(avatar.picture.shape == .superellipse(exponent: 4))
     }
 

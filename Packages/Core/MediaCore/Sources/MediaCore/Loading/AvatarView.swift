@@ -1,21 +1,30 @@
 import DesignSystem
 import UIKit
 
-/// THE app's avatar (#943, step 2 of #1085): a person's initials, then their
-/// picture, on the loading ladder — one view where nineteen drew their own.
+/// THE app's avatar (#943, step 2 of #1085): a person's picture on the
+/// loading ladder, their initials when there is none — one view where
+/// nineteen drew their own.
 ///
 /// ```
+///   skeleton:    a bone in the avatar's shape (AvatarSkeletonView)
 ///   placeholder: the initials (MonogramAvatarView) — a PERMANENT floor
-///   content:     the picture (AvatarImageView), dissolved in over it
+///   preview:     a smaller decode of the face standing in
+///   content:     the picture (AvatarImageView), dissolved in
 ///   overlay:     the avatar frame (`frameID`, #943) — a ring on the rim
 /// ```
 ///
-/// The avatar rendering contract, unchanged: **the initials are the rendered
-/// state, the picture an enhancement that may never arrive.** No row waits on
-/// a face. The picture is drawn OVER the initials, never swapped for them, so
-/// there is no empty disc at any point; once it has landed the initials draw
-/// nothing (`MonogramAvatarView.isCovered`), or a reshaped plate would show
-/// around it as a rim.
+/// The avatar rendering contract (#1505, the owner's option A; #1750):
+/// - **An account WITH a picture shows its picture**: in the configure pass
+///   when the pipeline holds it; else nothing for `skeletonDelay`, then the
+///   skeleton (held at least `skeletonMinimum`), then the picture dissolved
+///   in. Never the initials first: a stand-in that then changes reads as two
+///   avatars (the owner's recording, 2026-10-21: AM, KT, LK, SR, then faces).
+/// - **The initials are for an account with NO picture, or whose picture
+///   failed.** They are a permanent floor: the picture would be drawn over
+///   them, and once it has landed they draw nothing
+///   (`MonogramAvatarView.isCovered`), or a reshaped plate would show around
+///   it as a rim.
+/// No row waits on a face: the skeleton holds the face's place.
 ///
 /// The ladder's rules come with it: a warm picture in the configure pass, a
 /// late one dissolved in, a recycled view never showing the previous person,
@@ -24,6 +33,8 @@ import UIKit
 public final class AvatarView: UIView {
     /// The initials: the floor.
     public let monogram: MonogramAvatarView
+    /// The bone shown while a face that exists is on its way.
+    public let skeleton = AvatarSkeletonView()
     /// The picture, addressable (the ladder's hook 1).
     public let picture = AvatarImageView()
     /// A smaller decode of the same face standing in while the sharp one
@@ -51,7 +62,7 @@ public final class AvatarView: UIView {
         monogram.translatesAutoresizingMaskIntoConstraints = false
         addSubview(monogram)
         monogram.pin(to: self)
-        for view in [standIn, picture] {
+        for view in [skeleton, standIn, picture] {
             view.translatesAutoresizingMaskIntoConstraints = false
             view.isUserInteractionEnabled = false
             addSubview(view)
@@ -61,6 +72,7 @@ public final class AvatarView: UIView {
         // bounds: it changes no size.
         frameView.translatesAutoresizingMaskIntoConstraints = false
         frameView.pin(to: monogram)
+        ladder.setView(skeleton, for: .skeleton)
         ladder.setView(monogram, for: .placeholder, drivesAlpha: false, permanent: true)
         ladder.setView(standIn, for: .preview)
         ladder.setView(picture, for: .content)
@@ -83,6 +95,7 @@ public final class AvatarView: UIView {
         get { monogram.shape }
         set {
             monogram.shape = newValue
+            skeleton.shape = newValue
             picture.shape = newValue
             frameView.shape = newValue
         }
@@ -122,10 +135,10 @@ public final class AvatarView: UIView {
         monogram.setMonogram(text)
     }
 
-    /// Shows `url`'s picture over the initials: at once when the pipeline
-    /// has it, else dissolved in when it lands. The same URL again is a
-    /// reconfigure and changes nothing; another (or nil) is a new person and
-    /// cuts back to the initials first.
+    /// Shows `url`'s picture: at once when the pipeline has it, else the
+    /// skeleton, then the picture dissolved in when it lands; the initials
+    /// when `url` is nil or the picture fails. The same URL again is a
+    /// reconfigure and changes nothing; another (or nil) is a new person.
     public func setPicture(_ url: URL?, pipeline: ImagePipeline?) {
         if let url, url == load.url, load.isLoading || ladder.rung == .content { return }
         if url == nil, load.url == nil, ladder.rung == .placeholder, picture.image == nil { return }
@@ -134,7 +147,9 @@ public final class AvatarView: UIView {
         picture.image = nil
         standIn.image = nil
         monogram.isCovered = false
-        ladder.show(.placeholder, token: token, warm: true)
+        // No picture: the initials, now. A picture: nothing yet — the
+        // ladder brings the skeleton in if it is late.
+        if url == nil { ladder.show(.placeholder, token: token, warm: true) }
         // After the new item has begun: a sheet already resolved hands its
         // still over now, as the picture (`adoptStill`). At the rung the
         // picture is decoded at: the profile header's 512 px picture takes
@@ -152,6 +167,8 @@ public final class AvatarView: UIView {
             if !warm { onSettledAfterLoad?() }
         } failed: { [weak self] in
             guard let self, ladder.isCurrent(token) else { return }
+            // The picture is not coming: the initials, without animation.
+            ladder.show(.placeholder, token: token, warm: true)
             ladder.fail(token: token)
             if url != nil { onSettledAfterLoad?() }
         }
@@ -167,7 +184,8 @@ public final class AvatarView: UIView {
         }
     }
 
-    /// Back to the initials alone — a recycled row's first step.
+    /// Back to the initials alone — a recycled row's first step (the next
+    /// configure, in the same pass, starts the new person).
     public func reset() {
         load.cancel()
         setPicture(nil, pipeline: nil)
