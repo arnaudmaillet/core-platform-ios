@@ -15,6 +15,17 @@ import UIKit
 /// subtle enough — and its failure mode (a debug-only assert, on a cell that
 /// looks fine in release) obscure enough — that a second copy of it is a second
 /// thing to get wrong.
+/// The app's avatar seen from DesignSystem, which cannot name it: MediaCore's
+/// `AvatarView` (the picture, its skeleton, the initials — the avatar
+/// contract, #1750) conforms, and a host that only lays a disc out takes it
+/// as one of these.
+@MainActor
+public protocol AvatarSlotView: UIView {
+    func setMonogram(_ text: String)
+    /// Back to a bare avatar: no picture coming.
+    func reset()
+}
+
 public final class MonogramAccessoryHost: UIView {
     private let monogramView = MonogramAvatarView()
     /// Laid OVER the monogram rather than replacing it, so the initials stay
@@ -56,8 +67,38 @@ public final class MonogramAccessoryHost: UIView {
         CGSize(width: MonogramAvatarView.rowDiameter, height: MonogramAvatarView.rowDiameter)
     }
 
+    /// The app's avatar, laid over the disc in its place (#1750): the
+    /// person's picture, skeleton and initials are then its business, and
+    /// the host's own monogram and image stay hidden under it. A symbol row
+    /// still wears the host's own disc.
+    public private(set) var avatar: AvatarSlotView?
+    /// The last initials set, for an avatar installed after them.
+    private var monogramText = ""
+    private var showsSymbol = false
+
+    public func install(_ avatar: AvatarSlotView) {
+        guard self.avatar !== avatar else { return }
+        self.avatar?.removeFromSuperview()
+        self.avatar = avatar
+        // Beside the disc, not inside it (the disc hides under it), centred
+        // on it; the avatar is made at the disc's diameter and sizes itself.
+        avatar.constrain(in: self) { _ in
+            avatar.centerXAnchor.constraint(equalTo: monogramView.centerXAnchor)
+            avatar.centerYAnchor.constraint(equalTo: monogramView.centerYAnchor)
+        }
+        imageView.isHidden = true
+        avatar.setMonogram(monogramText)
+        avatar.isHidden = showsSymbol
+        monogramView.isHidden = !showsSymbol
+    }
+
     public func setMonogram(_ monogram: String) {
+        monogramText = monogram
+        showsSymbol = false
         monogramView.setMonogram(monogram)
+        avatar?.setMonogram(monogram)
+        avatar?.isHidden = false
+        monogramView.isHidden = avatar != nil
         symbolView.isHidden = true
     }
 
@@ -70,6 +111,10 @@ public final class MonogramAccessoryHost: UIView {
     /// kinds of row would read as two different lists. One slot, one text
     /// margin, and what sits in the slot is what differs.
     public func setSymbol(_ systemName: String) {
+        showsSymbol = true
+        avatar?.reset()
+        avatar?.isHidden = true
+        monogramView.isHidden = false
         monogramView.setMonogram("")
         symbolView.image = UIImage(systemName: systemName)
         symbolView.isHidden = false
@@ -83,13 +128,14 @@ public final class MonogramAccessoryHost: UIView {
     /// result, which is also what lets a cell cancel its own load on reuse.
     public func setImage(_ image: UIImage?) {
         imageView.image = image
-        imageView.isHidden = image == nil
+        imageView.isHidden = image == nil || avatar != nil
     }
 
     /// Back to a bare disc — no picture, no glyph — so a recycled host does
     /// not carry the last row's dressing into the next one.
     public func reset() {
         setImage(nil)
+        avatar?.reset()
         symbolView.isHidden = true
     }
 

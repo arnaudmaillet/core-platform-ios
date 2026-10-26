@@ -256,8 +256,12 @@ public final class PersonListCell: UICollectionViewListCell {
         UIView.performWithoutAnimation { super.layoutSubviews() }
     }
 
-    public func setAvatarImage(_ image: UIImage?) {
-        avatarHost.setImage(image)
+    /// The app's avatar in the row's disc (#1750): set once per cell by
+    /// MediaCore's `PersonListCell.avatar`, which then loads the picture with
+    /// its skeleton. DesignSystem cannot load a URL itself.
+    public var avatarSlot: AvatarSlotView? {
+        get { avatarHost.avatar }
+        set { if let newValue { avatarHost.install(newValue) } }
     }
 
     /// `onDelete` non-nil is what puts a ✕ on the row; every host but the

@@ -184,6 +184,11 @@ final class BadgedAvatarView: UIView {
         avatar.setPicture(url, pipeline: pipeline)
     }
 
+    /// A picture still being looked up: the skeleton until `setPicture`.
+    func awaitPicture() {
+        avatar.awaitPicture()
+    }
+
     /// The picture on show, nil while the initials are — for tests.
     var shownPicture: UIImage? { avatar.shownPicture }
 

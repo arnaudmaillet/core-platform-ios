@@ -708,7 +708,7 @@ final class SearchViewController: UIViewController {
                 // not remembered in the first place.
                 onDelete: model.isRemovable ? { [weak self] in self?.viewModel.didDeleteRecent(id) } : nil
             )
-            self.loadAvatar(model.avatarURL, into: cell, stillShowing: .row(id))
+            cell.avatar.setPicture(model.avatarURL, pipeline: self.imagePipeline)
         }
 
         let seeMoreRegistration = UICollectionView.CellRegistration<SeeMoreCell, Int> {
@@ -720,7 +720,7 @@ final class SearchViewController: UIViewController {
             [weak self] cell, _, id in
             guard let self, let model = self.resultsByID[id] else { return }
             cell.configure(with: model.rowContent)
-            self.loadAvatar(model.avatarURL, into: cell, stillShowing: .result(id))
+            cell.avatar.setPicture(model.avatarURL, pipeline: self.imagePipeline)
         }
 
         // The SAME row the results list uses, and the compose picker, and the
@@ -735,7 +735,7 @@ final class SearchViewController: UIViewController {
                 monogram: creator.monogram,
                 context: creator.context
             ))
-            self.loadAvatar(creator.avatarURL, into: cell, stillShowing: .suggested(id))
+            cell.avatar.setPicture(creator.avatarURL, pipeline: self.imagePipeline)
         }
 
         let suggestedSkeletonRegistration =
@@ -794,31 +794,6 @@ final class SearchViewController: UIViewController {
             collectionView.dequeueConfiguredReusableSupplementary(
                 using: headerRegistration, for: indexPath
             )
-        }
-    }
-
-    /// Fills a creator row's disc, if the corpus carried a picture.
-    ///
-    /// Cache-first and synchronous when it can be: a warm avatar set inside
-    /// the cell registration never shows the monogram at all, where an
-    /// unconditional `Task` would flash initials for a frame on every scroll.
-    ///
-    /// The task is keyed by the row's own identity rather than held: cells are
-    /// recycled, and by the time a slow load returns the cell may be showing
-    /// someone else. Re-reading the item at completion is what keeps the wrong
-    /// face off the right row.
-    private func loadAvatar(_ url: URL?, into cell: PersonListCell, stillShowing item: SearchItem) {
-        guard let url else { return }
-        if let cached = imagePipeline.cachedImage(for: url, size: .avatar) {
-            return cell.setAvatarImage(cached)
-        }
-        Task { [weak self, weak cell] in
-            guard let image = try? await self?.imagePipeline.image(for: url, size: .avatar) else { return }
-            guard let self, let cell,
-                  let indexPath = self.collectionView.indexPath(for: cell),
-                  self.dataSource.itemIdentifier(for: indexPath) == item
-            else { return }
-            cell.setAvatarImage(image)
         }
     }
 

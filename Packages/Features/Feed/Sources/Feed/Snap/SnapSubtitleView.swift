@@ -117,12 +117,12 @@ final class SnapSubtitleView: UIView {
     /// stays stable while the badge is free to bleed past the avatar's round
     /// bounds (`clipsToBounds = false`).
     private let avatarContainerView = UIView()
-    private let avatarView = AvatarImageView()
-    /// The pipeline avatars load through, and the in-flight load — cancelled
-    /// on each handoff and on teardown so a slow fetch can't paint a stale
-    /// author onto the current cue.
+    /// The app's avatar (#1750): the author's picture, its skeleton while
+    /// it loads, their initials without one. Its load is keyed by the
+    /// picture, so a slow fetch never paints a stale author on a new cue.
+    private let avatarView = AvatarView(diameter: SnapSubtitleView.avatarDiameter, size: .avatar)
+    /// The pipeline avatars load through.
     private var imagePipeline: ImagePipeline?
-    private var avatarTask: Task<Void, Never>?
     /// The post's total comment count as a micro-badge on the avatar's
     /// BOTTOM-RIGHT corner — a subtle pill (dark, hairline-bordered)
     /// deliberately offset down-and-right so it OVERFLOWS the avatar's round
@@ -159,11 +159,11 @@ final class SnapSubtitleView: UIView {
         // so a cue segment still touches exactly one layer — background and
         // glyphs move as a unit.
         label.layer.opacity = 0
-        // The avatar: a compact round image at the zone's leading edge. A
-        // placeholder fill so an unhydrated/loading author still reads as an
-        // avatar rather than a hole. Its opacity rides the cue cycle (fades
-        // in once, then clamped), so it starts invisible like the pill.
-        avatarView.backgroundColor = UIColor.white.withAlphaComponent(0.15)
+        // The avatar: a compact round image at the zone's leading edge, over
+        // media — its initials' plate drawn dark, like the white text beside
+        // it. Its opacity rides the cue cycle (fades in once, then clamped),
+        // so it starts invisible like the pill.
+        avatarView.overrideUserInterfaceStyle = .dark
         avatarView.layer.opacity = 0
 
         // The count badge: a subtle dark pill, hairline-bordered so it reads
@@ -335,7 +335,7 @@ final class SnapSubtitleView: UIView {
         nextIndex = 0
         isActive = false
         isHidden = true
-        avatarView.image = nil
+        avatarView.reset()
         countLabel.text = nil
         countBadge.isHidden = true
     }
@@ -350,8 +350,6 @@ final class SnapSubtitleView: UIView {
         generation += 1
         isCycling = false
         pillBlur?.setStrength(0)
-        avatarTask?.cancel()
-        avatarTask = nil
         label.layer.removeAllAnimations()
         label.layer.opacity = 0
         avatarView.layer.removeAllAnimations()
@@ -372,7 +370,7 @@ final class SnapSubtitleView: UIView {
         // text here IS the hard cut — same pill, new line, one frame. The
         // avatar's IMAGE swaps to the new cue's author on the same beat.
         label.attributedText = Self.renderedCue(cues[index].text)
-        updateAvatar(url: cues[index].avatarURL)
+        updateAvatar(for: cues[index])
 
         let expected = generation
         CATransaction.begin()
@@ -442,21 +440,12 @@ final class SnapSubtitleView: UIView {
     /// The blur's strength behind the pill (0…1); 0 without the flag.
     var pillBlurStrength: CGFloat { pillBlur?.strength ?? 0 }
 
-    /// Swaps the avatar to `url`'s author. Clears to the placeholder first so
-    /// a handoff never shows the previous author under the new cue, then
-    /// loads asynchronously; the in-flight load is cancelled on the next
-    /// handoff and on teardown, and the generation/cancellation guards keep
-    /// a late fetch from painting a stale author.
-    private func updateAvatar(url: URL?) {
-        avatarTask?.cancel()
-        avatarView.image = nil
-        guard let url, let pipeline = imagePipeline else { return }
-        let expected = generation
-        avatarTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url, size: .avatar) else { return }
-            guard !Task.isCancelled, let self, self.generation == expected else { return }
-            self.avatarView.image = image
-        }
+    /// Swaps the avatar to `cue`'s author: never the previous author under
+    /// the new cue (the avatar cuts on a new picture), and a late fetch for
+    /// an earlier cue lands nowhere.
+    private func updateAvatar(for cue: SubtitleCue) {
+        avatarView.setMonogram(cue.monogram)
+        avatarView.setPicture(cue.avatarURL, pipeline: imagePipeline)
     }
 
     /// The bubble's one-shot entrance, matching the first cue's kind:

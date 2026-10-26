@@ -77,7 +77,6 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
     let supervisionList: SupervisionListModel?
     private let imagePipeline: ImagePipeline?
     private let router: (any Router)?
-    private let avatarLoads = RowImageLoads(size: .avatar)
     /// The supervision a notification asked for (#1106): opened once the
     /// list has it and the page is at rest, then forgotten.
     var pendingSupervisionAccountID: String?
@@ -316,10 +315,7 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
                 monogram: MonogramAvatarView.monogram(name: profile?.displayName ?? "", handle: profile?.handle ?? link.name)
             ))
             cell.accessories.append(.disclosureIndicator())
-            cell.setAvatarImage(nil)
-            self?.avatarLoads.load(profile?.avatarURL, using: self?.imagePipeline, for: cell) { [weak cell] image, _ in
-                cell?.setAvatarImage(image)
-            }
+            cell.avatar.setPicture(profile?.avatarURL, pipeline: self?.imagePipeline)
         }
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
             if case .link(let link) = item {

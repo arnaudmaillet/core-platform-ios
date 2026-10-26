@@ -7,10 +7,10 @@ import UIKit
 /// (`Metrics.faceShape`; "the disc" below is that slot), a ring around it
 /// while they have posts the viewer has not seen, and their name under it.
 ///
-/// **The app's avatar contract** (`avatar-rendering-contract`): the initials
-/// are the RENDERED state and the picture is an enhancement drawn over them,
-/// never swapped for them — no empty disc at any point, and a recycled cell
-/// guards its late picture by the friend's id, not only by cancelling.
+/// **The app's avatar** (`AvatarView`, #1750): a friend with a picture shows
+/// it, or its skeleton until it lands, never the initials first; the
+/// initials only for a friend with none. A recycled cell never shows the
+/// previous friend's face (the avatar keys its load by the picture).
 ///
 /// **The disc is also a flight's source.** A tap flies the friend's posts out
 /// of it (`ForYouViewController.openStory`), so the cell answers the three
@@ -79,12 +79,8 @@ final class ForYouStoryCell: UICollectionViewCell {
     private let ringMask = CAShapeLayer()
     /// Re-sized to the cell's disc in `layoutSubviews` — its own width and
     /// height constraints must agree with the frame given it there.
-    private let monogram = MonogramAvatarView(diameter: Metrics.faceDiameter(discSide: 70))
-    private let picture = AvatarImageView()
+    private let avatar = AvatarView(diameter: Metrics.faceDiameter(discSide: 70), size: .px256)
     private let nameLabel = UILabel()
-    private var pictureTask: Task<Void, Never>?
-    /// Whose face this cell is showing — the guard a late picture checks.
-    private var shownAuthor: ProfileID?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -103,12 +99,9 @@ final class ForYouStoryCell: UICollectionViewCell {
         ring.mask = ringMask
         disc.layer.addSublayer(ring)
 
-        monogram.translatesAutoresizingMaskIntoConstraints = true
-        monogram.shape = Metrics.faceShape
-        disc.addSubview(monogram)
-        picture.shape = Metrics.faceShape
-        picture.isHidden = true
-        monogram.addSubview(picture)
+        avatar.translatesAutoresizingMaskIntoConstraints = true
+        avatar.shape = Metrics.faceShape
+        disc.addSubview(avatar)
 
         nameLabel.font = .appFont(forTextStyle: .caption1)
         nameLabel.adjustsFontForContentSizeCategory = false
@@ -142,9 +135,8 @@ final class ForYouStoryCell: UICollectionViewCell {
         ).cgPath
         CATransaction.commit()
         let inset = Metrics.ringWidth + Metrics.ringGap
-        monogram.setDiameter(Metrics.faceDiameter(discSide: side))
-        monogram.frame = disc.bounds.insetBy(dx: inset, dy: inset)
-        picture.frame = monogram.bounds
+        avatar.setDiameter(Metrics.faceDiameter(discSide: side))
+        avatar.frame = disc.bounds.insetBy(dx: inset, dy: inset)
         nameLabel.frame = CGRect(
             x: 0, y: disc.frame.maxY + Metrics.nameGap,
             width: bounds.width, height: Metrics.nameHeight
@@ -153,106 +145,69 @@ final class ForYouStoryCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        pictureTask?.cancel()
-        pictureTask = nil
-        shownAuthor = nil
-        picture.image = nil
-        picture.isHidden = true
-        monogram.isCovered = false
+        avatar.reset()
         isDiscConcealed = false
     }
-
-    /// The face's animation (#1358): For You's Friends faces play once on
-    /// their first display there (`animationScope`, the row's).
-    private lazy var animation: AnimatedAvatarPlayer = {
-        let player = AnimatedAvatarPlayer.attach(to: picture)
-        // An animated face's still is its picture (#1424).
-        player.onStill = { [weak self] still in self?.showPicture(still) }
-        return player
-    }()
 
     func configure(
         with story: ForYouViewModel.FriendStory, imagePipeline: ImagePipeline,
         animationScope: AnimatedAvatarScope? = nil
     ) {
-        if let animationScope { animation.trigger = .firstAppearance(animationScope) }
-        shownAuthor = story.authorID
+        // The face's animation (#1358): For You's Friends faces play once on
+        // their first display there (`animationScope`, the row's).
+        if let animationScope { avatar.animationTrigger = .firstAppearance(animationScope) }
         nameLabel.text = story.name.split(separator: " ").first.map(String.init) ?? story.name
         nameLabel.font = .scaledFont(forTextStyle: .caption1, weight: story.hasUnseen ? .semibold : .regular)
         nameLabel.textColor = story.hasUnseen ? .label : .secondaryLabel
         ring.isHidden = !story.hasUnseen
-        monogram.setMonogram(MonogramAvatarView.monogram(name: story.name, handle: story.handle))
+        avatar.setMonogram(MonogramAvatarView.monogram(name: story.name, handle: story.handle))
         accessibilityLabel = story.name
         accessibilityValue = story.hasUnseen ? "New posts" : nil
 
-        picture.image = nil
-        picture.isHidden = true
-        monogram.isCovered = false
-        // After the reset: a sheet already resolved draws its still now, at
-        // the rung the face is decoded at (#1444).
-        animation.rung = AnimatedAvatars.Rung(bucket: .px256)
-        animation.setAvatar(story.avatarURL)
-        guard let url = story.avatarURL else { return }
-        if let cached = imagePipeline.cachedImage(for: url, size: .px256) {
-            showPicture(animation.still ?? cached)
-            return
-        }
-        let author = story.authorID
-        pictureTask = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url, size: .px256), !Task.isCancelled,
-                  let self, shownAuthor == author else { return }
-            showPicture(animation.still ?? image)
-        }
-    }
-
-    private func showPicture(_ image: UIImage) {
-        picture.image = image
-        picture.isHidden = false
-        // The initials stay underneath, covered rather than removed — the
-        // contract's "drawn over, never swapped".
-        monogram.isCovered = true
+        // Decoded at 256 px; an animated face's still is its picture, drawn
+        // at once when its sheet is resolved (#1424, #1444).
+        avatar.setPicture(story.avatarURL, pipeline: imagePipeline)
     }
 
     // MARK: - As a flight's source
 
     /// The face alone — no ring, no name — which a long press lifts into the
     /// context menu's preview.
-    var faceView: UIView { monogram }
+    var faceView: UIView { avatar }
 
     /// The avatar's own picture while one is shown — what a flight carries
     /// for this face (#1356): the photograph alone, never a render of the
     /// cell, whose initials fill bled into the clip's edge as a light rim.
     var shownPicture: UIImage? {
-        guard !picture.isHidden else { return nil }
-        // An animated face rests on its sheet's last frame, over the photo.
-        return animation.still ?? picture.image
+        // An animated face rests on its sheet's last frame (its picture).
+        avatar.shownPicture
     }
 
     /// The face's rect — the disc without its ring — in `space`, AT REST:
     /// with no transform between the face and `row` counted.
     ///
-    /// ⚠️ NOT `monogram.convert(monogram.bounds, to:)`. A press (or anything
+    /// ⚠️ NOT `avatar.convert(avatar.bounds, to:)`. A press (or anything
     /// else) that scales the disc makes UIKit's conversion report the SCALED
     /// rect, and a flight measuring that lands a few points inside and off
     /// centre of the face it is returning to — filmed on a close. Where a
     /// flight goes is where the face RESTS; see `RowGeometry.restingFrame`.
     func discFrame(in space: UICoordinateSpace, restingBelow row: UIView) -> CGRect {
-        RowGeometry.restingFrame(of: monogram, below: row, in: space)
+        RowGeometry.restingFrame(of: avatar, below: row, in: space)
     }
 
-    /// The face exactly as drawn: the picture when it has landed, the initials
-    /// on their plate when it has not — so a flight starts as this disc's
+    /// The face exactly as drawn: the picture when it has landed, its
+    /// skeleton or the initials when it has not — so a flight starts as this disc's
     /// twin whichever state it is in.
     func renderedFace() -> UIImage {
         layoutIfNeeded()
-        let renderer = UIGraphicsImageRenderer(bounds: monogram.bounds)
+        let renderer = UIGraphicsImageRenderer(bounds: avatar.bounds)
         return renderer.image { context in
             // Clipped by hand: `render(in:)` does not honour every mask a
             // live layer wears, and a square corner on a face's twin is the
             // one frame a flight would show it.
-            context.cgContext.addPath(Metrics.faceShape.path(in: monogram.bounds).cgPath)
+            context.cgContext.addPath(Metrics.faceShape.path(in: avatar.bounds).cgPath)
             context.cgContext.clip()
-            monogram.layer.render(in: context.cgContext)
+            avatar.layer.render(in: context.cgContext)
         }
     }
 

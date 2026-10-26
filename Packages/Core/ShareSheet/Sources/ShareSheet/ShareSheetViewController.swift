@@ -868,9 +868,24 @@ public final class ShareSheetViewController: UIViewController {
     private enum ResultsSection { case results }
 
     private func makeResultsSource() -> UICollectionViewDiffableDataSource<ResultsSection, ShareTarget> {
-        let registration = UICollectionView.CellRegistration<ShareSearchResultCell, ShareTarget> {
+        // THE app's person row (#1750): its avatar is the app's avatar — the
+        // picture with its skeleton, the initials without one — where this
+        // list drew a grey disc and cut to the face when it landed.
+        let registration = UICollectionView.CellRegistration<PersonListCell, ShareTarget> {
             [imagePipeline] cell, _, target in
-            cell.configure(with: target, imagePipeline: imagePipeline)
+            cell.configure(with: PersonRowContent(
+                displayName: target.displayName,
+                // The handle without its `@`: the sigil is decoration here,
+                // and the row already reads as a person.
+                handle: target.handle,
+                monogram: MonogramAvatarView.monogram(name: target.displayName, handle: target.handle)
+            ))
+            cell.avatar.setPicture(target.avatarURL, pipeline: imagePipeline)
+            // Cleared, so the sheet's glass runs behind the list: a list
+            // cell's default background is an opaque block on the material.
+            var background = UIBackgroundConfiguration.listPlainCell()
+            background.backgroundColor = .clear
+            cell.backgroundConfiguration = background
         }
         return UICollectionViewDiffableDataSource(collectionView: resultsView) { collection, indexPath, target in
             collection.dequeueConfiguredReusableCell(
