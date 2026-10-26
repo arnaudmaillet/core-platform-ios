@@ -51,13 +51,10 @@ final class SelectorLiquidLens {
         /// device; the owner asked for a bigger lens (2026-10-26).
         static let pastCapsule: CGFloat = 6
         static let minimumOutset: CGFloat = 4
-        /// The titles seen through the lifted lens, at its centre: the native
-        /// tab bar lens's ×1.28 (an icon under it, measured rest against
-        /// lifted), easing to none at the rim — a fish-eye. A uniform 1.15
-        /// read as a loupe (owner, 2026-10-26). The native segmented control
-        /// magnifies nothing (its titles measure the same width lifted): a
-        /// bar drawn as one sets `magnification` to 1.
-        static let magnification: CGFloat = 1.28
+        /// The titles seen through the lifted lens are magnified about its
+        /// centre, barely: 1.15 read as a loupe next to the tab bar's lens
+        /// (owner, 2026-10-26).
+        static let magnification: CGFloat = 1
         /// The lifted lens's growth past a pill this tall, in a capsule this
         /// tall: the pill's own clearance plus `pastCapsule`, on every side.
         static func growth(pillHeight: CGFloat, capsuleHeight: CGFloat) -> CGSize {
@@ -249,8 +246,6 @@ final class SelectorLiquidLens {
     /// A fixed growth for the lifted lens instead of the capsule-relative
     /// outset — the native segmented control's 24×16pt, for a bar drawn as one.
     var fixedGrowth: CGSize?
-    /// The titles' magnification at the lens's centre when lifted.
-    var magnification: CGFloat = Tuning.magnification
     /// While held: how far past the model the finger pulls the lens (the
     /// rubber band beyond the first and last tab). Back to zero on release.
     var holdOvershoot: CGFloat = 0
@@ -787,7 +782,7 @@ final class SelectorLiquidLens {
             u.overlayOriginX = Float(origin.x * scale)
             u.overlayOriginY = Float(origin.y * scale)
             u.overlayAmount = Float(Tuning.portalAmount * lift * scale)
-            u.magnification = Float(1 + (magnification - 1) * lift)
+            u.magnification = Float(1 + (Tuning.magnification - 1) * lift)
             u.overlayReach = Float(Tuning.portalReachTabBar * scale)
             u.portalClear = Float(min(inGlass.width, inGlass.height) / 2 * Tuning.portalClearFraction * scale)
             u.portalBlur = Float(Tuning.portalBlur * lift * scale)

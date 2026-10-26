@@ -63,8 +63,7 @@ final class LiquidLensRenderer {
         /// The portal's push near the rim (px) and how far in it reaches (px).
         var overlayAmount: Float = 0
         var overlayReach: Float = 1
-        /// The titles' magnification at the lens's centre (1 = none), easing
-        /// to none at its rim — a fish-eye, not a loupe (see `portalPoint`).
+        /// The titles' magnification about the lens's centre (1 = none).
         var magnification: Float = 1
         /// Titles points per glass point: the host's live scale (see
         /// `SelectorLiquidLens.drawGlass`).
@@ -378,14 +377,7 @@ final class LiquidLensRenderer {
         // pixel into a streak ("Ch=ats") where the native control's title is
         // pushed out and simply vanishes at the rim (filmed side by side on
         // the lens bench). A sample that leaves the lens reads nothing.
-        // A FISH-EYE: the native tab bar lens magnifies what is under its
-        // centre (×1.28 measured on an icon there, ×1.22 on the label further
-        // out) and less and less towards its rim, where the content is
-        // compressed (owner's dark lens bench, 2026-10-26). A uniform zoom
-        // (1.15, earlier) read as a loupe. Monotonic for any m ≥ 1.
-        float2 rel = (p - c0) / max(float2(u.halfWidth, u.halfHeight), float2(1.0));
-        float m = 1.0 + (max(u.magnification, 1.0) - 1.0) * (1.0 - saturate(dot(rel, rel)));
-        float2 sp = c0 + (p - c0) / m + nq * (u.overlayAmount * (1.0 - t));
+        float2 sp = c0 + (p - c0) / max(u.magnification, 0.01) + nq * (u.overlayAmount * (1.0 - t));
         // A pull never brings a point from above or below the titles' band
         // (`portalClear` either side of the axis) into it: a full −17.5 from
         // the top and bottom rims of a 48pt lens fetched the title up there,
