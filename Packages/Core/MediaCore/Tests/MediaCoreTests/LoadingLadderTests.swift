@@ -111,6 +111,17 @@ struct LoadingLadderTests {
         #expect(settled == 1)
     }
 
+    /// ⚠️ A failure inside the skeleton's delay: no bone afterwards — nothing
+    /// is coming, and a bone landing late stayed for good (#1752).
+    @Test func aFailureBeforeTheDelayLeavesNoBone() {
+        let rig = makeRig()
+        let token = rig.ladder.begin(item: "a")
+        rig.ladder.fail(token: token)
+        rig.clock.advance(1)
+        #expect(rig.skeleton.isHidden)
+        #expect(rig.ladder.rung != .skeleton)
+    }
+
     // MARK: - The skeleton's timing
 
     /// A skeleton shows only after the delay, never for a load that lands

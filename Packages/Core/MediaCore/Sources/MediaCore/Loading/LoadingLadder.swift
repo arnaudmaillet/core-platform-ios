@@ -398,7 +398,10 @@ public final class LoadingLadder {
         if isFlightCard { return }
         clock.after(policy.skeletonDelay) { [weak self] in
             guard let self, self.generation == generation, !isHeld else { return }
-            guard rung == nil || rung == .background else { return }
+            // ⚠️ Not for an item that already failed: nothing is coming, and
+            // a bone landing after a fast failure stayed for good (#1752 — a
+            // banner whose fetch failed inside the delay).
+            guard !hasFailed, rung == nil || rung == .background else { return }
             skeletonShownAt = clock.now()
             land(.skeleton, transition: .none)
         }

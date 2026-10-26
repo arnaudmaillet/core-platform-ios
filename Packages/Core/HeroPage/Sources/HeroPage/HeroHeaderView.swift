@@ -49,12 +49,17 @@ public struct HeroHeaderContent: Equatable, Sendable {
     /// No picture, no banner: the bannerless layout.
     public var bannerImageURL: URL?
     public var bannerVideoURL: URL?
+    /// A banner that may exist and is not known yet (a place whose posts
+    /// are on their way, the owner 2026-10-26): with no `bannerImageURL`,
+    /// the banner's slot shows its skeleton rather than the bannerless
+    /// layout (#1752).
+    public var bannerPending: Bool
 
     public init(
         title: String, subtitle: String, isVerified: Bool = false, bio: String? = nil,
         websiteText: String? = nil, websiteURL: URL? = nil, counterValues: [String?],
         avatarURL: URL? = nil, avatarMonogram: String = "", avatarFrameID: String? = nil,
-        bannerImageURL: URL? = nil, bannerVideoURL: URL? = nil
+        bannerImageURL: URL? = nil, bannerVideoURL: URL? = nil, bannerPending: Bool = false
     ) {
         self.title = title
         self.subtitle = subtitle
@@ -68,6 +73,7 @@ public struct HeroHeaderContent: Equatable, Sendable {
         self.avatarFrameID = avatarFrameID
         self.bannerImageURL = bannerImageURL
         self.bannerVideoURL = bannerVideoURL
+        self.bannerPending = bannerPending
     }
 
     /// Counter `index`'s figure — nil past the end.
@@ -916,9 +922,7 @@ open class HeroHeaderView: UIView {
             if old?.counterValue(at: index) != value || old == nil { counter.setValue(value) }
         }
 
-        applyBannerPresence(content.bannerImageURL)
-        bannerView.setImageURL(content.bannerImageURL)
-        bannerView.setVideoURL(content.bannerVideoURL, pool: bannerVideoPool)
+        applyBanner(content)
         loadAvatar(content.avatarURL)
     }
 
@@ -950,12 +954,25 @@ open class HeroHeaderView: UIView {
 
     /// No picture, no banner — and a picture arriving on a header that had
     /// none takes the unresolved shape until it has said which it is.
-    private func applyBannerPresence(_ url: URL?) {
-        if url == nil {
+    private func applyBannerPresence(_ url: URL?, pending: Bool = false) {
+        if url == nil, !pending {
             setBannerFormat(.none)
         } else if bannerFormat == .none {
             setBannerFormat(.unresolved)
         }
+    }
+
+    /// The banner's presence, picture and loop — or its skeleton while a
+    /// banner may still come (`bannerPending`).
+    private func applyBanner(_ content: HeroHeaderContent) {
+        let awaiting = content.bannerImageURL == nil && content.bannerPending
+        applyBannerPresence(content.bannerImageURL, pending: awaiting)
+        if awaiting {
+            bannerView.awaitImage()
+        } else {
+            bannerView.setImageURL(content.bannerImageURL)
+        }
+        bannerView.setVideoURL(content.bannerVideoURL, pool: bannerVideoPool)
     }
 
     /// Applies `content` as a set of small, lightly staggered cross-dissolves
@@ -994,9 +1011,7 @@ open class HeroHeaderView: UIView {
             self.nameLabel.text = content.title
             self.handleLabel.text = content.subtitle
             self.verifiedBadge.isHidden = !content.isVerified
-            self.applyBannerPresence(content.bannerImageURL)
-            self.bannerView.setImageURL(content.bannerImageURL)
-            self.bannerView.setVideoURL(content.bannerVideoURL, pool: self.bannerVideoPool)
+            self.applyBanner(content)
             self.loadAvatar(content.avatarURL)
         }
         dissolve(counters, after: Metrics.stagger, generation: generation) {
