@@ -142,7 +142,7 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
         selector.onScrubEnd = { [weak self] velocity in self?.pager?.settleAfterScrub(velocityInPages: velocity) }
         selector.addAction(UIAction { [weak self] _ in
             guard let self else { return }
-            self.pager?.setActivePage(self.selector.selectedIndex, animated: true)
+            self.pager?.setActivePage(self.selector.selectedIndex, animated: self.selector.animatesPageChanges)
         }, for: .valueChanged)
 
         // The page in front wears the sector's item from the start.

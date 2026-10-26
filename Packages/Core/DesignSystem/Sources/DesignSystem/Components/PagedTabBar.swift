@@ -90,16 +90,15 @@ import UIKit
 /// tap on a segment. A drag that starts anywhere ELSE on the capsule scrolls
 /// the strip, which is what every drag used to do. See "Moving between tabs".
 ///
-/// The lens tracks progress LINEARLY and rigidly, and there is no physics of
-/// any kind in this file. Elasticity has now been built and removed TWICE — a
-/// spring-driven version in 2026-07, and a velocity-derived stretch after it —
-/// so treat a third attempt as a decision to be made deliberately rather than a
-/// gap to be filled. Both are recorded in [[messages-inbox-paged]]. If it ever
-/// does return: the lens must be driven by its `frame`, never a
-/// `CGAffineTransform`, which scales the rendered corner radius and degrades
-/// the capsule into an ellipse; and any decay must have a tick source that
-/// outlives the last progress change, because `setProgress` early-returns on an
-/// unchanged position and will otherwise freeze the effect mid-stretch.
+/// The MODEL lens tracks progress linearly and rigidly; the pill the viewer
+/// sees is `SelectorLiquidLens` (#1748): the flat fill at rest, and under a
+/// finger or in a tap's flight the Liquid Glass lens of iOS 27's
+/// `UISegmentedControl`, with the native control's measured lift, flex and
+/// flight, ported from the owner's `liquidglass` prototype. Since then the
+/// pages switch DIRECTLY (`pagerMode = .instant`): a tap or a released drag
+/// selects, the host shows the page at once, the lens flies there alone.
+/// The model is still driven by its `frame`, never a `CGAffineTransform`,
+/// which scales the rendered corner radius into an ellipse.
 public final class PagedTabBar: UIControl {
     /// Where the bar is being hosted, which decides its metrics and whether it
     /// carries a material of its own.
@@ -117,6 +116,11 @@ public final class PagedTabBar: UIControl {
         /// navigation bar supplies the backdrop, so the bar contributes only
         /// its lens and its titles.
         case navigationTitle
+        /// A clone of `UISegmentedControl` (iOS 27, measured by the owner's
+        /// `liquidglass` prototype): a 32pt track, a pill 2pt inside it, 13pt
+        /// titles all in `label`, the selected one medium, equal slots. The
+        /// lens bench draws one beside the native control (#1748).
+        case segmentedControl
 
         var capsuleHeight: CGFloat {
             switch self {
@@ -132,6 +136,7 @@ public final class PagedTabBar: UIControl {
             // beside `itemH` if that comparison ever needs re-taking; 36 is the
             // value that makes the three read as one row.
             case .navigationTitle: 44
+            case .segmentedControl: 32
             }
         }
 
@@ -139,6 +144,7 @@ public final class PagedTabBar: UIControl {
             switch self {
             case .floating: 4
             case .navigationTitle: 0
+            case .segmentedControl: 0
             }
         }
 
@@ -146,6 +152,7 @@ public final class PagedTabBar: UIControl {
             switch self {
             case .floating: 8
             case .navigationTitle: 0
+            case .segmentedControl: 0
             }
         }
 
@@ -156,6 +163,7 @@ public final class PagedTabBar: UIControl {
             // The navigation bar decides where the title slot begins and ends;
             // a margin of ours inside it would be a second opinion.
             case .navigationTitle: 0
+            case .segmentedControl: 0
             }
         }
 
@@ -171,6 +179,8 @@ public final class PagedTabBar: UIControl {
             // the title slot gets nothing, and scrolled content showed straight
             // through the titles. See `-foryou-backdrop-off` for the A/B.
             case .navigationTitle: !ProcessInfo.processInfo.arguments.contains("-foryou-backdrop-off")
+            // A flat track, as the native control's.
+            case .segmentedControl: false
             }
         }
 
@@ -255,7 +265,7 @@ public final class PagedTabBar: UIControl {
         /// bar too wide for its slot now slides instead of clipping, so the
         /// only thing 13pt still bought was smaller text. Every host reads at
         /// 15pt now, and a crowded one scrolls.
-        var titleTextStyle: UIFont.TextStyle { .subheadline }
+        var titleTextStyle: UIFont.TextStyle { self == .segmentedControl ? .footnote : .subheadline }
 
         /// Where Dynamic Type stops growing the titles.
         ///
@@ -278,6 +288,8 @@ public final class PagedTabBar: UIControl {
             switch self {
             case .floating: 19
             case .navigationTitle: 15
+            // 13pt, fixed: `.footnote`'s default size, capped there.
+            case .segmentedControl: 13
             }
         }
 
@@ -289,6 +301,7 @@ public final class PagedTabBar: UIControl {
             switch self {
             case .floating: 15
             case .navigationTitle: 11
+            case .segmentedControl: 11
             }
         }
 
@@ -297,7 +310,15 @@ public final class PagedTabBar: UIControl {
         /// segment is expressed against THIS rather than against the capsule,
         /// because the lens is what a viewer actually sees a badge sitting
         /// inside.
-        var lensHeight: CGFloat { capsuleHeight - SelectorCapsuleMetrics.clearance * 2 }
+        var lensHeight: CGFloat { capsuleHeight - clearance * 2 }
+
+        /// The pill's inset inside the track, every side: the shared 4pt, or
+        /// the native segmented control's 2pt (a 28pt pill in a 32pt track).
+        var clearance: CGFloat { self == .segmentedControl ? 2 : SelectorCapsuleMetrics.clearance }
+
+        /// The selected title's weight and the others' colour.
+        var selectedTitleWeight: UIFont.Weight { self == .segmentedControl ? .medium : .semibold }
+        var unselectedTitleColour: UIColor { self == .segmentedControl ? .label : .secondaryLabel }
 
         /// The count pill's height: half the lens, which keeps it a small mark
         /// beside the title rather than a second element competing with it.
@@ -338,6 +359,7 @@ public final class PagedTabBar: UIControl {
             switch self {
             case .floating: .fillEqually
             case .navigationTitle: .fill
+            case .segmentedControl: .fillEqually
             }
         }
 
@@ -351,6 +373,7 @@ public final class PagedTabBar: UIControl {
             switch self {
             case .floating: false
             case .navigationTitle: true
+            case .segmentedControl: false
             }
         }
 
@@ -361,6 +384,11 @@ public final class PagedTabBar: UIControl {
     }
 
     private enum Metrics {
+        /// The lens's give past the first and last tab under a dragging
+        /// finger: `maximum · tanh(overshoot / scale)` (the prototype's fit of
+        /// the native trace, 9pt for 75pt).
+        static let rubberBandMaximum: CGFloat = 12
+        static let rubberBandScale: CGFloat = 90
         /// The lens's clearance inside the VISIBLE capsule, on EVERY side — the
         /// number every selector in this module shares.
         ///
@@ -506,7 +534,7 @@ public final class PagedTabBar: UIControl {
     /// NEGATIVE in a ring deeper than the clearance (the bottom toolbar's
     /// platter stands 6pt above and below a 46pt strip): the lens then reaches
     /// past the view, so that it still stands the same 4pt off the glass.
-    private var lensInset: CGFloat { Metrics.clearance - overhangY }
+    private var lensInset: CGFloat { style.clearance - overhangY }
 
     /// How far the visible capsule reaches beyond this view, per axis. The
     /// capsule is laid out at THAT size, so a platter's own ring is where the
@@ -715,6 +743,36 @@ public final class PagedTabBar: UIControl {
     /// ride home, so the bar runs its own.
     public var onScrubEnd: ((CGFloat) -> Void)?
 
+    /// How the host's pages follow the bar.
+    public enum PagerMode: Sendable {
+        /// The pages run under a dragged pill (`onScrub`), the release hands
+        /// its velocity to the pager (`onScrubEnd`), and a tap scrolls the
+        /// pages there — the bar rides their animation home.
+        case scrolling
+        /// The pages do not move with the pill: a tap, or a dragged pill let
+        /// go, selects a segment (`.valueChanged`) and the host shows its page
+        /// DIRECTLY, while the lens flies there on its own. The owner's pick
+        /// from the `liquidglass` prototype (`PagerMode.instant`, #1748).
+        /// Swiping the pages still moves the pill fractionally.
+        case instant
+    }
+
+    /// `.instant` everywhere since #1748. In this mode `onScrub` and
+    /// `onScrubEnd` are never called.
+    public var pagerMode: PagerMode = .instant
+
+    /// The resting selection pill's fill. Defaults to the main tab bar's
+    /// selection grey; a bar drawn like a `UISegmentedControl` (the lens
+    /// bench) sets white.
+    public var selectionTint: UIColor {
+        get { pillLens.tint }
+        set { pillLens.tint = newValue }
+    }
+
+    /// Whether a host answering `.valueChanged` should animate its pages —
+    /// the one line every host's handler reads, so the mode lives here.
+    public var animatesPageChanges: Bool { pagerMode == .scrolling }
+
 
     private var titles: [String]
     private let capsule = UIVisualEffectView(effect: nil)
@@ -729,15 +787,27 @@ public final class PagedTabBar: UIControl {
     /// The active-segment marker. A tinted overlay, NOT a second material —
     /// see the type comment on why glass-inside-glass cost the lens its edge.
     private let lens = UIView()
-    /// The pill the viewer sees, following the model with weight — see
-    /// `SelectorPillMotion`.
-    private lazy var pillMotion: SelectorPillMotion = {
-        let motion = SelectorPillMotion(tint: Self.lensTint) { [weak self] in self?.lens.frame ?? .zero }
-        motion.detents = { [weak self] in
-            guard let self else { return [] }
-            return segments.indices.map { lensFrame(for: $0).midX }
+    /// The pill the viewer sees: the flat fill at rest, the Liquid Glass
+    /// lens under a finger and in a tap's flight — see `SelectorLiquidLens`.
+    private lazy var pillLens: SelectorLiquidLens = {
+        let pill = SelectorLiquidLens(tint: Self.lensTint) { [weak self] in self?.lens.frame ?? .zero }
+        pill.space = content
+        pill.titles = row
+        pill.anchor = self
+        pill.capsuleView = capsule
+        if style == .segmentedControl {
+            // The native control's: a white pill (`tertiaryLabel` in dark, which
+            // over the track reads the native's 90/90/95 to a grey level), and
+            // a lens 24×16pt larger.
+            pill.tint = UIColor { $0.userInterfaceStyle == .dark ? .tertiaryLabel : .white }
+            pill.fixedGrowth = CGSize(width: 24, height: 16)
         }
-        return motion
+        // ⚠️ `pill` weakly too: the closure is stored ON it.
+        pill.capsuleFrame = { [weak self, weak pill] in
+            guard let self, let pill else { return .zero }
+            return capsule.convert(capsule.bounds, to: pill.glass)
+        }
+        return pill
     }()
     /// The segment strip. A subclass only so it can say when it has finished
     /// positioning its arranged subviews — see `SegmentRow`.
@@ -898,9 +968,9 @@ public final class PagedTabBar: UIControl {
         lens.clipsToBounds = true
         lens.isUserInteractionEnabled = false
         // The model pill draws nothing: the pill the viewer sees is the
-        // motion's body, beside it, following it with weight.
+        // lens's body, beside it (and its glass, over the bar, when lifted).
         lens.backgroundColor = .clear
-        content.addSubview(pillMotion.body)
+        content.addSubview(pillLens.body)
 
         row.axis = .horizontal
         row.spacing = Metrics.interSegmentSpacing
@@ -1025,6 +1095,10 @@ public final class PagedTabBar: UIControl {
         pillGrab.delegate = self
         addGestureRecognizer(pillGrab)
 
+        // The lens's glass is drawn over the bar in its WINDOW while it shows
+        // (see `SelectorLiquidLens.glass`): it stands past the capsule when it
+        // lifts, as the native lens does, and the hosts clip.
+
         // The whole capsule reads as one tab bar to VoiceOver; each segment is
         // a button reporting its own selected state.
         accessibilityContainerType = .semanticGroup
@@ -1132,17 +1206,13 @@ public final class PagedTabBar: UIControl {
         }
     }
 
-    /// The active segment's fill. Adaptive by construction: `label` is near
-    /// black in light mode and near white in dark, so one constant reads as a
-    /// darkening in one and a lightening in the other, over a backdrop that is
-    /// itself taking its cue from the content behind it.
-    ///
-    /// 0.18 rather than 0.12, chosen by comparison over scrolled list rows —
-    /// which is the hard case, because the glass backdrop passes more of the
-    /// content through than the thin material did. At 0.12 the pill reads as
-    /// soft shading; at 0.18 it is unambiguous and still subtle.
-    /// `.quaternarySystemFill` was fainter than either and was discarded.
-    private static let lensTint = UIColor.label.withAlphaComponent(0.18)
+    /// The active segment's fill: the SAME grey as the main tab bar's selected
+    /// tab (owner, 2026-10-26). Measured on device over the same glass: the
+    /// tab bar's selection reads ~230 on a ~252 bar, which is
+    /// `secondarySystemFill` exactly; the `label` at 18% this bar wore read
+    /// ~200, a heavier grey than anything else in the chrome. Adaptive like
+    /// the system's own (a lightening in dark mode).
+    private static let lensTint = UIColor.secondarySystemFill
 
     /// Whether a layout pass has ever run — the fact that decides whether the
     /// capsule's bounds are real or still zero when the material goes live.
@@ -1162,7 +1232,7 @@ public final class PagedTabBar: UIControl {
     public override func layoutSubviews() {
         if bounds.size != laidOutSize {
             laidOutSize = bounds.size
-            pillMotion.snapOnNextMove()
+            pillLens.snapOnNextMove()
         }
         super.layoutSubviews()
         measurePlatterIfHosted()
@@ -1237,7 +1307,7 @@ public final class PagedTabBar: UIControl {
     public override func didMoveToWindow() {
         super.didMoveToWindow()
         materializeEffects()
-        if window == nil { pillMotion.cancel() } else { pillMotion.snapOnNextMove() }
+        if window == nil { pillLens.cancel() } else { pillLens.snapOnNextMove() }
         // A bar that leaves its window starts its platter measurement over
         // when it comes back — the next host may be a different ring.
         if window == nil { remeasure.reset() }
@@ -1304,7 +1374,7 @@ public final class PagedTabBar: UIControl {
     public var currentTitles: [String] { titles }
 
     public func setTitles(_ newTitles: [String]) {
-        pillMotion.snapOnNextMove()
+        pillLens.snapOnNextMove()
         guard newTitles != titles else { return }
         titles = newTitles
         for segment in segments {
@@ -1565,7 +1635,18 @@ public final class PagedTabBar: UIControl {
             if fromTap { onReselect?(index) }
             return
         }
+        // Native: a tap lifts the lens, which flies to the segment on its
+        // own; a selection made in code slides it without lifting. Armed
+        // BEFORE the model moves, which the host's page change (or the line
+        // below) is about to do.
+        pillLens.fly(lifted: fromTap)
         selectedIndex = index
+        if pagerMode == .instant {
+            // The pages will be shown directly and echo this same number; a
+            // bar with no pager behind it lands just the same.
+            progress = CGFloat(index)
+            applyProgress()
+        }
         sendActions(for: .valueChanged)
     }
 
@@ -1706,6 +1787,8 @@ public final class PagedTabBar: UIControl {
         // which is the only way this drag moves it anyway.
         scroller.isScrollEnabled = false
         startEdgeScroll()
+        // Native: a press on the selected segment lifts the pill into the lens.
+        pillLens.beginHold()
     }
 
     /// Puts the pill where the finger is, and tells the pages.
@@ -1750,6 +1833,17 @@ public final class PagedTabBar: UIControl {
         drag.touch = viewportX
         pillDrag = drag
 
+        // Past the first or last tab the lens still follows the finger, with
+        // strong resistance (native: ~9pt for 75pt), and springs back on the
+        // release — dragged from the far end, a lens stopped dead short of
+        // the uniform overhang a fresh grab there gave (owner, 2026-10-26).
+        let centres = segments.indices.map { lensFrame(for: $0).midX }
+        if let low = centres.min(), let high = centres.max() {
+            let over = centre - min(max(centre, low), high)
+            pillLens.holdOvershoot = Metrics.rubberBandMaximum * tanh(over / Metrics.rubberBandScale)
+            pillLens.modelMoved()
+        }
+
         guard target != progress else { return }
         progress = target
         // ⚠️ Directly, not through `setNeedsLayout()`. The rule this looks
@@ -1761,7 +1855,7 @@ public final class PagedTabBar: UIControl {
         // interpolation between them moves. `setProgress` takes the same path
         // for the same reason, on every frame of every swipe.
         applyProgress()
-        onScrub?(target)
+        if pagerMode == .scrolling { onScrub?(target) }
     }
 
     /// The finger let go.
@@ -1777,6 +1871,9 @@ public final class PagedTabBar: UIControl {
         pillDrag = nil
         stopEdgeScroll()
         scroller.isScrollEnabled = true
+        // The lens rests 0.1 s after the release (never sooner than 0.19 s
+        // after it lifted), flying to wherever the model lands.
+        pillLens.endHold()
         // ⚠️ **A press that never travelled is a TAP, and a tap is the
         // segment's business — nothing was scrubbed, so there is nothing to
         // settle.** Publishing one anyway is not harmless: every tap on the
@@ -1788,11 +1885,27 @@ public final class PagedTabBar: UIControl {
         // gallery scrolls back to the top.
         guard drag.moved else { return }
         cancelSegmentTracking()
+        if pagerMode == .instant {
+            landPillUnderFinger()
+            return
+        }
         if let onScrubEnd {
             onScrubEnd(drag.speed)
         } else {
             settleLensAlone(speed: drag.speed)
         }
+    }
+
+    /// `.instant`: the release lands on the segment under the pill — the
+    /// native control's rule, no throw by velocity (which sent the pill a tab
+    /// past the finger) — and selects it, so the host shows its page directly.
+    private func landPillUnderFinger() {
+        let landing = min(max(Int(progress.rounded()), 0), max(0, segments.count - 1))
+        progress = CGFloat(landing)
+        applyProgress()
+        guard landing != selectedIndex else { return }
+        selectedIndex = landing
+        sendActions(for: .valueChanged)
     }
 
     /// No pager on the other end — a bar in a test, an audit, or a host that
@@ -2000,18 +2113,31 @@ public final class PagedTabBar: UIControl {
     public var debugSegmentNaturalWidths: [CGFloat] { segments.map(\.pinnedWidth) }
     public var debugContentWidth: CGFloat { content.bounds.width }
     /// The VISIBLE pill's frame in the content's space — the model's once the
-    /// motion has come to rest, behind it while it travels.
-    public var debugPillBodyFrame: CGRect { pillMotion.body.frame }
-    public var debugPillIsMoving: Bool { pillMotion.isMoving }
+    /// lens has come to rest; grown while lifted, behind it in a flight.
+    public var debugPillBodyFrame: CGRect { pillLens.lensFrame }
+    public var debugPillIsMoving: Bool { pillLens.isMoving }
+    /// Whether the lens is lifted (a press on the pill, a tap's flight).
+    public var debugPillIsLifted: Bool { pillLens.isLifted }
+    /// 0 at rest, 1 lifted.
+    public var debugPillLift: CGFloat { pillLens.liftProgress }
+    /// 1 when the resting fill is whole, 0 when the lens is clear glass.
+    public var debugPillFill: CGFloat { pillLens.fillStrength }
+    /// Whether the glass, not the flat pill, is drawn.
+    public var debugPillShowsGlass: Bool { pillLens.showsGlass }
+    /// Lets the lens draw glass without a compiled shader (a bare test host).
+    public func debugLetGlassDraw(_ allowed: Bool) { pillLens.glassIsAvailable = { allowed } }
     /// Lets the pill's spring run in a bare test host (no window, and no
     /// Reduce Motion read), or forbids every animation.
-    public func debugLetPillMove(_ allowed: Bool) { pillMotion.mayAnimate = { allowed } }
+    public func debugLetPillMove(_ allowed: Bool) {
+        pillLens.mayAnimate = { allowed }
+        if allowed, pillLens.debugClock == nil { pillLens.debugClock = 0 }
+    }
     /// Ends a layout's snapping placements by hand — a test has no run loop turn.
-    public func debugEndPillLayout() { pillMotion.endSnapping() }
+    public func debugEndPillLayout() { pillLens.endSnapping() }
     /// Steps the pill's spring frame by frame to rest; returns the frames it took.
-    @discardableResult public func debugRunPillToRest() -> Int { pillMotion.runToRest() }
+    @discardableResult public func debugRunPillToRest() -> Int { pillLens.runToRest() }
     /// Steps the pill's spring by `frames` at 120 Hz without settling it.
-    public func debugAdvancePill(frames: Int) { for _ in 0..<frames { pillMotion.advance(by: 1 / 120) } }
+    public func debugAdvancePill(frames: Int) { for _ in 0..<frames { pillLens.advance(by: 1 / 120) } }
 
     public var debugStripOnScreen: CGRect {
         capsule.contentView.convert(capsule.contentView.bounds, to: nil)
@@ -2025,7 +2151,9 @@ public final class PagedTabBar: UIControl {
                 // The title's padding is measured from the LENS's edge, and the
                 // lens stands the clearance inside its segment — so the segment
                 // makes room for both, on every host.
-                titlePadding: style.segmentPadding + Metrics.clearance * 2,
+                titlePadding: style.segmentPadding + style.clearance * 2,
+                selectedWeight: style.selectedTitleWeight,
+                plainColour: style.unselectedTitleColour,
                 widthPriority: style.segmentWidthPriority,
                 textStyle: style.titleTextStyle,
                 maximumPointSize: style.maximumTitlePointSize,
@@ -2042,6 +2170,11 @@ public final class PagedTabBar: UIControl {
                 // `UIControl` this used to be never fired it at all.
                 for: .primaryActionTriggered
             )
+            // A press dims an unselected segment's content; the lifted lens
+            // redraws the titles, so it has to hear about it — a copy taken
+            // mid-press showed the newly selected tab greyed for the lens's
+            // whole rest (~1 s, owner's device recording).
+            segment.onAppearanceChange = { [weak self] in self?.pillLens.titlesChanged() }
             segment.setBadgeTint(badgeTint)
             segment.setBadgeGradient(badgeGradient)
             row.addArrangedSubview(segment)
@@ -2061,8 +2194,17 @@ public final class PagedTabBar: UIControl {
         // Weight/tint crossfade: each segment is fully "selected" at its own
         // index and fully plain a page away, so a half-way drag shows both
         // neighbours at half strength — the same readout as the lens's frame.
-        for (index, segment) in segments.enumerated() {
-            segment.setSelectionStrength(max(0, 1 - abs(clamped - CGFloat(index))))
+        // ⚠️ Not while a dragged pill is the one moving in `.instant`: the
+        // native control keeps its titles as they are under a held lens and
+        // switches them only when the release lands (filmed side by side on
+        // the lens bench) — crossfading them with the finger left both grey
+        // mid-drag. Pages swiped still crossfade them (they ARE fractional).
+        let titlesHold = pillDrag != nil && pagerMode == .instant
+        var strengthsChanged = false
+        for (index, segment) in segments.enumerated() where !titlesHold {
+            let strength = max(0, 1 - abs(clamped - CGFloat(index)))
+            if abs(segment.strength - strength) > 0.002 { strengthsChanged = true }
+            segment.setSelectionStrength(strength)
         }
 
         let from = lensFrame(for: lower)
@@ -2088,7 +2230,8 @@ public final class PagedTabBar: UIControl {
         lens.frame = rect
         lens.layer.cornerRadius = lens.bounds.height / 2
         lens.layer.cornerCurve = .continuous
-        pillMotion.modelMoved()
+        if strengthsChanged { pillLens.titlesChanged() }
+        pillLens.modelMoved()
         keepLensVisible()
     }
 
@@ -2178,7 +2321,7 @@ public final class PagedTabBar: UIControl {
         // The semantics are the ones the doc above describes and are worth
         // keeping: the MINIMUM distance that brings the lens into view, and
         // nothing at all when it is already there.
-        let reveal = lens.frame.insetBy(dx: -Metrics.clearance, dy: 0)
+        let reveal = lens.frame.insetBy(dx: -style.clearance, dy: 0)
         let viewport = scroller.bounds.width
         var offset = scroller.contentOffset.x
         if reveal.minX < offset {
@@ -2256,9 +2399,9 @@ public final class PagedTabBar: UIControl {
     private func lensFrame(for index: Int) -> CGRect {
         let segment = segments[index].frame
         return CGRect(
-            x: row.frame.minX + segment.minX + Metrics.clearance,
+            x: row.frame.minX + segment.minX + style.clearance,
             y: row.frame.minY + segment.minY + lensInset,
-            width: max(0, segment.width - Metrics.clearance * 2),
+            width: max(0, segment.width - style.clearance * 2),
             height: max(0, segment.height - lensInset * 2)
         )
     }
@@ -2402,9 +2545,16 @@ private final class SegmentView: UIButton {
     /// leading and trailing insets both come out at their stated values.
     private let contentOffset: CGFloat
 
+    /// The selected title's weight, and the unselected one's colour (the
+    /// style's: semibold and `secondaryLabel`, or a segmented control's).
+    private let selectedWeight: UIFont.Weight
+    private let plainColour: UIColor
+
     init(
         title: String,
         titlePadding: CGFloat,
+        selectedWeight: UIFont.Weight = .semibold,
+        plainColour: UIColor = .secondaryLabel,
         widthPriority: UILayoutPriority,
         textStyle: UIFont.TextStyle,
         maximumPointSize: CGFloat,
@@ -2416,6 +2566,8 @@ private final class SegmentView: UIButton {
     ) {
         self.title = title
         self.titlePadding = titlePadding
+        self.selectedWeight = selectedWeight
+        self.plainColour = plainColour
         self.widthPriority = widthPriority
         self.textStyle = textStyle
         self.maximumPointSize = maximumPointSize
@@ -2425,7 +2577,7 @@ private final class SegmentView: UIButton {
         badge = BadgeView(maximumPointSize: maximumBadgePointSize, height: badgeHeight)
         super.init(frame: .zero)
 
-        for (label, weight) in [(plainLabel, UIFont.Weight.regular), (boldLabel, .semibold)] {
+        for (label, weight) in [(plainLabel, UIFont.Weight.regular), (boldLabel, selectedWeight)] {
             label.text = title
             label.font = .preferredFont(forTextStyle: textStyle, weight: weight, maximumPointSize: maximumPointSize)
             label.adjustsFontForContentSizeCategory = true
@@ -2442,7 +2594,7 @@ private final class SegmentView: UIButton {
         }
         // Both labels stay opaque; the crossfade lives in their colours — see
         // `setSelectionStrength`.
-        plainLabel.textColor = Self.fadedColour(.secondaryLabel, to: 1)
+        plainLabel.textColor = Self.fadedColour(plainColour, to: 1)
         boldLabel.textColor = Self.fadedColour(.label, to: 0)
 
         // The SEMIBOLD label defines the geometry (it is the wider of the
@@ -2508,9 +2660,13 @@ private final class SegmentView: UIButton {
         configuration = .plain()
         configurationUpdateHandler = { [weak self] button in
             guard let self else { return }
-            let dimmed = button.isHighlighted ? 0.55 : 1
+            // The SELECTED segment does not dim: a press there lifts the lens,
+            // which redraws this content — dimmed, the copy read washed out
+            // (spike #182). Native dims only the other segments.
+            let dimmed = button.isHighlighted && self.strength < 0.5 ? 0.55 : 1
             self.content.alpha = dimmed
             self.plainLabel.alpha = dimmed
+            self.onAppearanceChange?()
         }
 
         // A MINIMUM, not an exact width: `fillEqually` on the row hands every
@@ -2539,7 +2695,9 @@ private final class SegmentView: UIButton {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    private var strength: CGFloat = 0
+    private(set) var strength: CGFloat = 0
+    /// The pressed dimming changed — the bar's lens redraws its titles.
+    var onAppearanceChange: (() -> Void)?
 
     /// `base` at `fraction` of its own alpha — a dynamic colour, so it keeps
     /// following the appearance (`secondaryLabel` is 60% in light, and
@@ -2565,7 +2723,7 @@ private final class SegmentView: UIButton {
     func setSelectionStrength(_ strength: CGFloat) {
         self.strength = strength
         boldLabel.textColor = Self.fadedColour(.label, to: strength)
-        plainLabel.textColor = Self.fadedColour(.secondaryLabel, to: 1 - strength)
+        plainLabel.textColor = Self.fadedColour(plainColour, to: 1 - strength)
         let selected = strength > 0.5
         if selected != accessibilityTraits.contains(.selected) {
             accessibilityTraits = selected ? [.button, .selected] : [.button]
@@ -2612,7 +2770,7 @@ private final class SegmentView: UIButton {
     /// width stated here: "All 11" was pinned to 41pt, needed 51, and the title
     /// compressed to a bare "…" beside an intact badge.
     private func updatePinnedWidth() {
-        let bold = UIFont.preferredFont(forTextStyle: textStyle, weight: .semibold, maximumPointSize: maximumPointSize)
+        let bold = UIFont.preferredFont(forTextStyle: textStyle, weight: selectedWeight, maximumPointSize: maximumPointSize)
         var width = ceil((title as NSString).size(withAttributes: [.font: bold]).width) + titlePadding
         if !badge.isHidden {
             width += badge.measuredWidth + badgeSpacing

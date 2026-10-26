@@ -29,6 +29,7 @@ struct RawHueGuardTests {
         "AppButtonCatalogViewController.swift": "the DEBUG button catalog's colour trials for the prominent ground",
         "MapIconDebugHUD.swift": "a DEBUG HUD",
         "AppCoordinator.swift": "a DEBUG stand-in picture",
+        "LensLab.swift": "the DEBUG lens bench's test backgrounds (#1748)",
         "SimulatedCaptureSource.swift": "the simulator camera's synthetic frames",
         "DebugMediaLibrary.swift": "the DEBUG media library's synthetic pictures",
         "ImageFetching.swift": "the placeholder fetcher's synthetic pictures",

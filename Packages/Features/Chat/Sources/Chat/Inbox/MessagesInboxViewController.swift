@@ -213,12 +213,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         categoryBar.addAction(
             UIAction { [weak self] _ in
                 guard let self else { return }
-                // ONE animation drives both. The pager scrolls to the target
-                // and reports fractional progress every frame; the lens
-                // interpolates off that, so page and lens cannot disagree and
-                // there is nothing to keep in sync. The bar runs no animation
-                // of its own — a second one on the same frame would fight this.
-                self.select(index: self.categoryBar.selectedIndex, animated: true)
+                // The page is shown DIRECTLY (`PagedTabBar.PagerMode.instant`,
+                // #1748): the lens flies there on its own and the pager's
+                // report of the new page lands exactly where it is going.
+                self.select(index: self.categoryBar.selectedIndex, animated: self.categoryBar.animatesPageChanges)
             },
             for: .valueChanged
         )

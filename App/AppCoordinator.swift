@@ -78,6 +78,14 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         PresentationBudget.installIfRequested()
         #endif
         container.memberGate.presenter = self
+        #if DEBUG
+        // `-lens-lab`: the selector lens bench, alone in the window (#1748).
+        if LensLab.isRequested {
+            window.rootViewController = LensLab.makeRoot()
+            window.makeKeyAndVisible()
+            return
+        }
+        #endif
         window.rootViewController = LaunchViewController()
         window.makeKeyAndVisible()
         // Which avatars have a sprite sheet (#1358).

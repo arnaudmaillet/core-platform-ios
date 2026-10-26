@@ -18,6 +18,10 @@ struct PagedTabBarPillDragTests {
 
     private func bar(_ titles: [String] = three, width: CGFloat = 360) -> PagedTabBar {
         let bar = PagedTabBar(titles: titles, style: .floating)
+        // The pages-run-under-the-finger contract these tests pin is the
+        // `.scrolling` mode's; `.instant` (every host since #1748) is pinned
+        // by `PagedTabBarInstantPagesTests`.
+        bar.pagerMode = .scrolling
         bar.frame = CGRect(x: 0, y: 0, width: width, height: PagedTabBar.Style.floating.height)
         bar.setNeedsLayout()
         bar.layoutIfNeeded()
