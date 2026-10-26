@@ -117,15 +117,18 @@ final class SelectorLiquidLens {
         static let pageRefraction: Float = 1
         /// 9pt (the native displacement's raw amount) bent the bar's edges far
         /// more than the native lens visibly does (owner, device, 2026-10-26).
-        static let refractAmount: CGFloat = 4
-        static let refractHeight: CGFloat = 14
+        static let refractAmount: CGFloat = 9
+        static let refractHeight: CGFloat = 24
         static let refractSplit: CGFloat = 3
         /// The thin-film sheen at the rim (see `LiquidLensRenderer`): only on
         /// the lens's rounded ends, inside the highlight, faint at rest and
         /// brighter in motion — as the native lens shows it. All round and
         /// always on, it read as a border (owner, 2026-10-26).
-        static let iridescence: Float = 0.16
-        static let iridescenceInMotion: Float = 0.24
+        /// OFF for good: a painted sheen read as rainbow borders; the colour
+        /// at the rim is the dispersion of what lies under it (see
+        /// `LiquidLensRenderer`), as the native lens's is.
+        static let iridescence: Float = 0
+        static let iridescenceInMotion: Float = 0
         static let iridescenceWidth: CGFloat = 3
         /// The bevel's lighting (see `LiquidLensRenderer`): the native lens
         /// reads as a piece of glass with volume; without it ours read flat.
@@ -536,7 +539,9 @@ final class SelectorLiquidLens {
         let t = now()
         let model = modelFrame()
         if model.width > 0 { knobY = model.midY; knobH = model.height }
-        if let at = restAt, t >= at { pressTarget = 0; restAt = nil; restedSince = t; fillAAtRest = fillA; fillBAtRest = fillB }
+        if let at = restAt, t >= at {
+            pressTarget = 0; restAt = nil; restedSince = t; fillAAtRest = fillA; fillBAtRest = fillB
+        }
         let sliding = slideAt.map { t >= $0 } ?? true
         if sliding { slideAt = nil }
         let overshoot: CGFloat = { if case .held = mode { return holdOvershoot }; return 0 }()
@@ -754,7 +759,10 @@ final class SelectorLiquidLens {
             u.aberrationDirY = Float(sin(Tuning.aberrationAngle))
             u.aberrationWidth = Float(Tuning.aberrationBandTabBar * scale)
         }
-        u.backdropLuma = body.traitCollection.userInterfaceStyle == .dark ? 0.12 : 0.97
+        // The tone under the titles and on the bar's side of the track's edge
+        // (a segmented track reads ~238/255 on a white page; the bar's glass
+        // ~0.95; ~0.12 in dark).
+        u.backdropLuma = body.traitCollection.userInterfaceStyle == .dark ? 0.12 : 0.94
         u.bevel = Tuning.bevel * Float(lift)
         u.bevelWidth = Float(Tuning.bevelWidth * scale)
         u.bevelShade = Tuning.bevelShade

@@ -363,7 +363,7 @@ final class LiquidLensRenderer {
         // colour is painted, one coverage per channel for the fringe. Only
         // OVER the capsule: the ring past it is left clear, so media under it
         // still shows.
-        if (u.pageRefraction > 0.0 && u.capsuleHalfWidth > 0.0 && capsuleSDF(p, u) < 0.0) {
+        if (u.pageRefraction > 0.0 && u.capsuleHalfWidth > 0.0) {
             // The pull fades with the VERTICAL distance from the lens's own
             // top (or bottom) line — not with the distance to its rounded rim,
             // which made the pulled-in page follow the rim down the ends, so
@@ -371,25 +371,40 @@ final class LiquidLensRenderer {
             // the flat line, the page's boundary runs nearly straight and only
             // meets the rim at the lens's ends: the edges diverge, as the
             // native lens's do (owner, device screenshots, 2026-10-26).
-            bool upper = p.y < u.centreY;
-            float lineY = upper ? (u.centreY - u.halfHeight) : (u.centreY + u.halfHeight);
-            float dv = abs(p.y - lineY);
-            float pull = 1.0 - smoothstep(0.0, max(u.refractHeight, 1.0), dv);
-            // …and eases off across the lens's rounded ends, so the boundary
-            // lifts in an arc to meet the rim there rather than running flat
-            // into it.
-            float intoEnd = saturate((abs(p.x - u.centreX) - (u.halfWidth - u.halfHeight)) / max(u.halfHeight, 1.0));
-            pull *= 1.0 - smoothstep(0.0, 1.0, intoEnd);
-            float towards = upper ? -1.0 : 1.0;
+            // ONE model for both native lenses (the lens bench): the backdrop
+            // is displaced along the rim's normal with a deep dome profile
+            // (the native `displacementMap` reads an SDF 36pt high). Over the
+            // tab bar, which runs past the lens on both sides, a sideways pull
+            // never leaves the bar, so only the top shows the page and its
+            // boundary lifts towards the ends (diverging); over a segmented
+            // track whose end lies inside the lens, the end pulls the page in
+            // too (the native's track reads shrunk inside its lens).
+            float dd = max(-d, 0.0);
+            float k0 = saturate(dd / max(u.refractHeight, 1.0));
+            float pull = 1.0 - k0 * k0 * (3.0 - 2.0 * k0);
+            float2 refracted = p + n2 * u.refractAmount * pull;
+            // ⚠️ THE COLOUR IS DISPERSION, NOT PAINT. The native lens's
+            // `glassForeground` splits what lies under its rim by 3.684pt at
+            // −15° over a 14pt band; on a plain page the only thing there to
+            // split is the boundary between the track (or the bar's glass)
+            // and the page, so that is the only place colour appears — faint
+            // where the two are close in tone. A painted thin-film rim read as
+            // "a rainbow border" instead of light through glass (owner).
+            float band = 1.0 - smoothstep(0.0, max(u.aberrationWidth, 1.0), -d);
+            float2 split = float2(u.aberrationDirX, u.aberrationDirY) * u.aberrationAmount * band;
+            float real = smoothstep(-0.75 * u.scale, 0.75 * u.scale, capsuleSDF(p, u));
             float3 cover;
             for (int k = 0; k < 3; ++k) {
-                float2 sp = p + float2(0.0, towards) * (u.refractAmount + u.refractSplit * float(k - 1)) * pull;
+                float2 sp = refracted + split * float(k - 1);
                 cover[k] = smoothstep(-0.75 * u.scale, 0.75 * u.scale, capsuleSDF(sp, u));
             }
-            cover *= u.pageRefraction;
-            float A = max(cover.r, max(cover.g, cover.b));
-            float3 rgb = float3(u.pageR, u.pageG, u.pageB) * cover + u.backdropLuma * (A - cover);
-            c = float4(c.rgb * (1.0 - A) + rgb, c.a + A * (1.0 - c.a));
+            float3 change = abs(cover - float3(real)) * u.pageRefraction;
+            float A = max(change.r, max(change.g, change.b));
+            if (A > 0.004) {
+                float3 page = float3(u.pageR, u.pageG, u.pageB);
+                float3 col = page * cover + u.backdropLuma * (1.0 - cover);
+                c = float4(c.rgb * (1.0 - A) + col * A, c.a + A * (1.0 - c.a));
+            }
         }
 
         // The measured rim.
@@ -409,13 +424,15 @@ final class LiquidLensRenderer {
             // 8, stroke 4, blur 3 — read off the native tab bar lens): a dark
             // band ~7% centred ~9pt under the top edge, gone by 19pt.
             // (Tuned to the tab bar lens's measured band: 235 on a 251 page.)
-            c = over(c, float3(0.0), 0.045 * u.outline * bump);
+            c = over(c, float3(0.0), 0.025 * u.outline * bump);
             // And the native lens's interior darkens near its rim all round
             // (measured on a white page: ~5% for the first 8pt, fading by
             // 15pt) — the backdrop refracted inwards; it is what reads as
             // volume, with no light from any side.
             float rimShade = 1.0 - smoothstep(6.0 * s1, 15.0 * s1, -d);
-            c = over(c, float3(0.0), 0.05 * u.outline * rimShade * smoothstep(0.8 * s1, 1.6 * s1, -d));
+            // (Light: next to the native segmented control the ring under the
+            // rim stays white; a 5% shade read as a second grey outline.)
+            c = over(c, float3(0.0), 0.02 * u.outline * rimShade * smoothstep(0.8 * s1, 1.6 * s1, -d));
             float bottom = u.centreY + u.halfHeight;
             float dyBot = (bottom - p.y) / s1;
             float fill = pow(saturate(1.0 - dyBot / 6.0), 1.5) * smoothstep(0.6 * s1, 1.2 * s1, -d);
