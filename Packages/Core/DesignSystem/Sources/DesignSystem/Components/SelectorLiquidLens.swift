@@ -115,8 +115,8 @@ final class SelectorLiquidLens {
         /// `LiquidLensRenderer`): measured on a black page, ~3pt past the
         /// bar's edge at ~7pt deep, a ~1.5pt rainbow at the boundary.
         static let pageRefraction: Float = 1
-        static let refractAmount: CGFloat = 6
-        static let refractHeight: CGFloat = 14
+        static let refractAmount: CGFloat = 9
+        static let refractHeight: CGFloat = 18
         static let refractSplit: CGFloat = 3
         /// The thin-film sheen at the rim (see `LiquidLensRenderer`): only on
         /// the lens's rounded ends, inside the highlight, faint at rest and

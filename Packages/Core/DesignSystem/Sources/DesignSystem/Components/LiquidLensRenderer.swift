@@ -368,7 +368,12 @@ final class LiquidLensRenderer {
             float pull = 1.0 - smoothstep(0.0, max(u.refractHeight, 1.0), dd);
             float3 cover;
             for (int k = 0; k < 3; ++k) {
-                float2 sp = p + n2 * (u.refractAmount + u.refractSplit * float(k - 1)) * pull;
+                // VERTICAL only, scaled by how much the rim faces up or down:
+                // along the full normal the rounded ends pulled the page in
+                // diagonally and the bar's edge bent DOWN the sides, following
+                // the rim (converging); the native's bends UP to meet the rim
+                // at the ends (diverging) — owner, from the lab frames.
+                float2 sp = p + float2(0.0, n2.y) * (u.refractAmount + u.refractSplit * float(k - 1)) * pull;
                 cover[k] = smoothstep(-0.75 * u.scale, 0.75 * u.scale, capsuleSDF(sp, u));
             }
             cover *= u.pageRefraction;
