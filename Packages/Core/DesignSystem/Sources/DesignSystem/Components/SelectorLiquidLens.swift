@@ -499,11 +499,71 @@ final class SelectorLiquidLens {
     /// values before the lift flashed the fill back for a frame (prototype).
     private func lift() {
         guard pressTarget == 0 else { return }
+        // Read before the lens shows: the snapshot must not see it.
+        if press < 0.01 { pageColour = samplePage() }
         pressTarget = 1
         liftedSince = now()
         fillAAtLift = fillA
         fillBAtLift = fillB
         overlayIsStale = true
+    }
+
+    /// What lies around the bar, read off the screen when the lens lifts —
+    /// the colour the page refraction pulls in under the rim. ⚠️ Not
+    /// `systemBackground`: over a photo (For You's header, dark mode) the
+    /// pulled-in page was painted BLACK, a dark veil and a black crescent at
+    /// the lens's ends where the native lens shows the photo (owner's
+    /// device, 2026-10-26). The native lens refracts the real backdrop
+    /// (private `CABackdropLayer`); a public snapshot of the bands just above
+    /// and below the capsule gives at least its colour.
+    private var pageColour: UIColor?
+
+    private func samplePage() -> UIColor? {
+        guard let anchor, let window = anchor.window, let capsuleView, window.bounds.width > 0 else { return nil }
+        let capsule = capsuleView.convert(capsuleView.bounds, to: window)
+        // ONE snapshot of the capsule's rect grown 10pt up and down, drawn
+        // tiny (16 columns, a row per ~4pt): its first and last rows are the
+        // bands just above and below the capsule. Measured on device
+        // (2026-10-26): 2–6 ms a lift, once 13 ms; two snapshots cost ~1.6×.
+        let region = capsule.insetBy(dx: 0, dy: -10).intersection(window.bounds)
+        guard region.width > 1, region.height > 1 else { return nil }
+        let columns = 16
+        let rows = max(3, Int(region.height / 4))
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        format.preferredRange = .standard
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: columns, height: rows), format: format)
+        let image = renderer.image { _ in
+            let sx = CGFloat(columns) / region.width
+            let sy = CGFloat(rows) / region.height
+            window.drawHierarchy(
+                in: CGRect(x: -region.minX * sx, y: -region.minY * sy,
+                           width: window.bounds.width * sx, height: window.bounds.height * sy),
+                afterScreenUpdates: false
+            )
+        }
+        guard let cgImage = image.cgImage, let data = cgImage.dataProvider?.data,
+              let bytes = CFDataGetBytePtr(data) else { return nil }
+        let bytesPerPixel = cgImage.bitsPerPixel / 8
+        guard bytesPerPixel >= 3 else { return nil }
+        let littleEndian = cgImage.bitmapInfo.contains(.byteOrder32Little)
+        var sum = [CGFloat](repeating: 0, count: 3)
+        let sampledRows = [0, rows - 1]
+        let count = columns * sampledRows.count
+        for row in sampledRows {
+            for column in 0..<columns {
+                let offset = row * cgImage.bytesPerRow + column * bytesPerPixel
+                // BGRA (little-endian, alpha first) or RGBA.
+                let (r, g, b) = littleEndian
+                    ? (bytes[offset + 2], bytes[offset + 1], bytes[offset])
+                    : (bytes[offset], bytes[offset + 1], bytes[offset + 2])
+                sum[0] += CGFloat(r); sum[1] += CGFloat(g); sum[2] += CGFloat(b)
+            }
+        }
+        let colour = UIColor(cgColor: CGColor(srgbRed: sum[0] / CGFloat(count * 255), green: sum[1] / CGFloat(count * 255),
+                                              blue: sum[2] / CGFloat(count * 255), alpha: 1))
+        return colour
     }
 
     private func scheduleRest(after delay: CFTimeInterval, from start: CFTimeInterval) {
@@ -819,7 +879,7 @@ final class SelectorLiquidLens {
         u.diffuseAmount = Tuning.diffuseAmount
         u.diffuseSpread = Tuning.diffuseSpread
         var pr: CGFloat = 1, pg: CGFloat = 1, pb: CGFloat = 1, pa: CGFloat = 1
-        UIColor.systemBackground.resolvedColor(with: body.traitCollection).getRed(&pr, green: &pg, blue: &pb, alpha: &pa)
+        (pageColour ?? UIColor.systemBackground.resolvedColor(with: body.traitCollection)).getRed(&pr, green: &pg, blue: &pb, alpha: &pa)
         u.pageR = Float(pr); u.pageG = Float(pg); u.pageB = Float(pb)
         u.pageRefraction = Tuning.pageRefraction * Float(lift)
         u.refractAmount = Float(Tuning.refractAmount * scale)
