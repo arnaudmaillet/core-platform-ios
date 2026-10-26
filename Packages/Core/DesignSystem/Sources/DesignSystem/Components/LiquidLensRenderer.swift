@@ -466,25 +466,23 @@ final class LiquidLensRenderer {
         // OVER the capsule: the ring past it is left clear, so media under it
         // still shows.
         if (u.pageRefraction > 0.0 && u.capsuleHalfWidth > 0.0) {
-            // The pull fades with the VERTICAL distance from the lens's own
-            // top (or bottom) line — not with the distance to its rounded rim,
-            // which made the pulled-in page follow the rim down the ends, so
-            // the bar's edges seen through the lens converged. Measured from
-            // the flat line, the page's boundary runs nearly straight and only
-            // meets the rim at the lens's ends: the edges diverge, as the
-            // native lens's do (owner, device screenshots, 2026-10-26).
-            // ONE model for both native lenses (the lens bench): the backdrop
-            // is displaced along the rim's normal with a deep dome profile
-            // (the native `displacementMap` reads an SDF 36pt high). Over the
-            // tab bar, which runs past the lens on both sides, a sideways pull
-            // never leaves the bar, so only the top shows the page and its
-            // boundary lifts towards the ends (diverging); over a segmented
-            // track whose end lies inside the lens, the end pulls the page in
-            // too (the native's track reads shrunk inside its lens).
-            float dd = max(-d, 0.0);
-            float k0 = saturate(dd / max(u.refractHeight, 1.0));
-            float pull = 1.0 - k0 * k0 * (3.0 - 2.0 * k0);
-            float2 refracted = p + n2 * u.refractAmount * pull;
+            // ⚠️ SEPARABLE, NOT ALONG THE RIM'S NORMAL. The native tab bar
+            // lens shows the bar's top and bottom edges as perfectly straight
+            // lines across it; only the lens's own rounded rim cuts them
+            // (owner, dark lens bench, 2026-10-26). Pulled along the normal,
+            // with the depth measured to the rounded rim, the points near the
+            // lens's ends were pulled down with the rim and the edges bent
+            // into it — they read as converging. Here the vertical pull fades
+            // with the distance to the lens's top (or bottom) LINE and the
+            // horizontal one with the distance to its left (or right) end:
+            // a horizontal edge maps to a horizontal edge, a vertical one (a
+            // segmented track's end inside the lens) to a vertical one.
+            float2 c0 = float2(u.centreX, u.centreY);
+            float2 off = p - c0;
+            float2 depth = max(float2(u.halfWidth, u.halfHeight) - abs(off), 0.0);
+            float2 k0 = saturate(depth / max(u.refractHeight, 1.0));
+            float2 pull = 1.0 - k0 * k0 * (3.0 - 2.0 * k0);
+            float2 refracted = p + sign(off) * u.refractAmount * pull;
             // ⚠️ THE COLOUR IS DISPERSION, NOT PAINT. The native lens's
             // `glassForeground` splits what lies under its rim by 3.684pt at
             // −15° over a 14pt band; on a plain page the only thing there to
