@@ -500,7 +500,7 @@ final class SelectorLiquidLens {
     private func lift() {
         guard pressTarget == 0 else { return }
         // Read before the lens shows: the snapshot must not see it.
-        if press < 0.01 { pageColour = samplePage() }
+        if press < 0.01 { (pageColour, barLuma) = sampleSurroundings() ?? (nil, nil) }
         pressTarget = 1
         liftedSince = now()
         fillAAtLift = fillA
@@ -517,8 +517,14 @@ final class SelectorLiquidLens {
     /// (private `CABackdropLayer`); a public snapshot of the bands just above
     /// and below the capsule gives at least its colour.
     private var pageColour: UIColor?
+    /// The bar's own tone under the lens, read in the same snapshot just
+    /// inside the capsule's top and bottom (clear of the titles) — what
+    /// the fringes resolve against. ⚠️ Not a constant per appearance: 0.12
+    /// in dark turned every split edge over a beige photo into a dark
+    /// blue-green or red-yellow crescent (owner's device, 2026-10-26).
+    private var barLuma: CGFloat?
 
-    private func samplePage() -> UIColor? {
+    private func sampleSurroundings() -> (page: UIColor, barLuma: CGFloat)? {
         guard let anchor, let window = anchor.window, let capsuleView, window.bounds.width > 0 else { return nil }
         let capsule = capsuleView.convert(capsuleView.bounds, to: window)
         // ONE snapshot of the capsule's rect grown 10pt up and down, drawn
@@ -548,22 +554,29 @@ final class SelectorLiquidLens {
         let bytesPerPixel = cgImage.bitsPerPixel / 8
         guard bytesPerPixel >= 3 else { return nil }
         let littleEndian = cgImage.bitmapInfo.contains(.byteOrder32Little)
-        var sum = [CGFloat](repeating: 0, count: 3)
-        let sampledRows = [0, rows - 1]
-        let count = columns * sampledRows.count
-        for row in sampledRows {
-            for column in 0..<columns {
-                let offset = row * cgImage.bytesPerRow + column * bytesPerPixel
-                // BGRA (little-endian, alpha first) or RGBA.
-                let (r, g, b) = littleEndian
-                    ? (bytes[offset + 2], bytes[offset + 1], bytes[offset])
-                    : (bytes[offset], bytes[offset + 1], bytes[offset + 2])
-                sum[0] += CGFloat(r); sum[1] += CGFloat(g); sum[2] += CGFloat(b)
+        // The mean colour (0…1) of whole rows.
+        func mean(_ sampledRows: [Int]) -> (CGFloat, CGFloat, CGFloat) {
+            var sum: (CGFloat, CGFloat, CGFloat) = (0, 0, 0)
+            for row in sampledRows {
+                for column in 0..<columns {
+                    let offset = row * cgImage.bytesPerRow + column * bytesPerPixel
+                    // BGRA (little-endian, alpha first) or RGBA.
+                    let (r, g, b) = littleEndian
+                        ? (bytes[offset + 2], bytes[offset + 1], bytes[offset])
+                        : (bytes[offset], bytes[offset + 1], bytes[offset + 2])
+                    sum.0 += CGFloat(r); sum.1 += CGFloat(g); sum.2 += CGFloat(b)
+                }
             }
+            let n = CGFloat(columns * sampledRows.count * 255)
+            return (sum.0 / n, sum.1 / n, sum.2 / n)
         }
-        let colour = UIColor(cgColor: CGColor(srgbRed: sum[0] / CGFloat(count * 255), green: sum[1] / CGFloat(count * 255),
-                                              blue: sum[2] / CGFloat(count * 255), alpha: 1))
-        return colour
+        let page = mean([0, rows - 1])
+        // Rows 2–6pt inside the capsule's top and bottom (the capsule starts
+        // 10pt into the region; a row is ~4pt).
+        let inside = rows > 7 ? [3, rows - 4] : [rows / 2]
+        let bar = mean(inside)
+        return (UIColor(cgColor: CGColor(srgbRed: page.0, green: page.1, blue: page.2, alpha: 1)),
+                0.2126 * bar.0 + 0.7152 * bar.1 + 0.0722 * bar.2)
     }
 
     private func scheduleRest(after delay: CFTimeInterval, from start: CFTimeInterval) {
@@ -857,7 +870,7 @@ final class SelectorLiquidLens {
         // (a segmented track reads ~238/255 on a white page; the bar's glass
         // ~0.95; ~0.12 in dark).
         let isDark = body.traitCollection.userInterfaceStyle == .dark
-        u.backdropLuma = isDark ? 0.12 : 0.94
+        u.backdropLuma = Float(barLuma ?? (isDark ? 0.12 : 0.94))
         u.dark = isDark ? 1 : 0
         u.bevel = Tuning.bevel * Float(lift)
         u.bevelWidth = Float(Tuning.bevelWidth * scale)
