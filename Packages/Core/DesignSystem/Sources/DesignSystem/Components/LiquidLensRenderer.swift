@@ -364,16 +364,26 @@ final class LiquidLensRenderer {
         // OVER the capsule: the ring past it is left clear, so media under it
         // still shows.
         if (u.pageRefraction > 0.0 && u.capsuleHalfWidth > 0.0 && capsuleSDF(p, u) < 0.0) {
-            float dd = max(-d, 0.0);
-            float pull = 1.0 - smoothstep(0.0, max(u.refractHeight, 1.0), dd);
+            // The pull fades with the VERTICAL distance from the lens's own
+            // top (or bottom) line — not with the distance to its rounded rim,
+            // which made the pulled-in page follow the rim down the ends, so
+            // the bar's edges seen through the lens converged. Measured from
+            // the flat line, the page's boundary runs nearly straight and only
+            // meets the rim at the lens's ends: the edges diverge, as the
+            // native lens's do (owner, device screenshots, 2026-10-26).
+            bool upper = p.y < u.centreY;
+            float lineY = upper ? (u.centreY - u.halfHeight) : (u.centreY + u.halfHeight);
+            float dv = abs(p.y - lineY);
+            float pull = 1.0 - smoothstep(0.0, max(u.refractHeight, 1.0), dv);
+            // …and eases off across the lens's rounded ends, so the boundary
+            // lifts in an arc to meet the rim there rather than running flat
+            // into it.
+            float intoEnd = saturate((abs(p.x - u.centreX) - (u.halfWidth - u.halfHeight)) / max(u.halfHeight, 1.0));
+            pull *= 1.0 - smoothstep(0.0, 1.0, intoEnd);
+            float towards = upper ? -1.0 : 1.0;
             float3 cover;
             for (int k = 0; k < 3; ++k) {
-                // VERTICAL only, scaled by how much the rim faces up or down:
-                // along the full normal the rounded ends pulled the page in
-                // diagonally and the bar's edge bent DOWN the sides, following
-                // the rim (converging); the native's bends UP to meet the rim
-                // at the ends (diverging) — owner, from the lab frames.
-                float2 sp = p + float2(0.0, n2.y) * (u.refractAmount + u.refractSplit * float(k - 1)) * pull;
+                float2 sp = p + float2(0.0, towards) * (u.refractAmount + u.refractSplit * float(k - 1)) * pull;
                 cover[k] = smoothstep(-0.75 * u.scale, 0.75 * u.scale, capsuleSDF(sp, u));
             }
             cover *= u.pageRefraction;
