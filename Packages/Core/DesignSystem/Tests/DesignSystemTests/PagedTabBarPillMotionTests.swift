@@ -28,6 +28,8 @@ struct PagedTabBarPillMotionTests {
         #expect(!bar.debugPillIsLifted)
         #expect(bar.debugPillFill == 1)
         #expect(!bar.debugPillShowsGlass)
+        // Idle: no display link ticking.
+        #expect(!bar.debugPillIsMoving)
         #expect(abs(drawn(bar).midX - model.midX) < 0.5 && abs(drawn(bar).width - model.width) < 0.5)
     }
 
