@@ -100,7 +100,7 @@ private final class LensLabPage: UIViewController {
         native.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(native)
         // Ours, on the page under it, with its own glass (not in the accessory).
-        let ours = PagedTabBar(titles: ["Chats", "Requests", "Suggestions"], style: .navigationTitle)
+        let ours = PagedTabBar(titles: ["Chats", "Requests", "Suggestions"], style: .segmentedControl)
         // Drawn as the native control is: a tertiarySystemFill track, a white
         // pill — so only the lenses differ.
         ours.hosting = .container
@@ -108,7 +108,6 @@ private final class LensLabPage: UIViewController {
         ours.backgroundColor = .tertiarySystemFill
         ours.layer.cornerCurve = .continuous
         ours.layer.cornerRadius = 16
-        ours.selectionTint = .white
         ours.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(ours)
         NSLayoutConstraint.activate([

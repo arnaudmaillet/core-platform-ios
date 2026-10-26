@@ -116,6 +116,11 @@ public final class PagedTabBar: UIControl {
         /// navigation bar supplies the backdrop, so the bar contributes only
         /// its lens and its titles.
         case navigationTitle
+        /// A clone of `UISegmentedControl` (iOS 27, measured by the owner's
+        /// `liquidglass` prototype): a 32pt track, a pill 2pt inside it, 13pt
+        /// titles all in `label`, the selected one medium, equal slots. The
+        /// lens bench draws one beside the native control (#1748).
+        case segmentedControl
 
         var capsuleHeight: CGFloat {
             switch self {
@@ -131,6 +136,7 @@ public final class PagedTabBar: UIControl {
             // beside `itemH` if that comparison ever needs re-taking; 36 is the
             // value that makes the three read as one row.
             case .navigationTitle: 44
+            case .segmentedControl: 32
             }
         }
 
@@ -138,6 +144,7 @@ public final class PagedTabBar: UIControl {
             switch self {
             case .floating: 4
             case .navigationTitle: 0
+            case .segmentedControl: 0
             }
         }
 
@@ -145,6 +152,7 @@ public final class PagedTabBar: UIControl {
             switch self {
             case .floating: 8
             case .navigationTitle: 0
+            case .segmentedControl: 0
             }
         }
 
@@ -155,6 +163,7 @@ public final class PagedTabBar: UIControl {
             // The navigation bar decides where the title slot begins and ends;
             // a margin of ours inside it would be a second opinion.
             case .navigationTitle: 0
+            case .segmentedControl: 0
             }
         }
 
@@ -170,6 +179,8 @@ public final class PagedTabBar: UIControl {
             // the title slot gets nothing, and scrolled content showed straight
             // through the titles. See `-foryou-backdrop-off` for the A/B.
             case .navigationTitle: !ProcessInfo.processInfo.arguments.contains("-foryou-backdrop-off")
+            // A flat track, as the native control's.
+            case .segmentedControl: false
             }
         }
 
@@ -254,7 +265,7 @@ public final class PagedTabBar: UIControl {
         /// bar too wide for its slot now slides instead of clipping, so the
         /// only thing 13pt still bought was smaller text. Every host reads at
         /// 15pt now, and a crowded one scrolls.
-        var titleTextStyle: UIFont.TextStyle { .subheadline }
+        var titleTextStyle: UIFont.TextStyle { self == .segmentedControl ? .footnote : .subheadline }
 
         /// Where Dynamic Type stops growing the titles.
         ///
@@ -277,6 +288,8 @@ public final class PagedTabBar: UIControl {
             switch self {
             case .floating: 19
             case .navigationTitle: 15
+            // 13pt, fixed: `.footnote`'s default size, capped there.
+            case .segmentedControl: 13
             }
         }
 
@@ -288,6 +301,7 @@ public final class PagedTabBar: UIControl {
             switch self {
             case .floating: 15
             case .navigationTitle: 11
+            case .segmentedControl: 11
             }
         }
 
@@ -296,7 +310,15 @@ public final class PagedTabBar: UIControl {
         /// segment is expressed against THIS rather than against the capsule,
         /// because the lens is what a viewer actually sees a badge sitting
         /// inside.
-        var lensHeight: CGFloat { capsuleHeight - SelectorCapsuleMetrics.clearance * 2 }
+        var lensHeight: CGFloat { capsuleHeight - clearance * 2 }
+
+        /// The pill's inset inside the track, every side: the shared 4pt, or
+        /// the native segmented control's 2pt (a 28pt pill in a 32pt track).
+        var clearance: CGFloat { self == .segmentedControl ? 2 : SelectorCapsuleMetrics.clearance }
+
+        /// The selected title's weight and the others' colour.
+        var selectedTitleWeight: UIFont.Weight { self == .segmentedControl ? .medium : .semibold }
+        var unselectedTitleColour: UIColor { self == .segmentedControl ? .label : .secondaryLabel }
 
         /// The count pill's height: half the lens, which keeps it a small mark
         /// beside the title rather than a second element competing with it.
@@ -337,6 +359,7 @@ public final class PagedTabBar: UIControl {
             switch self {
             case .floating: .fillEqually
             case .navigationTitle: .fill
+            case .segmentedControl: .fillEqually
             }
         }
 
@@ -350,6 +373,7 @@ public final class PagedTabBar: UIControl {
             switch self {
             case .floating: false
             case .navigationTitle: true
+            case .segmentedControl: false
             }
         }
 
@@ -510,7 +534,7 @@ public final class PagedTabBar: UIControl {
     /// NEGATIVE in a ring deeper than the clearance (the bottom toolbar's
     /// platter stands 6pt above and below a 46pt strip): the lens then reaches
     /// past the view, so that it still stands the same 4pt off the glass.
-    private var lensInset: CGFloat { Metrics.clearance - overhangY }
+    private var lensInset: CGFloat { style.clearance - overhangY }
 
     /// How far the visible capsule reaches beyond this view, per axis. The
     /// capsule is laid out at THAT size, so a platter's own ring is where the
@@ -771,6 +795,11 @@ public final class PagedTabBar: UIControl {
         pill.titles = row
         pill.anchor = self
         pill.capsuleView = capsule
+        if style == .segmentedControl {
+            // The native control's: a white pill, and a lens 24×16pt larger.
+            pill.tint = .white
+            pill.fixedGrowth = CGSize(width: 24, height: 16)
+        }
         // ⚠️ `pill` weakly too: the closure is stored ON it.
         pill.capsuleFrame = { [weak self, weak pill] in
             guard let self, let pill else { return .zero }
@@ -2120,7 +2149,9 @@ public final class PagedTabBar: UIControl {
                 // The title's padding is measured from the LENS's edge, and the
                 // lens stands the clearance inside its segment — so the segment
                 // makes room for both, on every host.
-                titlePadding: style.segmentPadding + Metrics.clearance * 2,
+                titlePadding: style.segmentPadding + style.clearance * 2,
+                selectedWeight: style.selectedTitleWeight,
+                plainColour: style.unselectedTitleColour,
                 widthPriority: style.segmentWidthPriority,
                 textStyle: style.titleTextStyle,
                 maximumPointSize: style.maximumTitlePointSize,
@@ -2161,8 +2192,14 @@ public final class PagedTabBar: UIControl {
         // Weight/tint crossfade: each segment is fully "selected" at its own
         // index and fully plain a page away, so a half-way drag shows both
         // neighbours at half strength — the same readout as the lens's frame.
+        // ⚠️ Not while a dragged pill is the one moving in `.instant`: the
+        // native control keeps its titles as they are under a held lens and
+        // switches them only when the release lands (filmed side by side on
+        // the lens bench) — crossfading them with the finger left both grey
+        // mid-drag. Pages swiped still crossfade them (they ARE fractional).
+        let titlesHold = pillDrag != nil && pagerMode == .instant
         var strengthsChanged = false
-        for (index, segment) in segments.enumerated() {
+        for (index, segment) in segments.enumerated() where !titlesHold {
             let strength = max(0, 1 - abs(clamped - CGFloat(index)))
             if abs(segment.strength - strength) > 0.002 { strengthsChanged = true }
             segment.setSelectionStrength(strength)
@@ -2282,7 +2319,7 @@ public final class PagedTabBar: UIControl {
         // The semantics are the ones the doc above describes and are worth
         // keeping: the MINIMUM distance that brings the lens into view, and
         // nothing at all when it is already there.
-        let reveal = lens.frame.insetBy(dx: -Metrics.clearance, dy: 0)
+        let reveal = lens.frame.insetBy(dx: -style.clearance, dy: 0)
         let viewport = scroller.bounds.width
         var offset = scroller.contentOffset.x
         if reveal.minX < offset {
@@ -2360,9 +2397,9 @@ public final class PagedTabBar: UIControl {
     private func lensFrame(for index: Int) -> CGRect {
         let segment = segments[index].frame
         return CGRect(
-            x: row.frame.minX + segment.minX + Metrics.clearance,
+            x: row.frame.minX + segment.minX + style.clearance,
             y: row.frame.minY + segment.minY + lensInset,
-            width: max(0, segment.width - Metrics.clearance * 2),
+            width: max(0, segment.width - style.clearance * 2),
             height: max(0, segment.height - lensInset * 2)
         )
     }
@@ -2506,9 +2543,16 @@ private final class SegmentView: UIButton {
     /// leading and trailing insets both come out at their stated values.
     private let contentOffset: CGFloat
 
+    /// The selected title's weight, and the unselected one's colour (the
+    /// style's: semibold and `secondaryLabel`, or a segmented control's).
+    private let selectedWeight: UIFont.Weight
+    private let plainColour: UIColor
+
     init(
         title: String,
         titlePadding: CGFloat,
+        selectedWeight: UIFont.Weight = .semibold,
+        plainColour: UIColor = .secondaryLabel,
         widthPriority: UILayoutPriority,
         textStyle: UIFont.TextStyle,
         maximumPointSize: CGFloat,
@@ -2520,6 +2564,8 @@ private final class SegmentView: UIButton {
     ) {
         self.title = title
         self.titlePadding = titlePadding
+        self.selectedWeight = selectedWeight
+        self.plainColour = plainColour
         self.widthPriority = widthPriority
         self.textStyle = textStyle
         self.maximumPointSize = maximumPointSize
@@ -2529,7 +2575,7 @@ private final class SegmentView: UIButton {
         badge = BadgeView(maximumPointSize: maximumBadgePointSize, height: badgeHeight)
         super.init(frame: .zero)
 
-        for (label, weight) in [(plainLabel, UIFont.Weight.regular), (boldLabel, .semibold)] {
+        for (label, weight) in [(plainLabel, UIFont.Weight.regular), (boldLabel, selectedWeight)] {
             label.text = title
             label.font = .preferredFont(forTextStyle: textStyle, weight: weight, maximumPointSize: maximumPointSize)
             label.adjustsFontForContentSizeCategory = true
@@ -2546,7 +2592,7 @@ private final class SegmentView: UIButton {
         }
         // Both labels stay opaque; the crossfade lives in their colours — see
         // `setSelectionStrength`.
-        plainLabel.textColor = Self.fadedColour(.secondaryLabel, to: 1)
+        plainLabel.textColor = Self.fadedColour(plainColour, to: 1)
         boldLabel.textColor = Self.fadedColour(.label, to: 0)
 
         // The SEMIBOLD label defines the geometry (it is the wider of the
@@ -2675,7 +2721,7 @@ private final class SegmentView: UIButton {
     func setSelectionStrength(_ strength: CGFloat) {
         self.strength = strength
         boldLabel.textColor = Self.fadedColour(.label, to: strength)
-        plainLabel.textColor = Self.fadedColour(.secondaryLabel, to: 1 - strength)
+        plainLabel.textColor = Self.fadedColour(plainColour, to: 1 - strength)
         let selected = strength > 0.5
         if selected != accessibilityTraits.contains(.selected) {
             accessibilityTraits = selected ? [.button, .selected] : [.button]
@@ -2722,7 +2768,7 @@ private final class SegmentView: UIButton {
     /// width stated here: "All 11" was pinned to 41pt, needed 51, and the title
     /// compressed to a bare "…" beside an intact badge.
     private func updatePinnedWidth() {
-        let bold = UIFont.preferredFont(forTextStyle: textStyle, weight: .semibold, maximumPointSize: maximumPointSize)
+        let bold = UIFont.preferredFont(forTextStyle: textStyle, weight: selectedWeight, maximumPointSize: maximumPointSize)
         var width = ceil((title as NSString).size(withAttributes: [.font: bold]).width) + titlePadding
         if !badge.isHidden {
             width += badge.measuredWidth + badgeSpacing

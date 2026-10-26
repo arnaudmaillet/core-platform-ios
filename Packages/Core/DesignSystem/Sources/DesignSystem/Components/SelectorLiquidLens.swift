@@ -208,6 +208,9 @@ final class SelectorLiquidLens {
     lazy var glassIsAvailable: () -> Bool = { LiquidLensRenderer.shared.isReady }
 
     private(set) var mode: Mode = .following
+    /// A fixed growth for the lifted lens instead of the capsule-relative
+    /// outset — the native segmented control's 24×16pt, for a bar drawn as one.
+    var fixedGrowth: CGSize?
     /// While held: how far past the model the finger pulls the lens (the
     /// rubber band beyond the first and last tab). Back to zero on release.
     var holdOvershoot: CGFloat = 0
@@ -630,7 +633,7 @@ final class SelectorLiquidLens {
 
     private func targetSize() -> (CGFloat, CGFloat) {
         let across = 1 - Tuning.flexTransverse * (flexScale - 1)
-        let grow = Tuning.growth(pillHeight: knobH, capsuleHeight: capsuleFrame().height)
+        let grow = fixedGrowth ?? Tuning.growth(pillHeight: knobH, capsuleHeight: capsuleFrame().height)
         return ((knobW + grow.width * press) * flexScale, (knobH + grow.height * press) * across)
     }
 
