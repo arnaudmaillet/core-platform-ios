@@ -295,12 +295,13 @@ final class SelectorLiquidLens {
     #endif
 
     // The titles' copy, and the mask that cuts the real ones out under the lens.
-    /// The copy the next frame samples — one of two, alternated on every
-    /// capture: the GPU may still be reading the last frame's when the
-    /// selection crossfade asks for a new one, and rewriting it in place
-    /// would tear that frame.
+    /// The copy the next frame samples — one of FOUR, rotated on every
+    /// capture: the GPU may still be reading the copies of the frames in
+    /// flight (the layer keeps up to three drawables, and a frame only waits
+    /// to be scheduled, not completed) when the selection crossfade asks
+    /// for a new one, and rewriting one in place would tear that frame.
     private var overlay: MTLTexture?
-    private var spareOverlay: MTLTexture?
+    private var spareOverlays: [MTLTexture] = []
     private var overlayIsStale = true
     /// The bitmap the titles are drawn into, kept between captures: a held
     /// drag redraws them every frame the selection crossfade moves.
@@ -934,10 +935,15 @@ final class SelectorLiquidLens {
         overlayIsStale = false
         let width = Int(ceil(titles.bounds.width * scale))
         let height = Int(ceil(titles.bounds.height * scale))
-        if spareOverlay?.width != width || spareOverlay?.height != height {
-            spareOverlay = LiquidLensRenderer.shared.makeTexture(width: width, height: height)
+        // The copy sampled three captures back — the frames since may still
+        // be in flight. Fresh ones go first until there are enough (four
+        // in all), and the pool starts over when the size changes.
+        if spareOverlays.first.map({ $0.width != width || $0.height != height }) == true { spareOverlays.removeAll() }
+        if spareOverlays.count < 2, let fresh = LiquidLensRenderer.shared.makeTexture(width: width, height: height) {
+            spareOverlays.insert(fresh, at: 0)
         }
-        guard let target = spareOverlay else { return }
+        guard !spareOverlays.isEmpty else { return }
+        let target = spareOverlays.removeFirst()
         let bytesPerRow = width * 4
         if overlayPixels.count != bytesPerRow * height {
             overlayPixels = [UInt8](repeating: 0, count: bytesPerRow * height)
@@ -963,7 +969,9 @@ final class SelectorLiquidLens {
             target.replace(region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0,
                             withBytes: base, bytesPerRow: bytesPerRow)
         }
-        spareOverlay = overlay
+        if let previous = overlay, previous.width == width, previous.height == height {
+            spareOverlays.append(previous)
+        }
         overlay = target
     }
 

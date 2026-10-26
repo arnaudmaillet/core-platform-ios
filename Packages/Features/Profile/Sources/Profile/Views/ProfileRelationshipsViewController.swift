@@ -125,7 +125,7 @@ final class ProfileRelationshipsViewController: UIViewController {
         viewModel.onDirectionChange = { [weak self] direction in
             guard let self, let index = Self.directions.firstIndex(of: direction) else { return }
             self.tabBar.select(index)
-            self.pager.setActivePage(index, animated: true)
+            self.pager.setActivePage(index, animated: self.tabBar.animatesPageChanges)
         }
         viewModel.onSegmentTitlesChange = { [weak self] titles in
             self?.tabBar.setTitles(titles)
