@@ -18,7 +18,6 @@ final class BlockedAccountsViewController: UIViewController {
     private let imagePipeline: ImagePipeline?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, Item>!
-    private let avatarLoads = RowImageLoads(size: .avatar)
 
     init(viewModel: BlockedAccountsViewModel, imagePipeline: ImagePipeline?) {
         self.viewModel = viewModel
@@ -70,13 +69,9 @@ final class BlockedAccountsViewController: UIViewController {
                 handle: "@\(profile.handle)",
                 monogram: MonogramAvatarView.monogram(name: profile.displayName, handle: profile.handle)
             ))
-            cell.setAvatarImage(nil)
-            // One load per CELL, cancelled when the cell is configured again:
-            // an unkept task painted the previous person's face on a
-            // recycled row (#780).
-            self?.avatarLoads.load(profile.avatarURL, using: self?.imagePipeline, for: cell) { [weak cell] image, _ in
-                cell?.setAvatarImage(image)
-            }
+            // The avatar keeps its own load and drops a late face for the
+            // person the row was before (#780, the avatar contract #1750).
+            cell.avatar.setPicture(profile.avatarURL, pipeline: self?.imagePipeline)
         }
         let messageRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             var content = UIListContentConfiguration.cell()

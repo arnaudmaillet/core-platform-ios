@@ -140,9 +140,14 @@ public final class AvatarView: UIView {
     /// when `url` is nil or the picture fails. The same URL again is a
     /// reconfigure and changes nothing; another (or nil) is a new person.
     public func setPicture(_ url: URL?, pipeline: ImagePipeline?) {
-        if let url, url == load.url, load.isLoading || ladder.rung == .content { return }
-        if url == nil, load.url == nil, ladder.rung == .placeholder, picture.image == nil { return }
-        let token = ladder.begin(item: url)
+        // The answer to `awaitPicture`: the same item, its skeleton kept.
+        let answersAwait = isAwaitingPicture
+        isAwaitingPicture = false
+        if !answersAwait {
+            if let url, url == load.url, load.isLoading || ladder.rung == .content { return }
+            if url == nil, load.url == nil, ladder.rung == .placeholder, picture.image == nil { return }
+        }
+        let token = answersAwait ? (self.token ?? ladder.begin(item: url)) : ladder.begin(item: url)
         self.token = token
         picture.image = nil
         standIn.image = nil
@@ -183,6 +188,23 @@ public final class AvatarView: UIView {
             monogram.isCovered = true
         }
     }
+
+    /// A person whose picture's URL is still being looked up (a second
+    /// service — `profile.v1` behind a `chat.v1` row): they may well have a
+    /// face, so the skeleton holds its place, never the initials (#1750).
+    /// `setPicture` answers it on the same item — the URL loads under the
+    /// bone already there, nil shows the initials.
+    public func awaitPicture() {
+        load.cancel()
+        token = ladder.begin(item: UUID())
+        picture.image = nil
+        standIn.image = nil
+        monogram.isCovered = false
+        animation.setAvatar(nil)
+        isAwaitingPicture = true
+    }
+
+    private var isAwaitingPicture = false
 
     /// Back to the initials alone — a recycled row's first step (the next
     /// configure, in the same pass, starts the new person).

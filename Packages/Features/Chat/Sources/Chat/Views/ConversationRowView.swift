@@ -114,17 +114,28 @@ final class ConversationRowView: UIView {
         imagePipeline: ImagePipeline?,
         avatars: (any PeerAvatarProviding)?
     ) {
+        // The same person again (a snapshot reconfiguring the row): their
+        // face, or the lookup for it, is already under way.
+        if let peerID = model.peerID, peerID == avatarPeerID, avatarTask != nil || avatarView.shownPicture != nil {
+            return
+        }
         avatarTask?.cancel()
         avatarTask = nil
         avatarPeerID = model.peerID
-        avatarView.setPicture(nil, pipeline: nil)
 
-        guard let peerID = model.peerID, let avatars, let imagePipeline else { return }
+        guard let peerID = model.peerID, let avatars, let imagePipeline else {
+            avatarView.setPicture(nil, pipeline: nil)
+            return
+        }
+        // The URL lives in profile.v1, a second service: the skeleton holds
+        // the face's place meanwhile, never the initials (#1750).
+        avatarView.awaitPicture()
         avatarTask = Task { [weak self] in
             let urls = await avatars.avatarURLs(for: [peerID])
-            guard !Task.isCancelled, let url = urls[peerID] else { return }
             guard let self, !Task.isCancelled, self.avatarPeerID == peerID else { return }
-            self.avatarView.setPicture(url, pipeline: imagePipeline)
+            self.avatarTask = nil
+            // No picture: the initials.
+            self.avatarView.setPicture(urls[peerID], pipeline: imagePipeline)
         }
     }
 

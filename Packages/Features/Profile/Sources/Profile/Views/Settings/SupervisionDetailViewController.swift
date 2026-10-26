@@ -45,7 +45,6 @@ final class SupervisionDetailViewController: UIViewController {
     private let onEnded: (SupervisionDetailViewController, Supervision, Bool) -> Void
     private var collectionView: UICollectionView!
     private(set) var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
-    private let avatarLoads = RowImageLoads(size: .avatar)
     private(set) var isEnding = false
     /// Confirms the end; a test hands in its own (an action sheet never
     /// finishes presenting in the test host).
@@ -163,11 +162,8 @@ final class SupervisionDetailViewController: UIViewController {
                 handle: "@\(profile.handle)",
                 monogram: MonogramAvatarView.monogram(name: profile.displayName, handle: profile.handle)
             ))
-            cell.setAvatarImage(nil)
             if self?.router != nil { cell.accessories.append(.disclosureIndicator()) }
-            self?.avatarLoads.load(profile.avatarURL, using: self?.imagePipeline, for: cell) { [weak cell] image, _ in
-                cell?.setAvatarImage(image)
-            }
+            cell.avatar.setPicture(profile.avatarURL, pipeline: self?.imagePipeline)
         }
         let row = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             guard let self else { return }

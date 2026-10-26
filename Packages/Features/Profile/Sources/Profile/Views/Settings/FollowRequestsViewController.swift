@@ -19,7 +19,6 @@ final class FollowRequestsViewController: UIViewController {
     private let imagePipeline: ImagePipeline?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, Item>!
-    private let avatarLoads = RowImageLoads(size: .avatar)
 
     init(viewModel: FollowRequestsViewModel, imagePipeline: ImagePipeline?) {
         self.viewModel = viewModel
@@ -82,13 +81,9 @@ final class FollowRequestsViewController: UIViewController {
                 monogram: MonogramAvatarView.monogram(name: request.displayName, handle: request.handle)
             ))
             cell.accessibilityHint = "Confirm or delete this follow request."
-            cell.setAvatarImage(nil)
-            // One load per CELL, cancelled when the cell is configured again:
-            // an unkept task painted the previous person's face on a
-            // recycled row (#780).
-            self?.avatarLoads.load(request.avatarURL, using: self?.imagePipeline, for: cell) { [weak cell] image, _ in
-                cell?.setAvatarImage(image)
-            }
+            // The avatar keeps its own load and drops a late face for the
+            // person the row was before (#780, the avatar contract #1750).
+            cell.avatar.setPicture(request.avatarURL, pipeline: self?.imagePipeline)
         }
         let messageRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             var content = UIListContentConfiguration.cell()

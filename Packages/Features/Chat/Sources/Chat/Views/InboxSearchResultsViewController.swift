@@ -52,6 +52,10 @@ final class InboxSearchResultsViewController: UIViewController {
 
     private let imagePipeline: ImagePipeline?
     private let avatars: (any PeerAvatarProviding)?
+    /// Each person row's face lookup, by cell: the directory carries no
+    /// picture, so it is read from profile.v1 like the inbox rows' (#1750 —
+    /// these rows drew initials only, never a face).
+    private var avatarLookups: [ObjectIdentifier: (id: ProfileID, task: Task<Void, Never>)] = [:]
 
     init(
         viewModel: InboxSearchViewModel,
@@ -125,8 +129,9 @@ final class InboxSearchResultsViewController: UIViewController {
         let personRegistration = UICollectionView.CellRegistration<
             PersonListCell, ProfileID
         > { [weak self] cell, _, id in
-            guard let model = self?.viewModel.peopleModels[id] else { return }
+            guard let self, let model = self.viewModel.peopleModels[id] else { return }
             cell.configure(with: model.rowContent)
+            self.lookUpAvatar(of: id, into: cell)
         }
 
         // A plain list pins its headers, so rows pass DIRECTLY under this one.
@@ -390,5 +395,29 @@ final class PeoplePagingFooterView: UICollectionReusableView {
     override func prepareForReuse() {
         super.prepareForReuse()
         spinner.startAnimating()
+    }
+}
+
+extension InboxSearchResultsViewController {
+    /// The row's face: the skeleton while profile.v1 is asked, then the
+    /// picture, or the initials when there is none. The same person again
+    /// (a reconfigure) keeps what is under way; a recycled cell drops the
+    /// late answer for the person it showed before.
+    fileprivate func lookUpAvatar(of id: ProfileID, into cell: PersonListCell) {
+        let key = ObjectIdentifier(cell)
+        if avatarLookups[key]?.id == id { return }
+        avatarLookups[key]?.task.cancel()
+        guard let avatars, let imagePipeline else {
+            avatarLookups[key] = nil
+            cell.avatar.setPicture(nil, pipeline: nil)
+            return
+        }
+        cell.avatar.awaitPicture()
+        let task = Task { [weak self, weak cell] in
+            let urls = await avatars.avatarURLs(for: [id])
+            guard !Task.isCancelled, let self, let cell, avatarLookups[key]?.id == id else { return }
+            cell.avatar.setPicture(urls[id], pipeline: imagePipeline)
+        }
+        avatarLookups[key] = (id, task)
     }
 }
