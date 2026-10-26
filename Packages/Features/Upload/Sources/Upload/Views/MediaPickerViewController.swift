@@ -573,7 +573,7 @@ final class MediaPickerViewController: UIViewController {
     /// through `onProgress`, which is why nothing here touches the bar.
     private func albumChanged() {
         guard let bar = albumBar, albums.indices.contains(bar.selectedIndex) else { return }
-        pager?.setActivePage(bar.selectedIndex, animated: true)
+        pager?.setActivePage(bar.selectedIndex, animated: bar.animatesPageChanges)
     }
 }
 

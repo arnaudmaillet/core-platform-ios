@@ -2205,7 +2205,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         mirrorSelection(to: index)
         let tab = tabs[index]
         adoptTab(tab)
-        galleryPager.setActivePage(tab, animated: true)
+        galleryPager.setActivePage(tab, animated: selector.bar.animatesPageChanges)
     }
 
     /// Arms the full-width dismissal, once, and only for a PUSHED profile.

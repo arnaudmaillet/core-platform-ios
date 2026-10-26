@@ -511,7 +511,7 @@ final class SearchResultsViewController: UIViewController {
     private func configurePages() {
         tabBar.addAction(UIAction { [weak self] _ in
             guard let self else { return }
-            self.pager.setActivePage(self.tabBar.selectedIndex, animated: true)
+            self.pager.setActivePage(self.tabBar.selectedIndex, animated: self.tabBar.animatesPageChanges)
         }, for: .valueChanged)
 
         // ⚠️ THE USERS TAB HAD NO HANDLER AT ALL. `SearchPeoplePage.onSelect`

@@ -160,12 +160,11 @@ final class ProfileRelationshipsViewController: UIViewController {
         // them; this one sits right under the bar, and covers it.
         pager.pagingScrollView.applyTopEdge(for: .titled)
 
-        // Tap → page. Animated, so the lens rides the same progress stream a
-        // finger produces rather than jumping.
+        // Tap → page, shown directly (#1748): the lens flies on its own.
         tabBar.addAction(
             UIAction { [weak self] _ in
                 guard let self else { return }
-                self.pager.setActivePage(self.tabBar.selectedIndex, animated: true)
+                self.pager.setActivePage(self.tabBar.selectedIndex, animated: self.tabBar.animatesPageChanges)
             },
             for: .valueChanged
         )
