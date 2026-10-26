@@ -106,6 +106,14 @@ final class LiquidLensRenderer {
         var ringOffsetY: Float = 0
         var ringStroke: Float = 1
         var ringBlur: Float = 1
+        /// The ring's top and bottom runs: no stroke, a wide soft bell
+        /// (`ringRunBlur` px either side of the dropped outline). Filmed
+        /// against the native tab bar lens (2026-10-26), its band under the top
+        /// is a gradient from the rim down (~−1% at the rim, ~−7% about 7pt
+        /// in, gone by ~18pt); the 4pt stroke blurred 3pt read as a hard grey
+        /// bar with white above it. The sides keep the stroke and blur above,
+        /// whose soft edges make the pastel rim colours.
+        var ringRunBlur: Float = 1
         /// The portal's displacement is evaluated on a grid this many px wide:
         /// the native displacement map is LOW-RESOLUTION, which is what makes
         /// a glyph smeared to the rim look stepped, almost pixelated.
@@ -313,7 +321,7 @@ final class LiquidLensRenderer {
         float iridescence, iridescenceWidth, backdropLuma;
         float bevel, bevelWidth, bevelShade, topBand, topBandDepth;
         float capsuleCentreX, capsuleCentreY, capsuleHalfWidth, capsuleHalfHeight, capsuleCover;
-        float ringOpacity, ringOffsetY, ringStroke, ringBlur, portalCell, portalBlur, portalClear;
+        float ringOpacity, ringOffsetY, ringStroke, ringBlur, ringRunBlur, portalCell, portalBlur, portalClear;
         float keyAmount, fillAmount, keySpread, keyHeight, diffuseHeight, diffuseAmount, diffuseSpread;
         float pageR, pageG, pageB, pageRefraction, refractAmount, refractHeight, refractSplit;
         float aberrationAmount, aberrationDirX, aberrationDirY, aberrationWidth;
@@ -393,9 +401,16 @@ final class LiquidLensRenderer {
 
     static inline float ringShadowAt(float2 q, constant Uniforms &u) {
         if (u.ringOpacity <= 0.0) { return 0.0; }
-        float ds = lensSDF(q - float2(0.0, u.ringOffsetY), u);
-        float halfStroke = u.ringStroke * 0.5;
-        return u.ringOpacity * (1.0 - smoothstep(halfStroke, halfStroke + max(u.ringBlur, 0.5), abs(ds)));
+        float2 r = q - float2(0.0, u.ringOffsetY);
+        float ds = lensSDF(r, u);
+        // How much of a top or bottom run this is (the outline's normal, up
+        // or down), against a side.
+        float gy = lensSDF(r + float2(0.0, 1.0), u) - lensSDF(r - float2(0.0, 1.0), u);
+        float gx = lensSDF(r + float2(1.0, 0.0), u) - lensSDF(r - float2(1.0, 0.0), u);
+        float run = gy * gy / max(gx * gx + gy * gy, 1e-6);
+        float halfStroke = mix(u.ringStroke * 0.5, 0.0, run);
+        float blur = mix(max(u.ringBlur, 0.5), max(u.ringRunBlur, 0.5), run);
+        return u.ringOpacity * (1.0 - smoothstep(halfStroke, halfStroke + blur, abs(ds)));
     }
 
     static inline float4 over(float4 c, float3 rgb, float a) {

@@ -177,6 +177,9 @@ final class SelectorLiquidLens {
         static let ringOffsetY: CGFloat = 8
         static let ringStroke: CGFloat = 4
         static let ringBlur: CGFloat = 3
+        /// The ring's top and bottom runs: a 10pt bell, no stroke (see
+        /// `LiquidLensRenderer.Uniforms.ringRunBlur`).
+        static let ringRunBlur: CGFloat = 10
         static let shadowRadius: CGFloat = 5
         static let shadowOffsetY: CGFloat = 8.5
         /// How far the glass may draw beyond the capsule: the grown lens and its shadow.
@@ -826,7 +829,8 @@ final class SelectorLiquidLens {
         u.ringOffsetY = Float(Tuning.ringOffsetY * scale)
         u.ringStroke = Float(Tuning.ringStroke * scale)
         u.ringBlur = Float(Tuning.ringBlur * scale)
-        let margin = (max(Tuning.shadowRadius + Tuning.shadowOffsetY, Tuning.ringOffsetY + Tuning.ringStroke + Tuning.ringBlur) + 4) * scale
+        u.ringRunBlur = Float(Tuning.ringRunBlur * scale)
+        let margin = (max(Tuning.shadowRadius + Tuning.shadowOffsetY, Tuning.ringOffsetY + max(Tuning.ringStroke + Tuning.ringBlur, Tuning.ringRunBlur)) + 4) * scale
         u.quadMinX = Float(max(0, inGlass.minX * scale - margin))
         u.quadMinY = Float(max(0, inGlass.minY * scale - margin))
         u.quadMaxX = Float(min(glass.bounds.width * scale, inGlass.maxX * scale + margin))
