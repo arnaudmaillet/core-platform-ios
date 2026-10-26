@@ -40,18 +40,27 @@ import UIKit
 @MainActor
 final class SelectorLiquidLens {
     enum Tuning {
-        /// How much the lifted lens outgrows the pill. ⚠️ THE TAB BAR'S LENS,
-        /// not the segmented control's (owner, 2026-10-26, filmed on device):
-        /// the native tab bar's lens is ~1.3× its pill's width and 20pt
-        /// taller, standing well past the bar; the segmented control's
-        /// 24×16pt read as a lens that "does not leave its container".
-        static let growWidthRatio: CGFloat = 0.3
-        static let minimumGrowWidth: CGFloat = 24
-        static let growHeight: CGFloat = 20
+        /// How much the lifted lens outgrows the pill: a CONSTANT OUTSET, the
+        /// same on all four sides, so the lens stands `pastCapsule` beyond the
+        /// capsule's top, bottom AND outer end on every bar — the owner's rule
+        /// (2026-10-26, as in spike #182 v6): "the lens must overhang its
+        /// container uniformly". Sized off the pill (×1.3, +20pt) a three-tab
+        /// bar's wide slots swallowed their container; a 1.3 width ratio
+        /// overhung the ends more than the top and bottom.
+        /// 3pt (the tab bar's, measured) read too small next to it on
+        /// device; the owner asked for a bigger lens (2026-10-26).
+        static let pastCapsule: CGFloat = 6
+        static let minimumOutset: CGFloat = 4
         /// The titles seen through the lifted lens are magnified about its
-        /// centre — the tab bar's lens reads its item ~1.15–1.2× larger.
-        static let magnification: CGFloat = 1.15
-        static func growWidth(forPillWidth width: CGFloat) -> CGFloat { max(minimumGrowWidth, width * growWidthRatio) }
+        /// centre, barely: 1.15 read as a loupe next to the tab bar's lens
+        /// (owner, 2026-10-26).
+        static let magnification: CGFloat = 1
+        /// The lifted lens's growth past a pill this tall, in a capsule this
+        /// tall: the pill's own clearance plus `pastCapsule`, on every side.
+        static func growth(pillHeight: CGFloat, capsuleHeight: CGFloat) -> CGSize {
+            let outset = max(minimumOutset, (capsuleHeight - pillHeight) / 2 + pastCapsule)
+            return CGSize(width: outset * 2, height: outset * 2)
+        }
         static let liftStiffness: CGFloat = 631.654682
         static let liftDamping: CGFloat = 50.265482
         static let releaseHang: CFTimeInterval = 0.10
@@ -76,15 +85,72 @@ final class SelectorLiquidLens {
         static let flexSmoothing: CGFloat = 0.094
         static let flexResponse: CGFloat = 0.021
         static let flexVelocitySoftness: CGFloat = 3.4
-        /// The native lens's optics, in points.
+        /// ⚠️ **READ OFF THE LIVE NATIVE TAB BAR LENS** (`-lens-lab
+        /// -lens-lab-dump`, simulator, 2026-10-26), not guessed: its content
+        /// portal is displaced by −17.5pt over an SDF 11.2pt high (the sign
+        /// convention here samples outward for the native's negative), and its
+        /// `glassForeground` splits what crosses the rim by 3.684pt at −15°
+        /// over a 14pt band fading inwards (edge opacity 1 → 0). No
+        /// magnification. (Guesses before this — a 6pt stretch, a fringe that
+        /// grew with speed — were tuned against videos.)
         static let portalAmount: CGFloat = 17.5
+        static let portalReachTabBar: CGFloat = 11.2
         static let portalReach: CGFloat = 11.2
-        static let aberration: CGFloat = 2.316
+        static let aberration: CGFloat = 3.684211
+        static let aberrationInMotion: CGFloat = 3.684211
+        static let aberrationFullSpeed: CGFloat = 900
+        static let aberrationBandTabBar: CGFloat = 14
+        /// The key/fill highlight, as the native effect is configured: key 0.5
+        /// up, fill 0.5 down, 80° spread, diffuse ×8 deep at 0.15 over 0.65 of
+        /// the spread (see `LiquidLensRenderer`). The line's depth is the
+        /// effect's `keyHeight` (1pt).
+        static let keyAmount: Float = 0.5
+        static let fillAmount: Float = 0.5
+        static let keySpread: Float = 1.396263
+        static let keyHeight: CGFloat = 1.5
+        static let diffuseHeightScale: CGFloat = 8
+        static let diffuseAmount: Float = 0.15
+        static let diffuseSpread: Float = 0.65
+        /// The page refracted in over the bar near the rim (see
+        /// `LiquidLensRenderer`): measured on a black page, ~3pt past the
+        /// bar's edge at ~7pt deep, a ~1.5pt rainbow at the boundary.
+        static let pageRefraction: Float = 1
+        static let refractAmount: CGFloat = 6
+        static let refractHeight: CGFloat = 14
+        static let refractSplit: CGFloat = 3
+        /// The thin-film sheen at the rim (see `LiquidLensRenderer`): only on
+        /// the lens's rounded ends, inside the highlight, faint at rest and
+        /// brighter in motion — as the native lens shows it. All round and
+        /// always on, it read as a border (owner, 2026-10-26).
+        static let iridescence: Float = 0.18
+        static let iridescenceInMotion: Float = 0.4
+        static let iridescenceWidth: CGFloat = 3
+        /// The bevel's lighting (see `LiquidLensRenderer`): the native lens
+        /// reads as a piece of glass with volume; without it ours read flat.
+        /// ⚠️ EXACTLY THE TAB BAR'S LENS (owner, 2026-10-26), measured on the
+        /// owner's device recording: NO directional light, NO shade on the
+        /// side away from it, NO drop shadow — those read as a 3D button, not
+        /// the native glass. What it has: the fine grey outline (`outline`),
+        /// and inside it a lighter band fading inwards — which also frosts over
+        /// the host capsule's edge seen through the lens, read as a second
+        /// bubble otherwise (`topBand`, see `LiquidLensRenderer`).
+        static let bevel: Float = 0
+        static let bevelWidth: CGFloat = 11
+        static let bevelShade: Float = 0
+        static let topBand: Float = 0
+        static let topBandDepth: CGFloat = 9
+        /// How fully the ring past the host capsule's edge is frosted over:
+        /// OFF — the frost read as a blur. The capsule's edge, sharp, now
+        /// plays the part of the line the native lens shows inside its rim
+        /// (the bar's edge seen through the glass).
+        static let capsuleCover: Float = 0
         static let aberrationAngle: CGFloat = -.pi / 12
         static let aberrationBand: CGFloat = 8.8
-        static let shadowOpacity: Float = 0.03
-        static let shadowRadius: CGFloat = 8
-        static let shadowOffsetY: CGFloat = 7
+        /// No drop shadow: the native lens has none, and one under ours read
+        /// oddly on device (owner, 2026-10-26).
+        static let shadowOpacity: Float = 0
+        static let shadowRadius: CGFloat = 10
+        static let shadowOffsetY: CGFloat = 6
         /// How far the glass may draw beyond the capsule: the grown lens and its shadow.
         static let glassMargin: CGFloat = 40
     }
@@ -119,8 +185,17 @@ final class SelectorLiquidLens {
     weak var titles: UIView?
     /// The capsule, in `glass`'s space: the lens is clipped to it, grown.
     var capsuleFrame: () -> CGRect = { .zero }
+    /// The capsule view itself, so the shader can frost the ring past its
+    /// edge where it is SHOWN (through the host's press transform).
+    weak var capsuleView: UIView?
     /// The resting fill.
-    var tint: UIColor { didSet { body.backgroundColor = tint } }
+    var tint: UIColor { didSet { paintBody() } }
+    /// The body's fill, as a SHAPE, never the view's `backgroundColor`: the
+    /// host's glass repaints a semantic background colour itself (#277) — the
+    /// resting pill read ~188 where the same `secondarySystemFill` drawn by
+    /// the lens read ~222, so the pill "turned grey again" once the lens
+    /// rested (owner's device recording, 2026-10-26).
+    private let bodyFill = CAShapeLayer()
     /// Whether a move may animate at all: not off-window, not under Reduce
     /// Motion. A test overrides it to run the springs in a bare host.
     lazy var mayAnimate: () -> Bool = { [weak self] in
@@ -131,6 +206,9 @@ final class SelectorLiquidLens {
     lazy var glassIsAvailable: () -> Bool = { LiquidLensRenderer.shared.isReady }
 
     private(set) var mode: Mode = .following
+    /// While held: how far past the model the finger pulls the lens (the
+    /// rubber band beyond the first and last tab). Back to zero on release.
+    var holdOvershoot: CGFloat = 0
     // Position and size, in `space`.
     private var knobX: CGFloat = 0
     private var knobV: CGFloat = 0
@@ -194,8 +272,8 @@ final class SelectorLiquidLens {
         self.tint = tint
         self.modelFrame = modelFrame
         body = UIView()
-        body.backgroundColor = tint
         body.isUserInteractionEnabled = false
+        body.layer.addSublayer(bodyFill)
         body.clipsToBounds = true
         body.layer.cornerCurve = .continuous
         glass = LiquidLensView()
@@ -205,6 +283,10 @@ final class SelectorLiquidLens {
         glassClip.fillColor = UIColor.black.cgColor
         glass.layer.mask = glassClip
         LiquidLensRenderer.shared.prepare()
+        // A shape's colour does not follow the appearance on its own.
+        body.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: UIView, _: UITraitCollection) in
+            self?.paintBody()
+        }
     }
 
     /// Whether anything is still moving (the display link runs).
@@ -309,6 +391,7 @@ final class SelectorLiquidLens {
     /// The bar left its window: nothing to animate towards any more.
     func cancel() {
         stop()
+        holdOvershoot = 0
         glass.removeFromSuperview()
         pressTarget = 0; press = 0; pressV = 0; restAt = nil; slideAt = nil
         fillA = 1; fillB = 1
@@ -333,6 +416,7 @@ final class SelectorLiquidLens {
     /// The finger let go: the lens flies to wherever the model is (the bar
     /// has landed it) and rests 0.1 s later.
     func endHold() {
+        holdOvershoot = 0
         guard case .held = mode else { return }
         mode = .flight(lifted: true)
         scheduleRest(after: Tuning.releaseHang, from: now())
@@ -450,7 +534,8 @@ final class SelectorLiquidLens {
         if let at = restAt, t >= at { pressTarget = 0; restAt = nil; restedSince = t; fillAAtRest = fillA; fillBAtRest = fillB }
         let sliding = slideAt.map { t >= $0 } ?? true
         if sliding { slideAt = nil }
-        let targetX = sliding ? model.midX : knobX
+        let overshoot: CGFloat = { if case .held = mode { return holdOvershoot }; return 0 }()
+        let targetX = sliding ? model.midX + overshoot : knobX
         let targetW = sliding ? model.width : knobW
 
         let following: Bool
@@ -543,7 +628,8 @@ final class SelectorLiquidLens {
 
     private func targetSize() -> (CGFloat, CGFloat) {
         let across = 1 - Tuning.flexTransverse * (flexScale - 1)
-        return ((knobW + Tuning.growWidth(forPillWidth: knobW) * press) * flexScale, (knobH + Tuning.growHeight * press) * across)
+        let grow = Tuning.growth(pillHeight: knobH, capsuleHeight: capsuleFrame().height)
+        return ((knobW + grow.width * press) * flexScale, (knobH + grow.height * press) * across)
     }
 
     // MARK: Drawing
@@ -561,11 +647,21 @@ final class SelectorLiquidLens {
             showFlat()
             body.frame = frame
             body.layer.cornerRadius = frame.height / 2
+            paintBody()
             return
         }
         body.isHidden = true
         glass.isHidden = false
         drawGlass(lens: frame, in: space)
+    }
+
+    private func paintBody() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        bodyFill.frame = body.bounds
+        bodyFill.path = UIBezierPath(roundedRect: body.bounds, cornerRadius: body.bounds.height / 2).cgPath
+        bodyFill.fillColor = tint.resolvedColor(with: body.traitCollection).cgColor
+        CATransaction.commit()
     }
 
     private func showFlat() {
@@ -584,14 +680,29 @@ final class SelectorLiquidLens {
             let margin = Tuning.glassMargin
             glass.frame = anchor.convert(anchor.bounds, to: window).insetBy(dx: -margin, dy: -margin)
         }
-        let inGlass = space.convert(lens, to: glass)
+        // ⚠️ **THROUGH THE PRESENTATION TREE, NOT THE MODEL.** UIKit's
+        // interactive glass answers a press by scaling the WHOLE host — the
+        // tab accessory with our bar and its titles inside — about a point
+        // that leans towards the finger, as a render-time animation the
+        // model never sees (probed: every title's presentation frame grows
+        // and drifts while held). The lens lives in the window, outside that
+        // transform; placed from the model it overhung one end of the grown
+        // glass and not the other, differently after a long drag than after
+        // a fresh grab (owner, device, 2026-10-26). The `liquidglass`
+        // prototype never met this: its track is a plain view. Converted
+        // through the presentation layers, the lens is transformed exactly as
+        // the glass and the titles are, frame by frame.
+        let shown = Self.presentationConvert(lens, from: space, to: glass)
+        let inGlass = shown.rect
         // The lens may stand past the capsule (that is the lift), not past
         // the grown capsule.
-        let capsule = capsuleFrame().insetBy(dx: -(lens.width / 2 + 2), dy: -(Tuning.growHeight / 2 + 2))
+        let capsule = capsuleFrame().insetBy(dx: -(inGlass.width / 2 + 2), dy: -(Tuning.pastCapsule + 12))
         glassClip.frame = glass.bounds
         glassClip.path = UIBezierPath(roundedRect: capsule, cornerRadius: capsule.height / 2).cgPath
         // The real titles under the lens are cut out; the shader redraws them.
         if let titles {
+            // The mask lives on the titles' own layer, inside the host's
+            // transform: the MODEL conversion is the right one here.
             let hole = space.convert(lens, to: titles)
             titlesMask.frame = titles.bounds
             let path = UIBezierPath(rect: titles.bounds.insetBy(dx: -40, dy: -40))
@@ -618,7 +729,11 @@ final class SelectorLiquidLens {
         let lift = min(press, 1)
         u.outline = Float(lift)
         if let overlay, let titles {
-            let origin = glass.convert(CGPoint.zero, to: titles)
+            // Glass point → titles point, through the host's live transform:
+            // an origin and a scale (the transform is a scale and a shift).
+            let mapped = Self.presentationConvert(CGRect(x: 0, y: 0, width: 100, height: 100), from: glass, to: titles).rect
+            let origin = mapped.origin
+            u.overlayScale = Float(mapped.width / 100)
             u.overlayEnabled = 1
             u.overlayWidth = Float(overlay.width)
             u.overlayHeight = Float(overlay.height)
@@ -626,12 +741,45 @@ final class SelectorLiquidLens {
             u.overlayOriginY = Float(origin.y * scale)
             u.overlayAmount = Float(Tuning.portalAmount * lift * scale)
             u.magnification = Float(1 + (Tuning.magnification - 1) * lift)
-            u.overlayReach = Float(Tuning.portalReach * scale)
-            u.aberrationAmount = Float(Tuning.aberration * lift * scale)
+            u.overlayReach = Float(Tuning.portalReachTabBar * scale)
+            let speed = min(abs(knobV) / Tuning.aberrationFullSpeed, 1)
+            u.aberrationAmount = Float((Tuning.aberration + (Tuning.aberrationInMotion - Tuning.aberration) * speed) * lift * scale)
+            // The native fringe's fixed direction (−15°).
             u.aberrationDirX = Float(cos(Tuning.aberrationAngle))
             u.aberrationDirY = Float(sin(Tuning.aberrationAngle))
-            u.aberrationWidth = Float(Tuning.aberrationBand * scale)
+            u.aberrationWidth = Float(Tuning.aberrationBandTabBar * scale)
         }
+        u.backdropLuma = body.traitCollection.userInterfaceStyle == .dark ? 0.12 : 0.97
+        u.bevel = Tuning.bevel * Float(lift)
+        u.bevelWidth = Float(Tuning.bevelWidth * scale)
+        u.bevelShade = Tuning.bevelShade
+        if let capsuleView {
+            let shownCapsule = Self.presentationConvert(capsuleView.bounds, from: capsuleView, to: glass).rect
+            u.capsuleCentreX = Float(shownCapsule.midX * scale)
+            u.capsuleCentreY = Float(shownCapsule.midY * scale)
+            u.capsuleHalfWidth = Float(shownCapsule.width / 2 * scale)
+            u.capsuleHalfHeight = Float(shownCapsule.height / 2 * scale)
+            u.capsuleCover = Tuning.capsuleCover * Float(lift)
+        }
+        u.topBand = Tuning.topBand * Float(lift)
+        u.keyAmount = Tuning.keyAmount * Float(lift)
+        u.fillAmount = Tuning.fillAmount * Float(lift)
+        u.keySpread = Tuning.keySpread
+        u.keyHeight = Float(Tuning.keyHeight * scale)
+        u.diffuseHeight = Float(Tuning.keyHeight * Tuning.diffuseHeightScale * scale)
+        u.diffuseAmount = Tuning.diffuseAmount
+        u.diffuseSpread = Tuning.diffuseSpread
+        var pr: CGFloat = 1, pg: CGFloat = 1, pb: CGFloat = 1, pa: CGFloat = 1
+        UIColor.systemBackground.resolvedColor(with: body.traitCollection).getRed(&pr, green: &pg, blue: &pb, alpha: &pa)
+        u.pageR = Float(pr); u.pageG = Float(pg); u.pageB = Float(pb)
+        u.pageRefraction = Tuning.pageRefraction * Float(lift)
+        u.refractAmount = Float(Tuning.refractAmount * scale)
+        u.refractHeight = Float(Tuning.refractHeight * scale)
+        u.refractSplit = Float(Tuning.refractSplit * scale)
+        u.topBandDepth = Float(Tuning.topBandDepth * scale)
+        let motion = Float(min(abs(knobV) / Tuning.aberrationFullSpeed, 1))
+        u.iridescence = (Tuning.iridescence + (Tuning.iridescenceInMotion - Tuning.iridescence) * motion) * Float(lift)
+        u.iridescenceWidth = Float(Tuning.iridescenceWidth * scale)
         u.shadowOpacity = Tuning.shadowOpacity * Float(lift)
         u.shadowRadius = Float(Tuning.shadowRadius * scale)
         u.shadowOffsetY = Float(Tuning.shadowOffsetY * scale)
@@ -641,6 +789,15 @@ final class SelectorLiquidLens {
         u.quadMaxX = Float(min(glass.bounds.width * scale, inGlass.maxX * scale + margin))
         u.quadMaxY = Float(min(glass.bounds.height * scale, inGlass.maxY * scale + margin))
         glass.render(uniforms: u, overlay: overlay, scale: scale)
+    }
+
+    /// `rect` in `from`'s space → `to`'s, through the presentation layers
+    /// when there are any (an in-flight transform on an ancestor counts).
+    private static func presentationConvert(_ rect: CGRect, from: UIView, to: UIView) -> (rect: CGRect, live: Bool) {
+        guard let source = from.layer.presentation(), let target = to.layer.presentation() else {
+            return (from.convert(rect, to: to), false)
+        }
+        return (source.convert(rect, to: target), true)
     }
 
     /// Draws the titles into the overlay texture, from the VIEWS.
@@ -720,18 +877,23 @@ final class SelectorLiquidLens {
             context.restoreGState()
         }
         if let label = view as? UILabel, let text = label.text, !text.isEmpty {
+            let font = label.font ?? UIFont.appFont(forTextStyle: .body)
             let paragraph = NSMutableParagraphStyle()
             paragraph.alignment = label.textAlignment
-            paragraph.lineBreakMode = label.lineBreakMode
+            paragraph.lineBreakMode = .byClipping
             let attributes: [NSAttributedString.Key: Any] = [
-                .font: label.font ?? UIFont.appFont(forTextStyle: .body),
+                .font: font,
                 .foregroundColor: label.textColor.resolvedColor(with: traits),
                 .paragraphStyle: paragraph
             ]
             let string = text as NSString
-            let height = string.boundingRect(with: CGSize(width: rect.width, height: .greatestFiniteMagnitude),
-                                             options: [.usesLineFragmentOrigin], attributes: attributes, context: nil).height
-            let box = CGRect(x: rect.minX, y: rect.midY - height / 2, width: rect.width, height: height)
+            // ⚠️ ONE LINE, centred on the label as UILabel centres it. Measured
+            // against the label's width, a title a hair wider than its
+            // tightly hugging label (the For You "Feed | Shots" bar) wrapped
+            // to two lines and drew half a line high inside the lens (device,
+            // 2026-10-26). A little slack either side, never a wrap.
+            let height = font.lineHeight
+            let box = CGRect(x: rect.minX - 4, y: rect.midY - height / 2, width: rect.width + 8, height: height)
             context.saveGState()
             context.setAlpha(alpha)
             UIGraphicsPushContext(context)

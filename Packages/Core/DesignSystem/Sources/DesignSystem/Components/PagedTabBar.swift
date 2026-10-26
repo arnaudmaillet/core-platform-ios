@@ -360,6 +360,11 @@ public final class PagedTabBar: UIControl {
     }
 
     private enum Metrics {
+        /// The lens's give past the first and last tab under a dragging
+        /// finger: `maximum · tanh(overshoot / scale)` (the prototype's fit of
+        /// the native trace, 9pt for 75pt).
+        static let rubberBandMaximum: CGFloat = 12
+        static let rubberBandScale: CGFloat = 90
         /// The lens's clearance inside the VISIBLE capsule, on EVERY side — the
         /// number every selector in this module shares.
         ///
@@ -757,6 +762,7 @@ public final class PagedTabBar: UIControl {
         pill.space = content
         pill.titles = row
         pill.anchor = self
+        pill.capsuleView = capsule
         // ⚠️ `pill` weakly too: the closure is stored ON it.
         pill.capsuleFrame = { [weak self, weak pill] in
             guard let self, let pill else { return .zero }
@@ -1161,17 +1167,13 @@ public final class PagedTabBar: UIControl {
         }
     }
 
-    /// The active segment's fill. Adaptive by construction: `label` is near
-    /// black in light mode and near white in dark, so one constant reads as a
-    /// darkening in one and a lightening in the other, over a backdrop that is
-    /// itself taking its cue from the content behind it.
-    ///
-    /// 0.18 rather than 0.12, chosen by comparison over scrolled list rows —
-    /// which is the hard case, because the glass backdrop passes more of the
-    /// content through than the thin material did. At 0.12 the pill reads as
-    /// soft shading; at 0.18 it is unambiguous and still subtle.
-    /// `.quaternarySystemFill` was fainter than either and was discarded.
-    private static let lensTint = UIColor.label.withAlphaComponent(0.18)
+    /// The active segment's fill: the SAME grey as the main tab bar's selected
+    /// tab (owner, 2026-10-26). Measured on device over the same glass: the
+    /// tab bar's selection reads ~230 on a ~252 bar, which is
+    /// `secondarySystemFill` exactly; the `label` at 18% this bar wore read
+    /// ~200, a heavier grey than anything else in the chrome. Adaptive like
+    /// the system's own (a lightening in dark mode).
+    private static let lensTint = UIColor.secondarySystemFill
 
     /// Whether a layout pass has ever run — the fact that decides whether the
     /// capsule's bounds are real or still zero when the material goes live.
@@ -1792,6 +1794,17 @@ public final class PagedTabBar: UIControl {
         drag.touch = viewportX
         pillDrag = drag
 
+        // Past the first or last tab the lens still follows the finger, with
+        // strong resistance (native: ~9pt for 75pt), and springs back on the
+        // release — dragged from the far end, a lens stopped dead short of
+        // the uniform overhang a fresh grab there gave (owner, 2026-10-26).
+        let centres = segments.indices.map { lensFrame(for: $0).midX }
+        if let low = centres.min(), let high = centres.max() {
+            let over = centre - min(max(centre, low), high)
+            pillLens.holdOvershoot = Metrics.rubberBandMaximum * tanh(over / Metrics.rubberBandScale)
+            pillLens.modelMoved()
+        }
+
         guard target != progress else { return }
         progress = target
         // ⚠️ Directly, not through `setNeedsLayout()`. The rule this looks
@@ -2116,6 +2129,11 @@ public final class PagedTabBar: UIControl {
                 // `UIControl` this used to be never fired it at all.
                 for: .primaryActionTriggered
             )
+            // A press dims an unselected segment's content; the lifted lens
+            // redraws the titles, so it has to hear about it — a copy taken
+            // mid-press showed the newly selected tab greyed for the lens's
+            // whole rest (~1 s, owner's device recording).
+            segment.onAppearanceChange = { [weak self] in self?.pillLens.titlesChanged() }
             segment.setBadgeTint(badgeTint)
             segment.setBadgeGradient(badgeGradient)
             row.addArrangedSubview(segment)
@@ -2592,6 +2610,7 @@ private final class SegmentView: UIButton {
             let dimmed = button.isHighlighted && self.strength < 0.5 ? 0.55 : 1
             self.content.alpha = dimmed
             self.plainLabel.alpha = dimmed
+            self.onAppearanceChange?()
         }
 
         // A MINIMUM, not an exact width: `fillEqually` on the row hands every
@@ -2621,6 +2640,8 @@ private final class SegmentView: UIButton {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private(set) var strength: CGFloat = 0
+    /// The pressed dimming changed — the bar's lens redraws its titles.
+    var onAppearanceChange: (() -> Void)?
 
     /// `base` at `fraction` of its own alpha — a dynamic colour, so it keeps
     /// following the appearance (`secondaryLabel` is 60% in light, and

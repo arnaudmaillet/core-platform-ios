@@ -102,9 +102,14 @@ struct PagedTabBarPillMotionTests {
         #expect(bar.debugPillFill < 0.05, "the fill has faded to clear glass: \(bar.debugPillFill)")
         #expect(bar.debugPillShowsGlass)
         let lifted = drawn(bar)
-        // The tab bar's lens: ~1.3× the pill's width, 20pt taller.
-        #expect(abs(lifted.width - model.width * 1.3) < 1.5, "1.3× wider: \(lifted.width) vs \(model.width)")
-        #expect(abs(lifted.height - (model.height + 20)) < 1.5, "20pt taller: \(lifted.height) vs \(model.height)")
+        // The evenly outset pill, centred on it: 6pt past the capsule's top
+        // and bottom, the same outset on the sides. (On screen it then rides
+        // the host's live press transform, through the presentation tree.)
+        let capsule = bar.debugCapsuleShape.height
+        #expect(abs(lifted.height - (capsule + 12)) < 1.5, "6pt past the capsule: \(lifted.height) vs \(capsule)")
+        let grown = lifted.height - model.height
+        #expect(abs(lifted.width - (model.width + grown)) < 1.5, "the same outset on the sides: \(lifted.width) vs \(model.width)")
+        #expect(abs(lifted.midX - model.midX) < 0.5, "centred on the pill")
 
         bar.debugEndPillDrag()
         bar.debugAdvancePill(frames: 6)    // 0.05 s: inside the 0.1 s hang
@@ -114,6 +119,27 @@ struct PagedTabBarPillMotionTests {
         #expect(bar.debugPillFill == 1)
         #expect(!bar.debugPillShowsGlass, "at rest the flat pill shows again")
         #expect(abs(drawn(bar).width - model.width) < 0.5)
+    }
+
+    /// Dragged past the last tab, the lens follows the finger a little
+    /// (rubber band, native ~9pt for 75pt) and springs back on the release.
+    @Test func pastTheLastTabTheLensGivesALittleAndSpringsBack() {
+        let bar = bar()
+        bar.debugLetPillMove(true)
+        bar.select(2)
+        bar.debugRunPillToRest()
+        let model = bar.debugPillInViewport
+        #expect(bar.debugBeginPillDrag(atViewportX: model.midX))
+        bar.debugAdvancePill(frames: 60)
+        let held = drawn(bar).midX
+        bar.debugDragPill(toViewportX: model.midX + 80)
+        bar.debugAdvancePill(frames: 60)
+        let pulled = drawn(bar).midX - held
+        #expect(pulled > 4 && pulled < 13, "a little give past the end: \(pulled)")
+        #expect(abs(bar.debugPillInViewport.midX - model.midX) < 0.5, "the model stays on the last tab")
+        bar.debugEndPillDrag()
+        bar.debugRunPillToRest()
+        #expect(abs(drawn(bar).midX - model.midX) < 0.5, "back on the tab")
     }
 
     @Test func aTapLiftsTheLensWhichFliesAndRestsInFlight() {
