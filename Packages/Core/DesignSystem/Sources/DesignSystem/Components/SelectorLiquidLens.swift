@@ -134,7 +134,13 @@ final class SelectorLiquidLens {
         /// 9pt (the native displacement's raw amount) bent the bar's edges far
         /// more than the native lens visibly does (owner, device, 2026-10-26).
         static let refractAmount: CGFloat = 9
-        static let refractHeight: CGFloat = 24
+        /// How deep the pull reaches. Over 24pt the bar's edges seen through
+        /// the lens sat ~5pt in and read as converging; filmed in dark against
+        /// the native tab bar lens (2026-10-26), its pull is ~7pt 2.7pt in and
+        /// ~1pt 11pt in, and the bar's edge, 10pt in, barely moves. Our lens
+        /// stands only ~6pt past the accessory, so the pull must be spent by
+        /// then: 9pt keeps the native's 7pt near the rim and moves the edge ~1pt.
+        static let refractHeight: CGFloat = 9
         static let refractSplit: CGFloat = 3
         /// The thin-film sheen at the rim (see `LiquidLensRenderer`): only on
         /// the lens's rounded ends, inside the highlight, faint at rest and
