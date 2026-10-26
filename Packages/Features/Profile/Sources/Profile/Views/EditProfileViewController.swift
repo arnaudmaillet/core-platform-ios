@@ -18,7 +18,6 @@ final class EditProfileViewController: UIViewController {
     /// The working snapshot the list renders; child editors commit into it.
     private var fields: EditProfileViewModel.Fields?
     private var avatarURL: URL?
-    private var avatarImage: UIImage?
 
     #if DEBUG
     func qaOpenPrivacy() { onOpenPrivacy?() }
@@ -125,7 +124,12 @@ final class EditProfileViewController: UIViewController {
 
     private func configureDataSource() {
         let heroRegistration = UICollectionView.CellRegistration<EditProfileHeroCell, Item> { [weak self] cell, _, _ in
-            cell.setAvatar(self?.avatarImage)
+            guard let self else { return }
+            cell.setAvatar(
+                avatarURL,
+                monogram: MonogramAvatarView.monogram(name: fields?.displayName ?? "", handle: fields?.username ?? ""),
+                pipeline: imagePipeline
+            )
             cell.onChangePhoto = { [weak self] in self?.changePhotoTapped() }
         }
 
@@ -277,21 +281,15 @@ final class EditProfileViewController: UIViewController {
         dataSource.apply(snapshot, animatingDifferences: false)
     }
 
+    /// The hero's picture: its avatar loads it (#1750). If the real hero
+    /// isn't on screen yet (still skeleton), the URL waits — the real
+    /// snapshot picks it up when it applies.
     private func loadAvatar(_ url: URL?) {
         avatarURL = url
-        guard let url else { return }
-        let pipeline = imagePipeline
-        Task { [weak self] in
-            let image = try? await pipeline.image(for: url, size: .px512)
-            guard let self, self.avatarURL == url, let image else { return }
-            self.avatarImage = image
-            // If the real hero isn't on screen yet (still skeleton), just stash
-            // the image — the real snapshot will pick it up when it applies.
-            var snapshot = self.dataSource.snapshot()
-            guard snapshot.itemIdentifiers.contains(.hero) else { return }
-            snapshot.reconfigureItems([.hero])
-            await self.dataSource.apply(snapshot, animatingDifferences: false)
-        }
+        var snapshot = dataSource.snapshot()
+        guard snapshot.itemIdentifiers.contains(.hero) else { return }
+        snapshot.reconfigureItems([.hero])
+        dataSource.apply(snapshot, animatingDifferences: false)
     }
 
     // MARK: - Row values
@@ -537,9 +535,10 @@ extension EditProfileViewController {
 
 /// The avatar hero at the top of the editor: a large circular avatar over a
 /// "Change photo" button, on a clear background so it doesn't read as a grouped
-/// row.
+/// row. The avatar is the app's (#1750): the picture with its skeleton, the
+/// initials without one — no generic person glyph.
 private final class EditProfileHeroCell: UICollectionViewListCell {
-    private let avatarView = AvatarImageView()
+    private let avatarView = AvatarView(diameter: EditProfileHeroCell.avatarDiameter, size: .px512)
     private let changeButton = UIButton(configuration: .plain())
     var onChangePhoto: (() -> Void)?
 
@@ -548,10 +547,6 @@ private final class EditProfileHeroCell: UICollectionViewListCell {
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundConfiguration = .clear()
-
-        avatarView.tintColor = .tertiaryLabel
-        avatarView.backgroundColor = .secondarySystemFill
-        avatarView.image = Self.placeholder
 
         changeButton.configuration?.title = "Change photo"
         changeButton.configuration?.baseForegroundColor = .tintColor
@@ -565,8 +560,6 @@ private final class EditProfileHeroCell: UICollectionViewListCell {
         contentView.addSubview(stack)
 
         NSLayoutConstraint.activate([
-            avatarView.widthAnchor.constraint(equalToConstant: Self.avatarDiameter),
-            avatarView.heightAnchor.constraint(equalToConstant: Self.avatarDiameter),
             stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Spacing.md),
             stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Spacing.sm),
             stack.centerXAnchor.constraint(equalTo: contentView.centerXAnchor)
@@ -576,14 +569,10 @@ private final class EditProfileHeroCell: UICollectionViewListCell {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func setAvatar(_ image: UIImage?) {
-        avatarView.image = image ?? Self.placeholder
+    func setAvatar(_ url: URL?, monogram: String, pipeline: ImagePipeline) {
+        avatarView.setMonogram(monogram)
+        avatarView.setPicture(url, pipeline: pipeline)
     }
-
-    private static let placeholder = UIImage(
-        systemName: "person.crop.circle.fill",
-        withConfiguration: UIImage.SymbolConfiguration(pointSize: avatarDiameter)
-    )
 }
 
 // MARK: - Skeleton cells

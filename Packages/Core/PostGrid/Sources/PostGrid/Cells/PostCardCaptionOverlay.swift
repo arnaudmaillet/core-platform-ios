@@ -48,9 +48,8 @@ import UIKit
 ///
 /// A small disc leads the author's name (2026-09-30), as tall as the name's
 /// line — the band's avatar (`PostAuthorBandView`) at the size a caption can
-/// afford. It follows the app's avatar contract: the initials are drawn at
-/// once and the picture, when the post names one, is laid over them as it
-/// arrives. A COPY — the flight's resting furniture, a window's stand-in —
+/// afford. It is the app's avatar (`AvatarView`, #1750): the picture with
+/// its skeleton when the post names one, the initials when it does not. A COPY — the flight's resting furniture, a window's stand-in —
 /// reads the picture straight from the pipeline's memory when the card in the
 /// row already drew it, so the face the card takes off with is the face it
 /// had.
@@ -109,14 +108,10 @@ public final class PostCardCaptionOverlay: UIView {
     /// rect while the window it belongs to was still travelling.
     private let scrim = ScrimView()
     private let authorLabel = UILabel()
-    /// The author's disc, before the name — initials, and the picture over
-    /// them once it is here. Posed like the labels (bounds, centre,
-    /// transform), so it rides a flight's window by its corner too.
-    private let avatar = MonogramAvatarView(diameter: 16)
-    private let avatarPicture = AvatarImageView()
-    /// The picture's load. Holds the overlay weakly: a card recycled before it
-    /// lands drops its overlay, and the picture goes nowhere.
-    private var avatarTask: Task<Void, Never>?
+    /// The author's disc, before the name — the app's avatar. Posed like the
+    /// labels (bounds, centre, transform), so it rides a flight's window by
+    /// its corner too.
+    private let avatar = AvatarView(diameter: 16, size: .avatar)
     /// An `EmoteLabel`: the caption's emoji and `:code:` emotes animate on the
     /// card as they do on the list's cards (`PostGridListRowCell`), and only
     /// while the card is actually on screen (`EmoteVisibility`).
@@ -171,8 +166,6 @@ public final class PostCardCaptionOverlay: UIView {
         // beside them: drawn in the dark style, or a light-mode plate and ink
         // all but vanish into the photograph (seen on the simulator).
         if onMedia { avatar.overrideUserInterfaceStyle = .dark }
-        avatarPicture.isHidden = true
-        avatarPicture.pin(to: avatar)
         captionLabel.font = Self.captionFont(onMedia: onMedia)
         // `@handle`s and `#tag`s (#524): the link colour on a plain card,
         // semibold in the caption's own white over a picture.
@@ -285,28 +278,12 @@ public final class PostCardCaptionOverlay: UIView {
     /// The gap between the disc and the name.
     private static let avatarGap: CGFloat = 5
 
-    /// The picture over the initials: from memory at once when the pipeline
-    /// has it — every copy of a card the row has drawn — else when it lands.
-    /// The initials stay under it, the rendered state (the app's avatar
-    /// contract), so a face that never arrives costs nothing.
+    /// The picture: from memory at once when the pipeline has it — every
+    /// copy of a card the row has drawn — else its skeleton, then the
+    /// picture; the initials when the post names none.
     private func loadAvatar(_ url: URL?, from imagePipeline: ImagePipeline?) {
-        guard let url, let imagePipeline, !avatar.isHidden else { return }
-        if let cached = imagePipeline.cachedImage(for: url, size: .avatar) {
-            showAvatar(cached)
-            return
-        }
-        avatarTask = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url, size: .avatar), !Task.isCancelled,
-                  let self else { return }
-            showAvatar(image)
-        }
-    }
-
-    private func showAvatar(_ image: UIImage) {
-        avatarPicture.image = image
-        avatarPicture.isHidden = false
-        // A covered disc draws the picture alone, no plate rim around it.
-        avatar.isCovered = true
+        guard !avatar.isHidden else { return }
+        avatar.setPicture(url, pipeline: imagePipeline)
     }
 
     private static let inset: CGFloat = 10
@@ -467,7 +444,7 @@ public final class PostCardCaptionOverlay: UIView {
     public var debugAuthorFrame: CGRect { authorLabel.frame }
     /// The author's disc, and whether a picture covers its initials.
     public var debugAvatarFrame: CGRect { avatar.isHidden ? .null : avatar.frame }
-    public var debugShowsAvatarPicture: Bool { !avatarPicture.isHidden && avatarPicture.image != nil }
+    public var debugShowsAvatarPicture: Bool { avatar.shownPicture != nil }
     /// The width the caption is wrapped at — the card's, never the window's.
     public var debugCaptionWrapWidth: CGFloat { captionLabel.bounds.width }
     /// The most lines the words may take, the height they are drawn in, and

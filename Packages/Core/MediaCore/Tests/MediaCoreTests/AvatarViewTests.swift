@@ -52,6 +52,36 @@ struct AvatarViewTests {
         #expect(avatar.shownPicture == nil)
     }
 
+    /// Whether `view` shows, all the way up to `avatar`.
+    private func isDrawn(_ view: UIView, in avatar: AvatarView) -> Bool {
+        var current: UIView? = view
+        while let shown = current, shown !== avatar {
+            if shown.isHidden || shown.alpha < 0.01 { return false }
+            current = shown.superview
+        }
+        return current === avatar
+    }
+
+    /// ⚠️ THE SKELETON AND THE PICTURE DRAW WITH THE INITIALS HIDDEN: they
+    /// were laid inside the initials' disc once, and an avatar with a picture
+    /// — whose initials never show — drew an empty slot (snap author pill,
+    /// filmed 2026-10-26).
+    @Test func theSkeletonAndThePictureDrawWithoutTheInitials() throws {
+        let time = ManualClock()
+        let avatar = AvatarView(diameter: 40, size: .avatar, clock: time.clock)
+        avatar.setPicture(URL(string: "mock://face/cold-draw"), pipeline: makePipeline())
+        time.advance(0.15)
+        #expect(avatar.monogram.isHidden)
+        #expect(isDrawn(avatar.skeleton, in: avatar), "the bone sits in a hidden view")
+
+        let pipeline = makePipeline()
+        let url = try #require(URL(string: "mock://face/warm-draw"))
+        pipeline.store(solid(), for: url, size: .avatar)
+        let warm = AvatarView(diameter: 40, size: .avatar)
+        warm.setPicture(url, pipeline: pipeline)
+        #expect(isDrawn(warm.picture, in: warm), "the picture sits in a hidden view")
+    }
+
     /// A picture that fails: the initials, and the bone goes.
     @Test func aFailedPictureShowsTheInitials() throws {
         let time = ManualClock()

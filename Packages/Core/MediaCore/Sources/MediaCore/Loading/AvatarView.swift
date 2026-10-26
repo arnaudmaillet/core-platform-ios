@@ -62,16 +62,22 @@ public final class AvatarView: UIView {
         monogram.translatesAutoresizingMaskIntoConstraints = false
         addSubview(monogram)
         monogram.pin(to: self)
-        for view in [skeleton, standIn, picture] {
+        // ⚠️ SIBLINGS OF THE INITIALS, NOT THEIR SUBVIEWS (`pin(to:)` would
+        // add them INTO the disc): an avatar with a picture never shows its
+        // initials (#1750), and every layer inside a hidden disc hid with it —
+        // no skeleton, no picture, an empty slot. The frame rides on top of
+        // the face (last), in its bounds: it changes no size.
+        for view in [skeleton, standIn, picture, frameView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             view.isUserInteractionEnabled = false
             addSubview(view)
-            view.pin(to: monogram)
+            NSLayoutConstraint.activate([
+                view.leadingAnchor.constraint(equalTo: monogram.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: monogram.trailingAnchor),
+                view.topAnchor.constraint(equalTo: monogram.topAnchor),
+                view.bottomAnchor.constraint(equalTo: monogram.bottomAnchor)
+            ])
         }
-        // The frame rides on top of the face (last in the disc), in its
-        // bounds: it changes no size.
-        frameView.translatesAutoresizingMaskIntoConstraints = false
-        frameView.pin(to: monogram)
         ladder.setView(skeleton, for: .skeleton)
         ladder.setView(monogram, for: .placeholder, drivesAlpha: false, permanent: true)
         ladder.setView(standIn, for: .preview)
@@ -187,6 +193,19 @@ public final class AvatarView: UIView {
             ladder.show(.preview, token: token, warm: true)
             monogram.isCovered = true
         }
+    }
+
+    /// A picture already in hand (a place's flag): drawn now, nothing to
+    /// load.
+    public func setPicture(image: UIImage) {
+        load.cancel()
+        isAwaitingPicture = false
+        let token = ladder.begin(item: ObjectIdentifier(image))
+        self.token = token
+        animation.setAvatar(nil)
+        standIn.image = nil
+        picture.image = image
+        ladder.show(.content, token: token, warm: true)
     }
 
     /// A person whose picture's URL is still being looked up (a second

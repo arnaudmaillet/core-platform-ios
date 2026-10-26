@@ -165,7 +165,7 @@ public final class PostAuthorBandView: UIView {
     /// with the face it draws.
     var menuAuthor: PostCardMenuAuthor? {
         guard let model, model.showsIdentity, !model.handle.isEmpty else { return nil }
-        return PostCardMenuAuthor(handle: model.handle, face: avatarImage.isHidden ? nil : avatarImage.image)
+        return PostCardMenuAuthor(handle: model.handle, face: avatar.shownPicture)
     }
 
     #if DEBUG
@@ -201,18 +201,10 @@ public final class PostAuthorBandView: UIView {
         onShapeChange?()
     }
 
-    private let avatar = MonogramAvatarView(diameter: PostAuthorBandView.avatarDiameter)
-    private let avatarImage = AvatarImageView()
-    /// An animated avatar's still is its picture (#1424), drawn as soon as
-    /// it is known.
-    private lazy var animation: AnimatedAvatarPlayer = {
-        let player = AnimatedAvatarPlayer.attach(to: avatarImage)
-        player.onStill = { [weak self] still in
-            self?.avatarImage.image = still
-            self?.avatarImage.isHidden = false
-        }
-        return player
-    }()
+    /// The app's avatar (#943, #1750): the picture with its skeleton, the
+    /// initials without one; an animated avatar plays by the rounds and
+    /// rests on its still (#1358, #1424).
+    private let avatar = AvatarView(diameter: PostAuthorBandView.avatarDiameter, size: .avatar)
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
     private let menuButton = PostActionPillView.makeGlyphControl(systemName: "ellipsis", label: "More actions")
@@ -221,7 +213,6 @@ public final class PostAuthorBandView: UIView {
     /// whose height is the control's rather than the disc's.
     private var identityHeightConstraints: [NSLayoutConstraint] = []
     private var bareHeightConstraint: NSLayoutConstraint!
-    private var avatarTask: Task<Void, Never>?
 
     /// What a popover-shaped presentation should point at — the control the
     /// viewer actually pressed.
@@ -299,12 +290,6 @@ public final class PostAuthorBandView: UIView {
         nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         handleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        // The picture is laid OVER the monogram rather than replacing it — the
-        // app's avatar contract: initials are the rendered state and a
-        // photograph hydrates in front of them.
-        avatarImage.pin(to: avatar)
-        avatarImage.isHidden = true
-
         identityControl.addSubview(avatar)
         identityControl.addSubview(identity)
         addSubview(identityControl)
@@ -357,10 +342,6 @@ public final class PostAuthorBandView: UIView {
 
     public func configure(with model: Model, imagePipeline: ImagePipeline?) {
         self.model = model
-        avatarTask?.cancel()
-        avatarTask = nil
-        avatarImage.image = nil
-        avatarImage.isHidden = true
 
         let showsIdentity = model.showsIdentity
         identityControl.isHidden = !showsIdentity
@@ -376,28 +357,11 @@ public final class PostAuthorBandView: UIView {
         nameLabel.text = model.name
         renderHandleLine()
         avatar.setMonogram(model.monogram)
-        // A post card's author is large enough to play an animated avatar,
-        // when the rounds pick it (#1358, #1424).
-        animation.rung = AnimatedAvatars.Rung(bucket: .avatar)
-        animation.setAvatar(showsIdentity ? model.avatarURL : nil)
-
-        guard showsIdentity, let url = model.avatarURL, let imagePipeline else { return }
-        // Decoded at the avatar's bucket, not at 1200 px (#894).
-        if let cached = imagePipeline.cachedImage(for: url, size: .avatar) {
-            avatarImage.image = animation.still ?? cached
-            avatarImage.isHidden = false
-            return
-        }
-        // Reuse is handled by CANCELLATION, as the row's cover load is: the
-        // task is dropped in `prepareForReuse`, so a picture cannot arrive for
-        // a post this band has stopped representing.
-        avatarTask = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url, size: .avatar),
-                  !Task.isCancelled, let self
-            else { return }
-            self.avatarImage.image = self.animation.still ?? image
-            self.avatarImage.isHidden = false
-        }
+        // Decoded at the avatar's bucket, not at 1200 px (#894); a post card's
+        // author is large enough to play an animated avatar when the rounds
+        // pick it (#1358, #1424). The same face again (a re-dated stand-in
+        // with no pipeline) keeps the picture it has.
+        avatar.setPicture(showsIdentity ? model.avatarURL : nil, pipeline: imagePipeline)
     }
 
     /// Swaps the age on the band's second line, and nothing else.
@@ -426,7 +390,7 @@ public final class PostAuthorBandView: UIView {
 
     /// Whether the band is drawing the author's picture (rather than their
     /// initials) — for tests.
-    var isShowingPicture: Bool { !avatarImage.isHidden && avatarImage.image != nil }
+    var isShowingPicture: Bool { avatar.shownPicture != nil }
 
     /// Draws the "..." without wiring it.
     ///
@@ -442,9 +406,6 @@ public final class PostAuthorBandView: UIView {
 
     /// Drops any in-flight picture load. Called from the row's reuse.
     public func cancelPendingWork() {
-        avatarTask?.cancel()
-        avatarTask = nil
-        avatarImage.image = nil
-        avatarImage.isHidden = true
+        avatar.reset()
     }
 }

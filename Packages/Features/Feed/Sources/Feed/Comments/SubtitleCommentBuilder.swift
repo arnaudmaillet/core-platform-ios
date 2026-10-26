@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 
 /// One subtitle cue: a semantic comment reduced to what the subtitle zone
@@ -12,15 +13,17 @@ public struct SubtitleCue: Equatable, Sendable, Identifiable {
     /// populate this and scheduling moves onto the player clock
     /// (`SnapSubtitleView` keeps rendering "the current cue" either way).
     public let at: TimeInterval?
-    /// The comment author's avatar, shown leading the cue pill. Optional — a
-    /// missing/unhydrated author renders the zone's placeholder circle.
+    /// The comment author's avatar, shown leading the cue pill (its skeleton
+    /// while it loads); without one, the author's initials (#1750).
     public let avatarURL: URL?
+    public let monogram: String
 
-    public init(id: String, text: String, at: TimeInterval? = nil, avatarURL: URL? = nil) {
+    public init(id: String, text: String, at: TimeInterval? = nil, avatarURL: URL? = nil, monogram: String = "?") {
         self.id = id
         self.text = text
         self.at = at
         self.avatarURL = avatarURL
+        self.monogram = monogram
     }
 }
 
@@ -101,7 +104,10 @@ public struct SubtitleCommentBuilder: Sendable {
             guard !body.isEmpty,
                   !requiringSemanticShape || Self.isSemanticShaped(body),
                   seenBodies.insert(body.lowercased()).inserted else { continue }
-            cues.append(SubtitleCue(id: entry.id, text: body, avatarURL: entry.authorAvatarURL))
+            cues.append(SubtitleCue(
+                id: entry.id, text: body, avatarURL: entry.authorAvatarURL,
+                monogram: MonogramAvatarView.monogram(name: entry.authorName, handle: entry.authorHandle)
+            ))
         }
         return cues
     }

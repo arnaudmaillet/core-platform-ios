@@ -31,7 +31,6 @@ final class ShareTargetsView: UIView {
     private let scrollView = UIScrollView()
     private let row = UIStackView()
     private let imagePipeline: ImagePipeline?
-    private var avatarTasks: [Task<Void, Never>] = []
 
     /// - Parameter inset: the host's horizontal margin. Applied as a CONTENT
     ///   inset rather than a frame inset, which is the whole point of the row:
@@ -66,7 +65,6 @@ final class ShareTargetsView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    deinit { avatarTasks.forEach { $0.cancel() } }
 
     // MARK: - States
 
@@ -94,8 +92,6 @@ final class ShareTargetsView: UIView {
     }
 
     private func reset() {
-        avatarTasks.forEach { $0.cancel() }
-        avatarTasks = []
         row.arrangedSubviews.forEach { $0.removeFromSuperview() }
     }
 
@@ -165,34 +161,15 @@ final class ShareTargetsView: UIView {
     }
 
     private func makeItem(for target: ShareTarget) -> UIView {
-        let avatar = AvatarImageView()
-        avatar.backgroundColor = .tertiarySystemFill
-        avatar.isUserInteractionEnabled = false
-
-        let monogram = UILabel()
-        // ONE letter (#811): this quick row's disc carries it at a 22pt
-        // weight, where two initials would have to shrink to fit. The share
+        // The app's avatar (#1750): the picture — at once when the pipeline
+        // has it, else its skeleton — and the initials only without one.
+        // ONE letter (#811): this quick row's disc is large enough for one
+        // at its weight, where two would have to shrink to fit. The share
         // card above it reads the same rule with two.
-        monogram.text = MonogramAvatarView.monogram(name: target.displayName, handle: "", maxLetters: 1)
-        monogram.font = .systemFont(ofSize: 22, weight: .semibold)
-        monogram.textColor = .secondaryLabel
-        monogram.textAlignment = .center
-
-        let well = UIView()
-        monogram.pin(to: well)
-        avatar.pin(to: well)
-        NSLayoutConstraint.activate([
-            well.widthAnchor.constraint(equalToConstant: Metrics.avatarDiameter),
-            well.heightAnchor.constraint(equalToConstant: Metrics.avatarDiameter)
-        ])
-
-        if let url = target.avatarURL, let imagePipeline {
-            avatarTasks.append(Task { [weak avatar] in
-                guard let image = try? await imagePipeline.image(for: url, size: .px256) else { return }
-                guard !Task.isCancelled else { return }
-                avatar.map { $0.image = image }
-            })
-        }
+        let well = AvatarView(diameter: Metrics.avatarDiameter, size: .px256)
+        well.isUserInteractionEnabled = false
+        well.setMonogram(MonogramAvatarView.monogram(name: target.displayName, handle: "", maxLetters: 1))
+        well.setPicture(target.avatarURL, pipeline: imagePipeline)
 
         return makeColumnItem(
             // First name only: at 72pt a full name truncates to nothing

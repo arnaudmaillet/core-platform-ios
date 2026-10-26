@@ -1,4 +1,5 @@
 import Testing
+import MediaCore
 import UIKit
 @testable import Feed
 
@@ -113,10 +114,10 @@ struct SnapSubtitleViewTests {
         view.subviews.first { $0.accessibilityIdentifier == "subtitle-avatar-container" }
     }
 
-    /// The leading avatar (an `AvatarImageView`, i.e. a `UIImageView`) —
-    /// nested inside the wrapper.
-    private func avatar(_ view: SnapSubtitleView) -> UIImageView? {
-        avatarContainer(view)?.subviews.compactMap { $0 as? UIImageView }.first
+    /// The leading avatar (the app's `AvatarView`, #1750) — nested inside
+    /// the wrapper.
+    private func avatar(_ view: SnapSubtitleView) -> AvatarView? {
+        avatarContainer(view)?.subviews.compactMap { $0 as? AvatarView }.first
     }
 
     /// The count badge, nested inside the wrapper.

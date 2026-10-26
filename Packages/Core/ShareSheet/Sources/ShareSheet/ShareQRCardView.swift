@@ -50,13 +50,15 @@ public final class ShareQRCardView: UIView {
 
     private let qrImageView = UIImageView()
     private let punchView = UIView()
-    private let avatarView = AvatarImageView()
-    private let monogramLabel = UILabel()
+    /// The QR's centre: a well sized off the code (a fraction of its side),
+    /// holding the app's avatar (#1750) at the well's diameter — the picture
+    /// with its skeleton, the initials without one.
+    private let avatarWell = UIView()
+    private let avatarView = AvatarView(diameter: 40, size: .px256)
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
 
     private let imagePipeline: ImagePipeline?
-    private var avatarTask: Task<Void, Never>?
     /// The in-flight QR render, so a re-layout cannot queue a second one.
     private var renderTask: Task<Void, Never>?
     private var renderedURL: URL?
@@ -83,7 +85,6 @@ public final class ShareQRCardView: UIView {
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     deinit {
-        avatarTask?.cancel()
         renderTask?.cancel()
     }
 
@@ -102,13 +103,7 @@ public final class ShareQRCardView: UIView {
 
         punchView.backgroundColor = .white
 
-        avatarView.backgroundColor = .systemGray5
-        // The monogram backs the avatar until (or unless) the image resolves,
-        // so the centre is never an empty hole in the middle of the code.
-        monogramLabel.textAlignment = .center
-        monogramLabel.textColor = .secondaryLabel
-        monogramLabel.adjustsFontSizeToFitWidth = true
-        monogramLabel.minimumScaleFactor = 0.5
+        avatarView.isUserInteractionEnabled = false
 
         nameLabel.font = .appFont(forTextStyle: .headline)
         nameLabel.adjustsFontForContentSizeCategory = true
@@ -155,26 +150,26 @@ public final class ShareQRCardView: UIView {
             punchView.widthAnchor.constraint(equalTo: qrImageView.widthAnchor, multiplier: Metrics.avatarPunchFraction)
             punchView.heightAnchor.constraint(equalTo: punchView.widthAnchor)
         }
-        avatarView.constrain(in: self) { _ in
-            avatarView.centerXAnchor.constraint(equalTo: qrImageView.centerXAnchor)
-            avatarView.centerYAnchor.constraint(equalTo: qrImageView.centerYAnchor)
-            avatarView.widthAnchor.constraint(equalTo: qrImageView.widthAnchor, multiplier: Metrics.avatarFraction)
-            avatarView.heightAnchor.constraint(equalTo: avatarView.widthAnchor)
+        avatarWell.constrain(in: self) { _ in
+            avatarWell.centerXAnchor.constraint(equalTo: qrImageView.centerXAnchor)
+            avatarWell.centerYAnchor.constraint(equalTo: qrImageView.centerYAnchor)
+            avatarWell.widthAnchor.constraint(equalTo: qrImageView.widthAnchor, multiplier: Metrics.avatarFraction)
+            avatarWell.heightAnchor.constraint(equalTo: avatarWell.widthAnchor)
         }
-        monogramLabel.constrain(in: self) { _ in
-            monogramLabel.centerXAnchor.constraint(equalTo: avatarView.centerXAnchor)
-            monogramLabel.centerYAnchor.constraint(equalTo: avatarView.centerYAnchor)
-            monogramLabel.widthAnchor.constraint(equalTo: avatarView.widthAnchor, multiplier: 0.8)
+        avatarView.constrain(in: avatarWell) { well in
+            avatarView.centerXAnchor.constraint(equalTo: well.centerXAnchor)
+            avatarView.centerYAnchor.constraint(equalTo: well.centerYAnchor)
         }
-        // Monogram under the image, both above the punch.
-        bringSubviewToFront(monogramLabel)
-        bringSubviewToFront(avatarView)
+        // Above the punch.
+        bringSubviewToFront(avatarWell)
     }
 
     override public func layoutSubviews() {
         super.layoutSubviews()
         punchView.layer.cornerRadius = punchView.bounds.width / 2
-        monogramLabel.font = .systemFont(ofSize: max(avatarView.bounds.width * 0.38, 8), weight: .semibold)
+        // The avatar at the well's size, which follows the code's.
+        let side = avatarWell.bounds.width
+        if side > 0, abs(avatarView.bounds.width - side) > 0.5 { avatarView.setDiameter(side) }
         renderCodeIfNeeded()
     }
 
@@ -198,7 +193,7 @@ public final class ShareQRCardView: UIView {
         handleLabel.text = card.handle
         // The name alone: the line under it is a place's country as often as
         // a handle, and a country's initial is nobody's (#811).
-        monogramLabel.text = MonogramAvatarView.monogram(name: card.displayName, handle: "")
+        avatarView.setMonogram(MonogramAvatarView.monogram(name: card.displayName, handle: ""))
         renderedURL = card.url
         // Force a re-render: the payload changed even if the side did not.
         renderedSide = 0
@@ -206,10 +201,9 @@ public final class ShareQRCardView: UIView {
         setNeedsLayout()
         // A picture in hand — a place's flag — needs no fetch.
         if let image = card.avatarImage {
-            avatarTask?.cancel()
-            avatarView.image = image
+            avatarView.setPicture(image: image)
         } else {
-            loadAvatar(card.avatarURL)
+            avatarView.setPicture(card.avatarURL, pipeline: imagePipeline)
         }
     }
 
@@ -273,17 +267,6 @@ public final class ShareQRCardView: UIView {
             guard let self, !Task.isCancelled, self.renderedURL == url else { return }
             self.qrImageView.image = image
             self.renderTask = nil
-        }
-    }
-
-    private func loadAvatar(_ url: URL?) {
-        avatarTask?.cancel()
-        avatarView.image = nil
-        guard let url, let imagePipeline else { return }
-        avatarTask = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url, size: .px256) else { return }
-            guard let self, !Task.isCancelled else { return }
-            self.avatarView.image = image
         }
     }
 }
