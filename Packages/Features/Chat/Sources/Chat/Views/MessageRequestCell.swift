@@ -137,8 +137,8 @@ final class MessageRequestCell: UITableViewCell {
         avatars: (any PeerAvatarProviding)?
     ) {
         // The same person again (a snapshot reconfiguring the row): their
-        // face, or the lookup for it, is already under way.
-        if let peerID = model.peerID, peerID == avatarPeerID, avatarTask != nil || avatarView.shownPicture != nil {
+        // face, or the lookup for it, is under way or answered.
+        if let peerID = model.peerID, peerID == avatarPeerID, avatarTask != nil {
             return
         }
         avatarTask?.cancel()
@@ -155,8 +155,9 @@ final class MessageRequestCell: UITableViewCell {
         avatarTask = Task { [weak self] in
             let urls = await avatars.avatarURLs(for: [peerID])
             guard let self, !Task.isCancelled, self.avatarPeerID == peerID else { return }
-            self.avatarTask = nil
-            // No picture: the initials.
+            // No picture: the initials. The finished task stays as the
+            // peer's answer: a reconfigure for the same person keeps it,
+            // where a fresh lookup flickered pictureless rows' initials.
             self.avatarView.setPicture(urls[peerID], pipeline: imagePipeline)
         }
     }

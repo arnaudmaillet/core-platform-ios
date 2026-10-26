@@ -167,9 +167,7 @@ public final class ShareQRCardView: UIView {
     override public func layoutSubviews() {
         super.layoutSubviews()
         punchView.layer.cornerRadius = punchView.bounds.width / 2
-        // The avatar at the well's size, which follows the code's.
-        let side = avatarWell.bounds.width
-        if side > 0, abs(avatarView.bounds.width - side) > 0.5 { avatarView.setDiameter(side) }
+        syncAvatarDiameter()
         renderCodeIfNeeded()
     }
 
@@ -243,6 +241,10 @@ public final class ShareQRCardView: UIView {
     /// after the snapshot had already been taken. On-screen display stays
     /// async (that is what keeps the sheet quick to open); export opts back in.
     func renderCodeNow() {
+        // The avatar too: a snapshot taken now must not catch it at the
+        // diameter it had before the well was sized.
+        syncAvatarDiameter()
+        avatarWell.layoutIfNeeded()
         renderTask?.cancel()
         renderTask = nil
         let side = qrImageView.bounds.width.rounded()
@@ -251,6 +253,13 @@ public final class ShareQRCardView: UIView {
         qrImageView.image = QRCodeImage.makeImage(
             for: url, side: side, scale: traitCollection.displayScale
         )
+    }
+
+    /// The avatar at the well's size, which follows the code's.
+    private func syncAvatarDiameter() {
+        let side = avatarWell.bounds.width
+        guard side > 0, abs(avatarView.bounds.width - side) > 0.5 else { return }
+        avatarView.setDiameter(side)
     }
 
     private func renderCodeIfNeeded() {
