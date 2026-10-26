@@ -790,7 +790,9 @@ final class SelectorLiquidLens {
         // The tone under the titles and on the bar's side of the track's edge
         // (a segmented track reads ~238/255 on a white page; the bar's glass
         // ~0.95; ~0.12 in dark).
-        u.backdropLuma = body.traitCollection.userInterfaceStyle == .dark ? 0.12 : 0.94
+        let isDark = body.traitCollection.userInterfaceStyle == .dark
+        u.backdropLuma = isDark ? 0.12 : 0.94
+        u.dark = isDark ? 1 : 0
         u.bevel = Tuning.bevel * Float(lift)
         u.bevelWidth = Float(Tuning.bevelWidth * scale)
         u.bevelShade = Tuning.bevelShade

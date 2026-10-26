@@ -77,6 +77,12 @@ final class LiquidLensRenderer {
         /// ~1 light, ~0.1 dark), so a fringe can be COLOURED with no backdrop
         /// — black text split per channel has no colour of its own.
         var backdropLuma: Float = 1
+        /// 1 in dark mode. The rim's white lights were tuned on a white page,
+        /// where they barely show; over black they read ~113/255 over 4px
+        /// where the native lens's edge reads ~60 over one (filmed side by
+        /// side, 2026-10-26). In dark the key/fill light is halved and the
+        /// inner bright line and the bottom's light band are dropped.
+        var dark: Float = 0
         /// The bevel's lighting — what makes the lens read as a piece of
         /// glass with volume rather than a flat ring: strength (0…1) and the
         /// bevel's width (px). The prototype's two lobes, fresnel and edge line.
@@ -318,7 +324,7 @@ final class LiquidLensRenderer {
         float outline;
         float overlayEnabled, overlayWidth, overlayHeight, overlayOriginX, overlayOriginY;
         float overlayAmount, overlayReach, magnification, overlayScale;
-        float iridescence, iridescenceWidth, backdropLuma;
+        float iridescence, iridescenceWidth, backdropLuma, dark;
         float bevel, bevelWidth, bevelShade, topBand, topBandDepth;
         float capsuleCentreX, capsuleCentreY, capsuleHalfWidth, capsuleHalfHeight, capsuleCover;
         float ringOpacity, ringOffsetY, ringStroke, ringBlur, ringRunBlur, portalCell, portalBlur, portalClear;
@@ -528,13 +534,13 @@ final class LiquidLensRenderer {
             // (201–207 on 253); the segmented control's 33–38% read too dark.
             c = over(c, float3(0.0), u.outline * darkLine * (0.18 + 0.02 * side));
             float brightLine = smoothstep(0.6 * s1, 1.0 * s1, -d) * (1.0 - smoothstep(1.4 * s1, 2.1 * s1, -d));
-            c = over(c, float3(1.0), u.outline * brightLine * (0.10 + 0.12 * abs(n2.y)));
+            c = over(c, float3(1.0), u.outline * brightLine * (0.10 + 0.12 * abs(n2.y)) * (1.0 - u.dark));
             // (The band ~9pt under the top and the interior's shade near the
             // rim are the ring shadow above, no longer approximated here.)
             float bottom = u.centreY + u.halfHeight;
             float dyBot = (bottom - p.y) / s1;
             float fill = pow(saturate(1.0 - dyBot / 6.0), 1.5) * smoothstep(0.6 * s1, 1.2 * s1, -d);
-            c = over(c, float3(1.0), 0.10 * u.outline * fill);
+            c = over(c, float3(1.0), 0.10 * u.outline * fill * (1.0 - u.dark));
         }
 
         // The titles, redrawn through the portal: pushed outward near the rim,
@@ -642,7 +648,7 @@ final class LiquidLensRenderer {
             float glow = smoothstep(-0.5, 0.5 * u.scale, dd) * (1.0 - smoothstep(0.0, max(u.diffuseHeight, 1.0), dd));
             float light = lineBand * (u.keyAmount * towardsUp + u.fillAmount * towardsDown)
                         + glow * u.diffuseAmount * (u.keyAmount * diffuseUp + u.fillAmount * diffuseDown);
-            c = over(c, float3(1.0), saturate(light));
+            c = over(c, float3(1.0), saturate(light * (1.0 - 0.5 * u.dark)));
         }
 
         // The rim's LIGHT, crisp — the native tab bar lens zoomed on the

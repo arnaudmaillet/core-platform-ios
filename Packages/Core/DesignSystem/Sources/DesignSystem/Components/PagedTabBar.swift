@@ -796,8 +796,10 @@ public final class PagedTabBar: UIControl {
         pill.anchor = self
         pill.capsuleView = capsule
         if style == .segmentedControl {
-            // The native control's: a white pill, and a lens 24×16pt larger.
-            pill.tint = .white
+            // The native control's: a white pill (`tertiaryLabel` in dark, which
+            // over the track reads the native's 90/90/95 to a grey level), and
+            // a lens 24×16pt larger.
+            pill.tint = UIColor { $0.userInterfaceStyle == .dark ? .tertiaryLabel : .white }
             pill.fixedGrowth = CGSize(width: 24, height: 16)
         }
         // ⚠️ `pill` weakly too: the closure is stored ON it.
