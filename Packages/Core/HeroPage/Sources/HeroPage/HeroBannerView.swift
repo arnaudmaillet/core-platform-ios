@@ -181,6 +181,7 @@ public final class HeroBannerView: UIView {
         guard answersAwait || url != currentImageURL || picture.image == nil else { return }
         currentImageURL = url
         picture.image = nil
+        applyRampTone()
         focusTask?.cancel()
         let token = answersAwait ? (self.token ?? beginItem(url)) : beginItem(url)
         self.token = token
@@ -205,6 +206,7 @@ public final class HeroBannerView: UIView {
             ) : image
             guard ladder.isCurrent(token) else { return }
             picture.image = shown
+            applyRampTone(animated: transition != .none)
             // The ladder's arrival: in this pass when warm, else dissolved in
             // once the bone has had its minimum.
             ladder.show(.content, token: token, warm: transition == .none)
@@ -235,6 +237,7 @@ public final class HeroBannerView: UIView {
         focusTask?.cancel()
         currentImageURL = nil
         picture.image = nil
+        applyRampTone()
         token = beginItem(UUID())
         isAwaitingImage = true
         isPictureSettled = true
@@ -318,11 +321,36 @@ public final class HeroBannerView: UIView {
         applyRampTone()
     }
 
-    private func applyRampTone() {
-        let tone: UIColor = format == .band ? (bandTone ?? Self.bandRampTone) : Surface.page
-        ramp.tone = tone
-        picture.pageTone = tone
+    private func applyRampTone(animated: Bool = false) {
+        let tone: UIColor
+        if format != .band {
+            tone = Surface.page
+        } else if picture.image == nil {
+            // ⚠️ NO PICTURE (loading, or failed): the ramp lands on GREY, not
+            // black (the owner, 2026-10-27). One contract, one look: a black
+            // ramp over the bone read grey on the tall profile band and
+            // black on the short profile card, where it covers nearly all of
+            // it. Dark enough for the white name with its shadow.
+            tone = Self.emptyRampTone
+        } else {
+            tone = bandTone ?? Self.bandRampTone
+        }
+        let apply = {
+            self.ramp.tone = tone
+            self.picture.pageTone = tone
+        }
+        if animated, window != nil {
+            // With the picture's own dissolve.
+            UIView.transition(with: ramp, duration: 0.25, options: [.transitionCrossDissolve, .allowUserInteraction], animations: apply)
+        } else {
+            apply()
+        }
         onRampToneChange?(tone)
+    }
+
+    /// The band's ramp tone while it has no picture: a neutral grey.
+    public static let emptyRampTone = UIColor { traits in
+        traits.userInterfaceStyle == .dark ? UIColor(white: 0.22, alpha: 1) : UIColor(white: 0.42, alpha: 1)
     }
 
     /// The ramp's tone changed — a band card's shadow wears it.

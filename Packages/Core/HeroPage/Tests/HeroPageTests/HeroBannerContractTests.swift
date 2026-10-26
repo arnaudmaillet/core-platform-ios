@@ -111,6 +111,17 @@ struct HeroBannerContractTests {
         #expect(banner.ladder.rung == .skeleton)
     }
 
+    /// ⚠️ ONE LOOK WHILE THERE IS NO PICTURE: a band's ramp lands on grey,
+    /// never black — black read grey on the tall profile band and black on
+    /// the short profile card (the owner, 2026-10-27).
+    @Test func aBandWithoutAPictureRampsToGrey() throws {
+        let time = ManualClock()
+        let banner = HeroBannerView(imagePipeline: ImagePipeline(fetcher: HangingFetcher()), clock: time.clock)
+        banner.setFormat(.band)
+        banner.setImageURL(try #require(URL(string: "mock://banner/grey")))
+        #expect(banner.debugRampTone == HeroBannerView.emptyRampTone)
+    }
+
     /// A banner that may come (a place whose posts are loading): its
     /// skeleton, and the URL that answers loads under the same bone.
     @Test func anAwaitedBannerHoldsTheSkeletonUntilItsURL() throws {
