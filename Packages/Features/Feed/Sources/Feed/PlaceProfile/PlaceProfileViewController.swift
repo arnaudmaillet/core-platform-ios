@@ -1376,8 +1376,10 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
             if (renderedMembers ?? []).isEmpty, !fresh.isEmpty {
                 renderBanner(for: Self.bannerPost(in: Self.gallery(extraPosts)), shows: Self.showsBanner(for: extraPosts))
                 if extraPosts.count == fresh.count, view.window != nil { activityPage.restAtTop() }
-            } else if (renderedMembers ?? []).isEmpty, extraPosts.isEmpty, !hasMorePosts {
-                // The place ran out with no post at all: no banner is coming.
+            } else if (renderedMembers ?? []).isEmpty, extraPosts.isEmpty,
+                      !hasMorePosts || emptyPagesInARow >= Self.maxEmptyPagesInARow {
+                // The place ran out with no post at all, or the pages stopped
+                // being asked for: no banner is coming.
                 endBannerWait()
             }
             // Nothing new but more behind: no row reaches the end to ask, so
