@@ -111,15 +111,27 @@ struct HeroBannerContractTests {
         #expect(banner.ladder.rung == .skeleton)
     }
 
-    /// ⚠️ ONE LOOK WHILE THERE IS NO PICTURE: a band's ramp lands on grey,
-    /// never black — black read grey on the tall profile band and black on
-    /// the short profile card (the owner, 2026-10-27).
-    @Test func aBandWithoutAPictureRampsToGrey() throws {
+    /// ⚠️ ONE LOOK WHILE THERE IS NO PICTURE: a flat grey, no ramp, no
+    /// scrim — a black ramp over the bone read grey on the tall profile band
+    /// and black on the short profile card (the owner, 2026-10-27). The
+    /// ramp comes with the picture.
+    @Test func aBannerWithoutAPictureIsFlat() throws {
         let time = ManualClock()
-        let banner = HeroBannerView(imagePipeline: ImagePipeline(fetcher: HangingFetcher()), clock: time.clock)
-        banner.setFormat(.band)
-        banner.setImageURL(try #require(URL(string: "mock://banner/grey")))
-        #expect(banner.debugRampTone == HeroBannerView.emptyRampTone)
+        let cold = HeroBannerView(imagePipeline: ImagePipeline(fetcher: HangingFetcher()), clock: time.clock)
+        cold.setFormat(.band)
+        cold.setImageURL(try #require(URL(string: "mock://banner/flat")))
+        time.advance(0.15)
+        #expect(!cold.debugIsDressed)
+        #expect(!cold.hasPicture)
+
+        let pipeline = ImagePipeline(fetcher: HangingFetcher())
+        let url = try #require(URL(string: "mock://banner/dressed"))
+        pipeline.store(solid(), for: url, size: .full)
+        let warm = HeroBannerView(imagePipeline: pipeline, clock: time.clock)
+        warm.setFormat(.band)
+        warm.setImageURL(url)
+        #expect(warm.debugIsDressed)
+        #expect(warm.hasPicture)
     }
 
     /// A banner that may come (a place whose posts are loading): its

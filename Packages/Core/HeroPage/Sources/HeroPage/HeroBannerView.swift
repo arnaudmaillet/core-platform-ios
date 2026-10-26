@@ -129,6 +129,7 @@ public final class HeroBannerView: UIView {
         ladder.setView(bone, for: .skeleton)
         ladder.setView(picture, for: .content)
         token = beginItem(nil)
+        applyRampTone()
     }
 
     @available(*, unavailable)
@@ -322,36 +323,40 @@ public final class HeroBannerView: UIView {
     }
 
     private func applyRampTone(animated: Bool = false) {
-        let tone: UIColor
-        if format != .band {
-            tone = Surface.page
-        } else if picture.image == nil {
-            // ⚠️ NO PICTURE (loading, or failed): the ramp lands on GREY, not
-            // black (the owner, 2026-10-27). One contract, one look: a black
-            // ramp over the bone read grey on the tall profile band and
-            // black on the short profile card, where it covers nearly all of
-            // it. Dark enough for the white name with its shadow.
-            tone = Self.emptyRampTone
-        } else {
-            tone = bandTone ?? Self.bandRampTone
-        }
+        let tone: UIColor = format == .band ? (bandTone ?? Self.bandRampTone) : Surface.page
+        // ⚠️ NO PICTURE (loading, or failed): a FLAT grey — the bone, or the
+        // backdrop — with no ramp and no scrim over it, as an emote's
+        // skeleton (the owner, 2026-10-27). One contract, one look: a black
+        // ramp over the bone read grey on the tall profile band and black on
+        // the short profile card, where it covers nearly all of it. The ramp
+        // and the scrim come with the picture, in its dissolve.
+        let dressed: CGFloat = picture.image == nil ? 0 : 1
         let apply = {
             self.ramp.tone = tone
             self.picture.pageTone = tone
+            self.ramp.alpha = dressed
+            self.topScrim.opacity = Float(dressed)
         }
         if animated, window != nil {
-            // With the picture's own dissolve.
-            UIView.transition(with: ramp, duration: 0.25, options: [.transitionCrossDissolve, .allowUserInteraction], animations: apply)
+            UIView.animate(withDuration: 0.25, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState], animations: apply)
         } else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
             apply()
+            CATransaction.commit()
         }
         onRampToneChange?(tone)
+        if (dressed > 0) != hasPicture {
+            hasPicture = dressed > 0
+            onPicturePresenceChange?()
+        }
     }
 
-    /// The band's ramp tone while it has no picture: a neutral grey.
-    public static let emptyRampTone = UIColor { traits in
-        traits.userInterfaceStyle == .dark ? UIColor(white: 0.22, alpha: 1) : UIColor(white: 0.42, alpha: 1)
-    }
+    /// Whether a picture is drawn — the type over the banner reads the page's
+    /// ink without one (the flat grey has no ramp to stand on).
+    public private(set) var hasPicture = false
+    /// Fires when `hasPicture` changes.
+    public var onPicturePresenceChange: (() -> Void)?
 
     /// The ramp's tone changed — a band card's shadow wears it.
     public var onRampToneChange: ((UIColor) -> Void)?
@@ -519,6 +524,8 @@ public final class HeroBannerView: UIView {
     public var debugRampTone: UIColor { ramp.tone }
     /// Whether the opaque fade is drawn (not on a poster, #688).
     public var debugShowsRamp: Bool { !ramp.isHidden }
+    /// Whether the ramp and the scrim are drawn (not over a flat, pictureless banner).
+    public var debugIsDressed: Bool { ramp.alpha > 0 && topScrim.opacity > 0 }
     public var debugFade: HeroBannerFade.Geometry? { picture.fade }
     public var debugBlurLevels: [(start: CGFloat, full: CGFloat)] { picture.debugVisibleLevels }
     public var debugRampLocations: [CGFloat] { ramp.debugLocations }

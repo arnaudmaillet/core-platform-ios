@@ -512,7 +512,8 @@ open class HeroHeaderView: UIView {
     }
 
     private func applyIdentityInk(force: Bool = false) {
-        let onPicture = bannerFormat == .none ? 0 : bannerView.visibility
+        // No picture yet (a flat grey slot, no ramp): the page's ink.
+        let onPicture = bannerFormat == .none || !bannerView.hasPicture ? 0 : bannerView.visibility
         if force || onPicture != identityInkOnPicture {
             identityInkOnPicture = onPicture
             let tone = inkTones.name
@@ -862,6 +863,7 @@ open class HeroHeaderView: UIView {
             self?.setBannerFormat(.resolved(forImageSize: image.size))
         }
         bannerView.onPictureSettled = { [weak self] in self?.onPicturesSettled?() }
+        bannerView.onPicturePresenceChange = { [weak self] in self?.applyIdentityInk() }
         // The blurred picture decides the type's ink — read it again the
         // moment it changes. Off the bake's own dissolve (it lands inside
         // one) when on screen, so the ink's change is its own.

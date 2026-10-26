@@ -136,10 +136,9 @@ struct HeroBannerFormatTests {
         #expect(spans[1].full > header.debugNameFrame.midY)
     }
 
-    /// Every shape keeps its fade layer; a band's is black over a picture
-    /// (#718 brought the poster's back, at its foot) and grey while it has
-    /// none — this fixture's picture never loads (#1752, the owner
-    /// 2026-10-27).
+    /// Every shape keeps its fade layer; a band's is black (#718 brought the
+    /// poster's back, at its foot). Drawn once the picture is there: this
+    /// fixture's never loads, and a pictureless banner is flat (#1752).
     @Test(arguments: [HeroBannerFormat.band, .none])
     func everyShapeKeepsItsFade(format: HeroBannerFormat) {
         let header = header(format: format, picture: format != .none)
@@ -149,7 +148,7 @@ struct HeroBannerFormatTests {
             #expect(!header.debugBannerShowsBlur)
         }
         if format == .band {
-            #expect(header.debugBannerRampTone == HeroBannerView.emptyRampTone)
+            #expect(header.debugBannerRampTone == HeroBannerView.bandRampTone)
         }
     }
 
