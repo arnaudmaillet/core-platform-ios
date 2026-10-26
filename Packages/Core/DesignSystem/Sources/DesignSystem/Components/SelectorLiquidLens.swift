@@ -167,17 +167,18 @@ final class SelectorLiquidLens {
         static let capsuleCover: Float = 0
         static let aberrationAngle: CGFloat = -.pi / 12
         static let aberrationBand: CGFloat = 8.8
-        /// No drop shadow: the native lens has none, and one under ours read
-        /// oddly on device (owner, 2026-10-26).
-        static let shadowOpacity: Float = 0
+        /// The shade under the lens (see `LiquidLensRenderer`): no drop
+        /// shadow all round (one read oddly on device, owner 2026-10-26), a
+        /// soft crescent from the bottom rim down, 5% at its deepest.
+        static let shadowOpacity: Float = 0.052
         /// The native glass's ring shadow, as read: opacity 0.1, dropped 8pt,
         /// a 4pt stroke blurred 3pt (see `LiquidLensRenderer`).
         static let ringOpacity: Float = 0.1
         static let ringOffsetY: CGFloat = 8
         static let ringStroke: CGFloat = 4
         static let ringBlur: CGFloat = 3
-        static let shadowRadius: CGFloat = 10
-        static let shadowOffsetY: CGFloat = 6
+        static let shadowRadius: CGFloat = 5
+        static let shadowOffsetY: CGFloat = 8.5
         /// How far the glass may draw beyond the capsule: the grown lens and its shadow.
         static let glassMargin: CGFloat = 40
     }

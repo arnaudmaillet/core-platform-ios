@@ -14,10 +14,10 @@ import UIKit
 ///   shadow under the top edge and a light band along the bottom;
 /// - the bar's titles REDRAWN inside the lens (`overlay`, captured from the
 ///   segment row), magnified about its centre like the tab bar's lens,
-///   pushed outward near the rim the way the native portal is (amplitude
-///   17.5pt over 11.2pt), with a spectral fringe at a fixed angle (2.316pt
-///   at −15°, over an 8.8pt band);
-/// - a whisper of shadow outside.
+///   pulled inward near the rim the way the native portal is (a glyph
+///   reaching the rim smears into one dark blot), with a spectral fringe at
+///   a fixed angle (3.684pt at −15°, over a 14pt band);
+/// - a soft crescent of shade under the bottom rim.
 ///
 /// ⚠️ **NO BACKDROP.** The prototype samples a snapshot of what lies behind
 /// its control; here the bar sits on live glass over moving pages, and a
@@ -99,9 +99,9 @@ final class LiquidLensRenderer {
         /// The native glass's ring shadow (`glassBackground` ringShadow, read
         /// off the live lens: opacity 0.1, offset 8, stroke 4, blur 3): a soft
         /// dark ring along the lens's outline, dropped by `ringOffsetY` px.
-        /// Its top run lies inside the lens (the band ~9pt under the top), its
-        /// bottom run below it (the soft shadow under the lens), and where it
-        /// crosses the rim the fringe splits it into the pastel colours.
+        /// Its top run lies inside the lens (the band ~9pt under the top), and
+        /// where it crosses the rim the fringe splits it into the pastel
+        /// colours. (The shade below the lens is `shadow*`.)
         var ringOpacity: Float = 0
         var ringOffsetY: Float = 0
         var ringStroke: Float = 1
@@ -145,7 +145,7 @@ final class LiquidLensRenderer {
         var aberrationDirX: Float = 1
         var aberrationDirY: Float = 0
         var aberrationWidth: Float = 1
-        /// The drop shadow outside the lens.
+        /// The shade under the lens: a crescent below the bottom rim.
         var shadowOpacity: Float = 0
         var shadowRadius: Float = 1
         var shadowOffsetY: Float = 0
@@ -409,19 +409,19 @@ final class LiquidLensRenderer {
         const float2 p = in.position.xy;
         const float d = lensSDF(p, u);
 
+        // The shade under the lens: the lens's shape dropped `shadowOffsetY`
+        // and softened over `shadowRadius`, less the lens itself (grown 2pt,
+        // softened 3pt) — a crescent below the bottom rim, nothing above it
+        // or past the ends. Filmed under the native control on a white page
+        // (2026-10-26): −1% at the rim, −5% about 5pt below, gone by 13pt.
+        // The ring shadow drawn outside (a quarter of it) left a white gap
+        // between the rim and a shade starting 4pt below.
         float shadow = 0.0;
         if (u.shadowOpacity > 0.0 && d > -1.0) {
-            float ds = lensSDF(p - float2(0.0, u.shadowOffsetY), u);
-            float s = 1.0 - smoothstep(0.0, max(u.shadowRadius, 1.0), ds);
-            shadow = u.shadowOpacity * s * s;
-        }
-        // Outside the lens the ring shadow is drawn as it is: the soft shade
-        // under the native lens.
-        if (d > -1.0) {
-            // (A quarter of it: filmed next to the native control, whose
-            // shade under the lens is barely there — its ring is mostly
-            // composited inside the glass.)
-            shadow = max(shadow, 0.25 * ringShadowAt(p, u) * smoothstep(-1.0, 1.0, d));
+            float r = max(u.shadowRadius, 1.0);
+            float dropped = 1.0 - smoothstep(-r, r, lensSDF(p - float2(0.0, u.shadowOffsetY), u));
+            float lens = 1.0 - smoothstep(-3.0 * u.scale, 3.0 * u.scale, d - 2.0 * u.scale);
+            shadow = u.shadowOpacity * saturate(dropped - lens);
         }
         const float aa = 0.75;
         if (d > aa && shadow <= 0.002) { return float4(0.0); }
