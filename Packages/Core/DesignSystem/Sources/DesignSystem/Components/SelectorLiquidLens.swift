@@ -124,8 +124,8 @@ final class SelectorLiquidLens {
         /// the lens's rounded ends, inside the highlight, faint at rest and
         /// brighter in motion — as the native lens shows it. All round and
         /// always on, it read as a border (owner, 2026-10-26).
-        static let iridescence: Float = 0.18
-        static let iridescenceInMotion: Float = 0.4
+        static let iridescence: Float = 0.16
+        static let iridescenceInMotion: Float = 0.24
         static let iridescenceWidth: CGFloat = 3
         /// The bevel's lighting (see `LiquidLensRenderer`): the native lens
         /// reads as a piece of glass with volume; without it ours read flat.

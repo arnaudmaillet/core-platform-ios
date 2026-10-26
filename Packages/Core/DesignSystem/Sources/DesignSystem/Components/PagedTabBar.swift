@@ -737,6 +737,14 @@ public final class PagedTabBar: UIControl {
     /// `onScrubEnd` are never called.
     public var pagerMode: PagerMode = .instant
 
+    /// The resting selection pill's fill. Defaults to the main tab bar's
+    /// selection grey; a bar drawn like a `UISegmentedControl` (the lens
+    /// bench) sets white.
+    public var selectionTint: UIColor {
+        get { pillLens.tint }
+        set { pillLens.tint = newValue }
+    }
+
     /// Whether a host answering `.valueChanged` should animate its pages —
     /// the one line every host's handler reads, so the mode lives here.
     public var animatesPageChanges: Bool { pagerMode == .scrolling }

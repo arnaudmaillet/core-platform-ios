@@ -431,7 +431,14 @@ final class LiquidLensRenderer {
             float2 lo = float2(u.centreX - u.halfWidth, u.centreY - u.halfHeight);
             float2 hi = float2(u.centreX + u.halfWidth, u.centreY + u.halfHeight);
             float2 c0 = float2(u.centreX, u.centreY);
-            float2 sp = clamp(c0 + (p - c0) / max(u.magnification, 0.01) + disp, lo, hi);
+            // Not clamped to the lens's box: a clamped sample repeated the
+            // rim's pixel into a streak ("Ch=ats") where the native control's
+            // title is pushed out and simply vanishes at the rim (filmed side
+            // by side on the lens bench). A sample that leaves the lens reads
+            // nothing.
+            float2 sp = c0 + (p - c0) / max(u.magnification, 0.01) + disp;
+            float leaves = smoothstep(-0.5 * u.scale, 0.5 * u.scale, lensSDF(sp, u));
+            (void)lo; (void)hi;
             float2 origin = float2(u.overlayOriginX, u.overlayOriginY);
             float2 size = float2(u.overlayWidth, u.overlayHeight);
             float4 oc;
@@ -462,6 +469,7 @@ final class LiquidLensRenderer {
             } else {
                 oc = overlay.sample(smp, (sp * u.overlayScale + origin) / size);
             }
+            oc *= 1.0 - leaves;
             c = float4(c.rgb * (1.0 - oc.a) + oc.rgb, c.a + oc.a * (1.0 - c.a));
         }
 
@@ -543,14 +551,14 @@ final class LiquidLensRenderer {
         // the lens, pale, composited over at low alpha.
         if (u.iridescence > 0.0) {
             float band = (1.0 - smoothstep(0.0, max(u.iridescenceWidth, 1.0), -d)) * smoothstep(-0.5, 0.5 * u.scale, -d);
-            // Only on the rounded ends, where the native lens shows it.
-            band *= smoothstep(0.55, 0.9, abs(n2.x));
+            // All round, soft: filmed next to the native segmented control,
+            // whose lifted lens shows a pastel thin-film rim on every side.
             float2 q = p - float2(u.centreX, u.centreY);
             float aspect = max(u.halfWidth / max(u.halfHeight, 1.0), 1.0);
             float angle = atan2(q.y, q.x / aspect);
             float hue = fract(angle / 6.2831853 * 2.0 + (p.x - p.y) / (90.0 * u.scale));
             float3 rgb = saturate(abs(fract(hue + float3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0);
-            rgb = mix(float3(1.0), rgb, 0.5);
+            rgb = mix(float3(1.0), rgb, 0.4);
             c = over(c, rgb, u.iridescence * band);
         }
 

@@ -90,6 +90,38 @@ private final class LensLabPage: UIViewController {
         let mode = UserDefaults.standard.string(forKey: "lens-lab-bg") ?? "white"
         view = LensLabBackground(mode: mode)
     }
+
+    /// A native `UISegmentedControl` with our selector's segments, on the page,
+    /// so its lens can be held and compared with ours (owner, 2026-10-26).
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        let native = UISegmentedControl(items: ["Chats", "Requests", "Suggestions"])
+        native.selectedSegmentIndex = 0
+        native.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(native)
+        // Ours, on the page under it, with its own glass (not in the accessory).
+        let ours = PagedTabBar(titles: ["Chats", "Requests", "Suggestions"], style: .navigationTitle)
+        // Drawn as the native control is: a tertiarySystemFill track, a white
+        // pill — so only the lenses differ.
+        ours.hosting = .container
+        ours.fillsWidth = true
+        ours.backgroundColor = .tertiarySystemFill
+        ours.layer.cornerCurve = .continuous
+        ours.layer.cornerRadius = 16
+        ours.selectionTint = .white
+        ours.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(ours)
+        NSLayoutConstraint.activate([
+            native.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
+            native.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
+            native.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            ours.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
+            ours.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
+            ours.topAnchor.constraint(equalTo: native.bottomAnchor, constant: 32),
+            // The native control's height, so the two lenses compare at one size.
+            ours.heightAnchor.constraint(equalTo: native.heightAnchor)
+        ])
+    }
 }
 
 /// The page behind the bars: a flat colour, or a pattern whose displacement
