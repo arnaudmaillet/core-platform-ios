@@ -41,6 +41,22 @@ public enum Surface {
     /// the card.
     public static let card: UIColor = .secondarySystemGroupedBackground
 
+    /// THE skeleton's ground (#1753): one opaque, neutral grey every bone
+    /// (`SkeletonBoneView`) wears by default, whatever lies behind it — the
+    /// grey of an emote's skeleton, now the same on a page, a card, a banner
+    /// or a photo. A translucent fill (`tertiarySystemFill`, as before) took
+    /// the colour of its background: grey on a page, black over a banner's
+    /// ramp (the owner, 2026-10-27). Visible on both the page and a card, in
+    /// light and dark.
+    public static let skeleton: UIColor = .systemGray5
+
+    /// The skeleton's ground on a surface that is dark whatever the
+    /// appearance (the snap feed's black page): the dark grey of `skeleton`,
+    /// in light mode too — a light grey bone read as a hole in the page.
+    public static let skeletonOnDark: UIColor = UIColor.systemGray5.resolvedColor(
+        with: UITraitCollection(userInterfaceStyle: .dark)
+    )
+
     /// A card's corner (#1494): the For You card's, every card of the app's.
     /// A CARD — a surface that holds content, lighter than its page — not a
     /// thumbnail or a media tile, whose corners are their own.

@@ -44,11 +44,20 @@ public final class SkeletonBoneView: UIView {
     private let rounding: Rounding
     private let gradient = CAGradientLayer()
 
-    public init(rounding: Rounding = .capsule) {
+    /// The bone's ground (#1753): `Surface.skeleton`, one opaque neutral grey,
+    /// unless the host states another — the ONE way to change it (a raw
+    /// `backgroundColor` is caught by `SkeletonGroundGuardTests`). `.clear`
+    /// for a bone that adds only the sweep over a ground of its own.
+    public var fill: UIColor {
+        didSet { backgroundColor = fill }
+    }
+
+    public init(rounding: Rounding = .capsule, fill: UIColor = Surface.skeleton) {
         self.rounding = rounding
+        self.fill = fill
         super.init(frame: .zero)
         isUserInteractionEnabled = false
-        backgroundColor = .tertiarySystemFill
+        backgroundColor = fill
         layer.cornerCurve = .continuous
         layer.masksToBounds = true
         if case .fixed(let radius) = rounding {
