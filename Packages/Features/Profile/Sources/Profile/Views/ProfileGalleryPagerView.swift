@@ -97,14 +97,30 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
         }
     }
 
+    /// The profile's presence key (`ProfileViewModel.presenceScreen`), asked
+    /// at each render: nil leaves every tab its bones.
+    var presenceScreen: () -> String? = { nil }
+    var presence: SectionPresenceStore = .shared
+
     func render(_ snapshot: ProfileViewModel.GallerySnapshot) {
+        let screen = presenceScreen()
         for (index, tab) in allTabs.enumerated() {
             // Whether more pages are coming decides the Discover list's tail
             // chunk, so it is told before the posts.
             allPages[index].setCorpusComplete(snapshot.isComplete(for: tab))
+            let state = snapshot.state(for: tab)
+            let section = String(describing: tab)
+            if let screen {
+                switch state {
+                case .content(let posts): presence.remember(posts.count, screen: screen, section: section)
+                case .empty: presence.remember(0, screen: screen, section: section)
+                default: break
+                }
+            }
             allPages[index].show(Self.pageState(
-                snapshot.state(for: tab), for: tab,
-                groups: tab == .history ? snapshot.historyGroups : []
+                state, for: tab,
+                groups: tab == .history ? snapshot.historyGroups : [],
+                remembered: screen.flatMap { presence.count(screen: $0, section: section) }
             ))
         }
     }
@@ -118,12 +134,17 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
     /// A private profile's page with posts (Tagged) is drawn like any other:
     /// no lock line above them (#1445). The lock is the state of a page with
     /// nothing to show, and never a tab of its own.
+    ///
+    /// ⚠️ SECTIONS BY PRESENCE (#1773): `remembered`, the tab's count last
+    /// time. A tab that was empty then gets no bones that would turn into its
+    /// empty page — nothing, then the answer fades in.
     static func pageState(
-        _ state: ProfileViewModel.GalleryPageState, for tab: ProfileTab, groups: [HistoryGroup] = []
+        _ state: ProfileViewModel.GalleryPageState, for tab: ProfileTab, groups: [HistoryGroup] = [],
+        remembered: Int? = nil
     ) -> PostGridPageState {
         switch state {
         case .loading:
-            return .loading
+            return remembered == 0 ? .content([]) : .loading
         case .content(let posts):
             guard !groups.isEmpty, groups.reduce(0, { $0 + $1.count }) == posts.count else {
                 return .content(posts)

@@ -936,18 +936,40 @@ final class SearchViewController: UIViewController {
         case .unavailable, .failed:
             // No section at all. A suggestions list that failed is not worth
             // a row of apology on a screen whose search still works.
-            break
+            if case .unavailable = model.trending { rememberSuggested(0) }
         case .loading:
+            // ⚠️ SECTIONS BY PRESENCE (#1773): bones only for a section that
+            // had rows last time (or was never seen) — as many as it had, up
+            // to the fold — never five bones that leave for nothing.
+            let count = Self.suggestedSkeletonCount(remembered: rememberedSuggested)
+            guard count > 0 else { break }
             snapshot.appendSections([.suggestions])
-            snapshot.appendItems(
-                (0..<Self.suggestedSkeletonCount).map { .suggestedSkeleton($0) }, toSection: .suggestions
-            )
+            snapshot.appendItems((0..<count).map { .suggestedSkeleton($0) }, toSection: .suggestions)
         case .loaded(let creators):
+            rememberSuggested(creators.count)
             guard !creators.isEmpty else { break }
             snapshot.appendSections([.suggestions])
             snapshot.appendItems(creators.map { .suggested($0.id) }, toSection: .suggestions)
         }
         return snapshot
+    }
+
+    /// Where the Suggested section remembers whether it had rows (#1773).
+    var presence: SectionPresenceStore = .shared
+    private static let presenceScreen = "search.explore"
+
+    private var rememberedSuggested: Int? {
+        presence.count(screen: Self.presenceScreen, section: "suggested")
+    }
+
+    private func rememberSuggested(_ count: Int) {
+        presence.remember(count, screen: Self.presenceScreen, section: "suggested")
+    }
+
+    /// The Suggested bones for a section that had `remembered` rows last
+    /// time: up to the fold, none for an empty one, the fold's for unknown.
+    static func suggestedSkeletonCount(remembered: Int?) -> Int {
+        min(suggestedSkeletonCount, remembered ?? suggestedSkeletonCount)
     }
 
     /// Enough rows to reach the fold, so the shimmer reads as "a list is

@@ -85,6 +85,10 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     /// selector docks, a name up there is competing with the one control the
     /// chrome exists to hold.
     private let placeName: String
+    /// Whether Popular had posts last time (#1773, `SectionPresenceStore`).
+    private let presence: SectionPresenceStore
+    /// The page's presence key: the place's name, nil when it has none.
+    private var presenceScreen: String? { placeName.isEmpty ? nil : "place.\(placeName)" }
     private let rank: PlaceRankBadge?
     /// ⚠️ THE KIND LINE WAS DELETED, not hidden. "CITY CLUSTER" whispered
     /// above the name was a taxonomy label competing with the identity — and
@@ -668,8 +672,10 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         entities: EntityStore? = nil,
         loadPosts: @escaping () async throws -> [GalleryPost],
         loadMore: ((String?) async throws -> PlacePostsPage)? = nil,
+        presence: SectionPresenceStore = .shared,
         openPost: @escaping (UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void
     ) {
+        self.presence = presence
         self.loadMore = loadMore
         self.postIDs = postIDs
         self.placeName = placeName
@@ -722,8 +728,10 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         )
         header.configure(with: headerContent)
         shelf.title = "Popular"
-        // Its title over skeleton cards until the place's posts land (#1296).
-        shelf.isLoading = true
+        // Its title over skeleton cards until the place's posts land (#1296)
+        // — ⚠️ only for a place whose Popular had posts last time (#1773):
+        // never seen, or empty then, it fades in rather than shimmer.
+        shelf.isLoading = (presenceScreen.flatMap { presence.count(screen: $0, section: "popular") } ?? 0) > 0
         lead.listTitle = "Recent"
         // The list and the row draw the same cards For You does, and their
         // like chips stake the same way.
@@ -1321,7 +1329,9 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
                 ? .empty(.init(title: "Nothing has happened here yet"))
                 : .content(recent))
         }
-        shelf.apply(Self.popularShelf(self.corpus))
+        let popular = Self.popularShelf(self.corpus)
+        shelf.apply(popular)
+        if let presenceScreen { presence.remember(popular.posts.count, screen: presenceScreen, section: "popular") }
         updateLeadHeight()
         // ⚠️ THE WHOLE CORPUS. These are the PLACE's numbers, and a check-in
         // with no photograph is still something that happened here. As many

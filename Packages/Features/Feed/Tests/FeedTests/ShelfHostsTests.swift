@@ -55,8 +55,15 @@ struct ShelfHostsTests {
                 "a row showing all its posts ends on the chevron card")
     }
 
-    private static func place(_ posts: [GalleryPost]) -> PlaceProfileViewController {
-        PlaceProfileViewController(
+    private static func place(
+        _ posts: [GalleryPost], popularLastTime: Int? = 10, presence: SectionPresenceStore? = nil
+    ) -> PlaceProfileViewController {
+        let store = presence ?? SectionPresenceStore(
+            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            scope: StorageScope(owner: .member(account: "a", profile: "p"))
+        )
+        if let popularLastTime { store.remember(popularLastTime, screen: "place.Paris", section: "popular") }
+        return PlaceProfileViewController(
             postIDs: posts.map(\.id),
             placeName: "Paris",
             rank: nil,
@@ -65,8 +72,28 @@ struct ShelfHostsTests {
             following: nil,
             wallet: nil,
             loadPosts: { posts },
+            presence: store,
             openPost: { _, _, _ in }
         )
+    }
+
+    /// ⚠️ #1773: the place's Popular wears bones only when it had posts last
+    /// time — never seen, or empty then, it fades in; and what lands is
+    /// remembered.
+    @Test func thePlacesPopularSkeletonFollowsLastKnownPresence() async {
+        #expect(Self.place([], popularLastTime: 10).debugShelf.isLoading)
+        #expect(!Self.place([], popularLastTime: 0).debugShelf.isLoading, "an empty Popular last time has bones")
+        #expect(!Self.place([], popularLastTime: nil).debugShelf.isLoading, "a Popular never seen shimmers")
+
+        let store = SectionPresenceStore(
+            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            scope: StorageScope(owner: .member(account: "a", profile: "p"))
+        )
+        let place = Self.place(Self.posts(3, prefix: "p"), popularLastTime: nil, presence: store)
+        place.loadViewIfNeeded()
+        place.beginLoading()
+        await Self.settle { !place.debugShelf.cards.isEmpty }
+        #expect(store.count(screen: "place.Paris", section: "popular") == 3)
     }
 
     /// A presence store that remembers `following` posts and `friends` faces

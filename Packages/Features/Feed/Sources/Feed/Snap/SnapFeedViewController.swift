@@ -3838,6 +3838,8 @@ final class SnapFeedViewController: UIViewController {
                     ?? PostCardMetrics(reactions: model.likeCount, comments: nil)
             )
         }
+        // The count the feed knows: no comment bones for a post with none.
+        detail?.seedCommentCount(modelsByID[id]?.cardMetrics?.comments)
         // No close handler — a resting page is undismissable; the swipe
         // handler pages the feed (the only way off a text post).
         detail?.setEngagedPageSwipeHandler { [weak self] phase, translation, velocity in
@@ -3948,6 +3950,8 @@ final class SnapFeedViewController: UIViewController {
             // TOOLBAR, not just the home indicator.
             bottomInset: view.safeAreaInsets.bottom
         )
+        // The count the feed knows: no comment bones for a post with none (#1773).
+        detail?.seedCommentCount(modelsByID[id]?.cardMetrics?.comments)
         // An open sort menu takes the next drag on the list (#759).
         detail?.closesMenuOnShow = { [weak self] in self?.commentSortButton.closeMenu() ?? false }
         // Dragging the list down from its top collapses back to media — the

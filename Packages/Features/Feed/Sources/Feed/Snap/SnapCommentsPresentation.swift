@@ -122,6 +122,17 @@ enum SnapCommentsLayout {
         return Int(ceil(viewportHeight / skeletonRowEstimate))
     }
 
+    /// ⚠️ SECTIONS BY PRESENCE (#1773, the rule of #1756): no bones for
+    /// comments the post is KNOWN not to have. With the post's count in hand
+    /// (the opener's metrics), never more bones than comments — and none for
+    /// zero, whose empty page fades in when the fetch answers instead of a
+    /// skeleton that turns into it. Nil: unknown, the viewport's count.
+    static func skeletonPlaceholderCount(viewportHeight: CGFloat, knownComments: Int64?) -> Int {
+        let viewport = skeletonPlaceholderCount(viewportHeight: viewportHeight)
+        guard let knownComments else { return viewport }
+        return min(viewport, Int(max(0, knownComments)))
+    }
+
     /// The empty page's row height in the comments-only stream. The shared
     /// `EmptyStateView` centres its block in whatever bounds it is given and
     /// has no vertical intrinsic size of its own, so a self-sizing list row

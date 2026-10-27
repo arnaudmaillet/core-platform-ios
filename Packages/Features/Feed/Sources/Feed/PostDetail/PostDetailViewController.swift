@@ -230,6 +230,9 @@ final class PostDetailViewController: UIViewController {
     /// flight had no target and the caption appeared as a second one when the
     /// post arrived.
     private var seededCaption: (text: String, timestamp: String)?
+    /// The post's comment count from the opener, before the fetch: the
+    /// stream draws no more bones than that — none for zero (#1773).
+    private var knownCommentCount: Int64?
     /// The caption row's face and metric line, from the surface that opened
     /// this page. Survives hydration: a `FeedEntry` knows the format but not
     /// the view or comment counts, so the seed stays the source for the line
@@ -1296,6 +1299,22 @@ final class PostDetailViewController: UIViewController {
     /// them: the row is an avatar beside a bubble whatever the post is made of,
     /// and a `FeedEntry` carries a like count and neither a view nor a comment
     /// count — so a hydrated model knows less than the grid that opened this.
+    /// The post's comment count as the opener knows it (#1773): the
+    /// skeleton stream draws no more bones than that, and none for zero.
+    func seedCommentCount(_ count: Int64?) {
+        guard !commentsLoaded, count != knownCommentCount else { return }
+        knownCommentCount = count
+        guard isViewLoaded else { return }
+        applyStream(animated: false)
+    }
+
+    #if DEBUG
+    /// The skeleton rows in the stream now — what a test reads.
+    var debugSkeletonRowCount: Int {
+        streamItems().filter { if case .skeletonPlaceholder = $0 { true } else { false } }.count
+    }
+    #endif
+
     func seedCaption(
         _ text: String,
         timestamp: String,
@@ -1987,7 +2006,9 @@ final class PostDetailViewController: UIViewController {
             let viewport = collectionView.bounds.height > 0
                 ? collectionView.bounds.height
                 : view.bounds.height
-            let count = SnapCommentsLayout.skeletonPlaceholderCount(viewportHeight: viewport)
+            let count = SnapCommentsLayout.skeletonPlaceholderCount(
+                viewportHeight: viewport, knownComments: knownCommentCount
+            )
             items.append(contentsOf: (0..<count).map(StreamItem.skeletonPlaceholder))
             return items
         }
