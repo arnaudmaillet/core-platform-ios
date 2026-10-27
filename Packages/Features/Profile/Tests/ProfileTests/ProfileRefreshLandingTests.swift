@@ -63,6 +63,11 @@ struct ProfileRefreshLandingTests {
 
         func authoredPosts(for profileID: ProfileID) async throws -> [GalleryPost] {
             authoredReads += 1
+            // ⚠️ The FIRST page answers later than the skeleton's delay
+            // (#1770): the bones come up and the page waits out their
+            // minimum — the slow runner's case, made every run's, so the
+            // baseline is read only once the grid has really landed.
+            if authoredReads == 1 { try? await Task.sleep(for: .milliseconds(250)) }
             return (0..<12).map { index in
                 var post = GalleryPost(
                     id: PostID("p-\(index)"), kind: index.isMultiple(of: 3) ? .text : .photo,

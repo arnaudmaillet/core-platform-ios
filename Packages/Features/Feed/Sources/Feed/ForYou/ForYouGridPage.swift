@@ -2970,7 +2970,42 @@ final class ForYouGridPage: UIView {
         return collectionView.cellForItem(at: indexPath(for: index))
     }
 
+    /// The cold skeleton's timing (#1770): nothing for the delay, the bones
+    /// held their minimum, and "taking longer" with a retry after 10 s.
+    /// Injectable so a test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var skeletonGate: SkeletonGate = {
+        let gate = SkeletonGate(clock: skeletonClock)
+        gate.onSkeletonChange = { [weak self] showing in
+            guard let self, showing, posts.isEmpty, !refreshControl.isRefreshing else { return }
+            apply(style == .discover ? rawPosts : posts, skeleton: true)
+        }
+        gate.onTakingLonger = { [weak self] in
+            guard let self else { return }
+            skeletonGate.finish { [weak self] in
+                self?.showStatus(
+                    symbolName: "clock",
+                    title: "Taking longer than usual",
+                    subtitle: "The posts are still on their way.",
+                    actionTitle: "Try Again",
+                    action: { [weak self] in self?.onRefresh?() }
+                )
+            }
+        }
+        return gate
+    }()
+
     func render(_ state: ForYouViewModel.PageState) {
+        // ⚠️ THE COLD SKELETON IS THE GATE'S (#1770): a page that answers
+        // within the delay never shows a bone, and what answers after it
+        // waits out the bones' minimum.
+        guard case .loading = state else {
+            return skeletonGate.finish { [weak self] in self?.renderNow(state) }
+        }
+        renderNow(state)
+    }
+
+    private func renderNow(_ state: ForYouViewModel.PageState) {
         // The sections or the new run's count may have moved under the bar.
         defer { schedulePinnedSectionCheck() }
         switch state {
@@ -2987,8 +3022,10 @@ final class ForYouGridPage: UIView {
             // Titled groups are planned from their groups, which a refresh
             // under the spinner does not change.
             guard !(isGrouped && !posts.isEmpty) else { break }
-            apply(style == .discover ? rawPosts : posts,
-                  skeleton: !refreshControl.isRefreshing && posts.isEmpty)
+            // Cold: the gate brings the bones in (`skeletonGate`).
+            let cold = !refreshControl.isRefreshing && posts.isEmpty
+            if cold { skeletonGate.begin() }
+            apply(style == .discover ? rawPosts : posts, skeleton: cold && skeletonGate.showsSkeleton)
         case .content(let posts):
             emptyState.isHidden = true
             leaveGroups()
@@ -3160,7 +3197,12 @@ final class ForYouGridPage: UIView {
         else { return nil }
         return collectionView.convert(attributes.frame, to: window)
     }
-    var debugShowsSkeleton: Bool { showsSkeleton }
+    /// Whether the page is in its cold wait: the bones up, or due once the
+    /// gate's delay runs out (#1770) — what a host waits past before it
+    /// reads the page's content.
+    var debugShowsSkeleton: Bool { showsSkeleton || skeletonGate.isLoading || skeletonGate.showsSkeleton }
+    /// Whether the bones are drawn now.
+    var debugBonesVisible: Bool { showsSkeleton }
     /// The status block's frame while it shows, nil otherwise.
     var debugStatusFrame: CGRect? { emptyState.isHidden ? nil : emptyState.frame }
     /// The travel a hosted page offers now — see `offeredTravel`.

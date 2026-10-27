@@ -97,4 +97,23 @@ struct SkeletonGateTests {
         let peak = base * (1 - alpha) + band * alpha
         #expect(page - peak > 0.015, "the sweep peaks at \(peak), the page is \(page)")
     }
+
+    /// ⚠️ #1786: an answer landing while the last one waits out the bones'
+    /// minimum replaces it — the newest lands, once, never the older over it.
+    @Test func aNewerAnswerReplacesTheOneWaitingOutTheMinimum() {
+        let time = ManualClock()
+        let gate = SkeletonGate(clock: time.clock)
+        var landed: [String] = []
+        gate.begin()
+        time.advance(0.15)
+        #expect(gate.showsSkeleton)
+        gate.finish { landed.append("first") }
+        gate.finish { landed.append("second") }
+        #expect(landed.isEmpty, "an answer ran before the bones' minimum")
+        time.advance(0.3)
+        #expect(landed == ["second"])
+        #expect(!gate.showsSkeleton)
+        gate.finish { landed.append("third") }
+        #expect(landed == ["second", "third"], "with no bones, an answer lands at once")
+    }
 }

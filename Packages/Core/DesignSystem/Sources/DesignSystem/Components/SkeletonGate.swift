@@ -57,6 +57,9 @@ public final class SkeletonGate {
         guard !isLoading else { return }
         isLoading = true
         generation += 1
+        // A reveal still waiting out the last bones' minimum belonged to the
+        // load this one replaces.
+        pendingReveal = nil
         let current = generation
         clock.after(timing.delay) { [weak self] in
             guard let self, generation == current, isLoading else { return }
@@ -72,7 +75,17 @@ public final class SkeletonGate {
     /// The content answered (or failed): `reveal` runs now, or once the bones
     /// have had their minimum.
     public func finish(_ reveal: @escaping @MainActor () -> Void = {}) {
-        guard isLoading else { return reveal() }
+        guard isLoading else {
+            // ⚠️ A REVEAL STILL WAITING OUT THE BONES' MINIMUM IS REPLACED,
+            // never run after this one (#1786): a newer answer landing first
+            // and the older one landing over it a beat later was a stale page
+            // and two reloads. The newest answer lands, once, when the bones go.
+            if pendingReveal != nil {
+                pendingReveal = reveal
+                return
+            }
+            return reveal()
+        }
         isLoading = false
         generation += 1
         let current = generation
@@ -86,11 +99,17 @@ public final class SkeletonGate {
             showsSkeleton = false
             return reveal()
         }
+        pendingReveal = reveal
         clock.after(remaining) { [weak self] in
             guard let self, generation == current else { return }
             self.shownAt = nil
             showsSkeleton = false
-            reveal()
+            let reveal = pendingReveal
+            pendingReveal = nil
+            reveal?()
         }
     }
+
+    /// The reveal waiting out the bones' minimum, the newest answer's.
+    private var pendingReveal: (@MainActor () -> Void)?
 }
