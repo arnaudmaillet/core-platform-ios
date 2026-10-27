@@ -1276,15 +1276,12 @@ final class ShopCountryCardView: ShopCardView {
         }
         guard let poster else { return }
         // A card is ~810 px wide at @3x: the full bucket, not a tile's. On the
-        // loading ladder's rules (#1085): a warm poster at once, a late one
-        // dissolved in over the card's black.
-        posterLoad.load(poster, using: images) { [weak self] image, transition in
-            guard let self else { return }
-            transition.perform(on: posterView) { self.posterView.image = image }
-        }
+        // media slot (#1505): a warm poster at once, a late one behind the
+        // bone, then dissolved in — never the card's black and a snap.
+        posterSlot.load(poster, pipeline: images, item: poster)
     }
 
-    private let posterLoad = ImageLoadSlot(size: .full)
+    private lazy var posterSlot = CoverSlot(view: posterView, size: .full)
 
     /// The preview loop starts: the video fades in over the poster once it has
     /// a picture.

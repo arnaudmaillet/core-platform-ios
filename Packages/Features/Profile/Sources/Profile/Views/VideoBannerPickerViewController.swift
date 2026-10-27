@@ -164,10 +164,10 @@ private final class VideoBannerTileCell: UICollectionViewCell {
     private let cover = UIImageView()
     private let mark = UIImageView(image: UIImage(systemName: "play.fill"))
     private let check = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
-    /// The cover's load on the ladder's rules (#1085, #1752): the cache
-    /// first, drawn in the configure pass; else dissolved in. One per cell,
-    /// so a recycled tile drops the late cover of the post it was.
-    private let load = ImageLoadSlot(size: .px256)
+    /// The cover on the media slot (#1505): the cache first, drawn in the
+    /// configure pass; else the bone, then dissolved in. One per cell, so a
+    /// recycled tile drops the late cover of the post it was.
+    private lazy var slot = CoverSlot(view: cover, size: .px256)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -205,13 +205,8 @@ private final class VideoBannerTileCell: UICollectionViewCell {
         check.isHidden = !isCurrent
         accessibilityLabel = post.caption.isEmpty ? "Video" : post.caption
         accessibilityTraits = isCurrent ? [.button, .selected] : .button
-        let url = post.thumbnailURL
-        guard url != load.url || cover.image == nil else { return }
-        cover.image = nil
-        load.load(url, using: pipeline) { [weak self] image, transition in
-            guard let self else { return }
-            transition.perform(on: cover) { self.cover.image = image }
-        }
+        // The same post again is a reconfigure and keeps its cover.
+        slot.load(post.thumbnailURL, pipeline: pipeline, item: post.id)
     }
 }
 

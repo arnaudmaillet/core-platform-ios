@@ -10,20 +10,17 @@ import Testing
 /// decides on its own what a loading picture looks like again: the flat
 /// fill and the snap of the owner's recordings (2026-10-21).
 ///
-/// ⚠️ A RATCHET. The surfaces below still load bare and move onto the slot
-/// in #1505's next steps: each one leaves the list as it moves. A new one
-/// uses the slot, or argues its case here.
+/// The list held every surface still loading bare while #1505 moved them
+/// onto the slot, one step at a time; it is down to the slot itself. A new
+/// one uses the slot, or argues its case here.
 ///
 /// ⚠️ A REPO-WIDE GUARD IN MEDIACORE'S LANE. A pull request's CI runs only the
 /// lanes its diff selects: touching a picture load anywhere, run MediaCore's
 /// tests.
 struct BareImageLoadGuardTests {
-    /// File name → why it may still load a picture bare.
+    /// File name → why it may load a picture bare.
     static let allowed: [String: String] = [
         "MediaSlot.swift": "the media slot itself",
-        "ShopStorefrontViewController.swift": "#1505: the shop's poster, next",
-        "ForYouPostPreviewViewController.swift": "#1505: the context-menu preview, which draws the picture itself",
-        "VideoBannerPickerViewController.swift": "#1505: the banner picker's frames, next",
     ]
 
     private static var root: URL {
