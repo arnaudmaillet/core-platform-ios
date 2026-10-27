@@ -54,6 +54,7 @@ final class RestrictedAccountsViewController: UIViewController {
         case profile(RestrictedProfile)
         case loading
         case failed
+        case takingLonger
         case empty
     }
 
@@ -134,6 +135,9 @@ final class RestrictedAccountsViewController: UIViewController {
                 cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
                 return
+            case .takingLonger:
+                // Past 10 s (#1770): a row a tap retries.
+                content.text = TakingLongerCopy.row
             case .failed:
                 // "You’re offline…" when that is why (#794).
                 content.text = FailureCopy.row(
@@ -162,16 +166,38 @@ final class RestrictedAccountsViewController: UIViewController {
         }
     }
 
+    /// The list's loading on the kit's timing (#1770). Injectable so a test
+    /// steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
+
     private func applySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Int, Item>()
         snapshot.appendSections([0])
         switch viewModel.phase {
-        case .loading: snapshot.appendItems([.loading])
+        case .loading:
+            // The kit's timing (#1770): nothing for its delay, the bones,
+            // "taking longer" past 10 s.
+            switch loadingGate.loading() {
+            case .bones: snapshot.appendItems([.loading])
+            case .takingLonger: snapshot.appendItems([.takingLonger])
+            case .nothing: break
+            }
         case .failed: snapshot.appendItems([.failed])
         case .loaded(let profiles) where profiles.isEmpty: snapshot.appendItems([.empty])
         case .loaded(let profiles): snapshot.appendItems(profiles.map(Item.profile))
         }
-        dataSource.apply(snapshot, animatingDifferences: view.window != nil)
+        let animated = view.window != nil
+        if case .loading = viewModel.phase {
+            dataSource.apply(snapshot, animatingDifferences: animated)
+        } else {
+            // The answer waits out the bones' minimum (#1770).
+            loadingGate.landed { [weak self] in self?.dataSource.apply(snapshot, animatingDifferences: animated) }
+        }
     }
 
     private func confirmUnrestrict(_ profile: RestrictedProfile, from indexPath: IndexPath) {
@@ -225,6 +251,9 @@ extension RestrictedAccountsViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .profile(let profile): confirmUnrestrict(profile, from: indexPath)
         case .failed: Task { await viewModel.load() }
+        case .takingLonger:
+            loadingGate.retry()
+            Task { await viewModel.load() }
         default: break
         }
     }
