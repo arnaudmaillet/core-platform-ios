@@ -22,6 +22,8 @@ final class LocationSharingViewController: UIViewController {
         case planned(String)
         case loading
         case failed
+        /// Past 10 s (#1770): a row a tap retries.
+        case takingLonger
     }
 
     static let planned = ["Who can see your location", "Add your location to new posts by default"]
@@ -139,6 +141,10 @@ final class LocationSharingViewController: UIViewController {
                 cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
                 return
+            case .takingLonger:
+                content = .cell()
+                content.text = TakingLongerCopy.row
+                content.textProperties.color = .secondaryLabel
             case .failed:
                 content = .cell()
                 // "You’re offline…" when that is why (#794).
@@ -179,7 +185,13 @@ final class LocationSharingViewController: UIViewController {
         switch phase {
         case .loading:
             snapshot.appendSections([.ghost])
-            snapshot.appendItems([.loading], toSection: .ghost)
+            // The kit's timing (#1770): nothing for its delay, the bones,
+            // "taking longer" past 10 s.
+            switch loadingGate.loading() {
+            case .bones: snapshot.appendItems([.loading], toSection: .ghost)
+            case .takingLonger: snapshot.appendItems([.takingLonger], toSection: .ghost)
+            case .nothing: break
+            }
         case .failed:
             snapshot.appendSections([.ghost])
             snapshot.appendItems([.failed], toSection: .ghost)
@@ -190,8 +202,23 @@ final class LocationSharingViewController: UIViewController {
             snapshot.appendItems(Self.planned.map(Item.planned), toSection: .comingSoon)
             snapshot.reconfigureItems([.ghost, .precise, .city])
         }
-        dataSource.apply(snapshot, animatingDifferences: false)
+        let animated = false
+        if case .loading = phase {
+            dataSource.apply(snapshot, animatingDifferences: animated)
+        } else {
+            // The answer waits out the bones' minimum (#1770).
+            loadingGate.landed { [weak self] in self?.dataSource.apply(snapshot, animatingDifferences: animated) }
+        }
     }
+
+    /// The settings' loading on the kit's timing (#1770). Injectable so a
+    /// test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
 
     private func save(_ change: (inout LocationSharingSettings) -> Void) {
         guard case .loaded(let current) = phase, !isSaving else { return }
@@ -231,6 +258,9 @@ extension LocationSharingViewController: UICollectionViewDelegate {
         case .precise: save { $0.cityLevel = false }
         case .city: save { $0.cityLevel = true }
         case .failed: load()
+        case .takingLonger:
+            loadingGate.retry()
+            load()
         default: break
         }
     }

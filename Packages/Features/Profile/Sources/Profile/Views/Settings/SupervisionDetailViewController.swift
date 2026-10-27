@@ -24,6 +24,8 @@ final class SupervisionDetailViewController: UIViewController {
         case sharing(SupervisionConsent.Line)
         case overviewLoading
         case overviewFailed
+        /// The overview ran past 10 s (#1770): a row a tap retries.
+        case overviewTakingLonger
         case day(ScreenTimeDay)
         case noTime
         case limit(title: String, value: String)
@@ -141,9 +143,17 @@ final class SupervisionDetailViewController: UIViewController {
     }
 
     /// The overview's rows: the days, newest first, and the limits.
-    static func overviewItems(_ phase: SupervisionOverviewModel.Phase, canEdit: Bool) -> (time: [Item], limits: [Item]) {
+    /// `shown`: what the gate lets the loading overview show (#1770).
+    static func overviewItems(
+        _ phase: SupervisionOverviewModel.Phase, canEdit: Bool, shown: ListSkeletonGate.Shown = .bones
+    ) -> (time: [Item], limits: [Item]) {
         switch phase {
-        case .loading: return ([.overviewLoading], [])
+        case .loading:
+            switch shown {
+            case .bones: return ([.overviewLoading], [])
+            case .takingLonger: return ([.overviewTakingLonger], [])
+            case .nothing: return ([], [])
+            }
         case .failed: return ([.overviewFailed], [])
         case .loaded(let overview):
             let days: [Item] = overview.screenTime.isEmpty ? [.noTime] : overview.screenTime.map(Item.day)
@@ -194,6 +204,11 @@ final class SupervisionDetailViewController: UIViewController {
                 cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
                 return
+            case .overviewTakingLonger:
+                content = .cell()
+                content.text = TakingLongerCopy.row
+                content.textProperties.color = .secondaryLabel
+                cell.accessibilityTraits.insert(.button)
             case .overviewFailed:
                 content = .cell()
                 // "You’re offline…" when that is why (#794).
@@ -266,8 +281,13 @@ final class SupervisionDetailViewController: UIViewController {
             snapshot.appendSections([.sharing])
             snapshot.appendItems(SupervisionConsent.lines(linked: true).map(Item.sharing), toSection: .sharing)
         }
+        var loading = false
         if let overview {
-            let items = Self.overviewItems(overview.phase, canEdit: overview.canEditLimits)
+            // The kit's timing (#1770): nothing for its delay, the bones,
+            // "taking longer" past 10 s.
+            if case .loading = overview.phase { loading = true }
+            let shown: ListSkeletonGate.Shown = loading ? loadingGate.loading() : .nothing
+            let items = Self.overviewItems(overview.phase, canEdit: overview.canEditLimits, shown: shown)
             snapshot.appendSections([.screenTime])
             snapshot.appendItems(items.time, toSection: .screenTime)
             if !items.limits.isEmpty {
@@ -280,8 +300,19 @@ final class SupervisionDetailViewController: UIViewController {
         snapshot.appendItems([.end], toSection: .end)
         snapshot.reconfigureItems(snapshot.itemIdentifiers)
         snapshot.reloadSections(snapshot.sectionIdentifiers)
-        dataSource.apply(snapshot, animatingDifferences: false)
+        guard !loading else { return dataSource.apply(snapshot, animatingDifferences: false) }
+        // The answer waits out the bones' minimum (#1770).
+        loadingGate.landed { [weak self] in self?.dataSource.apply(snapshot, animatingDifferences: false) }
     }
+
+    /// The overview's loading on the kit's timing (#1770). Injectable so a
+    /// test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
 
     // MARK: Limits
 
@@ -346,7 +377,7 @@ extension SupervisionDetailViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .profile: router != nil
         case .end: !isEnding
-        case .overviewFailed, .editLimits: true
+        case .overviewFailed, .overviewTakingLonger, .editLimits: true
         default: false
         }
     }
@@ -357,6 +388,9 @@ extension SupervisionDetailViewController: UICollectionViewDelegate {
         case .profile(let profile):
             router?.route(to: .profile(ProfileID(profile.profileID), stub: nil))
         case .overviewFailed:
+            loadOverview()
+        case .overviewTakingLonger:
+            loadingGate.retry()
             loadOverview()
         case .editLimits:
             openLimitsEditor()

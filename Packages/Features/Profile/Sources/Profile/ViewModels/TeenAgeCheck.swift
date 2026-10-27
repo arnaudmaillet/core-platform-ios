@@ -26,13 +26,17 @@ final class TeenAgeCheck {
 
     /// Returns false when the read failed.
     @discardableResult
-    func read() async -> Bool {
-        guard !isReading else { return true }
+    /// `force` (#1770): Try Again past "taking longer" — a read still out
+    /// is superseded rather than waited on, and its late answer dropped.
+    func read(force: Bool = false) async -> Bool {
+        guard force || !isReading else { return true }
         isReading = true
-        defer { isReading = false }
+        readGeneration += 1
+        let mine = readGeneration
+        defer { if readGeneration == mine { isReading = false } }
         let isTeen = isTeen
         var caught: NetworkFailure?
-        age = await FamilyAndTeensViewController.readAge {
+        let answer = await FamilyAndTeensViewController.readAge {
             do {
                 return try await isTeen()
             } catch {
@@ -40,7 +44,12 @@ final class TeenAgeCheck {
                 throw error
             }
         }
+        guard readGeneration == mine else { return !age.isFailed }
+        age = answer
         failure = caught
         return !age.isFailed
     }
+
+    /// The newest read: a superseded one's answer is not this check's.
+    private var readGeneration = 0
 }

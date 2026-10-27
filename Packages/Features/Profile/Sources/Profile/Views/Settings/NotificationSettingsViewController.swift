@@ -41,6 +41,8 @@ final class NotificationSettingsViewController: UIViewController {
         /// A row-shaped bone while the preferences load (charter P8).
         case skeleton(Int)
         case failed
+        /// The preferences ran past 10 s (#1770): a row a tap retries.
+        case takingLonger
     }
 
     /// At most 8 h on the server.
@@ -300,6 +302,9 @@ final class NotificationSettingsViewController: UIViewController {
                     for: loadFailure, fallback: "Couldn't load your notification settings. Tap to try again."
                 )
                 content.textProperties.color = .secondaryLabel
+            case .takingLonger:
+                content.text = TakingLongerCopy.row
+                content.textProperties.color = .secondaryLabel
             }
             cell.contentConfiguration = content
         }
@@ -372,7 +377,11 @@ final class NotificationSettingsViewController: UIViewController {
     private func applySnapshot() {
         guard dataSource != nil else { return }
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        let layout = Self.layout(permission: systemPermission, phase: phase)
+        // The kit's timing (#1770): nothing for its delay, the bones,
+        // "taking longer" past 10 s.
+        let loading = phase == .loading
+        let shown: ListSkeletonGate.Shown = loading ? loadingGate.loading() : .nothing
+        let layout = Self.layout(permission: systemPermission, phase: phase, shown: shown)
         for (section, items) in layout {
             snapshot.appendSections([section])
             snapshot.appendItems(items, toSection: section)
@@ -383,28 +392,52 @@ final class NotificationSettingsViewController: UIViewController {
         // Not the switch sections: a reload would redraw a switch mid-flip.
         snapshot.reloadSections(snapshot.sectionIdentifiers.filter { $0 != .push && $0 != .email })
 
-        let previousSkeletonCount = skeletonCount
-        skeletonCount = layout.flatMap { $0.1 }.filter(Self.isSkeleton).count
-        if skeletonCount < previousSkeletonCount {
-            collectionView.crossfadeSkeleton { [dataSource, snapshot] in
-                dataSource?.apply(snapshot, animatingDifferences: false)
+        let count = layout.flatMap { $0.1 }.filter(Self.isSkeleton).count
+        let land: @MainActor () -> Void = { [weak self] in
+            guard let self else { return }
+            let previousSkeletonCount = skeletonCount
+            skeletonCount = count
+            if skeletonCount < previousSkeletonCount {
+                collectionView.crossfadeSkeleton { [dataSource, snapshot] in
+                    dataSource?.apply(snapshot, animatingDifferences: false)
+                }
+            } else {
+                dataSource.apply(snapshot, animatingDifferences: false)
             }
-        } else {
-            dataSource.apply(snapshot, animatingDifferences: false)
         }
+        // The answer waits out the bones' minimum (#1770).
+        if loading { land() } else { loadingGate.landed(land) }
     }
+
+    /// The preferences' loading on the kit's timing (#1770). Injectable so a
+    /// test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
 
     /// The screen's sections and rows. The permission row's slot is there
     /// from the first frame — a bone until iOS answers (nil), then the row for
     /// that answer — so the read never inserts a row above the list and
     /// pushes it down. While the preferences load, Pause All and the push
     /// categories are bones in their own places.
-    static func layout(permission: UNAuthorizationStatus?, phase: Phase) -> [(Section, [Item])] {
+    /// `shown` (#1770): what the gate lets the loading preferences show.
+    static func layout(
+        permission: UNAuthorizationStatus?, phase: Phase, shown: ListSkeletonGate.Shown = .bones
+    ) -> [(Section, [Item])] {
         var layout: [(Section, [Item])] = [(.system, [permissionRow(permission)])]
         switch phase {
         case .loading:
-            layout.append((.pause, [.skeleton(0)]))
-            layout.append((.push, NotificationCategory.allCases.indices.map { .skeleton($0 + 1) }))
+            switch shown {
+            case .bones:
+                layout.append((.pause, [.skeleton(0)]))
+                layout.append((.push, NotificationCategory.allCases.indices.map { .skeleton($0 + 1) }))
+            case .takingLonger:
+                layout.append((.pause, [.takingLonger]))
+            case .nothing: break
+            }
         case .failed:
             layout.append((.pause, [.failed]))
         case .loaded(let preferences):
@@ -490,7 +523,7 @@ final class NotificationSettingsViewController: UIViewController {
 extension NotificationSettingsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .failed, .allow, .turnOnInSettings, .allowed: true
+        case .failed, .takingLonger, .allow, .turnOnInSettings, .allowed: true
         default: false
         }
     }
@@ -499,6 +532,9 @@ extension NotificationSettingsViewController: UICollectionViewDelegate {
         collectionView.deselectItem(at: indexPath, animated: true)
         switch dataSource.itemIdentifier(for: indexPath) {
         case .failed: load()
+        case .takingLonger:
+            loadingGate.retry()
+            load()
         case .allow: requestPermission()
         case .turnOnInSettings, .allowed: openSystemSettings()
         default: break

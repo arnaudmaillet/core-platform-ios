@@ -59,6 +59,9 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
         case link(Supervision)
         case supervisionLoading
         case supervisionFailed
+        /// A section's wait ran past 10 s (#1770): a row a tap retries.
+        case takingLonger
+        case supervisionTakingLonger
         case invite
         case enterCode
     }
@@ -139,11 +142,12 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
 
     /// Reads the age; a retry that fails again keeps the failed row and says
     /// so. A tap while a read runs sends nothing (`TeenAgeCheck`).
-    private func readAge() {
+    /// `force`: past "taking longer", a read still out is superseded.
+    private func readAge(force: Bool = false) {
         let isRetry = age.isFailed
         Task { [weak self] in
             guard let self else { return }
-            let succeeded = await ageCheck.read()
+            let succeeded = await ageCheck.read(force: force)
             applySnapshot()
             if succeeded { loadSupervisions() }
             if isRetry, !succeeded {
@@ -233,9 +237,17 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
     /// The supervision rows: the links (supervisors first: what a teen most
     /// needs to see), then the ways to make one. A teen with two supervisors
     /// is offered no invite, which no one could accept (ACC-3003).
-    static func supervisionItems(_ phase: SupervisionListModel.Phase, teen: Bool) -> [Item] {
+    /// `shown`: what the gate lets the loading section show (#1770).
+    static func supervisionItems(
+        _ phase: SupervisionListModel.Phase, teen: Bool, shown: ListSkeletonGate.Shown = .bones
+    ) -> [Item] {
         switch phase {
-        case .loading: return [.supervisionLoading]
+        case .loading:
+            switch shown {
+            case .bones: return [.supervisionLoading]
+            case .takingLonger: return [.supervisionTakingLonger]
+            case .nothing: return []
+            }
         case .failed: return [.supervisionFailed]
         case .loaded(let links):
             let supervisors = links.filter { $0.otherRole == .supervisor }
@@ -273,6 +285,11 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
                 cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
                 return
+            case .takingLonger, .supervisionTakingLonger:
+                content = .cell()
+                content.text = TakingLongerCopy.row
+                content.textProperties.color = .secondaryLabel
+                cell.accessibilityTraits.insert(.button)
             case .supervisionFailed:
                 content = .cell()
                 // "You’re offline…" when that is why (#794).
@@ -357,9 +374,17 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
         guard dataSource != nil else { return }
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         snapshot.appendSections([.protections])
+        // The kit's timing (#1770), section by section: nothing for its
+        // delay, the bones, "taking longer" past 10 s.
+        var loading = false
         switch age {
         case .loading, .empty:
-            snapshot.appendItems([.loading], toSection: .protections)
+            loading = true
+            switch ageGate.loading() {
+            case .bones: snapshot.appendItems([.loading], toSection: .protections)
+            case .takingLonger: snapshot.appendItems([.takingLonger], toSection: .protections)
+            case .nothing: break
+            }
         case .failed:
             snapshot.appendItems([.failed], toSection: .protections)
         case .content(let teen):
@@ -373,19 +398,44 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
             } else {
                 snapshot.appendSections([.supervision])
             }
-            let supervision: [Item] = supervisionList.map { Self.supervisionItems($0.phase, teen: teen) } ?? [.supervision]
+            var shown = ListSkeletonGate.Shown.nothing
+            if case .loading? = supervisionList?.phase {
+                loading = true
+                shown = supervisionGate.loading()
+            }
+            let supervision: [Item] = supervisionList.map {
+                Self.supervisionItems($0.phase, teen: teen, shown: shown)
+            } ?? [.supervision]
             snapshot.appendItems(supervision, toSection: .supervision)
         }
         snapshot.reconfigureItems(snapshot.itemIdentifiers)
         snapshot.reloadSections(snapshot.sectionIdentifiers)
-        dataSource.apply(snapshot, animatingDifferences: false)
+        guard !loading else { return dataSource.apply(snapshot, animatingDifferences: false) }
+        // Each answer waits out its bones' minimum (#1770).
+        ageGate.landed { [weak self] in
+            self?.supervisionGate.landed { [weak self] in self?.dataSource.apply(snapshot, animatingDifferences: false) }
+        }
     }
+
+    /// Each section's loading on the kit's timing (#1770). Injectable so a
+    /// test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var ageGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
+    private lazy var supervisionGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
 }
 
 extension FamilyAndTeensViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .failed, .supervisionFailed, .link, .invite, .enterCode: return true
+        case .failed, .supervisionFailed, .takingLonger, .supervisionTakingLonger, .link, .invite, .enterCode: return true
         case .protection(let protection): return teen == true && protection.section != nil && openSection != nil
         default: return false
         }
@@ -396,6 +446,12 @@ extension FamilyAndTeensViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .failed: readAge()
         case .supervisionFailed: loadSupervisions()
+        case .takingLonger:
+            ageGate.retry()
+            readAge(force: true)
+        case .supervisionTakingLonger:
+            supervisionGate.retry()
+            loadSupervisions()
         case .link(let link): openSupervision(link)
         case .invite: openInvite()
         case .enterCode: openAccept()

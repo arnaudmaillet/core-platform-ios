@@ -26,6 +26,8 @@ final class DecisionDetailViewController: UIViewController {
         case retry
         /// A detail-shaped bone while the statement loads (charter P8).
         case skeleton(Int)
+        /// The statement ran past 10 s (#1770): a row a tap retries.
+        case takingLonger
     }
 
     private let restriction: AccountRestriction
@@ -213,6 +215,11 @@ final class DecisionDetailViewController: UIViewController {
             case .skeleton:
                 // Drawn by `SettingsSkeletonRowCell`.
                 break
+            case .takingLonger:
+                var content = UIListContentConfiguration.cell()
+                content.text = TakingLongerCopy.row
+                content.textProperties.color = .secondaryLabel
+                cell.contentConfiguration = content
             }
         }
         let skeletonRegistration = UICollectionView.CellRegistration<SettingsSkeletonRowCell, Int> { cell, _, index in
@@ -248,30 +255,55 @@ final class DecisionDetailViewController: UIViewController {
     private func applySnapshot() {
         guard dataSource != nil else { return }
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        for (section, items) in Self.layout(phase: phase, appeal: appeal) {
+        // The kit's timing (#1770): nothing for its delay, the bones,
+        // "taking longer" past 10 s.
+        let shown: ListSkeletonGate.Shown = phase == .loading ? loadingGate.loading() : .nothing
+        for (section, items) in Self.layout(phase: phase, appeal: appeal, shown: shown) {
             snapshot.appendSections([section])
             snapshot.appendItems(items, toSection: section)
         }
         snapshot.reloadSections(snapshot.sectionIdentifiers)
 
-        let wasShowingSkeleton = isShowingSkeleton
-        isShowingSkeleton = phase == .loading
-        if wasShowingSkeleton, !isShowingSkeleton {
-            collectionView.crossfadeSkeleton { [dataSource, snapshot] in
-                dataSource?.apply(snapshot, animatingDifferences: false)
+        guard phase != .loading else {
+            isShowingSkeleton = shown == .bones
+            return dataSource.apply(snapshot, animatingDifferences: false)
+        }
+        // The answer waits out the bones' minimum (#1770).
+        loadingGate.landed { [weak self] in
+            guard let self else { return }
+            let wasShowingSkeleton = isShowingSkeleton
+            isShowingSkeleton = false
+            if wasShowingSkeleton {
+                collectionView.crossfadeSkeleton { [dataSource, snapshot] in
+                    dataSource?.apply(snapshot, animatingDifferences: false)
+                }
+            } else {
+                dataSource.apply(snapshot, animatingDifferences: false)
             }
-        } else {
-            dataSource.apply(snapshot, animatingDifferences: false)
         }
     }
+
+    /// The statement's loading on the kit's timing (#1770). Injectable so a
+    /// test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
 
     /// The screen's sections and rows for `phase`. While the statement loads
     /// the decision section carries bones in the detail rows' place — the
     /// usual Policy / Decided on / Decided by — rather than nothing at all.
-    static func layout(phase: Phase, appeal: FiledAppeal?) -> [(Section, [Item])] {
+    /// `shown` (#1770): what the gate lets the loading section show.
+    static func layout(phase: Phase, appeal: FiledAppeal?, shown: ListSkeletonGate.Shown = .bones) -> [(Section, [Item])] {
         switch phase {
         case .loading:
-            return [(.decision, [.restriction, .skeleton(0), .skeleton(1), .skeleton(2)])]
+            switch shown {
+            case .bones: return [(.decision, [.restriction, .skeleton(0), .skeleton(1), .skeleton(2)])]
+            case .takingLonger: return [(.decision, [.restriction, .takingLonger])]
+            case .nothing: return [(.decision, [.restriction])]
+            }
         case .failed:
             return [(.decision, [.restriction, .retry])]
         case .loaded(let statement):
@@ -325,7 +357,7 @@ final class DecisionDetailViewController: UIViewController {
 extension DecisionDetailViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .appeal, .retry: true
+        case .appeal, .retry, .takingLonger: true
         default: false
         }
     }
@@ -335,6 +367,9 @@ extension DecisionDetailViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .appeal: presentAppeal()
         case .retry: load()
+        case .takingLonger:
+            loadingGate.retry()
+            load()
         default: break
         }
     }

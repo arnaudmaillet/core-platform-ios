@@ -21,6 +21,12 @@ struct ScreenSkeletonGateGuardTests {
         "PinCardView.swift": "an avatar's bone: a picture slot, on the media ladder's timing",
         "RestingCommentsPlaceholderView.swift": "the comments' shape during a hero flight, not a load",
         "SettingsSkeletonRowCell.swift": "the row skeleton itself, worn by the screens",
+        // Redaction (#1770's own exception): a real row, or a header, drawn
+        // redacted in place while its value loads — not a skeleton section.
+        "AccountStatusViewController.swift": "the status row redacted in place",
+        "DataExportViewController.swift": "the archive row redacted in place",
+        "SecurityCheckupViewController.swift": "the summary header redacted in place",
+        "StorageSettingsViewController.swift": "the sizes redacted in place while the device measures",
     ]
 
     /// Screens still showing their bones at t = 0, moved onto the gate one by
@@ -29,20 +35,6 @@ struct ScreenSkeletonGateGuardTests {
     static let pending: Set<String> = [
         "PostDetailViewController.swift",
         "MediaAlbumPageView.swift", "MediaPickerViewController.swift",
-        // Settings: section rows redacted while their values load.
-        "AccountStatusViewController.swift", "AccountTypeViewController.swift",
-        "ActivityDiscoveryViewController.swift",
-        "ConsentsViewController.swift",
-        "DataExportViewController.swift", "DecisionDetailViewController.swift",
-        "DeleteAccountViewController.swift", "FamilyAndTeensViewController.swift",
-        "HiddenWordsViewController.swift",
-        "LimitInteractionsViewController.swift", "ListPrivacyViewController.swift",
-        "LocationSharingViewController.swift",
-        "NotificationSettingsViewController.swift",
-        "SecurityCheckupViewController.swift",
-        "SecuritySettingsViewController.swift", "StorageSettingsViewController.swift",
-        "SupervisionDetailViewController.swift", "TwoStepViewController.swift",
-        "WhatYouSeeViewController.swift", "YourReportsViewController.swift",
     ]
 
     private static var root: URL {

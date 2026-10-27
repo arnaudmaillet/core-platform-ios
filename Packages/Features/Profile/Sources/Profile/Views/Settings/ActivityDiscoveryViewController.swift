@@ -24,6 +24,8 @@ final class ActivityDiscoveryViewController: UIViewController {
         case findContacts
         case loading
         case failed
+        /// Past 10 s (#1770): a row a tap retries.
+        case takingLonger
     }
 
     static let discoverySwitches: [ActivityDiscoverySettings.Switch] = [
@@ -183,6 +185,9 @@ final class ActivityDiscoveryViewController: UIViewController {
                 cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
                 return
+            case .takingLonger:
+                content.text = TakingLongerCopy.row
+                content.textProperties.color = .secondaryLabel
             case .failed:
                 // "You’re offline…" when that is why (#794).
                 content.text = FailureCopy.row(
@@ -222,7 +227,13 @@ final class ActivityDiscoveryViewController: UIViewController {
         switch phase {
         case .loading:
             snapshot.appendSections([.activity])
-            snapshot.appendItems([.loading], toSection: .activity)
+            // The kit's timing (#1770): nothing for its delay, the bones,
+            // "taking longer" past 10 s.
+            switch loadingGate.loading() {
+            case .bones: snapshot.appendItems([.loading], toSection: .activity)
+            case .takingLonger: snapshot.appendItems([.takingLonger], toSection: .activity)
+            case .nothing: break
+            }
         case .failed:
             snapshot.appendSections([.activity])
             snapshot.appendItems([.failed], toSection: .activity)
@@ -237,8 +248,23 @@ final class ActivityDiscoveryViewController: UIViewController {
             }
             snapshot.reconfigureItems(ActivityDiscoverySettings.Switch.allCases.map(Item.toggle) + (shareLinks == nil ? [] : [.resetLink]))
         }
-        dataSource.apply(snapshot, animatingDifferences: false)
+        let animated = false
+        if case .loading = phase {
+            dataSource.apply(snapshot, animatingDifferences: animated)
+        } else {
+            // The answer waits out the bones' minimum (#1770).
+            loadingGate.landed { [weak self] in self?.dataSource.apply(snapshot, animatingDifferences: animated) }
+        }
     }
+
+    /// The settings' loading on the kit's timing (#1770). Injectable so a
+    /// test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
 
     /// Not optimistic: the switch disables while saving, then shows what
     /// the server holds.
@@ -304,7 +330,7 @@ final class ActivityDiscoveryViewController: UIViewController {
 extension ActivityDiscoveryViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .failed: true
+        case .failed, .takingLonger: true
         case .resetLink: !resetting
         case .findContacts: true
         default: false
@@ -315,6 +341,9 @@ extension ActivityDiscoveryViewController: UICollectionViewDelegate {
         collectionView.deselectItem(at: indexPath, animated: true)
         switch dataSource.itemIdentifier(for: indexPath) {
         case .failed: load()
+        case .takingLonger:
+            loadingGate.retry()
+            load()
         case .resetLink: confirmReset()
         case .findContacts:
             if let screen = makeContactFriends?() { navigationController?.pushViewController(screen, animated: true) }

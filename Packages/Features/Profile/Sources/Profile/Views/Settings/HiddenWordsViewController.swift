@@ -23,6 +23,8 @@ final class HiddenWordsViewController: UIViewController {
         case add
         case loading
         case failed
+        /// Past 10 s (#1770): a row a tap retries.
+        case takingLonger
     }
 
     private let manager: any CommentFiltersManaging
@@ -141,6 +143,9 @@ final class HiddenWordsViewController: UIViewController {
                 cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
                 return
+            case .takingLonger:
+                content.text = TakingLongerCopy.row
+                content.textProperties.color = .secondaryLabel
             case .failed:
                 // "You’re offline…" when that is why (#794).
                 content.text = FailureCopy.row(
@@ -180,7 +185,13 @@ final class HiddenWordsViewController: UIViewController {
         switch phase {
         case .loading:
             snapshot.appendSections([.offensive])
-            snapshot.appendItems([.loading], toSection: .offensive)
+            // The kit's timing (#1770): nothing for its delay, the bones,
+            // "taking longer" past 10 s.
+            switch loadingGate.loading() {
+            case .bones: snapshot.appendItems([.loading], toSection: .offensive)
+            case .takingLonger: snapshot.appendItems([.takingLonger], toSection: .offensive)
+            case .nothing: break
+            }
         case .failed:
             snapshot.appendSections([.offensive])
             snapshot.appendItems([.failed], toSection: .offensive)
@@ -190,8 +201,23 @@ final class HiddenWordsViewController: UIViewController {
             snapshot.appendItems(filters.hiddenWords.map(Item.word) + [.add], toSection: .words)
             snapshot.reconfigureItems([.offensive])
         }
-        dataSource.apply(snapshot, animatingDifferences: view.window != nil)
+        let animated = view.window != nil
+        if case .loading = phase {
+            dataSource.apply(snapshot, animatingDifferences: animated)
+        } else {
+            // The answer waits out the bones' minimum (#1770).
+            loadingGate.landed { [weak self] in self?.dataSource.apply(snapshot, animatingDifferences: animated) }
+        }
     }
+
+    /// The settings' loading on the kit's timing (#1770). Injectable so a
+    /// test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
 
     // MARK: - Changes
 
@@ -261,6 +287,9 @@ extension HiddenWordsViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .add: presentAdd()
         case .failed: load()
+        case .takingLonger:
+            loadingGate.retry()
+            load()
         default: break
         }
     }
