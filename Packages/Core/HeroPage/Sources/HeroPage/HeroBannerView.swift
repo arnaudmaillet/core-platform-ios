@@ -57,6 +57,19 @@ public final class HeroBannerView: UIView {
     /// The banner's load, on the loading ladder's rules (#1085): cache first
     /// and drawn at once, else a dissolve the contract picks.
     private let load = ImageLoadSlot(size: .full)
+    /// THE banner contract (#1752), the avatar's (#1750) at a banner's size:
+    /// a picture in memory draws in the configure pass; else nothing for
+    /// `skeletonDelay`, then the skeleton (held at least `skeletonMinimum`),
+    /// then the picture dissolved in. A failure shows the neutral backdrop,
+    /// no bone. One bone for the profile's redaction and for the picture's
+    /// load (`setRedacted`), so a first load hands over without a second
+    /// flash.
+    public let ladder: LoadingLadder
+    private var token: LoadingLadder.Token?
+    /// The shimmer sheet in the media slot, under the ramp — which dissolves
+    /// it into the page exactly as it does real media, so the loading banner
+    /// and the loaded one share every seam.
+    private let bone = SkeletonBoneView(rounding: .fixed(0))
     private var currentImageURL: URL?
     /// The picture that landed, whatever its route — from the cache before
     /// the first layout, or from a fetch afterwards — so the header can read
@@ -73,8 +86,9 @@ public final class HeroBannerView: UIView {
     /// on the way up (a poster does, a band does not).
     private var format: HeroBannerFormat = .unresolved
 
-    public init(imagePipeline: ImagePipeline) {
+    public init(imagePipeline: ImagePipeline, clock: LoadingLadder.Clock = .system) {
         self.imagePipeline = imagePipeline
+        ladder = LoadingLadder(clock: clock)
         super.init(frame: .zero)
         clipsToBounds = true
         // Neutral backdrop while media loads (or when the profile has none):
@@ -82,6 +96,7 @@ public final class HeroBannerView: UIView {
         backgroundColor = Surface.card
 
         mediaContainer.pin(to: self)
+        bone.pin(to: mediaContainer)
         // The picture reaches ABOVE the banner by the most the parallax can
         // carry it down, so lagging behind the content never uncovers the
         // banner's floor at the top — see `setTravelled`.
@@ -110,6 +125,11 @@ public final class HeroBannerView: UIView {
         veil.isUserInteractionEnabled = false
         veil.isHidden = true
         veil.pin(to: self)
+
+        ladder.setView(bone, for: .skeleton)
+        ladder.setView(picture, for: .content)
+        token = beginItem(nil)
+        applyRampTone()
     }
 
     @available(*, unavailable)
@@ -156,10 +176,16 @@ public final class HeroBannerView: UIView {
     #endif
 
     public func setImageURL(_ url: URL?) {
-        guard url != currentImageURL || picture.image == nil else { return }
+        // The answer to `awaitImage`: the same item, its bone kept.
+        let answersAwait = isAwaitingImage
+        isAwaitingImage = false
+        guard answersAwait || url != currentImageURL || picture.image == nil else { return }
         currentImageURL = url
         picture.image = nil
+        applyRampTone()
         focusTask?.cancel()
+        let token = answersAwait ? (self.token ?? beginItem(url)) : beginItem(url)
+        self.token = token
 
         isPictureSettled = url == nil
         // Synchronously from the cache when it can (the slot draws a warm hit
@@ -179,7 +205,12 @@ public final class HeroBannerView: UIView {
                 focusY: BannerFocalCrop.focusY(aspect: image.size.width / image.size.height),
                 anchor: frame.anchor
             ) : image
-            transition.perform(on: picture) { self.picture.image = shown }
+            guard ladder.isCurrent(token) else { return }
+            picture.image = shown
+            applyRampTone(animated: transition != .none)
+            // The ladder's arrival: in this pass when warm, else dissolved in
+            // once the bone has had its minimum.
+            ladder.show(.content, token: token, warm: transition == .none)
             if cut { refineFocus(of: image, for: url) }
             bandTone = Self.prominentDarkTone(of: image)
             onImageResolved?(image)
@@ -187,9 +218,49 @@ public final class HeroBannerView: UIView {
             // a fetch tells `onPictureSettled`.
             if transition == .none { isPictureSettled = true } else { settle() }
         } failed: { [weak self] in
-            // A failure settles too: the backdrop is what stays.
-            self?.settle()
+            // A failure settles too: the neutral backdrop is what stays, no
+            // bone; the same URL configured again retries (`picture.image`
+            // is still nil).
+            guard let self, ladder.isCurrent(token) else { return }
+            ladder.fail(token: token)
+            settle()
         }
+    }
+
+    /// A banner that may exist and is not known yet (a place whose posts are
+    /// on their way, the owner 2026-10-26): the skeleton holds its place.
+    /// `setImageURL` answers it on the same item — the URL loads under the
+    /// bone already there; nil leaves the backdrop.
+    public func awaitImage() {
+        // Still waiting (a reconfigure meanwhile): the same item.
+        guard !isAwaitingImage else { return }
+        load.cancel()
+        focusTask?.cancel()
+        currentImageURL = nil
+        picture.image = nil
+        applyRampTone()
+        token = beginItem(UUID())
+        isAwaitingImage = true
+        isPictureSettled = true
+    }
+
+    private var isAwaitingImage = false
+
+    /// A new item on the ladder — keeping the bone up, without a new delay,
+    /// when it was already showing (the redaction's, or the previous item's).
+    private func beginItem(_ item: AnyHashable?) -> LoadingLadder.Token {
+        let boneShowing = !bone.isHidden && bone.alpha > 0
+        let token = ladder.begin(item: item)
+        if item == nil {
+            // No banner: nothing is coming, so no bone may follow — settled
+            // on the (empty) content rung, which the ladder never backs down
+            // from.
+            ladder.show(.content, token: token, warm: true)
+        } else if boneShowing || isRedacted {
+            ladder.show(.skeleton, token: token, warm: true)
+        }
+        applyRedaction()
+        return token
     }
 
     /// The picture's own frame in a band card, for a cut (`BannerFocalCrop`):
@@ -251,12 +322,41 @@ public final class HeroBannerView: UIView {
         applyRampTone()
     }
 
-    private func applyRampTone() {
+    private func applyRampTone(animated: Bool = false) {
         let tone: UIColor = format == .band ? (bandTone ?? Self.bandRampTone) : Surface.page
-        ramp.tone = tone
-        picture.pageTone = tone
+        // ⚠️ NO PICTURE (loading, or failed): a FLAT grey — the bone, or the
+        // backdrop — with no ramp and no scrim over it, as an emote's
+        // skeleton (the owner, 2026-10-27). One contract, one look: a black
+        // ramp over the bone read grey on the tall profile band and black on
+        // the short profile card, where it covers nearly all of it. The ramp
+        // and the scrim come with the picture, in its dissolve.
+        let dressed: CGFloat = picture.image == nil ? 0 : 1
+        let apply = {
+            self.ramp.tone = tone
+            self.picture.pageTone = tone
+            self.ramp.alpha = dressed
+            self.topScrim.opacity = Float(dressed)
+        }
+        if animated, window != nil {
+            UIView.animate(withDuration: 0.25, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState], animations: apply)
+        } else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            apply()
+            CATransaction.commit()
+        }
         onRampToneChange?(tone)
+        if (dressed > 0) != hasPicture {
+            hasPicture = dressed > 0
+            onPicturePresenceChange?()
+        }
     }
+
+    /// Whether a picture is drawn — the type over the banner reads the page's
+    /// ink without one (the flat grey has no ramp to stand on).
+    public private(set) var hasPicture = false
+    /// Fires when `hasPicture` changes.
+    public var onPicturePresenceChange: (() -> Void)?
 
     /// The ramp's tone changed — a band card's shadow wears it.
     public var onRampToneChange: ((UIColor) -> Void)?
@@ -418,10 +518,14 @@ public final class HeroBannerView: UIView {
 
     #if DEBUG
     public var debugHasPicture: Bool { picture.image != nil }
+    /// Whether the banner's bone shows (the redaction's or the load's).
+    public var debugShowsBone: Bool { !bone.isHidden && bone.alpha > 0 }
     public var debugShowsBlur: Bool { picture.showsBlur }
     public var debugRampTone: UIColor { ramp.tone }
     /// Whether the opaque fade is drawn (not on a poster, #688).
     public var debugShowsRamp: Bool { !ramp.isHidden }
+    /// Whether the ramp and the scrim are drawn (not over a flat, pictureless banner).
+    public var debugIsDressed: Bool { ramp.alpha > 0 && topScrim.opacity > 0 }
     public var debugFade: HeroBannerFade.Geometry? { picture.fade }
     public var debugBlurLevels: [(start: CGFloat, full: CGFloat)] { picture.debugVisibleLevels }
     public var debugRampLocations: [CGFloat] { ramp.debugLocations }
@@ -439,20 +543,24 @@ public final class HeroBannerView: UIView {
 
     // MARK: - Redaction
 
-    private var bone: SkeletonBoneView?
+    private var isRedacted = false
 
-    /// Skeleton state: a shimmer sheet in the media slot, under the ramp —
-    /// which dissolves it into the page exactly as it does real media, so the
-    /// loading banner and the loaded one share every seam. Alpha-only, so a
-    /// reveal inside an animation block cross-fades.
+    /// Skeleton state while the profile itself loads: the banner's bone, at
+    /// once. Alpha-only, so a reveal inside an animation block cross-fades —
+    /// unless the picture is still on its way, when the same bone stays as
+    /// the load's (one bone, never a second flash).
     public func setRedacted(_ redacted: Bool) {
-        if redacted, bone == nil {
-            let bone = SkeletonBoneView(rounding: .fixed(0))
-            bone.pin(to: mediaContainer)
-            self.bone = bone
+        isRedacted = redacted
+        applyRedaction()
+    }
+
+    private func applyRedaction() {
+        if isRedacted {
+            bone.isHidden = false
+            bone.alpha = 1
+        } else if ladder.rung != .skeleton {
+            bone.alpha = 0
         }
-        bone?.isHidden = false
-        bone?.alpha = redacted ? 1 : 0
     }
 
     public override func layoutSubviews() {

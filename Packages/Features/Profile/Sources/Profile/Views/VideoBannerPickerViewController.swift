@@ -164,7 +164,10 @@ private final class VideoBannerTileCell: UICollectionViewCell {
     private let cover = UIImageView()
     private let mark = UIImageView(image: UIImage(systemName: "play.fill"))
     private let check = UIImageView(image: UIImage(systemName: "checkmark.circle.fill"))
-    private var url: URL?
+    /// The cover's load on the ladder's rules (#1085, #1752): the cache
+    /// first, drawn in the configure pass; else dissolved in. One per cell,
+    /// so a recycled tile drops the late cover of the post it was.
+    private let load = ImageLoadSlot(size: .px256)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -203,14 +206,11 @@ private final class VideoBannerTileCell: UICollectionViewCell {
         accessibilityLabel = post.caption.isEmpty ? "Video" : post.caption
         accessibilityTraits = isCurrent ? [.button, .selected] : .button
         let url = post.thumbnailURL
-        guard url != self.url else { return }
-        self.url = url
+        guard url != load.url || cover.image == nil else { return }
         cover.image = nil
-        guard let url else { return }
-        Task { [weak self] in
-            let image = try? await pipeline.image(for: url, size: .px256)
-            guard let self, self.url == url else { return }
-            self.cover.image = image
+        load.load(url, using: pipeline) { [weak self] image, transition in
+            guard let self else { return }
+            transition.perform(on: cover) { self.cover.image = image }
         }
     }
 }

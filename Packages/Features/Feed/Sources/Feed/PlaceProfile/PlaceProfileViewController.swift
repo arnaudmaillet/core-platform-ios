@@ -684,9 +684,11 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         self.flagView = flag
         // Ranking and Likes (the owner, 2026-10-23): no rank, no Ranking
         // column; a dash for the likes until the posts arrive (`renderCorpus`).
+        // The banner's skeleton until the posts say which picture, if any
+        // (the owner, 2026-10-26, #1752).
         headerContent = HeroHeaderContent(
             title: Self.heroTitleComponents(of: placeName).name, subtitle: identity?.subtitle ?? "",
-            counterValues: [rank?.positionText, "—"]
+            counterValues: [rank?.positionText, "—"], bannerPending: true
         )
         self.imagePipeline = imagePipeline
         self.following = following
@@ -1237,6 +1239,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
                 // hydration here is almost certainly transient — say so
                 // plainly rather than rendering a dead end.
                 activityPage.render(.failed(message: "Couldn't load this place's posts."))
+                endBannerWait()
             }
         }
     }
@@ -1272,7 +1275,11 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         let pinned = Set(members.map(\.id))
         extraPosts.removeAll { pinned.contains($0.id) }
         renderCorpus(reset: isRefresh)
-        renderBanner(for: Self.bannerPost(in: Self.gallery(members)), shows: Self.showsBanner(for: members))
+        // No pins yet more pages to come (a page opened alone): the banner
+        // keeps its skeleton for the first page's top post.
+        if !members.isEmpty || !hasMorePosts {
+            renderBanner(for: Self.bannerPost(in: Self.gallery(members)), shows: Self.showsBanner(for: members))
+        }
     }
 
     /// Whether the page wears a banner (#1599): not when the place's most
@@ -1347,6 +1354,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
             guard let answer else {
                 // Nothing on screen to keep (a page opened alone): say it.
                 if corpus.isEmpty { activityPage.render(.failed(message: "Couldn't load this place's posts.")) }
+                if (renderedMembers ?? []).isEmpty, extraPosts.isEmpty { endBannerWait() }
                 return
             }
             moreCursor = answer.nextPageToken.map(MoreCursor.token) ?? .exhausted
@@ -1368,6 +1376,11 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
             if (renderedMembers ?? []).isEmpty, !fresh.isEmpty {
                 renderBanner(for: Self.bannerPost(in: Self.gallery(extraPosts)), shows: Self.showsBanner(for: extraPosts))
                 if extraPosts.count == fresh.count, view.window != nil { activityPage.restAtTop() }
+            } else if (renderedMembers ?? []).isEmpty, extraPosts.isEmpty,
+                      !hasMorePosts || emptyPagesInARow >= Self.maxEmptyPagesInARow {
+                // The place ran out with no post at all, or the pages stopped
+                // being asked for: no banner is coming.
+                endBannerWait()
             }
             // Nothing new but more behind: no row reaches the end to ask, so
             // the next page is asked now — a few times, not forever.
@@ -1393,7 +1406,9 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         let url = shows ? post?.thumbnailURL : nil
         let showsChanged = shows != showsBanner
         showsBanner = shows
-        guard url != headerContent.bannerImageURL else { return }
+        let wasPending = headerContent.bannerPending
+        headerContent.bannerPending = false
+        guard url != headerContent.bannerImageURL || wasPending else { return }
         headerContent.bannerImageURL = url
         applyHeaderContent()
         // The header changed height: the list starts again at its top, under
@@ -1402,6 +1417,14 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         view.setNeedsLayout()
         view.layoutIfNeeded()
         activityPage.restAtTop()
+    }
+
+    /// The posts settled with no banner to show (failed, or none at all):
+    /// the banner's skeleton leaves for the bannerless layout.
+    private func endBannerWait() {
+        guard headerContent.bannerPending else { return }
+        headerContent.bannerPending = false
+        applyHeaderContent()
     }
 
     // MARK: - The page's pure rules (tested directly)

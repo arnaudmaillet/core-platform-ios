@@ -137,7 +137,8 @@ struct HeroBannerFormatTests {
     }
 
     /// Every shape keeps its fade layer; a band's is black (#718 brought the
-    /// poster's back, at its foot).
+    /// poster's back, at its foot). Drawn once the picture is there: this
+    /// fixture's never loads, and a pictureless banner is flat (#1752).
     @Test(arguments: [HeroBannerFormat.band, .none])
     func everyShapeKeepsItsFade(format: HeroBannerFormat) {
         let header = header(format: format, picture: format != .none)

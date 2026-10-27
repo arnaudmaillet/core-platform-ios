@@ -104,6 +104,16 @@ struct PlaceProfileTests {
         for _ in 0..<100 where profile.debugRenderCount == 0 { await Task.yield() }
     }
 
+    /// While the posts load, the banner's slot holds its skeleton (the
+    /// owner, 2026-10-26, #1752): a band, not the bannerless layout.
+    @Test func whileThePostsLoadTheBannerShowsItsSkeleton() {
+        let profile = makeProfile(posts: [post("photo", kind: .photo, reactions: 10, thumbnail: "https://paris.example/p.jpg")])
+        laidOut(profile)
+        #expect(profile.debugHeaderContent.bannerPending)
+        #expect(profile.debugHeader.bannerFormat != .none)
+        #expect(!profile.debugHeader.debugBannerIsHidden)
+    }
+
     /// …and its header is then a BANNERLESS PROFILE'S (the owner,
     /// 2026-10-23): no banner, the identity right under the bar.
     @Test func withoutABannerTheHeaderIsABannerlessProfiles() async {
@@ -157,9 +167,13 @@ struct PlaceProfileTests {
     }
 
     /// On the profile's column, as the profile's own identity row: the flag at
-    /// the column's leading edge, the name beside it over the counters.
-    @Test func theIdentityIsLaidOnTheProfilesColumn() {
+    /// the column's leading edge, the name beside it over the counters — on
+    /// a bannerless page, once its posts have said there is no banner
+    /// (before, the banner's skeleton holds a band card, #1752).
+    @Test func theIdentityIsLaidOnTheProfilesColumn() async {
         let profile = makeProfile()
+        laidOut(profile)
+        await loaded(profile)
         laidOut(profile)
         let identity = profile.debugIdentityFrame
         #expect(abs(identity.minX - HeroHeaderView.pageMargin) < 0.5)
@@ -540,7 +554,7 @@ struct PlaceProfileTests {
     /// ⚠️ THE STAR AND THE QR CODE LEFT THE BAR (#1598, the owner 2026-10-22):
     /// the bar holds the balance alone, the row under the identity reads
     /// `[Add Pin to Map] [star] [QR code]` — each only with its seam.
-    @Test func theRowHoldsThePinThenTheStarThenTheQRCode() throws {
+    @Test func theRowHoldsThePinThenTheStarThenTheQRCode() async throws {
         let profile = PlaceProfileViewController(
             postIDs: [], placeName: "Paris • City Cluster",
             identity: PlaceIdentity(
@@ -555,6 +569,9 @@ struct PlaceProfileTests {
             wallet: WalletStore(defaults: Self.makeWalletDefaults()),
             loadPosts: { [] }, openPost: { _, _, _ in }
         )
+        laidOut(profile)
+        // No posts, no banner: the bannerless page (its skeleton until then).
+        await loaded(profile)
         laidOut(profile)
         let items = profile.debugTrailingItems
         try #require(items.count == 1)
