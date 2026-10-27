@@ -25,7 +25,9 @@ final class SuggestionsViewController: UIViewController {
         table.showsHorizontalScrollIndicator = false
         return table
     }()
-    private let skeletonView = ConversationListSkeletonView()
+    /// The row's own shape (#1774): a suggestion row, with its buttons — not a
+    /// conversation row's preview and time.
+    private let skeletonView = PersonListSkeletonView(trailing: .followAndDismiss)
     private let statusView = InboxStatusView()
     /// Which of the skeleton, the table and the status shows, on the kit's
     /// timing (#1770, `ScreenLoadingHost`): no skeleton for a list that
