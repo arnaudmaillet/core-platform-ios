@@ -46,6 +46,10 @@ public final class ListSkeletonGate {
     /// What a loading section shows now. The first ask starts the wait.
     public func loading() -> Shown {
         if tookLonger { return .takingLonger }
+        // ⚠️ AN ANSWER WAITING OUT THE MINIMUM KEEPS ITS BONES: a section
+        // still loading beside it (or a redraw before the phase moved) must
+        // not begin again — that would drop the answer.
+        if gate.isRevealing { return .bones }
         gate.begin()
         return gate.showsSkeleton ? .bones : .nothing
     }

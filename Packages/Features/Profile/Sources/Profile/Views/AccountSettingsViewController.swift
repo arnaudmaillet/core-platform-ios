@@ -58,6 +58,8 @@ final class AccountSettingsViewController: UIViewController {
         /// The account couldn't be read: one row in place of the three
         /// values, tapped to read it again (#799).
         case failed
+        /// The values ran past 10 s (#1770): a row tapped to read again.
+        case takingLonger
     }
 
     private var collectionView: UICollectionView!
@@ -132,10 +134,12 @@ final class AccountSettingsViewController: UIViewController {
             cell.accessories = []
         }
         // The failed-row style every Settings screen uses.
-        let failedRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, _ in
+        let failedRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             var content = UIListContentConfiguration.cell()
             // The phase's words: "You’re offline…" when that is why (#794).
-            if case .failed(let message) = self?.viewModel.phase {
+            if item == .takingLonger {
+                content.text = TakingLongerCopy.row
+            } else if case .failed(let message) = self?.viewModel.phase {
                 content.text = message
             } else {
                 content.text = AccountDetailsViewModel.failureMessage
@@ -153,7 +157,7 @@ final class AccountSettingsViewController: UIViewController {
                 return collectionView.dequeueConfiguredReusableCell(using: rowRegistration, for: indexPath, item: row)
             case .skeleton(let index):
                 return collectionView.dequeueConfiguredReusableCell(using: skeletonRegistration, for: indexPath, item: index)
-            case .failed:
+            case .failed, .takingLonger:
                 return collectionView.dequeueConfiguredReusableCell(using: failedRegistration, for: indexPath, item: item)
             }
         }
@@ -182,7 +186,13 @@ final class AccountSettingsViewController: UIViewController {
         case .content:
             snapshot.appendItems(Self.accountInfoRows, toSection: .accountInfo)
         case .loading, .empty:
-            snapshot.appendItems([.skeleton(0), .skeleton(1), .skeleton(2)], toSection: .accountInfo)
+            // The kit's timing (#1770): nothing for its delay, the bones,
+            // "taking longer" past 10 s.
+            switch loadingGate.loading() {
+            case .bones: snapshot.appendItems([.skeleton(0), .skeleton(1), .skeleton(2)], toSection: .accountInfo)
+            case .takingLonger: snapshot.appendItems([.takingLonger], toSection: .accountInfo)
+            case .nothing: break
+            }
         case .failed:
             snapshot.appendItems([.failed], toSection: .accountInfo)
         }
@@ -214,7 +224,24 @@ final class AccountSettingsViewController: UIViewController {
         Task { await viewModel.reloadAfterEdit() }
     }
 
+    /// The values' loading on the kit's timing (#1770). Injectable so a test
+    /// steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.renderNow() }
+        return gate
+    }()
+
     private func render() {
+        switch viewModel.phase {
+        case .loading, .empty: renderNow()
+        // The answer waits out the bones' minimum (#1770).
+        default: loadingGate.landed { [weak self] in self?.renderNow() }
+        }
+    }
+
+    private func renderNow() {
         let snapshot = makeSnapshot(for: viewModel.phase)
         let current = dataSource.snapshot()
         let shown = current.sectionIdentifiers.contains(.accountInfo) ? current.itemIdentifiers(inSection: .accountInfo) : []
@@ -518,6 +545,10 @@ extension AccountSettingsViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .row(let row): handle(row)
         case .failed: retryAccount()
+        case .takingLonger:
+            loadingGate.retry()
+            renderNow()
+            retryAccount()
         case .skeleton, nil: break
         }
     }

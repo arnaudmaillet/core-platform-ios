@@ -28,8 +28,6 @@ struct ScreenSkeletonGateGuardTests {
     /// guard until the entry goes.
     static let pending: Set<String> = [
         "PostDetailViewController.swift",
-        "AccountSettingsViewController.swift", "EditProfileViewController.swift",
-        "WalletHistoryViewController.swift",
         "MediaAlbumPageView.swift", "MediaPickerViewController.swift",
         // Settings: section rows redacted while their values load.
         "AccountStatusViewController.swift", "AccountTypeViewController.swift",
