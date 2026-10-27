@@ -22,12 +22,11 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
 
     /// The cluster's face; also the exact blueprint of the flying card.
     let card = PinCardView(frame: CGRect(x: 0, y: 0, width: side, height: side))
-    /// The representative's cover and author loads (#1088), as the lone
-    /// pin's: a cache hit drawn in the configure pass, a re-dress cancelling
-    /// the load in flight, a late answer for an older face landing nowhere,
-    /// no dissolve (`arrival: .none`).
-    private let coverLoad = ImageLoadSlot(size: .full, arrival: .none)
-    private let avatarLoad = ImageLoadSlot(size: .avatar, arrival: .none)
+    // The representative's cover and author loads are the card's media slots
+    // (`PinCardView.coverSlot`, `loadTextAvatar`, #1505), as the lone pin's: a
+    // cache hit drawn in the configure pass, a re-dress cancelling the load
+    // in flight, a late answer for an older face landing nowhere, and the
+    // bone where a picture is late.
     /// Guards a slow load against reuse (clusters have no stable id, so key on
     /// the URL being shown).
     private var representedURL: URL?
@@ -94,6 +93,8 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
         // the single pin.
         PinCardView.applyPinShadow(to: layer)
         installInstantTap(target: self, action: #selector(handleTap))
+        // The cover drew a picture — the wire's still, or a sheet's frame zero.
+        card.coverSlot.onChange = { [weak self] _ in self?.reportDressed() }
         applyFace(.media)
     }
 
@@ -187,8 +188,6 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
             || representedAvatar != avatar || representedIcon != icon
             || representedPreview != preview
         else { return }
-        coverLoad.cancel()
-        avatarLoad.cancel()
         representedURL = url
         representedFace = face
         representedAvatar = avatar
@@ -197,7 +196,14 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
         previewTask?.cancel()
         iconTask?.cancel()
         card.setPreviewSheet(nil)
-        card.imageView.image = nil
+        // ⚠️ THE COVER FIRST, before the sheet: a sheet's frame zero is parked
+        // on the cover and outranks the wire's still — the refusal below,
+        // kept by the slot (clusters have no stable id: the URL is the item).
+        if face == .media, let url {
+            card.coverSlot.load(url, pipeline: imagePipeline, item: url)
+        } else {
+            card.resetCover()
+        }
         card.setTextAvatar(nil)
         applyIconArt(nil)
         applyFace(face)
@@ -228,9 +234,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
         // the face meant the one face that can end up bare was the one face that
         // never loaded anything to be bare with.
         if face == .text || face == .icon, let avatar {
-            avatarLoad.load(avatar, using: imagePipeline) { [weak self] image, _ in
-                self?.card.setTextAvatar(image)
-            }
+            card.loadTextAvatar(avatar, pipeline: imagePipeline)
             return
         }
         #if DEBUG
@@ -257,29 +261,15 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
                 }
             }
         }
-        // ⚠️ THE SAME REFUSAL THE LONE PIN ALREADY MAKES, and its absence here
-        // is what a viewer sees. A cluster wearing a sheet writes that sheet's
-        // own frame zero into the cover (`PinCardView.setPreviewSheet`), and
-        // this fetch then landed ON TOP of it — so the marker, and the card
-        // that flies off it, showed a PHOTOGRAPH OF SOMETHING ELSE while the
-        // clip animated over it. Filmed: a marker opening a post about a build
-        // log flew a picture of a sky.
-        //
-        // Where we have the frame, the wire's still is not needed; it is a
-        // stand-in for a frame the backend does not generate.
-        guard face == .media, let url else { return }
-        coverLoad.load(url, using: imagePipeline) { [weak self] image, _ in
-            guard let self else { return }
-            // ⚠️ THE SHEET OUTRANKS THE WIRE, and this guard is the whole of it.
-            // Landing the wire cover on top of a sheet replaced that sheet's
-            // own frame zero — filmed as a marker showing a photograph of a sky
-            // over a post about a build log, and flown to the page as that same
-            // photograph. Held back instead, this is the third rung: what the
-            // marker falls to when the sheet does not resolve.
-            guard card.wornPreview == nil else { return }
-            card.imageView.image = image
-            reportDressed()
-        }
+        // ⚠️ THE SAME REFUSAL THE LONE PIN ALREADY MAKES. A cluster wearing a
+        // sheet writes that sheet's own frame zero into the cover
+        // (`PinCardView.setPreviewSheet`), and the wire's fetch once landed ON
+        // TOP of it — the marker, and the card that flew off it, showed a
+        // PHOTOGRAPH OF SOMETHING ELSE while the clip animated over it (filmed:
+        // a marker opening a post about a build log flew a picture of a sky).
+        // Frame zero is parked on the cover now, which the slot keeps over a
+        // late thumbnail; the thumbnail is the third rung, for a sheet that
+        // never resolves.
     }
 
     #if DEBUG
@@ -343,8 +333,6 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
         alpha = 1
         transform = .identity
         onSelect = nil
-        coverLoad.cancel()
-        avatarLoad.cancel()
         representedURL = nil
         representedFace = nil
         representedAvatar = nil
@@ -354,7 +342,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
         previewTask = nil
         applyIconArt(nil)
         card.setPreviewSheet(nil)
-        card.imageView.image = nil
+        card.resetCover()
         card.setTextAvatar(nil)
         applyDress(.neutral)
         applyFace(.media)

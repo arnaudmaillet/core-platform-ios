@@ -232,6 +232,7 @@ final class PinCardView: UIView {
     /// mark. Its ground is the container and is deliberately not one of them.
     var debugTextFaceGlyph: UIView { textFaceView.debugGlyph }
     var debugTextFaceAvatar: UIView { textFaceView.debugAvatar }
+    var debugTextFaceBone: UIView { textFaceView.faceBone }
     var debugIconFace: UIView { iconFaceView }
     /// Where a donated surface is hosted; its alpha is the blend's channel for
     /// the departing page's moving picture.
@@ -607,7 +608,66 @@ final class PinCardView: UIView {
     /// The author's face for a TEXT marker — see `PinTextFaceView.setAvatar`.
     /// A no-op on a media face, which has a cover of its own.
     func setTextAvatar(_ image: UIImage?) {
+        if image == nil {
+            // Back to no face: a load in flight lands nowhere.
+            faceSlotIfBuilt?.cancel()
+            faceSlotIfBuilt?.begin(nil)
+            textFaceView.setAvatarPending(false)
+        }
         textFaceView.setAvatar(image)
+    }
+
+    // MARK: - The marker's pictures on the media slot (#1505)
+
+    /// A marker's loading timing: the media slot's, with NO minimum for the
+    /// bone. A marker is held at zero until it is dressed
+    /// (`MapAnnotationPopChoreographer.hold`), so a bone that came up meanwhile
+    /// was never seen, and holding the picture back for it would only delay
+    /// the pop; after the hold's deadline the picture dissolves in over the
+    /// bone, which never flashes.
+    static let markerLoading = LoadingLadder.Policy(skeletonMinimum: 0)
+
+    private var coverSlotIfBuilt: CoverSlot?
+    private var faceSlotIfBuilt: MediaSlot?
+
+    /// The cover on the media slot — built on first use, so a flying card,
+    /// which loads nothing, carries no bone. The bone sits in the cover over
+    /// its black ground; the picture dissolves in over it.
+    var coverSlot: CoverSlot {
+        if let coverSlotIfBuilt { return coverSlotIfBuilt }
+        let slot = CoverSlot(view: imageView, size: .full, policy: Self.markerLoading)
+        coverSlotIfBuilt = slot
+        return slot
+    }
+
+    /// Back to no cover — a text face, a recycled marker.
+    func resetCover() {
+        coverSlotIfBuilt?.reset()
+        imageView.image = nil
+    }
+
+    private var faceSlot: MediaSlot {
+        if let faceSlotIfBuilt { return faceSlotIfBuilt }
+        let slot = MediaSlot(size: .avatar, bone: textFaceView.faceBone, policy: Self.markerLoading)
+        faceSlotIfBuilt = slot
+        return slot
+    }
+
+    /// Loads a text marker's author face on the media slot (the avatar
+    /// contract, #1750): drawn now when in memory, else the round bone, then
+    /// the face; the glyph only when it fails.
+    func loadTextAvatar(_ url: URL?, pipeline: ImagePipeline?) {
+        let slot = faceSlot
+        textFaceView.setAvatar(nil)
+        let token = slot.begin(url)
+        textFaceView.setAvatarPending(url != nil)
+        slot.load(url, using: pipeline) { [weak self] image, transition in
+            guard let self else { return }
+            transition.perform(on: textFaceView) { [weak self] in self?.textFaceView.setAvatar(image) }
+            slot.ladder.show(.content, token: token, warm: transition == .none)
+        } failed: { [weak self] in
+            self?.textFaceView.setAvatarPending(false)
+        }
     }
 
     /// The author face this card is wearing, so a transition can carry it —
@@ -844,7 +904,14 @@ final class PinCardView: UIView {
         // the swap is visible. Frame zero is the same picture the animation
         // starts from, so stopping looks like pausing rather than changing.
         if let art = preview?.art, let frameZero = art.firstFrame() {
-            imageView.image = frameZero
+            // Through the cover's slot when it has one: frame zero outranks
+            // the wire's thumbnail still loading, as a parked frame does, and
+            // takes the bone down.
+            if let coverSlotIfBuilt {
+                coverSlotIfBuilt.showParked(frameZero)
+            } else {
+                imageView.image = frameZero
+            }
         }
     }
 
@@ -1401,6 +1468,11 @@ private final class PinTextFaceView: UIView {
     private let disc = UIView()
     private let glyph = UIImageView()
     private let avatar = UIImageView()
+    /// The bone while the author's face is on its way (#1505, the avatar
+    /// contract): an author WITH a face never shows the glyph first.
+    let faceBone = AvatarSkeletonView()
+    /// The author's face is on its way: the glyph keeps out of sight.
+    private var isAvatarPending = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1437,6 +1509,12 @@ private final class PinTextFaceView: UIView {
         glyph.isUserInteractionEnabled = false
         addSubview(glyph)
 
+        // Over the glyph, under the face it holds the place of.
+        faceBone.frame = bounds
+        faceBone.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        faceBone.isHidden = true
+        addSubview(faceBone)
+
         // ABOVE the glyph, because it replaces it rather than decorating it: a
         // text post wearing its author's face says whose it is, and the symbol
         // is what is left when there is no face to show.
@@ -1459,7 +1537,15 @@ private final class PinTextFaceView: UIView {
     func setAvatar(_ image: UIImage?) {
         avatar.image = image
         avatar.isHidden = image == nil
-        glyph.isHidden = image != nil
+        if image != nil { isAvatarPending = false }
+        glyph.isHidden = image != nil || isAvatarPending
+    }
+
+    /// An author face is on its way (its bone holds the place), or is no
+    /// longer coming (the glyph again).
+    func setAvatarPending(_ pending: Bool) {
+        isAvatarPending = pending
+        glyph.isHidden = avatar.image != nil || pending
     }
 
     @available(*, unavailable)

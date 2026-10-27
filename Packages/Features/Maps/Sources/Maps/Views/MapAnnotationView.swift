@@ -46,13 +46,11 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
     #if DEBUG
     private var representedKind = "-"
     #endif
-    /// The cover's and the text pin's author's loads (#1088): a cache hit
-    /// drawn in the configure pass — the marker arrives dressed and pops at
-    /// once — a recycled view cancelling the load in flight, a late answer
-    /// for another pin landing nowhere. No dissolve, as before: a marker's
-    /// face cuts in (`arrival: .none`).
-    private let coverLoad = ImageLoadSlot(size: .full, arrival: .none)
-    private let avatarLoad = ImageLoadSlot(size: .avatar, arrival: .none)
+    // The cover's and the text pin's author's loads are the card's media
+    // slots (`PinCardView.coverSlot`, `loadTextAvatar`, #1505): a cache hit
+    // drawn in the configure pass — the marker arrives dressed and pops at
+    // once — a recycled view cancelling the load in flight, a late answer for
+    // another pin landing nowhere, and the bone where a picture is late.
     /// Separate from the cover's load: a media pin loads its COVER and its PREVIEW,
     /// and one task handle for two loads cancels whichever started first.
     private var previewTask: Task<Void, Never>?
@@ -146,6 +144,19 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         backgroundColor = .clear
         buildLayout()
         installInstantTap(target: self, action: #selector(handleTap))
+        card.coverSlot.onChange = { [weak self] image in self?.coverChanged(image) }
+    }
+
+    /// The cover drew a picture — the wire's thumbnail, or a preview sheet's
+    /// frame zero, which outranks it.
+    private func coverChanged(_ image: UIImage) {
+        reportDressed()
+        // If a live preview started before the thumbnail finished loading,
+        // give it a poster now so the pin shows the still until the first
+        // video frame — instead of a black square.
+        if !card.videoRenderView.isHidden {
+            card.videoRenderView.setPoster(image)
+        }
     }
 
     @objc private func handleTap() { onSelect?() }
@@ -258,10 +269,16 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         // it off again — and get its square back.
         applyFace(PinCardView.Face.of(pin))
 
-        coverLoad.cancel()
-        avatarLoad.cancel()
         iconTask?.cancel()
-        card.imageView.image = nil
+        // ⚠️ THE COVER FIRST, before the preview sheet: a sheet's frame zero is
+        // handed to the cover as a parked frame, which outranks the wire's
+        // thumbnail still loading — and only within the item begun here.
+        // The same pin again is a reconfigure, and keeps what it has.
+        if !pin.isText, let url = pin.thumbnailURL {
+            card.coverSlot.load(url, pipeline: imagePipeline, item: pin.postID)
+        } else {
+            card.resetCover()
+        }
         // ⚠️ CLEARED ON EVERY CONFIGURE, like the cover above it: this view is
         // recycled, and a text marker dequeuing a view that last wore somebody
         // else's face would show that face until its own arrived.
@@ -321,43 +338,16 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         // `RadarPin` carries an author (`dev/issues/BACKEND_MAP_PIN_AUTHOR.md`),
         // and the glyph is what the face shows without it.
         if pin.isText, let avatar = pin.authorAvatarURL {
-            avatarLoad.load(avatar, using: imagePipeline) { [weak self] image, _ in
-                self?.card.setTextAvatar(image)
-            }
+            card.loadTextAvatar(avatar, pipeline: imagePipeline)
             return
         }
-        // ⚠️ A PIN WITH A PREVIEW FETCHES THE COVER AND HOLDS IT BACK.
-        //
-        // It used to refuse the fetch outright, because the wire's still was a
-        // PHOTOGRAPH OF SOMETHING ELSE and putting it on the marker until the
-        // catalogue answered was a picture of another post. That reasoning was
-        // about the wire's content, and the wire's content has changed: a video
-        // post's thumbnail is now its own clip's frame zero, the same picture
-        // the sheet opens on.
-        //
-        // What the refusal cost was the THIRD RUNG. `hasPreviewSheet` asks
-        // whether an id was SEEDED, not whether art RESOLVED — so a pin whose
-        // sheet never lands (catalogue miss, eviction, `-map-previews-unavailable`)
-        // had nothing at all to fall to, and stood on its ground. Filmed as
-        // black squares on the map.
-        //
-        // So the ladder is honest at last: the sheet wins where it lands, the
-        // thumbnail stands in where it does not, and the two are one picture.
-        guard !pin.isText, let url = pin.thumbnailURL else { return }
-        coverLoad.load(url, using: imagePipeline) { [weak self] image, _ in
-            guard let self else { return }
-            // The sheet outranks it, and may have landed while this was in
-            // flight — its frame zero is already in the cover.
-            guard card.wornPreview == nil else { return }
-            card.imageView.image = image
-            reportDressed()
-            // If a live preview started before the thumbnail finished loading,
-            // give it a poster now so the pin shows the still until the first
-            // video frame — instead of a black square.
-            if !card.videoRenderView.isHidden {
-                card.videoRenderView.setPoster(image)
-            }
-        }
+        // ⚠️ A PIN WITH A PREVIEW FETCHES THE COVER AND HOLDS IT BACK — begun
+        // above, before the sheet. The wire's still for a video post is its
+        // own clip's frame zero, the same picture the sheet opens on, so the
+        // ladder is honest: the sheet wins where it lands (its frame zero is
+        // parked on the cover), the thumbnail stands in where it does not —
+        // the THIRD RUNG a pin whose sheet never resolves falls to, rather
+        // than its black ground (filmed once as black squares on the map).
     }
 
     #if DEBUG
@@ -416,13 +406,11 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         onReuse?()
         onReuse = nil
         endVideoPreview()
-        coverLoad.cancel()
-        avatarLoad.cancel()
         previewTask?.cancel()
         previewTask = nil
         representedID = nil
         card.setPreviewSheet(nil)
-        card.imageView.image = nil
+        card.resetCover()
         // Cleared HERE as well as on configure. An animating icon left under a
         // photograph is worse than a stale avatar: it moves.
         applyIconArt(nil)
