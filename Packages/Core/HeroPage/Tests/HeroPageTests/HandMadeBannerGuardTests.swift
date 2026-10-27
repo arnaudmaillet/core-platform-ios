@@ -30,12 +30,17 @@ struct HandMadeBannerGuardTests {
     }
 
     /// Whether `text` builds a banner by hand: a banner picture or banner
-    /// view of its own, or a banner URL fed to the image pipeline itself.
+    /// view of its own, or a banner URL fed STRAIGHT to the image pipeline
+    /// (`image(for:)`, `cachedImage(for:)`, a slot's `load(`).
+    ///
+    /// ⚠️ THE URL MUST BE THE LOAD'S ARGUMENT, not merely in the same file
+    /// (the merge coordinator, 2026-10-27): a file that passes a banner URL
+    /// along and loads some other picture is no banner load, and a
+    /// file-level match would turn develop red for it.
     static func buildsBanner(_ text: String) -> Bool {
         if text.contains("HeroBannerPictureView(") || text.contains("HeroBannerView(") { return true }
-        let readsBannerURL = text.contains("bannerImageURL") || text.contains("bannerURL")
-        let loads = text.contains(".image(for:") || text.contains("cachedImage(for:") || text.contains("ImageLoadSlot(")
-        return readsBannerURL && loads
+        let pattern = #"(\.image\(for:|cachedImage\(for:|\.load\()\s*[\w.?!]*banner(Image)?URL"#
+        return text.range(of: pattern, options: .regularExpression) != nil
     }
 
     @Test func noSurfaceBuildsItsOwnBanner() {
@@ -63,11 +68,14 @@ struct HandMadeBannerGuardTests {
     /// The scan cannot pass by matching nothing.
     @Test func thePatternFindsTheShape() {
         #expect(Self.buildsBanner("let banner = HeroBannerView(imagePipeline: pipeline)"))
-        #expect(Self.buildsBanner("""
-        let url = profile.bannerImageURL
-        let image = try await pipeline.image(for: url, size: .full)
-        """))
+        #expect(Self.buildsBanner("let image = try await pipeline.image(for: profile.bannerImageURL, size: .full)"))
+        #expect(Self.buildsBanner("load.load(model.bannerImageURL, using: pipeline) { _, _ in }"))
         // A URL passed along is not a load.
         #expect(!Self.buildsBanner("content.bannerImageURL = profile.bannerURL"))
+        // Nor is another picture loaded in a file that mentions a banner.
+        #expect(!Self.buildsBanner("""
+        content.bannerImageURL = profile.bannerURL
+        let face = try await pipeline.image(for: profile.avatarURL, size: .avatar)
+        """))
     }
 }
