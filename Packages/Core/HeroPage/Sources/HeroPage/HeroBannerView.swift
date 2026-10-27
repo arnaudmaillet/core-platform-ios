@@ -54,18 +54,17 @@ public final class HeroBannerView: UIView {
     }
 
     private let imagePipeline: ImagePipeline
-    /// The banner's load, on the loading ladder's rules (#1085): cache first
-    /// and drawn at once, else a dissolve the contract picks.
-    private let load = ImageLoadSlot(size: .full)
-    /// THE banner contract (#1752), the avatar's (#1750) at a banner's size:
-    /// a picture in memory draws in the configure pass; else nothing for
-    /// `skeletonDelay`, then the skeleton (held at least `skeletonMinimum`),
-    /// then the picture dissolved in. A failure shows the neutral backdrop,
-    /// no bone. One bone for the profile's redaction and for the picture's
-    /// load (`setRedacted`), so a first load hands over without a second
-    /// flash.
-    public let ladder: LoadingLadder
-    private var token: LoadingLadder.Token?
+    /// THE banner contract (#1752) is the media's (`MediaSlot`, #1505), at a
+    /// banner's size: a picture in memory draws in the configure pass; else
+    /// nothing for `skeletonDelay`, then the skeleton (held at least
+    /// `skeletonMinimum`), then the picture dissolved in. A failure shows the
+    /// neutral backdrop, no bone. One bone for the profile's redaction and
+    /// for the picture's load (`setRedacted`), so a first load hands over
+    /// without a second flash. The banner keeps only what is a banner's: the
+    /// focal cut, the baked blur, the ramp, the video.
+    private let slot: MediaSlot
+    /// The ladder the picture arrives on.
+    public var ladder: LoadingLadder { slot.ladder }
     /// The shimmer sheet in the media slot, under the ramp — which dissolves
     /// it into the page exactly as it does real media, so the loading banner
     /// and the loaded one share every seam.
@@ -88,7 +87,7 @@ public final class HeroBannerView: UIView {
 
     public init(imagePipeline: ImagePipeline, clock: LoadingLadder.Clock = .system) {
         self.imagePipeline = imagePipeline
-        ladder = LoadingLadder(clock: clock)
+        slot = MediaSlot(size: .full, bone: bone, clock: clock)
         super.init(frame: .zero)
         clipsToBounds = true
         // Neutral backdrop while media loads (or when the profile has none):
@@ -126,9 +125,8 @@ public final class HeroBannerView: UIView {
         veil.isHidden = true
         veil.pin(to: self)
 
-        ladder.setView(bone, for: .skeleton)
         ladder.setView(picture, for: .content)
-        token = beginItem(nil)
+        beginItem(nil)
         applyRampTone()
     }
 
@@ -176,16 +174,14 @@ public final class HeroBannerView: UIView {
     #endif
 
     public func setImageURL(_ url: URL?) {
-        // The answer to `awaitImage`: the same item, its bone kept.
-        let answersAwait = isAwaitingImage
-        isAwaitingImage = false
-        guard answersAwait || url != currentImageURL || picture.image == nil else { return }
+        // The answer to `awaitImage` is the same item, its bone kept
+        // (`MediaSlot.begin`).
+        guard slot.isAwaiting || url != currentImageURL || picture.image == nil else { return }
         currentImageURL = url
         picture.image = nil
         applyRampTone()
         focusTask?.cancel()
-        let token = answersAwait ? (self.token ?? beginItem(url)) : beginItem(url)
-        self.token = token
+        let token = beginItem(url)
 
         isPictureSettled = url == nil
         // Synchronously from the cache when it can (the slot draws a warm hit
@@ -193,7 +189,7 @@ public final class HeroBannerView: UIView {
         // decided before the first layout is a header that never jumps. A
         // fetch still decides it, one layout later — dissolved over the
         // neutral backdrop, the loudest pop on the screen otherwise.
-        load.load(url, using: imagePipeline) { [weak self] image, transition in
+        slot.load(url, using: imagePipeline) { [weak self] image, transition in
             guard let self else { return }
             // A picture taller than the card is cut where its subject is
             // likely to be (`BannerFocalCrop`): by its ratio now, by its faces
@@ -221,9 +217,7 @@ public final class HeroBannerView: UIView {
             // A failure settles too: the neutral backdrop is what stays, no
             // bone; the same URL configured again retries (`picture.image`
             // is still nil).
-            guard let self, ladder.isCurrent(token) else { return }
-            ladder.fail(token: token)
-            settle()
+            self?.settle()
         }
     }
 
@@ -233,30 +227,28 @@ public final class HeroBannerView: UIView {
     /// bone already there; nil leaves the backdrop.
     public func awaitImage() {
         // Still waiting (a reconfigure meanwhile): the same item.
-        guard !isAwaitingImage else { return }
-        load.cancel()
+        guard !slot.isAwaiting else { return }
         focusTask?.cancel()
         currentImageURL = nil
         picture.image = nil
         applyRampTone()
-        token = beginItem(UUID())
-        isAwaitingImage = true
+        slot.awaitPicture()
+        if isRedacted { ladder.show(.skeleton, token: slot.token, warm: true) }
+        applyRedaction()
         isPictureSettled = true
     }
 
-    private var isAwaitingImage = false
-
-    /// A new item on the ladder — keeping the bone up, without a new delay,
-    /// when it was already showing (the redaction's, or the previous item's).
+    /// A new item on the slot — the bone kept up, without a new delay, when
+    /// it was already showing (the slot's rule) or the profile is redacted.
+    @discardableResult
     private func beginItem(_ item: AnyHashable?) -> LoadingLadder.Token {
-        let boneShowing = !bone.isHidden && bone.alpha > 0
-        let token = ladder.begin(item: item)
+        let token = slot.begin(item)
         if item == nil {
             // No banner: nothing is coming, so no bone may follow — settled
             // on the (empty) content rung, which the ladder never backs down
             // from.
             ladder.show(.content, token: token, warm: true)
-        } else if boneShowing || isRedacted {
+        } else if isRedacted {
             ladder.show(.skeleton, token: token, warm: true)
         }
         applyRedaction()

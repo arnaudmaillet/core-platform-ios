@@ -37,6 +37,12 @@ public final class AvatarSkeletonView: UIView {
         AvatarShapeMask.apply(shape, to: self)
     }
 
+    /// Hidden with its bone, so the bone's sweep stops too (a hidden bone
+    /// runs none — `SkeletonBoneView.isHidden`).
+    public override var isHidden: Bool {
+        didSet { bone.isHidden = isHidden }
+    }
+
     #if DEBUG
     /// Whether the bone's band is sweeping now — for tests.
     public var debugIsSweeping: Bool { bone.isSweeping }

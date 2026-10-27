@@ -168,6 +168,12 @@ public final class LoadingLadder {
     public var isSettled: Bool { rung == .content || hasFailed }
     /// Told once each item settles.
     public var onSettled: (() -> Void)?
+    /// Told as each rung lands, with how — for a host that draws a rung
+    /// itself rather than registering its view: a hero source's cover, whose
+    /// view the ladder never touches (`CoverSlot`). Called before the rungs
+    /// below leave, in the same pass, so a dissolve the host runs carries
+    /// the bone's leaving too.
+    public var onLand: ((Rung, Transition) -> Void)?
 
     /// Held by a flight: no transition runs (hook 3).
     public private(set) var isHeld = false
@@ -340,6 +346,7 @@ public final class LoadingLadder {
         transitions.append((next, transition))
         if transitions.count > 32 { transitions.removeFirst() }
         if next > .skeleton { skeletonShownAt = nil }
+        onLand?(next, transition)
         guard let entry = views[next], !(next == .content && isContentLent) else {
             finishLanding(next)
             return
@@ -394,7 +401,9 @@ public final class LoadingLadder {
     // MARK: - Skeleton
 
     private func scheduleSkeleton(for generation: Int) {
-        guard views[.skeleton] != nil else { return }
+        // No item, nothing coming: a reset view shows its ground, never a
+        // bone that would shimmer for good.
+        guard views[.skeleton] != nil, item != nil else { return }
         if isFlightCard { return }
         clock.after(policy.skeletonDelay) { [weak self] in
             guard let self, self.generation == generation, !isHeld else { return }

@@ -2,8 +2,11 @@ import DesignSystem
 import UIKit
 
 /// THE app's avatar (#943, step 2 of #1085): a person's picture on the
-/// loading ladder, their initials when there is none — one view where
-/// nineteen drew their own.
+/// media slot (`MediaSlot`, #1505), their initials when there is none — one
+/// view where nineteen drew their own. The slot carries the media's
+/// contract (the load, the skeleton, the arrival); the avatar keeps only
+/// what is an avatar's: the initials floor, the stand-in, the animated
+/// still and the frame.
 ///
 /// ```
 ///   skeleton:    a bone in the avatar's shape (AvatarSkeletonView)
@@ -41,11 +44,11 @@ public final class AvatarView: UIView {
     /// decodes (`standInSize`): the preview rung.
     public let standIn = AvatarImageView()
     /// The ladder the avatar runs on.
-    public let ladder: LoadingLadder
+    public var ladder: LoadingLadder { slot.ladder }
     /// The frame the profile wears (#943), over the face's rim.
     public let frameView = AvatarFrameView()
-    private let load: ImageLoadSlot
-    private var token: LoadingLadder.Token?
+    /// The picture's media contract: its load, its skeleton, its arrival.
+    private let slot: MediaSlot
 
     /// - Parameters:
     ///   - diameter: the disc's side; `setDiameter` changes it later.
@@ -56,8 +59,7 @@ public final class AvatarView: UIView {
         policy: LoadingLadder.Policy = .standard, clock: LoadingLadder.Clock = .system
     ) {
         monogram = MonogramAvatarView(diameter: diameter)
-        ladder = LoadingLadder(policy: policy, clock: clock)
-        load = ImageLoadSlot(size: size)
+        slot = MediaSlot(size: size, bone: skeleton, policy: policy, clock: clock)
         super.init(frame: .zero)
         monogram.translatesAutoresizingMaskIntoConstraints = false
         addSubview(monogram)
@@ -78,7 +80,6 @@ public final class AvatarView: UIView {
                 view.bottomAnchor.constraint(equalTo: monogram.bottomAnchor)
             ])
         }
-        ladder.setView(skeleton, for: .skeleton)
         ladder.setView(monogram, for: .placeholder, drivesAlpha: false, permanent: true)
         ladder.setView(standIn, for: .preview)
         ladder.setView(picture, for: .content)
@@ -89,8 +90,7 @@ public final class AvatarView: UIView {
             monogram.isCovered = (ladder.rung == .content && picture.image != nil)
                 || (ladder.rung == .preview && standIn.image != nil)
         }
-        token = ladder.begin(item: nil)
-        ladder.show(.placeholder, token: token!, warm: true)
+        ladder.show(.placeholder, token: slot.begin(nil), warm: true)
     }
 
     @available(*, unavailable)
@@ -122,8 +122,8 @@ public final class AvatarView: UIView {
     /// The bucket the picture is decoded at, for a disc that follows Dynamic
     /// Type: the next picture is decoded at it.
     public var pictureSize: ImageBucket {
-        get { load.size }
-        set { load.size = newValue }
+        get { slot.size }
+        set { slot.size = newValue }
     }
 
     /// A smaller bucket whose decode, when the pipeline already holds it,
@@ -146,15 +146,13 @@ public final class AvatarView: UIView {
     /// when `url` is nil or the picture fails. The same URL again is a
     /// reconfigure and changes nothing; another (or nil) is a new person.
     public func setPicture(_ url: URL?, pipeline: ImagePipeline?) {
-        // The answer to `awaitPicture`: the same item, its skeleton kept.
-        let answersAwait = isAwaitingPicture
-        isAwaitingPicture = false
-        if !answersAwait {
-            if let url, url == load.url, load.isLoading || ladder.rung == .content { return }
-            if url == nil, load.url == nil, ladder.rung == .placeholder, picture.image == nil { return }
+        // The answer to `awaitPicture` is the same item, its skeleton kept
+        // (`MediaSlot.begin`).
+        if !slot.isAwaiting {
+            if let url, url == slot.url, slot.isLoading || ladder.rung == .content { return }
+            if url == nil, slot.url == nil, ladder.rung == .placeholder, picture.image == nil { return }
         }
-        let token = answersAwait ? (self.token ?? ladder.begin(item: url)) : ladder.begin(item: url)
-        self.token = token
+        let token = slot.begin(url)
         picture.image = nil
         standIn.image = nil
         monogram.isCovered = false
@@ -165,11 +163,11 @@ public final class AvatarView: UIView {
         // still over now, as the picture (`adoptStill`). At the rung the
         // picture is decoded at: the profile header's 512 px picture takes
         // the 256 px sheet (#1444).
-        animation.rung = AnimatedAvatars.Rung(bucket: load.size)
+        animation.rung = AnimatedAvatars.Rung(bucket: slot.size)
         animation.setAvatar(url)
         var warm = false
-        load.load(url, using: pipeline) { [weak self] image, transition in
-            guard let self, ladder.isCurrent(token) else { return }
+        slot.load(url, using: pipeline) { [weak self] image, transition in
+            guard let self else { return }
             warm = transition == .none
             // An animated avatar's picture is its still, never the photo
             // under it (#1424).
@@ -177,17 +175,16 @@ public final class AvatarView: UIView {
             ladder.show(.content, token: token, warm: warm)
             if !warm { onSettledAfterLoad?() }
         } failed: { [weak self] in
-            guard let self, ladder.isCurrent(token) else { return }
+            guard let self else { return }
             // The picture is not coming: the initials, without animation.
             ladder.show(.placeholder, token: token, warm: true)
-            ladder.fail(token: token)
             if url != nil { onSettledAfterLoad?() }
         }
         // Missed at its size: a smaller decode already at hand stands in.
         // Never for a sheet avatar (#1444): its one picture is its sheet's
         // last frame, shown once the sheet is decoded — no stand-in to hand
         // over from.
-        if !warm, load.isLoading, animation.still == nil, let url, !AnimatedAvatars.isSheet(url), let standInSize,
+        if !warm, slot.isLoading, animation.still == nil, let url, !AnimatedAvatars.isSheet(url), let standInSize,
            let face = pipeline?.cachedImage(for: url, size: standInSize) {
             standIn.image = face
             ladder.show(.preview, token: token, warm: true)
@@ -198,10 +195,8 @@ public final class AvatarView: UIView {
     /// A picture already in hand (a place's flag): drawn now, nothing to
     /// load.
     public func setPicture(image: UIImage) {
-        load.cancel()
-        isAwaitingPicture = false
-        let token = ladder.begin(item: ObjectIdentifier(image))
-        self.token = token
+        slot.cancel()
+        let token = slot.begin(ObjectIdentifier(image))
         animation.setAvatar(nil)
         standIn.image = nil
         picture.image = image
@@ -214,21 +209,18 @@ public final class AvatarView: UIView {
     /// `setPicture` answers it on the same item — the URL loads under the
     /// bone already there, nil shows the initials.
     public func awaitPicture() {
-        load.cancel()
-        token = ladder.begin(item: UUID())
+        slot.cancel()
+        slot.awaitPicture()
         picture.image = nil
         standIn.image = nil
         monogram.isCovered = false
         animation.setAvatar(nil)
-        isAwaitingPicture = true
     }
-
-    private var isAwaitingPicture = false
 
     /// Back to the initials alone — a recycled row's first step (the next
     /// configure, in the same pass, starts the new person).
     public func reset() {
-        load.cancel()
+        slot.cancel()
         setPicture(nil, pipeline: nil)
     }
 
@@ -247,7 +239,8 @@ public final class AvatarView: UIView {
     /// Laid over a different photo, every hand-over between the two was a cut
     /// (the owner's recording, 2026-10-19: three pictures around one play).
     private func adoptStill(_ still: UIImage) {
-        guard let token, ladder.isCurrent(token) else { return }
+        let token = slot.token
+        guard ladder.isCurrent(token) else { return }
         picture.image = still
         ladder.show(.content, token: token, warm: true)
         monogram.isCovered = true
@@ -275,10 +268,10 @@ public final class AvatarView: UIView {
     /// coming — for a push that waits on its faces.
     /// A stand-in counts: the face is drawn, the sharper one only refines it.
     public var isSettled: Bool {
-        ladder.isSettled || ladder.rung == .preview || (load.url == nil && !load.isLoading)
+        ladder.isSettled || ladder.rung == .preview || (slot.url == nil && !slot.isLoading)
     }
 
     #if DEBUG
-    public var debugIsLoading: Bool { load.isLoading }
+    public var debugIsLoading: Bool { slot.isLoading }
     #endif
 }
