@@ -509,7 +509,6 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
     }
     /// The skeletons over the tiles whose media is on its way (#1553), by
     /// cell.
-    private var bones: [ObjectIdentifier: UIView] = [:]
 
     static var tileSpacing: CGFloat { SnapSideList.Geometry.tileSpacing }
     /// Before the geometry places the list: portrait, as a post's media is.
@@ -715,30 +714,16 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: PostGridTileCell.reuseID, for: indexPath)
         if let tile = cell as? PostGridTileCell {
             tile.cornerRadius = SnapSideList.Geometry.tileCornerRadius
+            tile.groundsOnDark = true
             let entry = entries[indexPath.item]
             // A text post's tile is its words; a picture speaks for itself.
             tile.configure(
                 with: ForYouRepository.galleryPost(from: entry), imagePipeline: imagePipeline,
                 showsInfo: entry.post.attachments.isEmpty
             )
-            // A cover landing late is when a still tile may start, and when
-            // its skeleton gives way (#1553).
-            tile.onCoverLoaded = { [weak self, weak tile] in
-                guard let self else { return }
-                if let tile { removeBone(from: tile, animated: true) }
-                reconcilePlayback()
-            }
-            tile.onCoverFailed = { [weak self, weak tile] in
-                guard let self, let tile else { return }
-                stillBone(on: tile)
-            }
-            // A media tile whose cover is not drawn yet wears a skeleton; a
-            // resident one, or a text tile (its words), none.
-            if !entry.post.attachments.isEmpty, tile.renderedCover == nil {
-                showBone(on: tile)
-            } else {
-                removeBone(from: tile, animated: false)
-            }
+            // A cover landing late is when a still tile may start. Its wait is
+            // the tile's own bone (#1772), on the page's black (#1753).
+            tile.onCoverLoaded = { [weak self] in self?.reconcilePlayback() }
         }
         cell.contentView.layer.cornerRadius = SnapSideList.Geometry.tileCornerRadius
         cell.contentView.layer.cornerCurve = .continuous
@@ -763,51 +748,6 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         return CGSize(width: width, height: (width * Self.fallbackTileAspect).rounded())
     }
 
-    // MARK: Skeletons (#1553)
-
-    /// The app's shimmering bone over `tile`, on its own shape. It stills
-    /// itself under Reduce Motion and Power Saving (`SkeletonBoneView`).
-    private func showBone(on tile: PostGridTileCell) {
-        let key = ObjectIdentifier(tile)
-        let bone = bones[key] ?? {
-            // On the snap feed's black page in either appearance (#1753).
-            let bone = SkeletonBoneView(rounding: .fixed(SnapSideList.Geometry.tileCornerRadius), fill: Surface.skeletonOnDark)
-            bones[key] = bone
-            return bone
-        }()
-        bone.alpha = 1
-        bone.frame = tile.contentView.bounds
-        bone.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        if bone.superview !== tile.contentView { tile.contentView.addSubview(bone) }
-    }
-
-    /// The cover landed: the bone fades to the picture.
-    private func removeBone(from tile: PostGridTileCell, animated: Bool) {
-        guard let bone = bones.removeValue(forKey: ObjectIdentifier(tile)) else { return }
-        guard animated, window != nil, !UIAccessibility.isReduceMotionEnabled else {
-            return bone.removeFromSuperview()
-        }
-        UIView.animate(withDuration: 0.2, delay: 0, options: [.allowUserInteraction]) {
-            bone.alpha = 0
-        } completion: { _ in bone.removeFromSuperview() }
-    }
-
-    /// The cover failed: a still bone, never an endless shimmer — the
-    /// emotes' rule (#1504).
-    private func stillBone(on tile: PostGridTileCell) {
-        let key = ObjectIdentifier(tile)
-        guard let bone = bones[key], bone is SkeletonBoneView else { return }
-        let still = UIView(frame: bone.frame)
-        still.autoresizingMask = bone.autoresizingMask
-        still.isUserInteractionEnabled = false
-        still.backgroundColor = .tertiarySystemFill
-        still.layer.cornerRadius = SnapSideList.Geometry.tileCornerRadius
-        still.layer.cornerCurve = .continuous
-        bone.superview?.insertSubview(still, aboveSubview: bone)
-        bone.removeFromSuperview()
-        bones[key] = still
-    }
-
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         guard entries.indices.contains(indexPath.item) else { return }
         onSelect?(entries[indexPath.item])
@@ -820,10 +760,12 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
         set { collection.contentOffset.y = newValue }
     }
     var debugTileFrames: [CGRect] { tileFrames }
-    /// Whether `cell` wears a skeleton, and whether it shimmers. Tests.
-    func debugBone(on cell: PostGridTileCell) -> (shown: Bool, shimmers: Bool) {
-        guard let bone = bones[ObjectIdentifier(cell)], bone.superview != nil else { return (false, false) }
-        return (true, bone is SkeletonBoneView)
+    /// The skeletons `cell` wears — its cover's, and any other over it. Tests.
+    func debugBones(on cell: PostGridTileCell) -> [SkeletonBoneView] {
+        func bones(in view: UIView) -> [SkeletonBoneView] {
+            view.subviews.flatMap { ($0 as? SkeletonBoneView).map { [$0] } ?? bones(in: $0) }
+        }
+        return bones(in: cell.contentView).filter { !$0.isHidden && $0.alpha > 0 }
     }
 
     /// The tiles on screen. Tests.

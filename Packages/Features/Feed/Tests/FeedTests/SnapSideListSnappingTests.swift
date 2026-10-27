@@ -1,3 +1,4 @@
+import DesignSystem
 import CoreModels
 import Foundation
 import MediaCore
@@ -90,28 +91,21 @@ struct SnapSideListSnappingTests {
         return list
     }
 
-    /// A media tile still waiting for its cover wears the shimmering bone; a
-    /// text tile (its words) never does.
-    @Test func aWaitingMediaTileWearsASkeletonAndATextTileNone() throws {
+    /// A media tile still waiting for its cover wears ONE shimmering bone —
+    /// its cover's own (#1772), on the page's black — and a text tile (its
+    /// words) none.
+    @Test func aWaitingMediaTileWearsItsOwnBoneAndATextTileNone() async throws {
         let list = makeList([Self.entry("m0"), Self.entry("t1", media: false)])
         let cells = list.debugTileCells
         try #require(cells.count == 2, "guard: the tiles laid out")
         let media = try #require(cells.first { !$0.showsInfo })
         let text = try #require(cells.first { $0.showsInfo })
-        #expect(list.debugBone(on: media) == (true, true), "no bone on a waiting media tile")
-        #expect(list.debugBone(on: text).shown == false, "a text tile wears a bone")
-    }
-
-    /// The cover lands: the bone goes. It fails: the bone stills, never an
-    /// endless shimmer.
-    @Test func theBoneGoesWithTheCoverAndStillsOnAFailure() throws {
-        let list = makeList([Self.entry("m0"), Self.entry("m1")])
-        let cells = list.debugTileCells
-        try #require(cells.count == 2, "guard: the tiles laid out")
-        cells[0].onCoverLoaded?()
-        #expect(list.debugBone(on: cells[0]).shown == false, "the bone outlived the cover")
-        cells[1].onCoverFailed?()
-        #expect(list.debugBone(on: cells[1]) == (true, false), "a failed cover's bone still shimmers, or left")
+        for _ in 0..<200 where !media.showsCoverBone { try? await Task.sleep(for: .milliseconds(5)) }
+        let bones = list.debugBones(on: media)
+        #expect(bones.count == 1, "a second bone over the tile's own")
+        #expect(bones.first?.fill == Surface.mediaGroundOnDark)
+        #expect(media.contentView.backgroundColor == Surface.mediaGroundOnDark)
+        #expect(list.debugBones(on: text).isEmpty, "a text tile wears a bone")
     }
 
     // MARK: - No scroll while the list opens (#1580)

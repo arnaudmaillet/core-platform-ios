@@ -37,7 +37,8 @@ final class SnapBrowseStripView: UIView {
 
     private var tiles: [UIImageView] = []
     private var videoMarks: [UIImageView] = []
-    private var loads: [Task<Void, Never>] = []
+    /// The previews' slots, one per tile.
+    private var covers: [CoverSlot] = []
     private(set) var selectedPage = 0
     /// Where the chosen tile's centre goes, in this view's space.
     private var anchorX: CGFloat = 0
@@ -61,8 +62,8 @@ final class SnapBrowseStripView: UIView {
 
     /// The pages' previews: their thumbnails, and which pages are clips.
     func configure(thumbnails: [URL?], videoPages: Set<Int>, pipeline: ImagePipeline?) {
-        loads.forEach { $0.cancel() }
-        loads = []
+        covers.forEach { $0.reset() }
+        covers = []
         liveView?.removeFromSuperview()
         liveView = nil
         tiles.forEach { $0.removeFromSuperview() }
@@ -70,7 +71,8 @@ final class SnapBrowseStripView: UIView {
             let tile = UIImageView()
             tile.contentMode = .scaleAspectFill
             tile.clipsToBounds = true
-            tile.backgroundColor = UIColor.white.withAlphaComponent(0.18)
+            // The on-dark media ground (#1771): the strip rides the black page.
+            tile.backgroundColor = Surface.mediaGroundOnDark
             tile.layer.cornerCurve = .continuous
             tile.layer.borderColor = UIColor.white.cgColor
             addSubview(tile)
@@ -91,20 +93,16 @@ final class SnapBrowseStripView: UIView {
         selectedPage = min(selectedPage, max(thumbnails.count - 1, 0))
         updateCounter()
         setNeedsLayout()
-        guard let pipeline else { return }
+        // Each preview through the slot (#1772): its bone on the black, the
+        // carousel's own decode drawn at once when it is cached.
+        covers = tiles.map { tile in
+            let cover = CoverSlot(view: tile, size: .px256)
+            cover.bone?.fill = Surface.mediaGroundOnDark
+            return cover
+        }
         for (index, url) in thumbnails.enumerated() {
             guard let url else { continue }
-            // The carousel's own full decode, when it is already cached: read,
-            // never decoded here (`UnsizedImageDecodesGuardTests`).
-            if let image = pipeline.cachedImage(for: url, size: .px256) ?? pipeline.cachedImage(for: url, size: .full) {
-                tiles[index].image = image
-                continue
-            }
-            loads.append(Task { @MainActor [weak self] in
-                guard let image = try? await pipeline.image(for: url, size: .px256) else { return }
-                guard let self, !Task.isCancelled, self.tiles.indices.contains(index) else { return }
-                self.tiles[index].image = image
-            })
+            covers[index].load(url, pipeline: pipeline, item: url)
         }
     }
 

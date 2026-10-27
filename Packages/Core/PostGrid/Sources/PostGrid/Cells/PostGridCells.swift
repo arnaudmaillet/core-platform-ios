@@ -2938,6 +2938,14 @@ public final class PostGridTileCell: UICollectionViewCell {
         media.showReturnStill(image)
     }
 
+    /// A tile on a page that is black in either appearance (the snap feed's
+    /// side list, #1772): its picture's ground and its bone are the on-dark
+    /// media ground — the tile's own bone, never a host's second one over it.
+    public var groundsOnDark = false
+
+    /// Whether the cover's own bone shows now.
+    public var showsCoverBone: Bool { media.coverSlot.showsBone }
+
     /// Fired when the cover lands from an async load.
     ///
     /// Autoplay is gated on the cover being present, and the gate is evaluated
@@ -3160,9 +3168,11 @@ public final class PostGridTileCell: UICollectionViewCell {
         with post: GalleryPost, imagePipeline: ImagePipeline,
         showsInfo: Bool = false, infoReferenceSize: CGSize? = nil
     ) {
-        // Video tiles keep a dark floor: their poster may be unrenderable
-        // (or plain black in the simulator), and the glyph needs a stage.
-        contentView.backgroundColor = Self.fillColor(for: post)
+        // The media ground under a picture, the card under words (#1771) —
+        // on a dark page, the on-dark ground and bone (`groundsOnDark`).
+        contentView.backgroundColor = groundsOnDark && post.kind != .text
+            ? Surface.mediaGroundOnDark : Self.fillColor(for: post)
+        media.coverSlot.bone?.fill = groundsOnDark ? Surface.mediaGroundOnDark : Surface.mediaGround
 
         likes.set(post.reactionCount)
         configuredLikeCount = post.reactionCount
