@@ -94,9 +94,11 @@ final class EditProfileViewController: UIViewController {
         configureCollectionView()
         configureDataSource()
 
-        // Show the skeleton up front so the first frame is the shimmer, not an
-        // empty screen — the real data cross-dissolves over it when it lands.
-        applySkeletonSnapshot()
+        // The first load on the kit's timing (#1770): nothing for its delay,
+        // then the shimmer — the real data cross-dissolves over it when it
+        // lands, after the bones' minimum.
+        awaitingFirstLoad = true
+        skeletonGate.begin()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
         viewModel.onSaveStateChange = { [weak self] state in self?.render(save: state) }
@@ -214,11 +216,59 @@ final class EditProfileViewController: UIViewController {
 
     // MARK: - Render
 
+    /// The first load's skeleton on the kit's timing (#1770). Injectable so
+    /// a test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var skeletonGate: SkeletonGate = {
+        let gate = SkeletonGate(clock: skeletonClock)
+        gate.onSkeletonChange = { [weak self] showing in
+            guard let self, showing, awaitingFirstLoad else { return }
+            applySkeletonSnapshot()
+        }
+        gate.onTakingLonger = { [weak self] in
+            self?.skeletonGate.finish { [weak self] in self?.showTakingLonger() }
+        }
+        return gate
+    }()
+    /// Nothing loaded yet: the first answer replaces the bones (or the
+    /// blank of the delay), and a failure has no form to stay on.
+    private var awaitingFirstLoad = false
+
+    /// Past 10 s with nothing loaded: "Taking longer than usual", Try Again.
+    private func showTakingLonger() {
+        guard awaitingFirstLoad else { return }
+        isShowingSkeleton = false
+        dataSource.apply(NSDiffableDataSourceSnapshot<Section, Item>(), animatingDifferences: false)
+        loadFailure.configure(
+            symbolName: TakingLongerCopy.symbol, title: TakingLongerCopy.title,
+            subtitle: "Your profile is still on its way.",
+            actionTitle: TakingLongerCopy.action, actionHandler: { [weak self] in self?.retryFirstLoad() }
+        )
+        loadFailure.isHidden = false
+    }
+
+    /// Try Again on the first load: the wait starts over.
+    private func retryFirstLoad() {
+        loadFailure.isHidden = true
+        awaitingFirstLoad = true
+        skeletonGate.begin()
+        viewModel.reload()
+    }
+
     private func render(_ phase: EditProfileViewModel.Phase) {
+        // ⚠️ THE FIRST ANSWER WAITS OUT THE BONES' MINIMUM (#1770).
+        if awaitingFirstLoad, phase != .loading {
+            return skeletonGate.finish { [weak self] in self?.renderNow(phase) }
+        }
+        renderNow(phase)
+    }
+
+    private func renderNow(_ phase: EditProfileViewModel.Phase) {
         switch phase {
         case .loading:
             break
         case .ready(let fields):
+            awaitingFirstLoad = false
             self.fields = fields
             loadFailure.isHidden = true
             applyRealSnapshot()
@@ -229,16 +279,12 @@ final class EditProfileViewController: UIViewController {
             // bones and offers Try Again; with the form already shown (a
             // reload after a rejected edit), the alert says what happened and
             // the form stays.
-            guard isShowingSkeleton else { return presentError(message) }
+            guard awaitingFirstLoad else { return presentError(message) }
+            isShowingSkeleton = false
             dataSource.apply(NSDiffableDataSourceSnapshot<Section, Item>(), animatingDifferences: false)
             loadFailure.configure(
                 symbolName: "exclamationmark.triangle", title: message,
-                actionTitle: "Try Again", actionHandler: { [weak self] in
-                    guard let self else { return }
-                    loadFailure.isHidden = true
-                    applySkeletonSnapshot()
-                    viewModel.reload()
-                }
+                actionTitle: "Try Again", actionHandler: { [weak self] in self?.retryFirstLoad() }
             )
             loadFailure.isHidden = false
         }

@@ -47,4 +47,18 @@ struct ListSkeletonGateTests {
         time.advance(1)
         #expect(gate.loading() == .nothing, "a new load waits its delay again")
     }
+
+    /// A redraw while an answer waits out the minimum — a second section
+    /// still loading — keeps the bones and the answer.
+    @Test func aRedrawDuringTheMinimumKeepsTheAnswer() {
+        let time = ManualLoadingClock()
+        let gate = ListSkeletonGate(clock: time.clock)
+        _ = gate.loading()
+        time.advance(LoadingTiming.skeletonDelay)
+        var applied = false
+        gate.landed { applied = true }
+        #expect(gate.loading() == .bones)
+        time.advance(LoadingTiming.minimum)
+        #expect(applied, "the redraw dropped the answer")
+    }
 }

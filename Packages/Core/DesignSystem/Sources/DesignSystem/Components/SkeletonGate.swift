@@ -112,4 +112,8 @@ public final class SkeletonGate {
 
     /// The reveal waiting out the bones' minimum, the newest answer's.
     private var pendingReveal: (@MainActor () -> Void)?
+
+    /// Whether an answer is waiting out the bones' minimum: the bones are
+    /// still up for it, and a new `begin()` would drop it.
+    public var isRevealing: Bool { pendingReveal != nil }
 }

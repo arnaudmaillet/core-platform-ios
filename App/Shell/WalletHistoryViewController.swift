@@ -52,6 +52,8 @@ final class WalletHistoryViewController: UIViewController {
         case bone(Int)
         case loading
         case failed
+        /// Past 10 s (#1770): a row a tap retries.
+        case takingLonger
         case empty
         case loadingMore
     }
@@ -229,6 +231,8 @@ final class WalletHistoryViewController: UIViewController {
             case .loading, .loadingMore, .bone: break
             case .failed:
                 content.text = FailureCopy.row(for: self?.failure, fallback: "Couldn't load your wallet's history. Tap to try again.")
+            case .takingLonger:
+                content.text = TakingLongerCopy.row
             case .empty: content.text = "Nothing here yet. Claims, stakes and gifts show up here."
             case .filter, .transaction: break
             }
@@ -298,9 +302,18 @@ final class WalletHistoryViewController: UIViewController {
         }
         switch phase {
         case .loading:
-            // Bones in a list's card, not a "Loading…" line (#1494).
-            snapshot.appendSections([.status])
-            snapshot.appendItems((0..<Self.boneRows).map(Item.bone), toSection: .status)
+            // Bones in a list's card, not a "Loading…" line (#1494) — on the
+            // kit's timing (#1770): nothing for its delay, "taking longer"
+            // past 10 s.
+            switch loadingGate.loading() {
+            case .bones:
+                snapshot.appendSections([.status])
+                snapshot.appendItems((0..<Self.boneRows).map(Item.bone), toSection: .status)
+            case .takingLonger:
+                snapshot.appendSections([.status])
+                snapshot.appendItems([.takingLonger], toSection: .status)
+            case .nothing: break
+            }
         case .failed:
             snapshot.appendSections([.status])
             snapshot.appendItems([.failed], toSection: .status)
@@ -318,8 +331,19 @@ final class WalletHistoryViewController: UIViewController {
                 snapshot.appendItems([.loadingMore], toSection: .status)
             }
         }
-        dataSource.apply(snapshot, animatingDifferences: false)
+        guard phase != .loading else { return dataSource.apply(snapshot, animatingDifferences: false) }
+        // The answer waits out the bones' minimum (#1770).
+        loadingGate.landed { [weak self] in self?.dataSource.apply(snapshot, animatingDifferences: false) }
     }
+
+    /// The history's loading on the kit's timing (#1770). Injectable so a
+    /// test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
 
     /// The movements by day of the viewer's calendar, newest day first, in
     /// the server's order within a day; the undated ones last.
@@ -437,12 +461,18 @@ extension WalletHistoryViewController: UICollectionViewDelegate {
     }
 
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
-        dataSource.itemIdentifier(for: indexPath) == .failed
+        [.failed, .takingLonger].contains(dataSource.itemIdentifier(for: indexPath))
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
-        if dataSource.itemIdentifier(for: indexPath) == .failed { reload() }
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .failed: reload()
+        case .takingLonger:
+            loadingGate.retry()
+            reload()
+        default: break
+        }
     }
 }
 
