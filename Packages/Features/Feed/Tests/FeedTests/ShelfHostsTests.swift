@@ -1,3 +1,4 @@
+import CoreStorage
 import CoreModels
 import FeedInterface
 import Foundation
@@ -68,13 +69,48 @@ struct ShelfHostsTests {
         )
     }
 
-    @Test func forYousFollowingLoadsThenDrawsTenAndTheChevron() {
-        let screen = ForYouViewController(
+    /// A presence store that remembers `following` posts and `friends` faces
+    /// from last time (nil: never loaded).
+    private static func presence(following: Int?, friends: Int? = nil) -> SectionPresenceStore {
+        let store = SectionPresenceStore(
+            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            scope: StorageScope(owner: .member(account: "a", profile: "p"))
+        )
+        if let following { store.remember(following, screen: "foryou", section: "following") }
+        if let friends { store.remember(friends, screen: "foryou", section: "friends") }
+        return store
+    }
+
+    private static func forYou(presence: SectionPresenceStore) -> ForYouViewController {
+        ForYouViewController(
             viewModel: ForYouViewModel(repository: EmptyForYouProvider()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
             makeSnapFeed: { _, _ in UIViewController() },
-            prewarm: { _ in }
+            prewarm: { _ in },
+            presence: presence
         )
+    }
+
+    /// ⚠️ #1757: the shelf's skeleton only when the shelf was there last
+    /// time — never one that collapses because the shelf turned out empty.
+    @Test func forYousFollowingSkeletonFollowsLastKnownPresence() {
+        let seen = Self.forYou(presence: Self.presence(following: 7, friends: 4))
+        seen.loadViewIfNeeded()
+        #expect(seen.debugShelf.isLoading, "a shelf there last time has its skeleton")
+        #expect(seen.friendsRow.placeholderCount == 4)
+
+        let empty = Self.forYou(presence: Self.presence(following: 0, friends: 0))
+        empty.loadViewIfNeeded()
+        #expect(!empty.debugShelf.isLoading, "an empty shelf last time has no skeleton")
+        #expect(empty.friendsRow.placeholderCount == 0)
+
+        let unknown = Self.forYou(presence: Self.presence(following: nil))
+        unknown.loadViewIfNeeded()
+        #expect(!unknown.debugShelf.isLoading, "a shelf never seen fades in rather than shimmer")
+    }
+
+    @Test func forYousFollowingLoadsThenDrawsTenAndTheChevron() {
+        let screen = Self.forYou(presence: Self.presence(following: 10))
         screen.loadViewIfNeeded()
         let shelf = screen.debugShelf
         #expect(shelf.isLoading, "no skeleton before the first snapshot")

@@ -84,6 +84,45 @@ final class ProfileHeaderView: HeroHeaderView {
         configure(with: HeroHeaderContent(model), staggered: staggered)
     }
 
+    // MARK: - The profile's phases (#1757)
+
+    /// THE ONE MAPPING from the profile's phase to the header, for every
+    /// screen that shows a profile's header — the profile and the profile
+    /// card. Each screen used to write its own; the two drifted (the card
+    /// never drew its loading state, nor kept the profile's switch), and the
+    /// card opened on the header's blank default: a "transparent" avatar, a
+    /// bare banner (the owner's recording, 2026-10-27).
+    ///
+    /// - Parameters:
+    ///   - profileKnown: whether a profile has ever loaded — a failure keeps
+    ///     its header, a first failure shows none.
+    ///   - switching: a profile switch — the header is HELD rather than
+    ///     redacted (a fast load's shimmer read as a wipe), and the content
+    ///     lands group by group.
+    ///   - animated: the reveal cross-fades (on screen).
+    func render(_ phase: ProfileViewModel.Phase, profileKnown: Bool, switching: Bool = false, animated: Bool) {
+        switch phase {
+        case .loading:
+            isHidden = false
+            if !switching { setRedacted(true) }
+        case .content(let model):
+            isHidden = false
+            // Content first — the labels adopt their text while still
+            // invisible under the bones — then the alpha-only reveal.
+            configure(with: model, staggered: switching)
+            setRedacted(false, animated: animated)
+        case .failed:
+            setRedacted(false)
+            // Nothing ever loaded: an empty badge, counters and buttons would
+            // show around the screen's failure block.
+            isHidden = !profileKnown
+        case .notFound:
+            // A plain page (#1406): no header for no one.
+            setRedacted(false)
+            isHidden = true
+        }
+    }
+
     /// Installs the see-more bubble's overflow menu. Set once with a menu whose
     /// children are resolved lazily (`UIDeferredMenuElement`), so the tray never
     /// holds a stale copy of state the controller owns.

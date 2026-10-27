@@ -248,6 +248,24 @@ struct ProfileCardTests {
         #expect(ProfileCardViewController.climb(bandAvatarDetent: nil) == 0)
         #expect(ProfileCardViewController.visibleHeight(headerHeight: 600.2, climb: 214) == 387)
     }
+
+    /// ⚠️ #1757: the card draws its loading state from the start, as the
+    /// profile does — a redacted header, not the header's blank default (a
+    /// "transparent" avatar, a bare banner) until the profile lands.
+    @Test func theCardOpensOnItsRedactedHeader() {
+        let card = ProfileCardViewController(
+            viewModel: ProfileViewModel(
+                repository: CardProfileProvider(Self.ada, following: false), source: .profile(ProfileID("prof-1"))
+            ),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            shareTargeting: nil,
+            makeRelationshipsViewController: nil,
+            identityStub: nil,
+            actions: .init(openProfile: {}, push: { _ in })
+        )
+        card.loadViewIfNeeded()
+        #expect(card.headerView.debugIsRedacted, "the card opened on the header's blank default")
+    }
 }
 
 /// A video source that resolves nothing: the pool is all a test reads.

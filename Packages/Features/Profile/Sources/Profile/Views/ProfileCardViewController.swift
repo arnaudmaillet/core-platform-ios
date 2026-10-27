@@ -126,6 +126,13 @@ final class ProfileCardViewController: UIViewController {
         configureNavigationBar()
         configureHeader()
         bindViewModel()
+        // ⚠️ THE LOADING STATE, DRAWN (#1757), as the profile draws it: the
+        // view model STARTS in `.loading` and never announces it, so the card
+        // sat in the header's blank default state until the profile landed —
+        // empty labels, the verified badge, empty initials on a translucent
+        // plate (a "transparent" avatar), a banner with no bone. A cache hit
+        // in `viewDidLoad` below replaces it in this same pass.
+        render(.loading)
         applyBars()
         viewModel.viewDidLoad()
         NotificationCenter.default.addObserver(
@@ -287,22 +294,11 @@ final class ProfileCardViewController: UIViewController {
     }
 
     private func render(_ phase: ProfileViewModel.Phase) {
-        switch phase {
-        case .loading:
-            headerView.isHidden = false
-            headerView.setRedacted(true)
-        case .content(let model):
-            headerView.isHidden = false
-            headerView.configure(with: model)
-            headerView.setRedacted(false, animated: view.window != nil)
-            // The banner's clip arrives with the profile.
-            updateBannerVideo()
-        case .failed, .notFound:
-            // A plain card, as the profile's plain page (#1406): no banner,
-            // no header for no one.
-            headerView.setRedacted(false)
-            headerView.isHidden = viewModel.profile == nil
-        }
+        // The profile's own mapping (`ProfileHeaderView.render`): the card
+        // and the profile can no longer drift apart.
+        headerView.render(phase, profileKnown: viewModel.profile != nil, animated: view.window != nil)
+        // The banner's clip arrives with the profile.
+        if case .content = phase { updateBannerVideo() }
         remeasure()
         applyBars()
     }

@@ -1801,7 +1801,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             // Nothing known about the new identity: bones are the honest state,
             // and their un-redact reveal is the animation — no stagger over it.
             isSwitchingProfile = false
-            headerView.setRedacted(true)
+            headerView.render(.loading, profileKnown: false, animated: false)
         }
         // Re-read the snapshot so the menu's active marker moves to the profile
         // just switched to.
@@ -2423,14 +2423,13 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             // snapshot arrives. Hydration is a pure cross-fade over the very
             // frames the content will occupy — nothing can shift.
             statusView.isHidden = true
-            headerView.isHidden = false
             galleryPager.isHidden = false
             // The HEADER is held on a switch rather than redacted: its bones'
             // shimmer sweeps left to right, and over a fast load that sweep
             // became the transition — a diagonal wipe across the identity.
             // The GALLERY still redacts, because its rows are genuinely
             // unknown until the fetch lands and bones are the honest answer.
-            if !isSwitchingProfile { headerView.setRedacted(true) }
+            headerView.render(phase, profileKnown: viewModel.profile != nil, switching: isSwitchingProfile, animated: false)
             if viewModel.hasGallery {
                 skeletonViewportFill?.isActive = true
                 galleryPager.render(ProfileViewModel.GallerySnapshot(
@@ -2443,7 +2442,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         case .content(let model):
             pullIndicator.endRefreshing()
             statusView.isHidden = true
-            headerView.isHidden = false
             galleryPager.isHidden = false
             // Content owns its height again; the release rides the same
             // layout pass as the (dissolve-masked) gallery height snap.
@@ -2464,19 +2462,19 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             // Granular on a switch: each header group dissolves on its own,
             // lightly staggered, so one identity becomes another rather than
             // the whole screen blinking over at once.
-            headerView.configure(with: model, staggered: isSwitchingProfile)
+            headerView.render(
+                phase, profileKnown: true, switching: isSwitchingProfile, animated: view.window != nil
+            )
             updateBannerVideo()
-            headerView.setRedacted(false, animated: view.window != nil)
 
         case .failed(let message):
             pullIndicator.endRefreshing()
             // Never leave the previous profile held over an error.
             galleryPager.isHidden = true
             skeletonViewportFill?.isActive = false
-            headerView.setRedacted(false)
-            // Nothing ever loaded (an offline handle tap, #800): an empty
-            // badge, counters and Message button would show around the block.
-            headerView.isHidden = viewModel.profile == nil
+            // Nothing ever loaded (an offline handle tap, #800): no header
+            // around the block (`ProfileHeaderView.render`).
+            headerView.render(phase, profileKnown: viewModel.profile != nil, animated: false)
             // ⚠️ A WAY OUT (#797): the pull lives on the gallery this hides,
             // so "Pull to retry" could not be done.
             statusView.configure(
@@ -2502,8 +2500,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             pullIndicator.endRefreshing()
             galleryPager.isHidden = true
             skeletonViewportFill?.isActive = false
-            headerView.setRedacted(false)
-            headerView.isHidden = true
+            headerView.render(phase, profileKnown: viewModel.profile != nil, animated: false)
             statusView.configure(
                 symbolName: "person.crop.circle.badge.questionmark", title: message, subtitle: detail
             )

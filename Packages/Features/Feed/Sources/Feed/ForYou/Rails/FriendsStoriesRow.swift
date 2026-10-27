@@ -38,7 +38,67 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
     }
 
     func preferredHeight(forWidth width: CGFloat) -> CGFloat {
-        Self.height(forWidth: width, friends: stories.count)
+        Self.height(forWidth: width, friends: max(stories.count, placeholderCount))
+    }
+
+    // MARK: - Skeleton (#1756)
+
+    /// How many skeleton faces stand in while the row loads: the friends it
+    /// held LAST time (`SectionPresenceStore`), 0 when it had none or has
+    /// never loaded — then no skeleton, and the row fades in with its data.
+    /// Real friends take the bones' place.
+    var placeholderCount = 0 {
+        didSet {
+            guard placeholderCount != oldValue else { return }
+            let had = oldValue > 0 && stories.isEmpty
+            setNeedsLayout()
+            if had != showsPlaceholders { onHeightChange?() }
+        }
+    }
+    /// Whether the bones show — the room is the skeleton's from the start,
+    /// the bones only after the delay (`SkeletonGate`).
+    var bonesVisible = true {
+        didSet { placeholderViews.forEach { $0.alpha = bonesVisible ? 1 : 0 } }
+    }
+    private var showsPlaceholders: Bool { placeholderCount > 0 && stories.isEmpty }
+    /// A face (in the row's tile) and its name, per skeleton friend.
+    private var placeholderViews: [UIView] = []
+
+    private func layoutPlaceholders(width: CGFloat) {
+        guard showsPlaceholders, width > 0 else {
+            placeholderViews.forEach { $0.removeFromSuperview() }
+            placeholderViews = []
+            return
+        }
+        let size = LeadRowMetrics.storySize(forWidth: width)
+        // As many as the width shows (four whole, one peeking), never more
+        // than the friends it held.
+        let shown = min(placeholderCount, Int(LeadRowMetrics.storiesPerWidth.rounded(.up)))
+        while placeholderViews.count < shown * 2 {
+            let face = AvatarSkeletonView()
+            face.shape = ForYouStoryCell.Metrics.faceShape
+            let name = SkeletonBoneView()
+            for view in [face, name] as [UIView] {
+                view.alpha = bonesVisible ? 1 : 0
+                addSubview(view)
+                placeholderViews.append(view)
+            }
+        }
+        while placeholderViews.count > shown * 2 { placeholderViews.removeLast().removeFromSuperview() }
+        let inset = ForYouStoryCell.Metrics.ringWidth + ForYouStoryCell.Metrics.ringGap
+        for index in 0..<shown {
+            let x = LeadRowMetrics.sideMargin + CGFloat(index) * (size.width + LeadRowMetrics.itemGap)
+            let top = SectionTitleView.Metrics.height
+            let disc = CGRect(x: x, y: top, width: size.width, height: size.width)
+            placeholderViews[index * 2].frame = disc.insetBy(dx: inset, dy: inset)
+            // A first name's width, varied by a fixed rule — never at random.
+            let nameWidth = size.width * [0.62, 0.48, 0.7, 0.55][index % 4]
+            placeholderViews[index * 2 + 1].frame = CGRect(
+                x: x + (size.width - nameWidth) / 2,
+                y: disc.maxY + ForYouStoryCell.Metrics.nameGap + 4,
+                width: nameWidth, height: ForYouStoryCell.Metrics.nameHeight - 8
+            )
+        }
     }
 
     /// The row came to hold friends, or none — its host re-sizes.
@@ -146,7 +206,7 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
     /// Shows `friends` — in the order the viewer was shown, while it is held
     /// — and `newCount` after the title.
     func render(_ friends: [ForYouViewModel.FriendStory], newCount: Int) {
-        let hadFriends = !stories.isEmpty
+        let hadFriends = !stories.isEmpty || showsPlaceholders
         latestStories = friends
         let ordered = heldStoryOrder.map { Self.holding(friends, in: $0) } ?? friends
         let changed = ordered != stories
@@ -158,7 +218,7 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
         }
         holdStoryOrderIfShown()
         setNeedsLayout()
-        if hadFriends != !stories.isEmpty { onHeightChange?() }
+        if hadFriends != (!stories.isEmpty || showsPlaceholders) { onHeightChange?() }
     }
 
     /// Keyed by FRIEND, so a friend whose ring changed is the same item,
@@ -233,8 +293,12 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
         super.layoutSubviews()
         let width = bounds.width
         let hasStories = !stories.isEmpty
-        header.isHidden = !hasStories
+        header.isHidden = !hasStories && !showsPlaceholders
         storiesView.isHidden = !hasStories
+        layoutPlaceholders(width: width)
+        if showsPlaceholders {
+            header.frame = CGRect(x: 0, y: 0, width: width, height: SectionTitleView.Metrics.height)
+        }
         guard hasStories else { return }
         // The title spans the row edge to edge: it stands its own inset from
         // the surface (`SectionTitleView.Metrics.surfaceInset`).

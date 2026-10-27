@@ -180,4 +180,13 @@ struct HeroHeaderViewTests {
         ).height
         #expect(hidden.bounds.height < shown.bounds.height - HeroHeaderView.bubbleSize + 0.5)
     }
+
+    /// ⚠️ A loading banner (no picture yet) casts no card shadow (#1757):
+    /// the shadow comes with the picture.
+    @Test func aBannerWithoutItsPictureCastsNoShadow() throws {
+        let header = makeHeader(banner: try #require(URL(string: "mock://banner/never")))
+        #expect(header.debugBannerShadowOpacity == 0)
+        // Nor a black ground where the banner is not drawn yet.
+        #expect(header.debugBannerShadowGround == Surface.skeleton)
+    }
 }
