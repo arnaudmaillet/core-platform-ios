@@ -1108,14 +1108,19 @@ open class HeroHeaderView: UIView {
             // The ballast below writes over the labels: no model is on
             // screen any more.
             appliedContent = nil
-            // Layout ballast: one blank line per single-line label, two for
-            // the bio's typical measure. The website row is reserved too —
+            // Layout ballast: one blank line per single-line label, and ONE
+            // for the bio (#1757): a profile never seen has a bio of unknown
+            // length, or none, and two reserved lines made a one-line bio pull
+            // everything below up a line at the reveal (the owner's recording).
+            // One is the likeliest, so the smallest step on average; a profile
+            // seen before skips the skeleton entirely (its cache draws the
+            // header on the first frame). The website row is reserved too —
             // hiding it here and inserting it at reveal would push the whole
             // gallery down mid-fade (most profiles carry a link; a linkless
             // one collapses the row as a content change, not a reveal jump).
             nameLabel.text = " "
             handleLabel.text = " "
-            bioLabel.text = " \n "
+            bioLabel.text = " "
             bioLabel.isHidden = false
             websiteButton.configuration?.title = " "
             websiteButton.isHidden = false
@@ -1194,20 +1199,14 @@ open class HeroHeaderView: UIView {
             handleBone.heightAnchor.constraint(equalToConstant: 12)
         }
 
-        // Two caption-pitch bars inside the bio's two placeholder lines.
+        // One caption-pitch bar inside the bio's one placeholder line,
+        // short of the column's width, as a bio's line usually is.
         let bioFirst = SkeletonBoneView()
         bioFirst.constrain(in: self) { _ in
             bioFirst.leadingAnchor.constraint(equalTo: bioLabel.leadingAnchor)
-            bioFirst.trailingAnchor.constraint(equalTo: bioLabel.trailingAnchor)
-            bioFirst.topAnchor.constraint(equalTo: bioLabel.topAnchor, constant: 4)
+            bioFirst.widthAnchor.constraint(equalTo: bioLabel.widthAnchor, multiplier: 0.8)
+            bioFirst.centerYAnchor.constraint(equalTo: bioLabel.centerYAnchor)
             bioFirst.heightAnchor.constraint(equalToConstant: 12)
-        }
-        let bioSecond = SkeletonBoneView()
-        bioSecond.constrain(in: self) { _ in
-            bioSecond.leadingAnchor.constraint(equalTo: bioLabel.leadingAnchor)
-            bioSecond.widthAnchor.constraint(equalTo: bioLabel.widthAnchor, multiplier: 0.55)
-            bioSecond.bottomAnchor.constraint(equalTo: bioLabel.bottomAnchor, constant: -4)
-            bioSecond.heightAnchor.constraint(equalToConstant: 12)
         }
 
         let websiteBone = SkeletonBoneView()
@@ -1218,7 +1217,7 @@ open class HeroHeaderView: UIView {
             websiteBone.heightAnchor.constraint(equalToConstant: 12)
         }
 
-        redactionBones = [avatarBone, nameBone, handleBone, bioFirst, bioSecond, websiteBone]
+        redactionBones = [avatarBone, nameBone, handleBone, bioFirst, websiteBone]
     }
 
     /// The quiet buttons' opaque grey — `HeroTray.fill`, which `AppButton`'s

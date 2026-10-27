@@ -95,6 +95,15 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// The last snapshot rendered, so a screen pushed between two publishes
     /// opens on what is loaded rather than on a skeleton.
     private var lastSnapshot: ForYouViewModel.Snapshot?
+    /// Which lead sections the screen showed last time (#1756): a cold load
+    /// draws the Friends row's and the shelf's skeletons only for a section
+    /// that was there, so no bone vanishes because its section is empty.
+    private let presence: SectionPresenceStore
+    /// The lead's skeleton timing (#1756): bones after 0.15 s, held 0.3 s.
+    private let leadGate = SkeletonGate()
+    /// The rows the reveal waits to draw while the bones finish their minimum.
+    private var pendingLead: ForYouViewModel.Rails?
+    private static let presenceScreen = "foryou"
     private let prewarm: ([PostID]) async -> Void
     /// Loads a post's first page of comments into the panel's synchronous
     /// cache. Optional so the other entry points need not supply one.
@@ -203,8 +212,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         wallet: WalletStore? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         showsBalance: @escaping @MainActor () -> Bool = { true },
-        entities: EntityStore? = nil
+        entities: EntityStore? = nil,
+        presence: SectionPresenceStore = .shared
     ) {
+        self.presence = presence
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
         self.showsBalance = showsBalance
@@ -231,8 +242,16 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         super.init(nibName: nil, bundle: nil)
         page.staking = staking
         shelf.staking = staking
-        // Its title over skeleton cards until the first snapshot (#1296).
-        shelf.apply(.init(title: "Following", posts: [], isLoading: true))
+        // Its title over skeleton cards until the first snapshot (#1296) —
+        // only if the shelf was there last time (#1756); the Friends row's
+        // faces likewise. The bones wait for the gate.
+        friendsRow.bonesVisible = false
+        shelf.bonesVisible = false
+        leadGate.onSkeletonChange = { [weak self] shows in
+            self?.friendsRow.bonesVisible = shows
+            self?.shelf.bonesVisible = shows
+        }
+        beginLeadSkeleton()
         shelf.titleAccessibilityHint = "Shows posts from people you follow"
         // "For you" names the list under the rows and pushes Discover's whole
         // mosaic — the screen a chunk's "View all" pushes.
@@ -439,7 +458,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // The vertical feed's own list, read ahead for the next tap (#1343).
             viewModel.ownFeed.prepare()
             // The stories' pictures are the Friends row's lookahead (#970).
-            renderLead(snapshot.rails, loading: snapshot.following == .loading)
+            renderLead(snapshot.rails, state: snapshot.following)
             lastSnapshot = snapshot
             discoverGallery?.render(snapshot.media)
             followingList?.render(snapshot.following, newPosts: snapshot.followingNew)
@@ -503,12 +522,51 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         updateLeadHeight()
     }
 
-    /// The Friends row and the shelf, from the view model's rows.
-    private func renderLead(_ rows: ForYouViewModel.Rails, loading: Bool) {
+    /// The lead's skeleton while the Following timeline loads: the sections
+    /// that were there last time, at the size they had (#1756).
+    private func beginLeadSkeleton() {
+        let friends = presence.count(screen: Self.presenceScreen, section: "friends") ?? 0
+        let following = presence.count(screen: Self.presenceScreen, section: "following") ?? 0
+        friendsRow.placeholderCount = friends
+        _ = shelf.apply(.init(title: "Following", posts: [], isLoading: following > 0))
+        leadGate.begin()
+    }
+
+    /// The Friends row and the shelf, from the view model's rows — once the
+    /// lead's bones have had their minimum.
+    private func renderLead(_ rows: ForYouViewModel.Rails, state: ForYouViewModel.PageState) {
+        if state == .loading {
+            if !leadGate.isLoading, pendingLead == nil, friendsRow.stories.isEmpty, shelf.cards.isEmpty {
+                beginLeadSkeleton()
+            }
+            return
+        }
+        // What the screen will show, for the next cold load — not a failure's
+        // nothing.
+        if case .failed = state {} else {
+            presence.remember(rows.friends.count, screen: Self.presenceScreen, section: "friends")
+            presence.remember(rows.following.count, screen: Self.presenceScreen, section: "following")
+        }
+        if leadGate.isLoading {
+            pendingLead = rows
+            leadGate.finish { [weak self] in
+                guard let self, let rows = pendingLead else { return }
+                pendingLead = nil
+                applyLead(rows)
+            }
+        } else if pendingLead != nil {
+            pendingLead = rows
+        } else {
+            applyLead(rows)
+        }
+    }
+
+    private func applyLead(_ rows: ForYouViewModel.Rails) {
+        friendsRow.placeholderCount = 0
         friendsRow.render(rows.friends, newCount: rows.friendsBadge)
         if shelf.apply(.init(
             title: "Following", newCount: rows.followingBadge, posts: rows.following,
-            hasMore: rows.followingHasMore, isLoading: loading
+            hasMore: rows.followingHasMore, isLoading: false
         )) {
             #if DEBUG
             // Which `-foryou-open-card` index opens which row's card.

@@ -35,11 +35,21 @@ public final class SkeletonBoneView: UIView {
 
     /// The travelling band, over the base fill. Light mode gets a brighter
     /// pass than dark, where a faint lift is all the surface can carry.
+    ///
+    /// ⚠️ ITS PEAK STAYS DARKER THAN THE PAGE (#1757). Over the opaque grey
+    /// ground (`Surface.skeleton`, #1753) the old 55% band peaked at ~243 on
+    /// a ~242 page: as it passed, a bone vanished into the screen and read as
+    /// a transparent hole (the owner's recording, a profile's avatar). At
+    /// 30% it peaks at ~237: a clear sweep, the bone always there.
     private static let highlight = UIColor { traits in
         traits.userInterfaceStyle == .dark
             ? UIColor.white.withAlphaComponent(0.09)
-            : UIColor.white.withAlphaComponent(0.55)
+            : UIColor.white.withAlphaComponent(0.3)
     }
+
+    #if DEBUG
+    static var debugHighlight: UIColor { highlight }
+    #endif
 
     private let rounding: Rounding
     private let gradient = CAGradientLayer()

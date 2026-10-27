@@ -140,6 +140,11 @@ final class PostShelfSection: UIView {
     /// Whether the skeleton is what the shelf draws: loading, with nothing yet.
     private var showsSkeleton: Bool { isLoading && cards.isEmpty }
     private var skeletonCards: [SkeletonBoneView] = []
+    /// Whether the bones show — the room is the skeleton's from the start, the
+    /// bones only after the delay (`SkeletonGate`, #1756).
+    var bonesVisible = true {
+        didSet { skeletonCards.forEach { $0.alpha = bonesVisible ? 1 : 0 } }
+    }
 
     /// The item a "View all" card stands for in a row's data source.
     static let viewAllID = PostID("post-shelf.view-all")
@@ -529,6 +534,7 @@ final class PostShelfSection: UIView {
         let count = Int(LeadRowMetrics.cardsPerWidth.rounded(.up))
         while skeletonCards.count < count {
             let bone = SkeletonBoneView(rounding: .fixed(PostShelfMediaCardCell.cornerRadius))
+            bone.alpha = bonesVisible ? 1 : 0
             addSubview(bone)
             skeletonCards.append(bone)
         }
