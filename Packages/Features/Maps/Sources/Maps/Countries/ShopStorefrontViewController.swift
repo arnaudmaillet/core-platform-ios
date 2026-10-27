@@ -1281,7 +1281,13 @@ final class ShopCountryCardView: ShopCardView {
         posterSlot.load(poster, pipeline: images, item: poster)
     }
 
-    private lazy var posterSlot = CoverSlot(view: posterView, size: .full)
+    private lazy var posterSlot: CoverSlot = {
+        let slot = CoverSlot(view: posterView, size: .full)
+        // A poster sits on the card's black: the media ground's dark grey
+        // (#1771), not the light one that read as a hole in the card.
+        slot.bone?.fill = Surface.mediaGroundOnDark
+        return slot
+    }()
 
     /// The preview loop starts: the video fades in over the poster once it has
     /// a picture.

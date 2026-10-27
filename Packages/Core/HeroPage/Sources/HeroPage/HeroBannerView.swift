@@ -92,7 +92,9 @@ public final class HeroBannerView: UIView {
         clipsToBounds = true
         // Neutral backdrop while media loads (or when the profile has none):
         // the ramp blends it into the page, so "no banner" degrades quietly.
-        backgroundColor = Surface.card
+        // The media ground (#1771): the bone's own grey, so a banner reads
+        // the same loading, missing or failed.
+        backgroundColor = Surface.mediaGround
 
         mediaContainer.pin(to: self)
         bone.pin(to: mediaContainer)

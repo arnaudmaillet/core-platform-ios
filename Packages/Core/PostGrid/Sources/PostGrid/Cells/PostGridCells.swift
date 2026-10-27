@@ -2560,7 +2560,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // ⚠️ AFTER the indicator has been configured below, since it is on the
         // line too — see the end of this method.
 
-        mediaView.backgroundColor = post.kind == .video ? .darkGray : .tertiarySystemFill
+        // The media ground (#1771): the bone's own grey under the cover.
+        mediaView.backgroundColor = Surface.mediaGround
 
         // A collection hands its pages to the carousel and stops here: the
         // box's own image view stays empty, which is what keeps a single-media
@@ -2674,8 +2675,11 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// tile it holds is what fades over it. Two spellings of one colour would
     /// make the empty beat of a dismissal a different shade from the brick it
     /// lands on.
+    /// The tile's ground: the media ground under a picture (#1771) — the
+    /// bone's own grey, so a tile reads the same loading, missing or failed —
+    /// and the card's for words.
     public static func fillColor(for post: GalleryPost) -> UIColor {
-        post.kind == .video ? .darkGray : Surface.card
+        post.kind == .text ? Surface.card : Surface.mediaGround
     }
 
     /// The image the brick is currently showing — see `PostGridListRowCell`'s
@@ -2783,7 +2787,7 @@ public final class PostGridTileCell: UICollectionViewCell {
 
     override public init(frame: CGRect) {
         super.init(frame: frame)
-        contentView.backgroundColor = Surface.card
+        contentView.backgroundColor = Surface.mediaGround
         contentView.clipsToBounds = true
         // Soft bricks, not hard edges. `cornerRadius` re-applies this whenever
         // a host wants the softer pairing; the curve stays continuous either

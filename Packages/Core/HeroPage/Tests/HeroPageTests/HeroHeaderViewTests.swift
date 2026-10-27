@@ -46,6 +46,31 @@ struct HeroHeaderViewTests {
         return header
     }
 
+    private func first<T: UIView>(_ type: T.Type, in view: UIView) -> T? {
+        for subview in view.subviews {
+            if let match = subview as? T { return match }
+            if let found = first(type, in: subview) { return found }
+        }
+        return nil
+    }
+
+    /// ⚠️ ONE BONE ON THE DISC (#1771): a redacted header holds the avatar's
+    /// place with `AvatarView`'s own skeleton, never a redaction bone stacked
+    /// over it — two skeletons on one disc.
+    @Test func aRedactedAvatarWearsOnlyItsOwnBone() async throws {
+        let header = makeHeader(avatar: .person)
+        header.setRedacted(true)
+        let avatar = try #require(first(AvatarView.self, in: header))
+        let disc = try #require(avatar.superview)
+        #expect(disc.subviews.filter { $0 is SkeletonBoneView }.isEmpty, "a redaction bone over the avatar's own")
+        #expect(disc.backgroundColor == Surface.mediaGround)
+        // The avatar waits for its picture under its skeleton.
+        for _ in 0..<100 where avatar.skeleton.alpha == 0 || avatar.skeleton.isHidden {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(avatar.skeleton.alpha > 0 && !avatar.skeleton.isHidden)
+    }
+
     private func label(withText text: String, in view: UIView) -> UILabel? {
         for subview in view.subviews {
             if let label = subview as? UILabel, label.text == text { return label }
