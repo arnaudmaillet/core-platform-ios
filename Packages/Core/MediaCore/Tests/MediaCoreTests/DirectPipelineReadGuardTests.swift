@@ -30,7 +30,6 @@ struct DirectPipelineReadGuardTests {
         "PostShelfSection.swift": "the autoplay's cache probe: is the cover drawn yet",
         "SnapSideListAutoplay.swift": "the autoplay's cache probe",
         "SoundSheetAutoplay.swift": "the autoplay's cache probe",
-        "SoundSheetViewController.swift": "the sound's artwork for a flight and the header (follow-up of #1772)",
         "MapsViewController.swift": "a returning flight's cover",
         "ProfileFeatureBuilder.swift": "an account switcher's face, handed to a menu",
         "ProfileSwitcherMenuFactory.swift": "a menu row's image (UIMenu draws no view of ours)",

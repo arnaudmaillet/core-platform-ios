@@ -1,4 +1,5 @@
 import DesignSystem
+import MediaCore
 import UIKit
 
 /// The sound sheet's head: the RECORD of the post the sheet opened over, and
@@ -196,10 +197,25 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         record.isUserInteractionEnabled = canToggle
     }
 
-    func setArtwork(_ image: UIImage?) {
-        UIView.transition(with: artwork, duration: 0.2, options: .transitionCrossDissolve) {
-            self.artwork.image = image
-            self.artworkBackdrop.isHidden = image != nil
+    /// The sound's picture through the slot (#1772): the bone on the record
+    /// while it is on its way, dissolved in, the note's backdrop if it never
+    /// comes.
+    private lazy var artworkSlot: CoverSlot = {
+        let slot = CoverSlot(view: artwork, size: .px256)
+        slot.onChange = { [weak self] _ in self?.artworkBackdrop.isHidden = true }
+        return slot
+    }()
+
+    func loadArtwork(_ url: URL, pipeline: ImagePipeline) {
+        // ⚠️ A file is read as it is: the mock pipeline paints a colour for
+        // any URL it does not recognise, a file among them.
+        guard url.isFileURL else { return artworkSlot.load(url, pipeline: pipeline, item: url) }
+        Task { [weak self] in
+            let image = await Task.detached(priority: .userInitiated) {
+                UIImage(contentsOfFile: url.path)?.preparingForDisplay()
+            }.value
+            guard let image else { return }
+            self?.artworkSlot.apply(image)
         }
     }
 
