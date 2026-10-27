@@ -67,6 +67,8 @@ final class EditProfileViewController: UIViewController {
         // bone width so the rows don't read as identical.
         case heroSkeleton
         case rowSkeleton(Int)
+        /// The video banner's row, redacted while the profile loads (#1774).
+        case bannerSkeleton
     }
 
     private var collectionView: UICollectionView!
@@ -127,6 +129,7 @@ final class EditProfileViewController: UIViewController {
     private func configureDataSource() {
         let heroRegistration = UICollectionView.CellRegistration<EditProfileHeroCell, Item> { [weak self] cell, _, _ in
             guard let self else { return }
+            cell.setRedacted(false)
             cell.setAvatar(
                 avatarURL,
                 monogram: MonogramAvatarView.monogram(name: fields?.displayName ?? "", handle: fields?.username ?? ""),
@@ -179,7 +182,20 @@ final class EditProfileViewController: UIViewController {
             cell.contentConfiguration = content
         }
 
-        let heroSkeletonRegistration = UICollectionView.CellRegistration<EditProfileHeroSkeletonCell, Item> { _, _, _ in }
+        // The hero redacted (#1774): the real cell, its avatar awaiting its
+        // picture and a bone where "Change photo" stands.
+        let heroSkeletonRegistration = UICollectionView.CellRegistration<EditProfileHeroCell, Item> { cell, _, _ in
+            cell.setRedacted(true)
+        }
+        // The banner's row redacted (#1774): its symbol, title and value.
+        let bannerSkeletonRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, _ in
+            var content = UIListContentConfiguration.valueCell()
+            content.text = "Video Banner"
+            content.secondaryText = "Off"
+            content.image = UIImage(systemName: "play.rectangle")
+            cell.contentConfiguration = SkeletonRowConfiguration(redacting: content)
+            cell.accessories = []
+        }
 
         // The field rows redacted (#1769): Name, Username, Bio, Website and
         // Links with sample values, as bones at the real rows' metrics.
@@ -210,6 +226,8 @@ final class EditProfileViewController: UIViewController {
                 return collectionView.dequeueConfiguredReusableCell(using: heroSkeletonRegistration, for: indexPath, item: item)
             case .rowSkeleton(let index):
                 return collectionView.dequeueConfiguredReusableCell(using: rowSkeletonRegistration, for: indexPath, item: index)
+            case .bannerSkeleton:
+                return collectionView.dequeueConfiguredReusableCell(using: bannerSkeletonRegistration, for: indexPath, item: item)
             }
         }
     }
@@ -301,6 +319,17 @@ final class EditProfileViewController: UIViewController {
     #if DEBUG
     /// Whether the first load's failure block shows.
     var debugShowsLoadFailure: Bool { !loadFailure.isHidden }
+    /// The form's rows by kind, as applied: "hero", "heroSkeleton",
+    /// "rowSkeleton", "privacy"… — what a test reads.
+    var debugItemKinds: [String] {
+        dataSource.snapshot().itemIdentifiers.map { item in
+            switch item {
+            case .rowSkeleton: "rowSkeleton"
+            case .field: "field"
+            default: String(describing: item)
+            }
+        }
+    }
     #endif
 
     private func render(save state: EditProfileViewModel.SaveState) {
@@ -319,15 +348,20 @@ final class EditProfileViewController: UIViewController {
         }
     }
 
-    /// The shimmer placeholder — one hero bone, four identity rows, one links
-    /// row — laid out in the same sections and list layout as the real content.
+    /// The form redacted (#1774): every section the real form has, in its
+    /// place — the hero redacted, the banner's row when the banner is
+    /// offered, the field rows as bones — and the privacy rows real, since
+    /// they show nothing that loads. Nothing moves when the content lands.
     private func applySkeletonSnapshot() {
         isShowingSkeleton = true
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.hero, .identity, .links])
+        let banner = viewModel.videoBannerRow != .hidden
+        snapshot.appendSections(banner ? [.hero, .banner, .identity, .links, .privacy] : [.hero, .identity, .links, .privacy])
         snapshot.appendItems([.heroSkeleton], toSection: .hero)
+        if banner { snapshot.appendItems([.bannerSkeleton], toSection: .banner) }
         snapshot.appendItems([.rowSkeleton(0), .rowSkeleton(1), .rowSkeleton(2), .rowSkeleton(3)], toSection: .identity)
         snapshot.appendItems([.rowSkeleton(4)], toSection: .links)
+        snapshot.appendItems([.privacy] + (onOpenAccountType == nil ? [] : [.accountType]), toSection: .privacy)
         dataSource.apply(snapshot, animatingDifferences: false)
     }
 
@@ -657,37 +691,30 @@ private final class EditProfileHeroCell: UICollectionViewListCell {
         avatarView.setMonogram(monogram)
         avatarView.setPicture(url, pipeline: pipeline)
     }
-}
 
-// MARK: - Skeleton cells
-
-/// Shimmer stand-in for the hero: a round avatar bone over a short caption bone,
-/// on a clear background — matching `EditProfileHeroCell`'s footprint.
-private final class EditProfileHeroSkeletonCell: UICollectionViewListCell {
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundConfiguration = .clear()
-
-        let avatarBone = SkeletonBoneView(rounding: .capsule)
-        let captionBone = SkeletonBoneView(rounding: .capsule)
-        let stack = UIStackView(arrangedSubviews: [avatarBone, captionBone])
-        stack.axis = .vertical
-        stack.alignment = .center
-        stack.spacing = Spacing.sm
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(stack)
-
-        NSLayoutConstraint.activate([
-            avatarBone.widthAnchor.constraint(equalToConstant: 96),
-            avatarBone.heightAnchor.constraint(equalToConstant: 96),
-            captionBone.widthAnchor.constraint(equalToConstant: 120),
-            captionBone.heightAnchor.constraint(equalToConstant: 14),
-            stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Spacing.md),
-            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Spacing.sm),
-            stack.centerXAnchor.constraint(equalTo: contentView.centerXAnchor)
-        ])
+    /// The hero redacted while the profile loads (#1774): the avatar holds
+    /// its place with its own bone (`awaitPicture`, the avatar contract), and
+    /// a bone stands where "Change photo" is — the real cell, so nothing moves
+    /// when it is told who this is.
+    func setRedacted(_ redacted: Bool) {
+        changeButton.alpha = redacted ? 0 : 1
+        changeButton.isUserInteractionEnabled = !redacted
+        captionBone.isHidden = !redacted
+        if redacted { avatarView.awaitPicture() }
     }
 
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+    private lazy var captionBone: SkeletonBoneView = {
+        let bone = SkeletonBoneView(rounding: .capsule)
+        bone.isHidden = true
+        bone.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(bone)
+        NSLayoutConstraint.activate([
+            bone.centerXAnchor.constraint(equalTo: changeButton.centerXAnchor),
+            bone.centerYAnchor.constraint(equalTo: changeButton.centerYAnchor),
+            bone.widthAnchor.constraint(equalToConstant: 110),
+            bone.heightAnchor.constraint(equalToConstant: 14),
+        ])
+        return bone
+    }()
 }
+
