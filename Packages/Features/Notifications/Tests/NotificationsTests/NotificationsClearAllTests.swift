@@ -223,6 +223,9 @@ struct NotificationsClearItemTests {
             let trash = try #require(controller.debugClearItem)
             await settle { trash.isEnabled }
             let list = try #require(controller.view.subviews.lazy.compactMap { $0 as? UICollectionView }.first)
+            // The rows land on the kit's timing (#1770): a first page that
+            // answered after the skeleton's delay waits out its minimum.
+            for _ in 0..<200 where list.isHidden { try? await Task.sleep(for: .milliseconds(10)) }
             try #require(!list.isHidden, "guard: rows shown")
 
             controller.debugTapClear()

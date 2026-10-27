@@ -27,6 +27,23 @@ final class SuggestionsViewController: UIViewController {
     }()
     private let skeletonView = ConversationListSkeletonView()
     private let statusView = InboxStatusView()
+    /// Which of the skeleton, the table and the status shows, on the kit's
+    /// timing (#1770, `ScreenLoadingHost`): no skeleton for a list that
+    /// answers at once, held its minimum once up, and "taking longer" with a
+    /// retry after 10 s.
+    private lazy var loading: ScreenLoadingHost = {
+        let host = ScreenLoadingHost(container: view, skeleton: skeletonView, content: tableView, status: statusView)
+        host.onTakingLonger = { [weak self] in
+            guard let self else { return }
+            statusView.configure(
+                symbol: "clock", title: "Taking longer than usual",
+                message: "Your suggestions are still on their way.",
+                actionTitle: "Try Again", action: { [weak self] in self?.retryLoad() }
+            )
+            loading.showStatus()
+        }
+        return host
+    }()
     /// The inbox's paging spinner, under the last row while another page is
     /// there to load (#644, as #593).
     private let pagingFooter = PagingFooterView()
@@ -129,11 +146,8 @@ final class SuggestionsViewController: UIViewController {
     private func render(_ phase: SuggestionsViewModel.Phase) {
         switch phase {
         case .loading:
-            skeletonView.isHidden = false
-            tableView.isHidden = true
-            statusView.isHidden = true
+            loading.load()
         case .content(let models):
-            statusView.isHidden = true
             var snapshot = NSDiffableDataSourceSnapshot<Section, ProfileID>()
             snapshot.appendSections([.main])
             snapshot.appendItems(models.map(\.id), toSection: .main)
@@ -151,22 +165,18 @@ final class SuggestionsViewController: UIViewController {
             revealContent()
             if viewModel.canPageOnItsOwn { askIfTheEndIsInView() }
         case .empty:
-            skeletonView.isHidden = true
-            tableView.isHidden = true
             statusView.configure(
                 symbol: "person.2",
                 title: "No suggestions right now",
                 message: "Follow a few accounts and we'll find people you might know."
             )
-            statusView.isHidden = false
+            loading.showStatus()
         case .failed(let message):
-            skeletonView.isHidden = true
-            tableView.isHidden = true
             statusView.configure(
                 symbol: "exclamationmark.triangle", title: "Something went wrong", message: message,
-                actionTitle: "Try Again", action: { [weak self] in self?.viewModel.refresh() }
+                actionTitle: "Try Again", action: { [weak self] in self?.retryLoad() }
             )
-            statusView.isHidden = false
+            loading.showStatus()
         }
     }
 
@@ -193,17 +203,13 @@ final class SuggestionsViewController: UIViewController {
     }
 
     private func revealContent() {
-        guard !skeletonView.isHidden, view.window != nil else {
-            skeletonView.isHidden = true
-            tableView.isHidden = false
-            return
-        }
-        UIView.transition(
-            with: view, duration: 0.35, options: [.transitionCrossDissolve, .curveEaseInOut]
-        ) {
-            self.skeletonView.isHidden = true
-            self.tableView.isHidden = false
-        }
+        loading.showContent()
+    }
+
+    /// Try Again: the wait starts over under the skeleton's timing.
+    private func retryLoad() {
+        loading.load()
+        viewModel.refresh()
     }
 }
 
