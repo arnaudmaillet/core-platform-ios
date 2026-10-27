@@ -62,6 +62,22 @@ struct MediaSlotTests {
         #expect(ladder.rung == nil)
     }
 
+    /// ⚠️ A SMALLER DECODE STANDS IN (#1505): the page a flight lands on finds
+    /// a grid tile's 512 px decode, not its own full one — told at once, so
+    /// it draws it and no bone comes; the gate's `cachedCover` finds it too.
+    @Test func aSmallerDecodeInMemoryStandsIn() throws {
+        let pipeline = makePipeline()
+        let url = try #require(URL(string: "mock://slot/stand-in"))
+        let tile = solid()
+        pipeline.store(tile, for: url, size: .px512)
+        let slot = MediaSlot(size: .full, bone: UIView())
+        slot.begin(url)
+        var stoodIn: UIImage?
+        slot.load(url, using: pipeline, standIn: { stoodIn = $0 }) { _, _ in }
+        #expect(stoodIn === tile)
+        #expect(pipeline.cachedCover(for: url) === tile)
+    }
+
     // MARK: - The cover
 
     /// The bone lives IN the cover, at its back: over the cover's own fill

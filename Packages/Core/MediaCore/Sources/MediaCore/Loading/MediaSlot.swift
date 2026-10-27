@@ -102,8 +102,15 @@ public final class MediaSlot {
     /// comes in (`.none` for a warm hit, drawn in this pass), `failed` a
     /// missing or broken one — after the ladder has failed, so no bone
     /// follows. A late answer for an older item lands nowhere.
+    ///
+    /// - Parameter standIn: told, in this pass, of a SMALLER decode of the
+    ///   same picture already in memory when the slot's own size is not — a
+    ///   grid tile's cover (#1505, the tile decodes at its drawn size) for
+    ///   the page a flight lands on: the host draws it as the preview rung,
+    ///   no bone, and the sharp one replaces it when it lands.
     public func load(
         _ url: URL?, using pipeline: ImagePipeline?,
+        standIn: (@MainActor (UIImage) -> Void)? = nil,
         arrive: @escaping @MainActor (UIImage, LoadingLadder.Transition) -> Void,
         failed: (@MainActor () -> Void)? = nil
     ) {
@@ -116,11 +123,31 @@ public final class MediaSlot {
             ladder.fail(token: token)
             failed?()
         }
+        guard let standIn, load.isLoading, let url, let pipeline,
+              let smaller = Self.largestSmallerDecode(of: url, below: size, in: pipeline) else { return }
+        standIn(smaller)
+    }
+
+    /// The largest decode of `url` in memory below `size`, if any.
+    nonisolated public static func largestSmallerDecode(of url: URL, below size: ImageBucket, in pipeline: ImagePipeline) -> UIImage? {
+        for bucket in ImageBucket.allCases.reversed() where bucket < size && !bucket.isSmall {
+            if let image = pipeline.cachedImage(for: url, size: bucket) { return image }
+        }
+        return nil
     }
 
     /// Drops the load in flight (and any wait); its answer lands nowhere.
     public func cancel() {
         isAwaiting = false
         load.cancel()
+    }
+}
+
+public extension ImagePipeline {
+    /// A post's cover in memory at whatever size a host decoded it — the full
+    /// picture, or a grid tile's decode at its drawn size (#1505): for a gate
+    /// that only asks whether a tile HAS a face (the autoplay's).
+    func cachedCover(for url: URL) -> UIImage? {
+        cachedImage(for: url, size: .full) ?? MediaSlot.largestSmallerDecode(of: url, below: .full, in: self)
     }
 }

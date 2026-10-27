@@ -128,7 +128,8 @@ struct CoverLoadCancellationTests {
         await landings.next { await fetcher.release(secondURL) }
 
         #expect(landings.count == 1)
-        #expect(cell.renderedCover === pipeline.cachedImage(for: secondURL))
+        // At the tile's drawn bucket (#1505): a 120 pt tile is a 512 px decode.
+        #expect(cell.renderedCover === pipeline.cachedImage(for: secondURL, size: .px512))
     }
 
     /// The list row's single-media cover follows the same rule.

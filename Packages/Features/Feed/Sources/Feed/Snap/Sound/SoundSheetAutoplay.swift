@@ -134,7 +134,7 @@ final class SoundSheetAutoplay {
     private func hasCover(_ item: Item) -> Bool {
         guard let thumbnail = item.tile.thumbnailURL else { return true }
         if item.cell.renderedCover != nil { return true }
-        guard let cached = imagePipeline.cachedImage(for: thumbnail) else { return false }
+        guard let cached = imagePipeline.cachedCover(for: thumbnail) else { return false }
         item.cell.applyCover(cached)
         return true
     }

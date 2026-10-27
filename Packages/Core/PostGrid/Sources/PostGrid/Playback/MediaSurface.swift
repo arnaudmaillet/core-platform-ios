@@ -87,6 +87,13 @@ public final class MediaSurface {
     /// thumbnail landing later (hook 7).
     public func showReturnStill(_ image: UIImage) { coverSlot.showParked(image) }
 
+    /// The bucket the cover is decoded at — restated by a host that knows its
+    /// drawn size before it loads (`PostGridTileCell`, #1505).
+    public var coverSize: ImageBucket {
+        get { coverSlot.size }
+        set { coverSlot.size = newValue }
+    }
+
     /// Whether a cover load is in flight.
     public var isLoadingCover: Bool { coverSlot.isLoading }
 

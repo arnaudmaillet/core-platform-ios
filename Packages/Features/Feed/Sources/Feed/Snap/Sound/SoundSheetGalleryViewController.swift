@@ -46,7 +46,8 @@ final class SoundSheetGalleryViewController: UIViewController {
         ) { [weak self] path in
             guard let self, let id = dataSource?.itemIdentifier(for: path),
                   let url = tile(id)?.thumbnailURL else { return [] }
-            return [ImageRequest(url: url)]
+            // At the bucket the tile decodes it at (#1505).
+            return [PostGridTileCell.coverRequest(url, at: path, in: collectionView)]
         }
         lookahead.attach(to: collectionView)
         return lookahead

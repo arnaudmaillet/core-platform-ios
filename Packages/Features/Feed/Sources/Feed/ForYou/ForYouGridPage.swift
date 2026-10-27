@@ -800,7 +800,13 @@ final class ForYouGridPage: UIView {
         guard !showsSkeleton else { return [] }
         let index = flatIndex(for: indexPath)
         guard posts.indices.contains(index) else { return [] }
-        return posts[index].lookaheadImages
+        let post = posts[index]
+        // A tile decodes its cover at its drawn size (#1505): asked for at
+        // that bucket, or the prefetch is a 1200 px decode the tile never
+        // reads. A card keeps the full picture.
+        guard drawsAsTile(post.id), !drawsAsPairedCard(post.id), let url = post.thumbnailURL
+        else { return post.lookaheadImages }
+        return [PostGridTileCell.coverRequest(url, at: indexPath, in: collectionView)]
     }
 
     /// The page joined or left a window: a new stay with its own owner, or
@@ -1770,7 +1776,7 @@ final class ForYouGridPage: UIView {
         // now rather than merely reporting it: a gate that passed on a cover
         // the tile is not actually showing would let playback start against a
         // blank face, which is what it exists to prevent.
-        guard let cached = imagePipeline.cachedImage(for: thumbnail) else { return false }
+        guard let cached = imagePipeline.cachedCover(for: thumbnail) else { return false }
         cell.applyCover(cached)
         return true
     }
