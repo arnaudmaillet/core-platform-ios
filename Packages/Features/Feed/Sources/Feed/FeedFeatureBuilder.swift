@@ -208,6 +208,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 // Media posts only (#1699): a text-only post is filtered out
                 // of every page the Discover list serves.
                 repository: MediaOnlyFeedProvider(base: discovery ?? repository),
+                // The launch screen opens on the device's first page, and the
+                // post playing is never swapped when the network answers
+                // (#1765).
+                cacheRevalidation: .keepShown,
                 engagementProvider: engagementProvider,
                 commentsProvider: commentsProvider,
                 realtime: realtime,
@@ -220,6 +224,33 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         )
         (feed as? SnapFeedViewController)?.isForYouRoot = true
         return feed
+    }
+
+    public func warmLaunchScreen() {
+        guard let discovery else { return }
+        let pipeline = imagePipeline
+        let videoPlayback = videoPlayback
+        // ⚠️ DETACHED: inheriting the main actor, the warm-up waited for the
+        // shell it was meant to overlap to finish building — it started 0.6 s
+        // late and saved nothing (measured, Release, 2026-10-27).
+        Task.detached(priority: .userInitiated) {
+            guard let first = await MediaOnlyFeedProvider(base: discovery).cachedFirstPage()?.first else { return }
+            let model = FeedDisplayModelBuilder().build(first, now: Date())
+            // The URL the page's media card asks for, at its bucket: the
+            // photograph, or a clip's poster (`SnapFeedCell.configure`).
+            let picture = model.mediaKind == .video ? model.thumbnailURL : model.mediaURL
+            if let picture { _ = try? await pipeline.image(for: picture, size: .full, priority: .visible) }
+            // A clip's PLAYER prepared meanwhile, with no surface yet — the
+            // pool's lookahead (BytePlus' "pre-render", TikTok's first
+            // video): its item resolved, loaded and paused at the start, so
+            // the page's `play` adopts it on its first activation instead of
+            // minting one. Keyed as the page plays it: the clip and its post.
+            if model.mediaKind == .video, let clip = model.mediaURL {
+                let item = VideoLookaheadItem(url: clip, scope: first.post.id.rawValue)
+                await MainActor.run { videoPlayback?.setLookahead(next: item, previous: nil, warmNext: true) }
+            }
+            LaunchTimeline.mark("shots.warmed")
+        }
     }
 
     public func galleryPosts(_ ids: [PostID]) async -> [PostID: GalleryPost] {

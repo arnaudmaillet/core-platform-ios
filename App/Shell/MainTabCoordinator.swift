@@ -2,6 +2,7 @@ import ChatInterface
 import CoreModels
 import CoreNavigation
 import FeedInterface
+import MediaCore
 import MediaPlayback
 import NotificationsInterface
 import ProfileInterface
@@ -289,6 +290,14 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // (#1002) — see `BottomEdgeBlurView`.
         for (_, tab) in orderedTabs { BottomEdgeBlurView.install(in: tab.navigationController) }
         applyBar(animated: false)
+        // ⚠️ THE APP OPENS ON FOR YOU → SHOTS (the owner, 2026-10-27, #1765):
+        // its first post is the launch screen, as TikTok's first video is. The
+        // bar's order stays (Explore first); only the selection moves.
+        // `-select-tab N` still overrides it, later in the launch.
+        if let forYou = orderedTabs.first(where: { $0.0 == .forYou })?.1.tab {
+            tabBarController.selectedTab = forYou
+        }
+        LaunchTimeline.mark("shell")
         tabBarController.delegate = self
         // The stake menu's way to the cartridge pack, from any screen.
         tabBarController.makeStakeShopScreen = { [unowned container] in container.makeStakeShopScreen() }

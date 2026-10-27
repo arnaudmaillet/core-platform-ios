@@ -182,6 +182,27 @@ struct FeedViewModelTests {
         #expect(observed.last?.phase == .content)
     }
 
+    /// ⚠️ THE LAUNCH SCREEN NEVER SWAPS THE POST PLAYING (#1765): Shots opens
+    /// on the device's first page, and when the network answers, the posts the
+    /// viewer reached (and the one after, warming) stay at the head — the
+    /// network's fresh posts come after them, as TikTok's first video plays on.
+    @Test func keepShownKeepsTheCachedHeadUnderTheNetworksPage() async {
+        let provider = FakeFeedProvider()
+        provider.cached = makeEntries(0..<3)
+        // The network ranks differently: post 5 first, post 1 again later.
+        let network = makeEntries(5..<7) + makeEntries(1..<2) + makeEntries(7..<8)
+        provider.pages[""] = .success(FeedPage(entries: network, nextPageToken: nil, isCold: false))
+        let viewModel = FeedViewModel(repository: provider, cacheRevalidation: .keepShown)
+
+        async let states = collectStates(viewModel) { $0.items.count >= 5 }
+        viewModel.viewDidLoad()
+        let observed = await states
+
+        #expect(observed.first?.items.map(\.id.rawValue) == ["post-000", "post-001", "post-002"])
+        #expect(observed.last?.items.map(\.id.rawValue) == ["post-000", "post-001", "post-005", "post-006", "post-007"],
+                "the post on screen was swapped, or a kept post came back twice")
+    }
+
     @Test func coldFlagSurfacesAndClearsOnRefresh() async {
         let provider = FakeFeedProvider()
         provider.pages[""] = .success(FeedPage(entries: makeEntries(0..<2), nextPageToken: nil, isCold: true))

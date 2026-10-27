@@ -1,12 +1,14 @@
 import Auth
 import AuthInterface
 import CoreModels
+import FeedInterface
 import CoreNavigation
 import CoreRealtime
 import CoreStorage
 import DesignSystem
 import MediaPlayback
 import Profile
+import MediaCore
 import UIKit
 #if DEBUG
 import CoreNetworkingMocks
@@ -159,6 +161,11 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             guard let container = self?.container else { return }
             let realtimeClient = container.realtimeClient
             for await state in await container.sessionManager.stateUpdates() {
+                if LaunchTimeline.time(of: "auth.firstState") == nil {
+                    // Shots' first post warms while the shell builds (#1765).
+                    container.feedFeature.warmLaunchScreen()
+                }
+                LaunchTimeline.mark("auth.firstState")
                 self?.render(state)
                 // Realtime lifecycle is driven here, in auth-state order, rather
                 // than via detached Tasks in render() — otherwise a rapid
@@ -709,15 +716,36 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
 /// the fixture login round trip, which it covers rather than flashing the login
 /// form on the way past.
 private final class LaunchViewController: UIViewController {
+    /// ⚠️ THE LAUNCH SCREEN'S TWIN (`LaunchScreen.storyboard`, the owner,
+    /// 2026-10-27): the same logo, the same 120 pt, at the centre of the same
+    /// ground — the pages' own (`Surface.page`) — so iOS's static screen hands
+    /// over to this one without a seam.
+    static let logoSide: CGFloat = 120
+    /// A loader under the logo only for a wait worth saying: the keychain read
+    /// this covers is usually gone well before.
+    static let loaderDelay: TimeInterval = 1
+
+    private let loader = AppLoaderView(size: .medium)
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = Surface.page
 
-        let spinner = AppLoaderView(size: .large)
-        spinner.startAnimating()
-        spinner.constrain(in: view) { parent in
-            spinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            spinner.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
+        let logo = UIImageView(image: UIImage(named: "LaunchLogo"))
+        logo.contentMode = .scaleAspectFit
+        logo.constrain(in: view) { parent in
+            logo.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
+            logo.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
+            logo.widthAnchor.constraint(equalToConstant: Self.logoSide)
+            logo.heightAnchor.constraint(equalToConstant: Self.logoSide)
+        }
+        loader.hidesWhenStopped = true
+        loader.constrain(in: view) { parent in
+            loader.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
+            loader.topAnchor.constraint(equalTo: logo.bottomAnchor, constant: 32)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.loaderDelay) { [weak self] in
+            self?.loader.startAnimating()
         }
     }
 }

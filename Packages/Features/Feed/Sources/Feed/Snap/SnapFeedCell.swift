@@ -2205,6 +2205,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Re-decides whether the page is announcing a wait — called from every
     /// place the answer can change (`SnapMediaWait.refresh`).
     private func refreshMediaLoader() {
+        // The launch screen's milestones (#1765): the first post's picture,
+        // then its first frame — each once per process.
+        if mediaURL != nil, mediaCard.showsPicture { LaunchTimeline.mark("shots.firstPicture") }
+        if mediaCard.renderView.hasFrame { LaunchTimeline.mark("shots.firstFrame") }
         mediaWait.refresh()
     }
 

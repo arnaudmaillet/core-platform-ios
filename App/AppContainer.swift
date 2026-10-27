@@ -989,7 +989,8 @@ final class AppContainer {
     private lazy var discoveryRepository = DiscoveryFeedRepository(
         timelineClient: Timeline_V1_TimelineServiceClient(client: authenticatedRPCClient),
         base: feedRepository,
-        reader: { [weak self] in await self?.discoveryReader() ?? .guest }
+        reader: { [weak self] in await self?.discoveryReader() ?? .guest },
+        localCache: feedLocalCache
     )
 
     /// Who reads Discover (#407, #413): the active profile, its Sensitive
