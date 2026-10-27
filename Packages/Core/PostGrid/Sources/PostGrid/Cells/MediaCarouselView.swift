@@ -443,14 +443,9 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         pageViews.indices.contains(index) && pageViews[index].visibleLoader != nil
     }
 
-    /// Whether `index`'s picture is still on its way on the media slot — its
-    /// load in flight, or its skeleton up (#1505): the wait the bone already
-    /// says, which a host must not announce a second time with a spinner.
-    public func isPictureLoading(onPage index: Int) -> Bool {
-        guard pageViews.indices.contains(index) else { return false }
-        let slot = pageViews[index].coverSlot
-        return slot.isLoading || slot.showsBone
-    }
+    /// Told when a page's cover is drawn — the moment a host's "is there a
+    /// picture here" answer changes.
+    public var onPageCover: ((Int) -> Void)?
 
     /// The spinner on `index` while it is up — the view itself, so a spec can
     /// ask where it is drawn rather than trust that it travelled.
@@ -642,9 +637,13 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         self.imagePipeline = imagePipeline
         pageViews = pages.enumerated().map { index, page in
             let view = CarouselPageView()
+            view.isFullScreen = self.style == .page
             // The picture's own pixels decide its framing, in the same beat
             // as it arrives.
             view.coverSlot.alongside = { [weak self] _ in self?.applyFraming(onPage: index) }
+            // And the host hears of it: a full-screen page's centred loader
+            // comes down the moment its picture is there.
+            view.coverSlot.onChange = { [weak self] _ in self?.onPageCover?(index) }
             // ⚠️ A page knows whether it is PLAYABLE, and it is per page.
             //
             // Nothing in `post.v1` says a carousel's attachments agree about
@@ -1329,9 +1328,15 @@ private final class EdgeYieldingScrollView: UIScrollView {
 /// ⚠️ NO PLAY BADGE, deliberately — see `isPlayable`.
 final class CarouselPageView: UIView {
     let cover = UIImageView()
+    /// A full-screen page (`.page`): its wait is the host's centred loader
+    /// (the owner, 2026-10-27), so its cover wears no bone. Set before the
+    /// cover is first loaded.
+    var isFullScreen = false
     /// The page's picture on the loading ladder (#1088): its dissolve runs
     /// over the whole picture stack, backdrop included.
-    private(set) lazy var coverSlot = CoverSlot(view: cover, size: .full, dissolving: pictureLayers)
+    private(set) lazy var coverSlot = CoverSlot(
+        view: cover, size: .full, dissolving: pictureLayers, showsSkeleton: !isFullScreen
+    )
 
     /// Whether this page has a stream behind it.
     ///

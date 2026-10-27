@@ -2175,15 +2175,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     // MARK: - The wait
 
     /// Whether the page is announcing a wait — see `SnapMediaWait`, which
-    /// asks `hasItsOwnMedia` and drives the card's loader.
+    /// asks `showsAPicture` and drives the card's centred loader.
+    ///
+    /// ⚠️ THE OWNER'S RULE (2026-10-27), TikTok's: a full-screen media that has
+    /// not arrived loads under a loader at the centre; a clip whose STREAM is
+    /// buffering — its poster or frames already up — says so with the bar's
+    /// pulse (`SnapCellPlayback.onLoading`, #1537), never a loader over it.
     private lazy var mediaWait: SnapMediaWait = {
         let wait = SnapMediaWait(
-            // A picture still on its way wears its bone (#1505): the spinner
-            // is for a clip whose poster stands in while it buffers.
-            hasItsOwnMedia: { [weak self] in
-                guard let self else { return true }
-                return hasItsOwnMedia || mediaCard.isPictureLoading
-            },
+            hasItsOwnMedia: { [weak self] in self?.showsAPicture ?? true },
             isShowingLoader: { [weak self] in self?.mediaCard.isShowingLoader ?? false },
             setLoading: { [weak self] loading in self?.mediaCard.setLoading(loading) }
         )
@@ -2193,23 +2193,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         return wait
     }()
 
-    /// Whether the media area has the post's OWN picture on it.
-    ///
-    /// Deliberately not `isMediaContentRendering`, which answers a different
-    /// question for the hero landing: a postered clip is *presentable* there —
-    /// there is something to hand over to — and it is exactly the case this
-    /// must call a wait, because the poster is not the post's media.
-    private var hasItsOwnMedia: Bool {
+    /// Whether the media area shows a picture of the post — the photograph,
+    /// a clip's poster or frames, a page's cover: what the centred loader
+    /// waits for. A clip with its poster up is NOT waited on here; its stream
+    /// is the bar's to announce.
+    private var showsAPicture: Bool {
         guard mediaURL != nil else { return true }
-        if mediaCard.showsCollection {
-            return mediaCard.currentPageVideoURL == nil
-                ? mediaCard.isImageReady
-                : mediaCard.renderView.hasFrame
-        }
-        switch mediaKind {
-        case .video: return mediaCard.renderView.hasFrame
-        case .image: return mediaCard.isImageReady
-        }
+        return mediaCard.showsPicture
     }
 
     /// Re-decides whether the page is announcing a wait — called from every
@@ -2227,9 +2217,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Whether the page is announcing a wait, asked of the media area rather
     /// than of any bookkeeping.
     var debugIsShowingMediaLoader: Bool { mediaCard.isShowingLoader }
-
-    /// Whether the page's picture wears its bone now (#1505).
-    var debugShowsPictureBone: Bool { mediaCard.debugShowsPictureBone }
 
     /// The surface the page is CURRENTLY showing — which is not the one it was
     /// built with once a landing has handed one over. A spec that wants to

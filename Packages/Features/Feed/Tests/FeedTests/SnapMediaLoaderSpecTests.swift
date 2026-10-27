@@ -65,8 +65,8 @@ struct SnapMediaLoaderSpecTests {
     }
 
     /// A clip whose poster is on screen and whose first frame has not come:
-    /// the one wait the spinner still says (#1505) — a photograph, or a
-    /// poster still on its way, wears its bone instead.
+    /// its STREAM is buffering, which the bar's pulse says — never the
+    /// centred loader (the owner, 2026-10-27).
     private func bufferingClip(_ id: String = "post-clip") -> SnapFeedCell {
         let model = clip(id)
         return cell(model, warm: [model.thumbnailURL])
@@ -89,26 +89,25 @@ struct SnapMediaLoaderSpecTests {
 
     /// A post of several pictures, none of which the pipeline will ever answer
     /// for — so every page is genuinely outstanding.
-    /// A collection of clips whose covers are in memory: each page waits on
-    /// its own first frame.
+    /// A collection of photographs, none of them in memory: each page waits
+    /// on its own picture.
     private func collection(_ pages: Int, id: String = "post-gallery") -> SnapFeedCell {
         let cell = SnapFeedCell(frame: Self.container)
-        let covers = (0..<pages).map { URL(string: "https://example.test/\(id)-\($0).jpg") }
         let extra = (1..<pages).map { index in
             GalleryPost.MediaPage(
-                thumbnailURL: covers[index],
-                videoURL: URL(string: "https://example.test/\(id)-\(index).mp4")
+                thumbnailURL: URL(string: "https://example.test/\(id)-\(index).jpg"),
+                videoURL: nil
             )
         }
         cell.configure(
             with: FeedItemDisplayModel(
                 id: PostID(id), authorID: ProfileID("p"), authorName: "Ava",
                 metaText: "@ava · 3m", avatarURL: nil, caption: "caption",
-                mediaURL: URL(string: "https://example.test/\(id)-0.mp4"),
-                mediaKind: .video, thumbnailURL: covers[0], audioText: nil,
+                mediaURL: URL(string: "https://example.test/\(id)-0.jpg"),
+                mediaKind: .image, thumbnailURL: nil, audioText: nil,
                 likeCount: 0, timestampText: "now", extraMedia: extra
             ),
-            pipeline: Self.pipeline(warm: covers),
+            pipeline: Self.pipeline(warm: []),
             videoPlayback: nil
         )
         cell.layoutIfNeeded()
@@ -138,7 +137,7 @@ struct SnapMediaLoaderSpecTests {
     ///
     /// Two claims, and they fail separately, so they are tested separately.
     @Test func adoptingALiveSurfaceEndsTheWait() {
-        let cell = bufferingClip()
+        let cell = cell(clip())
         cell.debugElapseMediaLoaderGrace()
         #expect(cell.debugIsShowingMediaLoader, "the premise: nothing has arrived yet")
 
@@ -151,23 +150,6 @@ struct SnapMediaLoaderSpecTests {
 
         #expect(!cell.debugIsShowingMediaLoader,
                 "the page is showing a picture, so it must stop saying it is not")
-    }
-
-    /// ⚠️ A CLIP'S FRAMES ARE ITS PICTURE (#1505): the bone stands over the
-    /// video surface, so a landing that hands over a surface already drawing
-    /// — while the poster is still on its way — takes the bone down at once,
-    /// or the clip would play under it.
-    @Test func aLiveSurfaceHandedOverTakesTheBoneDown() async {
-        let cell = cell(clip())
-        for _ in 0..<100 where !cell.debugShowsPictureBone { try? await Task.sleep(for: .milliseconds(5)) }
-        #expect(cell.debugShowsPictureBone, "the premise: the poster is on its way, under its bone")
-
-        let adopted = VideoRenderView()
-        adopted.debugSimulateFirstFrame()
-        cell.adoptLiveRenderView(adopted)
-
-        #expect(!cell.debugShowsPictureBone, "the bone stayed over a clip that is playing")
-        #expect(!cell.debugIsShowingMediaLoader)
     }
 
     /// ⚠️ AND THE SIGNAL MOVES WITH THE SURFACE, for the frame that has not
@@ -239,18 +221,14 @@ struct SnapMediaLoaderSpecTests {
         #expect(cell.debugIsShowingMediaLoader == false)
     }
 
-    /// ⚠️ A PICTURE ON ITS WAY WEARS ITS BONE, NEVER A SPINNER (#1505): a
-    /// photograph not in memory — or a clip's poster — shows nothing for the
-    /// first moment, then the skeleton, and the spinner never comes up over
-    /// it (the owner's recording, 2026-10-27: black and a spinner).
-    @Test func aPictureOnItsWayWearsTheBoneNeverASpinner() async {
+    /// ⚠️ AND THEN IT DOES — THE OWNER'S RULE (2026-10-27): a full-screen
+    /// media that has not arrived, a photograph or a clip's poster, loads
+    /// under the centred loader once the grace has run out.
+    @Test func aMediaNotYetArrivedShowsTheLoader() {
         for cell in [cell(photo()), cell(clip())] {
             cell.debugElapseMediaLoaderGrace()
-            #expect(!cell.debugIsShowingMediaLoader, "a spinner over a picture that is still on its way")
-            for _ in 0..<100 where !cell.debugShowsPictureBone { try? await Task.sleep(for: .milliseconds(5)) }
-            #expect(cell.debugShowsPictureBone, "no bone where the picture will land")
-            cell.debugElapseMediaLoaderGrace()
-            #expect(!cell.debugIsShowingMediaLoader)
+            #expect(cell.debugIsShowingMediaLoader,
+                    "a page with no picture and no loader is indistinguishable from a loaded one")
         }
     }
 
@@ -265,20 +243,20 @@ struct SnapMediaLoaderSpecTests {
         let cell = SnapFeedCell(frame: Self.container)
         cell.configure(with: model, pipeline: pipeline, videoPlayback: nil)
         #expect(cell.debugShownPhoto != nil, "the page waited on its own decode with the tile's in hand")
-        try? await Task.sleep(for: .milliseconds(250))
-        #expect(!cell.debugShowsPictureBone, "a bone over the tile's picture")
+        cell.debugElapseMediaLoaderGrace()
+        #expect(!cell.debugIsShowingMediaLoader, "a loader over the tile's picture")
     }
 
-    /// THE REPORTED CASE, exactly: a clip showing its poster. There IS a
-    /// picture on screen — but it is not the post's media, and the viewer is
-    /// waiting for something. Past the grace, the page says so.
-    @Test func aClipShowingOnlyItsPosterAnnouncesTheWait() {
+    /// ⚠️ A CLIP BUFFERING BEHIND ITS POSTER SHOWS NO LOADER (the owner,
+    /// 2026-10-27): there is a picture on screen, and the stream's wait is the
+    /// bar's pulse (`SnapMediaPageBarView.setLoading`, #1537) — TikTok's
+    /// loading line, never a spinner over the poster.
+    @Test func aClipBufferingBehindItsPosterShowsNoLoader() {
         let cell = bufferingClip()
 
         cell.debugElapseMediaLoaderGrace()
 
-        #expect(cell.debugIsShowingMediaLoader)
-        #expect(!cell.debugShowsPictureBone, "a bone over the poster")
+        #expect(!cell.debugIsShowingMediaLoader, "a loader over a poster whose stream is buffering")
     }
 
     /// A page with NO media has nothing to wait for, ever.
@@ -295,7 +273,7 @@ struct SnapMediaLoaderSpecTests {
     /// The moment the picture lands, the spinner goes — not at the next settle,
     /// not on the next layout pass.
     @Test func theSpinnerGoesWhenThePictureLands() {
-        let cell = bufferingClip()
+        let cell = cell(clip())
         cell.debugElapseMediaLoaderGrace()
         #expect(cell.debugIsShowingMediaLoader, "the premise: it was waiting")
 
@@ -307,7 +285,7 @@ struct SnapMediaLoaderSpecTests {
     /// A recycled cell carries nothing over. A spinner inherited from the post
     /// before it would sit over a page that is not waiting for anything.
     @Test func aRecycledCellCarriesNoSpinner() {
-        let cell = bufferingClip()
+        let cell = cell(clip())
         cell.debugElapseMediaLoaderGrace()
 
         cell.prepareForReuse()
@@ -317,7 +295,7 @@ struct SnapMediaLoaderSpecTests {
 
     /// And re-binding to a post whose picture is in hand does not re-arm it.
     @Test func abindingToAReadyPageDoesNotAnnounceAWait() {
-        let cell = bufferingClip("post-a")
+        let cell = cell(clip("post-a"))
         cell.debugElapseMediaLoaderGrace()
         cell.debugRenderView.debugSimulateFirstFrame()
 
@@ -344,12 +322,7 @@ struct SnapMediaLoaderSpecTests {
 
         let cell = SnapFeedCell(frame: Self.container)
         host.view.addSubview(cell)
-        let buffering = clip()
-        cell.configure(
-            with: buffering,
-            pipeline: Self.pipeline(warm: [buffering.thumbnailURL]),
-            videoPlayback: nil
-        )
+        cell.configure(with: photo(), pipeline: Self.pipeline(warm: []), videoPlayback: nil)
         host.view.layoutIfNeeded()
 
         let quiet = try #require(Self.render(window))

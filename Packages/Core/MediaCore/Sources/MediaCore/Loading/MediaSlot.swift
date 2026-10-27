@@ -35,7 +35,10 @@ public final class MediaSlot {
     public let ladder: LoadingLadder
     /// The skeleton rung's view: a `SkeletonBoneView`, or a shaped wrapper of
     /// one (`AvatarSkeletonView`). The host lays it out under the picture.
-    public let bone: UIView
+    /// Nil for a host that says the wait its own way — a full-screen page's
+    /// centred loader (the owner, 2026-10-27: a full-screen media loads under
+    /// a loader, not a bone).
+    public let bone: UIView?
     private let load: ImageLoadSlot
     /// The current item's token.
     public private(set) var token: LoadingLadder.Token
@@ -44,14 +47,15 @@ public final class MediaSlot {
 
     /// - Parameters:
     ///   - size: the bucket the picture is decoded at — required (#894).
-    ///   - bone: the skeleton the host lays out under its picture.
+    ///   - bone: the skeleton the host lays out under its picture, or nil
+    ///     for none.
     public init(
-        size: ImageBucket, bone: UIView,
+        size: ImageBucket, bone: UIView?,
         policy: LoadingLadder.Policy = .standard, clock: LoadingLadder.Clock = .system
     ) {
         load = ImageLoadSlot(size: size)
         self.bone = bone
-        bone.isUserInteractionEnabled = false
+        bone?.isUserInteractionEnabled = false
         ladder = LoadingLadder(policy: policy, clock: clock)
         ladder.setView(bone, for: .skeleton)
         token = ladder.currentToken
@@ -71,7 +75,7 @@ public final class MediaSlot {
     public var isLoading: Bool { load.isLoading }
 
     /// Whether the bone is on screen now.
-    public var showsBone: Bool { !bone.isHidden && bone.alpha > 0 }
+    public var showsBone: Bool { bone.map { !$0.isHidden && $0.alpha > 0 } ?? false }
 
     /// A new item: a cut, the load in flight dropped — unless the slot was
     /// awaiting a picture, whose item this answers (its bone kept, its delay

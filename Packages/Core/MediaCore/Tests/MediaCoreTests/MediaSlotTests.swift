@@ -83,12 +83,14 @@ struct MediaSlotTests {
     /// The bone lives IN the cover, at its back: over the cover's own fill
     /// (the card's grey, a video's dark), under its picture and whatever the
     /// host hangs in it.
-    @Test func theCoversBoneSitsAtItsBack() {
+    @Test func theCoversBoneSitsAtItsBack() throws {
         let view = UIImageView(frame: CGRect(x: 0, y: 0, width: 120, height: 160))
         let slot = CoverSlot(view: view, size: .px256)
-        #expect(view.subviews.first === slot.bone)
-        #expect(slot.bone.frame == view.bounds)
-        #expect(slot.bone.isHidden, "a bone before anything is loading")
+        let bone = try #require(slot.bone)
+        #expect(view.subviews.first === bone)
+        #expect(bone.frame == view.bounds)
+        #expect(bone.isHidden, "a bone before anything is loading")
+        #expect(CoverSlot(view: UIImageView(), size: .px256, showsSkeleton: false).bone == nil)
     }
 
     /// ⚠️ THE TILE CONTRACT (#1505): a cover not in memory shows nothing for

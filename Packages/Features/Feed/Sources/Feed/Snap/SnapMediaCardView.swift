@@ -55,9 +55,6 @@ final class SnapMediaCardView: UIView {
             guard oldValue !== renderView else { return }
             oldValue.onPictureAvailabilityChange = nil
             installPictureObserver(on: renderView)
-            // A surface handed over already drawing (a landing's): its frames
-            // are the picture, and no bone stands over them.
-            if renderView.hasFrame { framesArrived() }
             // The band follows whichever surface this card draws with.
             if oldValue.frameCompanion === liveBackdrop { oldValue.frameCompanion = nil }
             renderView.frameCompanion = liveBackdrop
@@ -265,7 +262,6 @@ final class SnapMediaCardView: UIView {
             guard let self else { return }
             if ready {
                 self.applyFraming()
-                self.framesArrived()
             } else {
                 // The surface is back on its poster: so is a playing band.
                 self.liveBackdrop.sourceStoppedDrawing()
@@ -314,9 +310,6 @@ final class SnapMediaCardView: UIView {
         imageView.clipsToBounds = true
         imageView.pin(to: self)
         renderView.pin(to: self)
-        // Over both pictures, so it covers a photograph's black floor and a
-        // clip's opaque ground alike; the carousel and the spinner go above.
-        pictureBone.pin(to: self)
         picture.ladder.onLand = { [weak self] rung, transition in
             self?.pictureLanded(rung, transition)
         }
@@ -479,15 +472,13 @@ final class SnapMediaCardView: UIView {
 
     // MARK: - The picture on the media slot (#1505)
 
-    /// The bone over the page while its picture — the photograph, or a clip's
-    /// poster — is on its way: a page not in memory shows nothing for
-    /// `skeletonDelay`, then the bone, then the picture as the bone dissolves
-    /// away. Never the black floor and a spinner (the owner's recording,
-    /// 2026-10-27).
-    private let pictureBone = SkeletonBoneView(rounding: .fixed(0))
-    /// The picture's media contract: its load, the bone, its arrival.
-    private(set) lazy var picture = MediaSlot(size: .full, bone: pictureBone)
-    /// Told when the bone comes or goes — the wait's answer changes with it.
+    /// The picture's media contract: its load, its arrival. NO bone: a
+    /// full-screen media loads under the centred loader (the owner,
+    /// 2026-10-27 — `setLoading`, decided by the cell's `SnapMediaWait`), and
+    /// a clip's stream buffering is the bar's pulse, not a loader.
+    private(set) lazy var picture = MediaSlot(size: .full, bone: nil)
+    /// Told when a picture lands or fails — the page's "is there a picture
+    /// here" answer, which the loader follows, changes with it.
     var onPictureLoadingChange: (() -> Void)?
 
     /// Loads the page's single picture — the photograph for `.image`, the
@@ -495,26 +486,25 @@ final class SnapMediaCardView: UIView {
     /// missing or broken one.
     func loadPicture(_ url: URL?, kind: MediaKind, pipeline: ImagePipeline?, failed: (() -> Void)? = nil) {
         let token = picture.begin(url)
+        let draw: (UIImage) -> Void = { [weak self] image in
+            switch kind {
+            case .image: self?.setImage(image)
+            case .video: self?.setPoster(image)
+            }
+        }
         // ⚠️ A GRID TILE'S DECODE STANDS IN (#1505). Tiles decode their cover at
         // their drawn size, so the page a flight lands on finds a 512 px decode
-        // in memory and not its own: drawn now, no bone, the full picture
-        // replacing it a beat later — never a bone over the picture the
-        // flight just carried.
+        // in memory and not its own: drawn now — never a loader over the
+        // picture the flight just carried — the full picture replacing it a
+        // beat later.
         picture.load(url, using: pipeline, standIn: { [weak self] image in
             guard let self else { return }
-            switch kind {
-            case .image: setImage(image)
-            case .video: setPoster(image)
-            }
+            draw(image)
             picture.ladder.show(.preview, token: token, warm: true)
         }) { [weak self] image, transition in
             guard let self else { return }
-            // Drawn now, under the bone: it shows as the bone leaves, once
-            // the bone has had its minimum (or in this pass when warm).
-            switch kind {
-            case .image: setImage(image)
-            case .video: setPoster(image)
-            }
+            // Cut in over the black, as a full-screen picture always has.
+            draw(image)
             picture.ladder.show(.content, token: token, warm: transition == .none)
         } failed: { [weak self] in
             self?.onPictureLoadingChange?()
@@ -522,63 +512,28 @@ final class SnapMediaCardView: UIView {
         }
     }
 
-    /// Drops the picture's load and its bone — a recycled or rebound page.
+    /// Drops the picture's load — a recycled or rebound page.
     func cancelPicture() {
         picture.cancel()
         picture.begin(nil)
     }
 
-    /// Whether the single picture is still on its way: loading, or its bone
-    /// up. The bone says that wait; the spinner must not say it again.
-    var isPictureLoading: Bool {
-        if showsCollection { return carousel?.isPictureLoading(onPage: currentPage) ?? false }
-        return picture.isLoading || picture.showsBone
-    }
-
-    /// ⚠️ A CLIP'S FRAMES ARE ITS PICTURE. The bone stands over the video
-    /// surface (it covers the surface's opaque ground), so a clip drawing
-    /// before its poster came — a landing's live surface, a fast first frame —
-    /// would play under it: the picture lands now, its poster load or not, and
-    /// the bone dissolves away.
-    private func framesArrived() {
-        guard picture.ladder.rung != .content, picture.isLoading || picture.showsBone else { return }
-        if case .dissolve(let duration) = LoadingLadder.Transition.pictureArrives {
-            dissolveBoneAway(duration: duration)
+    /// Whether the page shows a picture of its media: the photograph; a
+    /// clip's poster or its frames; a collection page's cover or frames. What
+    /// the centred loader waits on — a clip buffering behind its poster is
+    /// the bar's pulse, not a loader (the owner, 2026-10-27).
+    var showsPicture: Bool {
+        if showsCollection {
+            return carousel?.cover(onPage: currentPage) != nil || renderView.hasFrame
         }
-        picture.ladder.show(.content, token: picture.token, warm: true)
+        if !imageView.isHidden { return imageView.image != nil }
+        return posterImage != nil || renderView.hasFrame
     }
 
-    /// A rung landed: the bone came up, or the picture arrived — the bone
-    /// dissolving away over it when it was showing (the ladder hides it in
-    /// this same pass; a still of it fades out on top).
+    /// A rung landed: the picture arrived.
     private func pictureLanded(_ rung: LoadingLadder.Rung, _ transition: LoadingLadder.Transition) {
-        defer { onPictureLoadingChange?() }
-        guard rung == .content, case .dissolve(let duration) = transition else { return }
-        dissolveBoneAway(duration: duration)
+        onPictureLoadingChange?()
     }
-
-    /// A still of the bone, faded out over what replaces it — the bone itself
-    /// is hidden by the ladder in the same pass.
-    private func dissolveBoneAway(duration: TimeInterval) {
-        guard window != nil, picture.showsBone,
-              let ghost = pictureBone.snapshotView(afterScreenUpdates: false) else { return }
-        ghost.frame = pictureBone.frame
-        ghost.isUserInteractionEnabled = false
-        insertSubview(ghost, aboveSubview: pictureBone)
-        UIView.animate(
-            withDuration: duration, delay: 0,
-            options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]
-        ) {
-            ghost.alpha = 0
-        } completion: { _ in
-            ghost.removeFromSuperview()
-        }
-    }
-
-    #if DEBUG
-    /// Whether the page's bone shows now.
-    var debugShowsPictureBone: Bool { picture.showsBone }
-    #endif
 
     // MARK: - The wait
 
@@ -1070,6 +1025,8 @@ final class SnapMediaCardView: UIView {
         view.yieldsLeftwardDrags = true
         view.onPageChanged = { [weak self] page in self?.onPageChanged?(page) }
         view.onScrollPosition = { [weak self] position in self?.onScrollPosition?(position) }
+        // A page's cover drawn: the loader over it comes down.
+        view.onPageCover = { [weak self] _ in self?.onPictureLoadingChange?() }
         // Below nothing — it is the media, and everything else on the page is
         // layered over the card by the cell.
         insertSubview(view, aboveSubview: imageView)
