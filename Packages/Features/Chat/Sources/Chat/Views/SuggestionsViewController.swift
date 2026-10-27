@@ -38,9 +38,9 @@ final class SuggestionsViewController: UIViewController {
         host.onTakingLonger = { [weak self] in
             guard let self else { return }
             statusView.configure(
-                symbol: "clock", title: "Taking longer than usual",
+                symbol: TakingLongerCopy.symbol, title: TakingLongerCopy.title,
                 message: "Your suggestions are still on their way.",
-                actionTitle: "Try Again", action: { [weak self] in self?.retryLoad() }
+                actionTitle: TakingLongerCopy.action, action: { [weak self] in self?.retryLoad() }
             )
             loading.showStatus()
         }
@@ -211,7 +211,7 @@ final class SuggestionsViewController: UIViewController {
     /// Try Again: the wait starts over under the skeleton's timing.
     private func retryLoad() {
         loading.load()
-        viewModel.refresh()
+        viewModel.retry()
     }
 }
 

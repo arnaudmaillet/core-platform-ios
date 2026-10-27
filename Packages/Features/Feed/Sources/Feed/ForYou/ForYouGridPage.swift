@@ -2984,10 +2984,10 @@ final class ForYouGridPage: UIView {
             guard let self else { return }
             skeletonGate.finish { [weak self] in
                 self?.showStatus(
-                    symbolName: "clock",
-                    title: "Taking longer than usual",
+                    symbolName: TakingLongerCopy.symbol,
+                    title: TakingLongerCopy.title,
                     subtitle: "The posts are still on their way.",
-                    actionTitle: "Try Again",
+                    actionTitle: TakingLongerCopy.action,
                     action: { [weak self] in self?.onRefresh?() }
                 )
             }

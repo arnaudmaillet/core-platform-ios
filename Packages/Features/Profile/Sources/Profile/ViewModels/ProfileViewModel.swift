@@ -1433,6 +1433,17 @@ public final class ProfileViewModel {
         }
     }
 
+    /// The gallery's Try Again (#797, #1770). After a failure, a refresh.
+    /// Past "taking longer" the first pages are still out, and a refresh
+    /// would wait on that same read (`loadGallery` keeps one in flight):
+    /// the hung read is dropped and asked again.
+    public func retryGallery() {
+        guard let profile, galleryLoad != nil else { return refresh() }
+        galleryLoad?.cancel()
+        galleryLoad = nil
+        loadGallery(for: profile, reset: false)
+    }
+
     /// Whether the grid's first pages are on their way, for tests.
     var isGalleryLoading: Bool { galleryLoad != nil }
 

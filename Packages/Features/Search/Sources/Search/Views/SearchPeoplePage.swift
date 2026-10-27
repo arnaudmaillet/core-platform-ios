@@ -42,6 +42,21 @@ final class SearchPeoplePage: UIViewController {
     /// results on screen and the small spinner over them.
     private let skeleton = PersonListSkeletonView()
     private let statusView = EmptyStateView()
+    /// The first query's skeleton on the kit's timing (#1770): no bones for
+    /// a search that answers at once, held their minimum once up, and
+    /// "taking longer" with Try Again after 10 s. Injectable so a test
+    /// steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var skeletonGate: SkeletonGate = {
+        let gate = SkeletonGate(clock: skeletonClock)
+        gate.onSkeletonChange = { [weak self] showing in
+            if showing { self?.skeleton.showSkeleton() }
+        }
+        gate.onTakingLonger = { [weak self] in
+            self?.skeletonGate.finish { [weak self] in self?.showTakingLonger() }
+        }
+        return gate
+    }()
 
     private var modelsByID: [ProfileID: SearchResultDisplayModel] = [:]
 
@@ -151,6 +166,15 @@ final class SearchPeoplePage: UIViewController {
         }
     }
 
+    #if DEBUG
+    /// Whether the bones are drawn now.
+    var debugShowsSkeleton: Bool { !skeleton.isHidden && skeleton.alpha > 0 }
+    /// The status block's title while it shows, nil otherwise.
+    var debugStatusTitle: String? { statusView.isHidden ? nil : statusView.debugTitle }
+    /// Taps the status block's action (Try Again).
+    func debugTapStatusAction() { statusView.debugTapAction() }
+    #endif
+
     /// How many people are on screen. The only thing a test can honestly
     /// observe about this page without reaching into cells.
     var rowCountForTesting: Int { dataSource.snapshot().numberOfItems }
@@ -196,10 +220,32 @@ final class SearchPeoplePage: UIViewController {
     #endif
 
     func render(_ state: State) {
+        // ⚠️ THE FIRST QUERY'S SKELETON IS THE GATE'S (#1770): what answers
+        // after the bones came waits out their minimum.
+        guard case .loading = state else {
+            return skeletonGate.finish { [weak self] in self?.renderNow(state) }
+        }
+        renderNow(state)
+    }
+
+    /// "Taking longer than usual", the bones gone, and Try Again.
+    private func showTakingLonger() {
+        showSkeleton(false)
+        statusView.configure(
+            symbolName: TakingLongerCopy.symbol,
+            title: TakingLongerCopy.title,
+            subtitle: "The people are still on their way.",
+            actionTitle: TakingLongerCopy.action,
+            actionHandler: { [weak self] in self?.onRetry?() }
+        )
+        statusView.isHidden = false
+    }
+
+    private func renderNow(_ state: State) {
         switch state {
         case .loading:
             if dataSource.snapshot().numberOfItems == 0 {
-                showSkeleton(true)
+                skeletonGate.begin()
             } else {
                 spinner.startAnimating()
             }

@@ -149,6 +149,26 @@ final class ConversationThreadViewController: UIViewController {
     private var relationGeneration = 0
     private var viewer = ConversationThreadPerson(id: nil, name: "You", avatarURL: nil)
     private var hasRenderedContent = false
+
+    /// The first load's skeleton on the kit's timing (#1770): no bones for a
+    /// thread that answers at once, held their minimum once up, and "taking
+    /// longer" with Try Again after 10 s. Injectable so a test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var skeletonGate: SkeletonGate = {
+        let gate = SkeletonGate(clock: skeletonClock)
+        gate.onSkeletonChange = { [weak self] _ in
+            guard let self, case .loading = phase, !hasRenderedContent else { return }
+            applySnapshot(animated: false)
+        }
+        gate.onTakingLonger = { [weak self] in
+            self?.gaveUpWaiting = true
+            self?.skeletonGate.finish { [weak self] in self?.showTakingLonger() }
+        }
+        return gate
+    }()
+    /// The first load ran past 10 s: the status stays, and a redraw while
+    /// still loading does not bring the bones back, until Try Again.
+    private var gaveUpWaiting = false
     /// First content arrived before the stream had a height to pin against —
     /// see `pinToTail`.
     private var owesTailPin = false
@@ -914,6 +934,37 @@ final class ConversationThreadViewController: UIViewController {
     // MARK: - Render
 
     private func render(_ phase: ConversationThreadPhase) {
+        // ⚠️ THE FIRST LOAD'S SKELETON IS THE GATE'S (#1770): what answers
+        // after the bones came waits out their minimum — the newest answer,
+        // once.
+        guard case .loading = phase else {
+            return skeletonGate.finish { [weak self] in self?.renderNow(phase) }
+        }
+        if !hasRenderedContent, !gaveUpWaiting { skeletonGate.begin() }
+        renderNow(phase)
+    }
+
+    /// "Taking longer than usual", the bones gone, and Try Again.
+    private func showTakingLonger() {
+        guard case .loading = phase, !hasRenderedContent else { return }
+        applySnapshot(animated: false)
+        statusView.configure(
+            symbolName: TakingLongerCopy.symbol, title: TakingLongerCopy.title,
+            subtitle: "The messages are still on their way.",
+            actionTitle: TakingLongerCopy.action, actionHandler: { [weak self] in
+                guard let self else { return }
+                gaveUpWaiting = false
+                statusView.isHidden = true
+                skeletonGate.begin()
+                applySnapshot(animated: false)
+                driver.refresh()
+            }
+        )
+        if composerBackdrop.superview === view { view.insertSubview(statusView, belowSubview: composerBackdrop) }
+        statusView.isHidden = false
+    }
+
+    private func renderNow(_ phase: ConversationThreadPhase) {
         // ⚠️ A DELIVERY PLAYS ON THE PENDING ROW ON SCREEN, and the delivered
         // row takes its place only once it has played: the loader out, THEN
         // the time in (the owner, 2026-10-17). Played on the delivered row
@@ -938,7 +989,7 @@ final class ConversationThreadViewController: UIViewController {
         self.phase = phase
         switch phase {
         case .loading:
-            statusView.isHidden = true
+            statusView.isHidden = !gaveUpWaiting || hasRenderedContent
         case .failed(let message):
             // ⚠️ A WAY OUT (#797). It said "Pull to retry" on a screen with no
             // pull — by design (the composer owns the bottom edge) — so a
@@ -997,6 +1048,9 @@ final class ConversationThreadViewController: UIViewController {
         case .loading:
             headerPolicy.daySections = false
             snapshot.appendSections([.main])
+            // The gate's timing (#1770): no bones before its delay, none
+            // once the wait ran past 10 s.
+            guard skeletonGate.showsSkeleton else { break }
             let viewport = collectionView.bounds.height > 0 ? collectionView.bounds.height : view.bounds.height
             let count = SnapCommentsLayout.skeletonPlaceholderCount(viewportHeight: viewport)
             snapshot.appendItems((0..<count).map(Item.skeleton))
@@ -1040,6 +1094,10 @@ final class ConversationThreadViewController: UIViewController {
 
     /// Whether the last render animated its differences. Tests.
     private(set) var debugLastApplyAnimated: Bool?
+    /// The skeleton rows in the list now.
+    var debugSkeletonRowCount: Int {
+        dataSource.snapshot().itemIdentifiers.filter { if case .skeleton = $0 { true } else { false } }.count
+    }
 
     private func isAwaitingDelivery(_ message: ConversationThreadMessage) -> Bool {
         message.isMine && message.media == nil && message.delivery != .sent

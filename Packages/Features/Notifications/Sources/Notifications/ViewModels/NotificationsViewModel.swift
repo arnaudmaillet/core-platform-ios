@@ -283,6 +283,12 @@ public final class NotificationsViewModel {
         reload()
     }
 
+    /// Try Again (#1770): asks again whatever is in flight — past "taking
+    /// longer" the first read is still out, and `refresh()` would wait on it.
+    public func retry() {
+        reload()
+    }
+
     /// The viewer neared the end of the list: the next page, if there is one,
     /// none is already on the way, and the last one did not fail.
     public func loadNextPageIfNeeded() {

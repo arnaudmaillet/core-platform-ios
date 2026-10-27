@@ -371,7 +371,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         applyNavigationState()
         heroPager.onPinnedSectionChanged = { [weak self] section in self?.applyPinnedSection(section) }
         galleryPager.onNearEnd = { [weak self] in self?.viewModel.loadMoreGallery() }
-        galleryPager.onRetry = { [weak self] in self?.viewModel.refresh() }
+        galleryPager.onRetry = { [weak self] in self?.viewModel.retryGallery() }
 
         viewModel.onPhaseChange = { [weak self] phase in
             HeroScreenCost.measure("landing.phase") { self?.render(phase) }

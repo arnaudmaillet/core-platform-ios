@@ -339,10 +339,10 @@ final class NotificationsViewController: UIViewController {
         host.onTakingLonger = { [weak self] in
             guard let self else { return }
             emptyState.configure(
-                symbolName: "clock",
-                title: "Taking longer than usual",
+                symbolName: TakingLongerCopy.symbol,
+                title: TakingLongerCopy.title,
                 subtitle: "Your notifications are still on their way.",
-                actionTitle: "Try Again"
+                actionTitle: TakingLongerCopy.action
             ) { [weak self] in self?.retryLoad() }
             loading.showStatus()
         }
@@ -357,7 +357,7 @@ final class NotificationsViewController: UIViewController {
     /// Try Again: the wait starts over under the skeleton's timing.
     private func retryLoad() {
         loading.load()
-        viewModel.refresh()
+        viewModel.retry()
     }
 
     private func configureStatusViews() {

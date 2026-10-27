@@ -21,6 +21,15 @@ public enum LoadingTiming {
     public static let takingLonger: TimeInterval = 10
 }
 
+/// The words of a wait past `LoadingTiming.takingLonger` (#1770): one status
+/// for every screen — the glyph, the title, the way out. The subtitle is the
+/// screen's own ("Your conversations are still on their way.").
+public enum TakingLongerCopy {
+    public static let symbol = "clock"
+    public static let title = "Taking longer than usual"
+    public static let action = "Try Again"
+}
+
 /// Time, injectable: a test steps it. The one clock of every loading state —
 /// `SkeletonGate.Clock` and `LoadingLadder.Clock` are this type.
 public struct LoadingClock {
@@ -41,6 +50,40 @@ public struct LoadingClock {
         })
     }
 }
+
+#if DEBUG
+/// A clock a test steps (#1770): `clock` goes into the screen, `advance`
+/// runs what fell due, in order. One for every suite rather than a copy in
+/// each.
+@MainActor
+public final class ManualLoadingClock {
+    public private(set) var now: TimeInterval = 0
+    private var pending: [(at: TimeInterval, work: @MainActor () -> Void)] = []
+
+    public init() {}
+
+    public var clock: LoadingClock {
+        LoadingClock(now: { [weak self] in self?.now ?? 0 }, after: { [weak self] delay, work in
+            guard let self else { return }
+            pending.append((now + delay, work))
+        })
+    }
+
+    /// Moves time on by `seconds`, running each piece of work that fell
+    /// due at its own time — a step's work is stamped at the step's end only
+    /// for what it schedules itself.
+    public func advance(_ seconds: TimeInterval) {
+        let end = now + seconds
+        while let index = pending.indices.filter({ pending[$0].at <= end })
+            .min(by: { pending[$0].at < pending[$1].at }) {
+            let due = pending.remove(at: index)
+            now = max(now, due.at)
+            due.work()
+        }
+        now = end
+    }
+}
+#endif
 
 /// When a loader shows (#1768): nothing for `grace`, then the loader, held at
 /// least `minimum` once up — the screen-level `SkeletonGate`'s rule for a

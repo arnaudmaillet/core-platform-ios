@@ -39,9 +39,9 @@ final class MessageRequestsViewController: UIViewController {
         host.onTakingLonger = { [weak self] in
             guard let self else { return }
             statusView.configure(
-                symbol: "clock", title: "Taking longer than usual",
+                symbol: TakingLongerCopy.symbol, title: TakingLongerCopy.title,
                 message: "Your requests are still on their way.",
-                actionTitle: "Try Again", action: { [weak self] in self?.retryLoad() }
+                actionTitle: TakingLongerCopy.action, action: { [weak self] in self?.retryLoad() }
             )
             loading.showStatus()
         }
@@ -306,7 +306,7 @@ final class MessageRequestsViewController: UIViewController {
     /// Try Again: the wait starts over under the skeleton's timing.
     private func retryLoad() {
         loading.load()
-        viewModel.refresh()
+        viewModel.retry()
     }
     #if DEBUG
     /// `-inbox-tap-section new|recent` fires a header pill's own action ~2s in.

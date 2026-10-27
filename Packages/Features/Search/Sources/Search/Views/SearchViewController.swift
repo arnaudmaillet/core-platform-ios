@@ -818,7 +818,55 @@ final class SearchViewController: UIViewController {
 
     // MARK: - Render
 
+    /// Suggested's bones on the kit's timing (#1770): none for a list that
+    /// answers at once, held their minimum once up. After 10 s the section
+    /// goes, as a failed one does — a suggestions list is not worth a row of
+    /// apology on a screen whose search still works. Injectable so a test
+    /// steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var suggestedGate: SkeletonGate = {
+        let gate = SkeletonGate(clock: skeletonClock)
+        gate.onSkeletonChange = { [weak self] _ in self?.rerenderExplore() }
+        gate.onTakingLonger = { [weak self] in
+            self?.suggestedGaveUp = true
+            self?.suggestedGate.finish { [weak self] in self?.rerenderExplore() }
+        }
+        return gate
+    }()
+    /// The wait for Suggested ran past 10 s: the section stays gone — a
+    /// redraw of the explore list must not start its bones again — until
+    /// it answers.
+    private var suggestedGaveUp = false
+
+    /// Draws the explore list again for what the gate decided.
+    private func rerenderExplore() {
+        guard case .explore = viewModel.currentPhase else { return }
+        render(viewModel.currentPhase)
+    }
+
+    /// The gate's reveal: the explore list as it is now — nothing if the
+    /// screen moved on to a query meanwhile.
+    private func rerenderExploreNow() {
+        guard case .explore = viewModel.currentPhase else { return }
+        renderNow(viewModel.currentPhase)
+    }
+
     private func render(_ phase: SearchViewModel.Phase) {
+        // ⚠️ SUGGESTED'S ANSWER WAITS OUT ITS BONES' MINIMUM (#1770): the
+        // explore list lands through the gate once Suggested has answered.
+        if case .explore(let model) = phase {
+            if case .loading = model.trending {
+                if !suggestedGaveUp { suggestedGate.begin() }
+            } else {
+                suggestedGaveUp = false
+                // The newest phase lands, not the one this call was given.
+                return suggestedGate.finish { [weak self] in self?.rerenderExploreNow() }
+            }
+        }
+        renderNow(phase)
+    }
+
+    private func renderNow(_ phase: SearchViewModel.Phase) {
         switch phase {
         case .explore(let model):
             spinner.stopAnimating()
@@ -941,8 +989,10 @@ final class SearchViewController: UIViewController {
             // ⚠️ SECTIONS BY PRESENCE (#1773): bones only for a section that
             // had rows last time (or was never seen) — as many as it had, up
             // to the fold — never five bones that leave for nothing.
+            // The gate's timing (#1770): no bones before its delay, none
+            // once the wait ran past 10 s.
             let count = Self.suggestedSkeletonCount(remembered: rememberedSuggested)
-            guard count > 0 else { break }
+            guard count > 0, suggestedGate.showsSkeleton else { break }
             snapshot.appendSections([.suggestions])
             snapshot.appendItems((0..<count).map { .suggestedSkeleton($0) }, toSection: .suggestions)
         case .loaded(let creators):
