@@ -1,3 +1,5 @@
+import CoreStorage
+import Foundation
 import MediaCore
 import PostGrid
 import Testing
@@ -366,5 +368,30 @@ struct ProfileGalleryPullTests {
         page.debugReleasePull(by: 90)
         #expect(released.count == 1)
         #expect(abs((released.first ?? 0) - 90) < 1)
+    }
+}
+
+/// SECTIONS BY PRESENCE (#1773): a profile tab empty last time wears no
+/// bones that would turn into its empty page.
+@MainActor
+struct ProfileTabPresenceTests {
+    @Test func aTabEmptyLastTimeLoadsWithoutBones() {
+        #expect(ProfileGalleryPagerView.pageState(.loading, for: .format(.activity), remembered: 0) == .content([]))
+        #expect(ProfileGalleryPagerView.pageState(.loading, for: .format(.activity), remembered: 4) == .loading)
+        #expect(ProfileGalleryPagerView.pageState(.loading, for: .format(.activity), remembered: nil) == .loading)
+    }
+
+    @Test func theAnswerIsRemembered() throws {
+        let defaults = try #require(UserDefaults(suiteName: "presence-\(UUID().uuidString)"))
+        let pager = ProfileGalleryPagerView(tabs: ProfileTab.publicTabs, makePage: TestGridPages.pageMaker())
+        pager.presence = SectionPresenceStore(defaults: defaults)
+        pager.presenceScreen = { "profile.ada" }
+        var snapshot = ProfileViewModel.GallerySnapshot(activity: .empty(message: ""), media: .empty(message: ""))
+        pager.render(snapshot)
+        #expect(pager.presence.count(screen: "profile.ada", section: String(describing: ProfileTab.format(.activity))) == 0)
+        snapshot.activity = .loading
+        pager.render(snapshot)
+        #expect(pager.presence.count(screen: "profile.ada", section: String(describing: ProfileTab.format(.activity))) == 0,
+                "a load forgot what was there")
     }
 }

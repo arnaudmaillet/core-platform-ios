@@ -24,8 +24,11 @@ final class RestingCommentsPlaceholderView: UIView {
     private let caption = CommentRowView(installsContextMenu: false)
     private var rows: [CommentSkeletonRowView] = []
     private var topInset: NSLayoutConstraint!
+    /// The post's comment count when the feed knows it: no bones for none.
+    private let knownComments: Int64?
 
     init(model: FeedItemDisplayModel, imagePipeline: ImagePipeline, safeAreaTop: CGFloat) {
+        knownComments = model.cardMetrics?.comments
         super.init(frame: .zero)
         isUserInteractionEnabled = false
         clipsToBounds = true
@@ -62,6 +65,11 @@ final class RestingCommentsPlaceholderView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    #if DEBUG
+    /// The comment bones standing in — what a test reads.
+    var debugBoneCount: Int { rows.count }
+    #endif
+
     /// Updates the stream's top inset once the cell knows its safe area.
     func setSafeAreaTop(_ safeAreaTop: CGFloat) {
         topInset.constant = SnapCommentsLayout.commentsTopInset(topInset: safeAreaTop)
@@ -71,7 +79,9 @@ final class RestingCommentsPlaceholderView: UIView {
         super.layoutSubviews()
         // Enough bones to reach the bottom edge, the way the panel counts
         // its placeholders against the viewport.
-        let needed = SnapCommentsLayout.skeletonPlaceholderCount(viewportHeight: bounds.height)
+        let needed = SnapCommentsLayout.skeletonPlaceholderCount(
+            viewportHeight: bounds.height, knownComments: knownComments
+        )
         guard needed != rows.count else { return }
         rows.forEach { $0.superview?.removeFromSuperview() }
         rows = (0..<needed).map(CommentSkeletonRowView.init(index:))

@@ -606,6 +606,16 @@ public final class ProfileViewModel {
         return false
     }
 
+    /// Where this profile's sections remember whether they had something
+    /// (#1773, `SectionPresenceStore`): its id once known, nil before.
+    public var presenceScreen: String? {
+        switch source {
+        case .currentUser: "profile.me"
+        case .profile(let id): "profile.\(id.rawValue)"
+        case .lookup: nil
+        }
+    }
+
     /// Every key a route to this screen could carry by now (#800): the
     /// reference it was opened with, its id once known, its handle once
     /// loaded — what the router's repeat filter compares a new route with.

@@ -298,6 +298,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         let savesPosts = viewModel.bookmarks != nil
         let pager = ProfileGalleryPagerView(tabs: allTabs) { style in makeGridPage(style, savesPosts) }
         pager.setVisibleTabs(shown)
+        pager.presenceScreen = { [weak viewModel] in viewModel?.presenceScreen }
         galleryPager = pager
         // The gallery's format selector — the SAME `PagedTabBar` For You and
         // Messages wear, built `.navigationTitle` and told to FILL — at the
