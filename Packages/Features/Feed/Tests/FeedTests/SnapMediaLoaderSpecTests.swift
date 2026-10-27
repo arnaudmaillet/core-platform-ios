@@ -153,6 +153,23 @@ struct SnapMediaLoaderSpecTests {
                 "the page is showing a picture, so it must stop saying it is not")
     }
 
+    /// ⚠️ A CLIP'S FRAMES ARE ITS PICTURE (#1505): the bone stands over the
+    /// video surface, so a landing that hands over a surface already drawing
+    /// — while the poster is still on its way — takes the bone down at once,
+    /// or the clip would play under it.
+    @Test func aLiveSurfaceHandedOverTakesTheBoneDown() async {
+        let cell = cell(clip())
+        for _ in 0..<100 where !cell.debugShowsPictureBone { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(cell.debugShowsPictureBone, "the premise: the poster is on its way, under its bone")
+
+        let adopted = VideoRenderView()
+        adopted.debugSimulateFirstFrame()
+        cell.adoptLiveRenderView(adopted)
+
+        #expect(!cell.debugShowsPictureBone, "the bone stayed over a clip that is playing")
+        #expect(!cell.debugIsShowingMediaLoader)
+    }
+
     /// ⚠️ AND THE SIGNAL MOVES WITH THE SURFACE, for the frame that has not
     /// arrived yet.
     ///

@@ -55,6 +55,9 @@ final class SnapMediaCardView: UIView {
             guard oldValue !== renderView else { return }
             oldValue.onPictureAvailabilityChange = nil
             installPictureObserver(on: renderView)
+            // A surface handed over already drawing (a landing's): its frames
+            // are the picture, and no bone stands over them.
+            if renderView.hasFrame { framesArrived() }
             // The band follows whichever surface this card draws with.
             if oldValue.frameCompanion === liveBackdrop { oldValue.frameCompanion = nil }
             renderView.frameCompanion = liveBackdrop
@@ -262,6 +265,7 @@ final class SnapMediaCardView: UIView {
             guard let self else { return }
             if ready {
                 self.applyFraming()
+                self.framesArrived()
             } else {
                 // The surface is back on its poster: so is a playing band.
                 self.liveBackdrop.sourceStoppedDrawing()
@@ -519,12 +523,32 @@ final class SnapMediaCardView: UIView {
         return picture.isLoading || picture.showsBone
     }
 
+    /// ⚠️ A CLIP'S FRAMES ARE ITS PICTURE. The bone stands over the video
+    /// surface (it covers the surface's opaque ground), so a clip drawing
+    /// before its poster came — a landing's live surface, a fast first frame —
+    /// would play under it: the picture lands now, its poster load or not, and
+    /// the bone dissolves away.
+    private func framesArrived() {
+        guard picture.ladder.rung != .content, picture.isLoading || picture.showsBone else { return }
+        if case .dissolve(let duration) = LoadingLadder.Transition.pictureArrives {
+            dissolveBoneAway(duration: duration)
+        }
+        picture.ladder.show(.content, token: picture.token, warm: true)
+    }
+
     /// A rung landed: the bone came up, or the picture arrived — the bone
     /// dissolving away over it when it was showing (the ladder hides it in
     /// this same pass; a still of it fades out on top).
     private func pictureLanded(_ rung: LoadingLadder.Rung, _ transition: LoadingLadder.Transition) {
         defer { onPictureLoadingChange?() }
-        guard rung == .content, case .dissolve(let duration) = transition, window != nil, picture.showsBone,
+        guard rung == .content, case .dissolve(let duration) = transition else { return }
+        dissolveBoneAway(duration: duration)
+    }
+
+    /// A still of the bone, faded out over what replaces it — the bone itself
+    /// is hidden by the ladder in the same pass.
+    private func dissolveBoneAway(duration: TimeInterval) {
+        guard window != nil, picture.showsBone,
               let ghost = pictureBone.snapshotView(afterScreenUpdates: false) else { return }
         ghost.frame = pictureBone.frame
         ghost.isUserInteractionEnabled = false
