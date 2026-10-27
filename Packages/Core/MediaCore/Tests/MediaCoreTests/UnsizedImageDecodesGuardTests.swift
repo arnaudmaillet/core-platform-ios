@@ -21,7 +21,6 @@ struct UnsizedImageDecodesGuardTests {
         "ForYouGridPage.swift": "For You's grid covers and their warm-up, hero sources",
         "PostShelfSection.swift": "rail covers, hero sources",
         "SnapFeedViewController.swift": "the lock-screen artwork of the post playing",
-        "SoundSheetViewController.swift": "the sound's cover, shown large",
     ]
 
     /// A pipeline receiver, then `image(for: x)` or `cachedImage(for: x)`

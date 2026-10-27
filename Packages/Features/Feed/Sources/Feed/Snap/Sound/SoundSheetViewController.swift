@@ -1086,9 +1086,7 @@ final class SoundSheetViewController: UIViewController {
             onTogglePlayback?()
         }
         if let url = sound.artworkURL ?? fallbackArtworkURL {
-            Task { [weak header, pipeline = imagePipeline] in
-                header?.setArtwork(await Self.image(at: url, pipeline: pipeline))
-            }
+            header.loadArtwork(url, pipeline: imagePipeline)
         }
     }
 
@@ -1487,18 +1485,6 @@ final class SoundSheetViewController: UIViewController {
     }
 
     // MARK: - Text
-
-    /// A local file is read as it is; anything else goes through the app's
-    /// pipeline. ⚠️ Not everything through the pipeline: the mock one paints
-    /// a colour for any URL it does not recognise, a file among them.
-    private static func image(at url: URL, pipeline: ImagePipeline) async -> UIImage? {
-        if url.isFileURL {
-            return await Task.detached(priority: .userInitiated) {
-                UIImage(contentsOfFile: url.path)?.preparingForDisplay()
-            }.value
-        }
-        return try? await pipeline.image(for: url)
-    }
 
     /// "0:30 · 3 posts" — POSTS, not videos: a photograph or a text post can
     /// be set to a sound too.
