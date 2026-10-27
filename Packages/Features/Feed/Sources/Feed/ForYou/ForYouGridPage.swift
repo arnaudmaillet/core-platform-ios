@@ -513,9 +513,29 @@ final class ForYouGridPage: UIView {
     /// The chunk `section` holds, or nil for a run of cards. Asked by the
     /// layout, which is why it is not private.
     func chunk(inSection section: Int) -> MosaicChunk? {
-        guard style == .discover, !showsSkeleton, segments.indices.contains(section) else { return nil }
+        guard style == .discover else { return nil }
+        if showsSkeleton {
+            return discoverSkeletonPlan.indices.contains(section) ? discoverSkeletonPlan[section].chunk : nil
+        }
+        guard segments.indices.contains(section) else { return nil }
         return segments[section].chunk
     }
+
+    /// Whether the chunks wear their "View all" footer: not on a titled
+    /// group (a day of what the viewer looked at, not a corpus to browse),
+    /// and not on the skeleton's mosaic.
+    var offersViewAll: Bool { !isGrouped && !showsSkeleton }
+
+    /// Discover's cold skeleton in Discover's own shape (#1773): the cards
+    /// that open the list, a mosaic chunk's tiles — the planner's own first
+    /// tiling — and cards under it. Not list cards alone: the posts land
+    /// into this shape, so the cross-dissolve changes no silhouette.
+    private lazy var discoverSkeletonPlan: [(chunk: MosaicChunk?, count: Int)] = {
+        var planner = chunkPlanner
+        let chunk = planner.chunk(ordinal: 0, rows: MosaicChunkPlanner.preferredRows(forChunk: 0))
+        let lead = max(1, min(2, MosaicChunkPlanner.gap(beforeChunk: 0)))
+        return [(nil, lead), (chunk, chunk.tileCount), (nil, 2)]
+    }()
 
     /// Whether `section` opens a titled group, and wears its title. Asked by
     /// the layout, like `chunk(inSection:)`.
@@ -946,7 +966,7 @@ final class ForYouGridPage: UIView {
                 // A titled group is a day of what the viewer looked at, not a
                 // corpus to browse: no chunk offers "View all" there.
                 showsViewAll: { [headerHost] in
-                    !(headerHost.page?.isGrouped ?? false)
+                    headerHost.page?.offersViewAll ?? false
                 }
             )
         }
@@ -3368,7 +3388,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     }
 
     func numberOfSections(in collectionView: UICollectionView) -> Int {
-        guard !showsSkeleton else { return 1 }
+        guard !showsSkeleton else { return style == .discover ? discoverSkeletonPlan.count : 1 }
         // One section per stretch — and one empty one for an empty list, the
         // shape the other styles have when there is nothing to show.
         if style == .discover { return max(1, segments.count) }
@@ -3376,7 +3396,10 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     }
 
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        guard !showsSkeleton else { return skeletonCount }
+        guard !showsSkeleton else {
+            guard style == .discover else { return skeletonCount }
+            return discoverSkeletonPlan.indices.contains(section) ? discoverSkeletonPlan[section].count : 0
+        }
         if style == .discover {
             return segments.indices.contains(section) ? segments[section].posts.count : 0
         }
@@ -3464,9 +3487,16 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
 
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         if showsSkeleton {
+            // Discover waits in its own shape (#1773): its skeleton mosaic's
+            // sections are tiles, the rest cards.
+            let discoverTile = style == .discover && chunk(inSection: indexPath.section) != nil
             switch style {
-            // Discover waits as cards: most of what it shows is cards, and a
-            // chunk's shape is not known until its posts are.
+            case .discover where discoverTile:
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: PostGridSkeletonTileCell.reuseID, for: indexPath
+                ) as! PostGridSkeletonTileCell
+                cell.cornerRadius = tileCornerRadius
+                return cell
             case .list, .discover:
                 let cell = collectionView.dequeueReusableCell(
                     withReuseIdentifier: PostGridSkeletonListCell.reuseID, for: indexPath

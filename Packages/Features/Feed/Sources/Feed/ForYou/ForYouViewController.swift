@@ -527,6 +527,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     private func beginLeadSkeleton() {
         let friends = presence.count(screen: Self.presenceScreen, section: "friends") ?? 0
         let following = presence.count(screen: Self.presenceScreen, section: "following") ?? 0
+        // The text row's bones too, when the shelf had text posts (#1773).
+        shelf.skeletonHasTextRow = (presence.count(screen: Self.presenceScreen, section: "followingText") ?? 0) > 0
         friendsRow.placeholderCount = friends
         _ = shelf.apply(.init(title: "Following", posts: [], isLoading: following > 0))
         leadGate.begin()
@@ -546,6 +548,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         if case .failed = state {} else {
             presence.remember(rows.friends.count, screen: Self.presenceScreen, section: "friends")
             presence.remember(rows.following.count, screen: Self.presenceScreen, section: "following")
+            presence.remember(
+                rows.following.filter { PostShelfRows.Row($0) == .text }.count,
+                screen: Self.presenceScreen, section: "followingText"
+            )
         }
         if leadGate.isLoading {
             pendingLead = rows

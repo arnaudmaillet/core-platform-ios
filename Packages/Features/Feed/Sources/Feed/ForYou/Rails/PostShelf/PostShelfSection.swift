@@ -60,14 +60,15 @@ final class PostShelfSection: UIView {
     /// The height this shelf needs at `width` — while it loads, its title
     /// over one row of skeleton cards (#1296).
     func preferredHeight(forWidth width: CGFloat) -> CGFloat {
-        if showsSkeleton { return Self.loadingHeight(forWidth: width) }
+        if showsSkeleton { return Self.loadingHeight(forWidth: width, textRow: skeletonHasTextRow) }
         let counts = rowCounts
         return Self.height(forWidth: width, media: counts.media, text: counts.text)
     }
 
-    /// A loading shelf's height: its title and one media row.
-    static func loadingHeight(forWidth width: CGFloat) -> CGFloat {
-        SectionTitleView.Metrics.height + LeadRowMetrics.cardSize(forWidth: width).height
+    /// A loading shelf's height: its title and one media row — and the text
+    /// row under it when the shelf had one last time (#1773).
+    static func loadingHeight(forWidth width: CGFloat, textRow: Bool = false) -> CGFloat {
+        SectionTitleView.Metrics.height + PostShelfRows.height(forWidth: width, media: 1, text: textRow ? 1 : 0)
     }
 
     /// Each row's count, as drawn: its posts, under its limit.
@@ -140,10 +141,20 @@ final class PostShelfSection: UIView {
     /// Whether the skeleton is what the shelf draws: loading, with nothing yet.
     private var showsSkeleton: Bool { isLoading && cards.isEmpty }
     private var skeletonCards: [SkeletonBoneView] = []
+    private var skeletonTextCards: [SkeletonBoneView] = []
+    /// Whether the skeleton has the text row's shape too: the shelf had text
+    /// posts last time (#1773) — a skeleton the shape of what will land.
+    var skeletonHasTextRow = false {
+        didSet {
+            guard skeletonHasTextRow != oldValue else { return }
+            setNeedsLayout()
+            if showsSkeleton { onHeightChange?() }
+        }
+    }
     /// Whether the bones show — the room is the skeleton's from the start, the
     /// bones only after the delay (`SkeletonGate`, #1756).
     var bonesVisible = true {
-        didSet { skeletonCards.forEach { $0.alpha = bonesVisible ? 1 : 0 } }
+        didSet { (skeletonCards + skeletonTextCards).forEach { $0.alpha = bonesVisible ? 1 : 0 } }
     }
 
     /// The item a "View all" card stands for in a row's data source.
@@ -526,8 +537,9 @@ final class PostShelfSection: UIView {
     /// pictures.
     private func layoutSkeleton(width: CGFloat) {
         guard showsSkeleton, width > 0 else {
-            skeletonCards.forEach { $0.removeFromSuperview() }
+            (skeletonCards + skeletonTextCards).forEach { $0.removeFromSuperview() }
             skeletonCards = []
+            skeletonTextCards = []
             return
         }
         let size = LeadRowMetrics.cardSize(forWidth: width)
@@ -541,6 +553,22 @@ final class PostShelfSection: UIView {
         for (index, bone) in skeletonCards.enumerated() {
             let x = LeadRowMetrics.sideMargin + CGFloat(index) * (size.width + LeadRowMetrics.itemGap)
             bone.frame = CGRect(x: x, y: SectionTitleView.Metrics.height, width: size.width, height: size.height)
+        }
+        // The text row under it, when it had one (#1773): text-card bones,
+        // one whole and one peeking, at the text cards' size.
+        let textCount = skeletonHasTextRow ? 2 : 0
+        while skeletonTextCards.count > textCount { skeletonTextCards.removeLast().removeFromSuperview() }
+        while skeletonTextCards.count < textCount {
+            let bone = SkeletonBoneView(rounding: .fixed(PostGridListRowCell.cardCornerRadius))
+            bone.alpha = bonesVisible ? 1 : 0
+            addSubview(bone)
+            skeletonTextCards.append(bone)
+        }
+        let textSize = textCardSize(forWidth: width)
+        let textY = SectionTitleView.Metrics.height + size.height + PostShelfRows.rowGap
+        for (index, bone) in skeletonTextCards.enumerated() {
+            let x = LeadRowMetrics.sideMargin + CGFloat(index) * (textSize.width + LeadRowMetrics.itemGap)
+            bone.frame = CGRect(x: x, y: textY, width: textSize.width, height: textSize.height)
         }
     }
 
