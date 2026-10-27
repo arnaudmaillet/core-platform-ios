@@ -370,7 +370,13 @@ final class InboxCatalog {
                   loadGeneration == generation, nextTokens[folder] == token
             else {
                 // A reset already emptied the slot, and may have refilled it.
-                if loadGeneration == generation { pageLoads[folder] = nil }
+                if loadGeneration == generation {
+                    pageLoads[folder] = nil
+                    // ⚠️ SAID, not swallowed (#1767): with no new snapshot the
+                    // footer the approach set spinning spun on until the next
+                    // approach. A render stops it; the next approach retries.
+                    emit()
+                }
                 return
             }
             // Stored only where it follows the stored pages (the device

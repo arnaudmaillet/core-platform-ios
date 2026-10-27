@@ -247,6 +247,21 @@ struct SnapMediaLoaderSpecTests {
         #expect(!cell.debugIsShowingMediaLoader, "a loader over the tile's picture")
     }
 
+    /// ⚠️ A PHOTOGRAPH THAT FAILED IS NOT WAITED ON FOR GOOD (#1767): the
+    /// loader comes down, the failure mark offers Try Again, and Try Again
+    /// takes the mark away while the picture is asked for again.
+    @Test func aFailedPhotoShowsTryAgainNotALoaderForever() {
+        let cell = cell(photo())
+        cell.debugElapseMediaLoaderGrace()
+        #expect(cell.debugIsShowingMediaLoader, "the premise: the photograph is on its way")
+
+        cell.debugFailPicture()
+        cell.debugElapseMediaLoaderGrace()
+
+        #expect(!cell.debugIsShowingMediaLoader, "a loader over a photograph that will never come")
+        #expect(cell.debugShowsPictureFailure, "a failure with no way out")
+    }
+
     /// ⚠️ A CLIP BUFFERING BEHIND ITS POSTER SHOWS NO LOADER (the owner,
     /// 2026-10-27): there is a picture on screen, and the stream's wait is the
     /// bar's pulse (`SnapMediaPageBarView.setLoading`, #1537) — TikTok's

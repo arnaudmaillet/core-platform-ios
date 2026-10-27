@@ -34,6 +34,8 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
     var onNearEnd: (() -> Void)?
     /// "View all" under one of Posts' mosaic chunks (#631).
     var onViewAllTapped: (() -> Void)?
+    /// A failed page's Try Again (#1767): the gallery loads again.
+    var onRetry: (() -> Void)?
     /// A row's author was tapped, on whichever page is showing.
     var onAuthorTapped: ((GalleryPost) -> Void)?
     /// What a row's "..." offers — see `PostGridPage.postMenuActions`.
@@ -73,6 +75,7 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
                 }
             }
             page.onViewAllTapped = { [weak self] in self?.onViewAllTapped?() }
+            page.onRefresh = { [weak self] in self?.onRetry?() }
             page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
             page.postMenuActions = { [weak self] context in
                 self?.authorMenuActions?(context, tab) ?? []
@@ -140,9 +143,12 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
             return .status(PostGridPageStatus(symbolName: "lock", title: title, subtitle: message))
         case .failed(let message):
             // A failure is NOT an empty state: the glyph and the headline read
-            // as "this did not work", not as "there is nothing here".
+            // as "this did not work", not as "there is nothing here". And it
+            // has a way out (#1767): the pull lived on a page whose posts the
+            // failure had taken away.
             return .status(PostGridPageStatus(
-                symbolName: "exclamationmark.triangle", title: "Couldn't Load", subtitle: message
+                symbolName: "exclamationmark.triangle", title: "Couldn't Load", subtitle: message,
+                actionTitle: "Try Again"
             ))
         }
     }

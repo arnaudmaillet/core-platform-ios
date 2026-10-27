@@ -909,7 +909,12 @@ final class SearchViewController: UIViewController {
         case .failed(let message):
             spinner.stopAnimating()
             apply(NSDiffableDataSourceSnapshot<SearchSection, SearchItem>())
-            showStatus(symbolName: "exclamationmark.triangle", title: "Couldn't search", subtitle: message)
+            // ⚠️ A WAY OUT (#1767): the view model has always had a retry;
+            // the failure never offered it.
+            showStatus(
+                symbolName: "exclamationmark.triangle", title: "Couldn't search", subtitle: message,
+                actionTitle: "Try Again", action: { [weak self] in self?.viewModel.retryFailedSearch() }
+            )
         }
     }
 
@@ -992,8 +997,13 @@ final class SearchViewController: UIViewController {
         dataSource.apply(snapshot, animatingDifferences: true)
     }
 
-    private func showStatus(symbolName: String, title: String, subtitle: String) {
-        statusView.configure(symbolName: symbolName, title: title, subtitle: subtitle)
+    private func showStatus(
+        symbolName: String, title: String, subtitle: String,
+        actionTitle: String? = nil, action: (() -> Void)? = nil
+    ) {
+        statusView.configure(
+            symbolName: symbolName, title: title, subtitle: subtitle, actionTitle: actionTitle, actionHandler: action
+        )
         statusView.isHidden = false
     }
 

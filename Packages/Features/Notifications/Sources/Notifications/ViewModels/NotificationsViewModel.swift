@@ -116,6 +116,10 @@ public final class NotificationsViewModel {
     private(set) var clearCall: Task<Void, Never>?
     /// The server refused the clear: the rows are back, and the list says so.
     public var onClearFailed: (() -> Void)?
+    /// A refresh failed while rows were on show (#1767): the rows stay, and
+    /// the host ends its pull and says so. Without it the phase never moved,
+    /// so the pull's indicator spun on with no word.
+    public var onRefreshFailed: ((String) -> Void)?
 
     public init(
         repository: any NotificationsProviding,
@@ -413,12 +417,13 @@ public final class NotificationsViewModel {
             } catch is CancellationError {
                 // Superseded; leave the phase alone.
             } catch {
-                if case .content = self.phase {} else {
-                    // "You're offline" when that is why: the one cause the
-                    // viewer can fix themselves (#794).
-                    self.phase = .failed(message: FailureCopy.message(
-                        for: error, fallback: "Couldn't load your notifications."
-                    ))
+                // "You're offline" when that is why: the one cause the viewer
+                // can fix themselves (#794).
+                let message = FailureCopy.message(for: error, fallback: "Couldn't load your notifications.")
+                if case .content = self.phase {
+                    self.onRefreshFailed?(message)
+                } else {
+                    self.phase = .failed(message: message)
                 }
             }
             self.load = nil

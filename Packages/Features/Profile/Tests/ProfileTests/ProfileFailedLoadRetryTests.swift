@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import FeedInterface
 import Foundation
 import MediaCore
 import Testing
@@ -105,5 +106,70 @@ struct ProfileFailedLoadRetryTests {
         #expect(await settle { viewModel.profile != nil }, "the reload brought no profile")
         #expect(await settle { statusView(of: screen) == nil }, "the failure outlived the reload")
         #expect(viewModel.displayName == "Kenji Tanaka")
+    }
+
+    /// A gallery page that failed offers Try Again (#1767): it said "Pull to
+    /// retry", on a page whose posts the failure had taken away.
+    @Test func aFailedGalleryPageOffersTryAgain() {
+        let state = ProfileGalleryPagerView.pageState(.failed(message: "Couldn't load these posts."), for: .saved)
+        guard case .status(let status) = state else {
+            Issue.record("a failed page drew no status")
+            return
+        }
+        #expect(status.actionTitle == "Try Again")
+    }
+
+    /// ⚠️ THE CARD TOO (#1767): a card whose profile failed hid its header
+    /// and was left blank — no message, no way to try again.
+    @Test func aFailedProfileCardOffersTryAgainWhichReloadsIt() async throws {
+        let profiles = FlakyProfiles()
+        let viewModel = ProfileViewModel(repository: profiles, source: .profile(ProfileID("prof-kenji")))
+        let card = ProfileCardViewController(
+            viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            shareTargeting: nil, makeRelationshipsViewController: nil, identityStub: nil,
+            actions: .init(openProfile: {}, push: { _ in })
+        )
+        card.loadViewIfNeeded()
+
+        try #require(await settle { card.debugShowsStatus }, "the card's failure was not shown")
+        let status = try #require(Self.firstView(EmptyStateView.self, in: card.view))
+        let button = try #require(Self.firstView(UIButton.self, in: status))
+        #expect(button.configuration?.title == "Try Again")
+
+        await profiles.startAnswering()
+        button.sendActions(for: .primaryActionTriggered)
+
+        #expect(await settle { viewModel.profile != nil }, "Try Again brought no profile")
+        #expect(await settle { !card.debugShowsStatus }, "the failure outlived the reload")
+    }
+
+    /// ⚠️ EDIT PROFILE TOO (#1767): a first load that failed showed an alert
+    /// with only "OK" and left the skeleton up for good.
+    @Test func aFailedEditorLoadOffersTryAgainWhichReloadsIt() async throws {
+        let profiles = FlakyProfiles()
+        let editor = EditProfileViewController(
+            viewModel: EditProfileViewModel(repository: profiles, onSaved: {}),
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher())
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        window.rootViewController = UINavigationController(rootViewController: editor)
+        window.isHidden = false
+        window.layoutIfNeeded()
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+            window.layoutIfNeeded()
+        }
+
+        try #require(await settle { editor.debugShowsLoadFailure }, "the load's failure was not shown")
+        #expect(editor.presentedViewController == nil, "an OK-only alert instead of a way out")
+        let status = try #require(Self.firstView(EmptyStateView.self, in: editor.view))
+        let button = try #require(Self.firstView(UIButton.self, in: status))
+        #expect(button.configuration?.title == "Try Again")
+
+        await profiles.startAnswering()
+        button.sendActions(for: .primaryActionTriggered)
+
+        #expect(await settle { !editor.debugShowsLoadFailure }, "Try Again left the failure up")
     }
 }

@@ -1751,6 +1751,12 @@ final class MapsViewController: UIViewController {
     /// pick a primary is a different control wearing the same pills. The two
     /// sub-filter ROWS are where a primary's own people live — see
     /// `people(for:)`.
+    /// How long the dock waits before asking for its people again after a
+    /// failed read.
+    static let favoritesRetryDelay: TimeInterval = 5
+    static let favoritesRetryLimit = 3
+    private var favoritesRetries = 0
+
     private func loadFavorites() {
         #if DEBUG
         // Which surface a write woke is the whole question when the complaint
@@ -1773,9 +1779,23 @@ final class MapsViewController: UIViewController {
             let people = if let curated {
                 await repository.profiles(for: curated)
             } else {
-                await repository.following()
+                await repository.followingIfReachable()
             }
             guard let self, !Task.isCancelled else { return }
+            // ⚠️ A FAILURE IS NOT "NO ONE" (#1767): it read as an empty dock,
+            // the pills gone. The pills on show stay, and the dock asks again
+            // a little later.
+            guard let people else {
+                // A few times, not forever: offline for good, the next reload
+                // (a tab return, a filter change) asks again.
+                guard self.favoritesRetries < Self.favoritesRetryLimit else { return }
+                self.favoritesRetries += 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.favoritesRetryDelay) { [weak self] in
+                    self?.loadFavorites()
+                }
+                return
+            }
+            self.favoritesRetries = 0
             self.currentFavorites = people
             self.filterBar.setFavorites(people)
         }

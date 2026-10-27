@@ -2199,7 +2199,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// is the bar's to announce.
     private var showsAPicture: Bool {
         guard mediaURL != nil else { return true }
-        return mediaCard.showsPicture
+        // A picture that failed for good shows its failure mark and Try Again
+        // instead (#1767): nothing left for the loader to wait on.
+        return mediaCard.showsPicture || mediaCard.isPictureFailed
     }
 
     /// Re-decides whether the page is announcing a wait — called from every
@@ -2221,6 +2223,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Whether the page is announcing a wait, asked of the media area rather
     /// than of any bookkeeping.
     var debugIsShowingMediaLoader: Bool { mediaCard.isShowingLoader }
+    /// Whether the page shows its picture's failure mark (#1767).
+    var debugShowsPictureFailure: Bool { mediaCard.debugShowsPictureFailure }
+    /// Fails the page's photograph as the pipeline would.
+    func debugFailPicture() { mediaCard.debugFailPicture() }
 
     /// The surface the page is CURRENTLY showing — which is not the one it was
     /// built with once a landing has handed one over. A spec that wants to

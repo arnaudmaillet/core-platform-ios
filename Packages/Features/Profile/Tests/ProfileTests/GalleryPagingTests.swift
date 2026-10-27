@@ -222,7 +222,7 @@ struct GalleryPagingTests {
         let gallery = PagedGallery(authored: [:])
         await gallery.failFirstPage(with: ProfileError.transport(message: "x", failure: .server(code: "internal")))
         let (_, shown) = try await open(gallery)
-        #expect(shown.snapshot?.activity == .failed(message: "Couldn't load. Pull to retry."))
+        #expect(shown.snapshot?.activity == .failed(message: "Couldn't load these posts."))
     }
 
     @Test func anOfflineNextPageUnderAnEmptyTabSaysOffline() async throws {

@@ -148,6 +148,11 @@ final class NotificationsViewController: UIViewController {
         configureStatusViews()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        viewModel.onRefreshFailed = { [weak self] message in
+            guard let self else { return }
+            refreshControl.endRefreshing()
+            Feedback.failure(message, from: self)
+        }
         viewModel.onPageFooterChange = { [weak self] _ in
             guard let self, !sections.isEmpty else { return }
             apply(sections)

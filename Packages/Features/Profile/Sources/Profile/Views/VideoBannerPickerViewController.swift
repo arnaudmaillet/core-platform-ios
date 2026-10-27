@@ -97,7 +97,17 @@ final class VideoBannerPickerViewController: UIViewController {
         ])
     }
 
+    /// A failed load's way out (#1767): it said "Couldn't load your videos."
+    /// with nothing to press.
+    private lazy var failureView: EmptyStateView = {
+        let view = EmptyStateView()
+        view.isHidden = true
+        view.pin(to: self.view)
+        return view
+    }()
+
     private func reload() {
+        failureView.isHidden = true
         spinner.startAnimating()
         Task { [weak self] in
             guard let self else { return }
@@ -107,7 +117,12 @@ final class VideoBannerPickerViewController: UIViewController {
                 self.show(posts)
             } catch {
                 self.spinner.stopAnimating()
-                self.showEmpty("Couldn't load your videos.")
+                self.emptyLabel.isHidden = true
+                self.failureView.configure(
+                    symbolName: "exclamationmark.triangle", title: "Couldn't load your videos.",
+                    actionTitle: "Try Again", actionHandler: { [weak self] in self?.reload() }
+                )
+                self.failureView.isHidden = false
             }
         }
     }
