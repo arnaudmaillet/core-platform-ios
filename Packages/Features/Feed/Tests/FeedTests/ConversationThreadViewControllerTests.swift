@@ -78,7 +78,8 @@ struct ConversationThreadViewControllerTests {
         mode: ConversationThreadMode = .full,
         prefill: String = "",
         phase: ConversationThreadPhase = .content(transcript),
-        now: Date? = nil
+        now: Date? = nil,
+        skeletonClock: LoadingClock? = nil
     ) -> (ConversationThreadViewController, FakeDriver, FakeAccessory, UIWindow) {
         let driver = FakeDriver(initial: phase)
         let accessory = FakeAccessory()
@@ -89,6 +90,7 @@ struct ConversationThreadViewControllerTests {
         // One "now" for the seed and the titles: a run crossing midnight
         // read the clock on either side of it.
         if let now { screen.dayClock = { now } }
+        if let skeletonClock { screen.skeletonClock = skeletonClock }
         let navigation = UINavigationController(rootViewController: screen)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = navigation
@@ -119,6 +121,27 @@ struct ConversationThreadViewControllerTests {
         button.sendActions(for: .primaryActionTriggered)
 
         #expect(driver.refreshes == 1)
+    }
+
+    /// The first load's skeleton on the kit's timing (#1770): nothing for
+    /// the delay, the bones after it, and after 10 s "Taking longer than
+    /// usual" with Try Again, which loads again.
+    @Test func theFirstLoadsBonesFollowTheGate() throws {
+        let time = ManualLoadingClock()
+        let (screen, driver, _, window) = makeScreen(phase: .loading, skeletonClock: time.clock)
+        defer { window.isHidden = true }
+        #expect(screen.debugSkeletonRowCount == 0, "bones before the delay")
+        time.advance(LoadingTiming.skeletonDelay)
+        #expect(screen.debugSkeletonRowCount > 0)
+
+        time.advance(LoadingTiming.takingLonger)
+        #expect(screen.debugSkeletonRowCount == 0)
+        let status = try #require(Self.firstView(EmptyStateView.self, in: screen.view))
+        #expect(!status.isHidden)
+        #expect(status.debugTitle == TakingLongerCopy.title)
+        status.debugTapAction()
+        #expect(driver.refreshes == 1)
+        #expect(status.isHidden, "Try Again keeps the status up")
     }
 
     @Test func messagesAreGroupedByDayOldestFirst() throws {

@@ -177,4 +177,11 @@ public final class EmptyStateView: UIView {
 
         accessibilityLabel = [title, subtitle].compactMap { $0 }.joined(separator: ". ")
     }
+
+    #if DEBUG
+    /// The title shown — what a test reads.
+    public var debugTitle: String? { titleLabel.isHidden ? nil : titleLabel.text }
+    /// Taps the action, as a finger would.
+    public func debugTapAction() { actionHandler?() }
+    #endif
 }

@@ -36,14 +36,18 @@ final class ConversationListViewController: UIViewController {
     /// Which of the skeleton, the table and the status shows, on the kit's
     /// timing (#1768): no skeleton for an inbox that answers at once, held
     /// its minimum once up, and "taking longer" with a retry after 10 s.
+    /// Injectable so a test steps the timing.
+    var skeletonClock: LoadingClock = .system
     private lazy var loading: ScreenLoadingHost = {
-        let host = ScreenLoadingHost(container: view, skeleton: skeletonView, content: tableView, status: statusView)
+        let host = ScreenLoadingHost(
+            container: view, skeleton: skeletonView, content: tableView, status: statusView, clock: skeletonClock
+        )
         host.onTakingLonger = { [weak self] in
             guard let self else { return }
             statusView.configure(
-                symbol: "clock", title: "Taking longer than usual",
+                symbol: TakingLongerCopy.symbol, title: TakingLongerCopy.title,
                 message: "Your conversations are still on their way.",
-                actionTitle: "Try Again", action: { [weak self] in self?.retryLoad() }
+                actionTitle: TakingLongerCopy.action, action: { [weak self] in self?.retryLoad() }
             )
             loading.showStatus()
         }
@@ -372,7 +376,7 @@ final class ConversationListViewController: UIViewController {
     /// Try Again: the wait starts over under the skeleton's timing.
     private func retryLoad() {
         loading.load()
-        viewModel.refresh()
+        viewModel.retry()
     }
 
     #if DEBUG

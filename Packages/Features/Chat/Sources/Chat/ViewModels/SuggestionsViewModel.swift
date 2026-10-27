@@ -104,6 +104,12 @@ public final class SuggestionsViewModel {
         reload()
     }
 
+    /// Try Again (#1770): asks again whatever is in flight — past "taking
+    /// longer" the first read is still out, and `refresh()` would wait on it.
+    public func retry() {
+        reload()
+    }
+
     public func refresh() {
         guard load == nil else { return }
         reload()

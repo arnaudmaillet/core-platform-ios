@@ -97,6 +97,12 @@ public final class MessageRequestsViewModel {
         catalog.loadMore(folder)
     }
 
+    /// Try Again (#1770): asks again whatever is in flight — past "taking
+    /// longer" the first read is still out, and `refresh()` would wait on it.
+    public func retry() {
+        catalog.reload()
+    }
+
     public func refresh() {
         catalog.refresh()
     }
