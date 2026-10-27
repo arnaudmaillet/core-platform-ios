@@ -51,25 +51,39 @@ public actor DiscoveryFeedRepository: FeedProviding {
     private let reader: @Sendable () async -> DiscoveryReader
     private let region: @Sendable () -> String
     private let pageSize: Int32
+    /// The device's copy of the first page, per viewer (#1765): Shots — the
+    /// launch screen — opens on it in its first frame, as TikTok's first video
+    /// comes from disk, and the network revalidates behind it.
+    private let localCache: FeedLocalCache?
 
     public init(
         timelineClient: any Timeline_V1_TimelineServiceClientInterface,
         base: any FeedProviding,
         reader: @escaping @Sendable () async -> DiscoveryReader = { .guest },
         region: @escaping @Sendable () -> String = { Locale.current.region?.identifier ?? "" },
-        pageSize: Int32 = 20
+        pageSize: Int32 = 20,
+        localCache: FeedLocalCache? = nil
     ) {
         self.timelineClient = timelineClient
         self.base = base
         self.reader = reader
         self.region = region
         self.pageSize = pageSize
+        self.localCache = localCache
     }
 
-    public func cachedFirstPage() async -> [FeedEntry]? { nil }
+    public func cachedFirstPage() async -> [FeedEntry]? {
+        guard let entries = localCache?.firstPage(of: .discovery)?.entries, !entries.isEmpty else { return nil }
+        return entries
+    }
 
     public func loadFirstPage() async throws -> FeedPage {
-        try await loadPage(token: "")
+        // Whose page this is, asked BEFORE the fetch: a page that lands after
+        // a switch is not written as the next viewer's.
+        let writer = localCache?.viewer
+        let page = try await loadPage(token: "")
+        localCache?.storeFirstPage(page.entries, nextCursor: page.nextPageToken, in: .discovery, as: writer)
+        return page
     }
 
     public func loadPage(afterToken token: String) async throws -> FeedPage {

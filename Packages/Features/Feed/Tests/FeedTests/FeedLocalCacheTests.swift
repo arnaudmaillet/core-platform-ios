@@ -15,7 +15,7 @@ import Testing
 // MARK: - Fixtures
 
 /// A store folder per suite instance, deleted with it.
-private final class StoreFolder: Sendable {
+final class StoreFolder: Sendable {
     let url = FileManager.default.temporaryDirectory
         .appending(path: "FeedLocalCacheTests-\(UUID().uuidString)", directoryHint: .isDirectory)
 

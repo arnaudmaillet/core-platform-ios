@@ -4,6 +4,7 @@ import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
 import Foundation
+import LocalStore
 import PostGrid
 import Testing
 @testable import Feed
@@ -21,7 +22,7 @@ struct DiscoveryFeedRepositoryTests {
     }
 
     private func makeDiscovery(
-        reader: DiscoveryReader = .guest
+        reader: DiscoveryReader = .guest, localCache: FeedLocalCache? = nil
     ) -> (DiscoveryFeedRepository, MockBFF, MockSocialDataset) {
         let dataset = MockSocialDataset()
         let bff = MockBFF()
@@ -44,9 +45,27 @@ struct DiscoveryFeedRepositoryTests {
             base: base,
             reader: { reader },
             region: { "FR" },
-            pageSize: 10
+            pageSize: 10,
+            localCache: localCache
         )
         return (discovery, bff, dataset)
+    }
+
+    /// ⚠️ SHOTS OPENS ON THE DEVICE'S COPY (#1765): the Discover pool's first
+    /// page is stored per viewer, and the next launch reads it back without a
+    /// request — the launch screen's first post in its first frame.
+    @Test func theFirstPageIsKeptForTheNextLaunch() async throws {
+        let folder = StoreFolder()
+        let cache = FeedLocalCache(store: try LocalStore(directory: folder.url, viewer: { .guest }))
+        let (session, _, _) = makeDiscovery(localCache: cache)
+        #expect(await session.cachedFirstPage() == nil, "nothing stored yet")
+        let first = try await session.loadFirstPage()
+
+        let relaunched = FeedLocalCache(store: try LocalStore(directory: folder.url, viewer: { .guest }))
+        let (next, bff, _) = makeDiscovery(localCache: relaunched)
+        let cached = try #require(await next.cachedFirstPage())
+        #expect(cached == first.entries, "the first page, as the network served it")
+        #expect(bff.recordedRequests.isEmpty, "the copy cost a request")
     }
 
     /// No following timeline needed: a guest gets posts from everyone.

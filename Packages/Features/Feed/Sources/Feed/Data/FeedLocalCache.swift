@@ -34,6 +34,10 @@ public final class FeedLocalCache: Sendable {
         public static let forYouDiscover = ListKey("foryou.discover")
         /// For You's following timeline: its rows and the pushed lists.
         public static let forYouFollowing = ListKey("foryou.following")
+        /// The Discover pool's first page (`DiscoveryFeedRepository`): what
+        /// Shots, the launch screen, opens on before the network answers
+        /// (#1765).
+        public static let discovery = ListKey("discovery.foryou")
     }
 
     /// A list read back as the feed renders it.

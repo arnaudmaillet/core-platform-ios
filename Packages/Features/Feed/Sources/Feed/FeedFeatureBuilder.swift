@@ -208,6 +208,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 // Media posts only (#1699): a text-only post is filtered out
                 // of every page the Discover list serves.
                 repository: MediaOnlyFeedProvider(base: discovery ?? repository),
+                // The launch screen opens on the device's first page, and the
+                // post playing is never swapped when the network answers
+                // (#1765).
+                cacheRevalidation: .keepShown,
                 engagementProvider: engagementProvider,
                 commentsProvider: commentsProvider,
                 realtime: realtime,

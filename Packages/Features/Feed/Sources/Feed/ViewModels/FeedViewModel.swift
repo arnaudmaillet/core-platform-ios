@@ -140,6 +140,9 @@ public final class FeedViewModel {
     /// again once a cursor arrives (a seeded feed opened on its last tile
     /// displayed it before the first page said more would follow).
     private var lastDisplayedIndex: Int?
+    private let cacheRevalidation: CacheRevalidation
+    /// The items on show came from the device's copy, not the network yet.
+    private var showsCachedFirstPage = false
     private var builder: FeedDisplayModelBuilder?
     private var initialLoad: Task<Void, Never>?
     /// Which first-page load is current (#836): bumped each time the slot is
@@ -169,8 +172,20 @@ public final class FeedViewModel {
     /// token is not `Sendable`, so the nonisolated `deinit` can't touch it.
     private let preferencesObservation = NotificationObservation()
 
+    /// What the network's first page does to a first page rendered from the
+    /// device (#1765).
+    public enum CacheRevalidation: Sendable {
+        /// It replaces it: a list read from its top.
+        case replace
+        /// The posts already on screen stay, and the network's come after
+        /// them: a full-screen feed whose first post is PLAYING (Shots, the
+        /// launch screen) never swaps it under the viewer, as TikTok does.
+        case keepShown
+    }
+
     public init(
         repository: any FeedProviding,
+        cacheRevalidation: CacheRevalidation = .replace,
         engagementProvider: (any EngagementProviding)? = nil,
         commentsProvider: (any CommentsProviding)? = nil,
         realtime: (any FeedRealtimeSubscribing)? = nil,
@@ -183,6 +198,7 @@ public final class FeedViewModel {
         self.entities = entities ?? EntityStore()
         self.commentPreferences = commentPreferences
         self.repository = repository
+        self.cacheRevalidation = cacheRevalidation
         self.engagementProvider = engagementProvider
         self.commentsProvider = commentsProvider
         self.realtime = realtime
@@ -549,6 +565,7 @@ public final class FeedViewModel {
         streamLoads = [:]
         streamsByPost = [:]
         items = []
+        showsCachedFirstPage = false
         engagement = [:]
         likesInFlight = []
         nextPageToken = nil
@@ -572,6 +589,7 @@ public final class FeedViewModel {
         if let cached = await repository.cachedFirstPage(), isCurrentInitialLoad(generation),
            let models = await build(cached), isCurrentInitialLoad(generation) {
             items = withoutDeleted(models)
+            showsCachedFirstPage = !items.isEmpty
             // A copy from the device: it never replaces a fresher count.
             seedEngagement(from: cached, counts: .ifUnknown)
             phase = .content
@@ -594,7 +612,8 @@ public final class FeedViewModel {
                 initialLoad = nil
                 return
             }
-            items = withoutDeleted(models)
+            items = revalidated(withoutDeleted(models))
+            showsCachedFirstPage = false
             seedEngagement(from: page.entries)
             subscribeToCounters(for: items.map(\.id))
             nextPageToken = page.nextPageToken
@@ -616,6 +635,18 @@ public final class FeedViewModel {
         // A cursor that arrived after the viewer's cell displayed: the
         // near-end check runs again for it (#761).
         if let lastDisplayedIndex { startPagingIfNearEnd(lastDisplayedIndex) }
+    }
+
+    /// The network's first page over the one shown from the device: replaced,
+    /// or — `keepShown` — the posts the viewer has reached (and the one after,
+    /// already warming) kept at the head, the network's fresh posts after
+    /// them.
+    private func revalidated(_ network: [FeedItemDisplayModel]) -> [FeedItemDisplayModel] {
+        guard cacheRevalidation == .keepShown, showsCachedFirstPage, !items.isEmpty else { return network }
+        let keep = min(items.count, (lastDisplayedIndex ?? 0) + 2)
+        let head = Array(items.prefix(keep))
+        let shown = Set(head.map(\.id))
+        return head + network.filter { !shown.contains($0.id) }
     }
 
     private func loadNextPage() async {
