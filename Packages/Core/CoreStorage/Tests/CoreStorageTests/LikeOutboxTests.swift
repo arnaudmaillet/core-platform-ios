@@ -183,6 +183,31 @@ struct WalletLikeOutboxTests {
         #expect(wallet.balance == start - 3)
     }
 
+    /// ⚠️ THE VIEWER IS TOLD (#1775): likes the server did not spend come
+    /// back with an event naming how many and where — the app's toast; a
+    /// stake spent in full says nothing.
+    @Test func aRefundIsAnnounced() {
+        let (wallet, _) = make()
+        final class Heard: @unchecked Sendable { var items: [(Int, String)] = [] }
+        let box = Heard()
+        let token = NotificationCenter.default.addObserver(
+            forName: WalletStore.stakeRefundedNotification, object: wallet, queue: nil
+        ) { note in
+            let amount = note.userInfo?[WalletStore.stakeRefundAmountKey] as? Int ?? -1
+            let target = note.userInfo?[WalletStore.stakeRefundTargetKey] as? String ?? ""
+            box.items.append((amount, target))
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+        wallet.stake(.likes(5), on: "p1")
+        wallet.settleCommittedStake(targetID: "p1", asked: 5, spent: 5)
+        #expect(box.items.isEmpty, "a stake spent in full was announced")
+        wallet.stake(.likes(4), on: "p2")
+        wallet.settleCommittedStake(targetID: "p2", asked: 4, spent: 1)
+        #expect(box.items.count == 1)
+        #expect(box.items.first?.0 == 3)
+        #expect(box.items.first?.1 == "p2")
+    }
+
     /// A guest's likes are the welcome gift's: nothing goes to the outbox.
     @Test func aGuestRecordsNothing() {
         let defaults = makeDefaults()

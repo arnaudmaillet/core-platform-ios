@@ -529,6 +529,14 @@ public final class WalletStore: @unchecked Sendable {
     /// it, with `object:` the store instance that changed.
     public static let didChangeNotification = Notification.Name("wallet.didChange")
 
+    /// Fired when likes staked on a post came back to the balance because the
+    /// server did not spend them — a refusal, a clamp, an expired batch
+    /// (#1775): the viewer is told, never left to find a smaller stake.
+    /// `userInfo`: `stakeRefundAmountKey` (Int), `stakeRefundTargetKey` (String).
+    public static let stakeRefundedNotification = Notification.Name("wallet.stakeRefunded")
+    public static let stakeRefundAmountKey = "amount"
+    public static let stakeRefundTargetKey = "targetID"
+
     private let defaults: UserDefaults
     private let lock = NSLock()
     private let now: @Sendable () -> Date
@@ -1121,7 +1129,12 @@ public final class WalletStore: @unchecked Sendable {
     public func settleCommittedStake(targetID: String, asked: Int, spent: Int) {
         let unspent = asked - max(0, spent)
         guard unspent > 0 else { return }
-        if refund(targetID: targetID, amount: unspent) != nil { postDidChange() }
+        guard refund(targetID: targetID, amount: unspent) != nil else { return }
+        postDidChange()
+        NotificationCenter.default.post(
+            name: Self.stakeRefundedNotification, object: self,
+            userInfo: [Self.stakeRefundAmountKey: unspent, Self.stakeRefundTargetKey: targetID]
+        )
     }
 
     /// Buys a ×100 cartridge pack with gems: `Policy.StakePack.shots` shots
