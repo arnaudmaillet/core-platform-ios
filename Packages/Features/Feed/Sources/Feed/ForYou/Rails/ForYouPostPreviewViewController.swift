@@ -63,8 +63,9 @@ final class ForYouPostPreviewViewController: UIViewController {
     /// join), which it must hand back.
     private var ownsPlayback = false
     private var playTask: Task<Void, Never>?
-    /// The cover's load, on the loading ladder's rules (#1085).
-    private let cover = ImageLoadSlot(size: .full)
+    /// The cover on the media slot (#1505): the tile's picture is usually in
+    /// memory and drawn at once; a late one wears the bone, then dissolves in.
+    private lazy var cover = CoverSlot(view: imageView, size: .full)
 
     /// The shapes a picture previews between: a portrait clip is held at 2:3
     /// (a 9:16 frame would be taller than the space above the menu), a
@@ -114,7 +115,7 @@ final class ForYouPostPreviewViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        cover.cancel()
+        cover.reset()
         stopClip()
     }
 
@@ -172,10 +173,7 @@ final class ForYouPostPreviewViewController: UIViewController {
         }
 
         guard !isText, let url = post.thumbnailURL else { return }
-        cover.load(url, using: imagePipeline) { [weak self] image, transition in
-            guard let self else { return }
-            transition.perform(on: imageView) { self.imageView.image = image }
-        }
+        cover.load(url, pipeline: imagePipeline, item: post.id)
     }
 
     // MARK: - A picture's foot (#1498)
