@@ -132,11 +132,24 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         self.hydrate = hydrate
         if style == .discover {
             let shelf = PostShelfSection(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
+            // The room is the skeleton's from the start, the bones only after
+            // the gate's delay (#1773, #1770).
+            shelf.bonesVisible = false
             self.shelf = shelf
             lead = GridLeadStack(sections: [shelf])
         }
         super.init(nibName: nil, bundle: nil)
     }
+
+    /// The lead row's bones on the kit's timing (#1770): none for posts that
+    /// hydrate at once, held their minimum once up. Injectable so a test
+    /// steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var leadGate: SkeletonGate = {
+        let gate = SkeletonGate(clock: skeletonClock)
+        gate.onSkeletonChange = { [weak self] shows in self?.shelf?.bonesVisible = shows }
+        return gate
+    }()
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -227,9 +240,11 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         guard case .posts(let ids) = state, !ids.isEmpty else {
             leadIDs = []
             leadTask?.cancel()
-            shelf.isLoading = false
-            shelf.render([])
-            updateLeadHeight()
+            leadGate.finish { [weak self] in
+                self?.shelf?.isLoading = false
+                self?.shelf?.render([])
+                self?.updateLeadHeight()
+            }
             return
         }
         // Said with every answer: a later page can turn it on for the same
@@ -238,20 +253,26 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         guard ids != leadIDs else { return }
         leadIDs = ids
         leadTask?.cancel()
-        // Its title over skeleton cards while the posts hydrate (#1296).
+        // Its title over skeleton cards while the posts hydrate (#1296) — a
+        // row whose posts are known (#1773), its bones on the gate (#1770).
         shelf.isLoading = true
+        leadGate.begin()
         updateLeadHeight()
         leadTask = Task { [weak self] in
             guard let self else { return }
             let posts = await self.hydrate(ids)
             guard !Task.isCancelled, self.leadIDs == ids else { return }
             let byID = Dictionary(posts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            self.shelf?.render(ids.compactMap { byID[$0] })
-            self.shelf?.isLoading = false
-            self.updateLeadHeight()
-            #if DEBUG
-            self.openCardForQAIfRequested()
-            #endif
+            // The posts land once the bones have had their minimum.
+            self.leadGate.finish { [weak self] in
+                guard let self, self.leadIDs == ids else { return }
+                self.shelf?.render(ids.compactMap { byID[$0] })
+                self.shelf?.isLoading = false
+                self.updateLeadHeight()
+                #if DEBUG
+                self.openCardForQAIfRequested()
+                #endif
+            }
         }
     }
 
