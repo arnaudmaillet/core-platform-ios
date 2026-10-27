@@ -51,8 +51,9 @@ struct SkeletonGateTests {
         let gate = SkeletonGate(clock: time.clock)
         var revealed = false
         gate.begin()
-        time.advance(0.2)
+        time.advance(0.15)
         #expect(gate.showsSkeleton)
+        time.advance(0.05)
         gate.finish { revealed = true }
         #expect(!revealed, "a bone shown for 0.05 s would flash")
         time.advance(0.24)

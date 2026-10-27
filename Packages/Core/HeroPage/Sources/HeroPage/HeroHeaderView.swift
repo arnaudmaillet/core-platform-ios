@@ -264,12 +264,41 @@ open class HeroHeaderView: UIView {
     private let bannerShadow = UIView()
 
     private func applyBannerShadow(tone: UIColor) {
-        bannerShadow.backgroundColor = tone
+        bannerShadowTone = tone
         bannerShadow.layer.shadowColor = tone.cgColor
-        bannerShadow.layer.shadowOpacity = 0.35
         bannerShadow.layer.shadowRadius = 22
         bannerShadow.layer.shadowOffset = CGSize(width: 0, height: 10)
+        applyBannerShadowPresence(animated: false)
     }
+
+    /// ⚠️ NO SHADOW UNDER A BANNER WITHOUT ITS PICTURE (the owner,
+    /// 2026-10-27, #1757): a loading banner is a flat grey (no ramp, no
+    /// scrim), and a card's shadow under it read as a finished card before
+    /// anything had arrived. The shadow comes with the picture, in its
+    /// dissolve.
+    private func applyBannerShadowPresence(animated: Bool) {
+        // ⚠️ ITS GROUND TOO. The shadow's view is painted the ramp's tone
+        // (black) to cast its shadow, and the card shows it wherever the
+        // banner is not drawn — the profile card's loading climb, before the
+        // banner is: a BLACK card where the loading banner is grey (the
+        // owner's recording, 2026-10-27). Without a picture it wears the
+        // skeleton's grey, the loading banner's own.
+        bannerShadow.backgroundColor = bannerView.hasPicture ? bannerShadowTone : Surface.skeleton
+        let opacity: Float = bannerView.hasPicture ? Self.bannerShadowOpacity : 0
+        let layer = bannerShadow.layer
+        guard layer.shadowOpacity != opacity else { return }
+        if animated, window != nil {
+            let fade = CABasicAnimation(keyPath: "shadowOpacity")
+            fade.fromValue = layer.presentation()?.shadowOpacity ?? layer.shadowOpacity
+            fade.toValue = opacity
+            fade.duration = 0.25
+            layer.add(fade, forKey: "shadowOpacity")
+        }
+        layer.shadowOpacity = opacity
+    }
+
+    static let bannerShadowOpacity: Float = 0.35
+    private var bannerShadowTone: UIColor = HeroBannerView.bandRampTone
 
     /// ⚠️ EXPERIMENT (the owner, 2026-10-15): A BAND CARD HOLDS ITS TOP
     /// MARGIN while the page climbs — its foot rides up with the avatar, so
@@ -712,6 +741,9 @@ open class HeroHeaderView: UIView {
         identityColumn.arrangedSubviews[1].convert(identityColumn.arrangedSubviews[1].bounds, to: self)
     }
     public var debugBannerIsHidden: Bool { bannerView.isHidden }
+    /// The band card's shadow opacity (none without the banner's picture).
+    public var debugBannerShadowOpacity: Float { bannerShadow.layer.shadowOpacity }
+    public var debugBannerShadowGround: UIColor? { bannerShadow.backgroundColor }
     public var debugBannerShowsBlur: Bool { bannerView.debugShowsBlur }
     public var debugBannerRampTone: UIColor { bannerView.debugRampTone }
     public var debugBannerShowsRamp: Bool { bannerView.debugShowsRamp }
@@ -863,7 +895,10 @@ open class HeroHeaderView: UIView {
             self?.setBannerFormat(.resolved(forImageSize: image.size))
         }
         bannerView.onPictureSettled = { [weak self] in self?.onPicturesSettled?() }
-        bannerView.onPicturePresenceChange = { [weak self] in self?.applyIdentityInk() }
+        bannerView.onPicturePresenceChange = { [weak self] in
+            self?.applyIdentityInk()
+            self?.applyBannerShadowPresence(animated: true)
+        }
         // The blurred picture decides the type's ink — read it again the
         // moment it changes. Off the bake's own dissolve (it lands inside
         // one) when on screen, so the ink's change is its own.
