@@ -36,6 +36,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     private let container: AppContainer
     private var stateObservation: Task<Void, Never>?
     private var mainTabCoordinator: MainTabCoordinator?
+    private var stakeRefunds: StakeRefundNotifier?
     /// A link that arrived before the shell existed (a cold launch from a
     /// link), opened once it does.
     private var pendingDeepLink: AppRoute?
@@ -96,6 +97,8 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // transition: one band in the window, over everything the app draws —
         // see `StatusBarBlurView`. Root swaps replace the root's view only.
         StatusBarBlurView.install(in: window)
+        // A stake the server did not spend is told, on whatever is in front (#1775).
+        stakeRefunds = StakeRefundNotifier(wallet: container.walletStore, window: window)
         #if DEBUG
         FirstLayoutTrace.selfTestIfRequested(in: window)
         // `-animation-audit`: every running animation, every 5 s (#580).
