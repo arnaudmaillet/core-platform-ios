@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import Foundation
 import MediaCore
 import PostGrid
@@ -105,6 +106,14 @@ struct ProfileRefreshLandingTests {
         let screen = ProfileViewController(
             viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: SilentFetcher()), makeGridPage: TestGridPages.factory(), onLogout: nil
         )
+        // ⚠️ A PRESENCE OF ITS OWN (#1773). The shared store is the test
+        // host's defaults, which the suites with an empty Kenji write into
+        // as they run: read here, "no posts last time" would draw the pages
+        // without their bones — a different first load from one run to the
+        // next.
+        screen.galleryPager.presence = SectionPresenceStore(
+            defaults: UserDefaults(suiteName: "refresh-landing-\(UUID().uuidString)")!
+        )
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
         window.rootViewController = UINavigationController(rootViewController: screen)
         window.isHidden = false
@@ -116,8 +125,15 @@ struct ProfileRefreshLandingTests {
         }
         // Loaded: the header, the relationship, and the grid's first page.
         // (The screen owns the view model's callbacks: none is borrowed here.)
+        //
+        // ⚠️ THE FIRST PAGE ANSWERED, not merely the bones gone. On a loaded
+        // runner (the whole Profile suite in one host) the first page took
+        // past `LoadingTiming.takingLonger`: the gate traded the bones for
+        // "Taking longer than usual", this wait passed, and the page landed
+        // during the refresh as a reload.
         await settle(until: {
-            viewModel.profile != nil && viewModel.isRelationshipSettled && !screen.debugIsHeaderRedacted
+            guard case .content = viewModel.publishedGallery?.activity else { return false }
+            return viewModel.profile != nil && viewModel.isRelationshipSettled && !screen.debugIsHeaderRedacted
                 && !screen.debugGalleryShowsSkeleton && screen.debugGalleryReloadCount > 0
         })
         window.layoutIfNeeded()
