@@ -1,5 +1,6 @@
 import MediaCore
 import CoreModels
+import CoreStorage
 import ProfileInterface
 import CoreNavigation
 import FeedInterface
@@ -2322,6 +2323,19 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         selector.remove(from: self)
     }
 
+    /// The tabs whose source is still loading and which had posts the last
+    /// time this profile was seen (`SectionPresenceStore`, #1773).
+    static func rememberedTabs(
+        _ tabs: [ProfileTab], in snapshot: ProfileViewModel.GallerySnapshot,
+        screen: String?, presence: SectionPresenceStore
+    ) -> [ProfileTab] {
+        guard let screen else { return [] }
+        return tabs.filter { tab in
+            snapshot.state(for: tab) == .loading
+                && (presence.count(screen: screen, section: String(describing: tab)) ?? 0) > 0
+        }
+    }
+
     /// ⚠️ NO TAB FOR A SOURCE WITH NOTHING IN IT (#742, the owner's call
     /// 2026-10-09) — Posts included since #1422 (owner, 2026-10-19). A tab
     /// shows once its source holds something; a source still loading waits,
@@ -2339,6 +2353,13 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// bar's accessory as in a pushed profile's toolbar.
     private func showTabs(for snapshot: ProfileViewModel.GallerySnapshot) {
         var shown = Self.shownTabs(allTabs, in: snapshot, isOwnProfile: viewModel.isOwnProfile)
+        // ⚠️ SECTIONS BY PRESENCE (#1773): a source still loading whose tab
+        // had posts last time keeps its tab from the first frame — it does
+        // not pop in when its source answers.
+        let remembered = Self.rememberedTabs(
+            allTabs, in: snapshot, screen: viewModel.presenceScreen, presence: galleryPager.presence
+        )
+        shown = allTabs.filter { shown.contains($0) || remembered.contains($0) }
         if shown.isEmpty { shown = [.format(.activity)] }
         guard shown != tabs else { return }
         let active = tabs.indices.contains(galleryPager.activePageIndex) ? tabs[galleryPager.activePageIndex] : nil
