@@ -46,6 +46,8 @@ struct ImageContentViewTests {
         await settle(view)
         for _ in 0..<200 where view.image == nil { try? await Task.sleep(for: .milliseconds(5)) }
         #expect(view.image != nil)
+        // The bone leaves once the picture's dissolve has run (the fade law).
+        for _ in 0..<200 where view.debugShowsBone { try? await Task.sleep(for: .milliseconds(5)) }
         #expect(!view.debugShowsBone)
         #expect(view.ladder.transitions.last?.1 == .pictureArrives)
     }
