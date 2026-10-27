@@ -226,6 +226,29 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         return feed
     }
 
+    public func warmLaunchScreen() {
+        guard let discovery else { return }
+        let pipeline = imagePipeline
+        let videoPlayback = videoPlayback
+        // ⚠️ DETACHED: inheriting the main actor, the warm-up waited for the
+        // shell it was meant to overlap to finish building — it started 0.6 s
+        // late and saved nothing (measured, Release, 2026-10-27).
+        Task.detached(priority: .userInitiated) {
+            guard let first = await MediaOnlyFeedProvider(base: discovery).cachedFirstPage()?.first else { return }
+            let model = FeedDisplayModelBuilder().build(first, now: Date())
+            // The URL the page's media card asks for, at its bucket: the
+            // photograph, or a clip's poster (`SnapFeedCell.configure`).
+            let picture = model.mediaKind == .video ? model.thumbnailURL : model.mediaURL
+            if let picture { _ = try? await pipeline.image(for: picture, size: .full, priority: .visible) }
+            // A clip's source resolved meanwhile, so its player starts on a
+            // known URL.
+            if model.mediaKind == .video, let clip = model.mediaURL {
+                _ = try? await videoPlayback?.playableURL(for: clip)
+            }
+            LaunchTimeline.mark("shots.warmed")
+        }
+    }
+
     public func galleryPosts(_ ids: [PostID]) async -> [PostID: GalleryPost] {
         var found: [PostID: FeedEntry] = [:]
         var missing: [PostID] = []

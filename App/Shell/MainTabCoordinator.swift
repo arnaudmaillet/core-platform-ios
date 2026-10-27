@@ -2,6 +2,7 @@ import ChatInterface
 import CoreModels
 import CoreNavigation
 import FeedInterface
+import MediaCore
 import MediaPlayback
 import NotificationsInterface
 import ProfileInterface
@@ -296,6 +297,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         if let forYou = orderedTabs.first(where: { $0.0 == .forYou })?.1.tab {
             tabBarController.selectedTab = forYou
         }
+        LaunchTimeline.mark("shell")
         tabBarController.delegate = self
         // The stake menu's way to the cartridge pack, from any screen.
         tabBarController.makeStakeShopScreen = { [unowned container] in container.makeStakeShopScreen() }

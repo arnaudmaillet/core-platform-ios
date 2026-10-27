@@ -648,6 +648,7 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        LaunchTimeline.mark("snap.viewDidLoad")
         title = "Timeline"
         // The stored value, not a literal: `setEmptyGround` may legitimately
         // arrive BEFORE this runs — the map route loads this view while it
@@ -733,6 +734,9 @@ final class SnapFeedViewController: UIViewController {
         }
         if !didStartLoading, view.bounds.width > 0 {
             didStartLoading = true
+            // The view model says nothing until a page lands: the loader is
+            // armed here, for a feed that opens on no post (#1765).
+            if orderedIDs.isEmpty { setFirstPageWaiting(true) }
             viewModel.viewDidLoad()
         }
     }
@@ -2925,6 +2929,10 @@ final class SnapFeedViewController: UIViewController {
         // ⚠️ BLACK INK ON BLACK in light mode otherwise: the empty ground is
         // black unless a tapped card lent its tone.
         statusView.overrideUserInterfaceStyle = emptyGround == .black ? .dark : .unspecified
+        // The centred loader while there is no post to show at all (#1765):
+        // a first launch on Shots — no page on the device yet — sat on a
+        // blank black page until the network answered.
+        setFirstPageWaiting(state.phase == .loading && state.items.isEmpty)
         switch state.phase {
         case .loading, .content:
             statusView.isHidden = true
@@ -4431,6 +4439,48 @@ final class SnapFeedViewController: UIViewController {
     /// resists beyond the ends so you cannot fling off the feed — and, with
     /// the feed forward-only, `floor` is the drive's own origin page rather
     /// than offset zero.
+    /// The full-screen rule's loader (the owner, 2026-10-27) for a feed with no
+    /// post yet: at the centre, after `SnapMediaWait.grace`, so a page the
+    /// device already holds never flashes it.
+    private lazy var firstPageLoader: AppLoaderView = {
+        let spinner = AppLoaderView(size: .medium)
+        spinner.hidesWhenStopped = true
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(spinner)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+        return spinner
+    }()
+    private var firstPageLoaderTimer: Timer?
+
+    private func setFirstPageWaiting(_ waiting: Bool) {
+        guard waiting else {
+            firstPageLoaderTimer?.invalidate()
+            firstPageLoaderTimer = nil
+            if isFirstPageLoaderBuilt { firstPageLoader.stopAnimating() }
+            return
+        }
+        guard firstPageLoaderTimer == nil, !(isFirstPageLoaderBuilt && firstPageLoader.isAnimating) else { return }
+        firstPageLoaderTimer = Timer.scheduledTimer(withTimeInterval: SnapMediaWait.grace, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.firstPageLoaderTimer = nil
+                self.isFirstPageLoaderBuilt = true
+                self.view.bringSubviewToFront(self.firstPageLoader)
+                self.firstPageLoader.startAnimating()
+            }
+        }
+    }
+    /// Built on first need: most feeds open on posts and never show it.
+    private var isFirstPageLoaderBuilt = false
+
+    #if DEBUG
+    /// Whether the no-post loader is up.
+    var debugShowsFirstPageLoader: Bool { isFirstPageLoaderBuilt && firstPageLoader.isAnimating }
+    #endif
+
     /// The spinner shown under the last reachable page, exactly as the timeline
     /// shows one at the end of a loaded batch — because to the viewer it is the
     /// same situation: there IS more, and it is not here yet.

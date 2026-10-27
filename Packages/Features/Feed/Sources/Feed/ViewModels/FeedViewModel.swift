@@ -585,9 +585,11 @@ public final class FeedViewModel {
     }
 
     private func loadInitial(generation: Int) async {
+        LaunchTimeline.mark("feed.loadInitial")
         // Offline-first: render the snapshot immediately if there is one…
         if let cached = await repository.cachedFirstPage(), isCurrentInitialLoad(generation),
            let models = await build(cached), isCurrentInitialLoad(generation) {
+            LaunchTimeline.mark("feed.cachedBuilt")
             items = withoutDeleted(models)
             showsCachedFirstPage = !items.isEmpty
             // A copy from the device: it never replaces a fresher count.

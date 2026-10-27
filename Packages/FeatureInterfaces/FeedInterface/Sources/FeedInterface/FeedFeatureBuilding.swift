@@ -57,6 +57,11 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
     /// over the Discover list — the author inside the page, save and repost
     /// upright in the action column, no toolbar, the tab bar at the bottom.
     func makeForYouFullScreenFeedViewController() -> UIViewController
+    /// Starts warming Shots' first post — the launch screen (#1765) — from the
+    /// device's copy of its first page: its picture decoded into memory while
+    /// the shell builds, so the page draws it in its first frame. Fire and
+    /// forget; nothing when the device holds no page yet.
+    func warmLaunchScreen()
     /// The For You tab (#1703, #1705): the Feed | Shots sector — Feed the
     /// discovery list (`makeForYouViewController`), Shots the full-screen
     /// posts (`makeForYouFullScreenFeedViewController`) — switched by the

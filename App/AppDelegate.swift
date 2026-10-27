@@ -1,4 +1,5 @@
 import DesignSystem
+import MediaCore
 import UIKit
 
 /// Process-level lifecycle only: launch, push registration, background tasks.
@@ -33,6 +34,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         #endif
         // Before any cache fills: every release signal reaches the one
         // device cache from the first frame (#890).
+        LaunchTimeline.mark("app.didFinishLaunching")
         AppContainer.shared.startCacheCoordinator()
         AppContainer.configureEmotes()
         // Before returning: a tap on a notification that launched the app is

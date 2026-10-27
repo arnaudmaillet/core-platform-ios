@@ -1,12 +1,14 @@
 import Auth
 import AuthInterface
 import CoreModels
+import FeedInterface
 import CoreNavigation
 import CoreRealtime
 import CoreStorage
 import DesignSystem
 import MediaPlayback
 import Profile
+import MediaCore
 import UIKit
 #if DEBUG
 import CoreNetworkingMocks
@@ -159,6 +161,11 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             guard let container = self?.container else { return }
             let realtimeClient = container.realtimeClient
             for await state in await container.sessionManager.stateUpdates() {
+                if LaunchTimeline.time(of: "auth.firstState") == nil {
+                    // Shots' first post warms while the shell builds (#1765).
+                    container.feedFeature.warmLaunchScreen()
+                }
+                LaunchTimeline.mark("auth.firstState")
                 self?.render(state)
                 // Realtime lifecycle is driven here, in auth-state order, rather
                 // than via detached Tasks in render() — otherwise a rapid
