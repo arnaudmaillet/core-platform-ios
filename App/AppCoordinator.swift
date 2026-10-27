@@ -726,6 +726,8 @@ private final class LaunchViewController: UIViewController {
     static let loaderDelay: TimeInterval = 1
 
     private let loader = AppLoaderView(size: .medium)
+    /// The kit's gate (#1768) at the launch screen's own, longer grace.
+    private lazy var loaderGate = LoaderGate(loader: loader, grace: Self.loaderDelay)
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -744,9 +746,7 @@ private final class LaunchViewController: UIViewController {
             loader.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
             loader.topAnchor.constraint(equalTo: logo.bottomAnchor, constant: 32)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.loaderDelay) { [weak self] in
-            self?.loader.startAnimating()
-        }
+        loaderGate.begin()
     }
 }
 

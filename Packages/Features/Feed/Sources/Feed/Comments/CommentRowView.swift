@@ -507,17 +507,27 @@ final class CommentRowView: UIView {
         isLoaderShown = false
         sendingSpinner.alpha = 0
         let run = deliveryRun
-        DispatchQueue.main.asyncAfter(deadline: .now() + loaderDelay) { [weak self] in
+        // The kit's gate (#1768) at the conversation's grace, no minimum: a
+        // send that lands plays its own arrival (`playDelivered`).
+        let gate = LoaderGate(grace: loaderDelay, minimum: 0) { [weak self] showing in
+            guard showing, let self else { return }
+            sendingSpinner.startAnimating()
+            bounceInSpinner()
+        }
+        sendingGate = gate
+        gate.begin { [weak self] in
             // ⚠️ `self.delivery`, NOT `delivery` (#1640): inside this method
             // `delivery` is the PARAMETER — `.sending`, captured — so the guard
             // always passed, and a send that had FAILED meanwhile turned its
             // loader on behind the red mark, for good (the owner, on device,
             // offline, 2026-10-23).
-            guard let self, deliveryRun == run, self.delivery == .sending else { return }
-            sendingSpinner.startAnimating()
-            bounceInSpinner()
+            guard let self else { return false }
+            return deliveryRun == run && self.delivery == .sending
         }
     }
+
+    /// The current send's loader timing; a new send replaces it.
+    private var sendingGate: LoaderGate?
 
     /// How long a send may take before its loader shows; zero shows it at
     /// once. The conversation sets it (`ConversationThreadViewController

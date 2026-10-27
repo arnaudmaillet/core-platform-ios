@@ -956,7 +956,6 @@ final class ForYouGridPage: UIView {
 
         sliceLayout?.onPlanInvalidated = { [weak self] in self?.replanArrangement() }
         pagingSpinner.alpha = 0
-        pagingSpinner.hidesWhenStopped = false
         collectionView.addSubview(pagingSpinner)
         collectionView.backgroundColor = .clear
         collectionView.alwaysBounceVertical = true
@@ -1350,7 +1349,8 @@ final class ForYouGridPage: UIView {
     /// scroll. The footer adds its own space above that.
     private static let footerHeight: CGFloat = 56
 
-    private let pagingSpinner = AppLoaderView(size: .medium)
+    /// The kit's paging footer (#1768), parked under the last tile.
+    private let pagingSpinner = PagingFooterView()
     private var isPaging = false
 
     /// Shows or hides the next-page spinner beneath the last tile.
@@ -1376,7 +1376,7 @@ final class ForYouGridPage: UIView {
         guard isPaging != paging else { return }
         isPaging = paging
         if paging {
-            pagingSpinner.startAnimating()
+            pagingSpinner.setSpinning(true)
             positionPagingFooter()
         }
         footerInset = paging ? Self.footerHeight : 0
@@ -1384,7 +1384,7 @@ final class ForYouGridPage: UIView {
             self.applyBottomInset()
             self.pagingSpinner.alpha = paging ? 1 : 0
         } completion: { _ in
-            if !self.isPaging { self.pagingSpinner.stopAnimating() }
+            if !self.isPaging { self.pagingSpinner.setSpinning(false) }
         }
     }
 
@@ -1393,6 +1393,7 @@ final class ForYouGridPage: UIView {
     private func positionPagingFooter() {
         guard isPaging else { return }
         let contentHeight = collectionView.collectionViewLayout.collectionViewContentSize.height
+        pagingSpinner.bounds = CGRect(x: 0, y: 0, width: collectionView.bounds.width, height: Self.footerHeight)
         pagingSpinner.center = CGPoint(
             x: collectionView.bounds.width / 2,
             y: contentHeight + Self.footerHeight / 2

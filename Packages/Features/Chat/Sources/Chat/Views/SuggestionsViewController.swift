@@ -29,7 +29,7 @@ final class SuggestionsViewController: UIViewController {
     private let statusView = InboxStatusView()
     /// The inbox's paging spinner, under the last row while another page is
     /// there to load (#644, as #593).
-    private let pagingFooter = PagingSpinnerFooterView()
+    private let pagingFooter = PagingFooterView()
 
     private var dataSource: UITableViewDiffableDataSource<Section, ProfileID>!
     private var modelsByID: [ProfileID: SuggestionDisplayModel] = [:]

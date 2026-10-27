@@ -29,7 +29,7 @@ final class MessageRequestsViewController: UIViewController {
     private let skeletonView = ConversationListSkeletonView()
     private let statusView = InboxStatusView()
     /// Under the last row while another page is there to load (#593).
-    private let pagingFooter = PagingSpinnerFooterView()
+    private let pagingFooter = PagingFooterView()
     /// Under the last row once every page has loaded and the hidden folder
     /// holds requests (#552).
     private let hiddenRequestsRow = HiddenRequestsRowView()

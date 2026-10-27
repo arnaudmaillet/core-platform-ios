@@ -104,9 +104,10 @@ final class SearchPeoplePage: UIViewController {
         ) { view, indexPath, id in
             view.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: id)
         }
-        let footer = UICollectionView.SupplementaryRegistration<SearchPagingFooterView>(
+        // The kit's paging footer (#1768), shown while a next page is fetched.
+        let footer = UICollectionView.SupplementaryRegistration<PagingFooterSupplementaryView>(
             elementKind: UICollectionView.elementKindSectionFooter
-        ) { _, _, _ in }
+        ) { view, _, _ in view.footer.loadingAccessibilityLabel = "Loading more people" }
         dataSource.supplementaryViewProvider = { view, _, indexPath in
             view.dequeueConfiguredReusableSupplementary(using: footer, for: indexPath)
         }
@@ -289,32 +290,3 @@ extension SearchPeoplePage: UICollectionViewDelegate {
     }
 }
 
-/// The Users tab's footer while a next page is on its way: a spinner where
-/// the next rows will be (#612).
-final class SearchPagingFooterView: UICollectionReusableView {
-    private let spinner = AppLoaderView(size: .medium)
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        spinner.startAnimating()
-        spinner.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(spinner)
-        let height = heightAnchor.constraint(equalToConstant: 56)
-        height.priority = .required - 1
-        NSLayoutConstraint.activate([
-            height,
-            spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
-            spinner.centerYAnchor.constraint(equalTo: centerYAnchor)
-        ])
-        isAccessibilityElement = true
-        accessibilityLabel = "Loading more people"
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override func prepareForReuse() {
-        super.prepareForReuse()
-        spinner.startAnimating()
-    }
-}

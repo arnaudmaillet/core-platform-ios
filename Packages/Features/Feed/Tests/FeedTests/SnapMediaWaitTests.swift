@@ -1,3 +1,5 @@
+import DesignSystem
+import Foundation
 import Testing
 @testable import Feed
 
@@ -13,14 +15,34 @@ struct SnapMediaWaitTests {
         var switches: [Bool] = []
     }
 
-    private static func wait(for page: Page) -> SnapMediaWait {
+    /// A clock a test steps by hand: the loader's minimum.
+    @MainActor
+    private final class ManualClock {
+        var now: TimeInterval = 0
+        private var pending: [(at: TimeInterval, work: @MainActor () -> Void)] = []
+        var clock: LoadingClock {
+            LoadingClock(now: { [weak self] in self?.now ?? 0 }, after: { [weak self] delay, work in
+                guard let self else { return }
+                pending.append((now + delay, work))
+            })
+        }
+        func advance(_ seconds: TimeInterval) {
+            now += seconds
+            while let index = pending.indices.filter({ pending[$0].at <= now }).min(by: { pending[$0].at < pending[$1].at }) {
+                pending.remove(at: index).work()
+            }
+        }
+    }
+
+    private static func wait(for page: Page, clock: LoadingClock = .system) -> SnapMediaWait {
         SnapMediaWait(
             hasItsOwnMedia: { [page] in page.hasMedia },
             isShowingLoader: { [page] in page.showing },
             setLoading: { [page] loading in
                 page.switches.append(loading)
                 page.showing = loading
-            }
+            },
+            clock: clock
         )
     }
 
@@ -56,15 +78,19 @@ struct SnapMediaWaitTests {
         page.hasMedia = true
         wait.debugElapseGrace()
 
-        #expect(page.switches == [false])
+        #expect(page.switches.isEmpty, "the loader moved for a picture already there")
         #expect(page.showing == false)
     }
 
+    /// At once, on the kit's gate (#1768) with no minimum: the picture is
+    /// what replaces the loader.
     @Test func theArrivalTakesTheSpinnerDownAndDisarms() {
+        let time = ManualClock()
         let page = Page()
-        let wait = Self.wait(for: page)
+        let wait = Self.wait(for: page, clock: time.clock)
         wait.refresh()
-        wait.debugElapseGrace()
+        time.advance(SnapMediaWait.grace)
+        #expect(page.switches == [true])
 
         page.hasMedia = true
         wait.refresh()

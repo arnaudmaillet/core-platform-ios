@@ -16,7 +16,10 @@ public final class SkeletonGate {
         public var minimum: TimeInterval
         public var takingLonger: TimeInterval
 
-        public init(delay: TimeInterval = 0.15, minimum: TimeInterval = 0.3, takingLonger: TimeInterval = 10) {
+        public init(
+            delay: TimeInterval = LoadingTiming.skeletonDelay, minimum: TimeInterval = LoadingTiming.minimum,
+            takingLonger: TimeInterval = LoadingTiming.takingLonger
+        ) {
             self.delay = delay
             self.minimum = minimum
             self.takingLonger = takingLonger
@@ -25,25 +28,8 @@ public final class SkeletonGate {
         public static let standard = Timing()
     }
 
-    /// A clock a test can step.
-    public struct Clock {
-        public var now: @MainActor () -> TimeInterval
-        public var after: @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void
-
-        public init(
-            now: @escaping @MainActor () -> TimeInterval,
-            after: @escaping @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void
-        ) {
-            self.now = now
-            self.after = after
-        }
-
-        public static var system: Clock {
-            Clock(now: { CACurrentMediaTime() }, after: { delay, work in
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { work() } }
-            })
-        }
-    }
+    /// A clock a test can step — the loading kit's one clock.
+    public typealias Clock = LoadingClock
 
     public let timing: Timing
     private let clock: Clock

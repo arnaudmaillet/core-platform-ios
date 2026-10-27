@@ -516,7 +516,6 @@ final class MediaEditorViewController: UIViewController {
     /// the indicator for both.
     private var rendersInFlight = 0
     /// The busy stretch's pending reveal — see `beginRender`.
-    private var spinnerReveal: DispatchWorkItem?
 
     private let busy: AppLoaderView = {
         let spinner = AppLoaderView(size: .large)
@@ -528,8 +527,9 @@ final class MediaEditorViewController: UIViewController {
     /// ⚠️ **THE SPINNER WAITS BEFORE IT APPEARS, AND MOST OF THE TIME IT NEVER
     /// DOES.** A render from the held picture finishes in a few milliseconds; a
     /// spinner shown the instant work begins would flash on every tap of the
-    /// selector, which reads worse than the wait it is reporting.
-    private static let spinnerDelay: TimeInterval = 0.15
+    /// selector, which reads worse than the wait it is reporting. The kit's
+    /// grace and minimum (`LoaderGate`, #1768).
+    private lazy var busyGate = LoaderGate(loader: busy)
 
     /// ⚠️ **NOT WHILE A SLIDER IS UNDER A FINGER** (`MediaEditorEffectsMode`):
     /// a render is always in flight during a drag, and the spinner would flash.
@@ -543,20 +543,16 @@ final class MediaEditorViewController: UIViewController {
     private func beginRender() {
         rendersInFlight += 1
         guard rendersInFlight == 1 else { return }
-        let reveal = DispatchWorkItem { [weak self] in
-            guard let self, rendersInFlight > 0, !effectsMode.isTracking else { return }
-            busy.startAnimating()
+        busyGate.begin { [weak self] in
+            guard let self else { return false }
+            return rendersInFlight > 0 && !effectsMode.isTracking
         }
-        spinnerReveal = reveal
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.spinnerDelay, execute: reveal)
     }
 
     private func endRender() {
         rendersInFlight = max(0, rendersInFlight - 1)
         guard rendersInFlight == 0 else { return }
-        spinnerReveal?.cancel()
-        spinnerReveal = nil
-        busy.stopAnimating()
+        busyGate.end()
     }
 
     /// Draws a picture as the author left it, off the main thread, and hands it to

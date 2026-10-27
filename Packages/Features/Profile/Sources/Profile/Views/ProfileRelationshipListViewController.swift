@@ -138,9 +138,10 @@ final class ProfileRelationshipListViewController: UIViewController {
             UIView.performWithoutAnimation { cell.layoutIfNeeded() }
         }
 
-        let pagingRegistration = UICollectionView.CellRegistration<RelationshipPagingCell, Int> {
+        let pagingRegistration = UICollectionView.CellRegistration<PagingFooterCell, Int> {
             cell, _, _ in
-            cell.startAnimating()
+            cell.footer.loadingAccessibilityLabel = "Loading more people"
+            cell.configure(.loading)
         }
 
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(

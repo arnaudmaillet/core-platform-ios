@@ -101,25 +101,3 @@ final class RelationshipSkeletonCell: UICollectionViewListCell {
     var debugBoneWidths: [CGFloat] { [avatar, name, handle, action].map(\.bounds.width) }
 }
 
-/// The footer row under the last loaded page: a spinner that says the list is
-/// continuing, not that it has ended.
-final class RelationshipPagingCell: UICollectionViewListCell {
-    private let spinner = AppLoaderView(size: .medium)
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isUserInteractionEnabled = false
-        spinner.constrain(in: contentView) { parent in
-            spinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            spinner.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.lg)
-            spinner.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.lg)
-        }
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    func startAnimating() {
-        spinner.startAnimating()
-    }
-}

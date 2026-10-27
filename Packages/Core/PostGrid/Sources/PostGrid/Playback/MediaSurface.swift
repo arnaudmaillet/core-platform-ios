@@ -1,3 +1,4 @@
+import DesignSystem
 import MediaCore
 import MediaPlayback
 import UIKit
