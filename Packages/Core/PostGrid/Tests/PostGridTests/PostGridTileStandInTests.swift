@@ -61,15 +61,16 @@ struct PostGridTileStandInTests {
     /// that were a third opinion about the floor would make the middle of the
     /// hand-off a shade the landing never has.
     @Test func theFillIsTheTilesOwnFloor() throws {
-        for kind in [GalleryPost.Kind.photo, .video] {
+        for kind in [GalleryPost.Kind.photo, .video, .text] {
             let view = standIn(kind)
             let tile = try #require(view.subviews.first as? PostGridTileCell)
             #expect(view.backgroundColor == tile.contentView.backgroundColor)
         }
-        // …and the two floors genuinely differ, so the check above is not
-        // comparing one constant with itself: a video tile keeps a dark stage
-        // because its poster may be unrenderable.
-        #expect(standIn(.photo).backgroundColor != standIn(.video).backgroundColor)
+        // …and the floors genuinely differ, so the check above is not
+        // comparing one constant with itself: a picture's floor is the media
+        // ground (#1771 — a video's too, the bone's grey rather than a dark
+        // stage), words lie on the card.
+        #expect(standIn(.photo).backgroundColor != standIn(.text).backgroundColor)
     }
 
     /// ⚠️ THE TILE FILLS THE WINDOW AT EVERY SIZE. It used to be built at the

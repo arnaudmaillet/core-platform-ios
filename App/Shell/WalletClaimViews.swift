@@ -128,7 +128,8 @@ class WalletStakeCell: UICollectionViewListCell {
         // (`WalletStakeHero`), so a post flying home lands on its shape.
         thumbnail.layer.cornerRadius = WalletSheetMetrics.thumbnailCorner
         thumbnail.layer.cornerCurve = .continuous
-        thumbnail.backgroundColor = .tertiarySystemFill
+        // The media ground (#1771), under the thumbnail's bone.
+        thumbnail.backgroundColor = Surface.mediaGround
         thumbnail.tintColor = .secondaryLabel
         imageBone.isHidden = true
         imageBone.isUserInteractionEnabled = false

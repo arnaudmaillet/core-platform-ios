@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import MediaCore
 import Testing
 import UIKit
@@ -54,5 +55,25 @@ struct TileCoverDecodeSizeTests {
         let other = PostGridTileCell(frame: CGRect(x: 0, y: 0, width: 132, height: 176))
         other.configure(with: fullOnly, imagePipeline: pipeline)
         #expect(other.renderedCover != nil, "a full decode in memory did not serve the tile")
+    }
+}
+
+/// One media ground (#1771): a media tile's ground is the bone's own grey,
+/// so a tile reads the same loading, missing or failed; a text tile keeps the
+/// card's.
+@MainActor
+struct TileMediaGroundTests {
+    private func post(_ kind: GalleryPost.Kind) -> GalleryPost {
+        GalleryPost(
+            id: PostID("p"), kind: kind, isRepost: false, thumbnailURL: nil,
+            caption: "", publishedAtMS: 0, authorID: ProfileID("ada"),
+            authorName: "Ada", authorHandle: "ada", reactionCount: 0
+        )
+    }
+
+    @Test func aMediaTileWearsTheMediaGround() {
+        #expect(PostGridTileCell.fillColor(for: post(.photo)) == Surface.mediaGround)
+        #expect(PostGridTileCell.fillColor(for: post(.video)) == Surface.mediaGround)
+        #expect(PostGridTileCell.fillColor(for: post(.text)) == Surface.card)
     }
 }

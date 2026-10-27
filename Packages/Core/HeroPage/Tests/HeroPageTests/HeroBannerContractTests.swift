@@ -85,6 +85,8 @@ struct HeroBannerContractTests {
         #expect(!banner.debugHasPicture)
         #expect(!banner.debugShowsBone)
         #expect(banner.ladder.hasFailed)
+        // The media ground (#1771): the bone's own grey, loading or failed.
+        #expect(banner.backgroundColor == Surface.mediaGround)
     }
 
     @Test func noBannerShowsNoBoneEver() {

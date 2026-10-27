@@ -677,7 +677,8 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
             view.isPlayable = page.videoURL != nil
             switch self.style {
             case .card:
-                view.backgroundColor = .tertiarySystemFill
+                // The media ground (#1771), under the page's cover bone.
+                view.backgroundColor = Surface.mediaGround
                 // The pages carry the preview's own curve, not a smaller one:
                 // each is a preview-sized window onto one photo, and a page
                 // rounded less than the box it fills would show the box's

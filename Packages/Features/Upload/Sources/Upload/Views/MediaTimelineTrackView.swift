@@ -3738,7 +3738,7 @@ private final class ShotView: UIView {
         picture.layer.cornerRadius = 6
         picture.layer.cornerCurve = .continuous
         // Opaque: an empty chip must not show the footage behind the band either.
-        picture.backgroundColor = .systemGray5
+        picture.backgroundColor = Surface.mediaGround
         addSubview(picture)
         shade.backgroundColor = UIColor.black.withAlphaComponent(0.45)
         shade.alpha = 0

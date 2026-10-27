@@ -189,7 +189,8 @@ private final class VideoBannerTileCell: UICollectionViewCell {
         contentView.layer.cornerRadius = 8
         contentView.layer.cornerCurve = .continuous
         contentView.clipsToBounds = true
-        contentView.backgroundColor = .secondarySystemFill
+        // The media ground (#1771), under the cover's bone.
+        contentView.backgroundColor = Surface.mediaGround
         cover.contentMode = .scaleAspectFill
         mark.tintColor = .white
         mark.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)

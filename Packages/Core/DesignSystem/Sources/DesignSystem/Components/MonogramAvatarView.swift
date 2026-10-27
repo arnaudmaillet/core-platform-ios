@@ -133,7 +133,10 @@ public final class MonogramAvatarView: UIView {
         }
     }
 
-    private static let plateColor = UIColor.tertiarySystemFill
+    /// The media ground (#1771): the plate is the floor an avatar's picture
+    /// loads, fails or is missing on, so it wears the bone's own grey — a
+    /// face that never arrives sits on the colour its skeleton had.
+    static let plateColor = Surface.mediaGround
 
     /// Initials on the app's rule: the display name when there is one, the
     /// handle when there is not — the first letter of the first two words,

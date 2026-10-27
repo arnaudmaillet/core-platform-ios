@@ -1160,6 +1160,9 @@ open class HeroHeaderView: UIView {
             websiteButton.configuration?.title = " "
             websiteButton.isHidden = false
             installRedactionBones()
+            // The avatar holds its place with its own bone until the profile
+            // names its picture (`configure`, which answers the wait).
+            if let avatar, avatar.shownPicture == nil { avatar.awaitPicture() }
             // Everything data-driven drops to alpha 0 in place — the badge
             // included, so a verified profile fades it in with the name
             // instead of popping it beside the finished text.
@@ -1213,10 +1216,13 @@ open class HeroHeaderView: UIView {
     private func installRedactionBones() {
         guard redactionBones.isEmpty else { return }
 
-        // The avatar's own clipping rounds the bone; the ring border draws
-        // above it, staying crisp.
-        let avatarBone = SkeletonBoneView(rounding: .fixed(0))
-        avatarBone.pin(to: avatarView)
+        // ⚠️ ONE BONE FOR THE AVATAR (#1771): the avatar's own (`AvatarView`,
+        // through `awaitPicture` while redacted — `setRedacted`). A second
+        // redaction bone over it stacked two skeletons on one disc. Only a
+        // header with no avatar view draws one here; the avatar's clipping
+        // rounds it, and the ring border draws above it, staying crisp.
+        let avatarBone: SkeletonBoneView? = avatar == nil ? SkeletonBoneView(rounding: .fixed(0)) : nil
+        avatarBone?.pin(to: avatarView)
 
         let nameBone = SkeletonBoneView()
         nameBone.constrain(in: self) { _ in
@@ -1252,7 +1258,7 @@ open class HeroHeaderView: UIView {
             websiteBone.heightAnchor.constraint(equalToConstant: 12)
         }
 
-        redactionBones = [avatarBone, nameBone, handleBone, bioFirst, websiteBone]
+        redactionBones = [avatarBone, nameBone, handleBone, bioFirst, websiteBone].compactMap(\.self)
     }
 
     /// The quiet buttons' opaque grey — `HeroTray.fill`, which `AppButton`'s
@@ -1280,7 +1286,7 @@ open class HeroHeaderView: UIView {
         // Avatar: a filled circle with a monogram, overlaid by the image once
         // loaded. The ring keeps it defined while it floats over raw banner
         // media, above the fade.
-        avatarView.backgroundColor = .tertiarySystemFill
+        avatarView.backgroundColor = Surface.mediaGround
         avatarView.clipsToBounds = true
         avatarView.layer.borderWidth = Metrics.avatarRingWidth
         // The ring is the page's tone, so the avatar reads as cut from the

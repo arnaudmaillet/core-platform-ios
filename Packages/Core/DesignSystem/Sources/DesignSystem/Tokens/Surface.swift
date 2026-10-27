@@ -57,6 +57,18 @@ public enum Surface {
         with: UITraitCollection(userInterfaceStyle: .dark)
     )
 
+    /// THE MEDIA GROUND (#1771): what a picture's place shows when there is no
+    /// picture in it — loading (under the bone's sweep, which wears this same
+    /// grey), missing, or failed. A media slot's host paints this and nothing
+    /// else under its bone, so a tile looks the same waiting or empty, just
+    /// without the sweep, and two greys never meet. A host's own CHROME (a
+    /// post card's ground around its words) keeps `card`.
+    public static let mediaGround: UIColor = skeleton
+
+    /// The media ground on a surface that is dark whatever the appearance
+    /// (map pins, the shop's posters, the snap feed): `skeletonOnDark`.
+    public static let mediaGroundOnDark: UIColor = skeletonOnDark
+
     /// A card's corner (#1494): the For You card's, every card of the app's.
     /// A CARD — a surface that holds content, lighter than its page — not a
     /// thumbnail or a media tile, whose corners are their own.

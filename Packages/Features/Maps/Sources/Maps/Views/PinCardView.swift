@@ -636,6 +636,9 @@ final class PinCardView: UIView {
     var coverSlot: CoverSlot {
         if let coverSlotIfBuilt { return coverSlotIfBuilt }
         let slot = CoverSlot(view: imageView, size: .full, policy: Self.markerLoading)
+        // A marker's cover sits on the card's black: the media ground's dark
+        // grey (#1771), not the light one that read as a hole in the card.
+        slot.bone?.fill = Surface.mediaGroundOnDark
         coverSlotIfBuilt = slot
         return slot
     }
