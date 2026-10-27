@@ -352,3 +352,13 @@ struct HashtagEntryTests {
         #expect(row.action == .openHashtag("travel"))
     }
 }
+
+/// SECTIONS BY PRESENCE (#1773): the count's line is reserved from the first
+/// frame, so the title does not jump when the count lands.
+@MainActor
+struct HashtagCountRoomTests {
+    @Test func theCountsLineIsReservedUntilItLands() {
+        #expect(HashtagViewController.subtitle(countText: nil) == " ")
+        #expect(HashtagViewController.subtitle(countText: "12 posts") == "12 posts")
+    }
+}
