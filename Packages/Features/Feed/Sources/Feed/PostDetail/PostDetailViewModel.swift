@@ -376,6 +376,14 @@ public final class PostDetailViewModel {
         loadComments()
     }
 
+    /// Try Again past "taking longer" (#1770): the first page is asked again
+    /// even while one is still out — the newer read supersedes it
+    /// (`firstPageGeneration`).
+    public func retryCommentsAfterWait() {
+        guard firstPageFailed || isLoadingFirstPage else { return }
+        loadComments()
+    }
+
     /// The post's live count — the store's, else the one it was loaded with.
     public var engagementState: EngagementState {
         var state = engagement
