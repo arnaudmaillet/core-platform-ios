@@ -99,8 +99,13 @@ final class HashtagViewController: UIViewController {
         }
     }
 
+    /// The bar's second line: the count, or — until it is known — a blank
+    /// that keeps the line's room (#1773), so the count fades in where it
+    /// will stand instead of pushing the title up when it lands.
+    static func subtitle(countText: String?) -> String { countText ?? " " }
+
     private func render() {
-        navigationItem.subtitle = viewModel.countText
+        navigationItem.subtitle = Self.subtitle(countText: viewModel.countText)
         page.show(viewModel.top)
         page.showLeadRow(viewModel.recentRow, hasMore: viewModel.recentRowHasMore)
         page.setPaging(viewModel.isLoadingMore(.top))

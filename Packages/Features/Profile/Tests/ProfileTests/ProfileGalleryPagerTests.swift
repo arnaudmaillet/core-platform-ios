@@ -395,3 +395,25 @@ struct ProfileTabPresenceTests {
                 "a load forgot what was there")
     }
 }
+
+/// SECTIONS BY PRESENCE (#1773): a tab whose source had posts last time is
+/// there from the first frame while its source loads — it does not pop in.
+@MainActor
+struct ProfileRememberedTabsTests {
+    @Test func aTabWithPostsLastTimeStaysWhileItsSourceLoads() throws {
+        let defaults = try #require(UserDefaults(suiteName: "presence-\(UUID().uuidString)"))
+        let presence = SectionPresenceStore(defaults: defaults)
+        presence.remember(4, screen: "profile.ada", section: String(describing: ProfileTab.saved))
+        presence.remember(0, screen: "profile.ada", section: String(describing: ProfileTab.reactions))
+        var snapshot = ProfileViewModel.GallerySnapshot(activity: .loading, media: .loading)
+        snapshot.saved = .loading
+        snapshot.reactions = .loading
+        let tabs: [ProfileTab] = [.format(.activity), .saved, .reactions]
+        let remembered = ProfileViewController.rememberedTabs(tabs, in: snapshot, screen: "profile.ada", presence: presence)
+        #expect(remembered == [.saved], "an empty source last time, or one never seen, has no tab yet")
+        #expect(ProfileViewController.rememberedTabs(tabs, in: snapshot, screen: nil, presence: presence).isEmpty)
+        snapshot.saved = .content([])
+        #expect(ProfileViewController.rememberedTabs(tabs, in: snapshot, screen: "profile.ada", presence: presence).isEmpty,
+                "an answered source decides its own tab")
+    }
+}
