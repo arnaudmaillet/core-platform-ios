@@ -399,10 +399,9 @@ final class SoundSheetTileCell: UICollectionViewCell {
     /// The bone on a placeholder.
     private func showBone() {
         if bone == nil {
-            let bone = SkeletonBoneView(rounding: .fixed(0))
             // The tile's own fill is the ground; the bone adds only the
             // sweep, so a placeholder keeps the tile's colour.
-            bone.backgroundColor = .clear
+            let bone = SkeletonBoneView(rounding: .fixed(0), fill: .clear)
             bone.frame = contentView.bounds
             bone.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             contentView.insertSubview(bone, aboveSubview: imageView)

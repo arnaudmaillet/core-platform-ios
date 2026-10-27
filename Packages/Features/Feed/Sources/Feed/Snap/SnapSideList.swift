@@ -770,7 +770,8 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
     private func showBone(on tile: PostGridTileCell) {
         let key = ObjectIdentifier(tile)
         let bone = bones[key] ?? {
-            let bone = SkeletonBoneView(rounding: .fixed(SnapSideList.Geometry.tileCornerRadius))
+            // On the snap feed's black page in either appearance (#1753).
+            let bone = SkeletonBoneView(rounding: .fixed(SnapSideList.Geometry.tileCornerRadius), fill: Surface.skeletonOnDark)
             bones[key] = bone
             return bone
         }()
