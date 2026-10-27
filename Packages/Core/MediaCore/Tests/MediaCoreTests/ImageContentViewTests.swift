@@ -37,13 +37,18 @@ struct ImageContentViewTests {
         #expect(view.ladder.isSettled)
     }
 
-    /// A cold load lands later and dissolves in.
+    /// A cold load lands later and dissolves in — after the bone's minimum
+    /// when the bone came up (#1505).
     @Test func aColdLoadLandsAndDissolves() async throws {
         let view = ImageContentView(size: .px256)
         view.setImage(try #require(URL(string: "mock://cold/1")), pipeline: makePipeline())
         #expect(view.image == nil)
         await settle(view)
+        for _ in 0..<200 where view.image == nil { try? await Task.sleep(for: .milliseconds(5)) }
         #expect(view.image != nil)
+        // The bone leaves once the picture's dissolve has run (the fade law).
+        for _ in 0..<200 where view.debugShowsBone { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(!view.debugShowsBone)
         #expect(view.ladder.transitions.last?.1 == .pictureArrives)
     }
 

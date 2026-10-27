@@ -138,4 +138,27 @@ struct IdleCalmTests {
         #expect(bone.showsBand)
         _ = window
     }
+
+    /// ⚠️ A HIDDEN BONE RUNS NO SWEEP (#1505): every tile carries one under
+    /// its cover, hidden once the picture lands — a screen of pictures at rest
+    /// keeps no infinite animation ticking under it. So does an avatar's.
+    @Test func aHiddenBoneRunsNoSweep() {
+        let bone = SkeletonBoneView()
+        bone.stillsMotion = { false }
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 100))
+        bone.isHidden = true
+        window.addSubview(bone)
+        #expect(!bone.isSweeping, "a bone hidden as it entered the window swept")
+        bone.isHidden = false
+        #expect(bone.isSweeping, "a bone shown again stayed still")
+        bone.isHidden = true
+        #expect(!bone.isSweeping, "a hidden bone kept sweeping")
+
+        let face = AvatarSkeletonView()
+        window.addSubview(face)
+        #expect(face.debugIsSweeping || MotionPreference.stillsDecoration)
+        face.isHidden = true
+        #expect(!face.debugIsSweeping, "a hidden avatar bone kept sweeping")
+        _ = window
+    }
 }

@@ -1,52 +1,45 @@
 import DesignSystem
 import UIKit
 
-/// A picture arriving, on the loading ladder (#1085): an optional bone or
-/// placeholder, then the picture decoded at its bucket — the one place the
-/// app writes "cache first, else a task, then a dissolve".
+/// A picture arriving, on the media slot (#1505): the bone while a picture
+/// not in memory is on its way, an optional placeholder, then the picture
+/// decoded at its bucket — the plain view form of `MediaSlot`, for a host
+/// with no decoration of its own.
 ///
 /// ```
-///   skeleton (optional) → placeholder (optional) → picture
+///   skeleton → placeholder (optional) → picture
 ///   a warm hit draws in the configure pass; a late one dissolves in 0.25 s
 /// ```
 ///
 /// ⚠️ **THE SIZE BUCKET IS REQUIRED.** There is no `.full` default here: a
 /// view that decodes a 1200 px picture for a 40 pt slot holds forty times the
 /// memory it shows (#894, #1086). Say the size the view draws at.
-///
-/// ⚠️ **NOT FOR THE HERO'S SOURCES YET.** The tiles, rows, carousel, flight
-/// cards, snap cards and map pins keep their covers until the media surface
-/// (#1088) moves them, on this same ladder and its hero hooks.
 @MainActor
 public final class ImageContentView: UIView {
-    /// The ladder the view runs on — its hooks are the hero's (`hold`,
-    /// `lendContent`, …) once a hero source adopts it (#1088).
-    public let ladder: LoadingLadder
+    /// The ladder the view runs on.
+    public var ladder: LoadingLadder { slot.ladder }
     /// The picture, addressable (hook 1).
     public let imageView = UIImageView()
     /// The floor under the picture, when the caller gives one.
     public let placeholderView = UIImageView()
     /// The bucket the picture is decoded at.
-    public let size: ImageBucket
-    private let skeleton: SkeletonBoneView?
-    private var task: Task<Void, Never>?
-    private(set) var url: URL?
+    public var size: ImageBucket { slot.size }
+    private let slot: MediaSlot
+    var url: URL? { slot.url }
 
     /// - Parameters:
     ///   - size: the bucket the picture is decoded at — required (see the
     ///     type's note).
-    ///   - skeleton: a bone's rounding while nothing has arrived, or nil for
-    ///     none (a placeholder or a plain ground says it instead).
+    ///   - skeleton: the bone's rounding while nothing has arrived.
     public init(
-        size: ImageBucket, skeleton: SkeletonBoneView.Rounding? = nil,
+        size: ImageBucket, skeleton: SkeletonBoneView.Rounding = .fixed(0),
         policy: LoadingLadder.Policy = .standard, clock: LoadingLadder.Clock = .system
     ) {
-        self.size = size
-        ladder = LoadingLadder(policy: policy, clock: clock)
-        self.skeleton = skeleton.map { SkeletonBoneView(rounding: $0) }
+        let bone = SkeletonBoneView(rounding: skeleton)
+        slot = MediaSlot(size: size, bone: bone, policy: policy, clock: clock)
         super.init(frame: .zero)
         clipsToBounds = true
-        for view in [self.skeleton, placeholderView, imageView].compactMap({ $0 }) {
+        for view in [bone, placeholderView, imageView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             view.isUserInteractionEnabled = false
             addSubview(view)
@@ -56,7 +49,6 @@ public final class ImageContentView: UIView {
         imageView.contentMode = .scaleAspectFill
         placeholderView.clipsToBounds = true
         imageView.clipsToBounds = true
-        if let skeleton = self.skeleton { ladder.setView(skeleton, for: .skeleton) }
         ladder.setView(placeholderView, for: .placeholder)
         ladder.setView(imageView, for: .content)
     }
@@ -78,59 +70,41 @@ public final class ImageContentView: UIView {
     public var image: UIImage? { ladder.rung == .content ? imageView.image : nil }
 
     /// Shows the picture at `url`: drawn now when the pipeline has it, else
-    /// loaded and dissolved in. The same URL again is a reconfigure and
-    /// changes nothing (hook 8); another is a new item and cuts.
+    /// the bone, then the picture dissolved in. The same URL again is a
+    /// reconfigure and changes nothing (hook 8); another is a new item and
+    /// cuts.
     ///
     /// - Parameter placeholder: a floor shown under the picture until it
     ///   lands (a glyph, a known colour, later a blurhash — #990).
     public func setImage(_ url: URL?, pipeline: ImagePipeline?, placeholder: UIImage? = nil) {
-        if let url, url == self.url, task != nil || ladder.rung != nil { return }
-        task?.cancel()
-        task = nil
-        self.url = url
+        if let url, url == slot.url, slot.isLoading || ladder.rung == .content { return }
         imageView.image = nil
-        let token = ladder.begin(item: url)
+        let token = slot.begin(url)
         if let placeholder {
             placeholderView.image = placeholder
             ladder.show(.placeholder, token: token, warm: true)
         }
-        guard let url, let pipeline else {
-            ladder.fail(token: token)
-            return
-        }
-        if let cached = pipeline.cachedImage(for: url, size: size) {
-            imageView.image = cached
-            ladder.show(.content, token: token, warm: true)
-            return
-        }
-        let bucket = size
-        task = Task { [weak self] in
-            let image = try? await pipeline.image(for: url, size: bucket)
-            guard !Task.isCancelled, let self, ladder.isCurrent(token) else { return }
-            task = nil
-            if let image {
-                imageView.image = image
-                ladder.show(.content, token: token)
-            } else {
-                ladder.fail(token: token)
-            }
+        slot.load(url, using: pipeline) { [weak self] image, transition in
+            guard let self else { return }
+            imageView.image = image
+            ladder.show(.content, token: token, warm: transition == .none)
         }
     }
 
     /// Forgets the picture — a recycled cell's first step. A late answer for
     /// the old one lands nowhere.
     public func reset() {
-        task?.cancel()
-        task = nil
-        url = nil
+        slot.cancel()
         imageView.image = nil
         placeholderView.image = nil
-        ladder.begin(item: nil)
+        slot.begin(nil)
     }
 
     #if DEBUG
     /// Whether a load is in flight.
-    public var debugIsLoading: Bool { task != nil }
+    public var debugIsLoading: Bool { slot.isLoading }
+    /// Whether the bone shows now.
+    public var debugShowsBone: Bool { slot.showsBone }
     #endif
 }
 

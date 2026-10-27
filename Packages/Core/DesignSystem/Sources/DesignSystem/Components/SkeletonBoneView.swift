@@ -108,9 +108,25 @@ public final class SkeletonBoneView: UIView {
         super.didMoveToWindow()
         if window != nil {
             setNeedsLayout()
-            installSweep()
+            if !isHidden { installSweep() }
         } else {
             gradient.removeAnimation(forKey: Self.sweepKey)
+        }
+    }
+
+    /// ⚠️ A HIDDEN BONE RUNS NO SWEEP (#580, #1505). Every tile, card and
+    /// carousel page carries one under its cover, hidden once the picture has
+    /// landed: an infinite animation left on each would tick under every
+    /// screen of pictures at rest. The epoch keeps a bone shown again in
+    /// phase with the others.
+    public override var isHidden: Bool {
+        didSet {
+            guard isHidden != oldValue else { return }
+            if isHidden {
+                gradient.removeAnimation(forKey: Self.sweepKey)
+            } else if window != nil {
+                installSweep()
+            }
         }
     }
 
@@ -177,7 +193,7 @@ public final class SkeletonBoneView: UIView {
     }
 
     @objc private func reinstallIfVisible() {
-        if window != nil { installSweep() }
+        if window != nil, !isHidden { installSweep() }
     }
 
     /// Whether the sweep is running, and whether its band shows. Tests.
