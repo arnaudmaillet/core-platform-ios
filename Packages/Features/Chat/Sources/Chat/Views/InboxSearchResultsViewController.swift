@@ -250,7 +250,12 @@ final class InboxSearchResultsViewController: UIViewController {
 
         case .failed(let message):
             apply([])
-            showStatus(symbol: "exclamationmark.triangle", title: "Something went wrong", message: message)
+            // ⚠️ A WAY OUT (#1767): the failure had no action, so the only
+            // retry was retyping the query.
+            showStatus(
+                symbol: "exclamationmark.triangle", title: "Something went wrong", message: message,
+                actionTitle: "Try Again", action: { [weak self] in self?.viewModel.retry() }
+            )
         }
     }
 
@@ -299,10 +304,13 @@ final class InboxSearchResultsViewController: UIViewController {
         collectionView.setContentOffset(CGPoint(x: 0, y: target), animated: true)
     }
 
-    private func showStatus(symbol: String, title: String, message: String) {
+    private func showStatus(
+        symbol: String, title: String, message: String,
+        actionTitle: String? = nil, action: (() -> Void)? = nil
+    ) {
         // The list stays mounted and simply empty: it owns the keyboard's scroll
         // context, and tearing it down to show a message would take that with it.
-        statusView.configure(symbol: symbol, title: title, message: message)
+        statusView.configure(symbol: symbol, title: title, message: message, actionTitle: actionTitle, action: action)
         statusView.isHidden = false
     }
 }

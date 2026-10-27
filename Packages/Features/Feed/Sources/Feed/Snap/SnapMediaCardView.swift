@@ -485,6 +485,8 @@ final class SnapMediaCardView: UIView {
     /// poster for `.video` — on the media slot. `failed` is told of a
     /// missing or broken one.
     func loadPicture(_ url: URL?, kind: MediaKind, pipeline: ImagePipeline?, failed: (() -> Void)? = nil) {
+        setPictureFailed(false)
+        retryPicture = { [weak self] in self?.loadPicture(url, kind: kind, pipeline: pipeline, failed: failed) }
         let token = picture.begin(url)
         let draw: (UIImage) -> Void = { [weak self] image in
             switch kind {
@@ -507,6 +509,11 @@ final class SnapMediaCardView: UIView {
             draw(image)
             picture.ladder.show(.content, token: token, warm: transition == .none)
         } failed: { [weak self] in
+            // A photograph that will not come says so, with a way to try again
+            // (#1767) — the loader would otherwise come back for good. A clip's
+            // poster is not its media: the clip may still play, and its own
+            // wait is the bar's.
+            if kind == .image { self?.setPictureFailed(true) }
             self?.onPictureLoadingChange?()
             failed?()
         }
@@ -516,7 +523,74 @@ final class SnapMediaCardView: UIView {
     func cancelPicture() {
         picture.cancel()
         picture.begin(nil)
+        retryPicture = nil
+        setPictureFailed(false)
     }
+
+    // MARK: - A picture that failed (#1767)
+
+    /// Loads the single picture again, as it was asked.
+    private var retryPicture: (() -> Void)?
+    private var isSinglePictureFailed = false
+
+    /// Whether the page's picture failed for good — its photograph, or the
+    /// collection page in front of the viewer. The centred loader stops and
+    /// the failure mark offers Try Again.
+    var isPictureFailed: Bool {
+        if showsCollection { return carousel?.isCoverFailed(onPage: currentPage) ?? false }
+        return isSinglePictureFailed
+    }
+
+    /// The quiet "couldn't load" over the black, with Try Again: the shared
+    /// empty state, in the page's dark.
+    private lazy var failureView: EmptyStateView = {
+        let view = EmptyStateView()
+        view.overrideUserInterfaceStyle = .dark
+        view.isHidden = true
+        view.pin(to: self)
+        return view
+    }()
+    private var isFailureViewBuilt = false
+
+    private func setPictureFailed(_ failed: Bool) {
+        isSinglePictureFailed = failed
+        refreshFailureView()
+    }
+
+    /// Shows or hides the failure mark for what the viewer is looking at now.
+    func refreshFailureView() {
+        let failed = isPictureFailed
+        guard failed || isFailureViewBuilt else { return }
+        isFailureViewBuilt = true
+        if failed {
+            failureView.configure(
+                symbolName: "photo", title: "Couldn't load this photo",
+                actionTitle: "Try Again", actionHandler: { [weak self] in self?.retryFailedPicture() }
+            )
+            bringSubviewToFront(failureView)
+        }
+        failureView.isHidden = !failed
+    }
+
+    private func retryFailedPicture() {
+        if showsCollection {
+            carousel?.retryCover(onPage: currentPage)
+        } else {
+            retryPicture?()
+        }
+        refreshFailureView()
+        onPictureLoadingChange?()
+    }
+
+    #if DEBUG
+    /// Whether the failure mark shows.
+    var debugShowsPictureFailure: Bool { isFailureViewBuilt && !failureView.isHidden }
+    /// Fails the single picture as the pipeline would.
+    func debugFailPicture() {
+        setPictureFailed(true)
+        onPictureLoadingChange?()
+    }
+    #endif
 
     /// Whether the page shows a picture of its media: the photograph; a
     /// clip's poster or its frames; a collection page's cover or frames. What
@@ -1023,10 +1097,18 @@ final class SnapMediaCardView: UIView {
         // The side list (#1425) waits for a leftward drag past the last
         // photo, or born at the trailing edge.
         view.yieldsLeftwardDrags = true
-        view.onPageChanged = { [weak self] page in self?.onPageChanged?(page) }
+        view.onPageChanged = { [weak self] page in
+            // The failure mark belongs to the page in front of the viewer.
+            self?.refreshFailureView()
+            self?.onPageChanged?(page)
+        }
         view.onScrollPosition = { [weak self] position in self?.onScrollPosition?(position) }
-        // A page's cover drawn: the loader over it comes down.
-        view.onPageCover = { [weak self] _ in self?.onPictureLoadingChange?() }
+        // A page's cover drawn, or failed: the loader over it comes down, and
+        // a failure shows its way out.
+        view.onPageCover = { [weak self] _ in
+            self?.refreshFailureView()
+            self?.onPictureLoadingChange?()
+        }
         // Below nothing — it is the media, and everything else on the page is
         // layered over the card by the cell.
         insertSubview(view, aboveSubview: imageView)

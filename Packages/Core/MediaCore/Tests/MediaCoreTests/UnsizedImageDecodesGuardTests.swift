@@ -24,7 +24,6 @@ struct UnsizedImageDecodesGuardTests {
         "SoundSheetTileCell.swift": "sound sheet covers, hero sources",
         "SoundSheetViewController.swift": "the sound's cover, shown large",
         "ThreadMediaViewer.swift": "a conversation's media, full screen",
-        "ThreadMediaView.swift": "a conversation's media bubble, the viewer's hero source",
         "WalletClaimViews.swift": "a stake row's post cover, the hero source of the post it opens",
     ]
 

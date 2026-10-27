@@ -88,7 +88,9 @@ private actor NeverReturningDirectory: PeopleDirectoryProviding {
 }
 
 private actor FailingDirectory: PeopleDirectoryProviding {
+    private(set) var asks = 0
     func searchPeople(matching query: String, limit: Int32) async throws -> [DirectoryPerson] {
+        asks += 1
         throw ChatError.transport(message: "no")
     }
 }
@@ -372,6 +374,23 @@ struct InboxSearchViewModelTests {
         let phase = await settle(box) { if case .failed = $0 { true } else { false } }
 
         #expect(phase == .failed(message: "Couldn't search for people. Please try again."))
+    }
+
+    /// ⚠️ A FAILED SEARCH HAS A WAY OUT (#1767): Try Again runs the query
+    /// again — before, the only retry was retyping it.
+    @Test func retryRunsTheFailedQueryAgain() async {
+        let repository = StubChatProvider(conversations: [])
+        let catalog = await makeCatalog(repository)
+        let directory = FailingDirectory()
+        let (viewModel, box) = makeViewModel(repository: repository, catalog: catalog, people: directory)
+
+        viewModel.queryChanged("sofia")
+        _ = await settle(box) { if case .failed = $0 { true } else { false } }
+        let asked = await directory.asks
+        viewModel.retry()
+        for _ in 0..<300 where await directory.asks == asked { try? await Task.sleep(for: .milliseconds(5)) }
+
+        #expect(await directory.asks > asked, "Try Again asked nothing")
     }
 
     /// #794: offline is the one failure the viewer can fix, so it says so

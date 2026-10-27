@@ -16,6 +16,14 @@ public protocol MapFavoritesProviding: Sendable {
     /// The profiles the viewer follows — the sub-filter row under the
     /// Following primary, and the favorites fallback before any curation.
     func following() async -> [MapFavorite]
+    /// The same, or nil when the list could not be read (#1767): a host that
+    /// already shows people keeps them rather than reading a failure as "you
+    /// follow no one".
+    func followingIfReachable() async -> [MapFavorite]?
+}
+
+public extension MapFavoritesProviding {
+    func followingIfReachable() async -> [MapFavorite]? { await following() }
 }
 
 /// Reads the viewer's people lists from `social_graph.v1` and hydrates names
@@ -52,6 +60,11 @@ public actor MapFavoritesRepository: MapFavoritesProviding {
         await hydrate(ids: followingIDs())
     }
 
+    public func followingIfReachable() async -> [MapFavorite]? {
+        guard let ids = await readFollowingIDs() else { return nil }
+        return await hydrate(ids: ids)
+    }
+
     public func friends() async -> [MapFavorite] {
         // Both edge lists in flight together — the intersection needs both
         // anyway, so serializing them would just sum their latencies.
@@ -65,10 +78,15 @@ public actor MapFavoritesRepository: MapFavoritesProviding {
     // MARK: - Edges
 
     private func followingIDs() async -> [String] {
+        await readFollowingIDs() ?? []
+    }
+
+    /// Nil when the list could not be read.
+    private func readFollowingIDs() async -> [String]? {
         var request = SocialGraph_V1_ListFollowingRequest()
         request.limit = Int32(Self.limit)
         let response = await socialGraphClient.listFollowing(request: request, headers: [:])
-        guard case .success(let body) = response.result else { return [] }
+        guard case .success(let body) = response.result else { return nil }
         return body.following.map(\.profileID).filter { !$0.isEmpty }
     }
 

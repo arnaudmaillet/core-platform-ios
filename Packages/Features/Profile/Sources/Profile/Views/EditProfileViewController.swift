@@ -211,11 +211,42 @@ final class EditProfileViewController: UIViewController {
             break
         case .ready(let fields):
             self.fields = fields
+            loadFailure.isHidden = true
             applyRealSnapshot()
         case .failed(let message):
-            presentError(message)
+            // ⚠️ A FIRST LOAD THAT FAILED IS A DEAD END WITHOUT A WAY OUT
+            // (#1767): an alert with only "OK" left the skeleton up for good.
+            // With nothing loaded yet, the shared failure block replaces the
+            // bones and offers Try Again; with the form already shown (a
+            // reload after a rejected edit), the alert says what happened and
+            // the form stays.
+            guard isShowingSkeleton else { return presentError(message) }
+            dataSource.apply(NSDiffableDataSourceSnapshot<Section, Item>(), animatingDifferences: false)
+            loadFailure.configure(
+                symbolName: "exclamationmark.triangle", title: message,
+                actionTitle: "Try Again", actionHandler: { [weak self] in
+                    guard let self else { return }
+                    loadFailure.isHidden = true
+                    applySkeletonSnapshot()
+                    viewModel.reload()
+                }
+            )
+            loadFailure.isHidden = false
         }
     }
+
+    /// The first load's failure, with Try Again (#1767).
+    private lazy var loadFailure: EmptyStateView = {
+        let view = EmptyStateView()
+        view.isHidden = true
+        collectionView.backgroundView = view
+        return view
+    }()
+
+    #if DEBUG
+    /// Whether the first load's failure block shows.
+    var debugShowsLoadFailure: Bool { !loadFailure.isHidden }
+    #endif
 
     private func render(save state: EditProfileViewModel.SaveState) {
         switch state {

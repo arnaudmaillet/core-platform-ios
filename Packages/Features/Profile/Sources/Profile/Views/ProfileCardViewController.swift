@@ -54,6 +54,10 @@ final class ProfileCardViewController: UIViewController {
     let headerView: ProfileHeaderView
     /// Clips the header to what the card shows of it: from the climb down.
     private let headerClip = UIView()
+    /// The card's failure and not-found block (#1767): with no profile to
+    /// show, the header goes (`ProfileHeaderView.render`), and the sheet was
+    /// left blank — no message, no way to try again.
+    private let statusView = EmptyStateView()
     private var headerTop: NSLayoutConstraint?
     private var headerClipHeight: NSLayoutConstraint?
     /// The relationship, as the toolbar shows it.
@@ -132,6 +136,8 @@ final class ProfileCardViewController: UIViewController {
         // empty labels, the verified badge, empty initials on a translucent
         // plate (a "transparent" avatar), a banner with no bone. A cache hit
         // in `viewDidLoad` below replaces it in this same pass.
+        statusView.isHidden = true
+        statusView.pin(to: headerClip)
         render(.loading)
         applyBars()
         viewModel.viewDidLoad()
@@ -297,11 +303,43 @@ final class ProfileCardViewController: UIViewController {
         // The profile's own mapping (`ProfileHeaderView.render`): the card
         // and the profile can no longer drift apart.
         headerView.render(phase, profileKnown: viewModel.profile != nil, animated: view.window != nil)
+        renderStatus(phase)
         // The banner's clip arrives with the profile.
         if case .content = phase { updateBannerVideo() }
         remeasure()
         applyBars()
     }
+
+    /// The block the profile shows in the same phases (`ProfileViewController`):
+    /// a failure with Try Again, a not-found as an answer — only when there is
+    /// no profile to keep showing.
+    private func renderStatus(_ phase: ProfileViewModel.Phase) {
+        guard viewModel.profile == nil else {
+            statusView.isHidden = true
+            return
+        }
+        switch phase {
+        case .failed(let message):
+            statusView.configure(
+                symbolName: "exclamationmark.triangle", title: message,
+                actionTitle: "Try Again", actionHandler: { [weak self] in
+                    self?.statusView.setActionBusy(true)
+                    self?.viewModel.refresh()
+                }
+            )
+            statusView.isHidden = false
+        case .notFound(let message, let detail):
+            statusView.configure(symbolName: "person.crop.circle.badge.questionmark", title: message, subtitle: detail)
+            statusView.isHidden = false
+        case .loading, .content:
+            statusView.isHidden = true
+        }
+    }
+
+    #if DEBUG
+    /// Whether the card shows its failure or not-found block.
+    var debugShowsStatus: Bool { !statusView.isHidden }
+    #endif
 
     private func render(_ result: ProfileViewModel.ActionResult) {
         switch result {

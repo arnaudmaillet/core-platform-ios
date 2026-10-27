@@ -145,7 +145,7 @@ struct ProfileGalleryStoreTests {
     @Test func aFirstPageFailureNotFromTheNetworkOffersThePull() {
         let store = ProfileGalleryStore()
         store.applyFirstPages(authored: nil, authoredFailure: nil, tagged: page([]), taggedFailure: nil)
-        #expect(store.page(.activity, .posts) == .failed(message: "Couldn't load. Pull to retry."))
+        #expect(store.page(.activity, .posts) == .failed(message: "Couldn't load these posts."))
     }
 
     @Test func aFailedNextPagePausesPagingAndNamesTheCauseOnAnEmptyTab() {

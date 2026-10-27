@@ -34,8 +34,11 @@ final class ThreadMediaView: UIView {
     private let failedStack = UIStackView()
     private var ratioConstraint: NSLayoutConstraint?
     private var barLeading: NSLayoutConstraint?
-    private var loadTask: Task<Void, Never>?
-    private var shownURL: URL?
+    /// The bubble's picture on the media slot (#1767, #1772): its bone while
+    /// it loads, its dissolve; a failure is asked again on the next configure,
+    /// and the full-screen viewer a tap opens has its own Try Again. It sat on
+    /// a flat fill for good before, a `try?` swallowing the failure.
+    private lazy var cover = CoverSlot(view: imageView, size: .full)
 
     init() {
         super.init(frame: .zero)
@@ -134,9 +137,7 @@ final class ThreadMediaView: UIView {
         self.delivery = delivery
         guard let media else {
             isHidden = true
-            loadTask?.cancel()
-            imageView.image = nil
-            shownURL = nil
+            cover.reset()
             return
         }
         isHidden = false
@@ -159,22 +160,17 @@ final class ThreadMediaView: UIView {
         // The picture picked wins: the viewer's own message never waits on
         // the network, and a mock delivery URL has nothing behind it.
         if let preview = media.preview {
-            loadTask?.cancel()
-            shownURL = nil
-            imageView.image = preview
+            cover.reset()
+            cover.apply(preview)
             return
         }
         let url = isVideo ? media.posterURL : media.url
-        guard url != shownURL else { return }
-        shownURL = url
-        imageView.image = nil
-        loadTask?.cancel()
-        guard let url, let pipeline else { return }
-        loadTask = Task { [weak self] in
-            let image = try? await pipeline.image(for: url)
-            guard let self, !Task.isCancelled, self.shownURL == url else { return }
-            self.imageView.image = image
+        guard let url else {
+            cover.reset()
+            return
         }
+        // The same picture again is a reconfigure; a failed one is asked again.
+        cover.load(url, pipeline: pipeline, item: url)
     }
 
     /// The picture shown now, for the full-screen viewer's first frame.

@@ -447,6 +447,19 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// picture here" answer changes.
     public var onPageCover: ((Int) -> Void)?
 
+    /// The pages whose cover failed to load, until it is asked for again.
+    private var failedCoverPages: Set<Int> = []
+
+    /// Whether `index`'s cover failed — a host shows its way out (#1767).
+    public func isCoverFailed(onPage index: Int) -> Bool { failedCoverPages.contains(index) }
+
+    /// Asks for `index`'s cover again, after a failure.
+    public func retryCover(onPage index: Int) {
+        guard pageViews.indices.contains(index), let imagePipeline, let url = pages[index].thumbnailURL else { return }
+        failedCoverPages.remove(index)
+        pageViews[index].coverSlot.load(url, pipeline: imagePipeline, item: index)
+    }
+
     /// The spinner on `index` while it is up — the view itself, so a spec can
     /// ask where it is drawn rather than trust that it travelled.
     public func visibleLoader(onPage index: Int) -> UIView? {
@@ -633,6 +646,7 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         }
         cancelPendingWork()
         pageViews.forEach { $0.removeFromSuperview() }
+        failedCoverPages = []
         self.pages = pages
         self.imagePipeline = imagePipeline
         pageViews = pages.enumerated().map { index, page in
@@ -643,7 +657,16 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
             view.coverSlot.alongside = { [weak self] _ in self?.applyFraming(onPage: index) }
             // And the host hears of it: a full-screen page's centred loader
             // comes down the moment its picture is there.
-            view.coverSlot.onChange = { [weak self] _ in self?.onPageCover?(index) }
+            view.coverSlot.onChange = { [weak self] _ in
+                self?.failedCoverPages.remove(index)
+                self?.onPageCover?(index)
+            }
+            // A cover that will not come (#1767): the host offers a retry
+            // rather than waiting on it for good.
+            view.coverSlot.onFailed = { [weak self] in
+                self?.failedCoverPages.insert(index)
+                self?.onPageCover?(index)
+            }
             // ⚠️ A page knows whether it is PLAYABLE, and it is per page.
             //
             // Nothing in `post.v1` says a carousel's attachments agree about

@@ -82,6 +82,25 @@ struct InboxPagingTests {
 
     private func ids(_ rows: [Conversation]) -> [String] { rows.map(\.id.rawValue) }
 
+    /// ⚠️ A FAILED PAGE IS SAID (#1767): it rendered nothing, so the footer
+    /// the approach had set spinning spun on until the next approach. The
+    /// catalog now renders on a failure, which stops it.
+    @Test func aFailedPageRendersSoTheFooterStops() async {
+        let provider = PagedInbox(inbox: [
+            nil: InboxPage(conversations: [row("a", at: 40)], nextPageToken: "p2"),
+            "p2": InboxPage(conversations: [row("b", at: 30)], nextPageToken: nil),
+        ])
+        await provider.failOnce("p2")
+        let catalog = await loaded(provider)
+        var renders = 0
+        let token = catalog.observe { _ in renders += 1 }
+        let before = renders
+        catalog.loadMore(.inbox)
+        #expect(await settle { await provider.asks(for: .inbox).contains("p2") }, "the page was never asked")
+        #expect(await settle { renders > before }, "a failed page left the list unrendered")
+        _ = token
+    }
+
     @Test func nearingTheEndAppendsTheNextPageOnceAndStopsAtTheEnd() async {
         let provider = PagedInbox(inbox: [
             nil: InboxPage(conversations: [row("a", at: 40), row("b", at: 30)], nextPageToken: "p2"),

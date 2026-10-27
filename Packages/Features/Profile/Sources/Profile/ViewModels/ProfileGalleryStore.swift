@@ -366,7 +366,7 @@ final class ProfileGalleryStore {
     /// too long…" when that is why; otherwise the pull it offers, since the
     /// gallery is what the pull refreshes.
     nonisolated static func galleryFailureMessage(_ failure: NetworkFailure?) -> String {
-        FailureCopy.message(for: failure, fallback: "Couldn't load. Pull to retry.")
+        FailureCopy.message(for: failure, fallback: "Couldn't load these posts.")
     }
 
     /// `shown` with the page's new posts below it, or nil when it brings

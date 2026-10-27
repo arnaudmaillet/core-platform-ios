@@ -168,6 +168,9 @@ final class InboxSearchViewModel {
     /// a loaded one, and `InboxCatalog.reload` costs a `ListMembers` +
     /// `GetHistory` per conversation — an entire refetch to narrow a list the
     /// catalog is already holding.
+    /// Runs the current query again — a failed search's way out (#1767).
+    func retry() { queryChanged(query) }
+
     func queryChanged(_ text: String) {
         query = text
         searchTask?.cancel()
