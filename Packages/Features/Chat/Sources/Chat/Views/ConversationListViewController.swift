@@ -29,7 +29,9 @@ final class ConversationListViewController: UIViewController {
         table.showsHorizontalScrollIndicator = false
         return table
     }()
-    private let skeletonView = ConversationListSkeletonView()
+    /// The inbox's rows before the first page (#1769): DesignSystem's person
+    /// rows with a preview line and the time at the trailing edge.
+    private let skeletonView = PersonListSkeletonView(trailing: .timeBone, lines: .preview)
     private let statusView = InboxStatusView()
     /// Which of the skeleton, the table and the status shows, on the kit's
     /// timing (#1768): no skeleton for an inbox that answers at once, held

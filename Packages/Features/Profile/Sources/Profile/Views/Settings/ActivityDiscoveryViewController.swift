@@ -180,7 +180,7 @@ final class ActivityDiscoveryViewController: UIViewController {
                 content.imageProperties.tintColor = .label
                 cell.accessories = [.disclosureIndicator()]
             case .loading:
-                cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+                cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
                 return
             case .failed:

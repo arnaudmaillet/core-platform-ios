@@ -13,8 +13,9 @@ import UIKit
 /// height to the point.
 ///
 /// Enough rows are built to cover the view's height and no more, rebuilt
-/// when that height changes. The messages inbox draws its own variant with
-/// a preview line; this is the one for every other people list.
+/// when that height changes. One for every people list (#1769): the
+/// messages inbox wears it with a preview line (`lines: .preview`) and a
+/// time bone.
 public final class PersonListSkeletonView: UIView {
     /// What stands at the row's trailing edge (#1774): the real row's own
     /// furniture, so the skeleton is the row's shape and not another's.
@@ -33,15 +34,34 @@ public final class PersonListSkeletonView: UIView {
         public static let acceptAndDismiss = Trailing.action(pillWidth: 78, dismiss: 32)
     }
 
+    /// The two lines' rhythm.
+    public enum Lines: Equatable, Sendable {
+        /// A name over a shorter handle — a person row.
+        case person
+        /// A title over a longer preview — a conversation row.
+        case preview
+
+        var first: [CGFloat] {
+            switch self {
+            case .person: [0.58, 0.42, 0.66, 0.5]
+            case .preview: [0.42, 0.58, 0.36]
+            }
+        }
+        var second: [CGFloat] {
+            switch self {
+            case .person: [0.34, 0.46, 0.28, 0.4]
+            case .preview: [0.82, 0.64, 0.9]
+            }
+        }
+    }
+
     private let avatarSize: CGFloat
     private let trailing: Trailing
+    private let lines: Lines
     /// The action pill's height: an `AppButton` at `.row` size.
     static let pillHeight: CGFloat = 30
     private let rows = UIStackView()
     private var builtRowCount = 0
-
-    private static let lineFractions: [CGFloat] = [0.58, 0.42, 0.66, 0.5]
-    private static let secondLineFractions: [CGFloat] = [0.34, 0.46, 0.28, 0.4]
 
     /// - Parameters:
     ///   - avatarSize: the disc the real row draws (48 for a person row, 40
@@ -55,9 +75,11 @@ public final class PersonListSkeletonView: UIView {
     /// - Parameters:
     ///   - avatarSize: the disc the real row draws.
     ///   - trailing: the real row's trailing furniture (#1774).
-    public init(avatarSize: CGFloat = 48, trailing: Trailing) {
+    ///   - lines: the two lines' rhythm (#1769).
+    public init(avatarSize: CGFloat = 48, trailing: Trailing, lines: Lines = .person) {
         self.avatarSize = avatarSize
         self.trailing = trailing
+        self.lines = lines
         super.init(frame: .zero)
         isUserInteractionEnabled = false
         clipsToBounds = true
@@ -144,12 +166,12 @@ public final class PersonListSkeletonView: UIView {
             line.heightAnchor.constraint(equalToConstant: 13),
             line.widthAnchor.constraint(
                 equalTo: textColumn.widthAnchor,
-                multiplier: Self.lineFractions[index % Self.lineFractions.count]
+                multiplier: lines.first[index % lines.first.count]
             ),
             second.heightAnchor.constraint(equalToConstant: 11),
             second.widthAnchor.constraint(
                 equalTo: textColumn.widthAnchor,
-                multiplier: Self.secondLineFractions[index % Self.secondLineFractions.count]
+                multiplier: lines.second[index % lines.second.count]
             ),
             timeBone.heightAnchor.constraint(equalToConstant: 11),
             timeBone.widthAnchor.constraint(equalToConstant: 34),

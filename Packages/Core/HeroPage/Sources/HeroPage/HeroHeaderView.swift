@@ -1202,7 +1202,8 @@ open class HeroHeaderView: UIView {
             finish()
             return
         }
-        UIView.animate(withDuration: 0.35, delay: 0, options: [.curveEaseInOut]) {
+        // The kit's skeleton exit (#1769): one duration for every skeleton.
+        UIView.revealRedacted {
             reveal()
         } completion: { _ in
             // Re-entered redaction mid-fade keeps its bones up.

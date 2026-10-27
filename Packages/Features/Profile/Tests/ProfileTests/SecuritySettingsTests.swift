@@ -127,15 +127,21 @@ struct SecuritySettingsTests {
         content.image = UIImage(systemName: "iphone")
         cell.configure(redacting: content)
         cell.layoutIfNeeded()
-        let bones = cell.contentView.subviews.compactMap { $0 as? SkeletonBoneView }.filter { !$0.isHidden }
-        #expect(bones.count == 3)
-        #expect(bones.allSatisfy { $0.bounds.width > 0 && $0.bounds.height > 0 })
+        // The bones sit in the configuration's content view (#1769).
+        func bones(in view: UIView? = nil) -> [SkeletonBoneView] {
+            (view ?? cell.contentView).subviews.flatMap { sub in
+                (sub as? SkeletonBoneView).map { $0.isHidden ? [] : [$0] } ?? bones(in: sub)
+            }
+        }
+        let shown = bones()
+        #expect(shown.count == 3)
+        #expect(shown.allSatisfy { $0.bounds.width > 0 && $0.bounds.height > 0 })
 
         var titleOnly = UIListContentConfiguration.cell()
         titleOnly.text = "Delete Account"
         cell.configure(redacting: titleOnly)
         cell.layoutIfNeeded()
-        #expect(cell.contentView.subviews.compactMap { $0 as? SkeletonBoneView }.filter { !$0.isHidden }.count == 1)
+        #expect(bones().count == 1)
     }
 
     /// Coming back re-reads the sessions; when that read fails the list on

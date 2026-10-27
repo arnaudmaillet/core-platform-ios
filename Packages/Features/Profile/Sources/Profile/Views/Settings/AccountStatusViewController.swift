@@ -104,7 +104,7 @@ final class AccountStatusViewController: UIViewController {
                 content.image = UIImage(systemName: summary.symbol)
                 content.imageProperties.tintColor = summary.color
                 if case .loading = phase {
-                    cell.contentConfiguration = SettingsSkeletonRowConfiguration(redacting: content)
+                    cell.contentConfiguration = SkeletonRowConfiguration(redacting: content)
                 } else {
                     cell.contentConfiguration = content
                 }

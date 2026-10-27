@@ -99,7 +99,7 @@ final class DataExportViewController: UIViewController {
                 content.image = UIImage(systemName: "doc.zipper")
                 content.imageProperties.tintColor = .label
                 if viewModel.phase == .loading {
-                    cell.contentConfiguration = SettingsSkeletonRowConfiguration(redacting: content)
+                    cell.contentConfiguration = SkeletonRowConfiguration(redacting: content)
                     return
                 }
             case .request(let title):

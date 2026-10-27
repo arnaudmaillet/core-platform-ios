@@ -9,7 +9,7 @@ import UIKit
 /// hidden or removed afterwards. One helper, one duration, and a screen
 /// that reimplements it is a review comment.
 ///
-/// Three shapes:
+/// Four shapes:
 ///
 /// - `fadeOut(removing:)` when the skeleton is a view laid over the content
 ///   (the common case): it fades to clear and is then hidden, or removed
@@ -20,6 +20,9 @@ import UIKit
 /// - `crossfadeSkeleton(swapping:)` when the skeleton is cells of the
 ///   content's own list (P9): the view cross-dissolves while `swap` replaces
 ///   the bone rows with the real ones, at the same duration.
+/// - `UIView.revealRedacted(_:completion:)` when the skeleton is bones laid
+///   over a real view's own parts (a redacted header): `reveal` brings the
+///   parts in and the bones out, at the same duration (#1769).
 ///
 /// Both are safe to call when nothing is showing: a hidden skeleton is left
 /// alone, and calling twice while the fade runs restarts it from where it is.
@@ -76,5 +79,14 @@ public extension UIView {
             return
         }
         UIView.transition(with: self, duration: Self.skeletonFadeDuration, options: .transitionCrossDissolve, animations: swap)
+    }
+
+    /// Runs `reveal` — the redacted parts to opaque, their bones to clear —
+    /// as a skeleton's exit, then `completion` (whether it finished).
+    static func revealRedacted(_ reveal: @escaping () -> Void, completion: ((Bool) -> Void)? = nil) {
+        UIView.animate(
+            withDuration: skeletonFadeDuration, delay: 0, options: [.beginFromCurrentState, .curveEaseInOut],
+            animations: reveal, completion: completion
+        )
     }
 }

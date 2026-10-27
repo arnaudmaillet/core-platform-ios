@@ -128,9 +128,10 @@ final class ProfileRelationshipListViewController: UIViewController {
             }
         }
 
-        let skeletonRegistration = UICollectionView.CellRegistration<RelationshipSkeletonCell, Int> {
+        // DesignSystem's person row with the Follow pill (#1769).
+        let skeletonRegistration = UICollectionView.CellRegistration<PersonSkeletonCell, Int> {
             cell, _, index in
-            cell.configure(at: index)
+            cell.configure(at: index, trailing: .action(pillWidth: 82, dismiss: nil))
             // ⚠️ LAID OUT BEFORE ANY ANIMATION SEES IT (#717): its bones are
             // sized off the text column's width, which is only known once the
             // row is laid out — an insertion animated from there grew the
@@ -294,7 +295,7 @@ final class ProfileRelationshipListViewController: UIViewController {
     /// fixed tally, so the shimmer runs to the bottom edge on every device.
     private func placeholderCount(after loadedRows: Int) -> Int {
         let viewport = collectionView.bounds.height - collectionView.adjustedContentInset.top
-        return max(0, RelationshipSkeletonCell.rowsToFill(viewport) - loadedRows)
+        return max(0, PersonSkeletonCell.rowsToFill(viewport) - loadedRows)
     }
 }
 

@@ -270,7 +270,7 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
                 content.text = "Not Available Yet"
                 content.textProperties.color = .secondaryLabel
             case .loading, .supervisionLoading:
-                cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+                cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
                 return
             case .supervisionFailed:

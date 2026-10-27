@@ -181,7 +181,9 @@ final class WalletStakesViewController: UIViewController {
             cell.configure(retrying: postLoads.isRetrying, failedAfterRetry: postLoads.failedAfterRetry)
             cell.onRetry = { [weak self] in self?.retryFailedPosts() }
         }
-        let boneRegistration = UICollectionView.CellRegistration<WalletStakeBoneCell, Item> { _, _, _ in }
+        let boneRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, _ in
+            cell.contentConfiguration = WalletHistoryViewController.boneRow(thumbnail: true)
+        }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
             case .stake:
