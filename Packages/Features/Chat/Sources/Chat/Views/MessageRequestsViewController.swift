@@ -28,6 +28,23 @@ final class MessageRequestsViewController: UIViewController {
     }()
     private let skeletonView = ConversationListSkeletonView()
     private let statusView = InboxStatusView()
+    /// Which of the skeleton, the table and the status shows, on the kit's
+    /// timing (#1770, `ScreenLoadingHost`): no skeleton for a list that
+    /// answers at once, held its minimum once up, and "taking longer" with a
+    /// retry after 10 s.
+    private lazy var loading: ScreenLoadingHost = {
+        let host = ScreenLoadingHost(container: view, skeleton: skeletonView, content: tableView, status: statusView)
+        host.onTakingLonger = { [weak self] in
+            guard let self else { return }
+            statusView.configure(
+                symbol: "clock", title: "Taking longer than usual",
+                message: "Your requests are still on their way.",
+                actionTitle: "Try Again", action: { [weak self] in self?.retryLoad() }
+            )
+            loading.showStatus()
+        }
+        return host
+    }()
     /// Under the last row while another page is there to load (#593).
     private let pagingFooter = PagingFooterView()
     /// Under the last row once every page has loaded and the hidden folder
@@ -225,11 +242,8 @@ final class MessageRequestsViewController: UIViewController {
     private func render(_ phase: MessageRequestsViewModel.Phase) {
         switch phase {
         case .loading:
-            skeletonView.isHidden = false
-            tableView.isHidden = true
-            statusView.isHidden = true
+            loading.load()
         case .content(let sections):
-            statusView.isHidden = true
             renderedSections = sections
             // After this pass's apply: a header on screen whose section stays
             // is not dequeued again, and reading a row changes its count.
@@ -258,31 +272,25 @@ final class MessageRequestsViewController: UIViewController {
             pagingFooter.setSpinning(false)
             revealContent()
         case .empty where viewModel.folder == .hiddenRequests:
-            skeletonView.isHidden = true
-            tableView.isHidden = true
             statusView.configure(
                 symbol: "eye.slash",
                 title: "No hidden requests",
                 message: "Requests that match your hidden words will wait here."
             )
-            statusView.isHidden = false
+            loading.showStatus()
         case .empty:
-            skeletonView.isHidden = true
-            tableView.isHidden = true
             statusView.configure(
                 symbol: "tray",
                 title: "No requests",
                 message: "Messages from people you don't follow will wait here."
             )
-            statusView.isHidden = false
+            loading.showStatus()
         case .failed(let message):
-            skeletonView.isHidden = true
-            tableView.isHidden = true
             statusView.configure(
                 symbol: "exclamationmark.triangle", title: "Something went wrong", message: message,
-                actionTitle: "Try Again", action: { [weak self] in self?.viewModel.refresh() }
+                actionTitle: "Try Again", action: { [weak self] in self?.retryLoad() }
             )
-            statusView.isHidden = false
+            loading.showStatus()
         }
         updatePinnedSection()
     }
@@ -290,17 +298,13 @@ final class MessageRequestsViewController: UIViewController {
     /// Swaps the skeleton for the populated table — hydration in place, and
     /// only when the skeleton is actually on screen.
     private func revealContent() {
-        guard !skeletonView.isHidden, view.window != nil else {
-            skeletonView.isHidden = true
-            tableView.isHidden = false
-            return
-        }
-        UIView.transition(
-            with: view, duration: 0.35, options: [.transitionCrossDissolve, .curveEaseInOut]
-        ) {
-            self.skeletonView.isHidden = true
-            self.tableView.isHidden = false
-        }
+        loading.showContent()
+    }
+
+    /// Try Again: the wait starts over under the skeleton's timing.
+    private func retryLoad() {
+        loading.load()
+        viewModel.refresh()
     }
     #if DEBUG
     /// `-inbox-tap-section new|recent` fires a header pill's own action ~2s in.

@@ -330,6 +330,36 @@ final class NotificationsViewController: UIViewController {
         }
     }
 
+    /// Which of the skeleton, the list and the status shows, on the kit's
+    /// timing (#1770, `ScreenLoadingHost`): no skeleton for a list that
+    /// answers at once, held its minimum once up, and "taking longer" with a
+    /// retry after 10 s.
+    private lazy var loading: ScreenLoadingHost = {
+        let host = ScreenLoadingHost(container: view, skeleton: skeleton, content: collectionView, status: emptyState)
+        host.onTakingLonger = { [weak self] in
+            guard let self else { return }
+            emptyState.configure(
+                symbolName: "clock",
+                title: "Taking longer than usual",
+                subtitle: "Your notifications are still on their way.",
+                actionTitle: "Try Again"
+            ) { [weak self] in self?.retryLoad() }
+            loading.showStatus()
+        }
+        return host
+    }()
+
+    #if DEBUG
+    /// Whether the skeleton shows now — what a test reads.
+    var debugShowsSkeleton: Bool { !skeleton.isHidden && skeleton.alpha > 0 }
+    #endif
+
+    /// Try Again: the wait starts over under the skeleton's timing.
+    private func retryLoad() {
+        loading.load()
+        viewModel.refresh()
+    }
+
     private func configureStatusViews() {
         skeleton.pin(to: view)
         skeleton.isHidden = true
@@ -344,40 +374,35 @@ final class NotificationsViewController: UIViewController {
         switch phase {
         case .loading:
             // A pull-to-refresh keeps its own indicator and its rows; only a
-            // first load, with nothing to show, wears the skeleton.
-            if !refreshControl.isRefreshing, sections.isEmpty {
-                skeleton.showSkeleton()
-                collectionView.isHidden = true
+            // first load, with nothing to show, wears the skeleton (the host
+            // keeps rows already on screen).
+            if refreshControl.isRefreshing {
+                emptyState.isHidden = true
+            } else {
+                loading.load()
             }
-            emptyState.isHidden = true
         case .content(let sections):
             refreshControl.endRefreshing()
-            emptyState.isHidden = true
-            collectionView.isHidden = false
             apply(sections)
-            skeleton.fadeOutSkeleton()
+            loading.showContent()
         case .empty:
             refreshControl.endRefreshing()
-            collectionView.isHidden = true
-            skeleton.fadeOutSkeleton()
             emptyState.configure(
                 symbolName: "bell",
                 title: "No notifications yet",
                 subtitle: "Likes, comments and mentions of your posts will show up here."
             )
-            emptyState.isHidden = false
+            loading.showStatus()
         case .failed(let message):
             refreshControl.endRefreshing()
-            collectionView.isHidden = true
-            skeleton.fadeOutSkeleton()
             emptyState.configure(
                 symbolName: "wifi.exclamationmark",
                 title: message,
                 actionTitle: "Try Again"
             ) { [weak self] in
-                self?.viewModel.refresh()
+                self?.retryLoad()
             }
-            emptyState.isHidden = false
+            loading.showStatus()
         }
     }
 
