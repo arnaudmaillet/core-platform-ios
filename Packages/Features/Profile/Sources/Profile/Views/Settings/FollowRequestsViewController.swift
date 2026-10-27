@@ -1,3 +1,4 @@
+import CoreModels
 import CoreNetworking
 import DesignSystem
 import MediaCore
@@ -73,6 +74,17 @@ final class FollowRequestsViewController: UIViewController {
         view.addSubview(collectionView)
     }
 
+    /// The requests whose answer is on its way (#1775): they wear the busy
+    /// accessory until the row leaves, or comes back with the error.
+    private var busyIDs: Set<ProfileID> = []
+
+    private func reconfigureRow(_ request: FollowRequest) {
+        var snapshot = dataSource.snapshot()
+        guard snapshot.indexOfItem(.request(request)) != nil else { return }
+        snapshot.reconfigureItems([.request(request)])
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
     private func configureDataSource() {
         let personRegistration = UICollectionView.CellRegistration<PersonListCell, FollowRequest> { [weak self] cell, _, request in
             cell.configure(with: PersonRowContent(
@@ -84,6 +96,7 @@ final class FollowRequestsViewController: UIViewController {
             // The avatar keeps its own load and drops a late face for the
             // person the row was before (#780, the avatar contract #1750).
             cell.avatar.setPicture(request.avatarURL, pipeline: self?.imagePipeline)
+            cell.accessories = self?.busyIDs.contains(request.id) == true ? [.busy()] : []
         }
         let messageRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             var content = UIListContentConfiguration.cell()
@@ -154,8 +167,15 @@ final class FollowRequestsViewController: UIViewController {
     }
 
     private func answer(_ request: FollowRequest, confirm: Bool) {
+        guard !busyIDs.contains(request.id) else { return }
+        busyIDs.insert(request.id)
+        reconfigureRow(request)
         Task { [weak self] in
             guard let self else { return }
+            defer {
+                busyIDs.remove(request.id)
+                reconfigureRow(request)
+            }
             do {
                 if confirm {
                     try await viewModel.confirm(request)
