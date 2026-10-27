@@ -16,8 +16,27 @@ import UIKit
 /// when that height changes. The messages inbox draws its own variant with
 /// a preview line; this is the one for every other people list.
 public final class PersonListSkeletonView: UIView {
+    /// What stands at the row's trailing edge (#1774): the real row's own
+    /// furniture, so the skeleton is the row's shape and not another's.
+    public enum Trailing: Equatable, Sendable {
+        /// Nothing.
+        case none
+        /// A short bone on the first line, for a time or a count.
+        case timeBone
+        /// An action pill (Follow, Accept), centred on the row, and — when
+        /// `dismiss` is given — a ✕ disc of that diameter after it.
+        case action(pillWidth: CGFloat, dismiss: CGFloat?)
+
+        /// Follow and a quiet ✕ — a suggestion row (`SuggestionCell`).
+        public static let followAndDismiss = Trailing.action(pillWidth: 78, dismiss: 22)
+        /// Accept and a ✕ bubble — a message request (`MessageRequestCell`).
+        public static let acceptAndDismiss = Trailing.action(pillWidth: 78, dismiss: 32)
+    }
+
     private let avatarSize: CGFloat
-    private let showsTrailingBone: Bool
+    private let trailing: Trailing
+    /// The action pill's height: an `AppButton` at `.row` size.
+    static let pillHeight: CGFloat = 30
     private let rows = UIStackView()
     private var builtRowCount = 0
 
@@ -29,9 +48,16 @@ public final class PersonListSkeletonView: UIView {
     ///     for an activity row).
     ///   - showsTrailingBone: a short bone at the trailing edge of the first
     ///     line, for rows that carry a time or a count there.
-    public init(avatarSize: CGFloat = 48, showsTrailingBone: Bool = false) {
+    public convenience init(avatarSize: CGFloat = 48, showsTrailingBone: Bool = false) {
+        self.init(avatarSize: avatarSize, trailing: showsTrailingBone ? .timeBone : .none)
+    }
+
+    /// - Parameters:
+    ///   - avatarSize: the disc the real row draws.
+    ///   - trailing: the real row's trailing furniture (#1774).
+    public init(avatarSize: CGFloat = 48, trailing: Trailing) {
         self.avatarSize = avatarSize
-        self.showsTrailingBone = showsTrailingBone
+        self.trailing = trailing
         super.init(frame: .zero)
         isUserInteractionEnabled = false
         clipsToBounds = true
@@ -76,8 +102,8 @@ public final class PersonListSkeletonView: UIView {
 
         let line = SkeletonBoneView(rounding: .capsule)
         let slack = UIView()
-        let trailing = SkeletonBoneView(rounding: .capsule)
-        let firstRow = UIStackView(arrangedSubviews: showsTrailingBone ? [line, slack, trailing] : [line, slack])
+        let timeBone = SkeletonBoneView(rounding: .capsule)
+        let firstRow = UIStackView(arrangedSubviews: self.trailing == .timeBone ? [line, slack, timeBone] : [line, slack])
         firstRow.alignment = .center
         firstRow.spacing = Spacing.sm
 
@@ -87,7 +113,25 @@ public final class PersonListSkeletonView: UIView {
         textColumn.spacing = 6
         textColumn.alignment = .leading
 
-        let row = UIStackView(arrangedSubviews: [avatar, textColumn])
+        var arranged: [UIView] = [avatar, textColumn]
+        var actionConstraints: [NSLayoutConstraint] = []
+        if case .action(let pillWidth, let dismiss) = self.trailing {
+            let pill = SkeletonBoneView(rounding: .capsule)
+            arranged.append(pill)
+            actionConstraints += [
+                pill.widthAnchor.constraint(equalToConstant: pillWidth),
+                pill.heightAnchor.constraint(equalToConstant: Self.pillHeight),
+            ]
+            if let dismiss {
+                let disc = SkeletonBoneView(rounding: .capsule)
+                arranged.append(disc)
+                actionConstraints += [
+                    disc.widthAnchor.constraint(equalToConstant: dismiss),
+                    disc.heightAnchor.constraint(equalToConstant: dismiss),
+                ]
+            }
+        }
+        let row = UIStackView(arrangedSubviews: arranged)
         row.alignment = .center
         row.spacing = Spacing.md
         row.isLayoutMarginsRelativeArrangement = true
@@ -107,10 +151,21 @@ public final class PersonListSkeletonView: UIView {
                 equalTo: textColumn.widthAnchor,
                 multiplier: Self.secondLineFractions[index % Self.secondLineFractions.count]
             ),
-            trailing.heightAnchor.constraint(equalToConstant: 11),
-            trailing.widthAnchor.constraint(equalToConstant: 34),
+            timeBone.heightAnchor.constraint(equalToConstant: 11),
+            timeBone.widthAnchor.constraint(equalToConstant: 34),
             row.heightAnchor.constraint(equalToConstant: rowHeight)
-        ])
+        ] + actionConstraints)
         return row
     }
+
+    #if DEBUG
+    /// The bones of the first row — what a test reads.
+    var debugFirstRowBoneCount: Int {
+        layoutIfNeeded()
+        func bones(in view: UIView) -> Int {
+            view.subviews.reduce(0) { $0 + ($1 is SkeletonBoneView && !$1.isHidden ? 1 : bones(in: $1)) }
+        }
+        return rows.arrangedSubviews.first.map(bones(in:)) ?? 0
+    }
+    #endif
 }
