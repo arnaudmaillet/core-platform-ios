@@ -968,12 +968,16 @@ struct RelationshipSkeletonLayoutTests {
             subject: subject(isSelf: true), repository: StubRelationshipsProvider(followers: [])
         )
         let list = ProfileRelationshipListViewController(direction: .followers, viewModel: viewModel, imagePipeline: nil)
+        // The bones come after the kit's delay (#1770).
+        let time = ManualLoadingClock()
+        list.skeletonClock = time.clock
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 700))
         window.rootViewController = list
         window.isHidden = false
         defer { window.isHidden = true }
         list.view.layoutIfNeeded()
         list.render(.loading)
+        time.advance(LoadingTiming.skeletonDelay)
         list.view.layoutIfNeeded()
         let cells = list.collectionView.visibleCells.compactMap { $0 as? PersonSkeletonCell }
         try #require(!cells.isEmpty, "no skeleton rows")
@@ -982,5 +986,30 @@ struct RelationshipSkeletonLayoutTests {
             #expect(cell.debugBoneWidths.allSatisfy { $0 > 0 }, "bones \(cell.debugBoneWidths)")
             #expect(cell.debugBoneWidths.count == 4, "avatar, name, handle and the Follow pill")
         }
+    }
+
+    /// The first page on the kit's timing (#1770): no bones before the delay,
+    /// and after 10 s "Taking longer than usual" in their place.
+    @Test func theFirstPageFollowsTheGate() throws {
+        let viewModel = ProfileRelationshipsViewModel(
+            subject: subject(isSelf: true), repository: StubRelationshipsProvider(followers: [])
+        )
+        let list = ProfileRelationshipListViewController(direction: .followers, viewModel: viewModel, imagePipeline: nil)
+        let time = ManualLoadingClock()
+        list.skeletonClock = time.clock
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 700))
+        window.rootViewController = list
+        window.isHidden = false
+        defer { window.isHidden = true }
+        list.view.layoutIfNeeded()
+        list.render(.loading)
+        list.view.layoutIfNeeded()
+        #expect(list.collectionView.numberOfSections == 0, "bones before the delay")
+        time.advance(LoadingTiming.takingLonger)
+        list.view.layoutIfNeeded()
+        #expect(list.collectionView.numberOfSections == 0, "bones past the long wait")
+        let waiting = try #require(list.contentUnavailableConfiguration as? UIContentUnavailableConfiguration)
+        #expect(waiting.text == TakingLongerCopy.title)
+        #expect(waiting.button.title == TakingLongerCopy.action)
     }
 }

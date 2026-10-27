@@ -167,12 +167,48 @@ final class ProfileRelationshipListViewController: UIViewController {
 
     // MARK: - Render
 
+    /// The first page's skeleton on the kit's timing (#1770): no bones for a
+    /// list that answers at once, held their minimum once up, and "taking
+    /// longer" with Try Again after 10 s. Injectable so a test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var skeletonGate: SkeletonGate = {
+        let gate = SkeletonGate(clock: skeletonClock)
+        gate.onSkeletonChange = { [weak self] _ in
+            guard let self, case .loading = phase else { return }
+            renderNow(phase)
+        }
+        gate.onTakingLonger = { [weak self] in
+            guard let self else { return }
+            tookLonger = true
+            skeletonGate.finish { [weak self] in
+                guard let self, case .loading = phase else { return }
+                renderNow(phase)
+            }
+        }
+        return gate
+    }()
+    /// The first page ran past 10 s: "taking longer" stays until Try Again.
+    private var tookLonger = false
+
     func render(_ phase: ProfileRelationshipsViewModel.Phase) {
+        // ⚠️ THE FIRST PAGE'S SKELETON IS THE GATE'S (#1770): what answers
+        // after the bones came waits out their minimum — the newest answer,
+        // once.
+        guard case .loading = phase else {
+            tookLonger = false
+            return skeletonGate.finish { [weak self] in self?.renderNow(phase) }
+        }
+        if isViewLoaded, !tookLonger { skeletonGate.begin() }
+        renderNow(phase)
+    }
+
+    private func renderNow(_ phase: ProfileRelationshipsViewModel.Phase) {
         self.phase = phase
         guard isViewLoaded else { return }
         switch phase {
         case .loading:
-            apply(rows: [], placeholders: placeholderCount(after: 0), isAppending: false)
+            let shown = skeletonGate.showsSkeleton && !tookLonger
+            apply(rows: [], placeholders: shown ? placeholderCount(after: 0) : 0, isAppending: false)
 
         case .content(let rows, let isAppending):
             refreshControl.endRefreshing()
@@ -195,6 +231,23 @@ final class ProfileRelationshipListViewController: UIViewController {
     ) {
         var configuration: UIContentUnavailableConfiguration?
         switch phase {
+        case .loading where tookLonger:
+            var waiting = UIContentUnavailableConfiguration.empty()
+            waiting.image = UIImage(systemName: TakingLongerCopy.symbol)
+            waiting.text = TakingLongerCopy.title
+            waiting.secondaryText = "The people are still on their way."
+            var button = UIButton.Configuration.borderless()
+            button.title = TakingLongerCopy.action
+            waiting.button = button
+            waiting.buttonProperties.primaryAction = UIAction { [weak self] _ in
+                guard let self else { return }
+                tookLonger = false
+                skeletonGate.begin()
+                renderNow(phase)
+                viewModel.refresh()
+            }
+            configuration = waiting
+
         case .loading, .content:
             configuration = nil
 

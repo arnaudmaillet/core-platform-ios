@@ -28,6 +28,8 @@ public enum TakingLongerCopy {
     public static let symbol = "clock"
     public static let title = "Taking longer than usual"
     public static let action = "Try Again"
+    /// The same, as a list row a tap retries (`ListSkeletonGate`).
+    public static let row = "Taking longer than usual. Tap to try again."
 }
 
 /// Time, injectable: a test steps it. The one clock of every loading state —
