@@ -109,6 +109,17 @@ public final class CoverSlot {
         }
     }
 
+    /// A cover that may exist and whose post is not here yet (a placeholder
+    /// tile, #1772): the bone holds its place, and the next `load` answers
+    /// the wait with the bone kept.
+    public func awaitCover() {
+        guard !slot.isAwaiting else { return }
+        url = nil
+        pending = nil
+        view.image = nil
+        slot.awaitPicture()
+    }
+
     /// A cover handed in from outside the pipeline (a seed, a stand-in):
     /// used only when there is none yet.
     public func apply(_ image: UIImage) {

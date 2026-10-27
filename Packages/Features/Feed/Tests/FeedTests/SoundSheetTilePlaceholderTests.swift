@@ -4,8 +4,9 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// A sound sheet tile whose post is still on its way wears a bone (#831),
-/// and gives it up when the post is filled in.
+/// A sound sheet tile whose post is still on its way wears a bone (#831) —
+/// the slot's (#1772), after the kit's skeleton delay — and gives it up when
+/// the post is filled in.
 ///
 /// A post that cannot be loaded is not drawn as a failed tile: the sheet
 /// drops it and deals its sections again, by design
@@ -55,10 +56,11 @@ struct SoundSheetTilePlaceholderTests {
         return cell
     }
 
-    @Test func aPlaceholderTileWearsABone() {
+    @Test func aPlaceholderTileWearsABone() async {
         let cell = cell()
         cell.configure(tile("p1", loaded: false), pipeline: pipeline)
 
+        await settle { cell.showsPlaceholderBone }
         #expect(cell.showsPlaceholderBone)
     }
 
@@ -85,6 +87,7 @@ struct SoundSheetTilePlaceholderTests {
         let pipeline = ImagePipeline(fetcher: PosterFetcher())
         let cell = cell()
         cell.configure(tile("p1", loaded: false), pipeline: pipeline)
+        await settle { cell.showsPlaceholderBone }
 
         cell.configure(tile("p1", loaded: true), pipeline: pipeline)
         #expect(cell.showsPlaceholderBone, "no bare fill before the poster")

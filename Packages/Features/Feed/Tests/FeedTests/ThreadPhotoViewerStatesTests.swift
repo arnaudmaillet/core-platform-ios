@@ -5,8 +5,9 @@ import UIKit
 @testable import Feed
 
 /// The thread's full-screen photo in the charter's states (#831): the
-/// cache's picture on the first layout, a bone while it loads, and a failed
-/// state whose Try Again loads again.
+/// cache's picture on the first layout, the centred loader while it loads
+/// (the full-screen rule, #1772), and a failed state whose Try Again loads
+/// again.
 @MainActor
 struct ThreadPhotoViewerStatesTests {
     /// Fails the first `failures` fetches, then serves a small PNG.
@@ -75,19 +76,17 @@ struct ThreadPhotoViewerStatesTests {
 
         #expect(viewer.phase == .content)
         #expect(viewer.debugImage === cached)
-        #expect(viewer.debugShowsPlaceholder == false)
+        #expect(viewer.debugAnnouncesWait == false)
         #expect(viewer.debugFailedState == nil)
         #expect(fetcher.fetches == 0)
     }
 
-    @Test func aPhotoStillOnItsWayShowsABoneThenThePicture() async {
+    @Test func aPhotoStillOnItsWayWaitsUnderTheLoaderThenThePicture() async {
         let pipeline = ImagePipeline(fetcher: FlakyFetcher(failures: 0))
-        let viewer = laidOut(ThreadPhotoViewerController(
-            image: nil, url: Self.photoURL, pipeline: pipeline, aspectRatio: 4.0 / 3.0
-        ))
+        let viewer = laidOut(ThreadPhotoViewerController(image: nil, url: Self.photoURL, pipeline: pipeline))
 
         #expect(viewer.phase == .loading)
-        #expect(viewer.debugShowsPlaceholder)
+        #expect(viewer.debugAnnouncesWait)
         #expect(viewer.debugImage == nil)
 
         await settle { viewer.phase == .content }
@@ -111,7 +110,7 @@ struct ThreadPhotoViewerStatesTests {
         tryAgain.sendActions(for: .primaryActionTriggered)
         #expect(viewer.phase == .loading)
         #expect(viewer.debugFailedState == nil)
-        #expect(viewer.debugShowsPlaceholder)
+        #expect(viewer.debugAnnouncesWait)
 
         await settle { viewer.phase == .content }
         #expect(viewer.phase == .content)
@@ -122,13 +121,13 @@ struct ThreadPhotoViewerStatesTests {
     @Test func onlyThePictureZooms() async {
         let pipeline = ImagePipeline(fetcher: FlakyFetcher(failures: 0))
         let viewer = laidOut(ThreadPhotoViewerController(image: nil, url: Self.photoURL, pipeline: pipeline))
-        #expect(viewer.viewForZooming(in: UIScrollView()) == nil, "a pinch over the bone does nothing")
+        #expect(viewer.viewForZooming(in: UIScrollView()) == nil, "a pinch over the loader does nothing")
 
         await settle { viewer.phase == .content }
         #expect(viewer.viewForZooming(in: UIScrollView()) != nil)
     }
 
-    @Test func theBoneTellsVoiceOverThePhotoIsLoading() {
+    @Test func theLoaderTellsVoiceOverThePhotoIsLoading() {
         let pipeline = ImagePipeline(fetcher: FlakyFetcher(failures: 0))
         let viewer = laidOut(ThreadPhotoViewerController(image: nil, url: Self.photoURL, pipeline: pipeline))
 
@@ -143,20 +142,5 @@ struct ThreadPhotoViewerStatesTests {
         let failed = viewer.debugFailedState
         #expect(failed != nil)
         #expect(failed.flatMap { button(in: $0) } == nil)
-    }
-
-    @Test func theBoneStandsWhereTheFittedPhotoWill() {
-        let bounds = CGRect(x: 0, y: 0, width: 390, height: 844)
-        let landscape = ThreadPhotoViewerController.fittedRect(aspectRatio: 2, in: bounds)
-        #expect(landscape.width == 390)
-        #expect(landscape.height == 195)
-        #expect(landscape.midY == bounds.midY)
-
-        let tall = ThreadPhotoViewerController.fittedRect(aspectRatio: 0.25, in: bounds)
-        #expect(tall.height == 844)
-        #expect(tall.width == 211)
-
-        let unknown = ThreadPhotoViewerController.fittedRect(aspectRatio: nil, in: bounds)
-        #expect(unknown.width == unknown.height)
     }
 }

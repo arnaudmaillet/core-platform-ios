@@ -40,8 +40,9 @@ final class NotificationCell: UICollectionViewListCell {
     private lazy var textColumn = UIStackView(arrangedSubviews: [sentenceLabel, excerptLabel])
 
     private var imagePipeline: ImagePipeline?
-    private var thumbnailURL: URL?
-    private var thumbnailTask: Task<Void, Never>?
+    /// The post's picture through the slot (#1772): the bone while it is on
+    /// its way, dissolved in, the media ground if it fails.
+    private lazy var thumbnail = CoverSlot(view: thumbnailView, size: .px256)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -58,10 +59,7 @@ final class NotificationCell: UICollectionViewListCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        thumbnailTask?.cancel()
-        thumbnailTask = nil
-        thumbnailURL = nil
-        thumbnailView.image = nil
+        thumbnail.reset()
         thumbnailView.alpha = 1
         avatar.prepareForReuse()
     }
@@ -122,21 +120,8 @@ final class NotificationCell: UICollectionViewListCell {
 
     private func loadThumbnail(_ url: URL?) {
         thumbnailView.isHidden = url == nil
-        guard url != thumbnailURL || thumbnailView.image == nil else { return }
-        thumbnailURL = url
-        thumbnailTask?.cancel()
-        thumbnailView.image = nil
-        guard let url, let pipeline = imagePipeline else { return }
-        thumbnailTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url, size: .px256) else { return }
-            guard let self, !Task.isCancelled, self.thumbnailURL == url else { return }
-            UIView.transition(
-                with: self.thumbnailView, duration: 0.2,
-                options: [.transitionCrossDissolve, .allowUserInteraction]
-            ) {
-                self.thumbnailView.image = image
-            }
-        }
+        guard let url else { return thumbnail.reset() }
+        thumbnail.load(url, pipeline: imagePipeline, item: url)
     }
 
     override func updateConfiguration(using state: UICellConfigurationState) {
@@ -165,7 +150,7 @@ final class NotificationCell: UICollectionViewListCell {
         thumbnailView.clipsToBounds = true
         thumbnailView.layer.cornerRadius = Metrics.thumbnailRadius
         thumbnailView.layer.cornerCurve = .continuous
-        thumbnailView.backgroundColor = .tertiarySystemFill
+        thumbnailView.backgroundColor = Surface.mediaGround
         thumbnailView.isAccessibilityElement = false
 
         let row = UIStackView(arrangedSubviews: [avatar, textColumn, thumbnailView])

@@ -25,8 +25,7 @@ enum ThreadMediaViewer {
             return player
         case .image:
             let viewer = ThreadPhotoViewerController(
-                image: media.preview ?? shownImage, url: media.url, pipeline: pipeline,
-                aspectRatio: media.aspectRatio
+                image: media.preview ?? shownImage, url: media.url, pipeline: pipeline
             )
             viewer.modalPresentationStyle = .fullScreen
             viewer.modalTransitionStyle = .crossDissolve
@@ -40,8 +39,9 @@ enum ThreadMediaViewer {
 /// - **Content at once when the picture is at hand**: the one picked, the one
 ///   the bubble shows, or the image cache's — read synchronously, so a photo
 ///   already seen opens on itself rather than on a black frame.
-/// - **Loading**: a bone at the photo's own shape on the black, cross-faded
-///   to the picture when it lands (`crossfadeSkeleton`), never a snap.
+/// - **Loading**: the full-screen rule (#1764, #1772): the centred loader,
+///   after the kit's grace (`LoaderGate`), never a bone; the picture lands
+///   through the slot (`CoverSlot`), dissolved in.
 /// - **Failed**: the reason and Try Again (`EmptyStateView`, dark on black,
 ///   as the whole viewer is), which loads again. A photo with no address at
 ///   all fails without the offer: there is nothing to try.
@@ -58,22 +58,25 @@ final class ThreadPhotoViewerController: UIViewController, UIScrollViewDelegate 
     private(set) var phase: Phase
     private let scrollView = UIScrollView()
     private let imageView = UIImageView()
-    private let placeholder = SkeletonBoneView(rounding: .fixed(0))
+    /// The picture's slot — no bone: a full-screen wait is the loader's.
+    private lazy var cover: CoverSlot = {
+        let cover = CoverSlot(view: imageView, size: .full, showsSkeleton: false)
+        cover.onLoaded = { [weak self] in self?.landed() }
+        cover.onFailed = { [weak self] in self?.failed() }
+        return cover
+    }()
+    private let loader = AppLoaderView(size: .large)
+    private lazy var loaderGate = LoaderGate(loader: loader, minimum: 0)
     private let failedState = EmptyStateView()
     private let url: URL?
     private let pipeline: ImagePipeline?
-    /// Width over height, as the bubble reads it: the bone's shape.
-    private let aspectRatio: CGFloat?
-    private var loadTask: Task<Void, Never>?
 
-    init(image: UIImage?, url: URL?, pipeline: ImagePipeline?, aspectRatio: CGFloat? = nil) {
+    init(image: UIImage?, url: URL?, pipeline: ImagePipeline?) {
         self.url = url
         self.pipeline = pipeline
-        self.aspectRatio = aspectRatio
-        let seed = image ?? url.flatMap { pipeline?.cachedImage(for: $0) }
-        phase = seed != nil ? .content : (url != nil && pipeline != nil ? .loading : .failed)
+        phase = image != nil ? .content : (url != nil && pipeline != nil ? .loading : .failed)
         super.init(nibName: nil, bundle: nil)
-        imageView.image = seed
+        imageView.image = image
     }
 
     @available(*, unavailable)
@@ -97,11 +100,15 @@ final class ThreadPhotoViewerController: UIViewController, UIScrollViewDelegate 
         imageView.frame = scrollView.bounds
         imageView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         scrollView.addSubview(imageView)
-        // Over the picture, under ✕: the bone and the failed state stand
+        // Over the picture, under ✕: the loader and the failed state stand
         // where the photo will, and the way out stays on top of both.
-        placeholder.isAccessibilityElement = true
-        placeholder.accessibilityLabel = "Loading photo"
-        view.addSubview(placeholder)
+        loader.hidesWhenStopped = true
+        loader.isAccessibilityElement = true
+        loader.accessibilityLabel = "Loading photo"
+        loader.constrain(in: view) { parent in
+            loader.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
+            loader.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
+        }
         failedState.pin(to: view)
 
         let close = UIButton(configuration: .glass())
@@ -121,66 +128,36 @@ final class ThreadPhotoViewerController: UIViewController, UIScrollViewDelegate 
 
         switch phase {
         case .content:
-            placeholder.isHidden = true
             failedState.isHidden = true
         case .loading:
-            imageView.isHidden = true
             failedState.isHidden = true
             load()
         case .failed:
-            imageView.isHidden = true
-            placeholder.isHidden = true
             showFailed()
         }
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        placeholder.frame = Self.fittedRect(aspectRatio: aspectRatio, in: view.bounds)
-    }
-
-    /// The photo's shape fitted to `bounds` as `.scaleAspectFit` draws it, so
-    /// the bone stands where the picture will. Square when the shape is not
-    /// known.
-    static func fittedRect(aspectRatio: CGFloat?, in bounds: CGRect) -> CGRect {
-        guard bounds.width > 0, bounds.height > 0 else { return .zero }
-        let ratio = aspectRatio.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? 1
-        var size = CGSize(width: bounds.width, height: bounds.width / ratio)
-        if size.height > bounds.height {
-            size = CGSize(width: bounds.height * ratio, height: bounds.height)
-        }
-        return CGRect(
-            x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
-            width: size.width, height: size.height
-        )
-    }
-
-    /// Fetches the picture behind the bone; Try Again comes back here.
+    /// Loads the picture through the slot — at once when the cache holds
+    /// it, else under the loader; Try Again comes back here.
     private func load() {
         guard let url, let pipeline else { return }
         phase = .loading
-        loadTask?.cancel()
-        loadTask = Task { [weak self] in
-            let image: UIImage?
-            do {
-                image = try await pipeline.image(for: url)
-            } catch {
-                image = nil
-            }
-            guard let self, !Task.isCancelled else { return }
-            if let image {
-                phase = .content
-                imageView.image = image
-                placeholder.crossfadeSkeleton(to: imageView)
-            } else {
-                phase = .failed
-                showFailed()
-                placeholder.crossfadeSkeleton(to: failedState)
-                // VoiceOver was on "Loading photo"; the bone is gone, so it is
-                // taken to what replaced it.
-                UIAccessibility.post(notification: .layoutChanged, argument: failedState)
-            }
-        }
+        cover.load(url, pipeline: pipeline, item: url)
+        guard imageView.image == nil else { return landed() }
+        loaderGate.begin { [weak self] in self?.phase == .loading }
+    }
+
+    private func landed() {
+        phase = .content
+        loaderGate.cancel()
+    }
+
+    private func failed() {
+        phase = .failed
+        loaderGate.cancel()
+        showFailed()
+        // VoiceOver was on "Loading photo"; it is taken to what replaced it.
+        UIAccessibility.post(notification: .layoutChanged, argument: failedState)
     }
 
     private func showFailed() {
@@ -197,22 +174,21 @@ final class ThreadPhotoViewerController: UIViewController, UIScrollViewDelegate 
 
     private func retry() {
         failedState.isHidden = true
-        placeholder.showSkeleton()
         load()
     }
 
     #if DEBUG
     /// The picture on screen now — what a test reads.
     var debugImage: UIImage? { imageView.isHidden ? nil : imageView.image }
-    /// Whether the bone stands in for the picture — what a test reads.
-    var debugShowsPlaceholder: Bool { !placeholder.isHidden && placeholder.alpha > 0 }
+    /// Whether the wait is announced — the loader up, or its grace running.
+    var debugAnnouncesWait: Bool { loaderGate.isShowing || loaderGate.isArmed }
     /// The failed state while it shows, for a test to read and press Try
     /// Again on.
     var debugFailedState: EmptyStateView? { failedState.isHidden ? nil : failedState }
     #endif
 
-    /// Only a picture zooms: a pinch over the bone or the failed state does
-    /// nothing.
+    /// Only a picture zooms: a pinch over the loader or the failed state
+    /// does nothing.
     func viewForZooming(in scrollView: UIScrollView) -> UIView? {
         phase == .content ? imageView : nil
     }

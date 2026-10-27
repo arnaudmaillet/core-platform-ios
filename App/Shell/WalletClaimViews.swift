@@ -106,11 +106,10 @@ class WalletStakeCell: UICollectionViewListCell {
     /// The thumbnail and the two lines: what the bones stand in for.
     private let postContent = UIStackView()
     private let bones = UIView()
-    private var imageTask: Task<Void, Never>?
-    /// The thumbnail's bone while its picture downloads (#1494): a shimmer,
-    /// not a grey square.
-    private let imageBone = SkeletonBoneView(rounding: .fixed(WalletSheetMetrics.thumbnailCorner))
-    private var shownURL: URL?
+    /// The thumbnail through the slot (#1772): its bone while the picture
+    /// downloads (#1494) — a shimmer, not a grey square — the picture
+    /// dissolved in, and the media ground if it never comes.
+    private lazy var cover = CoverSlot(view: thumbnail, size: .full)
     /// The post state drawn now; nil on a fresh or recycled row.
     private var shownPhase: WalletStakePostLoads.State?
 
@@ -131,16 +130,6 @@ class WalletStakeCell: UICollectionViewListCell {
         // The media ground (#1771), under the thumbnail's bone.
         thumbnail.backgroundColor = Surface.mediaGround
         thumbnail.tintColor = .secondaryLabel
-        imageBone.isHidden = true
-        imageBone.isUserInteractionEnabled = false
-        imageBone.translatesAutoresizingMaskIntoConstraints = false
-        thumbnail.addSubview(imageBone)
-        NSLayoutConstraint.activate([
-            imageBone.topAnchor.constraint(equalTo: thumbnail.topAnchor),
-            imageBone.leadingAnchor.constraint(equalTo: thumbnail.leadingAnchor),
-            imageBone.trailingAnchor.constraint(equalTo: thumbnail.trailingAnchor),
-            imageBone.bottomAnchor.constraint(equalTo: thumbnail.bottomAnchor),
-        ])
 
         titleLabel.font = .scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline)
         titleLabel.adjustsFontForContentSizeCategory = true
@@ -245,11 +234,7 @@ class WalletStakeCell: UICollectionViewListCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        imageTask?.cancel()
-        imageTask = nil
-        shownURL = nil
-        thumbnail.image = nil
-        imageBone.isHidden = true
+        cover.reset()
         // Concealment is per-FLIGHT state and must not ride a recycled row.
         thumbnail.alpha = 1
         contentView.alpha = 1
@@ -428,9 +413,7 @@ class WalletStakeCell: UICollectionViewListCell {
             // A text post wears a quote on a tile; a post that could not be
             // loaded, a warning — never the dotted "on its way" circle, which
             // read as still loading.
-            imageTask?.cancel()
-            shownURL = nil
-            imageBone.isHidden = true
+            cover.reset()
             thumbnail.contentMode = .center
             let symbol = post != nil ? "text.quote" : failed ? "exclamationmark.triangle" : "circle.dotted"
             thumbnail.image = UIImage(
@@ -439,28 +422,8 @@ class WalletStakeCell: UICollectionViewListCell {
             )
             return
         }
-        guard url != shownURL else { return }
-        shownURL = url
         thumbnail.contentMode = .scaleAspectFill
-        if let cached = imagePipeline.cachedImage(for: url) {
-            imageBone.isHidden = true
-            thumbnail.image = cached
-            return
-        }
-        thumbnail.image = nil
-        imageBone.isHidden = false
-        imageTask?.cancel()
-        imageTask = Task { [weak self] in
-            let image = try? await imagePipeline.image(for: url)
-            guard !Task.isCancelled, let self, self.shownURL == url else { return }
-            // The picture takes the bone's place; a picture that never came
-            // leaves the tile's quiet ground, not a bone that shimmers on.
-            // ⚠️ No hand-written dissolve: a hero source's picture arrives on
-            // the loading ladder once #1088 moves it there
-            // (`HandWrittenImageLoadGuardTests`).
-            self.thumbnail.image = image
-            self.imageBone.isHidden = true
-        }
+        cover.load(url, pipeline: imagePipeline, item: url)
     }
 
     // MARK: - Hero
