@@ -165,7 +165,7 @@ final class LimitInteractionsViewController: UIViewController {
                     self?.setSoundReuse(isOn)
                 }]
             case .loading:
-                cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+                cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
                 return
             case .failed:

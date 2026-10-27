@@ -213,7 +213,9 @@ final class WalletHistoryViewController: UIViewController {
             amount.adjustsFontForContentSizeCategory = true
             cell.accessories = [.customView(configuration: .init(customView: amount, placement: .trailing()))]
         }
-        let boneRegistration = UICollectionView.CellRegistration<WalletHistoryBoneCell, Item> { _, _, _ in }
+        let boneRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, _ in
+            cell.contentConfiguration = Self.boneRow(thumbnail: false)
+        }
         // A first load is the list's bones; a next page, the kit's paging
         // footer (#1769) — never a "Loading…" line.
         let pagingRegistration = UICollectionView.CellRegistration<PagingFooterCell, Item> { cell, _, _ in
@@ -444,53 +446,29 @@ extension WalletHistoryViewController: UICollectionViewDelegate {
     }
 }
 
-/// A movement's row while the history loads (#1494): the row's bones — its
-/// symbol, its two lines and its amount — where the row will be.
-class WalletHistoryBoneCell: UICollectionViewListCell {
-    /// The leading bone's side and rounding: a symbol's, or (a stake row) a
-    /// thumbnail's.
-    class var leadingSide: CGFloat { 24 }
-    class var leadingRounding: SkeletonBoneView.Rounding { .capsule }
+extension WalletHistoryViewController {
+    /// A movement's row while the history loads (#1494, #1769): the row
+    /// redacted — its symbol (or, a stake row, its thumbnail), its two lines
+    /// and its amount — through DesignSystem's one row skeleton.
+    /// A clear picture of a stake's thumbnail size, made once: a symbol
+    /// keeps its font's size, and the bone takes the image's frame.
+    private static let thumbnailPlaceholder = UIGraphicsImageRenderer(
+        size: CGSize(width: WalletSheetMetrics.thumbnail, height: WalletSheetMetrics.thumbnail)
+    ).image { _ in }
 
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        let icon = SkeletonBoneView(rounding: Self.leadingRounding)
-        let title = SkeletonBoneView()
-        let subtitle = SkeletonBoneView()
-        let amount = SkeletonBoneView()
-        let lines = UIStackView(arrangedSubviews: [title, subtitle])
-        lines.axis = .vertical
-        lines.alignment = .leading
-        lines.spacing = Spacing.xs + 2
-        let row = UIStackView(arrangedSubviews: [icon, lines, UIView(), amount])
-        row.alignment = .center
-        row.spacing = Spacing.md
-        row.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(row)
-        NSLayoutConstraint.activate([
-            icon.widthAnchor.constraint(equalToConstant: Self.leadingSide),
-            icon.heightAnchor.constraint(equalToConstant: Self.leadingSide),
-            title.widthAnchor.constraint(equalToConstant: 110),
-            title.heightAnchor.constraint(equalToConstant: 12),
-            subtitle.widthAnchor.constraint(equalToConstant: 150),
-            subtitle.heightAnchor.constraint(equalToConstant: 10),
-            amount.widthAnchor.constraint(equalToConstant: 44),
-            amount.heightAnchor.constraint(equalToConstant: 12),
-            row.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor, constant: Spacing.xs),
-            row.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor, constant: -Spacing.xs),
-            row.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
-        ])
-        isAccessibilityElement = true
-        accessibilityLabel = "Loading"
+    static func boneRow(thumbnail: Bool) -> SkeletonRowConfiguration {
+        var content = UIListContentConfiguration.subtitleCell()
+        content.text = "Claimed your likes"
+        content.secondaryText = "Today at 09:41"
+        if thumbnail {
+            let side = WalletSheetMetrics.thumbnail
+            content.image = thumbnailPlaceholder
+            content.imageProperties.maximumSize = CGSize(width: side, height: side)
+            content.imageProperties.reservedLayoutSize = CGSize(width: side, height: side)
+            content.imageProperties.cornerRadius = WalletSheetMetrics.thumbnailCorner
+        } else {
+            content.image = UIImage(systemName: "circle.fill")
+        }
+        return SkeletonRowConfiguration(redacting: content, trailingBoneWidth: 44)
     }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-}
-
-/// A stake row while the stakes load (#1494): a thumbnail's bone first.
-final class WalletStakeBoneCell: WalletHistoryBoneCell {
-    override class var leadingSide: CGFloat { WalletSheetMetrics.thumbnail }
-    override class var leadingRounding: SkeletonBoneView.Rounding { .fixed(WalletSheetMetrics.thumbnailCorner) }
 }

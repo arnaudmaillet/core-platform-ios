@@ -186,7 +186,7 @@ final class ConsentsViewController: UIViewController {
             cell.contentConfiguration = Self.content("Data Processing", detail: "To provide the service · \(Self.statusText(consent))", symbol: "server.rack")
             if makeDeleteAccount != nil { cell.accessories = [.disclosureIndicator()] }
         case .loading:
-            cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+            cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
             cell.accessories = []
         case .failed:
             var content = UIListContentConfiguration.cell()

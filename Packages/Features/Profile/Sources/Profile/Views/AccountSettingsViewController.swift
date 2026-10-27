@@ -122,8 +122,14 @@ final class AccountSettingsViewController: UIViewController {
         let rowRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Row> { [weak self] cell, _, row in
             self?.configure(cell, for: row)
         }
-        let skeletonRegistration = UICollectionView.CellRegistration<AccountSkeletonRowCell, Int> { cell, _, index in
-            cell.configure(index: index)
+        // The value rows redacted (#1769): each one's label and a sample
+        // value, as bones at the real row's metrics.
+        let skeletonRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Int> { cell, _, index in
+            let samples = [("Email", "name@example.com"), ("Phone", "+1 555 0100"), ("Date of Birth", "12 March 2001")]
+            var content = UIListContentConfiguration.valueCell()
+            (content.text, content.secondaryText) = samples[index % samples.count]
+            cell.contentConfiguration = SkeletonRowConfiguration(redacting: content)
+            cell.accessories = []
         }
         // The failed-row style every Settings screen uses.
         let failedRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, _ in
@@ -215,9 +221,7 @@ final class AccountSettingsViewController: UIViewController {
         guard shown == snapshot.itemIdentifiers(inSection: .accountInfo) else {
             // Skeleton, values or failed row: cross-dissolve so the shimmer
             // melts into what replaced it rather than snapping.
-            UIView.transition(with: collectionView, duration: 0.3, options: .transitionCrossDissolve) {
-                self.dataSource.apply(snapshot, animatingDifferences: false)
-            }
+            collectionView.crossfadeSkeleton { self.dataSource.apply(snapshot, animatingDifferences: false) }
             return
         }
         // Same rows, new values (a refresh after an edit).
@@ -516,44 +520,5 @@ extension AccountSettingsViewController: UICollectionViewDelegate {
         case .failed: retryAccount()
         case .skeleton, nil: break
         }
-    }
-}
-
-// MARK: - Skeleton row cell
-
-/// Shimmer stand-in for a value row: a short label bone leading, a value bone
-/// trailing. Keeps the grouped background so it reads like the real rows.
-private final class AccountSkeletonRowCell: UICollectionViewListCell {
-    private let labelBone = SkeletonBoneView(rounding: .capsule)
-    private let valueBone = SkeletonBoneView(rounding: .capsule)
-    private lazy var valueWidth = valueBone.widthAnchor.constraint(equalToConstant: 120)
-    private static let valueWidths: [CGFloat] = [150, 120]
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        labelBone.translatesAutoresizingMaskIntoConstraints = false
-        valueBone.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(labelBone)
-        contentView.addSubview(valueBone)
-
-        let margins = contentView.layoutMarginsGuide
-        NSLayoutConstraint.activate([
-            contentView.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
-            labelBone.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
-            labelBone.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            labelBone.widthAnchor.constraint(equalToConstant: 56),
-            labelBone.heightAnchor.constraint(equalToConstant: 12),
-            valueBone.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
-            valueBone.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            valueWidth,
-            valueBone.heightAnchor.constraint(equalToConstant: 12)
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    func configure(index: Int) {
-        valueWidth.constant = Self.valueWidths[index % Self.valueWidths.count]
     }
 }

@@ -136,7 +136,7 @@ final class LocationSharingViewController: UIViewController {
                 content.text = title
                 content.textProperties.color = .secondaryLabel
             case .loading:
-                cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+                cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
                 return
             case .failed:

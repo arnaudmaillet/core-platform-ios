@@ -12,6 +12,9 @@ import UIKit
 /// size isn't final when the apply returns, so the bones landed *on top of* the
 /// rows they were supposed to follow. As collection view items they are placed
 /// by the layout, which already knows where the last row ended.
+///
+/// The one person-row cell (#1769): a relationship list's rows carry their
+/// action pill through `configure(at:trailing:)`.
 public final class PersonSkeletonCell: UICollectionViewListCell {
     private enum Metrics {
         /// `MonogramAvatarView.rowDiameter` (copied, not referenced: this
@@ -38,8 +41,12 @@ public final class PersonSkeletonCell: UICollectionViewListCell {
     private let avatar = SkeletonBoneView(rounding: .capsule)
     private let name = SkeletonBoneView(rounding: .capsule)
     private let handle = SkeletonBoneView(rounding: .capsule)
+    private let pill = SkeletonBoneView(rounding: .capsule)
+    private let dismiss = SkeletonBoneView(rounding: .capsule)
     private var nameWidth: NSLayoutConstraint!
     private var handleWidth: NSLayoutConstraint!
+    private lazy var pillWidth = pill.widthAnchor.constraint(equalToConstant: 0)
+    private lazy var dismissSide = dismiss.widthAnchor.constraint(equalToConstant: 0)
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
@@ -50,7 +57,9 @@ public final class PersonSkeletonCell: UICollectionViewListCell {
         textColumn.spacing = 6
         textColumn.alignment = .leading
 
-        let row = UIStackView(arrangedSubviews: [avatar, textColumn])
+        pill.isHidden = true
+        dismiss.isHidden = true
+        let row = UIStackView(arrangedSubviews: [avatar, textColumn, pill, dismiss])
         row.alignment = .center
         row.spacing = Spacing.md
         row.pin(to: contentView, insets: NSDirectionalEdgeInsets(
@@ -69,7 +78,11 @@ public final class PersonSkeletonCell: UICollectionViewListCell {
             name.heightAnchor.constraint(equalToConstant: Metrics.nameHeight),
             handle.heightAnchor.constraint(equalToConstant: Metrics.handleHeight),
             nameWidth,
-            handleWidth
+            handleWidth,
+            pillWidth,
+            pill.heightAnchor.constraint(equalToConstant: PersonListSkeletonView.pillHeight),
+            dismissSide,
+            dismiss.heightAnchor.constraint(equalTo: dismiss.widthAnchor),
         ])
     }
 
@@ -78,7 +91,18 @@ public final class PersonSkeletonCell: UICollectionViewListCell {
 
     /// `index` continues the width cycle across the whole run of rows, so the
     /// pattern doesn't restart when the skeleton shrinks as content lands.
-    public func configure(at index: Int) {
+    /// `trailing` is the real row's trailing furniture — an action pill and a
+    /// ✕ (`PersonListSkeletonView.Trailing`); a time bone is not a cell's.
+    public func configure(at index: Int, trailing: PersonListSkeletonView.Trailing = .none) {
+        if case .action(let width, let side) = trailing {
+            pill.isHidden = false
+            pillWidth.constant = width
+            dismiss.isHidden = side == nil
+            dismissSide.constant = side ?? 0
+        } else {
+            pill.isHidden = true
+            dismiss.isHidden = true
+        }
         // Multipliers are immutable, so varying a width means replacing its
         // constraint rather than assigning to it.
         NSLayoutConstraint.deactivate([nameWidth, handleWidth])
@@ -93,4 +117,11 @@ public final class PersonSkeletonCell: UICollectionViewListCell {
         )
         NSLayoutConstraint.activate([nameWidth, handleWidth])
     }
+
+    #if DEBUG
+    /// The bones' widths as laid out now, the hidden ones left out.
+    public var debugBoneWidths: [CGFloat] {
+        [avatar, name, handle, pill, dismiss].filter { !$0.isHidden }.map(\.bounds.width)
+    }
+    #endif
 }

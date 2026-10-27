@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import CoreNetworking
+import DesignSystem
 import Foundation
 import Testing
 import UIKit
@@ -974,11 +975,12 @@ struct RelationshipSkeletonLayoutTests {
         list.view.layoutIfNeeded()
         list.render(.loading)
         list.view.layoutIfNeeded()
-        let cells = list.collectionView.visibleCells.compactMap { $0 as? RelationshipSkeletonCell }
+        let cells = list.collectionView.visibleCells.compactMap { $0 as? PersonSkeletonCell }
         try #require(!cells.isEmpty, "no skeleton rows")
         for cell in cells {
             #expect(abs(cell.bounds.height - 64) < 1, "row height \(cell.bounds.height)")
             #expect(cell.debugBoneWidths.allSatisfy { $0 > 0 }, "bones \(cell.debugBoneWidths)")
+            #expect(cell.debugBoneWidths.count == 4, "avatar, name, handle and the Follow pill")
         }
     }
 }

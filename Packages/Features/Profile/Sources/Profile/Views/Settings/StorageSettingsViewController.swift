@@ -184,7 +184,7 @@ final class StorageSettingsViewController: UIViewController {
     private static func redactedUntilMeasured(
         _ content: UIListContentConfiguration, report: StorageReport?
     ) -> any UIContentConfiguration {
-        report == nil ? SettingsSkeletonRowConfiguration(redacting: content) : content
+        report == nil ? SkeletonRowConfiguration(redacting: content) : content
     }
 
     private func configure(_ cell: UICollectionViewListCell, for item: Item) {

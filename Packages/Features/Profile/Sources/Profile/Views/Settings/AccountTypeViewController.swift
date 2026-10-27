@@ -204,7 +204,7 @@ final class AccountTypeViewController: UIViewController {
                 content.secondaryText = row.detail
                 if case .loading = verification {
                     // The row redacted while its status loads (#1769).
-                    cell.contentConfiguration = SettingsSkeletonRowConfiguration(redacting: content)
+                    cell.contentConfiguration = SkeletonRowConfiguration(redacting: content)
                     cell.accessories = []
                     return
                 }
@@ -218,7 +218,7 @@ final class AccountTypeViewController: UIViewController {
                     break
                 }
             case .loading:
-                cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+                cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
                 return
             case .failed:

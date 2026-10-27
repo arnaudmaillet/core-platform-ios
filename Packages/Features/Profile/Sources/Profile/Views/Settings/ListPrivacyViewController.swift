@@ -108,7 +108,7 @@ final class ListPrivacyViewController: UIViewController {
                     cell.accessibilityTraits.remove(.selected)
                 }
             case .loading:
-                cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+                cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
             case .failed:
                 var content = UIListContentConfiguration.cell()

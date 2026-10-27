@@ -131,7 +131,7 @@ final class RestrictedAccountsViewController: UIViewController {
             content.textProperties.color = .secondaryLabel
             switch item {
             case .loading:
-                cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+                cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
                 return
             case .failed:

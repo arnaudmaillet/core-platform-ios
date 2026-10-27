@@ -179,8 +179,17 @@ final class EditProfileViewController: UIViewController {
 
         let heroSkeletonRegistration = UICollectionView.CellRegistration<EditProfileHeroSkeletonCell, Item> { _, _, _ in }
 
-        let rowSkeletonRegistration = UICollectionView.CellRegistration<EditProfileSkeletonRowCell, Int> { cell, _, index in
-            cell.configure(index: index)
+        // The field rows redacted (#1769): Name, Username, Bio, Website and
+        // Links with sample values, as bones at the real rows' metrics.
+        let rowSkeletonRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Int> { cell, _, index in
+            let samples = [
+                ("Name", "Kenji Tanaka"), ("Username", "kenji.dev"), ("Bio", "Building small tools"),
+                ("Website", "kenji.dev"), ("Links", "2 links"),
+            ]
+            var content = UIListContentConfiguration.valueCell()
+            (content.text, content.secondaryText) = samples[index % samples.count]
+            cell.contentConfiguration = SkeletonRowConfiguration(redacting: content)
+            cell.accessories = []
         }
 
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
@@ -293,9 +302,7 @@ final class EditProfileViewController: UIViewController {
         // First real data: cross-dissolve the whole list so the shimmer fades
         // out as the content fades in, rather than snapping.
         isShowingSkeleton = false
-        UIView.transition(with: collectionView, duration: 0.3, options: .transitionCrossDissolve) {
-            self.dataSource.apply(snapshot, animatingDifferences: false)
-        }
+        collectionView.crossfadeSkeleton { self.dataSource.apply(snapshot, animatingDifferences: false) }
     }
 
     private func reconfigureBanner() {
@@ -637,46 +644,4 @@ private final class EditProfileHeroSkeletonCell: UICollectionViewListCell {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-}
-
-/// Shimmer stand-in for a grouped field row: a short label bone pinned leading,
-/// a wider value bone pinned trailing. Keeps the default grouped background so
-/// the inset card and separators read exactly like the real rows.
-private final class EditProfileSkeletonRowCell: UICollectionViewListCell {
-    private let labelBone = SkeletonBoneView(rounding: .capsule)
-    private let valueBone = SkeletonBoneView(rounding: .capsule)
-    private lazy var valueWidth = valueBone.widthAnchor.constraint(equalToConstant: 120)
-
-    /// Value-bone widths per row, so the placeholder rows don't look stamped.
-    private static let valueWidths: [CGFloat] = [140, 90, 180, 150, 110]
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        labelBone.translatesAutoresizingMaskIntoConstraints = false
-        valueBone.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(labelBone)
-        contentView.addSubview(valueBone)
-
-        let margins = contentView.layoutMarginsGuide
-        NSLayoutConstraint.activate([
-            contentView.heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
-
-            labelBone.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
-            labelBone.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            labelBone.widthAnchor.constraint(equalToConstant: 64),
-            labelBone.heightAnchor.constraint(equalToConstant: 12),
-
-            valueBone.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
-            valueBone.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
-            valueWidth,
-            valueBone.heightAnchor.constraint(equalToConstant: 12)
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    func configure(index: Int) {
-        valueWidth.constant = Self.valueWidths[index % Self.valueWidths.count]
-    }
 }

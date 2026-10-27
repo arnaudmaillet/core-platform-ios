@@ -1115,7 +1115,7 @@ final class CommentThreadToggleRow: UIView {
 /// The comments stream's first-load skeleton row, assembled from the design
 /// system's `SkeletonBoneView` — the MESSAGES screens' exact doctrine (one
 /// window-coherent shimmer band, shared phase across every bone; see
-/// `ChatSkeletons`): placeholder geometry reuses the real row's layout
+/// `PersonListSkeletonView`): placeholder geometry reuses the real row's layout
 /// constants (avatar size, indent, header/body stack recipe), and bone
 /// widths cycle organic fractions so the stack reads as content hydrating,
 /// not a repeated stamp.

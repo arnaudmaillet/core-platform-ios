@@ -185,7 +185,7 @@ final class SecurityCheckupViewController: UIViewController {
             let checking = self?.items.isEmpty ?? true
             // A sample while the check runs: the header is drawn redacted (#1769).
             content.text = checking ? "Your security checkup" : self.map { SecurityCheckup.summary($0.items) }
-            view.contentConfiguration = checking ? SettingsSkeletonRowConfiguration(redacting: content) : content
+            view.contentConfiguration = checking ? SkeletonRowConfiguration(redacting: content) : content
         }
         dataSource.supplementaryViewProvider = { collectionView, _, indexPath in
             collectionView.dequeueConfiguredReusableSupplementary(using: header, for: indexPath)

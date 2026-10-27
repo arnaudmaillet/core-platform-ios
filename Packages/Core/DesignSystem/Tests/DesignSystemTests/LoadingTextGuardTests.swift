@@ -3,7 +3,7 @@ import Testing
 
 /// ⚠️ A REPO-WIDE GUARD (#1769): no "Loading…", "Checking…" or "Measuring…"
 /// in shipping UI. A loading row is drawn as the row it stands for, redacted
-/// (`SettingsSkeletonRowConfiguration`, the screens' skeletons), never as a
+/// (`SkeletonRowConfiguration`, the screens' skeletons), never as a
 /// sentence saying it is loading. Accessibility labels may still say so —
 /// VoiceOver has no bones to see.
 ///
@@ -48,7 +48,7 @@ struct LoadingTextGuardTests {
             }
         }
         #expect(scanned > 100, "the scan found no source at all: \(Self.root.path)")
-        #expect(found.isEmpty, "draw the row redacted (SettingsSkeletonRowConfiguration, a skeleton), not a loading sentence: \(found.sorted())")
+        #expect(found.isEmpty, "draw the row redacted (SkeletonRowConfiguration, a skeleton), not a loading sentence: \(found.sorted())")
     }
 
     @Test func theScanFindsTheShape() {
