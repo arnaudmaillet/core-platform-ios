@@ -3197,7 +3197,12 @@ final class ForYouGridPage: UIView {
         else { return nil }
         return collectionView.convert(attributes.frame, to: window)
     }
-    var debugShowsSkeleton: Bool { showsSkeleton }
+    /// Whether the page is in its cold wait: the bones up, or due once the
+    /// gate's delay runs out (#1770) — what a host waits past before it
+    /// reads the page's content.
+    var debugShowsSkeleton: Bool { showsSkeleton || skeletonGate.isLoading || skeletonGate.showsSkeleton }
+    /// Whether the bones are drawn now.
+    var debugBonesVisible: Bool { showsSkeleton }
     /// The status block's frame while it shows, nil otherwise.
     var debugStatusFrame: CGRect? { emptyState.isHidden ? nil : emptyState.frame }
     /// The travel a hosted page offers now — see `offeredTravel`.

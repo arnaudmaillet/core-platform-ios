@@ -48,9 +48,9 @@ struct GridSkeletonGateTests {
         let time = ManualClock()
         let page = page(time)
         page.render(.loading)
-        #expect(!page.debugShowsSkeleton, "a bone before the delay")
+        #expect(!page.debugBonesVisible, "a bone before the delay")
         time.advance(LoadingTiming.skeletonDelay)
-        #expect(page.debugShowsSkeleton)
+        #expect(page.debugBonesVisible)
     }
 
     @Test func aPageThatAnswersAtOnceShowsNoBone() {
@@ -59,7 +59,7 @@ struct GridSkeletonGateTests {
         page.render(.loading)
         page.render(.content([]))
         time.advance(1)
-        #expect(!page.debugShowsSkeleton)
+        #expect(!page.debugBonesVisible)
     }
 
     @Test func takingLongerOffersTryAgain() {
@@ -71,7 +71,7 @@ struct GridSkeletonGateTests {
         time.advance(LoadingTiming.skeletonDelay)
         time.advance(LoadingTiming.takingLonger)
         #expect(label("Taking longer than usual", in: page) != nil)
-        #expect(!page.debugShowsSkeleton)
+        #expect(!page.debugBonesVisible)
         func button(in view: UIView) -> UIButton? {
             for subview in view.subviews {
                 if let button = subview as? UIButton, !button.isHidden, button.configuration?.title == "Try Again" { return button }
