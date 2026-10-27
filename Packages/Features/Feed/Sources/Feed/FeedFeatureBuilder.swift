@@ -240,10 +240,14 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // photograph, or a clip's poster (`SnapFeedCell.configure`).
             let picture = model.mediaKind == .video ? model.thumbnailURL : model.mediaURL
             if let picture { _ = try? await pipeline.image(for: picture, size: .full, priority: .visible) }
-            // A clip's source resolved meanwhile, so its player starts on a
-            // known URL.
+            // A clip's PLAYER prepared meanwhile, with no surface yet — the
+            // pool's lookahead (BytePlus' "pre-render", TikTok's first
+            // video): its item resolved, loaded and paused at the start, so
+            // the page's `play` adopts it on its first activation instead of
+            // minting one. Keyed as the page plays it: the clip and its post.
             if model.mediaKind == .video, let clip = model.mediaURL {
-                _ = try? await videoPlayback?.playableURL(for: clip)
+                let item = VideoLookaheadItem(url: clip, scope: first.post.id.rawValue)
+                await MainActor.run { videoPlayback?.setLookahead(next: item, previous: nil, warmNext: true) }
             }
             LaunchTimeline.mark("shots.warmed")
         }
