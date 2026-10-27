@@ -310,6 +310,12 @@ final class SnapMediaCardView: UIView {
         imageView.clipsToBounds = true
         imageView.pin(to: self)
         renderView.pin(to: self)
+        // Over both pictures, so it covers a photograph's black floor and a
+        // clip's opaque ground alike; the carousel and the spinner go above.
+        pictureBone.pin(to: self)
+        picture.ladder.onLand = { [weak self] rung, transition in
+            self?.pictureLanded(rung, transition)
+        }
         // Last, so it starts above both pictures — and hidden, so it costs a
         // laid-out view and nothing else until a viewer stops something.
         singleMark.pin(to: self)
@@ -451,6 +457,7 @@ final class SnapMediaCardView: UIView {
         imageView.transform = .identity
         renderView.setPoster(nil)
         posterImage = nil
+        cancelPicture()
         // A recycled card's band was the last post's clip.
         liveBackdrop.returnToStill()
         // A recycled card must not frame a new post by the last one's shape;
@@ -465,6 +472,77 @@ final class SnapMediaCardView: UIView {
         applyFraming()
         logMediaState(image == nil ? "setImage(nil)" : "setImage(image)")
     }
+
+    // MARK: - The picture on the media slot (#1505)
+
+    /// The bone over the page while its picture — the photograph, or a clip's
+    /// poster — is on its way: a page not in memory shows nothing for
+    /// `skeletonDelay`, then the bone, then the picture as the bone dissolves
+    /// away. Never the black floor and a spinner (the owner's recording,
+    /// 2026-10-27).
+    private let pictureBone = SkeletonBoneView(rounding: .fixed(0))
+    /// The picture's media contract: its load, the bone, its arrival.
+    private(set) lazy var picture = MediaSlot(size: .full, bone: pictureBone)
+    /// Told when the bone comes or goes — the wait's answer changes with it.
+    var onPictureLoadingChange: (() -> Void)?
+
+    /// Loads the page's single picture — the photograph for `.image`, the
+    /// poster for `.video` — on the media slot. `failed` is told of a
+    /// missing or broken one.
+    func loadPicture(_ url: URL?, kind: MediaKind, pipeline: ImagePipeline?, failed: (() -> Void)? = nil) {
+        let token = picture.begin(url)
+        picture.load(url, using: pipeline) { [weak self] image, transition in
+            guard let self else { return }
+            // Drawn now, under the bone: it shows as the bone leaves, once
+            // the bone has had its minimum (or in this pass when warm).
+            switch kind {
+            case .image: setImage(image)
+            case .video: setPoster(image)
+            }
+            picture.ladder.show(.content, token: token, warm: transition == .none)
+        } failed: { [weak self] in
+            self?.onPictureLoadingChange?()
+            failed?()
+        }
+    }
+
+    /// Drops the picture's load and its bone — a recycled or rebound page.
+    func cancelPicture() {
+        picture.cancel()
+        picture.begin(nil)
+    }
+
+    /// Whether the single picture is still on its way: loading, or its bone
+    /// up. The bone says that wait; the spinner must not say it again.
+    var isPictureLoading: Bool {
+        if showsCollection { return carousel?.isPictureLoading(onPage: currentPage) ?? false }
+        return picture.isLoading || picture.showsBone
+    }
+
+    /// A rung landed: the bone came up, or the picture arrived — the bone
+    /// dissolving away over it when it was showing (the ladder hides it in
+    /// this same pass; a still of it fades out on top).
+    private func pictureLanded(_ rung: LoadingLadder.Rung, _ transition: LoadingLadder.Transition) {
+        defer { onPictureLoadingChange?() }
+        guard rung == .content, case .dissolve(let duration) = transition, window != nil, picture.showsBone,
+              let ghost = pictureBone.snapshotView(afterScreenUpdates: false) else { return }
+        ghost.frame = pictureBone.frame
+        ghost.isUserInteractionEnabled = false
+        insertSubview(ghost, aboveSubview: pictureBone)
+        UIView.animate(
+            withDuration: duration, delay: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]
+        ) {
+            ghost.alpha = 0
+        } completion: { _ in
+            ghost.removeFromSuperview()
+        }
+    }
+
+    #if DEBUG
+    /// Whether the page's bone shows now.
+    var debugShowsPictureBone: Bool { picture.showsBone }
+    #endif
 
     // MARK: - The wait
 

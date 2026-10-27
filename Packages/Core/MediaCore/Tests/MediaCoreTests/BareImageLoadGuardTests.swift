@@ -23,7 +23,6 @@ struct BareImageLoadGuardTests {
         "MediaSlot.swift": "the media slot itself",
         "MapAnnotationView.swift": "#1505: map pins, next",
         "MapClusterAnnotationView.swift": "#1505: map pins, next",
-        "SnapFeedCell.swift": "#1505: the snap feed's pages, next",
         "ShopStorefrontViewController.swift": "#1505: the shop's poster, next",
         "ForYouPostPreviewViewController.swift": "#1505: the context-menu preview, which draws the picture itself",
         "VideoBannerPickerViewController.swift": "#1505: the banner picker's frames, next",
