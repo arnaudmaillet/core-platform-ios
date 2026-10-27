@@ -1,3 +1,4 @@
+import DesignSystem
 import Foundation
 import QuartzCore
 
@@ -8,7 +9,9 @@ import QuartzCore
 /// landed, or the clip's surface decoded a frame), and calls `refresh()` from
 /// every place that answer can change; this decides when the spinner goes up
 /// and down. A missing picture is announced only after `grace`, and asked
-/// AGAIN when the grace runs out.
+/// AGAIN when the grace runs out — the kit's gate (`LoaderGate`, #1768),
+/// with no minimum: the picture landing IS what replaces the loader, and a
+/// spinner held over a picture already there would say something untrue.
 ///
 /// Kept free of views: the page's answer, the loader's state and the switch
 /// are closures, so the rule is tested with plain values
@@ -53,16 +56,21 @@ final class SnapMediaWait {
     var debugSubject: () -> String = { "nil" }
     #endif
 
-    private var timer: Timer?
+    private let clock: LoadingClock
+    private lazy var gate = LoaderGate(grace: Self.grace, minimum: 0, clock: clock) { [weak self] showing in
+        self?.setLoading(showing)
+    }
 
     /// Whether the grace is running.
-    var isArmed: Bool { timer != nil }
+    var isArmed: Bool { gate.isArmed }
 
     init(
         hasItsOwnMedia: @escaping () -> Bool,
         isShowingLoader: @escaping () -> Bool,
-        setLoading: @escaping (Bool) -> Void
+        setLoading: @escaping (Bool) -> Void,
+        clock: LoadingClock = .system
     ) {
+        self.clock = clock
         self.hasItsOwnMedia = hasItsOwnMedia
         self.isShowingLoader = isShowingLoader
         self.setLoading = setLoading
@@ -79,45 +87,37 @@ final class SnapMediaWait {
         if ProcessInfo.processInfo.arguments.contains("-media-log") {
             print(String(format: "[media-wait] %.3f decide own=%@ armed=%@ showing=%@ url=%@",
                          CACurrentMediaTime(), hasItsOwnMedia() ? "Y" : "n",
-                         timer == nil ? "n" : "Y",
+                         gate.isArmed ? "Y" : "n",
                          isShowingLoader() ? "Y" : "n",
                          debugSubject()))
         }
         #endif
         guard !hasItsOwnMedia() else {
-            timer?.invalidate()
-            timer = nil
-            setLoading(false)
+            // Said down now, up or not — the loader may be up on another's word.
+            gate.cancel()
             return
         }
-        guard timer == nil, !isShowingLoader() else { return }
-        let armed = Timer.scheduledTimer(
-            withTimeInterval: Self.grace, repeats: false
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.timer = nil
-                // Asked AGAIN at the end of the grace, never assumed: the whole
-                // point of waiting is that the answer may have changed.
-                self.setLoading(!self.hasItsOwnMedia())
-            }
-        }
-        timer = armed
+        // The card's word is the truth: a page turn takes the loader down
+        // with its page, and the gate, which thought it up, starts over.
+        guard !isShowingLoader() else { return }
+        if gate.isShowing { gate.cancel() }
+        // Asked AGAIN at the end of the grace, never assumed: the whole point
+        // of waiting is that the answer may have changed.
+        gate.begin { [weak self] in !(self?.hasItsOwnMedia() ?? true) }
     }
 
     /// Drops the wait entirely — the recycle path.
     func cancel() {
-        timer?.invalidate()
-        timer = nil
-        setLoading(false)
+        gate.cancel()
     }
 
     #if DEBUG
     /// Runs the grace out now, so a spec does not have to sleep for it.
+    /// Not armed (a spec turned a page without the page asking), the end of
+    /// the grace is still the decision, re-stated for the page in front.
     func debugElapseGrace() {
-        timer?.invalidate()
-        timer = nil
-        setLoading(!hasItsOwnMedia())
+        guard gate.isArmed else { return setLoading(!hasItsOwnMedia()) }
+        gate.debugElapseGrace()
     }
     #endif
 }

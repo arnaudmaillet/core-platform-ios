@@ -65,7 +65,17 @@ final class SnapScrubPreviewView: UIView {
 
     /// Whether a frame is on its way, and the delay before saying so.
     private var isLoading = false
-    private var graceTimer: Timer?
+    /// The spinner's timing — the kit's (`LoaderGate`, #1768) at this card's
+    /// grace, no minimum: a frame that lands replaces the spinner at once.
+    private lazy var spinnerGate = LoaderGate(grace: Self.loaderGrace, minimum: 0) { [weak self] showing in
+        guard let self else { return }
+        guard showing else { return spinner.stopAnimating() }
+        // ⚠️ Above the picture, and re-stated on every show for the reason
+        // the media card's is: this is the only thing here that has to be
+        // seen through whatever else the plate is holding.
+        plate.bringSubviewToFront(spinner)
+        spinner.startAnimating()
+    }
 
     /// ⚠️ A FIFTH OF A SECOND OF SILENCE FIRST. Most frames arrive faster than
     /// that, and a spinner shown for every one of them would strobe under the
@@ -173,21 +183,11 @@ final class SnapScrubPreviewView: UIView {
     func setLoading(_ loading: Bool) {
         guard loading != isLoading else { return }
         isLoading = loading
-        graceTimer?.invalidate()
-        graceTimer = nil
-        guard loading else {
-            spinner.stopAnimating()
-            return
-        }
+        guard loading else { return spinnerGate.cancel() }
         guard picture.image == nil else { return }
-        graceTimer = Timer.scheduledTimer(withTimeInterval: Self.loaderGrace, repeats: false) {
-            [weak self] _ in
-            guard let self, isLoading, picture.image == nil else { return }
-            // ⚠️ Above the picture, and re-stated on every show for the reason
-            // the media card's is: this is the only thing here that has to be
-            // seen through whatever else the plate is holding.
-            plate.bringSubviewToFront(spinner)
-            spinner.startAnimating()
+        spinnerGate.begin { [weak self] in
+            guard let self else { return false }
+            return isLoading && picture.image == nil
         }
     }
 
@@ -226,7 +226,7 @@ final class SnapScrubPreviewView: UIView {
     /// Runs the loader's grace out now, so a spec need not wait a fifth of a
     /// second for a delay whose duration is not the claim under test.
     func debugElapseLoaderGrace() {
-        graceTimer?.fire()
+        spinnerGate.debugElapseGrace()
     }
     #endif
 }

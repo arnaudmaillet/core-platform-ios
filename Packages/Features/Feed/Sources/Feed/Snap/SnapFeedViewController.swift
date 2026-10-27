@@ -4453,25 +4453,20 @@ final class SnapFeedViewController: UIViewController {
         ])
         return spinner
     }()
-    private var firstPageLoaderTimer: Timer?
+    /// The loader's timing — the kit's (`LoaderGate`, #1768) at the page's grace.
+    private lazy var firstPageGate = LoaderGate(grace: SnapMediaWait.grace) { [weak self] showing in
+        guard let self else { return }
+        if showing {
+            isFirstPageLoaderBuilt = true
+            view.bringSubviewToFront(firstPageLoader)
+            firstPageLoader.startAnimating()
+        } else if isFirstPageLoaderBuilt {
+            firstPageLoader.stopAnimating()
+        }
+    }
 
     private func setFirstPageWaiting(_ waiting: Bool) {
-        guard waiting else {
-            firstPageLoaderTimer?.invalidate()
-            firstPageLoaderTimer = nil
-            if isFirstPageLoaderBuilt { firstPageLoader.stopAnimating() }
-            return
-        }
-        guard firstPageLoaderTimer == nil, !(isFirstPageLoaderBuilt && firstPageLoader.isAnimating) else { return }
-        firstPageLoaderTimer = Timer.scheduledTimer(withTimeInterval: SnapMediaWait.grace, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.firstPageLoaderTimer = nil
-                self.isFirstPageLoaderBuilt = true
-                self.view.bringSubviewToFront(self.firstPageLoader)
-                self.firstPageLoader.startAnimating()
-            }
-        }
+        waiting ? firstPageGate.begin() : firstPageGate.end()
     }
     /// Built on first need: most feeds open on posts and never show it.
     private var isFirstPageLoaderBuilt = false

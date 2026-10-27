@@ -114,7 +114,7 @@ public final class LoadingLadder {
         public var previewArrives: Transition
 
         public init(
-            skeletonDelay: TimeInterval = 0.15, skeletonMinimum: TimeInterval = 0.3,
+            skeletonDelay: TimeInterval = LoadingTiming.skeletonDelay, skeletonMinimum: TimeInterval = LoadingTiming.minimum,
             contentArrives: Transition = .pictureArrives, previewArrives: Transition = .pictureArrives
         ) {
             self.skeletonDelay = skeletonDelay
@@ -126,25 +126,8 @@ public final class LoadingLadder {
         public static let standard = Policy()
     }
 
-    /// Time, injectable: a test steps it.
-    public struct Clock {
-        public var now: @MainActor () -> TimeInterval
-        public var after: @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void
-
-        public init(
-            now: @escaping @MainActor () -> TimeInterval,
-            after: @escaping @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void
-        ) {
-            self.now = now
-            self.after = after
-        }
-
-        public static var system: Clock {
-            Clock(now: { CACurrentMediaTime() }, after: { delay, work in
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { work() } }
-            })
-        }
-    }
+    /// Time, injectable: a test steps it — the loading kit's one clock.
+    public typealias Clock = LoadingClock
 
     /// A ticket for one item's answers: an answer with a stale one lands
     /// nowhere.

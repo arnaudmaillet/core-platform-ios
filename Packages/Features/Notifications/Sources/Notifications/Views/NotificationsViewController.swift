@@ -296,9 +296,12 @@ final class NotificationsViewController: UIViewController {
             cell, _, hiddenCount in
             cell.configure(hiddenCount: hiddenCount)
         }
-        let pageFooterRegistration = UICollectionView.CellRegistration<NotificationPageFooterCell, Bool> {
+        // The kit's paging footer (#1768); a failed one is tapped through
+        // the list's selection (`didSelectItemAt`).
+        let pageFooterRegistration = UICollectionView.CellRegistration<PagingFooterCell, Bool> {
             cell, _, failed in
-            cell.configure(failed: failed)
+            cell.footer.loadingAccessibilityLabel = "Loading more notifications"
+            cell.configure(failed ? .failed : .loading)
         }
         // The app's one section title (`SectionTitleView`): a heading, no
         // count, nothing to tap.

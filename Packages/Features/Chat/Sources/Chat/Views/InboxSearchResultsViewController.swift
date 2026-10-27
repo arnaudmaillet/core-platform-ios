@@ -183,9 +183,10 @@ final class InboxSearchResultsViewController: UIViewController {
                 )
             }
         }
-        let footerRegistration = UICollectionView.SupplementaryRegistration<PeoplePagingFooterView>(
+        // The kit's paging footer (#1768), shown while a next page is fetched.
+        let footerRegistration = UICollectionView.SupplementaryRegistration<PagingFooterSupplementaryView>(
             elementKind: UICollectionView.elementKindSectionFooter
-        ) { _, _, _ in }
+        ) { view, _, _ in view.footer.loadingAccessibilityLabel = "Loading more people" }
         dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
             kind == UICollectionView.elementKindSectionFooter
                 ? collectionView.dequeueConfiguredReusableSupplementary(using: footerRegistration, for: indexPath)
@@ -373,36 +374,6 @@ private extension Array {
     /// configure can land after a section has gone away.
     subscript(safe index: Int) -> Element? {
         indices.contains(index) ? self[index] : nil
-    }
-}
-
-/// The People section's footer while a next page is on its way: a spinner
-/// where the next rows will be (#614).
-final class PeoplePagingFooterView: UICollectionReusableView {
-    private let spinner = AppLoaderView(size: .medium)
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        spinner.startAnimating()
-        spinner.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(spinner)
-        let height = heightAnchor.constraint(equalToConstant: 56)
-        height.priority = .required - 1
-        NSLayoutConstraint.activate([
-            height,
-            spinner.centerXAnchor.constraint(equalTo: centerXAnchor),
-            spinner.centerYAnchor.constraint(equalTo: centerYAnchor)
-        ])
-        isAccessibilityElement = true
-        accessibilityLabel = "Loading more people"
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override func prepareForReuse() {
-        super.prepareForReuse()
-        spinner.startAnimating()
     }
 }
 
