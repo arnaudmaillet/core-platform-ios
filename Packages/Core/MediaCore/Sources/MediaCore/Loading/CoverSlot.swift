@@ -98,7 +98,9 @@ public final class CoverSlot {
     /// A cover handed in from outside the pipeline (a seed, a stand-in):
     /// used only when there is none yet.
     public func apply(_ image: UIImage) {
-        guard view.image == nil else { return }
+        // A fetched cover waiting out the bone's minimum is on its way, and
+        // is the better picture.
+        guard view.image == nil, pending == nil else { return }
         pending = (image, false)
         ladder.show(.preview, token: ladder.currentToken, warm: true)
     }
@@ -106,7 +108,9 @@ public final class CoverSlot {
     /// The frame a closing hero lands the host on: it replaces the cover, and
     /// the thumbnail still loading is dropped (hook 7).
     public func showParked(_ image: UIImage) {
-        pending = (image, false)
+        // A fetched cover it replaces, still waiting out the bone's minimum,
+        // was loaded all the same: the autoplay waiting on it is told.
+        pending = (image, pending?.fetched ?? false)
         ladder.show(.preview, token: ladder.currentToken, warm: true, source: .parked)
     }
 
@@ -145,5 +149,7 @@ public final class CoverSlot {
     #if DEBUG
     /// Whether the bone shows now.
     public var debugShowsBone: Bool { slot.showsBone }
+    /// Whether a picture has arrived and waits for its rung to land.
+    var debugHasPending: Bool { pending != nil }
     #endif
 }

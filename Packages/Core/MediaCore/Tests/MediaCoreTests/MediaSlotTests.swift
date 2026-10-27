@@ -102,6 +102,29 @@ struct MediaSlotTests {
         #expect(!view.isHidden && view.alpha == 1)
     }
 
+    /// ⚠️ A cover fetched while the bone has its minimum still to run waits:
+    /// a parked frame put meanwhile wins and the autoplay is still told the
+    /// cover loaded; a seed handed in meanwhile does not replace it.
+    @Test func aCoverWaitingOutTheBoneYieldsToParkedButNotToASeed() async throws {
+        let time = ManualClock()
+        let slot = CoverSlot(view: UIImageView(), size: .px256, clock: time.clock)
+        var loaded = 0
+        slot.onLoaded = { loaded += 1 }
+        slot.load(try #require(URL(string: "mock://cover/waits")), pipeline: makePipeline(), item: "p1")
+        time.advance(0.15)
+        for _ in 0..<400 where !slot.debugHasPending { try? await Task.sleep(for: .milliseconds(5)) }
+        try #require(slot.debugHasPending, "the fetch never answered")
+        slot.apply(solid())
+        #expect(slot.image == nil, "a seed jumped the fetched cover")
+        let parked = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { _ in }
+        slot.showParked(parked)
+        #expect(slot.image === parked)
+        #expect(loaded == 1, "the fetched cover's arrival was never told")
+        time.advance(1)
+        #expect(slot.image === parked, "the fetched cover landed over the parked frame")
+        #expect(loaded == 1)
+    }
+
     /// A cover in memory draws in the configure pass: no bone, ever.
     @Test func aWarmCoverNeverShowsTheBone() throws {
         let time = ManualClock()
