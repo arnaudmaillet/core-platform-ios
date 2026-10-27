@@ -138,8 +138,9 @@ final class HiddenWordsViewController: UIViewController {
                 content.text = "Add Words…"
                 content.textProperties.color = .tintColor
             case .loading:
-                content.text = "Loading…"
-                content.textProperties.color = .secondaryLabel
+                cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+                cell.accessories = []
+                return
             case .failed:
                 // "You’re offline…" when that is why (#794).
                 content.text = FailureCopy.row(

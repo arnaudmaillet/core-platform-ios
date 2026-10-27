@@ -74,3 +74,95 @@ final class SettingsSkeletonRowCell: UICollectionViewListCell {
         ]
     }
 }
+
+/// The same redacted row as a content configuration (#1769): what a list
+/// cell that is not a `SettingsSkeletonRowCell` wears while its section
+/// loads — `cell.contentConfiguration = SettingsSkeletonRowConfiguration(…)`
+/// in place of a "Loading…" line. The real row's configuration with sample
+/// text, drawn as bones at the real row's metrics.
+struct SettingsSkeletonRowConfiguration: UIContentConfiguration {
+    var content: UIListContentConfiguration
+
+    /// A row shaped like `content`: a title (and a subtitle, an image) whose
+    /// sample text sets each bone's width.
+    init(redacting content: UIListContentConfiguration) {
+        self.content = content
+    }
+
+    /// A plain one-line row of `sample`'s width.
+    init(sample: String, secondary: String? = nil) {
+        var content = UIListContentConfiguration.cell()
+        content.text = sample
+        content.secondaryText = secondary
+        self.content = content
+    }
+
+    func makeContentView() -> any UIView & UIContentView {
+        SettingsSkeletonRowContentView(configuration: self)
+    }
+
+    func updated(for state: any UIConfigurationState) -> SettingsSkeletonRowConfiguration { self }
+}
+
+private final class SettingsSkeletonRowContentView: UIView, UIContentView {
+    private let listView = UIListContentView(configuration: .cell())
+    private let imageBone = SkeletonBoneView(rounding: .fixed(6))
+    private let textBone = SkeletonBoneView(rounding: .capsule)
+    private let secondaryBone = SkeletonBoneView(rounding: .capsule)
+    private var boneConstraints: [NSLayoutConstraint] = []
+
+    var configuration: any UIContentConfiguration {
+        didSet { apply() }
+    }
+
+    init(configuration: SettingsSkeletonRowConfiguration) {
+        self.configuration = configuration
+        super.init(frame: .zero)
+        listView.pin(to: self)
+        for bone in [imageBone, textBone, secondaryBone] {
+            bone.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(bone)
+        }
+        isAccessibilityElement = true
+        accessibilityLabel = "Loading"
+        accessibilityTraits = .updatesFrequently
+        apply()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private func apply() {
+        guard let configuration = configuration as? SettingsSkeletonRowConfiguration else { return }
+        let content = configuration.content
+        var ink = content
+        ink.textProperties.color = .clear
+        ink.secondaryTextProperties.color = .clear
+        ink.imageProperties.tintColor = .clear
+        listView.configuration = ink
+        NSLayoutConstraint.deactivate(boneConstraints)
+        boneConstraints = []
+        place(imageBone, over: content.image == nil ? nil : listView.imageLayoutGuide, filling: true)
+        place(textBone, over: content.text == nil ? nil : listView.textLayoutGuide, filling: false)
+        place(secondaryBone, over: content.secondaryText == nil ? nil : listView.secondaryTextLayoutGuide, filling: false)
+        NSLayoutConstraint.activate(boneConstraints)
+    }
+
+    private func place(_ bone: SkeletonBoneView, over guide: UILayoutGuide?, filling: Bool) {
+        guard let guide else {
+            bone.isHidden = true
+            return
+        }
+        bone.isHidden = false
+        boneConstraints += [
+            bone.leadingAnchor.constraint(equalTo: guide.leadingAnchor),
+            bone.trailingAnchor.constraint(equalTo: guide.trailingAnchor),
+            bone.centerYAnchor.constraint(equalTo: guide.centerYAnchor),
+            bone.heightAnchor.constraint(equalTo: guide.heightAnchor, multiplier: filling ? 1 : 0.6)
+        ]
+    }
+
+    #if DEBUG
+    var debugBoneCount: Int { [imageBone, textBone, secondaryBone].filter { !$0.isHidden }.count }
+    #endif
+}

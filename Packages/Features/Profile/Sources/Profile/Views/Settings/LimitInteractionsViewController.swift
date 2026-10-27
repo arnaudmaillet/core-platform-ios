@@ -165,8 +165,9 @@ final class LimitInteractionsViewController: UIViewController {
                     self?.setSoundReuse(isOn)
                 }]
             case .loading:
-                content.text = "Loading…"
-                content.textProperties.color = .secondaryLabel
+                cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+                cell.accessories = []
+                return
             case .failed:
                 // "You’re offline…" when that is why (#794).
                 content.text = FailureCopy.row(

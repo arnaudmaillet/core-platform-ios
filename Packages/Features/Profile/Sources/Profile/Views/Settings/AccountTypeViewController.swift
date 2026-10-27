@@ -123,7 +123,8 @@ final class AccountTypeViewController: UIViewController {
     ) -> (title: String, detail: String?) {
         switch phase {
         case .loading:
-            ("Verification", "Loading…")
+            // The detail is a bone while it loads (`.verification`, #1769).
+            ("Verification", "Your verification status")
         case .failed:
             (
                 "Verification",
@@ -201,6 +202,12 @@ final class AccountTypeViewController: UIViewController {
                 let row = Self.verificationRow(verification, failure: verificationFailure)
                 content.text = row.title
                 content.secondaryText = row.detail
+                if case .loading = verification {
+                    // The row redacted while its status loads (#1769).
+                    cell.contentConfiguration = SettingsSkeletonRowConfiguration(redacting: content)
+                    cell.accessories = []
+                    return
+                }
                 switch verification {
                 case .loaded(.verified):
                     content.image = UIImage(systemName: "checkmark.seal.fill")
@@ -211,9 +218,9 @@ final class AccountTypeViewController: UIViewController {
                     break
                 }
             case .loading:
-                content = .cell()
-                content.text = "Loading…"
-                content.textProperties.color = .secondaryLabel
+                cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+                cell.accessories = []
+                return
             case .failed:
                 content = .cell()
                 // "You’re offline…" when that is why (#794).
