@@ -33,8 +33,9 @@ public final class CoverSlot {
     /// The cover's state: its item, its rung, where its preview came from.
     public var ladder: LoadingLadder { slot.ladder }
     /// The bone shown while a cover not in memory is on its way — in the
-    /// cover, at its back, edge to edge (the host's clip rounds it).
-    public let bone = SkeletonBoneView(rounding: .fixed(0))
+    /// cover, at its back, edge to edge (the host's clip rounds it). Nil for a
+    /// full-screen host, which says the wait with a centred loader.
+    public let bone: SkeletonBoneView?
     /// Told when a cover that had to be fetched has landed — the autoplay
     /// waits on a cover to stand behind its first frame.
     public var onLoaded: (() -> Void)?
@@ -60,15 +61,21 @@ public final class CoverSlot {
     ///   - dissolving: the view a late picture's dissolve runs over — the
     ///     image view by default; a page whose backdrop arrives with its
     ///     picture dissolves both together. It must hold the cover.
+    ///   - showsSkeleton: false for a full-screen page, whose wait is a
+    ///     centred loader (the owner, 2026-10-27), not a bone.
     public init(
-        view: UIImageView, size: ImageBucket, dissolving: UIView? = nil,
+        view: UIImageView, size: ImageBucket, dissolving: UIView? = nil, showsSkeleton: Bool = true,
         policy: LoadingLadder.Policy = .standard, clock: LoadingLadder.Clock = .system
     ) {
         self.view = view
         self.dissolving = dissolving
-        bone.frame = view.bounds
-        bone.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.insertSubview(bone, at: 0)
+        let bone = showsSkeleton ? SkeletonBoneView(rounding: .fixed(0)) : nil
+        self.bone = bone
+        if let bone {
+            bone.frame = view.bounds
+            bone.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            view.insertSubview(bone, at: 0)
+        }
         slot = MediaSlot(size: size, bone: bone, policy: policy, clock: clock)
         ladder.onLand = { [weak self] rung, transition in
             guard rung == .preview else { return }
