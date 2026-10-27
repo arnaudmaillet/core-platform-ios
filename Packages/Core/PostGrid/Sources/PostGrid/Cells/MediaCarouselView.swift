@@ -443,6 +443,15 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         pageViews.indices.contains(index) && pageViews[index].visibleLoader != nil
     }
 
+    /// Whether `index`'s picture is still on its way on the media slot — its
+    /// load in flight, or its skeleton up (#1505): the wait the bone already
+    /// says, which a host must not announce a second time with a spinner.
+    public func isPictureLoading(onPage index: Int) -> Bool {
+        guard pageViews.indices.contains(index) else { return false }
+        let slot = pageViews[index].coverSlot
+        return slot.isLoading || slot.showsBone
+    }
+
     /// The spinner on `index` while it is up — the view itself, so a spec can
     /// ask where it is drawn rather than trust that it travelled.
     public func visibleLoader(onPage index: Int) -> UIView? {

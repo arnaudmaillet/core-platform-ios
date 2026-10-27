@@ -146,9 +146,11 @@ public final class CoverSlot {
     /// bone's minimum.
     public var isLoading: Bool { slot.isLoading || pending != nil }
 
+    /// Whether the bone shows now — a host that would announce a wait of its
+    /// own (a spinner) leaves it to the bone.
+    public var showsBone: Bool { slot.showsBone }
+
     #if DEBUG
-    /// Whether the bone shows now.
-    public var debugShowsBone: Bool { slot.showsBone }
     /// Whether a picture has arrived and waits for its rung to land.
     var debugHasPending: Bool { pending != nil }
     #endif

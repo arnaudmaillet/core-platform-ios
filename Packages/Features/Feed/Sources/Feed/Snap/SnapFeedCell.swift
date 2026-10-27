@@ -526,13 +526,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         surface: { [weak self] in self?.mediaCard.renderView },
         isActive: { [weak self] in self?.isActive ?? false }
     )
-    /// The photograph's and the poster's loads (#1088): a cache hit drawn in
-    /// the configure pass, a new post cancelling the load in flight, a late
-    /// answer for a post this cell no longer shows landing nowhere. Both
-    /// arrive WITHOUT a dissolve — the page's picture cuts in over its black
-    /// floor, as it always has (`arrival: .none`).
-    private let imageLoad = ImageLoadSlot(size: .full, arrival: .none)
-    private let posterLoad = ImageLoadSlot(size: .full, arrival: .none)
+    // The photograph's and the poster's load is the card's media slot
+    // (`SnapMediaCardView.loadPicture`, #1505): a cache hit drawn in the
+    // configure pass, a new post cancelling the load in flight, a late answer
+    // for a post this cell no longer shows landing nowhere — and, between,
+    // the bone rather than the black floor and a spinner.
     #if DEBUG
     /// The photograph the page is drawing, for a test.
     var debugShownPhoto: UIImage? { mediaCard.imageView.image }
@@ -1909,6 +1907,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.onPictureAvailabilityChange = { [weak self] _ in
             self?.refreshMediaLoader()
         }
+        // And the bone coming or going (#1505): while it stands, the wait is
+        // its to say.
+        mediaCard.onPictureLoadingChange = { [weak self] in
+            self?.refreshMediaLoader()
+        }
         refreshMediaLoader()
 
         let isVideo = hasMedia && model.mediaKind == .video
@@ -1982,25 +1985,16 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
         if isImage {
             loadImage(model.mediaURL, expecting: model.id, pipeline: pipeline)
+        } else if isVideo, let thumbnailURL = model.thumbnailURL {
+            // The poster, shown under the player until the first frame is
+            // ready (or while an asset is still processing). Cache hit applied
+            // SYNCHRONOUSLY — see `loadImage` for why the async hop is what
+            // the viewer sees as a gap.
+            mediaCard.loadPicture(thumbnailURL, kind: .video, pipeline: pipeline)
         } else {
-            imageLoad.cancel()
-        }
-        if isVideo, let thumbnailURL = model.thumbnailURL {
-            loadPoster(thumbnailURL, pipeline: pipeline)
-        } else {
-            posterLoad.cancel()
+            mediaCard.cancelPicture()
         }
         refreshMediaLoader()
-    }
-
-    /// Loads the video poster into the render view; shown under the player until
-    /// the first frame is ready (or while an asset is still processing).
-    private func loadPoster(_ url: URL, pipeline: ImagePipeline) {
-        // Cache hit applied SYNCHRONOUSLY — see `loadImage` for why the async
-        // hop is what the viewer sees as a gap.
-        posterLoad.load(url, using: pipeline) { [weak self] image, _ in
-            self?.mediaCard.setPoster(image)
-        }
     }
 
     /// Freezes the chrome's layout bounds to the SCREEN's header/footer
@@ -2056,7 +2050,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     private func loadImage(_ url: URL?, expecting id: PostID, pipeline: ImagePipeline) {
         guard let url else {
-            imageLoad.cancel()
+            mediaCard.cancelPicture()
             return
         }
         // A cache hit is applied SYNCHRONOUSLY, in the same turn as the
@@ -2076,14 +2070,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // what `PostGridTileCell.configure` has always done; only the feed
         // went straight to the async path.
         //
-        // A genuine cache miss still loads asynchronously and still shows the
-        // floor. That is a first load with nothing to display yet, which is a
-        // different thing from blanking something we already had.
-        imageLoad.load(url, using: pipeline) { [weak self] image, _ in
-            guard let self else { return }
-            mediaCard.setImage(image)
-            refreshMediaLoader()
-        } failed: {
+        // A genuine cache miss still loads asynchronously, behind the bone
+        // (#1505). That is a first load with nothing to display yet, which is
+        // a different thing from blanking something we already had.
+        mediaCard.loadPicture(url, kind: .image, pipeline: pipeline) {
             // A post that HAS a media URL and cannot load it leaves the card
             // on its floor — visually identical to a text page, and silent
             // until now. This is the failure the audit is for.
@@ -2188,7 +2178,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// asks `hasItsOwnMedia` and drives the card's loader.
     private lazy var mediaWait: SnapMediaWait = {
         let wait = SnapMediaWait(
-            hasItsOwnMedia: { [weak self] in self?.hasItsOwnMedia ?? true },
+            // A picture still on its way wears its bone (#1505): the spinner
+            // is for a clip whose poster stands in while it buffers.
+            hasItsOwnMedia: { [weak self] in
+                guard let self else { return true }
+                return hasItsOwnMedia || mediaCard.isPictureLoading
+            },
             isShowingLoader: { [weak self] in self?.mediaCard.isShowingLoader ?? false },
             setLoading: { [weak self] loading in self?.mediaCard.setLoading(loading) }
         )
@@ -2233,6 +2228,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// than of any bookkeeping.
     var debugIsShowingMediaLoader: Bool { mediaCard.isShowingLoader }
 
+    /// Whether the page's picture wears its bone now (#1505).
+    var debugShowsPictureBone: Bool { mediaCard.debugShowsPictureBone }
+
     /// The surface the page is CURRENTLY showing — which is not the one it was
     /// built with once a landing has handed one over. A spec that wants to
     /// prove the page's picture signal followed the surface has to be able to
@@ -2248,13 +2246,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Runs the grace out now, so a spec does not have to sleep for it.
     func debugElapseMediaLoaderGrace() {
         mediaWait.debugElapseGrace()
-    }
-
-    /// Delivers a picture the way the pipeline would, so a spec can watch the
-    /// spinner go without a network.
-    func debugDeliverMedia() {
-        mediaCard.setImage(UIImage(systemName: "photo") ?? UIImage())
-        refreshMediaLoader()
     }
     #endif
 
@@ -3376,8 +3367,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // exactly the kind of stranded state reuse produces.
         contentView.backgroundColor = .black
         contentView.overrideUserInterfaceStyle = SnapChromeTheme.style(hasMedia: true)
-        imageLoad.cancel()
-        posterLoad.cancel()
+        mediaCard.cancelPicture()
         chrome.reset()
         mediaCard.setImage(nil)
         mediaCard.setPoster(nil)

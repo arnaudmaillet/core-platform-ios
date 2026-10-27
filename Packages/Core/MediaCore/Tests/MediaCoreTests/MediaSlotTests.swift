@@ -85,9 +85,9 @@ struct MediaSlotTests {
         var loaded = 0
         slot.onLoaded = { loaded += 1 }
         slot.load(try #require(URL(string: "mock://cover/cold")), pipeline: makePipeline(), item: "p1")
-        #expect(!slot.debugShowsBone, "a bone for a load that may land at once")
+        #expect(!slot.showsBone, "a bone for a load that may land at once")
         time.advance(0.15)
-        #expect(slot.debugShowsBone)
+        #expect(slot.showsBone)
         #expect(slot.image == nil)
         for _ in 0..<400 where slot.image == nil {
             try? await Task.sleep(for: .milliseconds(5))
@@ -95,7 +95,7 @@ struct MediaSlotTests {
         }
         #expect(slot.image != nil)
         #expect(time.now >= 0.45, "the bone left before its minimum")
-        #expect(!slot.debugShowsBone, "the bone stayed over the picture")
+        #expect(!slot.showsBone, "the bone stayed over the picture")
         #expect(slot.ladder.transitions.last?.0 == .preview)
         #expect(slot.ladder.transitions.last?.1 == .pictureArrives)
         #expect(loaded == 1)
@@ -135,7 +135,7 @@ struct MediaSlotTests {
         slot.load(url, pipeline: pipeline, item: "p1")
         #expect(slot.image != nil)
         time.advance(1)
-        #expect(!slot.debugShowsBone)
+        #expect(!slot.showsBone)
     }
 
     /// A cover that fails (or a post with none) leaves the host's fill, no
@@ -147,14 +147,14 @@ struct MediaSlotTests {
         slot.onFailed = { failed += 1 }
         slot.load(try #require(URL(string: "mock://cover/broken")), pipeline: nil, item: "p1")
         time.advance(1)
-        #expect(!slot.debugShowsBone)
+        #expect(!slot.showsBone)
         #expect(failed == 1)
 
         slot.load(try #require(URL(string: "mock://cover/reset")), pipeline: makePipeline(), item: "p2")
         time.advance(0.15)
-        #expect(slot.debugShowsBone)
+        #expect(slot.showsBone)
         slot.reset()
         time.advance(1)
-        #expect(!slot.debugShowsBone, "a reset host kept its bone")
+        #expect(!slot.showsBone, "a reset host kept its bone")
     }
 }
