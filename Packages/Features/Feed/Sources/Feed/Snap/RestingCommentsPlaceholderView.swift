@@ -84,7 +84,7 @@ final class RestingCommentsPlaceholderView: UIView {
         )
         guard needed != rows.count else { return }
         rows.forEach { $0.superview?.removeFromSuperview() }
-        rows = (0..<needed).map(CommentSkeletonRowView.init(index:))
+        rows = (0..<needed).map { CommentSkeletonRowView(index: $0) }
         rows.forEach { stack.addArrangedSubview(Self.gapped($0)) }
     }
 

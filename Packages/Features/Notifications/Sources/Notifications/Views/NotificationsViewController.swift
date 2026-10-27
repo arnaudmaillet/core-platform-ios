@@ -33,7 +33,11 @@ final class NotificationsViewController: UIViewController {
     private lazy var collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
     private let refreshControl = AppRefreshControl()
     /// Rows where the rows will be, until the first page lands (charter P8).
-    private let skeleton = PersonListSkeletonView(avatarSize: NotificationCell.Metrics.avatarArea, showsTrailingBone: true)
+    /// Rows under the list's section title, as the notifications land
+    /// (#1774).
+    private let skeleton = PersonListSkeletonView(
+        avatarSize: NotificationCell.Metrics.avatarArea, trailing: .timeBone, header: .sectionTitle
+    )
     private let emptyState = EmptyStateView()
 
     private var dataSource: UICollectionViewDiffableDataSource<NotificationSection.Kind, Item>!

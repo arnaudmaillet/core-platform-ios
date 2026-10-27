@@ -41,23 +41,37 @@ public final class PersonListSkeletonView: UIView {
         /// A title over a longer preview — a conversation row.
         case preview
 
-        var first: [CGFloat] {
-            switch self {
-            case .person: [0.58, 0.42, 0.66, 0.5]
-            case .preview: [0.42, 0.58, 0.36]
-            }
-        }
+        // The shared width rule (#1774).
+        var first: [CGFloat] { SkeletonLineWidths.title }
         var second: [CGFloat] {
             switch self {
-            case .person: [0.34, 0.46, 0.28, 0.4]
-            case .preview: [0.82, 0.64, 0.9]
+            case .person: SkeletonLineWidths.detail
+            case .preview: SkeletonLineWidths.body
             }
         }
+    }
+
+    /// A section header over the rows (#1774): the real list's own heading —
+    /// a band `height` tall with a title bone `titleHeight` tall in it.
+    public struct SectionHeader: Equatable, Sendable {
+        public var height: CGFloat
+        public var titleHeight: CGFloat
+
+        public init(height: CGFloat, titleHeight: CGFloat) {
+            self.height = height
+            self.titleHeight = titleHeight
+        }
+
+        /// `SectionTitleView`'s heading (the notifications' sections).
+        public static let sectionTitle = SectionHeader(height: SectionTitleView.Metrics.height, titleHeight: 14)
+        /// The inbox's large inline title (`SectionHeaderPillButton`).
+        public static let largeTitle = SectionHeader(height: 48, titleHeight: 20)
     }
 
     private let avatarSize: CGFloat
     private let trailing: Trailing
     private let lines: Lines
+    private let header: SectionHeader?
     /// The action pill's height: an `AppButton` at `.row` size.
     static let pillHeight: CGFloat = 30
     private let rows = UIStackView()
@@ -76,10 +90,12 @@ public final class PersonListSkeletonView: UIView {
     ///   - avatarSize: the disc the real row draws.
     ///   - trailing: the real row's trailing furniture (#1774).
     ///   - lines: the two lines' rhythm (#1769).
-    public init(avatarSize: CGFloat = 48, trailing: Trailing, lines: Lines = .person) {
+    ///   - header: the list's section heading over the rows (#1774).
+    public init(avatarSize: CGFloat = 48, trailing: Trailing, lines: Lines = .person, header: SectionHeader? = nil) {
         self.avatarSize = avatarSize
         self.trailing = trailing
         self.lines = lines
+        self.header = header
         super.init(frame: .zero)
         isUserInteractionEnabled = false
         clipsToBounds = true
@@ -108,11 +124,28 @@ public final class PersonListSkeletonView: UIView {
     private func rebuildRowsIfNeeded() {
         let height = bounds.height
         guard height > 0 else { return }
-        let count = max(1, Int((height / rowHeight).rounded(.up)))
+        let count = max(1, Int(((height - (header?.height ?? 0)) / rowHeight).rounded(.up)))
         guard count != builtRowCount else { return }
         builtRowCount = count
         rows.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        if let header { rows.addArrangedSubview(makeHeader(header)) }
         (0..<count).forEach { rows.addArrangedSubview(makeRow(at: $0)) }
+    }
+
+    /// The section heading's band: a short title bone where the title stands.
+    private func makeHeader(_ header: SectionHeader) -> UIView {
+        let band = UIView()
+        let title = SkeletonBoneView(rounding: .capsule)
+        title.translatesAutoresizingMaskIntoConstraints = false
+        band.addSubview(title)
+        NSLayoutConstraint.activate([
+            band.heightAnchor.constraint(equalToConstant: header.height),
+            title.leadingAnchor.constraint(equalTo: band.leadingAnchor, constant: Spacing.lg),
+            title.centerYAnchor.constraint(equalTo: band.centerYAnchor),
+            title.heightAnchor.constraint(equalToConstant: header.titleHeight),
+            title.widthAnchor.constraint(equalTo: band.widthAnchor, multiplier: SkeletonLineWidths.fraction(SkeletonLineWidths.detail, at: 0)),
+        ])
+        return band
     }
 
     private func makeRow(at index: Int) -> UIView {
@@ -187,7 +220,9 @@ public final class PersonListSkeletonView: UIView {
         func bones(in view: UIView) -> Int {
             view.subviews.reduce(0) { $0 + ($1 is SkeletonBoneView && !$1.isHidden ? 1 : bones(in: $1)) }
         }
-        return rows.arrangedSubviews.first.map(bones(in:)) ?? 0
+        return rows.arrangedSubviews.dropFirst(header == nil ? 0 : 1).first.map(bones(in:)) ?? 0
     }
+    /// Whether the section heading's band leads the rows.
+    var debugHasHeader: Bool { header != nil && rows.arrangedSubviews.first?.subviews.first is SkeletonBoneView }
     #endif
 }

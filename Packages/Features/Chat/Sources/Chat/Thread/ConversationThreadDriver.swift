@@ -40,6 +40,9 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     static let viewerName = "You"
 
     private let viewModel: ConversationViewModel
+
+    /// The thread's last-known shape, per conversation (#1774).
+    var presenceKey: String? { viewModel.currentConversationID.map { "thread.\($0.rawValue)" } }
     private let mediaPicker: ChatMediaPickerFactory?
     private let viewer: any ViewerIdentityProviding
     private let avatars: (any PeerAvatarProviding)?
