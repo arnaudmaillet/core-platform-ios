@@ -254,6 +254,21 @@ struct SnapMediaLoaderSpecTests {
         }
     }
 
+    /// ⚠️ A GRID TILE'S DECODE STANDS IN (#1505): tiles decode at their drawn
+    /// size, so the page a flight lands on finds a 512 px decode and not its
+    /// own — drawn at once, never a bone over the picture the flight carried.
+    @Test func aTilesSmallerDecodeStandsInForThePagesPicture() async {
+        let model = photo("post-tile")
+        let pipeline = Self.pipeline(warm: [])
+        let still = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { _ in }
+        pipeline.store(still, for: model.mediaURL!, size: .px512)
+        let cell = SnapFeedCell(frame: Self.container)
+        cell.configure(with: model, pipeline: pipeline, videoPlayback: nil)
+        #expect(cell.debugShownPhoto != nil, "the page waited on its own decode with the tile's in hand")
+        try? await Task.sleep(for: .milliseconds(250))
+        #expect(!cell.debugShowsPictureBone, "a bone over the tile's picture")
+    }
+
     /// THE REPORTED CASE, exactly: a clip showing its poster. There IS a
     /// picture on screen — but it is not the post's media, and the viewer is
     /// waiting for something. Past the grace, the page says so.

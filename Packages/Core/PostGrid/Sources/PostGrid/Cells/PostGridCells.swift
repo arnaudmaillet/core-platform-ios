@@ -3178,7 +3178,40 @@ public final class PostGridTileCell: UICollectionViewCell {
         // the tile started playing becomes the surface's poster — the
         // difference between a cold flight showing the thumbnail and showing
         // nothing — and is announced, for the autoplay gate.
+        //
+        // At the tile's DRAWN size (#1505, as #1086 did for avatars): a grid
+        // tile a third of the screen wide is a 512 px decode, not 1200 px.
+        // The cell is laid out by the time it is configured; a copy that is
+        // not yet keeps the full picture.
+        let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 3
+        media.coverSize = Self.coverBucket(forDrawnSize: bounds.size, scale: scale)
         media.loadCover(post.thumbnailURL, pipeline: imagePipeline, item: post.id)
+    }
+
+    /// How much a tile's cover may be enlarged to stay in a smaller bucket: a
+    /// 3:4 tile a third of a 402 pt screen wide is 528 px tall at @3x, a few
+    /// percent over 512 — invisible at tile size, where the next bucket is a
+    /// 1200 px decode, five times the memory.
+    static let coverUpscaleSlack: CGFloat = 1.15
+
+    /// The bucket a tile's cover is decoded at, from the size it is drawn at
+    /// (#1505): `.px512` for a grid tile, the full picture for a tile larger
+    /// than that (a slice's lead, a card) or one not laid out yet. Never a
+    /// "small" bucket, which is the avatars' namespace. The grid's lookahead
+    /// asks the same, so the tile finds its prefetch in memory.
+    public static func coverBucket(forDrawnSize size: CGSize, scale: CGFloat) -> ImageBucket {
+        guard size.width > 0, size.height > 0 else { return .full }
+        let pixels = max(size.width, size.height) * max(scale, 1) / coverUpscaleSlack
+        return max(.px256, ImageBucket(fittingPixels: pixels))
+    }
+
+    /// What a grid's lookahead asks for a tile's cover at `indexPath`: the
+    /// bucket the tile will decode it at, from the layout's size for it.
+    @MainActor
+    public static func coverRequest(_ url: URL, at indexPath: IndexPath, in collectionView: UICollectionView) -> ImageRequest {
+        guard let drawn = collectionView.layoutAttributesForItem(at: indexPath)?.size else { return ImageRequest(url: url) }
+        let scale = collectionView.traitCollection.displayScale > 0 ? collectionView.traitCollection.displayScale : 3
+        return ImageRequest(url: url, size: coverBucket(forDrawnSize: drawn, scale: scale))
     }
 }
 

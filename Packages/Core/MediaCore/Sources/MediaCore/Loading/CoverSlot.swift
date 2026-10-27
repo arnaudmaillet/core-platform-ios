@@ -76,6 +76,13 @@ public final class CoverSlot {
         }
     }
 
+    /// The bucket the next cover is decoded at — a host that knows its drawn
+    /// size (a grid tile, #1505) restates it before loading.
+    public var size: ImageBucket {
+        get { slot.size }
+        set { slot.size = newValue }
+    }
+
     /// Shows `url`'s cover for `item` (the post).
     public func load(_ url: URL?, pipeline: ImagePipeline?, item: AnyHashable) {
         if item == ladder.item, url == self.url, slot.isLoading || pending != nil || view.image != nil { return }

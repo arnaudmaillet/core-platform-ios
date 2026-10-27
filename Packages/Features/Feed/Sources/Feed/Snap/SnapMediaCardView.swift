@@ -495,7 +495,19 @@ final class SnapMediaCardView: UIView {
     /// missing or broken one.
     func loadPicture(_ url: URL?, kind: MediaKind, pipeline: ImagePipeline?, failed: (() -> Void)? = nil) {
         let token = picture.begin(url)
-        picture.load(url, using: pipeline) { [weak self] image, transition in
+        // ⚠️ A GRID TILE'S DECODE STANDS IN (#1505). Tiles decode their cover at
+        // their drawn size, so the page a flight lands on finds a 512 px decode
+        // in memory and not its own: drawn now, no bone, the full picture
+        // replacing it a beat later — never a bone over the picture the
+        // flight just carried.
+        picture.load(url, using: pipeline, standIn: { [weak self] image in
+            guard let self else { return }
+            switch kind {
+            case .image: setImage(image)
+            case .video: setPoster(image)
+            }
+            picture.ladder.show(.preview, token: token, warm: true)
+        }) { [weak self] image, transition in
             guard let self else { return }
             // Drawn now, under the bone: it shows as the bone leaves, once
             // the bone has had its minimum (or in this pass when warm).

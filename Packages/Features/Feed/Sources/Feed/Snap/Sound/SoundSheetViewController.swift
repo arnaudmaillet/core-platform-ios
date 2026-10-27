@@ -326,7 +326,8 @@ final class SoundSheetViewController: UIViewController {
         let lookahead = ScrollLookahead(pipeline: imagePipeline, name: "sound-sheet", kind: .grid) { [weak self] path in
             guard let self, case .tile(let id, _)? = dataSource?.itemIdentifier(for: path),
                   let url = tileByID[id]?.thumbnailURL else { return [] }
-            return [ImageRequest(url: url)]
+            // At the bucket the tile decodes it at (#1505).
+            return [PostGridTileCell.coverRequest(url, at: path, in: collectionView)]
         }
         lookahead.attach(to: collectionView)
         return lookahead
