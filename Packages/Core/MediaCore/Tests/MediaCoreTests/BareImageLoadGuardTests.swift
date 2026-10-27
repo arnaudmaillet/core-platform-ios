@@ -21,8 +21,6 @@ struct BareImageLoadGuardTests {
     /// File name → why it may still load a picture bare.
     static let allowed: [String: String] = [
         "MediaSlot.swift": "the media slot itself",
-        "MapAnnotationView.swift": "#1505: map pins, next",
-        "MapClusterAnnotationView.swift": "#1505: map pins, next",
         "ShopStorefrontViewController.swift": "#1505: the shop's poster, next",
         "ForYouPostPreviewViewController.swift": "#1505: the context-menu preview, which draws the picture itself",
         "VideoBannerPickerViewController.swift": "#1505: the banner picker's frames, next",
