@@ -177,6 +177,16 @@ final class StorageSettingsViewController: UIViewController {
 
     private var hasAnythingToClear: Bool { (model.report?.total ?? 0) > 0 }
 
+    /// A size's sample while the cache is measured: the row is drawn
+    /// redacted until then (#1769), never "Measuring…".
+    private static let sampleSize = "000.0 MB"
+
+    private static func redactedUntilMeasured(
+        _ content: UIListContentConfiguration, report: StorageReport?
+    ) -> any UIContentConfiguration {
+        report == nil ? SettingsSkeletonRowConfiguration(redacting: content) : content
+    }
+
     private func configure(_ cell: UICollectionViewListCell, for item: Item) {
         cell.accessories = []
         cell.accessibilityTraits.remove(.selected)
@@ -185,15 +195,15 @@ final class StorageSettingsViewController: UIViewController {
         switch item {
         case .category(let category):
             var content = Self.label(Self.title(category), symbol: Self.symbol(category))
-            content.secondaryText = report.map { MediaCacheInventory.formatted($0.bytes(in: category)) } ?? "Measuring…"
-            cell.contentConfiguration = content
+            content.secondaryText = report.map { MediaCacheInventory.formatted($0.bytes(in: category)) } ?? Self.sampleSize
+            cell.contentConfiguration = Self.redactedUntilMeasured(content, report: report)
             cell.accessibilityHint = (report?.bytes(in: category) ?? 0) > 0 ? "Clears \(Self.title(category).lowercased())" : nil
         case .total:
             var content = UIListContentConfiguration.valueCell()
             content.text = "Total"
             content.textProperties.font = .appFont(forTextStyle: .headline)
-            content.secondaryText = report.map { MediaCacheInventory.formatted($0.total) } ?? "Measuring…"
-            cell.contentConfiguration = content
+            content.secondaryText = report.map { MediaCacheInventory.formatted($0.total) } ?? Self.sampleSize
+            cell.contentConfiguration = Self.redactedUntilMeasured(content, report: report)
         case .clearAll:
             var content = UIListContentConfiguration.cell()
             content.text = "Clear All"
@@ -203,8 +213,8 @@ final class StorageSettingsViewController: UIViewController {
             var content = Self.label("In Use", symbol: "internaldrive")
             content.secondaryText = report.map {
                 "\(MediaCacheInventory.formatted($0.limitedDiskBytes)) of \(MediaCacheInventory.formatted(model.limitBytes))"
-            } ?? "Measuring…"
-            cell.contentConfiguration = content
+            } ?? Self.sampleSize
+            cell.contentConfiguration = Self.redactedUntilMeasured(content, report: report)
         case .limit(let limit):
             var content = UIListContentConfiguration.cell()
             content.text = Self.title(limit)

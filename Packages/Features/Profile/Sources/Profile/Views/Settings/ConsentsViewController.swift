@@ -186,10 +186,8 @@ final class ConsentsViewController: UIViewController {
             cell.contentConfiguration = Self.content("Data Processing", detail: "To provide the service · \(Self.statusText(consent))", symbol: "server.rack")
             if makeDeleteAccount != nil { cell.accessories = [.disclosureIndicator()] }
         case .loading:
-            var content = UIListContentConfiguration.cell()
-            content.text = "Loading…"
-            content.textProperties.color = .secondaryLabel
-            cell.contentConfiguration = content
+            cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+            cell.accessories = []
         case .failed:
             var content = UIListContentConfiguration.cell()
             // "You’re offline…" when that is why (#794).

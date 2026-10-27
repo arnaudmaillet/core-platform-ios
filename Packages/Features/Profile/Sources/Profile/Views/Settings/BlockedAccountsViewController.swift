@@ -77,7 +77,10 @@ final class BlockedAccountsViewController: UIViewController {
             var content = UIListContentConfiguration.cell()
             content.textProperties.color = .secondaryLabel
             switch item {
-            case .loading: content.text = "Loading…"
+            case .loading:
+                cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+                cell.accessories = []
+                return
             case .failed:
                 // "You’re offline…" when that is why (#794).
                 content.text = FailureCopy.row(

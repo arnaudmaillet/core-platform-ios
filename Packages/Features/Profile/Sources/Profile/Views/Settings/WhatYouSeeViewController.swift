@@ -258,9 +258,9 @@ final class WhatYouSeeViewController: UIViewController {
                 }
                 if unavailable { cell.accessibilityTraits.insert(.notEnabled) } else { cell.accessibilityTraits.remove(.notEnabled) }
             case .loading, .interestsLoading:
-                content = .cell()
-                content.text = "Loading…"
-                content.textProperties.color = .secondaryLabel
+                cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+                cell.accessories = []
+                return
             case .failed:
                 content = .cell()
                 content.text = Self.failedText(loadFailure)

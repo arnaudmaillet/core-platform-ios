@@ -270,9 +270,9 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
                 content.text = "Not Available Yet"
                 content.textProperties.color = .secondaryLabel
             case .loading, .supervisionLoading:
-                content = .cell()
-                content.text = "Loading…"
-                content.textProperties.color = .secondaryLabel
+                cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+                cell.accessories = []
+                return
             case .supervisionFailed:
                 content = .cell()
                 // "You’re offline…" when that is why (#794).

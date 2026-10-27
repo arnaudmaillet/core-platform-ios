@@ -182,8 +182,10 @@ final class SecurityCheckupViewController: UIViewController {
             elementKind: UICollectionView.elementKindSectionHeader
         ) { [weak self] view, _, _ in
             var content = UIListContentConfiguration.header()
-            content.text = self.map { $0.items.isEmpty ? "Checking…" : SecurityCheckup.summary($0.items) }
-            view.contentConfiguration = content
+            let checking = self?.items.isEmpty ?? true
+            // A sample while the check runs: the header is drawn redacted (#1769).
+            content.text = checking ? "Your security checkup" : self.map { SecurityCheckup.summary($0.items) }
+            view.contentConfiguration = checking ? SettingsSkeletonRowConfiguration(redacting: content) : content
         }
         dataSource.supplementaryViewProvider = { collectionView, _, indexPath in
             collectionView.dequeueConfiguredReusableSupplementary(using: header, for: indexPath)

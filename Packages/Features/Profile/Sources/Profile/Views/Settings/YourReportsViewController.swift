@@ -166,10 +166,8 @@ final class YourReportsViewController: UIViewController {
                 content.textProperties.color = .secondaryLabel
                 cell.contentConfiguration = content
             case .loadingMore:
-                var content = UIListContentConfiguration.cell()
-                content.text = "Loading…"
-                content.textProperties.color = .secondaryLabel
-                cell.contentConfiguration = content
+                cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+                cell.accessories = []
             case .retry:
                 var content = UIListContentConfiguration.cell()
                 content.text = "Try Again"

@@ -191,9 +191,9 @@ final class SupervisionDetailViewController: UIViewController {
                 content.text = SupervisionCopy.noLimits
                 content.textProperties.color = .secondaryLabel
             case .overviewLoading:
-                content = .cell()
-                content.text = "Loading…"
-                content.textProperties.color = .secondaryLabel
+                cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+                cell.accessories = []
+                return
             case .overviewFailed:
                 content = .cell()
                 // "You’re offline…" when that is why (#794).

@@ -84,7 +84,8 @@ final class AccountStatusViewController: UIViewController {
 
     static func summary(for phase: Phase) -> (title: String, symbol: String, color: UIColor) {
         switch phase {
-        case .loading: ("Checking your account…", "hourglass", .secondaryLabel)
+        // A sample: the row is drawn redacted while it loads (#1769).
+        case .loading: ("Your account's status", "hourglass", .secondaryLabel)
         case .failed: ("Couldn't check your account status.", "exclamationmark.circle", .secondaryLabel)
         case .loaded(let restrictions) where restrictions.isEmpty: ("No restrictions on your account", "checkmark.shield", .systemGreen)
         case .loaded: ("Your account has restrictions", "exclamationmark.triangle", Warning.glyphTint)
@@ -102,7 +103,11 @@ final class AccountStatusViewController: UIViewController {
                 content.text = summary.title
                 content.image = UIImage(systemName: summary.symbol)
                 content.imageProperties.tintColor = summary.color
-                cell.contentConfiguration = content
+                if case .loading = phase {
+                    cell.contentConfiguration = SettingsSkeletonRowConfiguration(redacting: content)
+                } else {
+                    cell.contentConfiguration = content
+                }
             case .restriction(let restriction):
                 var content = UIListContentConfiguration.subtitleCell()
                 content.text = restriction.title

@@ -92,9 +92,9 @@ final class RecentlyDeletedViewController: UIViewController {
                     }
                 }
             case .loading:
-                content = .cell()
-                content.text = "Loading…"
-                content.textProperties.color = .secondaryLabel
+                cell.contentConfiguration = SettingsSkeletonRowConfiguration(sample: "A row of this list")
+                cell.accessories = []
+                return
             case .failed:
                 content = .cell()
                 // "You’re offline…" when that is why (#794).

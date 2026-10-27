@@ -56,7 +56,8 @@ final class DataExportViewController: UIViewController {
         let destination = email.map { "to \($0)" } ?? "to your email address"
         switch phase {
         case .loading:
-            return "Checking…"
+            // A sample: the row is drawn redacted while it loads (#1769).
+            return "The state of your data export"
         case .available:
             return "Get a copy of the information linked to your account, as machine-readable files (JSON)."
         case .preparing(let requestedOn):
@@ -97,6 +98,10 @@ final class DataExportViewController: UIViewController {
                 content.textProperties.color = .secondaryLabel
                 content.image = UIImage(systemName: "doc.zipper")
                 content.imageProperties.tintColor = .label
+                if viewModel.phase == .loading {
+                    cell.contentConfiguration = SettingsSkeletonRowConfiguration(redacting: content)
+                    return
+                }
             case .request(let title):
                 content.text = title
                 content.textProperties.color = .tintColor

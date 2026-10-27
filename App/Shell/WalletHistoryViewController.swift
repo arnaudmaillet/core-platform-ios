@@ -214,11 +214,17 @@ final class WalletHistoryViewController: UIViewController {
             cell.accessories = [.customView(configuration: .init(customView: amount, placement: .trailing()))]
         }
         let boneRegistration = UICollectionView.CellRegistration<WalletHistoryBoneCell, Item> { _, _, _ in }
+        // A first load is the list's bones; a next page, the kit's paging
+        // footer (#1769) — never a "Loading…" line.
+        let pagingRegistration = UICollectionView.CellRegistration<PagingFooterCell, Item> { cell, _, _ in
+            cell.footer.loadingAccessibilityLabel = "Loading more history"
+            cell.configure(.loading)
+        }
         let messageRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             var content = UIListContentConfiguration.cell()
             content.textProperties.color = .secondaryLabel
             switch item {
-            case .loading, .loadingMore, .bone: content.text = "Loading…"
+            case .loading, .loadingMore, .bone: break
             case .failed:
                 content.text = FailureCopy.row(for: self?.failure, fallback: "Couldn't load your wallet's history. Tap to try again.")
             case .empty: content.text = "Nothing here yet. Claims, stakes and gifts show up here."
@@ -230,8 +236,10 @@ final class WalletHistoryViewController: UIViewController {
             switch item {
             case .filter:
                 collectionView.dequeueConfiguredReusableCell(using: filterRegistration, for: indexPath, item: item)
-            case .bone:
+            case .bone, .loading:
                 collectionView.dequeueConfiguredReusableCell(using: boneRegistration, for: indexPath, item: item)
+            case .loadingMore:
+                collectionView.dequeueConfiguredReusableCell(using: pagingRegistration, for: indexPath, item: item)
             case .transaction(let transaction):
                 collectionView.dequeueConfiguredReusableCell(using: rowRegistration, for: indexPath, item: transaction)
             default:
