@@ -103,6 +103,17 @@ final class RestrictedAccountsViewController: UIViewController {
         Task { await viewModel.load() }
     }
 
+    /// The rows whose unrestrict is on its way (#1775): they wear the busy
+    /// accessory until the row leaves, or comes back with the error.
+    private var busyHandles: Set<String> = []
+
+    private func reconfigureRow(_ profile: RestrictedProfile) {
+        var snapshot = dataSource.snapshot()
+        guard snapshot.indexOfItem(.profile(profile)) != nil else { return }
+        snapshot.reconfigureItems([.profile(profile)])
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
     private func configureDataSource() {
         let personRegistration = UICollectionView.CellRegistration<PersonListCell, RestrictedProfile> { [weak self] cell, _, profile in
             cell.configure(with: PersonRowContent(
@@ -113,6 +124,7 @@ final class RestrictedAccountsViewController: UIViewController {
             // The avatar keeps its own load and drops a late face for the
             // person the row was before (#780, the avatar contract #1750).
             cell.avatar.setPicture(profile.avatarURL, pipeline: self?.imagePipeline)
+            cell.accessories = self?.busyHandles.contains(profile.handle) == true ? [.busy()] : []
         }
         let messageRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             var content = UIListContentConfiguration.cell()
@@ -177,8 +189,15 @@ final class RestrictedAccountsViewController: UIViewController {
     }
 
     private func unrestrict(_ profile: RestrictedProfile) {
+        guard !busyHandles.contains(profile.handle) else { return }
+        busyHandles.insert(profile.handle)
+        reconfigureRow(profile)
         Task { [weak self] in
             guard let self else { return }
+            defer {
+                busyHandles.remove(profile.handle)
+                reconfigureRow(profile)
+            }
             do {
                 try await viewModel.unrestrict(profile)
             } catch {
