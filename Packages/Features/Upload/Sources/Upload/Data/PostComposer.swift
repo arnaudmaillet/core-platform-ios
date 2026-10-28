@@ -193,6 +193,15 @@ public protocol PostComposing: Sendable {
     func publish(
         media: [ComposeMedia], caption: String, as author: AuthorSummary?, idempotencyKey: String
     ) async throws -> FeedEntry
+
+    /// The same, saying how far along it is (#1775): `progress` gets the
+    /// share of the work done, 0…1 — each attachment uploaded, then the post
+    /// created and published — so the screen shows the long work moving.
+    @discardableResult
+    func publish(
+        media: [ComposeMedia], caption: String, as author: AuthorSummary?, idempotencyKey: String,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> FeedEntry
 }
 
 public extension PostComposing {
@@ -202,6 +211,17 @@ public extension PostComposing {
         media: [ComposeMedia], caption: String, as author: AuthorSummary?, idempotencyKey: String
     ) async throws -> FeedEntry {
         try await publish(media: media, caption: caption, as: author)
+    }
+
+    /// Composers with nothing to report on the way (fakes): done at the end.
+    @discardableResult
+    func publish(
+        media: [ComposeMedia], caption: String, as author: AuthorSummary?, idempotencyKey: String,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> FeedEntry {
+        let entry = try await publish(media: media, caption: caption, as: author, idempotencyKey: idempotencyKey)
+        progress(1)
+        return entry
     }
 
     /// One item, or none — what the text-post path and every caller before the
@@ -309,6 +329,18 @@ public actor PostComposer: PostComposing {
     public func publish(
         media: [ComposeMedia], caption: String, as author: AuthorSummary?, idempotencyKey: String
     ) async throws -> FeedEntry {
+        try await publish(media: media, caption: caption, as: author, idempotencyKey: idempotencyKey, progress: { _ in })
+    }
+
+    @discardableResult
+    public func publish(
+        media: [ComposeMedia], caption: String, as author: AuthorSummary?, idempotencyKey: String,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> FeedEntry {
+        // The steps (#1775): each attachment, then the post's creation and
+        // publication as one.
+        let steps = Double(media.count + 1)
+        var done = 0.0
         let trimmedCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !media.isEmpty || !trimmedCaption.isEmpty else {
             throw ComposeError.emptyPost
@@ -347,6 +379,8 @@ public actor PostComposer: PostComposing {
                 // round trip.
                 if let poster = uploaded.posterSeed { imageSeeds.append(poster) }
             }
+            done += 1
+            progress(done / steps)
         }
 
         let attachmentInputs = serverAttachments.map { makeAttachmentInput(from: $0) }
@@ -358,6 +392,7 @@ public actor PostComposer: PostComposing {
             idempotencyKey: idempotencyKey
         )
         try await publishDraft(postID: postID, profileID: viewer.author.id)
+        progress(1)
         keepPublishedClips(exports, in: &optimisticAttachments)
 
         let entry = FeedEntry(

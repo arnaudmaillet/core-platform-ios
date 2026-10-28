@@ -282,6 +282,16 @@ struct NewPostTests {
         func publish(
             media: [ComposeMedia], caption: String, as author: AuthorSummary?, idempotencyKey: String
         ) async throws -> FeedEntry {
+            try await publish(media: media, caption: caption, as: author, idempotencyKey: idempotencyKey) { _ in }
+        }
+
+        /// Reports half the upload done before it answers, as the real
+        /// composer does after each attachment (#1775).
+        func publish(
+            media: [ComposeMedia], caption: String, as author: AuthorSummary?, idempotencyKey: String,
+            progress: @escaping @Sendable (Double) -> Void
+        ) async throws -> FeedEntry {
+            progress(0.5)
             let pictures: [PickedImage] = media.compactMap {
                 if case .image(let picked) = $0 { return picked }
                 return nil
@@ -579,6 +589,47 @@ struct NewPostTests {
 
         #expect(IdempotencyKey.isValid(calls[0].postKey))
         #expect(calls[1].postKey == calls[0].postKey, "the retry went under a new key")
+    }
+
+    // MARK: - The post on its way (#1775)
+
+    /// The bar moves through the preparation, then the composer's upload,
+    /// and only ever forward.
+    @Test func thePublishShowsItsProgress() async throws {
+        let screen = open(Self.items(2))
+
+        screen.post.debugTapPost()
+        try await settle(until: { screen.handed.entry != nil })
+        try await settle(until: { screen.post.debugProgressSteps.contains { $0 > NewPostViewController.preparationShare } })
+
+        let steps = screen.post.debugProgressSteps
+        #expect(steps.contains(NewPostViewController.preparationShare), "the preparation's end was not shown: \(steps)")
+        let half = NewPostViewController.preparationShare + (1 - NewPostViewController.preparationShare) * 0.5
+        #expect(steps.contains { abs($0 - half) < 0.001 }, "the composer's progress did not reach the bar: \(steps)")
+    }
+
+    /// A failed post takes its bar away and offers Try Again, the preferred
+    /// action, beside Cancel.
+    @Test func aFailedPostOffersTryAgain() async throws {
+        let screen = open(Self.items(1), composer: RecordingComposer(failures: 1))
+
+        screen.post.debugTapPost()
+        try await settle(until: { screen.post.presentedViewController is UIAlertController })
+
+        let alert = try #require(screen.post.presentedViewController as? UIAlertController)
+        #expect(alert.actions.map(\.title) == ["Cancel", TakingLongerCopy.action])
+        #expect(alert.preferredAction?.title == TakingLongerCopy.action)
+        #expect(!screen.post.debugShowsPublishProgress, "the bar stayed over a post that failed")
+    }
+
+    /// Where posting again cannot help, OK alone.
+    @Test func aPostThatCannotBeRetriedOffersOK() {
+        for error in [ComposeError.emptyPost, .notAuthenticated, .noViewerProfile] {
+            let alert = NewPostViewController.failureAlert(error, retry: {})
+            #expect(alert.actions.map(\.title) == ["OK"], "\(error)")
+        }
+        let lost = NewPostViewController.failureAlert(ComposeError.transport("lost"), retry: {})
+        #expect(lost.actions.count == 2)
     }
 
     /// The other half: an edited caption is another post, under another key
