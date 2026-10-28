@@ -67,30 +67,38 @@ struct SnapSoundState {
 
     // MARK: - Which sound
 
-    /// The clip a post's sound belongs to: the one on screen when this is the
-    /// active page (a collection's pages are different clips, with different
-    /// sounds), else its head, or its first clip page.
-    ///
-    /// - Parameter playingClip: the clip the active page's cell is showing —
-    ///   nil for every other page.
-    static func clip(of model: FeedItemDisplayModel, playingClip: URL?) -> URL? {
-        if let playingClip { return playingClip }
-        if model.mediaKind == .video, let url = model.mediaURL { return url }
-        return model.extraMedia.first { $0.videoURL != nil }?.videoURL
+    /// A carousel: a post of several pages (#1849). Its pages are its media;
+    /// its sound is the POST's, one track across every page, and its clips
+    /// play muted.
+    static func isCarousel(_ model: FeedItemDisplayModel) -> Bool {
+        !model.extraMedia.isEmpty
     }
 
-    /// The sound `model` is set to: the provider's answer, or — with nobody to
-    /// ask — the clip's own "original sound", played from the clip itself
-    /// when a player can open it.
-    func sound(for model: FeedItemDisplayModel, playingClip: URL?) -> PostSound? {
-        let clipURL = Self.clip(of: model, playingClip: playingClip)
-        if let known = provider?.sound(forPost: model.id, clip: clipURL) { return known }
-        guard let url = clipURL else { return nil }
+    /// A post made of one clip: it is heard with that clip's own audio, from
+    /// the clip's player.
+    static func isSingleClip(_ model: FeedItemDisplayModel) -> Bool {
+        model.mediaKind == .video && model.mediaURL != nil && !isCarousel(model)
+    }
+
+    /// The sound `model` is set to — ONE per post, whatever page is on screen
+    /// (#1849): the provider's answer, or — with nobody to ask — a single
+    /// clip's own "original sound", played from the clip itself when a player
+    /// can open it. A carousel never takes a sound from one of its media.
+    func sound(for model: FeedItemDisplayModel) -> PostSound? {
+        if let known = provider?.sound(forPost: model.id) { return known }
+        guard Self.isSingleClip(model), let url = model.mediaURL else { return nil }
         let playable = url.isFileURL || ["http", "https"].contains(url.scheme?.lowercased() ?? "")
         return PostSound(
             id: "original-\(model.id.rawValue)", title: nil, artist: nil,
             previewURL: playable ? url : nil, artworkURL: model.thumbnailURL, duration: nil
         )
+    }
+
+    /// Whether a clip of `model` is heard through its own player: a single
+    /// clip only. A carousel's clips are muted: the post's track is its only
+    /// sound (#1849).
+    static func clipIsHeard(in model: FeedItemDisplayModel) -> Bool {
+        !isCarousel(model)
     }
 
     // MARK: - What it draws
@@ -124,9 +132,9 @@ struct SnapSoundState {
 
     /// What the attribution draws for `model`: the sound's line, and its cover.
     func attribution(
-        for model: FeedItemDisplayModel, playingClip: URL?
+        for model: FeedItemDisplayModel
     ) -> (sound: SnapMediaAttributionView.SoundCredit, cover: SnapMediaAttributionView.Cover) {
-        let postSound = sound(for: model, playingClip: playingClip)
+        let postSound = sound(for: model)
         return (Self.line(for: postSound, of: model).map { .sound($0) } ?? .none, Self.cover(for: postSound))
     }
 
@@ -137,8 +145,8 @@ struct SnapSoundState {
     /// ⚠️ NIL FOR A TEXT POST WITH NO SOUND (#1790, the owner 2026-10-27):
     /// such a post can have no sound at all, so the slot would carry nothing.
     /// No slot, no bubble: the comment field widens into its place.
-    func face(for model: FeedItemDisplayModel, playingClip: URL?) -> SnapSoundFace? {
-        let postSound = sound(for: model, playingClip: playingClip)
+    func face(for model: FeedItemDisplayModel) -> SnapSoundFace? {
+        let postSound = sound(for: model)
         guard Self.hasSoundSlot(isText: Self.isText(model), sound: postSound) else { return nil }
         return SnapSoundFace(
             coverURL: SnapMediaAttributionView.coverURL(for: model, cover: Self.cover(for: postSound)),
@@ -160,18 +168,24 @@ struct SnapSoundState {
 
     // MARK: - What is heard
 
-    /// The song of a page with no clip — a photograph, a collection of them,
-    /// a text post — when the page may be heard at all; nil for a clip page,
-    /// whose sound is the clip's own.
-    ///
-    /// ⚠️ **NOTHING IN LOW POWER MODE, FOLLOWED (#580, #1808).** A clip there
-    /// does not start on its own; a photograph's song is the same thing
-    /// without a picture, so it is silent too — the viewer's decision.
-    func song(for model: FeedItemDisplayModel, playingClip: URL?) -> URL? {
+    /// The track the feed's song player plays for `model` — the post's sound
+    /// heard OUTSIDE a clip's own player — or nil.
+    /// - **A carousel** (#1849): the post's sound, on every page, pictures and
+    ///   clips alike, whenever the feed is heard. ⚠️ Low Power Mode, followed,
+    ///   does NOT silence it (the owner, 2026-10-28): it is the post's sound,
+    ///   as a clip's own is, and only the feed's mute stops it.
+    /// - **A single clip**: nil. Its sound is its own player's.
+    /// - **A photograph, a text post**: its song, and ⚠️ NOTHING IN LOW POWER
+    ///   MODE, FOLLOWED (#580, #1808): a clip there does not start on its own,
+    ///   and a photograph's song is the same thing without a picture.
+    func song(for model: FeedItemDisplayModel) -> URL? {
+        if Self.isCarousel(model) {
+            return isOn ? sound(for: model)?.previewURL : nil
+        }
         guard Self.pageSongPlays(soundOn: isOn, lowPowerMode: readsLowPowerMode()),
-              !(model.mediaKind == .video || model.extraMedia.contains { $0.videoURL != nil })
+              model.mediaKind != .video
         else { return nil }
-        return sound(for: model, playingClip: playingClip)?.previewURL
+        return sound(for: model)?.previewURL
     }
 
     /// Whether a page's song may be heard at all: the feed's sound on, and
@@ -190,11 +204,11 @@ struct SnapSoundState {
     /// sound one; the sound's original post first when it is a media
     /// post, then the page it was opened from — then recent: every post
     /// the popular row does not show, newest first.
-    func sheetInputs(for model: FeedItemDisplayModel, playingClip: URL?) -> SheetInputs? {
-        guard let postSound = sound(for: model, playingClip: playingClip) else { return nil }
+    func sheetInputs(for model: FeedItemDisplayModel) -> SheetInputs? {
+        guard let postSound = sound(for: model) else { return nil }
         let ranked = provider?.rankings(using: postSound) ?? .empty
-        // With nobody to ask, a clip's own sound (`sound(for:)`) is this
-        // page's: it is its own original.
+        // With nobody to ask, a single clip's own sound (`sound(for:)`) is
+        // this page's: it is its own original.
         let original = provider?.originalPostID(of: postSound)
             ?? (postSound.id == "original-\(model.id.rawValue)" ? model.id : nil)
         return SheetInputs(

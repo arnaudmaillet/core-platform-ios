@@ -146,7 +146,7 @@ struct SnapComposerSoundSlotTests {
 }
 
 private struct SlotSoundProvider: PostSoundProviding {
-    func sound(forPost postID: PostID, clip: URL?) -> PostSound? {
+    func sound(forPost postID: PostID) -> PostSound? {
         PostSound(id: "song-1", title: "Song", artist: "Artist", previewURL: nil, artworkURL: nil, duration: 30)
     }
 

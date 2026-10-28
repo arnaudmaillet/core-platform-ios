@@ -60,13 +60,13 @@ struct SnapSoundStateTests {
         let switches = Switches()
         let sound = Self.state(switches)
         #expect(sound.isOn)
-        #expect(sound.face(for: Self.clip(), playingClip: nil)?.isMuted == false)
+        #expect(sound.face(for: Self.clip())?.isMuted == false)
         sound.toggle()
         #expect(!sound.isOn)
-        #expect(sound.face(for: Self.clip(), playingClip: nil)?.isMuted == true)
+        #expect(sound.face(for: Self.clip())?.isMuted == true)
         sound.toggle()
         #expect(sound.isOn)
-        #expect(sound.face(for: Self.clip(), playingClip: nil)?.isMuted == false)
+        #expect(sound.face(for: Self.clip())?.isMuted == false)
     }
 
     // MARK: - A page without audio
@@ -74,11 +74,11 @@ struct SnapSoundStateTests {
     @Test func aPhotoWithNoSoundHasNothingToHear() {
         let sound = Self.state(Switches())
         let page = Self.photo()
-        #expect(sound.sound(for: page, playingClip: nil) == nil)
-        #expect(sound.face(for: page, playingClip: nil)?.isAvailable == false, "a photo with no sound keeps its greyed slot (#683)")
-        #expect(sound.attribution(for: page, playingClip: nil).sound == SnapMediaAttributionView.SoundCredit.none)
-        #expect(sound.song(for: page, playingClip: nil) == nil)
-        #expect(sound.sheetInputs(for: page, playingClip: nil) == nil, "a sheet for nothing")
+        #expect(sound.sound(for: page) == nil)
+        #expect(sound.face(for: page)?.isAvailable == false, "a photo with no sound keeps its greyed slot (#683)")
+        #expect(sound.attribution(for: page).sound == SnapMediaAttributionView.SoundCredit.none)
+        #expect(sound.song(for: page) == nil)
+        #expect(sound.sheetInputs(for: page) == nil, "a sheet for nothing")
     }
 
     /// ⚠️ A TEXT POST WITH NO SOUND HAS NO SLOT (#1790): no face at all, so
@@ -91,7 +91,7 @@ struct SnapSoundStateTests {
             avatarURL: nil, caption: "words", mediaURL: nil, mediaKind: .image, thumbnailURL: nil, audioText: nil
         )
         #expect(SnapSoundState.isText(text))
-        #expect(sound.face(for: text, playingClip: nil) == nil, "a text post with no sound kept a slot")
+        #expect(sound.face(for: text) == nil, "a text post with no sound kept a slot")
         #expect(!SnapSoundState.isText(Self.photo()))
         #expect(SnapSoundState.hasSoundSlot(isText: false, sound: nil), "a media post lost its greyed slot")
         let song = PostSound(id: "s", title: "Song", artist: nil, previewURL: Self.songFile, artworkURL: nil, duration: nil)
@@ -104,7 +104,7 @@ struct SnapSoundStateTests {
     @Test func aClipWithNobodyToAskPlaysItsOwnOriginalSound() {
         let sound = Self.state(Switches())
         let page = Self.clip()
-        let postSound = sound.sound(for: page, playingClip: nil)
+        let postSound = sound.sound(for: page)
         #expect(postSound?.id == "original-v1")
         #expect(postSound?.previewURL == Self.clipURL)
         #expect(postSound?.isOriginal == true)
@@ -119,7 +119,7 @@ struct SnapSoundStateTests {
             avatarURL: nil, caption: nil, mediaURL: URL(string: "mock://clip")!, mediaKind: .video,
             thumbnailURL: nil, audioText: nil
         )
-        let postSound = sound.sound(for: clip, playingClip: nil)
+        let postSound = sound.sound(for: clip)
         #expect(postSound != nil)
         #expect(postSound?.previewURL == nil)
         #expect(SnapSoundState.line(for: postSound, of: clip) == "Original sound · @Ava", "the name, no handle")
@@ -130,38 +130,86 @@ struct SnapSoundStateTests {
             id: "song-1", title: "Song", artist: "Artist", previewURL: Self.songFile, artworkURL: nil, duration: 30
         ))
         let sound = Self.state(Switches(), provider: provider)
-        let postSound = sound.sound(for: Self.clip(), playingClip: nil)
+        let postSound = sound.sound(for: Self.clip())
         #expect(postSound?.id == "song-1")
         #expect(SnapSoundState.line(for: postSound, of: Self.clip()) == "Song · Artist")
         #expect(SnapSoundState.cover(for: postSound) == .note, "a named song with no artwork draws the note")
     }
 
-    // MARK: - Page change
+    // MARK: - One sound per post (#1849)
 
-    /// The clip a sound belongs to is the one on screen — but only the active
-    /// page has one on screen; a neighbour is asked about its head.
-    @Test func onlyTheActivePagesPlayingClipCounts() {
-        let provider = RecordingSoundProvider()
-        let sound = Self.state(Switches(), provider: provider)
-        _ = sound.sound(for: Self.clip(), playingClip: Self.otherClipURL)
-        _ = sound.sound(for: Self.clip(), playingClip: nil)
-        _ = sound.sound(for: Self.photo(), playingClip: nil)
-        #expect(provider.asked == [Self.otherClipURL, Self.clipURL, nil])
-        #expect(SnapSoundState.clip(of: Self.photo(), playingClip: nil) == nil)
-    }
-
-    @Test func aCarouselsSoundIsItsFirstClipPage() {
-        let carousel = FeedItemDisplayModel(
-            id: PostID("c1"), authorID: ProfileID("a"), authorName: "Ava", metaText: "",
-            avatarURL: nil, caption: nil, mediaURL: URL(string: "https://example.test/a.jpg"), mediaKind: .image,
+    private static func carousel(
+        _ id: String = "c1", headIsClip: Bool = false, clipPage: Bool = true
+    ) -> FeedItemDisplayModel {
+        FeedItemDisplayModel(
+            id: PostID(id), authorID: ProfileID("a"), authorName: "Ava", metaText: "@ava · 3m",
+            avatarURL: nil, caption: nil,
+            mediaURL: headIsClip ? clipURL : URL(string: "https://example.test/a.jpg"),
+            mediaKind: headIsClip ? .video : .image,
             thumbnailURL: nil, audioText: nil,
             extraMedia: [GalleryPost.MediaPage(
-                thumbnailURL: URL(string: "https://example.test/b.jpg"), videoURL: Self.otherClipURL
+                thumbnailURL: URL(string: "https://example.test/b.jpg"), videoURL: clipPage ? otherClipURL : nil
             )]
         )
-        #expect(SnapSoundState.clip(of: carousel, playingClip: nil) == Self.otherClipURL)
+    }
+
+    private static let song = PostSound(
+        id: "song-1", title: "Song", artist: "Artist", previewURL: songFile, artworkURL: nil, duration: 30
+    )
+
+    /// The provider is asked about the POST, once per post, whatever is on
+    /// screen: there is no clip to name any more.
+    @Test func theProviderIsAskedAboutThePost() {
+        let provider = RecordingSoundProvider()
+        let sound = Self.state(Switches(), provider: provider)
+        _ = sound.sound(for: Self.clip())
+        _ = sound.sound(for: Self.carousel())
+        #expect(provider.asked == [PostID("v1"), PostID("c1")])
+    }
+
+    /// ⚠️ A CAROUSEL NEVER TAKES A SOUND FROM ONE OF ITS MEDIA. With nobody to
+    /// ask, a single clip keeps its original sound; a carousel with a clip,
+    /// at its head or on a later page, has none: the greyed bubble (#683).
+    @Test func aCarouselWithNoSoundIsSilentWhateverItsClips() {
         let sound = Self.state(Switches())
-        #expect(sound.song(for: carousel, playingClip: nil) == nil, "a carousel with a clip plays the clip")
+        for carousel in [Self.carousel(), Self.carousel(headIsClip: true)] {
+            #expect(SnapSoundState.isCarousel(carousel))
+            #expect(!SnapSoundState.isSingleClip(carousel))
+            #expect(sound.sound(for: carousel) == nil, "a carousel borrowed a clip's own sound")
+            #expect(sound.face(for: carousel)?.isAvailable == false, "the bubble isn't greyed")
+            #expect(sound.song(for: carousel) == nil)
+            #expect(!SnapSoundState.clipIsHeard(in: carousel), "a carousel's clip is heard")
+        }
+        #expect(SnapSoundState.isSingleClip(Self.clip()))
+        #expect(SnapSoundState.clipIsHeard(in: Self.clip()))
+    }
+
+    /// A carousel set to a song plays it as ONE track, on every page —
+    /// mixed or pictures only — and its bubble, line and sheet read the same.
+    @Test func aCarouselsSongIsThePostsTrack() {
+        let sound = Self.state(Switches(), provider: FixedSoundProvider(sound: Self.song))
+        for carousel in [Self.carousel(), Self.carousel(clipPage: false), Self.carousel(headIsClip: true)] {
+            #expect(sound.song(for: carousel) == Self.songFile)
+            #expect(sound.attribution(for: carousel).sound == .sound("Song · Artist"))
+            #expect(sound.sheetInputs(for: carousel)?.sound.id == "song-1")
+        }
+        // A single clip keeps its own player's sound: no song.
+        #expect(sound.song(for: Self.clip()) == nil)
+    }
+
+    /// ⚠️ LOW POWER MODE, FOLLOWED, DOES NOT SILENCE A CAROUSEL (the owner,
+    /// 2026-10-28): its track is the post's sound, as a clip's own is. A
+    /// single photograph's song stays silent (#580). The mute silences both.
+    @Test func lowPowerModeSilencesAPhotographNotACarousel() {
+        let switches = Switches()
+        let sound = Self.state(switches, provider: FixedSoundProvider(sound: Self.song))
+        switches.lowPowerMode = true
+        #expect(sound.song(for: Self.carousel()) == Self.songFile, "a mixed carousel went quiet")
+        #expect(sound.song(for: Self.carousel(clipPage: false)) == Self.songFile, "a collection of pictures went quiet")
+        #expect(sound.song(for: Self.photo()) == nil, "a photograph's song in Low Power Mode")
+        sound.toggle()
+        #expect(sound.song(for: Self.carousel()) == nil, "a carousel's track while muted")
+        #expect(sound.song(for: Self.photo()) == nil)
     }
 
     // MARK: - What is heard
@@ -172,13 +220,13 @@ struct SnapSoundStateTests {
         ))
         let switches = Switches()
         let sound = Self.state(switches, provider: provider)
-        #expect(sound.song(for: Self.photo(), playingClip: nil) == Self.songFile)
+        #expect(sound.song(for: Self.photo()) == Self.songFile)
         switches.lowPowerMode = true
-        #expect(sound.song(for: Self.photo(), playingClip: nil) == nil, "a song in Low Power Mode, followed")
+        #expect(sound.song(for: Self.photo()) == nil, "a song in Low Power Mode, followed")
         switches.lowPowerMode = false
         sound.toggle()
-        #expect(sound.song(for: Self.photo(), playingClip: nil) == nil, "a song while muted")
-        #expect(sound.song(for: Self.clip(), playingClip: nil) == nil, "a clip page has no song")
+        #expect(sound.song(for: Self.photo()) == nil, "a song while muted")
+        #expect(sound.song(for: Self.clip()) == nil, "a clip page has no song")
     }
 
     // MARK: - The sound sheet
@@ -186,7 +234,7 @@ struct SnapSoundStateTests {
     @Test func aClipsOwnSoundOpensTheSheetAsItsOwnOriginal() {
         let sound = Self.state(Switches())
         let page = Self.clip()
-        let inputs = sound.sheetInputs(for: page, playingClip: nil)
+        let inputs = sound.sheetInputs(for: page)
         #expect(inputs?.sound.id == "original-v1")
         #expect(inputs?.original == page.id)
         #expect(inputs?.rankings == .empty)
@@ -204,7 +252,7 @@ struct SnapSoundStateTests {
             original: PostID("y")
         )
         let sound = Self.state(Switches(), provider: provider)
-        let inputs = sound.sheetInputs(for: Self.photo(), playingClip: nil)
+        let inputs = sound.sheetInputs(for: Self.photo())
         #expect(inputs?.rankings.popular == [PostID("x")])
         #expect(inputs?.original == PostID("y"))
         #expect(inputs?.fallbackArtworkURL == nil, "a named song borrowed the post's photo")
@@ -217,18 +265,18 @@ private struct FixedSoundProvider: PostSoundProviding {
     var rankings: PostSoundRankings = .empty
     var original: PostID?
 
-    func sound(forPost postID: PostID, clip: URL?) -> PostSound? { sound }
+    func sound(forPost postID: PostID) -> PostSound? { sound }
     func postIDs(using sound: PostSound) -> [PostID] { rankings.recent }
     func rankings(using sound: PostSound) -> PostSoundRankings { rankings }
     func originalPostID(of sound: PostSound) -> PostID? { original }
 }
 
-/// Answers nothing, and remembers which clip each question named.
+/// Answers nothing, and remembers which post each question named.
 private final class RecordingSoundProvider: PostSoundProviding, @unchecked Sendable {
-    private(set) var asked: [URL?] = []
+    private(set) var asked: [PostID] = []
 
-    func sound(forPost postID: PostID, clip: URL?) -> PostSound? {
-        asked.append(clip)
+    func sound(forPost postID: PostID) -> PostSound? {
+        asked.append(postID)
         return nil
     }
 

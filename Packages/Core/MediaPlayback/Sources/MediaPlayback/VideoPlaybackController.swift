@@ -313,7 +313,7 @@ public final class VideoPlaybackController {
     /// Its bytes go to the sound namespaces, counted and cleared as Music &
     /// Sounds in Settings → Storage (#1068), except for a file the clip
     /// namespaces already hold: a post's original sound IS its clip
-    /// (`SnapSoundState.sound(for:playingClip:)`), and a preview of it reads
+    /// (`SnapSoundState.sound(for:)`), and a preview of it reads
     /// the chunks the clip's playback already wrote instead of a second copy.
     public func soundItem(for url: URL) -> AVPlayerItem {
         makeItem(for: url, priority: .visible, content: .sound)

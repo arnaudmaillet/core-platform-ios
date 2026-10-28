@@ -3,14 +3,15 @@ import CoreNetworkingMocks
 import FeedInterface
 import Foundation
 
-/// The mock corpus's sounds.
+/// The mock corpus's sounds, one per POST (#1849: a sound belongs to a post,
+/// never to one of its media).
 ///
-/// - A post that plays a real clip (`MockClipCatalog`) is set to that clip's
+/// - A post made of ONE real clip (`MockClipCatalog`) is set to that clip's
 ///   full sound.
-/// - A photograph, a collection without a clip or a text post is set to a
-///   song (`MockSongCatalog`) or to another clip's sound, the way a post
-///   borrows a sound it did not make — most often one of a few HITS
-///   (`chart`), otherwise one from the long tail.
+/// - Any other post — a photograph, a carousel (its clips included), a text
+///   post — is set to a song (`MockSongCatalog`) or to another clip's sound,
+///   the way a post borrows a sound it did not make — most often one of a few
+///   HITS (`chart`), otherwise one from the long tail.
 /// - Every fifth of those has none at all, because "No audio" is a state the
 ///   feed has to show.
 ///
@@ -18,7 +19,9 @@ import Foundation
 struct MockPostSoundProvider: PostSoundProviding {
     private let clips: MockClipCatalog
     private let songs: MockSongCatalog
-    /// The sound id each post without a clip is set to.
+    /// The clip id each single-clip post is heard with: its own.
+    private let ownClips: [PostID: String]
+    /// The sound id every other post is set to.
     private let borrowed: [PostID: String]
     /// Post ids by sound id, in the dataset's order.
     private let postsBySound: [String: [PostID]]
@@ -46,6 +49,7 @@ struct MockPostSoundProvider: PostSoundProviding {
         self.publishedAt = Dictionary(
             dataset.posts.map { (PostID($0.postID), $0.publishedAtMS) }, uniquingKeysWith: { first, _ in first }
         )
+        var ownClips: [PostID: String] = [:]
         var borrowed: [PostID: String] = [:]
         var postsBySound: [String: [PostID]] = [:]
         var creators: [String: String] = [:]
@@ -53,15 +57,15 @@ struct MockPostSoundProvider: PostSoundProviding {
         let handles = Dictionary(dataset.authors.map { ($0.profileID, $0.handle) }, uniquingKeysWith: { a, _ in a })
         for (index, post) in dataset.posts.enumerated() {
             let id = PostID(post.postID)
-            let clipIDs = ([post.media?.url] + post.extraMedia.map(\.url))
-                .compactMap { $0.flatMap(URL.init(string:)).flatMap { clips.clip(for: $0)?.id } }
-            if !clipIDs.isEmpty {
-                for clip in Set(clipIDs) {
-                    postsBySound[clip, default: []].append(id)
-                    if originals[clip] == nil { originals[clip] = id }
-                    if creators[clip] == nil, let handle = handles[post.authorProfileID] {
-                        creators[clip] = "@\(handle)"
-                    }
+            let pages = ([post.media?.url] + post.extraMedia.map(\.url)).compactMap { $0 }
+            // A post made of one clip IS that clip: it is heard with its sound.
+            // A carousel's clips are its pages, never its sound (#1849).
+            if pages.count == 1, let url = URL(string: pages[0]), let clip = clips.clip(for: url)?.id {
+                ownClips[id] = clip
+                postsBySound[clip, default: []].append(id)
+                if originals[clip] == nil { originals[clip] = id }
+                if creators[clip] == nil, let handle = handles[post.authorProfileID] {
+                    creators[clip] = "@\(handle)"
                 }
                 continue
             }
@@ -77,14 +81,15 @@ struct MockPostSoundProvider: PostSoundProviding {
                 }
             }
         }
+        self.ownClips = ownClips
         self.borrowed = borrowed
         self.postsBySound = postsBySound
         self.creators = creators
         self.originals = originals
     }
 
-    func sound(forPost postID: PostID, clip: URL?) -> PostSound? {
-        if let clip, let playing = clips.clip(for: clip) { return sound(clip: playing) }
+    func sound(forPost postID: PostID) -> PostSound? {
+        if let own = ownClips[postID], let clip = clips.clip(id: own) { return sound(clip: clip) }
         guard let id = borrowed[postID] else { return nil }
         if let song = songs.song(id: id) { return sound(song: song) }
         return clips.clip(id: id).map { sound(clip: $0) }
