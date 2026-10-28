@@ -34,7 +34,7 @@ private final class AuthoredPhotos: FeedProviding, @unchecked Sendable {
 /// change hands on the same frame, crossing half a page in either direction.
 @MainActor
 struct SnapAuthorPillHandOffTests {
-    private func feed() async throws -> SnapFeedViewController {
+    private func makeFeed() async throws -> SnapFeedViewController {
         let provider = FixedPostsFeedProvider(
             base: AuthoredPhotos(), ids: ["a", "b", "c"].map { PostID($0) }, isCompleteSet: true
         )
@@ -67,7 +67,7 @@ struct SnapAuthorPillHandOffTests {
     }
 
     @Test func thePillAndThePictureChangeOwnerAtTheSameOffset() async throws {
-        let feed = try await feed()
+        let feed = try await makeFeed()
         try #require(await settle { shownAuthor(feed) == "author-a" }, "the first author never showed")
 
         for (pages, owner) in [(0.45, 0), (0.55, 1), (0.95, 1), (1.6, 2), (1.4, 1), (0.48, 0)] as [(CGFloat, Int)] {
