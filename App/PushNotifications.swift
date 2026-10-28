@@ -123,6 +123,10 @@ final class PushNotifications: NSObject {
         UNUserNotificationCenter.current().setBadgeCount(max(0, count)) { _ in }
     }
 
+    /// Whether a tap that came before the shell existed waits to be routed —
+    /// a launch that opens somewhere else (#1812).
+    var hasPending: Bool { pending != nil }
+
     /// Routes a tap that came before the shell existed. Called once the shell
     /// is up.
     func routePending() {

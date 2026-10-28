@@ -2769,6 +2769,13 @@ final class SnapFeedViewController: UIViewController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.setForeground(true) }
         })
+        // The launch screen lifting (#1812): what the page would have been
+        // heard saying under it starts now.
+        appObservers.add(center.addObserver(
+            forName: LaunchTimeline.curtainDidLift, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshAudibleSurface() }
+        })
         // (A keyboard-session rail yield used to live here: the engaged
         // composer rose into the rail's column, so the rail conceded the
         // band while typing. The engagement fades the rail outright now, so
@@ -3019,6 +3026,10 @@ final class SnapFeedViewController: UIViewController {
             )
             statusView.isHidden = false
         }
+        // The page says why it has no post (#1812): that is what it shows, so
+        // the launch screen lifts on it. Offline on a first launch, it waited
+        // out its 2 s cap over a failure known at 0.3 s (measured on device).
+        if !statusView.isHidden, view.window != nil { LaunchTimeline.mark("shots.firstPageReady") }
     }
 
     /// Comment streams land on exactly the cell showing that post; each
@@ -5095,8 +5106,8 @@ final class SnapFeedViewController: UIViewController {
         refreshPictureInPicture(ownerCell: ownerCell)
         guard let videoPlayback else { return }
         var surface: VideoRenderView?
-        if soundState.isOn, isOnScreen, isForeground, !isAudioYielded, let owner = playbackOwner,
-           let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
+        if soundState.isOn, isOnScreen, isForeground, !isAudioYielded, !LaunchTimeline.curtainIsUp,
+           let owner = playbackOwner, let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
             surface = cell.audibleSurface
         }
         // Only ever CLEARS what this screen set: another feed pushed on top
@@ -5144,7 +5155,9 @@ final class SnapFeedViewController: UIViewController {
     /// Saving (#580; `SnapSoundState.song`).
     private func refreshSong() {
         var song: URL?
-        if isOnScreen, isForeground, !isAudioYielded,
+        // Nothing heard under the launch screen (#1812): the song waits for it
+        // to lift (`curtainDidLift`).
+        if isOnScreen, isForeground, !isAudioYielded, !LaunchTimeline.curtainIsUp,
            let owner = playbackOwner, orderedIDs.indices.contains(owner),
            let model = modelsByID[orderedIDs[owner]] {
             song = model.id == songPausedFor || unavailablePostIDs.contains(model.id)

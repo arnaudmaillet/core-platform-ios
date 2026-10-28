@@ -2210,6 +2210,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // then its first frame — each once per process.
         if mediaURL != nil, mediaCard.showsPicture { LaunchTimeline.mark("shots.firstPicture") }
         if mediaCard.renderView.hasFrame { LaunchTimeline.mark("shots.firstFrame") }
+        // What the launch screen waits for (#1812): the first page has what it
+        // shows — its picture, a text page (no media to wait for), or a
+        // picture that failed for good (its Try Again). Never the video's
+        // first frame: that would add the stream's buffering to every launch.
+        if window != nil, showsAPicture { LaunchTimeline.mark("shots.firstPageReady") }
         mediaWait.refresh()
     }
 
