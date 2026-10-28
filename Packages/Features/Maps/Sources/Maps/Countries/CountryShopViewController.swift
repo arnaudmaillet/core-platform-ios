@@ -519,6 +519,8 @@ public final class CountryShopViewController: UIViewController {
         from stakePacks: any StakePackSelling, access: any CountryAccess, presenter: UIViewController
     ) async -> StakePackPurchase? {
         guard !access.purchasesRestricted else { return nil }
+        // Under way (#1775): "Buying …" past the loader's grace.
+        let pending = ShopPurchaseFeedback.pending(offer.map(StakePackRowCell.title) ?? "the pack", from: presenter)
         let outcome: StakePackPurchase
         if let offer {
             outcome = await stakePacks.buyPack(offer)
@@ -526,8 +528,10 @@ public final class CountryShopViewController: UIViewController {
             outcome = await stakePacks.buyPack()
         }
         if let refusal = refusalMessage(for: outcome) {
-            Feedback.failure(refusal, from: presenter)
+            pending.fail(refusal)
         } else {
+            // Bought: the row turns "Active — N left" on the spot.
+            pending.end()
             HapticNotification().notificationOccurred(.success)
         }
         return outcome

@@ -7,7 +7,7 @@ import UIKit
 /// (one `id`). An answer within the grace shows alone, so a fast action
 /// never flashes a spinner.
 ///
-/// ⚠️ EVERY PATH ENDS IN `succeed` / `undoable` / `fail` / `end`: a loading
+/// ⚠️ EVERY PATH ENDS IN `succeed` / `undoable` / `fail` / `warn` / `end`: a loading
 /// toast has no timer of its own (`Feedback.loading`).
 @MainActor
 public final class PendingFeedback {
@@ -34,8 +34,10 @@ public final class PendingFeedback {
     public var isShowingLoading: Bool { loading != nil && !isDone }
 
     @discardableResult
-    public func succeed(_ message: String, symbol: String? = Feedback.Kind.success.defaultSymbol) -> ToastView? {
-        finish { source in Feedback.success(message, symbol: symbol, from: source, at: position, id: id) }
+    public func succeed(
+        _ message: String, symbol: String? = Feedback.Kind.success.defaultSymbol, action: ToastView.Action? = nil
+    ) -> ToastView? {
+        finish { source in Feedback.success(message, symbol: symbol, from: source, at: position, action: action, id: id) }
     }
 
     @discardableResult
@@ -51,6 +53,11 @@ public final class PendingFeedback {
     @discardableResult
     public func fail(_ message: String) -> ToastView? {
         finish { source in Feedback.failure(message, from: source, at: position, id: id) }
+    }
+
+    @discardableResult
+    public func warn(_ message: String) -> ToastView? {
+        finish { source in Feedback.warning(message, from: source, at: position, id: id) }
     }
 
     /// Ends with no word: the loading toast leaves.

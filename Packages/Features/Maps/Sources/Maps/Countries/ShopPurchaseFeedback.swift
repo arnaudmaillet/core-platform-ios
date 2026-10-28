@@ -9,30 +9,36 @@ enum ShopPurchaseFeedback {
     /// The server could not be asked: nothing was charged.
     static let unreachable = "Couldn't reach the Shop. Nothing was charged — try again."
 
-    /// The toast for buying `title`; `action` rides a success ("Apply").
+    /// A purchase under way (#1775): "Buying Gold…" past the loader's grace,
+    /// the outcome's toast in its place.
+    static func pending(_ title: String, from presenter: UIViewController) -> PendingFeedback {
+        PendingFeedback("Buying \(title)…", from: presenter)
+    }
+
+    /// The toast for buying `title`, in `pending`'s place; `action` rides a
+    /// success ("Apply").
     static func show(
-        _ outcome: ProfileItemPurchase, title: String, from presenter: UIViewController,
+        _ outcome: ProfileItemPurchase, title: String, pending: PendingFeedback,
         action: ToastView.Action? = nil
     ) {
         switch outcome {
         case .bought:
             HapticNotification().notificationOccurred(.success)
-            Feedback.success("\(title) unlocked", from: presenter, action: action)
+            pending.succeed("\(title) unlocked", action: action)
         case .alreadyOwned:
-            break
+            pending.end()
         case .insufficientGems(let needed, let have):
             let missing = max(needed - have, 1)
-            Feedback.failure(missing == 1 ? "1 more gem needed" : "\(missing) more gems needed", from: presenter)
+            pending.fail(missing == 1 ? "1 more gem needed" : "\(missing) more gems needed")
         case .unavailable:
-            Feedback.failure(PurchaseRestriction.message, from: presenter)
+            pending.fail(PurchaseRestriction.message)
         case .priceChanged(let price):
-            Feedback.failure(
+            pending.fail(
                 price.map { "The price changed: now \($0) gems. Nothing was charged." }
-                    ?? "The price changed. Nothing was charged.",
-                from: presenter
+                    ?? "The price changed. Nothing was charged."
             )
         case .failed:
-            Feedback.failure(unreachable, from: presenter)
+            pending.fail(unreachable)
         }
     }
 }
