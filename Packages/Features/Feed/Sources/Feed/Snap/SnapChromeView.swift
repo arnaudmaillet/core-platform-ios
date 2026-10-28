@@ -226,6 +226,15 @@ final class SnapChromeView: UIView {
     /// pill's own.
     let authorRow = PersonPill(height: 40, carriesBadge: true, ceiling: 260)
 
+    /// The author's LINE, from the pill's face to the rail's stop and down to
+    /// the caption, under the pill (#1848). The pill hugs its name, and the
+    /// canvas beside a short one fell through to the media: a horizontal swipe
+    /// there turned the carousel's page. Touchable and empty, it holds those
+    /// touches as the caption does: a vertical swipe still reaches the feed's
+    /// pager, and a tap still toggles playback (it is not an interaction root).
+    /// `PersonPill` is untouched: the bar's author item is the same control.
+    private let authorLane = UIView()
+
     /// Whether the page shows its author row (the For You root only).
     var showsAuthorRow = false {
         didSet {
@@ -272,6 +281,17 @@ final class SnapChromeView: UIView {
             authorRow.trailingAnchor.constraint(lessThanOrEqualTo: shortcutRail.leadingAnchor, constant: -Spacing.md)
             authorRow.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.xs)
         }
+        authorLane.isHidden = true
+        authorLane.translatesAutoresizingMaskIntoConstraints = false
+        insertSubview(authorLane, belowSubview: authorRow)
+        NSLayoutConstraint.activate([
+            authorLane.leadingAnchor.constraint(equalTo: authorRow.leadingAnchor),
+            // The pill's own ceiling, the band's and the subtitle zone's stop.
+            authorLane.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md),
+            authorLane.topAnchor.constraint(equalTo: authorRow.topAnchor),
+            // Over the seam between the pill and the caption too.
+            authorLane.bottomAnchor.constraint(equalTo: captionLabel.topAnchor),
+        ])
     }
 
     @objc private func captionTapped() {
@@ -280,6 +300,10 @@ final class SnapChromeView: UIView {
 
     /// A tap on the caption — for tests.
     func debugTapCaption() { captionTapped() }
+
+    #if DEBUG
+    var debugAuthorLane: UIView { authorLane }
+    #endif
 
     @objc private func authorRowHeld(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began else { return }
@@ -292,6 +316,7 @@ final class SnapChromeView: UIView {
     private func applyAuthorRowLayout() {
         let shown = showsAuthorRow && hasMedia
         authorRow.isHidden = !shown
+        authorLane.isHidden = !shown
         let overAuthor: [NSLayoutConstraint] = [subtitleOverAuthor, emptyStateOverAuthor]
         let overCaption: [NSLayoutConstraint] = [subtitleOverCaption, emptyStateOverCaption]
         // Off before on: two required bottoms at once would conflict.

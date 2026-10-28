@@ -83,6 +83,93 @@ struct SnapForYouRootTests {
         #expect(plain.authorRow.isHidden, "the author row shows off the root")
     }
 
+    // MARK: - The author's line holds a swipe (#1848)
+
+    private static func rootChrome() -> SnapChromeView {
+        let chrome = SnapActionColumnLayoutTests.chrome()
+        let model = SnapActionColumnLayoutTests.mediaModel(mediaURL: URL(string: "mock://media/1"))
+        chrome.configure(with: model)
+        chrome.showsAuthorRow = true
+        chrome.setAuthorRow(model, badge: .follow, pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        chrome.layoutIfNeeded()
+        return chrome
+    }
+
+    /// ⚠️ A SWIPE BESIDE A SHORT NAME USED TO TURN THE CAROUSEL. The pill hugs
+    /// its name ("Ana"), and the empty canvas between it and the rail fell
+    /// through the chrome to the media's pager. The lane under the pill holds
+    /// it, on the author's line and in the seam down to the caption.
+    @Test func theAuthorsLineHoldsATouchBesideAShortName() throws {
+        let chrome = Self.rootChrome()
+        let lane = chrome.debugAuthorLane
+        let pill = chrome.authorRow.frame
+        try #require(pill.maxX < chrome.debugRailFrame.minX - Spacing.md - 40, "the premise: a short name leaves a gap")
+
+        let beside = CGPoint(x: pill.maxX + 20, y: pill.midY)
+        #expect(chrome.hitTest(beside, with: nil) === lane, "the canvas beside the pill falls through to the media")
+        let seam = CGPoint(x: pill.midX, y: (pill.maxY + chrome.debugCaptionFrame.minY) / 2)
+        #expect(chrome.hitTest(seam, with: nil) === lane, "the seam over the caption falls through")
+        // The pill keeps its own touches.
+        let onPill = CGPoint(x: pill.midX, y: pill.midY)
+        #expect(chrome.hitTest(onPill, with: nil)?.isDescendant(of: chrome.authorRow) == true)
+    }
+
+    /// The lane runs to the rail's stop, the pill's own ceiling.
+    @Test func theAuthorsLaneStopsWhereThePillWould() {
+        let chrome = Self.rootChrome()
+        let lane = chrome.debugAuthorLane.frame
+        #expect(abs(lane.maxX - (chrome.debugRailFrame.minX - Spacing.md)) < 0.5)
+        #expect(abs(lane.minX - chrome.authorRow.frame.minX) < 0.5)
+        #expect(abs(lane.minY - chrome.authorRow.frame.minY) < 0.5)
+        #expect(abs(lane.maxY - chrome.debugCaptionFrame.minY) < 0.5)
+    }
+
+    /// A name long enough to take the pill to its 260 pt ceiling: the lane
+    /// still runs to the rail's stop, and the pill keeps its touches.
+    @Test func aLongNameKeepsTheLaneAndThePill() {
+        let chrome = SnapActionColumnLayoutTests.chrome()
+        let model = FeedItemDisplayModel(
+            id: PostID("post-1"), authorID: ProfileID("profile-1"),
+            authorName: "Maximiliana Constantinopoulou-Vanderberghe",
+            metaText: "@maximiliana.constantinopoulou · 3m", avatarURL: nil,
+            caption: "A caption.", mediaURL: URL(string: "mock://media/1"), mediaKind: .image,
+            thumbnailURL: nil, audioText: nil
+        )
+        chrome.configure(with: model)
+        chrome.showsAuthorRow = true
+        chrome.setAuthorRow(model, badge: .follow, pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        chrome.layoutIfNeeded()
+        let pill = chrome.authorRow.frame
+        #expect(pill.width > 200, "the premise: a long name")
+        #expect(pill.maxX <= chrome.debugRailFrame.minX - Spacing.md + 0.5, "the pill ran under the rail")
+        #expect(abs(chrome.debugAuthorLane.frame.maxX - (chrome.debugRailFrame.minX - Spacing.md)) < 0.5)
+        #expect(chrome.hitTest(CGPoint(x: pill.maxX - 10, y: pill.midY), with: nil)?.isDescendant(of: chrome.authorRow) == true)
+    }
+
+    /// No author row, no lane: other feeds and text pages are untouched.
+    @Test func theLaneFollowsTheAuthorRow() {
+        let chrome = Self.rootChrome()
+        #expect(!chrome.debugAuthorLane.isHidden)
+
+        let plain = SnapActionColumnLayoutTests.chrome()
+        #expect(plain.authorRow.isHidden && plain.debugAuthorLane.isHidden, "a lane off the root")
+
+        let text = Self.rootChrome()
+        text.configure(with: SnapActionColumnLayoutTests.mediaModel(mediaURL: nil))
+        text.layoutIfNeeded()
+        #expect(text.authorRow.isHidden && text.debugAuthorLane.isHidden, "a lane on a text page")
+    }
+
+    /// A tap on the lane is the cell's to judge, as on the bare canvas before:
+    /// the lane is not an interaction root. (Under the comment band it is
+    /// outside the clip's tap territory, so it toggles nothing, as before.)
+    @Test func theLaneIsNotAnInteractionRoot() {
+        let chrome = Self.rootChrome()
+        #expect(!SnapFeedCell.isInteractiveTouch(
+            chrome.debugAuthorLane, interactiveRoots: chrome.interactionRoots, stopAt: chrome
+        ))
+    }
+
     // MARK: - The comments keep the tab bar (#1699)
 
     /// Comments open on the root: the tab bar stays, and no toolbar comes up
