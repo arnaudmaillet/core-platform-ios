@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import CoreContracts
 @testable import CoreNetworkingMocks
 
 /// Covers the media rules and the two-catalog seeding. Deliberately makes **no
@@ -310,6 +311,30 @@ struct MockMediaFixturesTests {
         #expect(synthetic.posts.map(\.extraMedia.count) == real.posts.map(\.extraMedia.count))
     }
 
+    // MARK: - A video's poster (#1850)
+
+    /// ⚠️ A VIDEO'S POSTER IS ITS CLIP AT t = 0, as the media service cuts it
+    /// ("Poster (first frame)"). It used to be the map preview sheet's cell 0,
+    /// sampled from 1 s in: the page showed the clip at 1 s and the player
+    /// took over at 0, on another shot. The post, its marker and a video
+    /// banner all ask for the same frame.
+    @Test func aVideosPosterIsItsClipAtTimeZero() throws {
+        let clipURL = try #require(clips.media(forSlot: 0), "the bundle carries no clips").url
+        let attachment = MockSocialServices.makeAttachment(url: clipURL, width: 720, height: 1280)
+        #expect(MockMediaFixtures.frameZeroSource(of: attachment.thumbnailURL) == clipURL)
+        #expect(!attachment.thumbnailURL.hasPrefix(MockMediaFixtures.previewPosterScheme), "the poster is the preview sheet's frame")
+        let pin = MockGeoDiscoveryService.pinURL(forMediaURL: clipURL, catalog: .realAssets)
+        #expect(pin.hasPrefix(attachment.thumbnailURL), "the marker and the page show two pictures")
+
+        let clip = try #require(clips.clip(forSlot: 0))
+        var profile = Profile_V1_ProfileView()
+        MockSocialServices.applyVideoBanner(clipID: clip.id, to: &profile)
+        #expect(MockMediaFixtures.frameZeroSource(of: profile.bannerURL)?.hasPrefix("mock://video/\(clip.id)") == true)
+
+        let photo = "https://example.test/a.jpg"
+        #expect(MockSocialServices.makeAttachment(url: photo, width: 1, height: 1).thumbnailURL == photo)
+    }
+
     // MARK: - Map pins
 
     /// A pin's single URL must always be something the surface can actually
@@ -322,11 +347,11 @@ struct MockMediaFixturesTests {
     /// on the map as a marker whose post was a build log flying a photograph of
     /// a sky. Renderable is necessary and was never sufficient.
     @Test func videoPinsCarryAFrameOfTheirOwnClip() throws {
-        // A clip with a baked sheet answers the sheet's own cell 0.
-        let clip = try #require(clips.clip(forSlot: 0), "the bundle carries no clips")
+        // A bundled clip answers its own frame at t = 0 (#1850), the feed's
+        // poster of the same post.
         let clipURL = try #require(clips.media(forSlot: 0)).url
         let sheeted = MockGeoDiscoveryService.pinURL(forMediaURL: clipURL, catalog: .realAssets)
-        #expect(sheeted.hasPrefix("\(MockMediaFixtures.previewPosterScheme)\(clip.id)"))
+        #expect(MockMediaFixtures.frameZeroSource(of: sheeted) == clipURL)
         #expect(sheeted.contains(MockGeoDiscoveryService.videoKindMarker),
                 "the kind stamp is the map's only signal that a pin is a video")
         #expect(MockMediaFixtures.mimeType(for: sheeted).hasPrefix("image/"))
@@ -351,8 +376,8 @@ struct MockMediaFixturesTests {
                   let clip = MockMediaFixtures.bakedClip(for: media.url)
             else { continue }
             let pin = MockGeoDiscoveryService.pinURL(forMediaURL: media.url, catalog: .realAssets)
-            #expect(pin == "\(MockMediaFixtures.previewPosterScheme)\(clip)?\(MockGeoDiscoveryService.videoKindMarker)",
-                    "\(post.postID) pins \(pin)")
+            #expect(pin == "\(MockMediaFixtures.frameZeroURL(for: media.url))&\(MockGeoDiscoveryService.videoKindMarker)",
+                    "\(post.postID) pins \(pin) for \(clip)")
         }
     }
 
@@ -362,7 +387,7 @@ struct MockMediaFixturesTests {
     @Test func syntheticVideoPinsAlsoCarryAFrame() throws {
         let clipURL = try #require(clips.media(forSlot: 0), "the bundle carries no clips").url
         let url = MockGeoDiscoveryService.pinURL(forMediaURL: clipURL, catalog: .synthetic)
-        #expect(url.hasPrefix(MockMediaFixtures.previewPosterScheme))
+        #expect(MockMediaFixtures.frameZeroSource(of: url) == clipURL)
         #expect(!url.contains(MockGeoDiscoveryService.videoKindMarker),
                 "the synthetic catalog never stamped, and stamping would reclassify every pin")
     }
