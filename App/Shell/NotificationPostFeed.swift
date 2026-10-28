@@ -26,27 +26,45 @@ enum NotificationPostFeed {
     private static var isOpening = false
 
     static func open(_ opening: NotificationPostOpening, feed: any FeedFeatureBuilding) {
+        // ⚠️ NEVER A DEAD TAP (#1862). The flight used to await the post's
+        // model over the network before anything moved; on a slow network the
+        // row did nothing for as long as that read took. Now the post is read
+        // from what the app holds, synchronously: held, it flies from the
+        // row's still; not held, the feed slides in at once onto its own
+        // loading page for that post, which loads inside it.
         guard !isOpening else { return }
         isOpening = true
+        defer { isOpening = false }
         let id = PostID(opening.postID)
         let presenter = opening.presenter
-        Task { @MainActor in
-            // The flight needs the post's model; a still-less row slides in
-            // and needs nothing.
-            let post = opening.thumbnail == nil ? nil : await feed.galleryPosts([id])[id]
-            isOpening = false
-            guard presenter.view.window != nil, presenter.presentedViewController == nil else { return }
-            if let post, post.kind != .text, let thumbnail = opening.thumbnail {
-                let origin = heroOrigin(for: post, thumbnail: thumbnail, list: presenter)
-                OverSheetFeedHost.present(over: presenter) { host in
-                    feed.presentSnapFeedHero(postIDs: [id], from: host, origin: origin)
-                }
-            } else {
-                OverSheetFeedHost.present(over: presenter) { host in
-                    feed.pushSnapFeed(postIDs: [id], from: host)
-                }
+        guard presenter.view.window != nil, presenter.presentedViewController == nil else { return }
+        let post = opening.thumbnail == nil ? nil : feed.heldGalleryPost(id)
+        switch decision(held: post, thumbnail: opening.thumbnail != nil) {
+        case .fly:
+            guard let post, let thumbnail = opening.thumbnail else { return }
+            let origin = heroOrigin(for: post, thumbnail: thumbnail, list: presenter)
+            OverSheetFeedHost.present(over: presenter) { host in
+                feed.presentSnapFeedHero(postIDs: [id], from: host, origin: origin)
+            }
+        case .slide:
+            OverSheetFeedHost.present(over: presenter) { host in
+                feed.pushSnapFeed(postIDs: [id], from: host)
             }
         }
+    }
+
+    enum Opening: Equatable {
+        /// The zoom flight from the row's still: the post is held.
+        case fly
+        /// The slide, at once: a text post, a still-less row, or a post not
+        /// held — the feed's loading page loads it.
+        case slide
+    }
+
+    /// How a post notification opens, decided with no await. Pure.
+    static func decision(held post: GalleryPost?, thumbnail: Bool) -> Opening {
+        guard thumbnail, let post, post.kind != .text else { return .slide }
+        return .fly
     }
 
     private static func heroOrigin(
