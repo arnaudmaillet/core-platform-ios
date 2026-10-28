@@ -2,6 +2,7 @@ import CoreModels
 import CoreNetworking
 import DesignSystem
 import Foundation
+import LocalStore
 
 /// The posts carrying one `#tag` (#524), laid out like For You (#629): its
 /// top posts as the page's list, its newest as a row above it, and how many
@@ -64,10 +65,45 @@ final class HashtagViewModel {
     }
     private var paging: [Tab: Paging] = [:]
 
-    init(tag: String, repository: any SearchProviding) {
+    /// The first pages as last read (#1776): the page opens on them, with no
+    /// skeleton, then asks again.
+    private let deviceCache: SearchLocalCache?
+    /// Opened on a stored copy: the first visit's `load` revalidates in
+    /// place rather than going back to loading.
+    private(set) var isSeeded = false
+    /// Each tab's first page as last landed: what is stored.
+    private var firstPages: [Tab: (ids: [PostID], cursor: String?)] = [:]
+    /// The viewer the open's pages are read for, captured before they go.
+    private var writer: LocalStoreViewer?
+
+    init(tag: String, repository: any SearchProviding, deviceCache: SearchLocalCache? = nil) {
         let bare = tag.hasPrefix("#") ? String(tag.dropFirst()) : tag
         self.tag = bare.lowercased()
         self.repository = repository
+        self.deviceCache = deviceCache
+        // ⚠️ CACHE FIRST (#1776, the rule of #1756): the last first pages are
+        // the page's first frame.
+        if let stored = deviceCache?.hashtag(self.tag), !(stored.top.isEmpty && stored.recent.isEmpty) {
+            isSeeded = true
+            paging[.top] = Paging(ids: stored.top, nextPageToken: stored.topCursor)
+            paging[.recent] = Paging(ids: stored.recent, nextPageToken: stored.recentCursor)
+            firstPages = [.top: (stored.top, stored.topCursor), .recent: (stored.recent, stored.recentCursor)]
+            top = stored.top.isEmpty ? .empty(query: "#" + self.tag) : .posts(stored.top)
+            recent = stored.recent.isEmpty ? .empty(query: "#" + self.tag) : .posts(stored.recent)
+            postCount = stored.postCount
+        }
+    }
+
+    /// Stores both tabs' first pages, once each has one.
+    private func storeFirstPages() {
+        guard let deviceCache, let topPage = firstPages[.top], let recentPage = firstPages[.recent] else { return }
+        deviceCache.storeHashtag(
+            SearchLocalCache.StoredHashtag(
+                top: topPage.ids, topCursor: topPage.cursor,
+                recent: recentPage.ids, recentCursor: recentPage.cursor, postCount: postCount
+            ),
+            tag: tag, as: writer
+        )
     }
 
     /// `#tag`, as the screen and its empty states name it.
@@ -107,8 +143,11 @@ final class HashtagViewModel {
             && !(paging[tab]?.ids.isEmpty ?? true)
     }
 
-    /// The first page of both tabs, and the count.
+    /// The first page of both tabs, and the count — or, opened on a stored
+    /// copy, that copy revalidated in place (#1776).
     func load() async {
+        writer = deviceCache?.viewer
+        guard !isSeeded else { return await refresh() }
         paging = [:]
         top = .loading
         recent = .loading
@@ -121,6 +160,7 @@ final class HashtagViewModel {
         // searchable posts carrying the tag, refreshed every minute. No local
         // tally from a page any more — a deleted or hidden post leaves it.
         if let counted = await count { postCount = counted }
+        storeFirstPages()
         onChange?()
     }
 
@@ -134,6 +174,7 @@ final class HashtagViewModel {
     /// (empty or failed) goes back to loading and says what came back. A tab
     /// already loading is left to its load.
     func refresh() async {
+        if writer == nil { writer = deviceCache?.viewer }
         async let count = try? await repository.hashtagPostCount(tag)
         async let topDone: Void = refreshPage(.top)
         async let recentDone: Void = refreshPage(.recent)
@@ -143,6 +184,7 @@ final class HashtagViewModel {
             postCount = counted
             onChange?()
         }
+        storeFirstPages()
     }
 
     private func refreshPage(_ tab: Tab) async {
@@ -169,6 +211,7 @@ final class HashtagViewModel {
         var seen = Set<PostID>()
         let ids = page.hits.map(\.id).filter { seen.insert($0).inserted }
         paging[tab] = Paging(ids: ids, nextPageToken: page.nextPageToken)
+        firstPages[tab] = (ids, page.nextPageToken)
         set(tab, ids.isEmpty ? .empty(query: title) : .posts(ids))
         onChange?()
     }
@@ -214,6 +257,7 @@ final class HashtagViewModel {
         state.nextPageToken = page.nextPageToken
         state.isLoading = false
         paging[tab] = state
+        if first { firstPages[tab] = (state.ids, page.nextPageToken) }
         #if DEBUG
         // What QA reads with `log show`: one line per page landed.
         NSLog("[hashtag] %@ %@ +%d → %d, next=%@", title, "\(tab)", page.hits.count, state.ids.count,

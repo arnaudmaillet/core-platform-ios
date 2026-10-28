@@ -72,6 +72,67 @@ final class SearchLocalCache: Sendable {
         }
     }
 
+    // MARK: - Hashtags (#1776)
+
+    static let hashtagType = "search.hashtag"
+
+    /// A hashtag page's first pages as last read: the posts of Top and
+    /// Recent, where each continues, and the tag's count. The page opens on
+    /// them, then asks again.
+    struct StoredHashtag: Equatable {
+        var top: [PostID]
+        var topCursor: String?
+        var recent: [PostID]
+        var recentCursor: String?
+        var postCount: Int?
+    }
+
+    func hashtag(_ tag: String) -> StoredHashtag? {
+        guard let entity = store.entity(LocalEntityKey(type: Self.hashtagType, id: tag)), entity.format == Self.format,
+              let record = try? JSONDecoder().decode(HashtagRecord.self, from: entity.payload) else { return nil }
+        return record.stored
+    }
+
+    func storeHashtag(_ stored: StoredHashtag, tag: String, as viewer: LocalStoreViewer?) {
+        let store = store
+        let logger = logger
+        queue.async {
+            guard let payload = try? JSONEncoder().encode(HashtagRecord(stored)) else { return }
+            let write = LocalEntityWrite(
+                key: LocalEntityKey(type: Self.hashtagType, id: tag), payload: payload, format: Self.format,
+                lifetime: LocalStorePolicy.listLifetime
+            )
+            do {
+                try store.write([write], as: viewer)
+            } catch {
+                logger.error("search cache write failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+    }
+
+    struct HashtagRecord: Codable, Equatable {
+        var top: [String]
+        var topCursor: String?
+        var recent: [String]
+        var recentCursor: String?
+        var postCount: Int?
+
+        init(_ stored: StoredHashtag) {
+            top = stored.top.map(\.rawValue)
+            topCursor = stored.topCursor
+            recent = stored.recent.map(\.rawValue)
+            recentCursor = stored.recentCursor
+            postCount = stored.postCount
+        }
+
+        var stored: StoredHashtag {
+            StoredHashtag(
+                top: top.map { PostID($0) }, topCursor: topCursor,
+                recent: recent.map { PostID($0) }, recentCursor: recentCursor, postCount: postCount
+            )
+        }
+    }
+
     /// Waits for every write queued so far. Tests only.
     func waitForPendingWrites() {
         queue.sync {}

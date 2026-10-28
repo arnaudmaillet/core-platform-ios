@@ -133,7 +133,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         let suggestions = SuggestionsViewController(
             viewModel: SuggestionsViewModel(
                 repository: connections ?? EmptySuggestionsRepository(),
-                router: router
+                router: router,
+                deviceCache: deviceCache
             ),
             imagePipeline: imagePipeline
         )

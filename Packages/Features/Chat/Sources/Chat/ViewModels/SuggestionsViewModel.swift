@@ -83,16 +83,39 @@ public final class SuggestionsViewModel {
         hasMore && lastAskError == nil && emptyPagesInARow < Self.maxEmptyPagesWithNothingShown
     }
 
-    public init(
+    /// The first page as last read (#1776): the surface opens on it, then
+    /// asks again.
+    private let deviceCache: ChatLocalCache?
+
+    public convenience init(
         repository: any SuggestionsProviding,
         router: (any Router)? = nil,
         limit: Int = 20,
         pageLimit: Int = SocialConnectionsRepository.suggestionLimit
     ) {
+        self.init(repository: repository, router: router, limit: limit, pageLimit: pageLimit, deviceCache: nil)
+    }
+
+    init(
+        repository: any SuggestionsProviding,
+        router: (any Router)? = nil,
+        limit: Int = 20,
+        pageLimit: Int = SocialConnectionsRepository.suggestionLimit,
+        deviceCache: ChatLocalCache?
+    ) {
         self.repository = repository
         self.router = router
         self.limit = limit
         self.pageLimit = max(pageLimit, 1)
+        self.deviceCache = deviceCache
+        // ⚠️ CACHE FIRST (#1776, the rule of #1756): the last first page is
+        // the surface's first frame, with no skeleton; `loadIfNeeded` still
+        // asks, and the answer replaces it.
+        if let stored = deviceCache?.suggestions() {
+            accounts = stored.accounts
+            nextPageToken = stored.nextPageToken
+            emit()
+        }
     }
 
     /// First activation loads; later ones are free. Suggestions age slowly —
@@ -195,6 +218,9 @@ public final class SuggestionsViewModel {
         generation += 1
         let current = generation
         let size = limit
+        // The viewer the page is read for, captured BEFORE the fetch: an
+        // answer that lands after a switch is not stored for the next one.
+        let writer = deviceCache?.viewer
         load = Task { [weak self] in
             guard let self else { return }
             do {
@@ -207,6 +233,7 @@ public final class SuggestionsViewModel {
                 self.load = nil
                 self.lastAskError = nil
                 self.adopt(firstPage: first)
+                self.deviceCache?.storeSuggestions(first.page, as: writer)
                 self.emit()
             } catch {
                 guard current == self.generation else { return }
