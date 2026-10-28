@@ -35,6 +35,17 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // Before any cache fills: every release signal reaches the one
         // device cache from the first frame (#890).
         LaunchTimeline.mark("app.didFinishLaunching")
+        // Follow Low Power Mode (#1808): Power Saving's old switch forgotten
+        // once, and iOS's Low Power Mode followed live from here on.
+        LowPowerMode.forgetPowerSaving()
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let flag = arguments.firstIndex(of: "-simulate-low-power-mode"),
+           arguments.indices.contains(flag + 1), let period = TimeInterval(arguments[flag + 1]) {
+            LowPowerMode.simulateSystem(flippingEvery: period)
+        }
+        #endif
+        LowPowerMode.startFollowingSystem()
         AppContainer.shared.startCacheCoordinator()
         AppContainer.configureEmotes()
         // Before returning: a tap on a notification that launched the app is

@@ -4,7 +4,7 @@ import MediaCore
 import UIKit
 
 /// How an emote may move right now (`policy`): still under Reduce Motion
-/// (iOS or the app's), Animate Emojis off, Power Saving, Low Power Mode and
+/// (iOS or the app's), Animate Emojis off, Low Power Mode and
 /// overheating; at its own rate otherwise.
 ///
 /// ⚠️ **ONE CONTRACT FOR EVERY ANIMATED EMOTE** (#1504, the owner
@@ -59,12 +59,12 @@ enum EmoteMotion {
 
     /// What the device says, for every emote's gate.
     struct Conditions: Equatable {
-        /// iOS Reduce Motion, or the app's own switch, or Power Saving
+        /// iOS Reduce Motion, or the app's own switch, or Low Power Mode
         /// (`MotionPreference.reducesMotion`).
         var reducesMotion = false
         /// iOS Low Power Mode.
         var lowPower = false
-        /// The viewer's Animate Emojis switch, off under Power Saving too
+        /// The viewer's Animate Emojis switch, off under Low Power Mode too
         /// (`EmoteAnimationPreference.animatesEmotes`).
         var animatesEmotes = true
         /// Serious or critical thermal pressure.
@@ -76,7 +76,7 @@ enum EmoteMotion {
         static var current: Conditions {
             Conditions(
                 reducesMotion: MotionPreference.reducesMotion,
-                lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled,
+                lowPower: LowPowerMode.savesBattery,
                 animatesEmotes: EmoteAnimationPreference.animatesEmotes,
                 overheated: ProcessInfo.processInfo.thermalState.rawValue
                     >= ProcessInfo.ThermalState.serious.rawValue,
@@ -89,7 +89,7 @@ enum EmoteMotion {
     /// they loop for as long as it shows — through idle calm, like every
     /// emote (#1072). Still under Reduce Motion and under Low Power Mode,
     /// which the owner named, and under what already stills every emote:
-    /// Animate Emojis off, Power Saving, overheating.
+    /// Animate Emojis off, Low Power Mode, overheating.
     ///
     /// ⚠️ LOW POWER IS STILL HERE, NOT `.reduced`. Decoration only halves its
     /// rate under Low Power (`AnimatedIconView.devicePolicy`); a screen of
@@ -117,7 +117,9 @@ enum EmoteMotion {
     /// `.decorativeMotionDidChange`: idle calm reaches none of them (#1072).
     static let policyNotifications: [Notification.Name] = [
         UIAccessibility.reduceMotionStatusDidChangeNotification,
-        Notification.Name.NSProcessInfoPowerStateDidChange,
+        // Low Power Mode as the viewer follows it (#1808), never iOS's own
+        // change: with the switch off it changes nothing here.
+        Notification.Name.lowPowerModeEffectDidChange,
         Notification.Name.emoteAnimationPreferenceDidChange,
         ProcessInfo.thermalStateDidChangeNotification
     ]

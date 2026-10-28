@@ -23,14 +23,14 @@ enum PersonOcclusionGate {
         var playing: Bool
         /// A hero flight carries the page.
         var inFlight: Bool
-        var powerSaving: Bool
+        /// Low Power Mode as the viewer follows it (#1808): one read.
         var lowPowerMode: Bool
         var thermalState: ProcessInfo.ThermalState
     }
 
     static func isOpen(_ inputs: Inputs) -> Bool {
         inputs.enabled && inputs.bandShown && inputs.pageActive && inputs.playing && !inputs.inFlight
-            && !inputs.powerSaving && !inputs.lowPowerMode && inputs.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
+            && !inputs.lowPowerMode && inputs.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue
     }
 
     /// How often a frame is segmented while the gate is open.

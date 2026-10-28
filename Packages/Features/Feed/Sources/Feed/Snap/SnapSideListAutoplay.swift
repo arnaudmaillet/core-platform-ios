@@ -10,7 +10,7 @@ import UIKit
 /// Nothing of its own about WHAT plays: admission, distance and budget are
 /// the shared ranking's (`GridAutoplayRanking`), the players
 /// `GridVideoPlaybackCoordinator`'s on the app's one pool — the sound sheet's
-/// arrangement (`SoundSheetAutoplay`). Power Saving and Reduce Motion stop
+/// arrangement (`SoundSheetAutoplay`). Low Power Mode and Reduce Motion stop
 /// them as everywhere (`GridVideoPlaybackCoordinator.allowsAutoplay`).
 ///
 /// ⚠️ **THE CARD KEEPS ITS PLAYER AND ITS SOUND.** The page on the left goes

@@ -179,7 +179,7 @@ open class HeroHeaderView: UIView {
     /// wherever the header is drawn — the profile, its card: the banner's
     /// loop plays while its host is on show (or leaving), the banner on
     /// screen and decorative motion allowed; the poster otherwise (Reduce
-    /// Motion, Power Saving, idle calm, #580), and its skeleton while the
+    /// Motion, Low Power Mode, idle calm, #580), and its skeleton while the
     /// profile loads (`setRedacted`). The avatar keeps its own (#1424): its
     /// rounds, its last frame as the still. A host supplies the one thing
     /// the header cannot know — whether it is on show.

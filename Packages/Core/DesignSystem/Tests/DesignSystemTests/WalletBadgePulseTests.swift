@@ -22,7 +22,7 @@ struct WalletBadgePulseTests {
         _ = window
     }
 
-    /// Reduce Motion or Power Saving: no endless breath to redraw the screen
+    /// Reduce Motion or Low Power Mode: no endless breath to redraw the screen
     /// every frame, the glow alone.
     @Test func underReducedMotionItOnlyGlows() {
         let badge = WalletBadgeButton()

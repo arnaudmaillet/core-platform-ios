@@ -24,7 +24,7 @@ public final class AnimatedAvatarScope {
 /// - on the viewer's tap (`replay()`, the profile page's avatar).
 ///
 /// Never under `minimumDiameter` (tile thumbnails, danmaku bubbles), never
-/// under Reduce Motion, Power Saving or idle calm (a tap ignores the last two),
+/// under Reduce Motion, Low Power Mode or idle calm (a tap ignores the last two),
 /// and never more than `maxConcurrent` at once.
 ///
 /// ⚠️ ONE LAYER, AT REST AND PLAYING. The sheet's layer always shows a frame
@@ -315,7 +315,7 @@ public final class AnimatedAvatarPlayer: UIView {
     // MARK: Playing
 
     /// Plays it again, now — the viewer's own request (a tap on the profile
-    /// page's avatar). Power Saving and idle calm do not block it; Reduce
+    /// page's avatar). Low Power Mode and idle calm do not block it; Reduce
     /// Motion does, and an avatar with no sheet does nothing.
     public func replay() {
         requestPlay(viewerAsked: true)

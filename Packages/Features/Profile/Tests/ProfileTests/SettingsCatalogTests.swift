@@ -50,13 +50,18 @@ struct SettingsCatalogTests {
         }
     }
 
-    /// Power Saving sits on its own under App and Device and says what it
-    /// changes, and that the viewer's own settings come back.
-    @Test func powerSavingSaysWhatItChanges() {
-        let footer = SettingsViewController.powerSavingFooter
-        #expect(footer.contains("animated emojis"))
+    /// Follow Low Power Mode sits on its own under App and Device and says
+    /// what Low Power Mode changes, and that the viewer's own settings come
+    /// back (#1808).
+    @Test func followLowPowerModeSaysWhatItChanges() {
+        #expect(SettingsViewController.followLowPowerModeTitle == "Follow Low Power Mode")
+        let footer = SettingsViewController.followLowPowerModeFooter
+        #expect(footer.contains("Low Power Mode"))
+        #expect(footer.contains("emojis stay still"))
         #expect(footer.contains("Reduce Motion"))
-        #expect(footer.contains("playing on their own"))
+        #expect(footer.contains("play on their own"))
+        #expect(footer.contains("song is off"))
+        #expect(footer.contains("full screen still plays"))
         #expect(footer.contains("come back"))
     }
 

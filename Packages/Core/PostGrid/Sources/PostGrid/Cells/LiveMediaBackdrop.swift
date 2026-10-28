@@ -108,10 +108,11 @@ public final class LiveMediaBackdrop: VideoFrameCompanion {
     public private(set) var isShowingLive = false
     /// The host's permission.
     private var isAllowed = false
-    /// Whether the system forbids motion here: Reduce Motion or Low Power.
+    /// Whether the system forbids motion here: Reduce Motion or Low Power
+    /// Mode as the viewer follows it (#1808).
     /// Injectable so the fallback can be pinned without flipping a setting.
     public var isSuppressedBySystem: () -> Bool = {
-        MotionPreference.reducesMotion || ProcessInfo.processInfo.isLowPowerModeEnabled
+        MotionPreference.reducesMotion || LowPowerMode.savesBattery
     }
 
     /// The frame reducer, off the main thread. Injectable for tests.
@@ -139,7 +140,7 @@ public final class LiveMediaBackdrop: VideoFrameCompanion {
         center.addObserver(proxy, selector: #selector(Proxy.settingsChanged),
                            name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil)
         center.addObserver(proxy, selector: #selector(Proxy.settingsChanged),
-                           name: Notification.Name.NSProcessInfoPowerStateDidChange, object: nil)
+                           name: Notification.Name.lowPowerModeEffectDidChange, object: nil)
     }
 
     /// Whether the band follows the clip right now.

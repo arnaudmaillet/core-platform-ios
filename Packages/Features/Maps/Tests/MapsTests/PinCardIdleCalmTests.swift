@@ -7,7 +7,7 @@ import MediaCore
 /// ⚠️ A MAP MARKER'S EMOTE FACE PLAYS THROUGH IDLE CALM (#1504, the owner
 /// 2026-10-21, reversing the map part of #1072): it follows the one emote
 /// contract (`EmoteMapIcons.playbackPolicy`) — still under Reduce Motion,
-/// Animate Emojis off, Power Saving and Low Power, never for idleness.
+/// Animate Emojis off and Low Power Mode, never for idleness.
 ///
 /// ⚠️ IDLE CALM IS INJECTED (`AnimatedIconView.isIdleCalm`), never the app-wide
 /// `IdleCalm`, and the test is SYNCHRONOUS: the seam is process-wide while set.

@@ -12,7 +12,7 @@ import UIKit
 struct PersonOcclusionTests {
     private let open = PersonOcclusionGate.Inputs(
         enabled: true, bandShown: true, pageActive: true, playing: true, inFlight: false,
-        powerSaving: false, lowPowerMode: false, thermalState: .nominal
+        lowPowerMode: false, thermalState: .nominal
     )
 
     /// Every rule closes the gate on its own; all clear, it opens.
@@ -31,11 +31,8 @@ struct PersonOcclusionTests {
         closed.inFlight = true
         #expect(!PersonOcclusionGate.isOpen(closed), "during a hero flight")
         closed = open
-        closed.powerSaving = true
-        #expect(!PersonOcclusionGate.isOpen(closed), "Power Saving")
-        closed = open
         closed.lowPowerMode = true
-        #expect(!PersonOcclusionGate.isOpen(closed), "Low Power Mode")
+        #expect(!PersonOcclusionGate.isOpen(closed), "Low Power Mode, followed")
         closed = open
         closed.thermalState = .serious
         #expect(!PersonOcclusionGate.isOpen(closed), "a hot device")

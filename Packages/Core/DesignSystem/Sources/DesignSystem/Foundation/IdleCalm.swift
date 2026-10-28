@@ -6,7 +6,7 @@ import UIKit
 /// ⚠️ **ANY ENDLESS ANIMATION ON SCREEN COSTS A WHOLE FRAME, EVERY FRAME.** A
 /// 20-point breathing badge makes the render server recomposite the screen —
 /// glass and blurs included — as surely as a full-screen video: measured in
-/// the #580 idle baseline. Power Saving stops it for those who turn it on;
+/// the #580 idle baseline. Low Power Mode stops it for those who follow it;
 /// this stops it for everyone once they stop touching (the viewer's decision,
 /// 2026-10-07).
 ///
@@ -42,7 +42,7 @@ public enum IdleCalm {
 
 extension MotionPreference {
     /// What endless DECORATIVE motion asks: Reduce Motion (iOS or the app's
-    /// switch), Power Saving, or an app at rest (`IdleCalm`). Readers also
+    /// switch), Low Power Mode, or an app at rest (`IdleCalm`). Readers also
     /// observe `.decorativeMotionDidChange`.
     public static var stillsDecoration: Bool {
         reducesMotion || IdleCalm.isCalm

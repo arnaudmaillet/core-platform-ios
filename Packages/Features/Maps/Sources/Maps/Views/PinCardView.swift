@@ -875,7 +875,7 @@ final class PinCardView: UIView {
         }
     }
 
-    /// Reduce Motion, Animate Emojis, Power Saving or Low Power changed.
+    /// Reduce Motion, Animate Emojis or Low Power Mode changed.
     @objc private func emotePolicyMayHaveChanged() {
         iconFaceView.playbackPolicy = EmoteMapIcons.playbackPolicy
     }

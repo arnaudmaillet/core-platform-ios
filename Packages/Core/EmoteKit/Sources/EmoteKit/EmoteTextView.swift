@@ -19,7 +19,7 @@ import UIKit
 /// (#1504): one still frame of the art when motion is off, a still skeleton
 /// when no art can be had. The budgets are the label's:
 /// the app-wide `EmoteEngine.maxAnimatedEmotes`, and stills under Reduce
-/// Motion, Power Saving, idle calm or thermal pressure (`EmoteMotion`).
+/// Motion, Low Power Mode, idle calm or thermal pressure (`EmoteMotion`).
 ///
 /// ## The text is still the wire format
 ///

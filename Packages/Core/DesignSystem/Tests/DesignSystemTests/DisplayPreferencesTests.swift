@@ -38,42 +38,42 @@ struct DisplayPreferencesTests {
         #expect(notices == 2)
     }
 
-    /// Power Saving overrides the viewer's own choices while it is on, and
-    /// gives them back untouched when it is off.
-    @Test func powerSavingOverridesWithoutRewriting() {
-        let previous = (MotionPreference.defaults, PowerSavingPreference.defaults, EmoteAnimationPreference.defaults)
+    /// The four combinations of the switch and iOS (#1808): the effect only
+    /// with both — and the viewer's own choices are overridden, never
+    /// rewritten.
+    @Test(arguments: [(true, true), (true, false), (false, true), (false, false)])
+    func lowPowerModeSavesBatteryOnlyWhenFollowed(followed: Bool, systemOn: Bool) {
+        let previous = (MotionPreference.defaults, LowPowerMode.defaults, EmoteAnimationPreference.defaults, LowPowerMode.system)
         defer {
             MotionPreference.defaults = previous.0
-            PowerSavingPreference.defaults = previous.1
+            LowPowerMode.defaults = previous.1
             EmoteAnimationPreference.defaults = previous.2
+            LowPowerMode.system = previous.3
+            LowPowerMode.resetAnnounced()
         }
         MotionPreference.defaults = isolated()
-        PowerSavingPreference.defaults = isolated()
+        LowPowerMode.defaults = isolated()
         EmoteAnimationPreference.defaults = isolated()
+        LowPowerMode.system = { systemOn }
 
-        #expect(!PowerSavingPreference.isOn)
-        #expect(EmoteAnimationPreference.isOn)
-        #expect(EmoteAnimationPreference.animatesEmotes)
-
-        PowerSavingPreference.isOn = true
-        #expect(MotionPreference.reducesMotion)
-        #expect(!EmoteAnimationPreference.animatesEmotes)
+        #expect(LowPowerMode.isFollowed, "the switch is not on by default")
+        LowPowerMode.isFollowed = followed
+        let saves = followed && systemOn
+        #expect(LowPowerMode.savesBattery == saves)
+        #expect(EmoteAnimationPreference.animatesEmotes == !saves)
+        if saves { #expect(MotionPreference.reducesMotion) }
         // The viewer's own switches are untouched.
         #expect(!MotionPreference.appReducesMotion)
         #expect(EmoteAnimationPreference.isOn)
-
-        PowerSavingPreference.isOn = false
-        #expect(MotionPreference.reducesMotion == UIAccessibility.isReduceMotionEnabled)
-        #expect(EmoteAnimationPreference.animatesEmotes)
     }
 
     @Test func animatedEmojisCanBeTurnedOffOnTheirOwn() {
-        let previous = (PowerSavingPreference.defaults, EmoteAnimationPreference.defaults)
+        let previous = (LowPowerMode.system, EmoteAnimationPreference.defaults)
         defer {
-            PowerSavingPreference.defaults = previous.0
+            LowPowerMode.system = previous.0
             EmoteAnimationPreference.defaults = previous.1
         }
-        PowerSavingPreference.defaults = isolated()
+        LowPowerMode.system = { false }
         EmoteAnimationPreference.defaults = isolated()
         var notices = 0
         let observer = NotificationCenter.default.addObserver(
@@ -86,25 +86,65 @@ struct DisplayPreferencesTests {
         #expect(notices == 1)
     }
 
-    /// Everything that honours Reduce Motion, and every emote, hears Power
-    /// Saving change.
-    @Test func togglingPowerSavingPostsTheMotionAndEmoteNotifications() {
-        let previous = PowerSavingPreference.defaults
-        defer { PowerSavingPreference.defaults = previous }
-        PowerSavingPreference.defaults = isolated()
-        var motion = 0
-        var emotes = 0
+    /// Everything that honours Reduce Motion, every emote and every
+    /// effect's reader hears the effect change — once per real change, on
+    /// main, and never while the switch is off (#1808).
+    @Test func theEffectsChangePostsTheThreeNotificationsOnlyWhenItChanges() {
+        let previous = (LowPowerMode.defaults, LowPowerMode.system)
+        defer {
+            LowPowerMode.defaults = previous.0
+            LowPowerMode.system = previous.1
+            LowPowerMode.resetAnnounced()
+        }
+        LowPowerMode.defaults = isolated()
+        var systemOn = false
+        LowPowerMode.system = { systemOn }
+        LowPowerMode.resetAnnounced()
+        LowPowerMode.reportIfChanged()
+        var motion = 0, emotes = 0, effect = 0
+        var onMain = true
         let center = NotificationCenter.default
         let observers = [
             center.addObserver(forName: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil, queue: nil) { _ in motion += 1 },
             center.addObserver(forName: .emoteAnimationPreferenceDidChange, object: nil, queue: nil) { _ in emotes += 1 },
+            center.addObserver(forName: .lowPowerModeEffectDidChange, object: nil, queue: nil) { _ in
+                effect += 1
+                onMain = onMain && Thread.isMainThread
+            },
         ]
         defer { observers.forEach(center.removeObserver) }
-        PowerSavingPreference.isOn = true
-        PowerSavingPreference.isOn = true
-        PowerSavingPreference.isOn = false
-        #expect(motion == 2)
-        #expect(emotes == 2)
+
+        systemOn = true
+        LowPowerMode.reportIfChanged()
+        LowPowerMode.reportIfChanged()
+        #expect((motion, emotes, effect) == (1, 1, 1), "iOS entering Low Power Mode, followed, is one change")
+        LowPowerMode.isFollowed = false
+        #expect(effect == 2, "turning the switch off lifts the effect")
+        systemOn = false
+        LowPowerMode.reportIfChanged()
+        systemOn = true
+        LowPowerMode.reportIfChanged()
+        #expect(effect == 2, "with the switch off, Low Power Mode posted")
+        LowPowerMode.isFollowed = true
+        #expect(effect == 3, "turning the switch on in Low Power Mode applies it")
+        #expect(onMain)
+    }
+
+    /// Power Saving's stored switch is forgotten, and a stored `true` has no
+    /// effect (#1808).
+    @Test func powerSavingsStoredSwitchIsForgotten() {
+        let previous = (LowPowerMode.defaults, LowPowerMode.system)
+        defer {
+            LowPowerMode.defaults = previous.0
+            LowPowerMode.system = previous.1
+        }
+        let defaults = isolated()
+        defaults.set(true, forKey: LowPowerMode.powerSavingKey)
+        LowPowerMode.defaults = defaults
+        LowPowerMode.system = { false }
+        #expect(!LowPowerMode.savesBattery, "a stored Power Saving still applied")
+        LowPowerMode.forgetPowerSaving()
+        #expect(defaults.object(forKey: LowPowerMode.powerSavingKey) == nil)
     }
 
     @Test func appearanceDefaultsToSystemAndMapsToInterfaceStyles() {

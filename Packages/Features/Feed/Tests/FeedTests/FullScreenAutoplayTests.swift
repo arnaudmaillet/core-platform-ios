@@ -8,7 +8,7 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// A post opened full screen always plays (#702): Autoplay and Power Saving
+/// A post opened full screen always plays (#702): Autoplay and Low Power Mode
 /// govern grids, rails and previews, never the post the viewer opened.
 @MainActor
 @Suite(.serialized)
@@ -29,7 +29,7 @@ struct FullScreenAutoplayTests {
         return condition()
     }
 
-    /// ⚠️ AUTOPLAY NEVER, NOT POWER SAVING: Power Saving is app-wide state
+    /// ⚠️ AUTOPLAY NEVER, NOT LOW POWER MODE: Low Power Mode is app-wide state
     /// that every suite running beside this one reads (motion, emojis, the
     /// band). The cell reads neither — `MediaPlaybackPolicy.autoplays`, which
     /// folds both, is the only door, and this closes it.

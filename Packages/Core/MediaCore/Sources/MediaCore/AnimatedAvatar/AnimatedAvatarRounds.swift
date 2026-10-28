@@ -14,7 +14,7 @@ import UIKit
 /// - No avatar plays two rounds in a row, and the most recently played are
 ///   picked last.
 /// - The players' own limits still hold: `maxConcurrent`, `minimumDiameter`,
-///   Reduce Motion, Power Saving, idle calm (#650 — a round under it plays
+///   Reduce Motion, Low Power Mode, idle calm (#650 — a round under it plays
 ///   nothing and the rounds stop until decoration wakes).
 ///
 /// ⚠️ A TIMER, NOT AN ANIMATION (#580): one pending work item while an

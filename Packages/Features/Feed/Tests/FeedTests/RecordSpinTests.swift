@@ -12,7 +12,7 @@ struct RecordSpinTests {
         #expect(layer.speed == 1)
     }
 
-    /// Reduce Motion or Power Saving: the cover stays still, so an endless
+    /// Reduce Motion or Low Power Mode: the cover stays still, so an endless
     /// turn doesn't keep the screen redrawing for as long as the sound plays.
     @Test func underReducedMotionTheCoverStaysStill() {
         let layer = CALayer()
@@ -20,7 +20,7 @@ struct RecordSpinTests {
         #expect(layer.animation(forKey: "sound.recordSpin") == nil)
     }
 
-    /// Turning Power Saving on mid-play pauses the turn where it is.
+    /// Low Power Mode starting mid-play pauses the turn where it is.
     @Test func reducedMotionMidPlayPausesTheTurn() {
         let layer = CALayer()
         layer.setRecordSpinning(true, reducesMotion: false)

@@ -8,9 +8,9 @@ import UIKit
 /// owner's decision of 2026-10-13): idle calm (#580/#650) rests the app's
 /// decoration, and an emote in a caption or a comment froze while the viewer
 /// simply read. What already stilled every emote still does: Reduce Motion,
-/// Animate Emojis off, Power Saving, overheating — and Low Power keeps its
-/// half rate. The map's markers, far more numerous, still rest (the owner's
-/// second decision on #1072).
+/// Animate Emojis off, Low Power Mode (when followed), overheating. The
+/// map's markers, far more numerous, still rest (the owner's second decision
+/// on #1072).
 ///
 /// ⚠️ IDLE CALM IS INJECTED (`EmoteMotion.conditions`), never the app-wide
 /// `IdleCalm`. And the tests that force it are SYNCHRONOUS: the seam is
@@ -73,16 +73,16 @@ struct EmoteIdleCalmTests {
     }
 
     enum Gate: String, CaseIterable, CustomTestStringConvertible {
-        case reduceMotion, animateEmojisOff, powerSaving, overheated
+        case reduceMotion, animateEmojisOff, lowPowerMode, overheated
         /// Each gate, with idle calm on too: it changes nothing.
         var conditions: EmoteMotion.Conditions {
             var gated = EmoteMotion.Conditions(idleCalm: true)
             switch self {
             case .reduceMotion: gated.reducesMotion = true
             case .animateEmojisOff: gated.animatesEmotes = false
-            // Power Saving turns on Reduce Motion and turns off Animate
-            // Emojis (`PowerSavingPreference`): both readings.
-            case .powerSaving:
+            // Low Power Mode, followed, turns on Reduce Motion and turns off
+            // Animate Emojis (`LowPowerMode`): both readings.
+            case .lowPowerMode:
                 gated.reducesMotion = true
                 gated.animatesEmotes = false
             case .overheated: gated.overheated = true
