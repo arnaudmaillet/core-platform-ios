@@ -86,7 +86,7 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
 
     public func makeHashtagViewController(tag: String) -> UIViewController {
         HashtagViewController(
-            viewModel: HashtagViewModel(tag: tag, repository: repository),
+            viewModel: HashtagViewModel(tag: tag, repository: repository, deviceCache: localCache),
             postSurfaces: postSurfaces
         )
     }

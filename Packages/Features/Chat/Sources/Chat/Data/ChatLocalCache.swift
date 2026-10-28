@@ -122,6 +122,86 @@ final class ChatLocalCache: Sendable {
         return record.conversation
     }
 
+    // MARK: - Suggestions (#1776)
+
+    static let suggestionType = "chat.suggestion"
+    static let suggestionsListKey = "chat.suggestions"
+
+    /// The Suggestions surface's first page as last read: what it opens on
+    /// at a cold start, before it asks again. Nil when nothing readable is
+    /// stored.
+    func suggestions() -> SuggestionsPage? {
+        guard let list = store.list(Self.suggestionsListKey, maxPages: 1) else { return nil }
+        let rows = list.entries.compactMap(Self.suggestion(from:))
+        guard !rows.isEmpty else { return nil }
+        return SuggestionsPage(accounts: rows, nextPageToken: list.nextCursor)
+    }
+
+    /// Replaces the stored first page. People rows: kept a profile's
+    /// lifetime, revalidated at every open.
+    func storeSuggestions(_ page: SuggestionsPage, as viewer: LocalStoreViewer?) {
+        let writes = page.accounts.compactMap { account -> LocalEntityWrite? in
+            guard let payload = try? JSONEncoder().encode(SuggestionRecord(account)) else { return nil }
+            return LocalEntityWrite(
+                key: LocalEntityKey(type: Self.suggestionType, id: account.id.rawValue),
+                payload: payload, format: Self.format, lifetime: LocalStorePolicy.profileLifetime
+            )
+        }
+        let listPage = LocalListPage(items: writes.map(\.key), entities: writes, nextCursor: page.nextPageToken, tier: .retained)
+        write { store in
+            try store.replaceList(Self.suggestionsListKey, with: listPage, as: viewer, lifetime: LocalStorePolicy.profileLifetime)
+        }
+    }
+
+    private static func suggestion(from entity: LocalEntity) -> SuggestedAccount? {
+        guard entity.key.type == suggestionType, entity.format == format,
+              let record = try? JSONDecoder().decode(SuggestionRecord.self, from: entity.payload) else { return nil }
+        return record.account
+    }
+
+    /// One suggestion row as stored; the reason in fixed words, so a file
+    /// outlives the enum's shape.
+    struct SuggestionRecord: Codable, Equatable {
+        var id: String
+        var handle: String
+        var displayName: String
+        var avatarURL: URL?
+        var reason: String
+        var followedByNames: [String]?
+        var followedByTotal: Int?
+        var isPrivate: Bool
+
+        init(_ account: SuggestedAccount) {
+            id = account.id.rawValue
+            handle = account.handle
+            displayName = account.displayName
+            avatarURL = account.avatarURL
+            isPrivate = account.isPrivate
+            switch account.reason {
+            case .followsYou: reason = "followsYou"
+            case .followedBy(let names, let total):
+                reason = "followedBy"
+                followedByNames = names
+                followedByTotal = total
+            case .suggestedForYou: reason = "suggestedForYou"
+            }
+        }
+
+        var account: SuggestedAccount? {
+            let decoded: SuggestedAccount.Reason
+            switch reason {
+            case "followsYou": decoded = .followsYou
+            case "followedBy": decoded = .followedBy(names: followedByNames ?? [], total: followedByTotal ?? 0)
+            case "suggestedForYou": decoded = .suggestedForYou
+            default: return nil
+            }
+            return SuggestedAccount(
+                id: ProfileID(id), handle: handle, displayName: displayName, avatarURL: avatarURL,
+                reason: decoded, isPrivate: isPrivate
+            )
+        }
+    }
+
     // MARK: - Messages
 
     /// A conversation's stored messages, oldest first, and the cursor for

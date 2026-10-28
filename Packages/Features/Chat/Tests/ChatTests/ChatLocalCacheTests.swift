@@ -94,6 +94,31 @@ private actor DeviceTestNetwork: ChatProviding {
     func directConversation(with profileID: ProfileID) async throws -> ConversationID { ConversationID("dm") }
 }
 
+/// Two suggestions, online or not.
+private actor DeviceSuggestions: SuggestionsProviding {
+    private var offline = false
+    private(set) var asks = 0
+    func goOffline(_ value: Bool) { offline = value }
+
+    func suggestions(limit: Int) async throws -> [SuggestedAccount] {
+        try await suggestions(limit: limit, after: nil).accounts
+    }
+    func suggestions(limit: Int, after pageToken: String?) async throws -> SuggestionsPage {
+        asks += 1
+        if offline { throw ChatError.transport(message: "offline", failure: .offline) }
+        return SuggestionsPage(accounts: [
+            SuggestedAccount(id: ProfileID("s1"), handle: "s1", displayName: "One", avatarURL: nil, reason: .followsYou),
+            SuggestedAccount(
+                id: ProfileID("s2"), handle: "s2", displayName: "Two", avatarURL: nil,
+                reason: .followedBy(names: ["ava"], total: 3), isPrivate: true
+            ),
+        ], nextPageToken: "p2")
+    }
+    func follow(_ profileID: ProfileID) async throws -> FollowOutcome { .following }
+    func unfollow(_ profileID: ProfileID) async throws {}
+    func cancelFollowRequest(_ profileID: ProfileID) async throws {}
+}
+
 @MainActor
 struct ChatLocalCacheTests {
     private let folder = DeviceFolder()
@@ -326,6 +351,53 @@ struct ChatLocalCacheTests {
     }
 
     // MARK: - Viewers
+
+    // MARK: - Suggestions (#1776)
+
+    /// Cache first: the Suggestions surface opens on its last first page at
+    /// the next launch, offline included, with no skeleton, then asks again.
+    @Test func suggestionsOpenOnTheirLastPageOfflineAtTheFirstFrame() async throws {
+        let network = DeviceSuggestions()
+        let (store, cache) = try launch()
+        let first = SuggestionsViewModel(repository: network, deviceCache: cache)
+        #expect(first.phase == .loading, "a cold device opened on rows")
+        first.loadIfNeeded()
+        #expect(await settle { if case .content = first.phase { true } else { false } })
+        cache.waitForPendingWrites()
+        _ = store
+
+        await network.goOffline(true)
+        let (_, relaunched) = try launch()
+        let second = SuggestionsViewModel(repository: network, deviceCache: relaunched)
+        guard case .content(let rows) = second.phase else {
+            Issue.record("the relaunch opened on \(second.phase), not the stored rows")
+            return
+        }
+        #expect(rows.map(\.id) == [ProfileID("s1"), ProfileID("s2")])
+        let stored = try #require(relaunched.suggestions()?.accounts.last)
+        #expect(stored.reason == .followedBy(names: ["ava"], total: 3), "the reason did not survive the record")
+        #expect(stored.isPrivate)
+        #expect(second.hasMore, "the stored cursor was lost")
+        second.loadIfNeeded()
+        #expect(await settle { await network.asks == 2 }, "the stored rows were not revalidated")
+        await letAFailedLoadLand()
+        #expect(second.phase == .content(rows), "a failed revalidation took the rows back")
+    }
+
+    /// Another account opens on nothing of the first one's.
+    @Test func anotherAccountOpensOnNoSuggestions() async throws {
+        let network = DeviceSuggestions()
+        let (_, cache) = try launch()
+        let first = SuggestionsViewModel(repository: network, deviceCache: cache)
+        first.loadIfNeeded()
+        #expect(await settle { if case .content = first.phase { true } else { false } })
+        cache.waitForPendingWrites()
+
+        viewer.viewer = bob
+        let (_, relaunched) = try launch()
+        #expect(relaunched.suggestions() == nil)
+        #expect(SuggestionsViewModel(repository: network, deviceCache: relaunched).phase == .loading)
+    }
 
     @Test func anotherAccountReadsNoneOfTheConversations() async throws {
         let network = try await firstLaunchOnline()

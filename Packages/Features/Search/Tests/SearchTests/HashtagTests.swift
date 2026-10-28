@@ -5,6 +5,7 @@ import CoreNetworking
 import CoreNetworkingMocks
 import CoreStorage
 import Foundation
+import LocalStore
 import Testing
 @testable import Search
 
@@ -360,5 +361,58 @@ struct HashtagCountRoomTests {
     @Test func theCountsLineIsReservedUntilItLands() {
         #expect(HashtagViewController.subtitle(countText: nil) == " ")
         #expect(HashtagViewController.subtitle(countText: "12 posts") == "12 posts")
+    }
+}
+
+/// A hashtag page opens on its last first pages (#1776): at the next visit
+/// or launch, with no skeleton, then revalidates in place.
+@MainActor
+struct HashtagCacheFirstTests {
+    private final class Folder: Sendable {
+        let url = FileManager.default.temporaryDirectory
+            .appending(path: "HashtagCacheFirstTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        deinit { try? FileManager.default.removeItem(at: url) }
+    }
+
+    private let folder = Folder()
+
+    private func launch(as viewer: LocalStoreViewer = .member(account: "acct-1", profile: "me")) throws -> SearchLocalCache {
+        SearchLocalCache(store: try LocalStore(directory: folder.url, viewer: { viewer }))
+    }
+
+    @Test func theNextVisitOpensOnTheLastPagesThenRevalidates() async throws {
+        let search = TagSearch(top: hits(20, prefix: "t"), recent: [hit("r1"), hit("r2")], count: 42)
+        let first = try launch()
+        let visit = HashtagViewModel(tag: "#Travel", repository: search, deviceCache: first)
+        #expect(visit.top == .loading, "a cold device opened on posts")
+        await visit.load()
+        first.waitForPendingWrites()
+
+        await search.setFails(true)
+        let again = HashtagViewModel(tag: "travel", repository: search, deviceCache: try launch())
+        #expect(again.isSeeded)
+        #expect(again.top == .posts(hits(18, prefix: "t").map(\.id)), "the first frame was not the stored Top")
+        #expect(again.recent == .posts([PostID("r1"), PostID("r2")]))
+        #expect(again.countText == "42 posts")
+        #expect(again.hasMore(.top), "the stored cursor was lost")
+
+        await again.load()
+        #expect(again.top == .posts(hits(18, prefix: "t").map(\.id)), "a failed revalidation took the posts back")
+        #expect(await search.queries.count == 4, "the stored pages were not revalidated")
+    }
+
+    @Test func anotherAccountOpensCold() async throws {
+        let search = TagSearch(top: [hit("a")], recent: [hit("b")])
+        let mine = try launch()
+        let visit = HashtagViewModel(tag: "travel", repository: search, deviceCache: mine)
+        await visit.load()
+        mine.waitForPendingWrites()
+
+        let theirs = HashtagViewModel(
+            tag: "travel", repository: search,
+            deviceCache: try launch(as: .member(account: "acct-2", profile: "them"))
+        )
+        #expect(!theirs.isSeeded)
+        #expect(theirs.top == .loading)
     }
 }
