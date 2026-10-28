@@ -31,8 +31,18 @@ final class HiddenWordsViewController: UIViewController {
 
     private let manager: any CommentFiltersManaging
     private var phase: Phase = .loading {
-        didSet { applySnapshot() }
+        didSet {
+            // Every answer, a save's included, is the next visit's first
+            // frame (#1776).
+            if case .loaded(let value) = phase { settingsCache?.store(value, as: CommentFiltersRecord.self, viewer: settingsWriter) }
+            applySnapshot()
+        }
     }
+    /// The screen's last answer on the device (#1776): it opens on it, with
+    /// no skeleton, then revalidates in place. Set by the builder.
+    var settingsCache: SettingsLocalCache?
+    /// The viewer the screen opened for: what its answers are stored as.
+    private lazy var settingsWriter = settingsCache?.viewer
     /// Why the last load failed, kept beside `.failed` so the failed row
     /// can say "You’re offline" when that is the cause (#794). Set before
     /// the phase, so the redraw `.failed` triggers already reads it.
@@ -89,13 +99,22 @@ final class HiddenWordsViewController: UIViewController {
     }
 
     private func load() {
-        phase = .loading
+        // ⚠️ CACHE FIRST (#1776, the rule of #1756): what the server last said
+        // is the first frame; the read below revalidates it in place.
+        if case .loaded = phase {
+        } else if let stored = settingsCache?.value(CommentFiltersRecord.self) {
+            phase = .loaded(stored)
+        } else {
+            phase = .loading
+        }
         Task { [weak self] in
             guard let self else { return }
             do {
                 phase = .loaded(try await manager.commentFilters())
             } catch {
                 loadFailure = NetworkFailure.of(error)
+                // A failed revalidation keeps the answer on screen.
+                if case .loaded = phase { return }
                 phase = .failed
             }
         }
