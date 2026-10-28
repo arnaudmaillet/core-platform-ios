@@ -18,10 +18,21 @@ private actor PauseServer: NotificationsProviding {
     private var held: PushPause
     private(set) var sent: [PushPause] = []
     private let refuses: Bool
+    /// Writes wait for `release()` (#1775's loader).
+    private let holds: Bool
+    private var waiting: [CheckedContinuation<Void, Never>] = []
 
-    init(_ held: PushPause = .off, refuses: Bool = false) {
+    init(_ held: PushPause = .off, refuses: Bool = false, holds: Bool = false) {
         self.held = held
         self.refuses = refuses
+        self.holds = holds
+    }
+
+    var heldWrites: Int { waiting.count }
+
+    func release() {
+        waiting.forEach { $0.resume() }
+        waiting = []
     }
 
     func loadNotifications(limit: Int32, after pageToken: String?) async throws -> NotificationsPage {
@@ -32,6 +43,7 @@ private actor PauseServer: NotificationsProviding {
     func pushPause() async throws -> PushPause { held }
     func setPushPause(_ pause: PushPause) async throws -> PushPause {
         sent.append(pause)
+        if holds { await withCheckedContinuation { waiting.append($0) } }
         if refuses { throw NotificationsError.transport(message: "refused") }
         held = pause
         return pause
@@ -227,6 +239,27 @@ struct NotificationsMuteTests {
         #expect(after !== wide, "the new look restyled the item in place")
         #expect(after.identifier == wide.identifier)
         #expect(controller.debugMuteButtonTitle == "Unmute")
+    }
+
+    /// A write on its way (#1775): the wide button wears the loader and takes
+    /// no second tap; the toast hands it the new look, a refusal the old one.
+    @Test(arguments: [false, true]) func theMuteWearsTheLoaderWhileItSaves(refused: Bool) async throws {
+        let server = PauseServer(refuses: refused, holds: true)
+        let (window, controller) = hosting(server)
+        defer { window.rootViewController = nil; window.isHidden = true }
+        #expect(!controller.debugMuteButtonIsBusy)
+
+        controller.muteButton?.debugTap()
+        #expect(controller.debugMuteButtonIsBusy, "the mute sat unchanged while it saved")
+        #expect(controller.debugMuteButtonTitle == "Mute", "the new look came before the answer (#1447)")
+        controller.muteButton?.debugTap()
+        while await server.heldWrites == 0 { await Task.yield() }
+        #expect(await server.sent.count == 1, "a second tap went out")
+
+        await server.release()
+        await settle { !controller.debugMuteButtonIsBusy }
+        #expect(!controller.debugMuteButtonIsBusy)
+        #expect(controller.debugMuteButtonTitle == (refused ? "Mute" : "Unmute"))
     }
 
     /// The menu offers the rows, worded as additions while muted.

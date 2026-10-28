@@ -71,11 +71,17 @@ public enum BarItems {
     ///
     /// An `image` leads the word (a glyph that says what the tap does, e.g.
     /// the notifications' bell).
+    ///
+    /// `busy` (#1775): the control at work — the kit's loader in the glyph's
+    /// place, and no tap — minted as its own item under the same identifier,
+    /// so the bar morphs to it and back (R3).
     public static func stretched(
         id: String, title: String, image: UIImage? = nil, prominent: Bool = false,
-        height: CGFloat = bubbleHeight, action: @escaping () -> Void
+        busy: Bool = false, height: CGFloat = bubbleHeight, action: @escaping () -> Void
     ) -> (item: UIBarButtonItem, label: StretchedBarLabel) {
-        let label = StretchedBarLabel(title: title, image: image, ink: prominent ? .white : .label, action: action)
+        let label = StretchedBarLabel(
+            title: title, image: image, ink: prominent ? .white : .label, busy: busy, action: action
+        )
         label.setContentHuggingPriority(.init(1), for: .horizontal)
         let fill = label.widthAnchor.constraint(equalToConstant: 10_000)
         fill.priority = .init(2)
@@ -210,6 +216,10 @@ public final class StretchedBarLabel: UIView {
     private let glyph = UIImageView()
     private let content = UIStackView()
     private let action: () -> Void
+    /// At work (`BarItems.stretched(busy:)`): the loader in the glyph's
+    /// place; a tap does nothing.
+    public let isBusy: Bool
+    private var loader: AppLoaderView?
 
     public var title: String { label.text ?? "" }
 
@@ -225,9 +235,11 @@ public final class StretchedBarLabel: UIView {
 
     public init(
         title: String, image: UIImage? = nil, ink: UIColor,
-        textStyle: UIFont.TextStyle = .body, weight: UIFont.Weight = .semibold, action: @escaping () -> Void
+        textStyle: UIFont.TextStyle = .body, weight: UIFont.Weight = .semibold, busy: Bool = false,
+        action: @escaping () -> Void
     ) {
         self.action = action
+        self.isBusy = busy
         super.init(frame: .zero)
         label.text = title
         label.textColor = ink
@@ -243,6 +255,15 @@ public final class StretchedBarLabel: UIView {
         content.spacing = Spacing.sm
         content.isUserInteractionEnabled = false
         content.addArrangedSubview(glyph)
+        if busy {
+            let loader = AppLoaderView(size: .medium)
+            loader.hidesWhenStopped = false
+            loader.isAccessibilityElement = false
+            loader.setContentHuggingPriority(.required, for: .horizontal)
+            glyph.isHidden = true
+            content.addArrangedSubview(loader)
+            self.loader = loader
+        }
         content.addArrangedSubview(label)
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
@@ -253,8 +274,14 @@ public final class StretchedBarLabel: UIView {
         ])
         isAccessibilityElement = true
         accessibilityLabel = title
-        accessibilityTraits = .button
+        accessibilityTraits = busy ? [.button, .notEnabled, .updatesFrequently] : .button
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
+    }
+
+    override public func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard let loader else { return }
+        window != nil ? loader.startAnimating() : loader.stopAnimating()
     }
 
     @available(*, unavailable)
@@ -278,12 +305,12 @@ public final class StretchedBarLabel: UIView {
     public var image: UIImage? { glyph.image }
 
     @objc private func tapped() {
-        guard isEnabled else { return }
+        guard isEnabled, !isBusy else { return }
         action()
     }
 
     override public func accessibilityActivate() -> Bool {
-        guard isEnabled else { return false }
+        guard isEnabled, !isBusy else { return false }
         action()
         return true
     }
@@ -291,5 +318,7 @@ public final class StretchedBarLabel: UIView {
     #if DEBUG
     /// The tap's own path, for tests.
     public func debugTap() { tapped() }
+    /// Whether the loader turns, for tests.
+    public var debugIsLoading: Bool { loader?.isAnimating ?? false }
     #endif
 }

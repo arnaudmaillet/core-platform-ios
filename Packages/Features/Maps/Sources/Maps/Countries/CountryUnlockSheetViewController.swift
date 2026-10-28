@@ -257,18 +257,25 @@ final class CountryUnlockSheetViewController: UIViewController {
     /// The unlock at `price`: a new item under the same identifier whenever
     /// the price changes (another country, a new price from the server) —
     /// the bar animates the swap (R3) — and the balance under it.
-    private func installUnlock(price: Int) {
+    private func installUnlock(price: Int, busy: Bool = false) {
         let title = "Unlock · \(price)"
-        if unlockControl?.title != title {
+        if unlockControl?.title != title || unlockControl?.isBusy != busy {
+            // At work (#1775): the busy twin — the loader in the gem's place,
+            // no tap — under the same identifier, so the bar morphs to it.
             let made = BarItems.stretched(
-                id: "countryUnlock.unlock", title: title, image: UIImage.symbol(named: GemSymbol.glyph), prominent: true
+                id: "countryUnlock.unlock", title: title, image: UIImage.symbol(named: GemSymbol.glyph), prominent: true,
+                busy: busy
             ) { [weak self] in self?.unlockTapped() }
             made.label.accessibilityIdentifier = "country.unlock.button"
             unlockControl = made.label
             setToolbarItems([made.item], animated: viewIfLoaded?.window != nil)
         }
+        unlockPrice = price
         refreshBalance(price: price)
     }
+
+    /// The price the unlock control asks.
+    private var unlockPrice: Int?
 
     /// A purchase-restricted device is told why; anyone else is asked to
     /// be a member, then the server is.
@@ -298,9 +305,17 @@ final class CountryUnlockSheetViewController: UIViewController {
     }
 
     private func unlock() async {
-        // One unlock at a time: the server is being asked.
-        unlockControl?.isEnabled = false
+        // One unlock at a time: the server is being asked, and the control
+        // says so (#1775).
+        guard unlockControl?.isBusy != true else { return }
+        let asked = unlockPrice
+        if let asked { installUnlock(price: asked, busy: true) }
         let outcome = await access.unlock(country.code)
+        // Back to the word, unless the sheet leaves on the answer.
+        switch outcome {
+        case .unlocked, .alreadyUnlocked, .unknownCountry, .priceChanged: break
+        case .insufficientGems, .failed: if let asked { installUnlock(price: asked) }
+        }
         switch outcome {
         case .unlocked, .alreadyUnlocked:
             HapticNotification().notificationOccurred(.success)
@@ -316,7 +331,6 @@ final class CountryUnlockSheetViewController: UIViewController {
             installUnlock(price: price)
         case .failed:
             Feedback.failure(ShopPurchaseFeedback.unreachable, from: self)
-            unlockControl?.isEnabled = true
         case .unknownCountry:
             dismiss(animated: true)
         }
@@ -344,3 +358,10 @@ final class CountryUnlockSheetViewController: UIViewController {
         )
     }
 }
+
+#if DEBUG
+extension CountryUnlockSheetViewController {
+    /// Internal for tests: the unlock, past the member gate.
+    func debugUnlock() async { await unlock() }
+}
+#endif
