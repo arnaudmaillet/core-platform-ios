@@ -43,6 +43,9 @@ public enum UISound: String, CaseIterable, Sendable {
         // the one door every interface sound goes through.
         guard InterfaceSoundPreference.isOn else { return }
         guard let player = Self.players.take(self) else { return }
+        #if DEBUG
+        guard !Self.silencedInTests else { return }
+        #endif
         player.currentTime = 0
         if delay > 0 {
             player.play(atTime: player.deviceCurrentTime + delay)
@@ -63,6 +66,18 @@ public enum UISound: String, CaseIterable, Sendable {
     }
 
     static let players = SoundPool()
+
+    #if DEBUG
+    /// ⚠️ **A TEST PROCESS NEVER STARTS A SOUND.** It takes the player, so the
+    /// pool is exercised as in the app, and stops short of `play()`.
+    /// `play()` starts an audio queue on the calling thread, the main one. On a
+    /// CI runner whose audio device dropped mid-run ("AudioObjectPropertiesChanged:
+    /// no such object"), every start waited out a 2.5 s timeout: 223 of them in
+    /// one Upload lane (run 40688530450). The pops of the editor's rows held the
+    /// main actor about ten minutes, every suite starved, and two tests hit
+    /// their 10-minute limit. A green run of the same lane shows 6.
+    static let silencedInTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    #endif
 }
 
 /// A small ring of players per sound.
@@ -116,5 +131,7 @@ final class SoundPool {
     #if DEBUG
     /// Internal for tests: how deep the ring for `sound` is, once built.
     func debugDepth(of sound: UISound) -> Int { (rings[sound] ?? []).count }
+    /// Internal for tests: the ring for `sound`, once built.
+    func debugPlayers(of sound: UISound) -> [AVAudioPlayer] { rings[sound] ?? [] }
     #endif
 }
