@@ -3026,6 +3026,10 @@ final class SnapFeedViewController: UIViewController {
             )
             statusView.isHidden = false
         }
+        // The page says why it has no post (#1812): that is what it shows, so
+        // the launch screen lifts on it. Offline on a first launch, it waited
+        // out its 2 s cap over a failure known at 0.3 s (measured on device).
+        if !statusView.isHidden, view.window != nil { LaunchTimeline.mark("shots.firstPageReady") }
     }
 
     /// Comment streams land on exactly the cell showing that post; each

@@ -16,9 +16,10 @@ import UIKit
 ///
 /// What it waits for, `LaunchCurtain.decision`:
 /// - the first page has what it shows (`shots.firstPageReady`: its picture, a
-///   text page, or a picture that failed for good), plus one committed frame;
+///   text page, a picture that failed for good, or the page's own empty or
+///   failed state — offline with nothing on disk), plus one committed frame;
 /// - or the cap, `cap` seconds after `app.didFinishLaunching` — a first
-///   install with nothing on disk, or offline: the page then shows its own
+///   install whose first page is slow to come: the page then shows its own
 ///   centred loader;
 /// - or nothing, when the launch opens somewhere else (a deep link, a
 ///   notification): it lifts as soon as the shell is in.
