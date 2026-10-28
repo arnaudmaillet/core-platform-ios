@@ -867,7 +867,7 @@ public final class MockSocialServices: @unchecked Sendable {
             // same on the wire.
             view.kind = Self.kind(forMediaURL: draft.media?.url)
             if let media = draft.media {
-                view.attachments = [makeAttachment(url: media.url, width: media.width, height: media.height)]
+                view.attachments = [Self.makeAttachment(url: media.url, width: media.width, height: media.height)]
             }
             return .success(view)
         }
@@ -886,9 +886,9 @@ public final class MockSocialServices: @unchecked Sendable {
             // Head plus tail, in the author's order — `attachments` is repeated
             // on the wire and the mock used to vend exactly one, which is why a
             // carousel could not be seen even though the contract allowed it.
-            view.attachments = [makeAttachment(url: media.url, width: media.width, height: media.height)]
+            view.attachments = [Self.makeAttachment(url: media.url, width: media.width, height: media.height)]
                 + record.extraMedia.map {
-                    makeAttachment(url: $0.url, width: $0.width, height: $0.height)
+                    Self.makeAttachment(url: $0.url, width: $0.width, height: $0.height)
                 }
         }
         return .success(view)
@@ -948,7 +948,7 @@ public final class MockSocialServices: @unchecked Sendable {
         return MockMediaFixtures.isVideoURL(url) ? .mainVideo : .carousel
     }
 
-    private func makeAttachment(url: String, width: Int, height: Int) -> Post_V1_MediaAttachmentView {
+    static func makeAttachment(url: String, width: Int, height: Int) -> Post_V1_MediaAttachmentView {
         var attachment = Post_V1_MediaAttachmentView()
         attachment.cdnURL = url
         // The snap feed routes on MIME, so this is what decides whether a post
@@ -965,27 +965,16 @@ public final class MockSocialServices: @unchecked Sendable {
         // A still poster for video, mirroring what `thumbnail_url` means on the
         // wire — never the video URL itself, which an image pipeline cannot
         // decode.
-        // ⚠️ A CLIP'S POSTER IS ITS OWN FIRST FRAME, when we have one.
-        //
-        // This used to hand every video post a picsum photograph, because an
-        // HLS manifest is useless to an image pipeline. But a poster is what the
-        // page SHOWS until the first frame decodes, so a picture of somewhere
-        // else is what the viewer saw — and after a map flight carrying the
-        // clip's own frame, it read as the post changing its mind. Where the
-        // clip has a baked preview, this points at it instead and the app
-        // resolves the scheme from the sheet it already holds.
-        attachment.thumbnailURL = if let clip = MockMediaFixtures.bakedClip(for: url) {
-            "\(MockMediaFixtures.previewPosterScheme)\(clip)"
-        } else if MockMediaFixtures.isVideoURL(url) {
-            // ⚠️ NOT A PHOTOGRAPH. This branch used to hand a clip with no baked
-            // sheet a stock picture, which is the same lie the map's pin URL
-            // told: a picture of somewhere else standing in for a frame we do
-            // not have from a SHEET — so it comes from the clip itself, which
-            // is the same picture by a slower route.
-            MockMediaFixtures.frameZeroURL(for: url)
-        } else {
-            url
-        }
+        // ⚠️ A CLIP'S POSTER IS ITS OWN FIRST FRAME, AT t = 0 (#1850), as the
+        // media service cuts it (`ffmpeg_video_transcoder`: "Poster (first
+        // frame)"). It used to be the map preview sheet's cell 0, which the
+        // baker samples from 1 s in (a marker must not open on black): the
+        // page then showed the clip at 1 s and the player took over at 0, on
+        // another shot. And before that a picsum photograph, a picture of
+        // somewhere else. The map's marker cover asks for the same frame
+        // (`MockGeoDiscoveryService.pinURL`), so a flight's two ends are one
+        // picture.
+        attachment.thumbnailURL = MockMediaFixtures.isVideoURL(url) ? MockMediaFixtures.frameZeroURL(for: url) : url
         return attachment
     }
 
@@ -1012,16 +1001,12 @@ public final class MockSocialServices: @unchecked Sendable {
     static func applyVideoBanner(clipID id: String, to view: inout Profile_V1_ProfileView) {
         guard let clip = MockClipCatalog.shared.clip(id: id) else { return }
         let loop = "mock://video/\(clip.id)?w=\(clip.width)&h=\(clip.height)"
-        // ⚠️ THE STILL IS THE CLIP'S OWN FRAME, served the way a video post's
-        // poster is (#1399): its baked sheet's frame, else its first frame.
+        // ⚠️ THE STILL IS THE CLIP'S OWN FIRST FRAME, served the way a video
+        // post's poster is (#1399, #1850: at t = 0, where the loop starts).
         // It was the bundled poster's `file://` URL, which the image pipeline
         // never fetches — anything but http(s) goes to the placeholder
         // fetcher, which paints a flat colour: the empty card under the loop.
-        let poster = if let baked = MockMediaFixtures.bakedClip(for: loop) {
-            "\(MockMediaFixtures.previewPosterScheme)\(baked)"
-        } else {
-            MockMediaFixtures.frameZeroURL(for: loop)
-        }
+        let poster = MockMediaFixtures.frameZeroURL(for: loop)
         var manifest = Media_V1_DeliveredRendition()
         manifest.kind = .mediaRenditionKindManifest
         manifest.url = loop

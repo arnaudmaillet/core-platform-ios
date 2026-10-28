@@ -575,7 +575,9 @@ final class AppContainer {
     }
 
     private nonisolated static func frameZero(ofClipAt source: String) async -> Data? {
-        guard let url = URL(string: source) else { return nil }
+        guard let named = URL(string: source) else { return nil }
+        // A bundled clip (`mock://video/<clip>`) is read from its file (#1850).
+        let url = MockClipCatalog.shared.fileURL(forVideo: named) ?? named
         let work = Task.detached(priority: .utility) { () -> Data? in
             let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
             generator.appliesPreferredTrackTransform = true

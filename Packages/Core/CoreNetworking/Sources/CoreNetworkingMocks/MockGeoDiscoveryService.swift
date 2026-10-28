@@ -305,9 +305,9 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// `dev/issues/BACKEND_MEDIA_PREVIEW_RENDITIONS.md` §C exists to close: a
     /// video pin has nowhere to say "this is a video, here is a cheap loop".
     /// The client renders every pin through the image pipeline, so a video
-    /// post's pin is always a **still of its own clip**: its baked sheet's
-    /// cell 0 (`mock://preview/<clip>`) when one exists, the clip's decoded
-    /// first frame (`mock://frame0/`) otherwise — never the raw video URL,
+    /// post's pin is always a **still of its own clip**: the clip's decoded
+    /// first frame at t = 0 (`mock://frame0/`, #1850), the feed's poster of the
+    /// same post — never the raw video URL,
     /// which an image pipeline renders as a blank pin, and never a photograph
     /// of something else. Under `.realAssets` it carries the `mock-kind=video`
     /// stamp that `GeoDiscoveryRepository.kind(for:)` matches on. A photo
@@ -328,13 +328,15 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // are now one picture rather than two. Whatever the catalog: under the
         // synthetic one this line used to hand an image pipeline a video URL,
         // which decodes to nothing and is the empty marker.
-        if MockMediaFixtures.isVideoURL(url), let clip = MockMediaFixtures.bakedClip(for: url) {
-            let frameZero = "\(MockMediaFixtures.previewPosterScheme)\(clip)"
+        // The clip's frame at t = 0 (#1850): the feed's poster of the same post
+        // is that frame too, as the media service cuts it.
+        if MockMediaFixtures.isVideoURL(url), MockMediaFixtures.bakedClip(for: url) != nil {
+            let frameZero = MockMediaFixtures.frameZeroURL(for: url)
             // ⚠️ The kind stamp has to survive: `GeoDiscoveryRepository.kind(for:)`
             // matches on that string and NOTHING else, so dropping it leaves the
             // map with no video pins at all. Only the real-asset catalog stamped
             // before, and changing that would reclassify every synthetic pin.
-            return catalog == .realAssets ? "\(frameZero)?\(Self.videoKindMarker)" : frameZero
+            return catalog == .realAssets ? "\(frameZero)&\(Self.videoKindMarker)" : frameZero
         }
         guard catalog == .realAssets else { return url }
         // ⚠️ THE ANNOTATION DESCRIBES THE POST, AND THE FLAG DOES NOT GET TO
