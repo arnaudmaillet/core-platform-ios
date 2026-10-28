@@ -222,17 +222,19 @@ public final class PersonPill: UIView {
             ring.heightAnchor.constraint(equalTo: avatar.heightAnchor, constant: PersonPillRing.width * 2)
         }
 
-        // ⚠️ CENTRED ON THE DISC'S EDGE, AT ITS MID-HEIGHT (the owner,
-        // 2026-10-16, #1277): the badge's centre sits over the far end of the
-        // face's disc, level with the face. Its size is its own: nothing in
-        // the row is measured against it. Trailing to trailing, not centre to
-        // trailing: only an edge-to-edge offset mirrors under right-to-left.
+        // ⚠️ ON THE FACE'S CIRCLE, 45° BELOW ITS TRAILING SIDE (the owner,
+        // 2026-10-28, #1793 — replacing #1277's "centred on the disc's edge,
+        // at its mid-height"): the badge's centre sits on the face's rim at
+        // its bottom-trailing corner, overlapping it the way an iOS status
+        // badge does. Its size is its own: nothing in the row is measured
+        // against it, and it reaches no further than the room the row keeps
+        // after the face (`overhang`). Edge to edge, never centre to trailing:
+        // only an edge offset mirrors under right-to-left.
         if let statusBadge {
+            let offset = PersonPillBadgeView.cornerOffset(faceDiameter: AvatarImageView.bubbleDiameter)
             statusBadge.constrain(in: self) { _ in
-                statusBadge.trailingAnchor.constraint(
-                    equalTo: avatar.trailingAnchor, constant: PersonPillBadgeView.overhang
-                )
-                statusBadge.centerYAnchor.constraint(equalTo: avatar.centerYAnchor)
+                statusBadge.trailingAnchor.constraint(equalTo: avatar.trailingAnchor, constant: offset)
+                statusBadge.bottomAnchor.constraint(equalTo: avatar.bottomAnchor, constant: offset)
             }
             statusBadge.addAction(UIAction { [weak self] _ in
                 guard let self, self.badge == .follow else { return }
@@ -452,9 +454,18 @@ final class PersonPillBadgeView: UIButton {
     /// The disc's side — larger than the 16pt it was (the owner, 2026-10-16,
     /// #1277).
     static let diameter: CGFloat = 20
-    /// How far the badge reaches past the face's edge: half its side, its
-    /// centre being ON that edge.
+    /// The room the row keeps past the face for the badge: half its side,
+    /// the most it could reach (#1277). On the corner it reaches less
+    /// (`cornerOffset`), so the pill's width does not change.
     static var overhang: CGFloat { diameter / 2 }
+
+    /// How far the badge's trailing and bottom edges sit past the face's
+    /// (#1793): its centre on the face's circle at 45°, `r·cos 45°` from the
+    /// face's centre on both axes. Pure, for tests.
+    static func cornerOffset(faceDiameter: CGFloat) -> CGFloat {
+        let radius = faceDiameter / 2
+        return diameter / 2 - radius * (1 - cos(.pi / 4))
+    }
     /// The touch area around the disc: a 20pt disc is still too small a target.
     private static let touchOutset: CGFloat = 8
 
