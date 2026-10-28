@@ -8,8 +8,10 @@ import UIKit
 /// or all reset (timeline #662) — and how each feed is ordered: the
 /// plain-language account of the recommender DSA Art. 27 and 38 ask for.
 ///
-/// Not optimistic, like the other privacy-adjacent choices: the checkmark,
-/// the switch and the list move once the server holds the change.
+/// Not optimistic, like the other privacy-adjacent choices: the checkmark
+/// and the switch show where the tap put them, with the loader beside them,
+/// until the server holds the change (#1775, `SettingSaves`); the list moves
+/// once it does.
 final class WhatYouSeeViewController: UIViewController {
     enum Phase: Equatable {
         case loading
@@ -67,8 +69,18 @@ final class WhatYouSeeViewController: UIViewController {
     /// Set before the phase, so the redraw `.failed` triggers already reads it.
     private var loadFailure: NetworkFailure?
     private var interestsFailure: NetworkFailure?
-    private var isSaving = false
-    private var isSavingPersonalized = false
+    /// The level on its way to the server (#1775).
+    private lazy var levelSaves: SettingSaves<Section, SensitiveContentLevel> = {
+        let saves = SettingSaves<Section, SensitiveContentLevel>()
+        saves.onChange = { [weak self] in self?.applySnapshot() }
+        return saves
+    }()
+    /// The personalisation switch on its way.
+    private lazy var personalizationSaves: SettingSaves<Section, Bool> = {
+        let saves = SettingSaves<Section, Bool>()
+        saves.onChange = { [weak self] in self?.applySnapshot() }
+        return saves
+    }()
     /// Tags whose removal (or the reset) is in flight.
     private var removing: Set<String> = []
     private var isResetting = false
@@ -235,6 +247,7 @@ final class WhatYouSeeViewController: UIViewController {
     // MARK: - List
 
     private var isPersonalized: Bool {
+        if let pending = personalizationSaves.value(for: .personalization) { return pending }
         if case .loaded(_, let personalized) = phase { return personalized }
         return false
     }
@@ -253,8 +266,9 @@ final class WhatYouSeeViewController: UIViewController {
                 content.secondaryText = level.detail
                 let unavailable = level == .standard && teen
                 content.textProperties.color = unavailable ? .secondaryLabel : .label
-                if case .loaded(let current, _) = phase, current == level {
-                    cell.accessories = [.checkmark()]
+                if case .loaded(let current, _) = phase, (levelSaves.value(for: .sensitive) ?? current) == level {
+                    // On its way (#1775): checked where the tap put it, the loader beside it.
+                    cell.accessories = levelSaves.isSaving(.sensitive) ? [.busy(), .checkmark()] : [.checkmark()]
                     cell.accessibilityTraits.insert(.selected)
                 } else {
                     cell.accessibilityTraits.remove(.selected)
@@ -286,19 +300,23 @@ final class WhatYouSeeViewController: UIViewController {
                 content.imageProperties.tintColor = .label
                 let toggle = UISwitch()
                 toggle.isOn = isPersonalized
-                toggle.isEnabled = !isSavingPersonalized
+                let travels = personalizationSaves.isSaving(.personalization)
+                toggle.isEnabled = !travels
                 toggle.accessibilityLabel = Self.personalizedTitle
                 toggle.addAction(UIAction { [weak self] action in
                     guard let toggle = action.sender as? UISwitch else { return }
                     self?.setPersonalized(toggle.isOn)
                 }, for: .valueChanged)
-                cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
+                let control = UICellAccessory.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))
+                cell.accessories = travels ? [.busy(), control] : [control]
             case .interest(let interest):
                 content = .valueCell()
                 content.text = "#" + interest.tag
                 content.secondaryText = Self.strength(interest.weight)
                 let busy = removing.contains(interest.tag) || isResetting
                 content.textProperties.color = busy ? .secondaryLabel : .label
+                // A row on its way out (#1775): the kit's loader, after its grace.
+                if busy { cell.accessories = [.busy()] }
             case .noInterests:
                 content = .cell()
                 content.text = Self.noInterestsText(personalized: isPersonalized)
@@ -420,41 +438,28 @@ final class WhatYouSeeViewController: UIViewController {
     }
 
     private func choose(_ level: SensitiveContentLevel) {
-        guard case .loaded(let current, let personalized) = phase, current != level, !isSaving else { return }
+        guard case .loaded(let current, _) = phase, (levelSaves.value(for: .sensitive) ?? current) != level else { return }
         guard !(level == .standard && teen) else { return }
-        isSaving = true
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await preferences.setSensitiveContent(level)
-                phase = .loaded(level, personalized: personalized)
-                HapticSelection().selectionChanged()
-            } catch {
-                alert("Couldn't change this setting. Try again.")
-            }
-            isSaving = false
-        }
+        let preferences = preferences
+        levelSaves.save(level, for: .sensitive, { [weak self] level in
+            try await preferences.setSensitiveContent(level)
+            guard let self, case .loaded(_, let personalized) = phase else { return }
+            phase = .loaded(level, personalized: personalized)
+            HapticSelection().selectionChanged()
+        }, failed: { [weak self] _ in self?.alert("Couldn't change this setting. Try again.") })
     }
 
     /// Turning it off erases the learnt interests on the server, so the list
     /// is read again either way.
     private func setPersonalized(_ isOn: Bool) {
-        guard case .loaded(let level, _) = phase, !isSavingPersonalized else { return }
-        isSavingPersonalized = true
-        applySnapshot()
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await preferences.setPersonalizedFeed(isOn)
-                isSavingPersonalized = false
-                phase = .loaded(level, personalized: isOn)
-                loadInterests()
-            } catch {
-                isSavingPersonalized = false
-                applySnapshot()
-                alert("Couldn't change \(Self.personalizedTitle). Try again.")
-            }
-        }
+        guard case .loaded = phase else { return }
+        let preferences = preferences
+        personalizationSaves.save(isOn, for: .personalization, { [weak self] isOn in
+            try await preferences.setPersonalizedFeed(isOn)
+            guard let self, case .loaded(let level, _) = phase else { return }
+            phase = .loaded(level, personalized: isOn)
+            loadInterests()
+        }, failed: { [weak self] _ in self?.alert("Couldn't change \(Self.personalizedTitle). Try again.") })
     }
 
     private func remove(_ interest: InterestTag) {

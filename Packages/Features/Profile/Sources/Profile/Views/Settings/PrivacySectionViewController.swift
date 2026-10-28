@@ -62,6 +62,12 @@ final class PrivacySectionViewController: UIViewController {
     }
 
     private let viewModel: PrivacySectionViewModel
+    /// The settings on their way to the server (#1775).
+    private lazy var saves: SettingSaves<Setting, Change> = {
+        let saves = SettingSaves<Setting, Change>()
+        saves.onChange = { [weak self] in self?.applySnapshot() }
+        return saves
+    }()
     /// Who can see the followers and following lists; nil hides the row.
     private let makeListPrivacy: (() -> UIViewController)?
     /// Activity status, read receipts and search (#406, #412); nil hides the row.
@@ -184,19 +190,16 @@ final class PrivacySectionViewController: UIViewController {
             content.image = UIImage(systemName: "lock")
             content.imageProperties.tintColor = .label
             let toggle = UISwitch()
-            if case .loaded(let isPrivate) = viewModel.phase { toggle.isOn = isPrivate }
-            toggle.isEnabled = !viewModel.isSaving
+            if case .loaded(let isPrivate) = viewModel.phase { toggle.isOn = flag(.privateAccount) ?? isPrivate }
             toggle.addAction(UIAction { [weak self] action in
                 guard let toggle = action.sender as? UISwitch else { return }
                 self?.setPrivate(toggle.isOn)
             }, for: .valueChanged)
-            cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
+            cell.accessories = accessories(toggle, for: .privateAccount)
         case .loading:
             content.text = "Private Account"
             content.secondaryText = nil
-            let spinner = AppLoaderView(size: .medium)
-            spinner.startAnimating()
-            cell.accessories = [.customView(configuration: .init(customView: spinner, placement: .trailing()))]
+            cell.accessories = [.busy()]
         case .failed:
             content.text = FailureCopy.row(
                 for: viewModel.visibilityFailure, fallback: "Couldn't load your privacy setting. Tap to try again."
@@ -217,28 +220,29 @@ final class PrivacySectionViewController: UIViewController {
         case .commentAudience:
             content = .valueCell()
             content.text = "Who Can Comment"
-            content.secondaryText = viewModel.commentAudience?.title
+            let current = audience(.comments) ?? viewModel.commentAudience
+            content.secondaryText = current?.title
             content.image = UIImage(systemName: "bubble.left")
             content.imageProperties.tintColor = .label
-            let current = viewModel.commentAudience
-            cell.accessories = [.popUpMenu(UIMenu(children: CommentAudience.allCases.map { audience in
+            cell.accessories = accessories(.popUpMenu(UIMenu(children: CommentAudience.allCases.map { audience in
                 UIAction(title: audience.title, state: audience == current ? .on : .off) { [weak self] _ in
                     self?.setCommentAudience(audience)
                 }
-            }), displayed: .always)]
+            }), displayed: .always), for: .comments)
         case .mentionAudience, .messageAudience:
             let kind: InteractionKind = item == .mentionAudience ? .mentions : .messages
             content = .valueCell()
             content.text = kind == .mentions ? "Who Can Mention" : "Who Can Message"
-            let current = kind == .mentions ? viewModel.mentionAudience : viewModel.messageAudience
+            let setting = Self.setting(for: kind)
+            let current = audience(setting) ?? (kind == .mentions ? viewModel.mentionAudience : viewModel.messageAudience)
             content.secondaryText = current?.title
             content.image = UIImage(systemName: kind == .mentions ? "at" : "paperplane")
             content.imageProperties.tintColor = .label
-            cell.accessories = [.popUpMenu(UIMenu(children: InteractionAudience.allCases.map { audience in
+            cell.accessories = accessories(.popUpMenu(UIMenu(children: InteractionAudience.allCases.map { audience in
                 UIAction(title: audience.title, state: audience == current ? .on : .off) { [weak self] _ in
                     self?.setAudience(audience, for: kind)
                 }
-            }), displayed: .always)]
+            }), displayed: .always), for: setting)
         case .downloads:
             // No "Show Like Counts" (#1713, the owner): likes always show.
             content.text = "Allow Downloads"
@@ -248,15 +252,14 @@ final class PrivacySectionViewController: UIViewController {
             content.imageProperties.tintColor = .label
             let toggle = UISwitch()
             if let sharing = viewModel.postSharing {
-                toggle.isOn = sharing.allowsDownloads
+                toggle.isOn = flag(.downloads) ?? sharing.allowsDownloads
             }
             toggle.accessibilityLabel = content.text
             toggle.addAction(UIAction { [weak self] action in
-                guard let self, let toggle = action.sender as? UISwitch, var next = viewModel.postSharing else { return }
-                next.allowsDownloads = toggle.isOn
-                setPostSharing(next)
+                guard let toggle = action.sender as? UISwitch else { return }
+                self?.setDownloads(toggle.isOn)
             }, for: .valueChanged)
-            cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
+            cell.accessories = accessories(toggle, for: .downloads)
         case .tab(let tab):
             content.text = tab.title
             let symbol = switch tab {
@@ -267,25 +270,26 @@ final class PrivacySectionViewController: UIViewController {
             content.image = UIImage.symbol(named: symbol)
             content.imageProperties.tintColor = .label
             let toggle = UISwitch()
-            toggle.isOn = viewModel.tabVisibility?[tab] ?? false
+            toggle.isOn = flag(.tab(tab)) ?? viewModel.tabVisibility?[tab] ?? false
             toggle.accessibilityLabel = "Show \(tab.title) to others"
             toggle.addAction(UIAction { [weak self] action in
-                guard let self, let toggle = action.sender as? UISwitch else { return }
-                setTab(tab, visible: toggle.isOn, from: toggle)
+                guard let toggle = action.sender as? UISwitch else { return }
+                self?.setTab(tab, visible: toggle.isOn)
             }, for: .valueChanged)
-            cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
+            cell.accessories = accessories(toggle, for: .tab(tab))
         case .postWindow:
             content = .valueCell()
             content.text = "Posts Visible to Others"
-            content.secondaryText = viewModel.postWindow?.title
+            let current: PostWindow?
+            if case .window(let window)? = saves.value(for: .postWindow) { current = window } else { current = viewModel.postWindow }
+            content.secondaryText = current?.title
             content.image = UIImage(systemName: "calendar")
             content.imageProperties.tintColor = .label
-            let current = viewModel.postWindow
-            cell.accessories = [.popUpMenu(UIMenu(children: PostWindow.allCases.map { window in
+            cell.accessories = accessories(.popUpMenu(UIMenu(children: PostWindow.allCases.map { window in
                 UIAction(title: window.title, state: window == current ? .on : .off) { [weak self] _ in
                     self?.setPostWindow(window)
                 }
-            }), displayed: .always)]
+            }), displayed: .always), for: .postWindow)
         case .hideLists:
             content.text = "Followers and Following Lists"
             content.image = UIImage(systemName: "person.2")
@@ -376,85 +380,101 @@ final class PrivacySectionViewController: UIViewController {
         dataSource.apply(snapshot, animatingDifferences: false)
     }
 
+    // MARK: - Changes (#1775)
+
+    /// A setting a row saves.
+    private enum Setting: Hashable, Sendable {
+        case privateAccount, downloads, tab(ProfileTabVisibility.Tab)
+        case comments, mentions, messages, postWindow
+    }
+
+    /// A change on its way.
+    private enum Change: Sendable {
+        case flag(Bool)
+        case audience(CommentAudience)
+        case window(PostWindow)
+    }
+
+    private static func setting(for kind: InteractionKind) -> Setting {
+        kind == .mentions ? .mentions : .messages
+    }
+
+    /// The switch value on its way for `setting`, nil when none.
+    private func flag(_ setting: Setting) -> Bool? {
+        if case .flag(let isOn)? = saves.value(for: setting) { return isOn }
+        return nil
+    }
+
+    /// The audience on its way for `setting`, nil when none.
+    private func audience(_ setting: Setting) -> CommentAudience? {
+        if case .audience(let audience)? = saves.value(for: setting) { return audience }
+        return nil
+    }
+
+    /// `toggle` for `setting`: on its way, it waits with the loader beside it.
+    private func accessories(_ toggle: UISwitch, for setting: Setting) -> [UICellAccessory] {
+        toggle.isEnabled = !saves.isSaving(setting)
+        return accessories(.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always))), for: setting)
+    }
+
+    private func accessories(_ control: UICellAccessory, for setting: Setting) -> [UICellAccessory] {
+        saves.isSaving(setting) ? [.busy(), control] : [control]
+    }
+
+    /// Shows `change` at once and saves it through the model in turn; on
+    /// failure the row goes back to the server's value, then says why.
+    private func save(
+        _ change: Change, for setting: Setting,
+        _ work: @escaping @MainActor (PrivacySectionViewModel) async throws -> Void,
+        message: @escaping @MainActor (Error) -> String
+    ) {
+        let viewModel = viewModel
+        saves.save(change, for: setting, { _ in try await work(viewModel) }, failed: { [weak self] error in
+            let alert = UIAlertController(title: nil, message: message(error), preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            self?.present(alert, animated: true)
+        })
+    }
+
     private func setCommentAudience(_ audience: CommentAudience) {
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await viewModel.setCommentAudience(audience)
-            } catch {
-                applySnapshot()
-                // A supervisor's floor holds it (PRF-5006, #417): say who.
-                let message = SupervisionLock.message(for: error, fallback: "Couldn't change who can comment. Try again.")
-                let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
-                present(alert, animated: true)
-            }
-        }
+        guard (self.audience(.comments) ?? viewModel.commentAudience) != audience else { return }
+        save(.audience(audience), for: .comments, { try await $0.setCommentAudience(audience) }, message: { error in
+            // A supervisor's floor holds it (PRF-5006, #417): say who.
+            SupervisionLock.message(for: error, fallback: "Couldn't change who can comment. Try again.")
+        })
     }
 
     private func setAudience(_ audience: InteractionAudience, for kind: InteractionKind) {
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await viewModel.setAudience(audience, for: kind)
-            } catch {
-                applySnapshot()
-                let what = kind == .mentions ? "who can mention you" : "who can message you"
-                let message = SupervisionLock.message(for: error, fallback: "Couldn't change \(what). Try again.")
-                let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
-                present(alert, animated: true)
-            }
-        }
+        let setting = Self.setting(for: kind)
+        let current = self.audience(setting) ?? (kind == .mentions ? viewModel.mentionAudience : viewModel.messageAudience)
+        guard current != audience else { return }
+        save(.audience(audience), for: setting, { try await $0.setAudience(audience, for: kind) }, message: { error in
+            let what = kind == .mentions ? "who can mention you" : "who can message you"
+            return SupervisionLock.message(for: error, fallback: "Couldn't change \(what). Try again.")
+        })
     }
 
-    private func setPostSharing(_ next: PostSharing) {
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await viewModel.setPostSharing(next)
-            } catch {
-                // Snap the switch back to what the server holds.
-                applySnapshot()
-                let alert = UIAlertController(title: nil, message: "Couldn't change this setting. Try again.", preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
-                present(alert, animated: true)
-            }
-        }
+    /// The downloads switch, over the sharing record as the save before it
+    /// left it.
+    private func setDownloads(_ allowed: Bool) {
+        guard viewModel.postSharing != nil else { return }
+        save(.flag(allowed), for: .downloads, { viewModel in
+            guard var next = viewModel.postSharing else { return }
+            next.allowsDownloads = allowed
+            try await viewModel.setPostSharing(next)
+        }, message: { _ in "Couldn't change this setting. Try again." })
     }
 
-    /// Not optimistic: the switch waits for the server, disabled meanwhile,
-    /// and snaps back if the change fails.
-    private func setTab(_ tab: ProfileTabVisibility.Tab, visible: Bool, from toggle: UISwitch) {
-        toggle.isEnabled = false
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await viewModel.setTab(tab, visible: visible)
-            } catch {
-                let alert = UIAlertController(
-                    title: nil, message: "Couldn't change who sees your \(tab.title) tab. Try again.", preferredStyle: .alert
-                )
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
-                present(alert, animated: true)
-            }
-            toggle.isEnabled = true
-            applySnapshot()
-        }
+    private func setTab(_ tab: ProfileTabVisibility.Tab, visible: Bool) {
+        save(.flag(visible), for: .tab(tab), { try await $0.setTab(tab, visible: visible) }, message: { _ in
+            "Couldn't change who sees your \(tab.title) tab. Try again."
+        })
     }
 
     private func setPostWindow(_ window: PostWindow) {
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await viewModel.setPostWindow(window)
-            } catch {
-                applySnapshot()
-                let alert = UIAlertController(title: nil, message: "Couldn't change who sees your older posts. Try again.", preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
-                present(alert, animated: true)
-            }
-        }
+        save(.window(window), for: .postWindow, { try await $0.setPostWindow(window) }, message: { _ in
+            "Couldn't change who sees your older posts. Try again."
+        })
     }
 
     /// The failed row's retry: only that setting is read again. A retry that
@@ -469,20 +489,12 @@ final class PrivacySectionViewController: UIViewController {
         }
     }
 
+    /// Not optimistic: the switch stays where the tap put it, with the
+    /// loader beside it, until the server holds it, or snaps back.
     private func setPrivate(_ isPrivate: Bool) {
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await viewModel.setPrivate(isPrivate)
-            } catch {
-                // Snap the switch back to what the server holds.
-                applySnapshot()
-                let message = SupervisionLock.message(for: error, fallback: "Couldn't change your privacy setting. Try again.")
-                let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
-                present(alert, animated: true)
-            }
-        }
+        save(.flag(isPrivate), for: .privateAccount, { try await $0.setPrivate(isPrivate) }, message: { error in
+            SupervisionLock.message(for: error, fallback: "Couldn't change your privacy setting. Try again.")
+        })
     }
 }
 

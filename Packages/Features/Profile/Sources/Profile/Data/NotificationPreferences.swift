@@ -108,6 +108,40 @@ public enum NotificationPreferencesChange: Equatable, Sendable {
     case quietHours(QuietHours?)
 }
 
+extension NotificationPreferencesChange {
+    /// The preference a change sets: two changes to one wait for each other
+    /// (#1775).
+    enum Target: Hashable, Sendable {
+        case push(NotificationCategory), email(NotificationCategory), pause, quietHours
+    }
+
+    var target: Target {
+        switch self {
+        case .push(let category, _): .push(category)
+        case .email(let category, _): .email(category)
+        case .pause: .pause
+        case .quietHours: .quietHours
+        }
+    }
+}
+
+extension NotificationPreferences {
+    /// These preferences with `change` made: what the rows show while it
+    /// travels (#1775).
+    func applying(_ change: NotificationPreferencesChange) -> NotificationPreferences {
+        var next = self
+        switch change {
+        case .push(let category, let isOn):
+            if isOn { next.mutedCategories.remove(category) } else { next.mutedCategories.insert(category) }
+        case .email(let category, let isOn):
+            if isOn { next.emailCategories.insert(category) } else { next.emailCategories.remove(category) }
+        case .pause(let until): next.pausedUntil = until
+        case .quietHours(let hours): next.quietHours = hours
+        }
+        return next
+    }
+}
+
 /// Settings → Notifications.
 public protocol NotificationPreferencesManaging: Sendable {
     func notificationPreferences() async throws -> NotificationPreferences

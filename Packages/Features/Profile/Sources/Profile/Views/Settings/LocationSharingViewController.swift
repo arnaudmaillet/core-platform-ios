@@ -4,7 +4,9 @@ import UIKit
 
 /// Settings → Privacy → Location Sharing (#398): ghost mode and city-level
 /// precision, enforced by the server on the map and on posts for everyone
-/// but the author (backend #717, #718). Not optimistic.
+/// but the author (backend #717, #718). Not optimistic: a change shows where
+/// the tap put it, with the loader beside it, until the server holds it
+/// (#1775, `SettingSaves`).
 final class LocationSharingViewController: UIViewController {
     enum Phase: Equatable {
         case loading
@@ -36,7 +38,17 @@ final class LocationSharingViewController: UIViewController {
     /// can say "You’re offline" when that is the cause (#794). Set before
     /// the phase, so the redraw `.failed` triggers already reads it.
     private var loadFailure: NetworkFailure?
-    private var isSaving = false
+    /// The two settings a row saves.
+    private enum Setting: Hashable, Sendable {
+        case ghost, cityLevel
+    }
+
+    /// The settings on their way to the server (#1775).
+    private lazy var saves: SettingSaves<Setting, Bool> = {
+        let saves = SettingSaves<Setting, Bool>()
+        saves.onChange = { [weak self] in self?.applySnapshot() }
+        return saves
+    }()
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
@@ -119,20 +131,23 @@ final class LocationSharingViewController: UIViewController {
                 content.image = UIImage(systemName: "eye.slash")
                 content.imageProperties.tintColor = .label
                 let toggle = UISwitch()
-                toggle.isOn = settings?.ghost ?? false
-                toggle.isEnabled = !isSaving
+                toggle.isOn = shown(.ghost, in: settings)
+                toggle.isEnabled = !saves.isSaving(.ghost)
                 toggle.addAction(UIAction { [weak self] action in
                     guard let toggle = action.sender as? UISwitch else { return }
-                    self?.save { $0.ghost = toggle.isOn }
+                    self?.set(.ghost, to: toggle.isOn)
                 }, for: .valueChanged)
-                cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
+                let control = UICellAccessory.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))
+                cell.accessories = saves.isSaving(.ghost) ? [.busy(), control] : [control]
             case .precise, .city:
                 let isCity = item == .city
                 content.text = isCity ? "City Level" : "Precise"
                 content.secondaryText = isCity ? "Others see the city you posted from." : "Others see where you posted."
-                let ghosted = settings?.ghost ?? false
+                let ghosted = shown(.ghost, in: settings)
                 content.textProperties.color = ghosted ? .secondaryLabel : .label
-                if settings?.cityLevel == isCity { cell.accessories = [.checkmark()] }
+                if settings != nil, shown(.cityLevel, in: settings) == isCity {
+                    cell.accessories = saves.isSaving(.cityLevel) ? [.busy(), .checkmark()] : [.checkmark()]
+                }
             case .planned(let title):
                 content = .cell()
                 content.text = title
@@ -220,27 +235,33 @@ final class LocationSharingViewController: UIViewController {
         return gate
     }()
 
-    private func save(_ change: (inout LocationSharingSettings) -> Void) {
-        guard case .loaded(let current) = phase, !isSaving else { return }
-        var next = current
-        change(&next)
-        guard next != current else { return }
-        isSaving = true
-        applySnapshot()
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await manager.setLocationSharing(next)
-                isSaving = false
-                phase = .loaded(next)
-            } catch {
-                isSaving = false
-                applySnapshot()
-                let alert = UIAlertController(title: nil, message: "Couldn't change your location sharing. Try again.", preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
-                present(alert, animated: true)
-            }
+    /// What a row shows for `setting`: the change on its way, else the
+    /// server's.
+    private func shown(_ setting: Setting, in settings: LocationSharingSettings?) -> Bool {
+        if let pending = saves.value(for: setting) { return pending }
+        switch setting {
+        case .ghost: return settings?.ghost ?? false
+        case .cityLevel: return settings?.cityLevel ?? false
         }
+    }
+
+    /// Saves one setting over the record the saves before it left — the
+    /// server takes the whole record.
+    private func set(_ setting: Setting, to value: Bool) {
+        guard case .loaded(let current) = phase, shown(setting, in: current) != value else { return }
+        saves.save(value, for: setting, { [weak self] value in
+            guard let self, case .loaded(var next) = phase else { return }
+            switch setting {
+            case .ghost: next.ghost = value
+            case .cityLevel: next.cityLevel = value
+            }
+            try await manager.setLocationSharing(next)
+            phase = .loaded(next)
+        }, failed: { [weak self] _ in
+            let alert = UIAlertController(title: nil, message: "Couldn't change your location sharing. Try again.", preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            self?.present(alert, animated: true)
+        })
     }
 }
 
@@ -255,8 +276,8 @@ extension LocationSharingViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .precise: save { $0.cityLevel = false }
-        case .city: save { $0.cityLevel = true }
+        case .precise: set(.cityLevel, to: false)
+        case .city: set(.cityLevel, to: true)
         case .failed: load()
         case .takingLonger:
             loadingGate.retry()

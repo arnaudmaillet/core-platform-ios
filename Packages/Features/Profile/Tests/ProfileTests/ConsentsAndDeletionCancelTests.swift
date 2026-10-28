@@ -80,12 +80,12 @@ struct ConsentsAndDeletionCancelTests {
         #expect(ConsentsViewController.statusText(.init(isGiven: false, changedAt: Date())).hasPrefix("Withdrawn on "))
     }
 
-    // MARK: - One save at a time
+    // MARK: - One save after another (#1775)
 
-    /// A flip while a save is in flight — the same switch or the other one —
-    /// sends nothing: one `updateConsents` at a time. The flipped switch
-    /// shows its new value while the change travels.
-    @Test(.timeLimit(.minutes(10))) func aSecondFlipWhileSavingSendsNothing() async {
+    /// The other switch stays usable while one travels: its change is shown
+    /// at once and sent once the first is saved — one `updateConsents` at a
+    /// time, in order. The same switch again sends nothing.
+    @Test(.timeLimit(.minutes(10))) func aSecondConsentWaitsItsTurn() async {
         let stub = GatedConsents()
         let model = ConsentsViewModel(manager: stub)
         await model.load()
@@ -93,17 +93,23 @@ struct ConsentsAndDeletionCancelTests {
 
         let first = Task { await model.set(.marketing, to: true) }
         await stub.waitForUpdate()
-        #expect(model.isSaving)
+        #expect(model.isSaving(.marketing))
         #expect(model.isGiven(.marketing))
-        #expect(await model.set(.analytics, to: false) == .ignored)
         #expect(await model.set(.marketing, to: false) == .ignored)
+        let second = Task { await model.set(.analytics, to: false) }
+        while !model.isSaving(.analytics) { await Task.yield() }
+        #expect(!model.isGiven(.analytics), "the second flip was not shown as made")
+        #expect(await stub.updates == 1, "the second change went out beside the first")
 
         await stub.release()
         #expect(await first.value == .saved)
-        #expect(await stub.updates == 1)
+        await stub.waitForUpdate(2)
+        await stub.release()
+        #expect(await second.value == .saved)
+        #expect(await stub.updates == 2)
         #expect(!model.isSaving)
         #expect(model.consents?.marketing.isGiven == true)
-        #expect(model.consents?.analytics.isGiven == true)
+        #expect(model.consents?.analytics.isGiven == false)
     }
 
     /// A failed save leaves the record as it was, and the switch's value
@@ -196,9 +202,9 @@ private actor GatedConsents: AccountConsentManaging {
         return record
     }
 
-    /// Returns once an update has reached the stub.
-    func waitForUpdate() async {
-        guard updates == 0 else { return }
+    /// Returns once `count` updates have reached the stub.
+    func waitForUpdate(_ count: Int = 1) async {
+        guard updates < count else { return }
         await withCheckedContinuation { arrival = $0 }
     }
 

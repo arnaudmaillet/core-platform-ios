@@ -5,7 +5,8 @@ import UIKit
 /// Settings → Safety and Interactions → Limits (#416, backend #735, #736):
 /// a temporary limit that holds comments and messages from an audience for
 /// review, and whether others may reuse this profile's original sounds.
-/// Not optimistic.
+/// Not optimistic: a change shows where the tap put it, with the loader
+/// beside it, until the server holds it (#1775, `SettingSaves`).
 final class LimitInteractionsViewController: UIViewController {
     struct State: Equatable {
         var limit: InteractionLimit?
@@ -42,7 +43,19 @@ final class LimitInteractionsViewController: UIViewController {
     /// can say "You’re offline" when that is the cause (#794). Set before
     /// the phase, so the redraw `.failed` triggers already reads it.
     private var loadFailure: NetworkFailure?
-    private var isSaving = false
+    /// The limit on its way to the server (#1775): on, off, another audience
+    /// or another end — one at a time.
+    private lazy var limitSaves: SettingSaves<Section, InteractionLimit?> = {
+        let saves = SettingSaves<Section, InteractionLimit?>()
+        saves.onChange = { [weak self] in self?.applySnapshot() }
+        return saves
+    }()
+    /// The sounds' switch on its way.
+    private lazy var soundSaves: SettingSaves<Section, Bool> = {
+        let saves = SettingSaves<Section, Bool>()
+        saves.onChange = { [weak self] in self?.applySnapshot() }
+        return saves
+    }()
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
@@ -139,18 +152,26 @@ final class LimitInteractionsViewController: UIViewController {
             guard let self else { return }
             cell.accessories = []
             var content = UIListContentConfiguration.cell()
-            let state: State? = if case .loaded(let current) = phase { current } else { nil }
+            let saved: State? = if case .loaded(let current) = phase { current } else { nil }
+            // What the rows show: the changes on their way over the server's
+            // record; a row whose change travels wears the loader (#1775).
+            let state = shown(saved)
             switch item {
             case .limitSwitch:
                 content.text = "Limit Interactions"
                 content.image = UIImage(systemName: "hand.raised")
                 content.imageProperties.tintColor = .label
-                cell.accessories = [switchAccessory(isOn: state?.limit != nil) { [weak self] isOn in
+                let control = switchAccessory(isOn: state?.limit != nil, isSaving: limitSaves.isSaving(.limit)) { [weak self] isOn in
                     self?.setLimitOn(isOn)
-                }]
+                }
+                let travels = (state?.limit != nil) != (saved?.limit != nil)
+                cell.accessories = travels ? [.busy(), control] : [control]
             case .audience(let audience):
                 content.text = audience.title
-                if state?.limit?.audience == audience { cell.accessories = [.checkmark()] }
+                if state?.limit?.audience == audience {
+                    let travels = saved?.limit != nil && saved?.limit?.audience != audience
+                    cell.accessories = travels ? [.busy(), .checkmark()] : [.checkmark()]
+                }
             case .duration:
                 content = .valueCell()
                 content.text = "Until"
@@ -158,14 +179,17 @@ final class LimitInteractionsViewController: UIViewController {
                 let choices = InteractionLimit.durations.map { days in
                     UIAction(title: Self.durationTitle(days: days)) { [weak self] _ in self?.setDuration(days: days) }
                 }
-                cell.accessories = [.popUpMenu(UIMenu(children: choices), displayed: .always)]
+                let menu = UICellAccessory.popUpMenu(UIMenu(children: choices), displayed: .always)
+                let travels = saved?.limit != nil && saved?.limit?.until != state?.limit?.until
+                cell.accessories = travels ? [.busy(), menu] : [menu]
             case .soundReuse:
                 content.text = "Others Can Use Your Sounds"
                 content.image = UIImage(systemName: "music.note")
                 content.imageProperties.tintColor = .label
-                cell.accessories = [switchAccessory(isOn: state?.allowsSoundReuse ?? true) { [weak self] isOn in
+                let control = switchAccessory(isOn: state?.allowsSoundReuse ?? true, isSaving: soundSaves.isSaving(.sounds)) { [weak self] isOn in
                     self?.setSoundReuse(isOn)
-                }]
+                }
+                cell.accessories = soundSaves.isSaving(.sounds) ? [.busy(), control] : [control]
             case .loading:
                 cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
@@ -206,7 +230,7 @@ final class LimitInteractionsViewController: UIViewController {
         }
     }
 
-    private func switchAccessory(isOn: Bool, onChange: @escaping (Bool) -> Void) -> UICellAccessory {
+    private func switchAccessory(isOn: Bool, isSaving: Bool, onChange: @escaping (Bool) -> Void) -> UICellAccessory {
         let toggle = UISwitch()
         toggle.isOn = isOn
         toggle.isEnabled = !isSaving
@@ -232,9 +256,9 @@ final class LimitInteractionsViewController: UIViewController {
             }
         case .failed:
             snapshot.appendItems([.failed], toSection: .limit)
-        case .loaded(let state):
+        case .loaded(let saved):
             snapshot.appendItems([.limitSwitch], toSection: .limit)
-            if state.limit != nil {
+            if shown(saved)?.limit != nil {
                 snapshot.appendSections([.audience])
                 snapshot.appendItems(InteractionLimitAudience.allCases.map(Item.audience) + [.duration], toSection: .audience)
             }
@@ -263,24 +287,34 @@ final class LimitInteractionsViewController: UIViewController {
 
     // MARK: - Changes
 
-    private func run(_ change: @escaping () async throws -> State) {
-        guard !isSaving else { return }
-        isSaving = true
-        applySnapshot()
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let next = try await change()
-                isSaving = false
-                phase = .loaded(next)
-            } catch {
-                isSaving = false
-                applySnapshot()
-                let alert = UIAlertController(title: nil, message: "Couldn't change your limits. Try again.", preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
-                present(alert, animated: true)
+    /// The record as the rows show it: the changes on their way over it.
+    private func shown(_ saved: State?) -> State? {
+        guard var state = saved else { return nil }
+        if let limit = limitSaves.value(for: .limit) { state.limit = limit }
+        if let allowed = soundSaves.value(for: .sounds) { state.allowsSoundReuse = allowed }
+        return state
+    }
+
+    private func failed() {
+        let alert = UIAlertController(title: nil, message: "Couldn't change your limits. Try again.", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+
+    /// Saves `limit` — nil clears it — and takes it into the record.
+    private func save(_ limit: InteractionLimit?) {
+        guard case .loaded = phase else { return }
+        let manager = manager
+        limitSaves.save(limit, for: .limit, { [weak self] limit in
+            if let limit {
+                try await manager.setInteractionLimit(limit)
+            } else {
+                try await manager.clearInteractionLimit()
             }
-        }
+            guard let self, case .loaded(var state) = phase else { return }
+            state.limit = limit
+            phase = .loaded(state)
+        }, failed: { [weak self] _ in self?.failed() })
     }
 
     private func until(days: Int) -> Date {
@@ -289,54 +323,30 @@ final class LimitInteractionsViewController: UIViewController {
 
     /// On: a week, from people who don't follow you; off: cleared.
     private func setLimitOn(_ isOn: Bool) {
-        guard case .loaded(var state) = phase else { return }
-        let manager = manager
-        if isOn {
-            let limit = InteractionLimit(audience: .nonFollowers, until: until(days: 7))
-            run {
-                try await manager.setInteractionLimit(limit)
-                state.limit = limit
-                return state
-            }
-        } else {
-            run {
-                try await manager.clearInteractionLimit()
-                state.limit = nil
-                return state
-            }
-        }
+        save(isOn ? InteractionLimit(audience: .nonFollowers, until: until(days: 7)) : nil)
     }
 
     private func setAudience(_ audience: InteractionLimitAudience) {
-        guard case .loaded(var state) = phase, var limit = state.limit, limit.audience != audience else { return }
+        guard case .loaded(let saved) = phase, var limit = shown(saved)?.limit, limit.audience != audience else { return }
         limit.audience = audience
-        let manager = manager
-        run {
-            try await manager.setInteractionLimit(limit)
-            state.limit = limit
-            return state
-        }
+        save(limit)
     }
 
     private func setDuration(days: Int) {
-        guard case .loaded(var state) = phase, var limit = state.limit else { return }
+        guard case .loaded(let saved) = phase, var limit = shown(saved)?.limit else { return }
         limit.until = until(days: days)
-        let manager = manager
-        run {
-            try await manager.setInteractionLimit(limit)
-            state.limit = limit
-            return state
-        }
+        save(limit)
     }
 
     private func setSoundReuse(_ allowed: Bool) {
-        guard case .loaded(var state) = phase else { return }
+        guard case .loaded = phase else { return }
         let manager = manager
-        run {
+        soundSaves.save(allowed, for: .sounds, { [weak self] allowed in
             try await manager.setAllowsSoundReuse(allowed)
+            guard let self, case .loaded(var state) = phase else { return }
             state.allowsSoundReuse = allowed
-            return state
-        }
+            phase = .loaded(state)
+        }, failed: { [weak self] _ in self?.failed() })
     }
 }
 

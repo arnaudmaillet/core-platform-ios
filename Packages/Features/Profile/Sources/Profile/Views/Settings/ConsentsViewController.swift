@@ -198,11 +198,11 @@ final class ConsentsViewController: UIViewController {
         case .marketing:
             let consent = viewModel.consents?.marketing ?? .init(isGiven: false)
             cell.contentConfiguration = Self.content("Marketing", detail: "Emails and offers about the app · \(Self.statusText(consent))", symbol: "envelope")
-            cell.accessories = [accessory(marketingSwitch, for: .marketing)]
+            cell.accessories = accessories(marketingSwitch, for: .marketing)
         case .analytics:
             let consent = viewModel.consents?.analytics ?? .init(isGiven: false)
             cell.contentConfiguration = Self.content("Analytics", detail: "Usage statistics that help improve the app · \(Self.statusText(consent))", symbol: "chart.bar")
-            cell.accessories = [accessory(analyticsSwitch, for: .analytics)]
+            cell.accessories = accessories(analyticsSwitch, for: .analytics)
         case .dataProcessing:
             let consent = viewModel.consents?.dataProcessing ?? .init(isGiven: true)
             cell.contentConfiguration = Self.content("Data Processing", detail: "To provide the service · \(Self.statusText(consent))", symbol: "server.rack")
@@ -251,11 +251,14 @@ final class ConsentsViewController: UIViewController {
         return toggle
     }
 
-    /// The cell only says whether `toggle` can be touched; its value is
+    /// The cell only says whether `toggle` can be touched, and shows the
+    /// loader beside it while its change travels (#1775); its value is
     /// `syncSwitches`'s.
-    private func accessory(_ toggle: UISwitch, for consent: ConsentsViewModel.Consent) -> UICellAccessory {
-        toggle.isEnabled = !viewModel.isSaving
-        return .customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))
+    private func accessories(_ toggle: UISwitch, for consent: ConsentsViewModel.Consent) -> [UICellAccessory] {
+        let travels = viewModel.isSaving(consent)
+        toggle.isEnabled = !travels
+        let control = UICellAccessory.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))
+        return travels ? [.busy(), control] : [control]
     }
 
     /// Brings both switches up to date with the model — the change in flight,
@@ -268,7 +271,7 @@ final class ConsentsViewController: UIViewController {
         for (toggle, consent) in [(marketingSwitch, ConsentsViewModel.Consent.marketing), (analyticsSwitch, .analytics)] {
             let isOn = viewModel.isGiven(consent)
             if toggle.isOn != isOn { toggle.setOn(isOn, animated: toggle.window != nil) }
-            toggle.isEnabled = !viewModel.isSaving
+            toggle.isEnabled = !viewModel.isSaving(consent)
         }
     }
 }
