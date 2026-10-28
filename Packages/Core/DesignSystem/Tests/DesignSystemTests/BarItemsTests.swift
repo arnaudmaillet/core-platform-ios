@@ -38,6 +38,25 @@ struct BarItemsTests {
         #expect(primary.identifier == "test.follow")
     }
 
+    /// A control at work (#1775): the loader, under the control's own
+    /// identifier so the bar morphs the word into it, turning on screen,
+    /// read as what it is doing.
+    @Test func aBusyItemIsTheLoaderUnderTheControlsIdentity() throws {
+        let item = BarItems.busy(id: "test.save", label: "Saving")
+        #expect(item.identifier == "test.save")
+        let view = try #require(item.customView as? BarBusyView)
+        #expect(view.accessibilityLabel == "Saving")
+        view.frame = CGRect(x: 0, y: 0, width: 48, height: 48)
+        #expect(view.hitTest(CGPoint(x: 24, y: 24), with: nil) == nil, "a loader that takes taps")
+        #expect(!view.debugIsLoading, "turning off screen (#580)")
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        window.addSubview(view)
+        window.isHidden = false
+        #expect(view.debugIsLoading)
+        view.removeFromSuperview()
+        #expect(!view.debugIsLoading)
+    }
+
     /// R5: the wide item's bubble is the BAR's — no glass of its own — and
     /// its prominence is the bar's `.prominent`.
     @Test func aStretchedItemLetsTheBarDrawItsBubble() {

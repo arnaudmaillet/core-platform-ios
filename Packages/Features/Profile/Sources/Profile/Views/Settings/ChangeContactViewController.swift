@@ -27,6 +27,11 @@ final class ChangeContactViewController: UIViewController {
         didSet { render() }
     }
     private var resendAvailableAt = Date()
+    /// Whether the work under way is the primary action's — Send Code or
+    /// Confirm, whose word becomes the loader (#1775) — not a resend.
+    private var primaryAtWork = false
+    /// What the primary item shows: its word, or "" for the loader.
+    private var shownPrimary = "Send Code"
 
     private let promptLabel = UILabel()
     private let addressField = UITextField()
@@ -180,7 +185,7 @@ final class ChangeContactViewController: UIViewController {
             resendButton.isHidden = true
             editAddressButton.isHidden = true
             showPrimary(title: "Send Code")
-            ownTrailingBarItems.first?.isEnabled = address != nil && address != current && !isWorking
+            if !primaryBusy { ownTrailingBarItems.first?.isEnabled = address != nil && address != current && !isWorking }
         case .code(let challenge):
             promptLabel.text = Self.codePrompt(challenge)
             footerLabel.text = nil
@@ -189,7 +194,7 @@ final class ChangeContactViewController: UIViewController {
             resendButton.isHidden = false
             editAddressButton.isHidden = false
             showPrimary(title: "Confirm")
-            ownTrailingBarItems.first?.isEnabled = code.count == 6 && !isWorking
+            if !primaryBusy { ownTrailingBarItems.first?.isEnabled = code.count == 6 && !isWorking }
             updateResend()
         }
         navigationItem.hidesBackButton = isWorking
@@ -201,15 +206,26 @@ final class ChangeContactViewController: UIViewController {
     /// The primary action — Send Code, then Confirm — one identifier for
     /// both words, so a new word is a new item the bar morphs to (#1679,
     /// R3), never a title changed in place.
+    static let primaryID = "settings.changeContact.primary"
+
     private func primaryItem(title: String) -> UIBarButtonItem {
-        BarItems.title(id: "settings.changeContact.primary", title: title, prominent: true) { [weak self] in
+        BarItems.title(id: Self.primaryID, title: title, prominent: true) { [weak self] in
             self?.primaryTapped()
         }
     }
 
+    private var primaryBusy: Bool { isWorking && primaryAtWork }
+
+    /// The primary word, or — at work (#1775) — the kit's loader under the
+    /// same identifier, which the bar morphs to and back.
     private func showPrimary(title: String) {
-        guard ownTrailingBarItems.first?.title != title else { return }
-        setOwnTrailingBarItems([primaryItem(title: title)], animated: view.window != nil)
+        let shown = primaryBusy ? "" : title
+        guard shownPrimary != shown else { return }
+        shownPrimary = shown
+        let item = primaryBusy
+            ? BarItems.busy(id: Self.primaryID, label: title == "Confirm" ? "Confirming" : "Sending code")
+            : primaryItem(title: title)
+        setOwnTrailingBarItems([item], animated: view.window != nil)
     }
 
     @objc private func primaryTapped() {
@@ -227,6 +243,7 @@ final class ChangeContactViewController: UIViewController {
 
     private func sendCode() {
         guard let address, !isWorking else { return }
+        primaryAtWork = true
         isWorking = true
         Task { [weak self] in
             guard let self else { return }
@@ -246,6 +263,7 @@ final class ChangeContactViewController: UIViewController {
 
     private func resend() {
         guard case .code(let challenge) = phase, Date() >= resendAvailableAt, !isWorking else { return }
+        primaryAtWork = false
         isWorking = true
         Task { [weak self] in
             guard let self else { return }
@@ -266,6 +284,7 @@ final class ChangeContactViewController: UIViewController {
     private func confirm(_ challenge: ContactChallenge) {
         guard code.count == 6, !isWorking else { return }
         let code = code
+        primaryAtWork = true
         isWorking = true
         Task { [weak self] in
             guard let self else { return }

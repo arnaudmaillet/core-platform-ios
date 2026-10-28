@@ -552,11 +552,8 @@ final class TwoStepEnrollmentViewController: UIViewController {
         super.viewDidLoad()
         navigationItem.largeTitleDisplayMode = .never
         view.backgroundColor = .systemGroupedBackground
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: "Turn On", style: .prominent, target: self, action: #selector(confirm)
-        )
-        navigationItem.rightBarButtonItem?.identifier = "settings.twoStep.turnOn"
-        navigationItem.rightBarButtonItem?.isEnabled = false
+        setOwnTrailingBarItems([turnOnItem()], animated: false)
+        ownTrailingBarItems.first?.isEnabled = false
 
         scroll.alwaysBounceVertical = true
         scroll.keyboardDismissMode = .interactive
@@ -870,16 +867,26 @@ final class TwoStepEnrollmentViewController: UIViewController {
         Feedback.success("Copied", symbol: "doc.on.doc.fill", from: self)
     }
 
-    @objc private func confirm() {
+    static let turnOnID = "settings.twoStep.turnOn"
+
+    private func turnOnItem() -> UIBarButtonItem {
+        BarItems.title(id: Self.turnOnID, title: "Turn On", prominent: true) { [weak self] in self?.confirm() }
+    }
+
+    private func confirm() {
         let code = Self.cleaned(codeField.text ?? "")
         guard code.count == 6, !isConfirming, enrollment != nil else { return }
         isConfirming = true
-        ownTrailingBarItems.first?.isEnabled = false
+        // At work (#1775): the word becomes the kit's loader, under the same
+        // identifier, and comes back unless two-step is on.
+        setOwnTrailingBarItems([BarItems.busy(id: Self.turnOnID, label: "Turning on")], animated: view.window != nil)
         navigationItem.hidesBackButton = true
         Task { [weak self] in
             guard let self else { return }
+            var enabled = false
             do {
                 let codes = try await manager.confirmTwoStepEnrollment(code: code)
+                enabled = true
                 onEnabled(codes)
             } catch TwoStepError.enrollmentExpired {
                 presentMessage(TwoStepViewController.failureMessage(TwoStepError.enrollmentExpired)) { [weak self] in
@@ -892,6 +899,7 @@ final class TwoStepEnrollmentViewController: UIViewController {
             }
             isConfirming = false
             navigationItem.hidesBackButton = false
+            if !enabled { setOwnTrailingBarItems([turnOnItem()], animated: view.window != nil) }
             codeChanged()
         }
     }

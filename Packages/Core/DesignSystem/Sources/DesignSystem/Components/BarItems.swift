@@ -126,6 +126,21 @@ public enum BarItems {
         return item
     }
 
+    /// A control at work (#1775, the owner 2026-10-28): the word of a Save,
+    /// a Confirm or a Link becomes the kit's loader under the SAME
+    /// identifier, so the bar morphs one into the other (R3) — and back to
+    /// the word, a new item again, when the work fails. Not tappable.
+    /// `label` is what VoiceOver says ("Saving").
+    ///
+    /// The loader turns at once, without the loader's grace: the word giving
+    /// way is the tap's answer, and an empty bubble for the grace would read
+    /// as a glitch.
+    public static func busy(id: String, label: String) -> UIBarButtonItem {
+        let item = UIBarButtonItem(customView: BarBusyView(label: label))
+        item.identifier = id
+        return item
+    }
+
     /// Two items' own bubbles: a zero-width space keeps UIKit from joining
     /// adjacent items in one shared platter.
     public static func separator() -> UIBarButtonItem {
@@ -135,6 +150,50 @@ public enum BarItems {
     /// The bar's glass bubbles' height on iOS 27 (iPhone 18 Pro), which a
     /// stretched item matches.
     public static let bubbleHeight: CGFloat = 48
+}
+
+/// `BarItems.busy`'s content: the kit's loader, centred in the bubble the
+/// bar draws, turning while on screen.
+final class BarBusyView: UIView {
+    private let loader = AppLoaderView(size: .medium)
+
+    init(label: String) {
+        super.init(frame: .zero)
+        loader.hidesWhenStopped = false
+        loader.isAccessibilityElement = false
+        loader.constrain(in: self) { parent in
+            loader.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
+            loader.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
+        }
+        let tall = heightAnchor.constraint(equalToConstant: BarItems.bubbleHeight)
+        tall.priority = .init(999)
+        tall.isActive = true
+        isAccessibilityElement = true
+        accessibilityLabel = label
+        accessibilityTraits = [.updatesFrequently, .notEnabled]
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Square, as an icon item's bubble.
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: BarItems.bubbleHeight, height: UIView.noIntrinsicMetric)
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        window != nil ? loader.startAnimating() : loader.stopAnimating()
+    }
+
+    /// Takes no taps — `UIBarButtonItem(customView:)` turns interaction back
+    /// on, so the view says so itself.
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
+
+    #if DEBUG
+    /// Internal for tests: whether the loader turns.
+    var debugIsLoading: Bool { loader.isAnimating }
+    #endif
 }
 
 /// The stretched toolbar item's content (#1678, `BarItems.stretched`): its

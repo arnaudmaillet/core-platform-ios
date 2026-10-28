@@ -76,10 +76,7 @@ final class SupervisionAcceptViewController: UIViewController {
         super.viewDidLoad()
         navigationItem.largeTitleDisplayMode = .never
         view.backgroundColor = .systemGroupedBackground
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            title: "Link", style: .prominent, target: self, action: #selector(link)
-        )
-        navigationItem.rightBarButtonItem?.identifier = "settings.supervisionAccept.link"
+        setOwnTrailingBarItems([linkItem()], animated: false)
 
         let scroll = UIScrollView()
         scroll.alwaysBounceVertical = true
@@ -174,17 +171,28 @@ final class SupervisionAcceptViewController: UIViewController {
 
     private func codeChanged() {
         model.code = codeField.text ?? ""
-        navigationItem.rightBarButtonItem?.isEnabled = model.canLink
+        ownTrailingBarItems.first?.isEnabled = model.canLink
     }
 
-    @objc func link() {
+    static let linkID = "settings.supervisionAccept.link"
+
+    private func linkItem() -> UIBarButtonItem {
+        BarItems.title(id: Self.linkID, title: "Link", prominent: true) { [weak self] in self?.link() }
+    }
+
+    func link() {
         guard model.canLink else { return }
-        navigationItem.rightBarButtonItem?.isEnabled = false
+        // At work (#1775): the word becomes the kit's loader, under the same
+        // identifier, and comes back unless the accounts are linked.
+        setOwnTrailingBarItems([BarItems.busy(id: Self.linkID, label: "Linking")], animated: view.window != nil)
         codeField.isEnabled = false
         Task { [weak self] in
             guard let self else { return }
             let result = await model.link()
             codeField.isEnabled = true
+            if case .success? = result {} else {
+                setOwnTrailingBarItems([linkItem()], animated: view.window != nil)
+            }
             codeChanged()
             guard let result else { return }
             switch result {
