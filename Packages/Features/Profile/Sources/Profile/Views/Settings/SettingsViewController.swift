@@ -222,7 +222,7 @@ final class SettingsViewController: UIViewController {
     }
 
     static let followLowPowerModeTitle = "Follow Low Power Mode"
-    static let followLowPowerModeFooter = "While your iPhone is in Low Power Mode, emojis stay still, Reduce Motion is on, videos in grids and previews don't play on their own and the feed's song is off. A post you open full screen still plays. Your own settings come back when Low Power Mode ends."
+    static let followLowPowerModeFooter = "While your iPhone is in Low Power Mode, emojis stay still, Reduce Motion is on, videos in grids and previews don't play on their own and a photograph's song is off. A post you open full screen still plays. Your own settings come back when Low Power Mode ends."
 
     /// What Settings shows. A guest has no account and no profile, so only
     /// what works without one: this device's settings, and help and the

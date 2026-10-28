@@ -1,14 +1,17 @@
 import CoreModels
 import Foundation
 
-/// The sound a video post is set to: a named track, or the author's own
-/// "original sound".
+/// The sound a POST is set to: a named track, or the author's own "original
+/// sound".
 ///
-/// ⚠️ **CLIENT-SIDE UNTIL THE CONTRACT CARRIES IT.** `post.v1` has no audio
-/// field yet, so a sound is resolved from the post's clip by whoever the shell
-/// hands the feed (`PostSoundProviding`). With nobody to ask, a clip's sound is
-/// its own soundtrack — true of the overwhelming majority of short videos —
-/// and the feed plays it straight from the clip.
+/// ⚠️ **A SOUND BELONGS TO A POST, NEVER TO A MEDIA** (the owner, 2026-10-28,
+/// #1849). A carousel is one post and its pages are its media: it has at most
+/// one sound, played across every page, pictures and clips alike, and its
+/// clips play muted. `post.v1` carries it as the post's `audio_ref`
+/// (`AudioReference`); the client does not read it from the wire yet, so the
+/// shell hands the feed a provider (`PostSoundProviding`). With nobody to ask,
+/// a post made of ONE clip is set to that clip's own soundtrack, played from
+/// the clip; any other post has no sound.
 public struct PostSound: Sendable, Equatable, Identifiable {
     public let id: String
     /// The track's name. Nil for an original sound, which is named after its
@@ -74,11 +77,12 @@ public struct PostSoundRankings: Sendable, Equatable {
 
 /// Answers which sound a post is set to, and which posts use it.
 public protocol PostSoundProviding: Sendable {
-    /// The sound `postID` plays: under its clip at `clip` when it shows one,
-    /// or the song a photograph, a collection or a text post is set to. Nil
-    /// when this provider does not know one — for a clip, the feed then treats
-    /// it as the clip's original sound; for anything else, the post has none.
-    func sound(forPost postID: PostID, clip: URL?) -> PostSound?
+    /// The sound `postID` is set to — one per post, whatever its media: a
+    /// single clip's sound, or the track a photograph, a carousel (clips
+    /// included) or a text post is set to. Nil when this provider does not
+    /// know one: a single-clip post is then heard with its clip's original
+    /// sound; any other post has none.
+    func sound(forPost postID: PostID) -> PostSound?
     /// The posts set to `sound`, most relevant first.
     func postIDs(using sound: PostSound) -> [PostID]
     /// The posts set to `sound`, ranked for each of the sound page's sections

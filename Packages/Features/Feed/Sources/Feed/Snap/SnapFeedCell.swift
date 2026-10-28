@@ -97,8 +97,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     var liveVideoSurface: VideoRenderView? {
         playsVideo && !mediaCard.showsCollection ? mediaCard.renderView : nil
     }
-    /// The clip on the page under the finger — a collection's current page.
-    var currentClipURL: URL? { activeVideoURL }
     /// Whether the clip under the finger is actually running — the cover's
     /// record turns exactly while it is.
     var isClipAdvancing: Bool {
@@ -2778,8 +2776,22 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             return
         }
         guard playbackTapRegionContains(point) else { return }
+        // A carousel's track (#1849): the screen pauses the post's sound and
+        // the clip on screen together.
+        if let onPostTrackTap {
+            onPostTrackTap()
+            return
+        }
         togglePlayback()
     }
+
+    /// A carousel's track (#1849): the post's sound is the screen's song
+    /// player's, one track across every page, and a tap or a hold on the
+    /// page acts on it as well as on the clip on screen. Set by the screen
+    /// for a carousel, nil for any other post.
+    var onPostTrackTap: (() -> Void)?
+    /// A hold on a carousel's page began (true) or ended (false).
+    var onPostTrackHold: ((Bool) -> Void)?
 
     /// THE CLIP'S TERRITORY: the media band, between the header and the page's
     /// bottom readout.
@@ -2833,6 +2845,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// means "bring the media back").
     func beginMediaHold(at point: CGPoint) {
         guard !isCommentsEngaged, playbackTapRegionContains(point) else { return }
+        // A carousel's track is held with its page, picture or clip (#1849).
+        onPostTrackHold?(true)
         guard playsVideo, !isPostUnavailable else { return }
         playback.beginHold()
     }
@@ -2847,6 +2861,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     }
 
     func endMediaHold() {
+        onPostTrackHold?(false)
         playback.endHold()
     }
 
@@ -3329,6 +3344,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         setCommentsEngaged(false)
         clearComments()
         onRequestComments = nil
+        onPostTrackTap = nil
+        onPostTrackHold = nil
         onRequestBoost = nil
         onRequestBoostUndo = nil
         onRequestCommentsClose = nil

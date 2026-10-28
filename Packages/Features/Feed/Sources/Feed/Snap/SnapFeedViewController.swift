@@ -362,6 +362,11 @@ final class SnapFeedViewController: UIViewController {
     /// (#1148): its song stays paused, where it was, until resumed — another
     /// page plays its own.
     private var songPausedFor: PostID?
+    /// The post whose track the song player holds (#1849): another post's
+    /// starts it again from its start.
+    private var songPostID: PostID?
+    /// A hold on a carousel's page is holding its track.
+    private var isSongHeld = false
     /// The sound sheet open over the page, mirroring it (#1148).
     private weak var soundSheet: SoundSheetViewController?
     private var coverSpinTimer: Timer?
@@ -1655,8 +1660,14 @@ final class SnapFeedViewController: UIViewController {
                 cell.setPostUnavailable(self.unavailablePostIDs.contains(id))
                 // Paging this post's collection travels back to whoever opened
                 // the feed — see `onMediaPageChanged`.
-                cell.onMediaPageChanged = { [weak self] page in
+                cell.onMediaPageChanged = { [weak self, weak cell] page in
                     self?.onMediaPageChanged?(id, page)
+                    // A carousel paused by a tap plays again on its next page,
+                    // as the arriving clip does: the track with it (#1849).
+                    if let self, self.songPausedFor == id, SnapSoundState.isCarousel(model) {
+                        self.songPausedFor = nil
+                        cell?.setPausedMarkVisible(false)
+                    }
                     // A collection's pages are clips and photographs: turning
                     // one changes what there is to hear, and what it is called.
                     self?.refreshAudibleSurface()
@@ -1704,6 +1715,18 @@ final class SnapFeedViewController: UIViewController {
                     return true
                 }
                 cell.onRequestCommentsClose = { [weak self] in self?.dismissComments() }
+                // A carousel's track (#1849): a tap or a hold on any of its
+                // pages acts on the post's sound with the clip on screen.
+                if SnapSoundState.isCarousel(model) {
+                    cell.onPostTrackTap = { [weak self, weak cell] in
+                        guard let self, let cell else { return }
+                        self.togglePostTrack(on: cell, id: id)
+                    }
+                    cell.onPostTrackHold = { [weak self] held in self?.holdPostTrack(held) }
+                } else {
+                    cell.onPostTrackTap = nil
+                    cell.onPostTrackHold = nil
+                }
                 // The boost spend: wallet verdict here (the cell holds no
                 // balance), theatre back on the cell that asked.
                 cell.onRequestBoost = { [weak self, weak cell] id, spend in
@@ -2835,7 +2858,9 @@ final class SnapFeedViewController: UIViewController {
     private func refreshPictureInPicture(ownerCell: SnapFeedCell? = nil) {
         guard let videoPlayback, !isAwaitingPictureInPicture else { return }
         var surface: VideoRenderView?
+        // A single clip floats, never a carousel's muted one (#1849).
         if MediaPlaybackPolicy.floatsInPictureInPicture, isOnScreen, isForeground, let owner = playbackOwner,
+           ownerModel.map(SnapSoundState.clipIsHeard(in:)) ?? true,
            let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
             surface = cell.audibleSurface
         }
@@ -3275,7 +3300,7 @@ final class SnapFeedViewController: UIViewController {
     /// What the sound bubble and the composer's rail slot draw for `model`
     /// (#671) — see `SnapSoundState.face`.
     func soundFace(for model: FeedItemDisplayModel) -> SnapSoundFace? {
-        guard var face = soundState.face(for: model, playingClip: playingClip(of: model)) else { return nil }
+        guard var face = soundState.face(for: model) else { return nil }
         face.pipeline = imagePipeline
         return face
     }
@@ -5087,7 +5112,7 @@ final class SnapFeedViewController: UIViewController {
     private func attributionContent(
         for model: FeedItemDisplayModel
     ) -> (sound: SnapMediaAttributionView.SoundCredit, cover: SnapMediaAttributionView.Cover) {
-        soundState.attribution(for: model, playingClip: playingClip(of: model))
+        soundState.attribution(for: model)
     }
 
     // MARK: - Sound
@@ -5106,8 +5131,11 @@ final class SnapFeedViewController: UIViewController {
         refreshPictureInPicture(ownerCell: ownerCell)
         guard let videoPlayback else { return }
         var surface: VideoRenderView?
+        // A carousel's clips are never heard: the post's track is its sound
+        // (#1849, `refreshSong`).
         if soundState.isOn, isOnScreen, isForeground, !isAudioYielded, !LaunchTimeline.curtainIsUp,
-           let owner = playbackOwner, let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
+           let owner = playbackOwner, ownerModel.map(SnapSoundState.clipIsHeard(in:)) ?? true,
+           let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
             surface = cell.audibleSurface
         }
         // Only ever CLEARS what this screen set: another feed pushed on top
@@ -5154,16 +5182,53 @@ final class SnapFeedViewController: UIViewController {
     /// same rules as a clip's (see `FeedSongPlayer`), and nothing under Power
     /// Saving (#580; `SnapSoundState.song`).
     private func refreshSong() {
+        // A post's track starts from its start when the post becomes the page
+        // that owns the screen, and runs on through its pages (#1849): another
+        // post — the same song or not — starts it again.
+        if let owned = ownerModel?.id, owned != songPostID {
+            songPlayer.stop()
+            songPostID = owned
+            if songPausedFor != owned { songPausedFor = nil }
+            isSongHeld = false
+        }
         var song: URL?
         // Nothing heard under the launch screen (#1812): the song waits for it
         // to lift (`curtainDidLift`).
-        if isOnScreen, isForeground, !isAudioYielded, !LaunchTimeline.curtainIsUp,
-           let owner = playbackOwner, orderedIDs.indices.contains(owner),
-           let model = modelsByID[orderedIDs[owner]] {
+        if isOnScreen, isForeground, !isAudioYielded, !LaunchTimeline.curtainIsUp, !isSongHeld,
+           let model = ownerModel {
             song = model.id == songPausedFor || unavailablePostIDs.contains(model.id)
-                ? nil : soundState.song(for: model, playingClip: playingClip(of: model))
+                ? nil : soundState.song(for: model)
         }
         songPlayer.play(song)
+    }
+
+    /// The post that owns the screen.
+    private var ownerModel: FeedItemDisplayModel? {
+        guard let owner = playbackOwner, orderedIDs.indices.contains(owner) else { return nil }
+        return modelsByID[orderedIDs[owner]]
+    }
+
+    /// A tap on a carousel's page (#1849): the post's track and the clip on
+    /// screen pause together, or resume together. On a picture page the
+    /// picture wears the stopped mark, as a clip's does.
+    private func togglePostTrack(on cell: SnapFeedCell, id: PostID) {
+        let pausing: Bool
+        if cell.canTogglePlayback, let paused = cell.togglePlayback() {
+            pausing = paused
+        } else {
+            pausing = songPausedFor != id
+            cell.setPausedMarkVisible(pausing)
+        }
+        songPausedFor = pausing ? id : nil
+        refreshSong()
+        refreshCoverSpin()
+    }
+
+    /// A hold on a carousel's page holds its track, as it holds its clip.
+    private func holdPostTrack(_ held: Bool) {
+        isSongHeld = held
+        refreshSong()
+        refreshCoverSpin()
     }
 
     /// Turns the attribution's cover while the page's media plays — a clip
@@ -5240,16 +5305,10 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Sound sheet
 
-    /// The clip the active page's cell is showing, for `model` when it is the
-    /// active page; nil for every other page (`SnapSoundState.clip`).
-    private func playingClip(of model: FeedItemDisplayModel) -> URL? {
-        model.id == activeModel?.id ? activeSnapCell?.currentClipURL : nil
-    }
-
     /// The attribution's tap: the sound the page is set to, in a sheet.
     private func presentSoundSheet() {
         guard presentedViewController == nil, let model = activeModel,
-              let inputs = soundState.sheetInputs(for: model, playingClip: playingClip(of: model))
+              let inputs = soundState.sheetInputs(for: model)
         else { return }
         // The sheet lists EVERY post set to this sound, not only this feed's
         // (`SnapSoundState.sheetInputs`).
