@@ -257,7 +257,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         var found: [PostID: FeedEntry] = [:]
         var missing: [PostID] = []
         for id in ids {
-            if let entry = repository.peekPost(id) { found[id] = entry } else { missing.append(id) }
+            if let entry = heldEntry(id) { found[id] = entry } else { missing.append(id) }
         }
         let repository = repository
         await withTaskGroup(of: (PostID, FeedEntry?).self) { group in
@@ -269,6 +269,28 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             }
         }
         return found.mapValues(ForYouRepository.galleryPost(from:))
+    }
+
+    @MainActor
+    public func heldGalleryPost(_ id: PostID) -> GalleryPost? {
+        heldEntry(id).map(ForYouRepository.galleryPost(from:))
+    }
+
+    /// A post the app holds, read synchronously (#1862): the feed's small
+    /// mirror (`peekPost`), then the app's `EntityStore` — whose device
+    /// backing reloads hundreds of posts at launch the mirror never saw. The
+    /// store's like count is a copy: a real load replaces it.
+    func heldEntry(_ id: PostID) -> FeedEntry? {
+        if let entry = repository.peekPost(id) { return entry }
+        return Self.entry(id, in: entities)
+    }
+
+    /// `id` as `store` holds it: the post and its author, both needed.
+    static func entry(_ id: PostID, in store: EntityStore) -> FeedEntry? {
+        guard let entity = store.post(id), let post = entity.post,
+              let author = store.profile(post.authorID)?.summary
+        else { return nil }
+        return FeedEntry(post: post, author: author, likeCount: entity.likeCount ?? 0)
     }
 
     /// Starts `postID`'s page player now, at `seconds` into its clip — a finger
@@ -1471,7 +1493,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // Additive like every seed: a real render replaces it, a seed
         // landing after one is ignored.
         if let snapFeed = feed as? SnapFeedViewController {
-            let cached = postIDs.compactMap { repository.peekPost($0) }
+            // The store answers what the mirror does not (#1862): a push or a
+            // link to a post held on the device opens on the post.
+            let cached = postIDs.compactMap { heldEntry($0) }
             #if DEBUG
             let maySeed = !Self.isColdOpenForced
             #else
@@ -1576,7 +1600,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             openFeedHero: { [self] ids, presenter, origin in
                 presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
             },
-            galleryPost: { id in repository.peekPost(id).map(ForYouRepository.galleryPost(from:)) },
+            galleryPost: { [self] id in heldEntry(id).map(ForYouRepository.galleryPost(from:)) },
             // …and the posts the grid lists from outside the feed: loaded into
             // the same cache, which `galleryPost` then answers from.
             prewarmPosts: { ids in await repository.prewarm(ids) }

@@ -295,6 +295,12 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
     /// its page come to disagree.
     func galleryPosts(_ ids: [PostID]) async -> [PostID: GalleryPost]
 
+    /// The post as the app already holds it, read synchronously (#1862): the
+    /// feed's cache, then the app's store. Nil when neither holds it — the
+    /// caller then opens without waiting, onto the feed's own loading page.
+    @MainActor
+    func heldGalleryPost(_ id: PostID) -> GalleryPost?
+
     func makeClusterGallery(
         postIDs: [PostID],
         title: String,
@@ -391,6 +397,10 @@ public protocol FeedPlaybackWarm: AnyObject {
 }
 
 extension FeedFeatureBuilding {
+    /// A builder that holds nothing synchronously answers nil.
+    @MainActor
+    public func heldGalleryPost(_ id: PostID) -> GalleryPost? { nil }
+
     public func warmPlayback(of postID: PostID, at seconds: TimeInterval?) -> (any FeedPlaybackWarm)? { nil }
     public func prerollPlayback(of postID: PostID, at seconds: TimeInterval?) -> (any FeedPlaybackWarm)? { nil }
 
