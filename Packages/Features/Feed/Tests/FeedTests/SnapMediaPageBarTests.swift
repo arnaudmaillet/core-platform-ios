@@ -1292,16 +1292,19 @@ struct SnapMediaPageBarTests {
         let view = chrome(pages: 1)
         view.setMediaPageCount(1, current: 0, clipPages: [0])
         view.setMediaPlayhead(0.2, seconds: 120)
-        view.layoutIfNeeded()
+        showPostActions(on: view)
+        #expect(!view.postActions.isHidden && view.postActions.alpha == 1, "the premise: the capsule is on screen")
         let resting = view.debugScrubFadedAlphas
 
         let bar = view.debugPageBar
         bar.debugScrub(.began, atX: 100)
         bar.debugScrub(.changed, atX: 140)
         #expect(view.debugScrubFadedAlphas.allSatisfy { $0 == 0 })
+        #expect(view.postActions.alpha == 0, "the save and share capsule stayed beside the scrub (#1847)")
 
         bar.debugScrub(.ended, atX: 140)
         #expect(view.debugScrubFadedAlphas == resting)
+        #expect(view.postActions.alpha == 1)
     }
 
     /// ⚠️ AND A CELL RECYCLED MID-SCRUB HANDS BACK WHAT IT BORROWED.
@@ -1315,7 +1318,8 @@ struct SnapMediaPageBarTests {
         let view = chrome(pages: 1)
         view.setMediaPageCount(1, current: 0, clipPages: [0])
         view.setMediaPlayhead(0.2, seconds: 120)
-        view.layoutIfNeeded()
+        showPostActions(on: view)
+        #expect(!view.postActions.isHidden && view.postActions.alpha == 1, "the premise: the capsule is on screen")
         let resting = view.debugScrubFadedAlphas
 
         let bar = view.debugPageBar
@@ -1327,6 +1331,7 @@ struct SnapMediaPageBarTests {
         view.reset()
 
         #expect(view.debugScrubFadedAlphas == resting)
+        #expect(view.postActions.alpha == 1, "the capsule came back to the next post faded")
     }
 
     /// And the strip itself never fades: it is the instrument in the hand.
@@ -1457,8 +1462,11 @@ struct SnapStripBrowseTests {
         ))
         view.setMediaPageCount(4, current: 0)
         view.setMediaPreviews(thumbnails: [nil, nil, nil, nil], videoPages: [2], pipeline: nil)
-        view.layoutIfNeeded()
+        showPostActions(on: view)
         let resting = view.debugScrubFadedAlphas
+        let capsuleCentre = view.postActions.convert(
+            CGPoint(x: view.postActions.bounds.midX, y: view.postActions.bounds.midY), to: view
+        )
         var browsed: [Int] = []
         view.onMediaBrowse = { browsed.append($0) }
 
@@ -1467,6 +1475,10 @@ struct SnapStripBrowseTests {
         bar.debugScrub(.began, atX: slot * 0.5)
         bar.debugScrub(.changed, atX: slot * 2.5)
         #expect(view.debugScrubFadedAlphas.allSatisfy { $0 == 0 })
+        #expect(view.postActions.alpha == 0, "the save and share capsule stayed beside the filmstrip (#1847)")
+        // A tap where the capsule stood no longer reaches it.
+        let hit = view.hitTest(capsuleCentre, with: nil)
+        #expect(hit.map { !$0.isDescendant(of: view.postActions) } ?? true, "a tap there would still save or share")
         let strip = view.debugBrowseStrip
         #expect(strip.debugIsShown)
         #expect(strip.debugTileCount == 4)
@@ -1495,4 +1507,13 @@ struct SnapStripBrowseTests {
         #expect(!strip.debugIsShown)
         #expect(bar.debugContainerOpacity == 1, "the segments did not come back")
     }
+}
+
+/// The For You root's save and share capsule, shown: it needs the flag AND a
+/// sound face, and a hidden capsule would make a fade case vacuous (#1847).
+@MainActor
+private func showPostActions(on view: SnapChromeView) {
+    view.showsPostActions = true
+    view.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+    view.layoutIfNeeded()
 }
