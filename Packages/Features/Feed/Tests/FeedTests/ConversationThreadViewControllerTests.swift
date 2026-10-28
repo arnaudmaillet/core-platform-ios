@@ -84,7 +84,8 @@ struct ConversationThreadViewControllerTests {
         now: Date? = nil,
         skeletonClock: LoadingClock? = nil,
         presence: SectionPresenceStore? = nil,
-        presenceKey: String? = nil
+        presenceKey: String? = nil,
+        anchorsShortStream: Bool = false
     ) -> (ConversationThreadViewController, FakeDriver, FakeAccessory, UIWindow) {
         let driver = FakeDriver(initial: phase)
         driver.presenceKey = presenceKey
@@ -98,6 +99,7 @@ struct ConversationThreadViewControllerTests {
         if let now { screen.dayClock = { now } }
         if let skeletonClock { screen.skeletonClock = skeletonClock }
         if let presence { screen.presence = presence }
+        screen.anchorsShortStream = anchorsShortStream
         let navigation = UINavigationController(rootViewController: screen)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = navigation
@@ -435,6 +437,102 @@ struct ConversationThreadViewControllerTests {
                 "opened \(Int(tail - stream.contentOffset.y))pt short of the newest message")
         let newest = IndexPath(item: long.count - 1, section: 0)
         #expect(stream.indexPathsForVisibleItems.contains(newest), "the newest message is not on screen")
+    }
+
+    // MARK: - #1799: a short transcript starts from the bottom
+
+    /// Where the stream's content ends on screen, and where the composer's
+    /// clearance begins: the two meet when the transcript rests at its tail.
+    private static func contentBottomAndClearance(_ stream: UICollectionView) -> (content: CGFloat, clearance: CGFloat) {
+        (stream.contentSize.height - stream.contentOffset.y,
+         stream.bounds.height - stream.adjustedContentInset.bottom)
+    }
+
+    /// The experiment on: four messages rest just above the composer, the
+    /// room above them worn in the top inset.
+    @Test func aShortTranscriptRestsAboveTheComposer() throws {
+        let (screen, _, _, window) = makeScreen(anchorsShortStream: true)
+        window.layoutIfNeeded()
+        let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
+
+        #expect(screen.bottomAnchorSlack > 100, "a four-message transcript wears no slack: \(screen.bottomAnchorSlack)")
+        let edges = Self.contentBottomAndClearance(stream)
+        #expect(abs(edges.content - edges.clearance) < 1, "the transcript ends at \(edges.content), the composer at \(edges.clearance)")
+        #expect(abs(stream.contentInset.top - (SnapCommentsLayout.streamTopBreath + screen.bottomAnchorSlack)) < 0.5)
+        #expect(abs(stream.contentOffset.y + stream.adjustedContentInset.top) < 1, "a short transcript scrolled")
+    }
+
+    /// The experiment off: the same transcript is top-aligned, as before.
+    @Test func withoutTheExperimentAShortTranscriptHangsFromTheTop() throws {
+        let (screen, _, _, window) = makeScreen()
+        window.layoutIfNeeded()
+        let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
+
+        #expect(screen.bottomAnchorSlack == 0)
+        #expect(abs(stream.contentInset.top - SnapCommentsLayout.streamTopBreath) < 0.5)
+        let edges = Self.contentBottomAndClearance(stream)
+        #expect(edges.content < edges.clearance - 100, "guard: the transcript is short")
+    }
+
+    /// A transcript taller than the stream has no slack: exactly as before,
+    /// on its newest message.
+    @Test func aLongTranscriptWearsNoSlack() throws {
+        let long = (0..<80).map { index in
+            Self.message("m\(index)", daysBack: 0, minutes: Double(index), mine: index.isMultiple(of: 3))
+        }
+        let (screen, _, _, _) = makeScreen(phase: .content(long), anchorsShortStream: true)
+        let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
+
+        #expect(screen.bottomAnchorSlack == 0)
+        #expect(abs(stream.contentInset.top - SnapCommentsLayout.streamTopBreath) < 0.5)
+        let tail = stream.contentSize.height + stream.adjustedContentInset.bottom - stream.bounds.height
+        #expect(abs(stream.contentOffset.y - tail) < 1)
+    }
+
+    /// The keyboard up: the composer's travel is the slack's — the short
+    /// transcript rises with it, still resting just above it — and settles
+    /// back when the keyboard goes.
+    @Test func aShortTranscriptRisesWithTheKeyboard() throws {
+        let (screen, _, _, window) = makeScreen(anchorsShortStream: true)
+        window.layoutIfNeeded()
+        let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
+        let rest = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
+        let keyboard = SnapActionColumnLayoutTests.fakeKeyboard(
+            in: screen.view, for: rest.bar, top: screen.view.bounds.height + 100
+        )
+        screen.view.layoutIfNeeded()
+        let restSlack = screen.bottomAnchorSlack
+        let restClearance = stream.contentInset.bottom
+
+        keyboard.constant = screen.view.bounds.height - 336
+        screen.view.setNeedsLayout()
+        screen.view.layoutIfNeeded()
+        let travel = stream.contentInset.bottom - restClearance
+        #expect(travel > 200, "guard: the keyboard moved the clearance")
+        #expect(abs(screen.bottomAnchorSlack - (restSlack - travel)) < 1,
+                "the slack did not absorb the travel: \(restSlack) → \(screen.bottomAnchorSlack), travel \(travel)")
+        var edges = Self.contentBottomAndClearance(stream)
+        #expect(abs(edges.content - edges.clearance) < 1, "the transcript did not rise with the composer")
+
+        keyboard.constant = screen.view.bounds.height + 100
+        screen.view.setNeedsLayout()
+        screen.view.layoutIfNeeded()
+        #expect(abs(screen.bottomAnchorSlack - restSlack) < 1)
+        edges = Self.contentBottomAndClearance(stream)
+        #expect(abs(edges.content - edges.clearance) < 1, "the transcript did not settle back")
+    }
+
+    /// The empty page is full height and centred: never anchored.
+    @Test func anEmptyConversationWearsNoSlack() throws {
+        let (screen, _, _, window) = makeScreen(phase: .content([]), anchorsShortStream: true)
+        window.layoutIfNeeded()
+        #expect(screen.bottomAnchorSlack == 0)
+    }
+
+    @Test func theSlackIsTheRoomLeftAboveTheContent() {
+        #expect(StreamBottomAnchor.slack(viewport: 600, contentHeight: 200) == 400)
+        #expect(StreamBottomAnchor.slack(viewport: 600, contentHeight: 600) == 0)
+        #expect(StreamBottomAnchor.slack(viewport: 600, contentHeight: 900) == 0)
     }
 
     @Test func anEmptyConversationIsThePostsEmptyPage() throws {
