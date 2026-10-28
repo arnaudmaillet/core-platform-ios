@@ -25,7 +25,6 @@ struct HandWrittenImageLoadGuardTests {
     static let allowed: [String: String] = [
         // The hero's sources and their grids: the media surface (#1088).
         "ForYouGridPage.swift": "hero source: the For You grid's covers and its skeleton dissolve (#1088)",
-        "SnapMediaAttributionView.swift": "snap chrome: the sound cover swaps inside the attribution's content transition (#1088)",
         // Not an image arrival: the file's dissolve is the header button's role
         // swap; the pills' faces land without animation and are UIImages the
         // menus reuse, not an avatar view (#943).

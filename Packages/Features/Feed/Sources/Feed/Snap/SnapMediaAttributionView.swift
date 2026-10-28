@@ -54,6 +54,13 @@ final class SnapMediaAttributionView: UIView {
     private var renderedCover: Cover = .post
     private var renderedSoundLine: String?
     private var coverTask: Task<Void, Never>?
+    /// The record's cover on the media slot (#1772): a bone on the dark
+    /// ground while a remote cover loads, the slot's arrival when it lands.
+    private lazy var coverSlot: CoverSlot = {
+        let slot = CoverSlot(view: coverView, size: Self.coverBucket)
+        slot.bone?.fill = Surface.skeletonOnDark
+        return slot
+    }()
     /// Everything the pill draws, edge-pinned: the one view a content change
     /// fades — a CONTAINER, because a platter flattens a label's own partial
     /// alpha to opaque.
@@ -87,7 +94,8 @@ final class SnapMediaAttributionView: UIView {
 
         // The shared bar-surface circle: same diameter as the identity
         // avatars, perfectly round by construction.
-        coverView.backgroundColor = .darkGray
+        // The media's ground on dark (#1771): what a failed cover leaves.
+        coverView.backgroundColor = Surface.mediaGroundOnDark
         coverView.widthAnchor.constraint(equalToConstant: AvatarImageView.bubbleDiameter).isActive = true
         coverView.heightAnchor.constraint(equalToConstant: AvatarImageView.bubbleDiameter).isActive = true
 
@@ -318,12 +326,7 @@ final class SnapMediaAttributionView: UIView {
         let line = Self.line(for: model, sound: sound)
         postID = model.id
         let url = Self.coverURL(for: model, cover: cover)
-        // A cover already in hand is drawn in the same pass as the labels:
-        // the blur's new still pictures it, nothing fades in after the swap.
-        let cached: UIImage? = switch cover {
-        case .note: Self.noteImage
-        case .artwork, .post: url.flatMap { pipeline.cachedImage(for: $0, size: Self.coverBucket) }
-        }
+        let id = model.id
 
         contentTransition.perform(animated: animated) {
             // A new post's record starts upright; the same one keeps its angle.
@@ -334,34 +337,51 @@ final class SnapMediaAttributionView: UIView {
             self.trackLabel.text = line
             self.accessibilityLabel = "\(model.authorName), \(line)"
             self.accessibilityHint = soundLine == nil ? nil : "Opens the sound"
-            self.coverView.image = cached
+            // The cover through the slot, at the swap (#1772): one in memory
+            // is drawn in this pass — the blur's new still pictures it — and a
+            // remote one arrives on the media's ladder after the swap.
+            switch cover {
+            case .note:
+                self.coverSlot.reset()
+                self.coverSlot.apply(Self.noteImage)
+            case .artwork, .post:
+                if let url, !url.isFileURL {
+                    self.coverSlot.load(url, pipeline: pipeline, item: id)
+                } else {
+                    self.coverSlot.reset()
+                    // A file read once already is in memory: drawn now.
+                    if let url, let kept = pipeline.cachedImage(for: url, size: Self.coverBucket) {
+                        self.coverSlot.apply(kept)
+                    }
+                }
+            }
         }
 
         coverTask?.cancel()
-        guard cached == nil, let url else { return }
-        let id = model.id
+        // ⚠️ A FILE is read as it is (#680): the mock pipeline paints a colour
+        // for any URL it does not recognise, a file among them. Kept in the
+        // pipeline's memory, so the sound bubble and the next swap read it
+        // without touching the disk again.
+        guard cover != .note, let url, url.isFileURL,
+              pipeline.cachedImage(for: url, size: Self.coverBucket) == nil else { return }
+        readFileCover(url, for: id, pipeline: pipeline)
+    }
+
+    /// A file cover, read off the main thread and handed to the slot once the
+    /// pill shows its post.
+    private func readFileCover(_ url: URL, for id: PostID, pipeline: ImagePipeline) {
         coverTask = Task { [weak self] in
-            // ⚠️ A file is read as it is: the mock pipeline paints a colour for
-            // any URL it does not recognise, a file among them.
-            let image: UIImage? = if url.isFileURL {
-                await Task.detached(priority: .userInitiated) {
-                    UIImage(contentsOfFile: url.path)?.preparingForDisplay()
-                }.value
-            } else {
-                try? await pipeline.image(for: url, size: Self.coverBucket)
-            }
+            let image = await Task.detached(priority: .userInitiated) {
+                UIImage(contentsOfFile: url.path)?.preparingForDisplay()
+            }.value
             guard let image else { return }
-            // A file is kept in the pipeline's memory too, so the sound bubble
-            // and the next swap read it without touching the disk again.
-            if url.isFileURL { pipeline.store(image, for: url) }
+            pipeline.store(image, for: url)
             guard let self, self.postID == id else { return }
             // Onto the NEW post's content: mid-blur, the old cover is still
             // what the live view draws.
             self.contentTransition.afterSwap { [weak self] in
                 guard let self, self.postID == id else { return }
-                UIView.transition(with: self.coverView, duration: 0.15, options: [.transitionCrossDissolve]) {
-                    self.coverView.image = image
-                }
+                self.coverSlot.apply(image)
             }
         }
     }

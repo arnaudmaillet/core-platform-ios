@@ -37,8 +37,8 @@ struct DirectPipelineReadGuardTests {
         // a view a slot can hold — follow-up of #1772.
         "AuthorizedAppsViewController.swift": "an app icon in a UIListContentConfiguration",
         "RecentlyDeletedViewController.swift": "a post thumbnail in a UIListContentConfiguration",
-        "SnapMediaAttributionView.swift": "the sound pill's cover, drawn inside its blur transition",
-        "SnapSoundBubble.swift": "the sound bubble's cover, read for the pill's still",
+        "SnapMediaAttributionView.swift": "the next page's cover warm-up and a FILE cover's memory lookup (#680); remote covers draw through CoverSlot",
+        "SnapSoundBubble.swift": "a FILE cover's memory lookup (#680); remote covers draw through CoverSlot",
         "MapSubFilterBarView.swift": "a sub-filter's face inside a button configuration",
         "MapSubFilterSheetViewController.swift": "a sub-filter's face inside a button configuration",
     ]

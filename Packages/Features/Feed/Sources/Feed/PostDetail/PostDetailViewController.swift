@@ -1360,10 +1360,6 @@ final class PostDetailViewController: UIViewController {
     /// the sound, a hold opens the sound sheet, as the media page's sound
     /// bubble does. A text post's page has no bubble of its own: this slot is
     /// its sound control.
-    /// Redraws the rail slot's cover once a fetched one has landed (#680).
-    func redrawRailSoundFace() {
-        composeBar.redrawRailFace()
-    }
 
     /// The post turned out unavailable to the viewer (#447) — said once, as
     /// this panel takes its own actions away (#1404). For a host that draws

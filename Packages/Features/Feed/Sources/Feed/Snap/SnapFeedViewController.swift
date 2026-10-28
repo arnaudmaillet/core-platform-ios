@@ -3239,14 +3239,7 @@ final class SnapFeedViewController: UIViewController {
         )
         // …and the composer on the page's breath over the bar (#1716, #1722).
         detail.setComposerLift(isForYouRoot ? SnapActionColumn.shotsBottomBreath : SnapActionColumn.bottomBreath)
-        // A remote cover the attribution has not fetched yet: fetch it, and
-        // redraw the slot once it lands (#680).
-        if let face, face.cachedCover == nil, let url = face.coverURL {
-            Task { [weak detail, imagePipeline] in
-                guard await SnapSoundFace.fetchCover(url, pipeline: imagePipeline) != nil else { return }
-                detail?.redrawRailSoundFace()
-            }
-        }
+        // A remote cover loads in the rail's own slot (#1772).
         // A tap opens the sound sheet, a hold mutes — the bubble's (#683).
         detail.setRailSoundActions(
             tap: { [weak self] in self?.presentSoundSheet() },

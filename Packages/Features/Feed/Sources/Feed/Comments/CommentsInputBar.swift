@@ -361,6 +361,12 @@ final class CommentsInputBar: UIView {
     /// component: while it shows, the rail button's glass steps aside.
     private let railRecord = SoundRecordGlass()
     private var railCoverView: UIImageView { railRecord.cover }
+    /// The rail's sound cover on the media slot (#1772), the bubble's.
+    private lazy var railCoverSlot: CoverSlot = {
+        let slot = CoverSlot(view: railRecord.cover, size: SnapMediaAttributionView.coverBucket)
+        slot.bone?.fill = Surface.skeletonOnDark
+        return slot
+    }()
     /// The rail button's glass, put back when the face leaves the sound.
     private var railGlassConfiguration: UIButton.Configuration?
     /// The field's trailing button, after the emote button: the voice note's
@@ -1831,8 +1837,8 @@ final class CommentsInputBar: UIView {
                 clear.background.backgroundColor = .clear
                 railButton.configuration = clear
             }
-            if railRecord.isHidden || railFaceSymbol != Self.soundRailSymbol || railCoverView.image == nil {
-                railCoverView.image = face.cachedCover
+            if railRecord.isHidden || railFaceSymbol != Self.soundRailSymbol || railCoverSlot.image == nil {
+                face.draw(into: railCoverSlot)
             }
             railRecord.isHidden = false
             railRecord.showsMutedBadge = face.isMuted && face.isAvailable
@@ -1862,11 +1868,10 @@ final class CommentsInputBar: UIView {
         applyReservedColumn()
     }
 
-    /// Redraws the rail face as it stands — the sound's cover, once a cover
-    /// that was still being fetched has landed (#680).
+    /// Redraws the rail face as it stands.
     func redrawRailFace() {
         railFaceSymbol = nil
-        railCoverView.image = nil
+        railCoverSlot.reset()
         applyRailFace()
     }
 

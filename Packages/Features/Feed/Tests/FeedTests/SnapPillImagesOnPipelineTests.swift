@@ -188,26 +188,34 @@ struct SnapPillImagesOnPipelineTests {
         let pill = SnapMediaAttributionView()
         pill.setPost(model, pipeline: pipeline, animated: false)
         let face = SnapSoundFace(coverURL: coverURL, isAvailable: true, isMuted: false, pipeline: pipeline)
+        let bubble = SnapSoundBubbleButton()
+        bubble.setFace(face, pipeline: pipeline)
 
         #expect(pill.debugCoverImage === decoded, "the attribution pill did not draw the pipeline's cover")
-        #expect(face.cachedCover === decoded, "the sound bubble did not read the pipeline's cover")
+        // The bubble's slot draws a cover in memory in the same pass (#1772).
+        #expect(bubble.debugCoverImage === decoded, "the sound bubble did not draw the pipeline's cover")
     }
 
-    /// A remote cover the bubble has to wait for is fetched into the pipeline,
-    /// and the face then reads it; without a pipeline a remote cover draws
-    /// nothing (it is never fetched behind the host's back).
+    /// A remote cover the bubble has to wait for loads through its slot
+    /// (#1772) and is drawn when it lands; without a pipeline a remote cover
+    /// draws nothing (it is never fetched behind the host's back).
     @Test func theSoundBubblesRemoteCoverComesFromThePipeline() async {
         let pipeline = Self.pipeline()
         let url = Self.url("bubble-remote")
         let face = SnapSoundFace(coverURL: url, isAvailable: true, isMuted: false, pipeline: pipeline)
-        #expect(face.cachedCover == nil, "guard: a remote cover drew before its fetch")
+        #expect(face.localCover == nil, "a remote cover is not a local one")
 
-        let fetched = await SnapSoundFace.fetchCover(url, pipeline: pipeline)
+        let bubble = SnapSoundBubbleButton()
+        bubble.setFace(face, pipeline: pipeline)
+        for _ in 0..<400 where bubble.debugCoverImage == nil {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(bubble.debugCoverImage != nil, "the remote cover never landed")
 
-        #expect(fetched != nil)
-        #expect(face.cachedCover === fetched, "the face does not read what the fetch decoded")
-        #expect(SnapSoundFace(coverURL: url, isAvailable: true, isMuted: false).cachedCover == nil,
-                "a face with no pipeline found a remote cover somewhere else")
+        let orphan = SnapSoundBubbleButton()
+        orphan.setFace(SnapSoundFace(coverURL: url, isAvailable: true, isMuted: false), pipeline: nil)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(orphan.debugCoverImage == nil, "a face with no pipeline found a remote cover somewhere else")
     }
 
     /// A file cover is read once and kept in the pipeline's memory, so the
@@ -222,9 +230,9 @@ struct SnapPillImagesOnPipelineTests {
         try png.write(to: file)
         defer { try? FileManager.default.removeItem(at: file) }
 
-        let first = SnapSoundFace(coverURL: file, isAvailable: true, isMuted: false, pipeline: pipeline).cachedCover
+        let first = SnapSoundFace(coverURL: file, isAvailable: true, isMuted: false, pipeline: pipeline).localCover
         try FileManager.default.removeItem(at: file)
-        let second = SnapSoundFace(coverURL: file, isAvailable: true, isMuted: false, pipeline: pipeline).cachedCover
+        let second = SnapSoundFace(coverURL: file, isAvailable: true, isMuted: false, pipeline: pipeline).localCover
 
         #expect(first != nil, "the file cover was not read")
         #expect(second === first, "the second face read the disk again instead of the pipeline")
