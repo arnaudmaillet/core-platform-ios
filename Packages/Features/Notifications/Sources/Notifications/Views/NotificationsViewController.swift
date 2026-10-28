@@ -338,8 +338,13 @@ final class NotificationsViewController: UIViewController {
     /// timing (#1770, `ScreenLoadingHost`): no skeleton for a list that
     /// answers at once, held its minimum once up, and "taking longer" with a
     /// retry after 10 s.
+    /// The loading's clock (#1770). Injectable so a test steps it instead of
+    /// reading the wall clock.
+    var skeletonClock: LoadingClock = .system
     private lazy var loading: ScreenLoadingHost = {
-        let host = ScreenLoadingHost(container: view, skeleton: skeleton, content: collectionView, status: emptyState)
+        let host = ScreenLoadingHost(
+            container: view, skeleton: skeleton, content: collectionView, status: emptyState, clock: skeletonClock
+        )
         host.onTakingLonger = { [weak self] in
             guard let self else { return }
             emptyState.configure(
