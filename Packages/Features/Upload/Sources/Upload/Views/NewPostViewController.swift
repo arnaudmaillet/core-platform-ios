@@ -346,7 +346,54 @@ final class NewPostViewController: UIViewController {
         view.backgroundColor = .systemGroupedBackground
         configureList()
         applyRows()
+        configurePublishProgress()
     }
+
+    /// The post on its way (#1775): a bar under the navigation bar, moving as
+    /// the media is prepared and uploaded and the post created — a clip's
+    /// export and upload take seconds, and a disabled Post alone said
+    /// nothing about them.
+    private let publishProgress = UIProgressView(progressViewStyle: .bar)
+    #if DEBUG
+    /// Internal for tests: every share of the publish the bar was moved to.
+    private(set) var debugProgressSteps: [Double] = []
+    #endif
+
+    private func configurePublishProgress() {
+        publishProgress.isHidden = true
+        publishProgress.isAccessibilityElement = true
+        publishProgress.accessibilityLabel = "Posting"
+        publishProgress.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(publishProgress)
+        NSLayoutConstraint.activate([
+            publishProgress.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            publishProgress.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            publishProgress.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ])
+    }
+
+    /// The share of the publish done: the media's preparation here (the
+    /// first third), the composer's upload and creation after it.
+    private func setPublishProgress(_ fraction: Double) {
+        // ⚠️ A report hopping to the main actor can land after the failure
+        // that ended the publish: it must not bring the bar back over the alert.
+        guard isViewLoaded, isPublishing else { return }
+        #if DEBUG
+        debugProgressSteps.append(fraction)
+        #endif
+        publishProgress.isHidden = false
+        publishProgress.setProgress(Float(max(publishProgress.progress, Float(fraction))), animated: true)
+        publishProgress.accessibilityValue = "\(Int((fraction * 100).rounded())) percent"
+    }
+
+    private func hidePublishProgress() {
+        guard isViewLoaded else { return }
+        publishProgress.isHidden = true
+        publishProgress.setProgress(0, animated: false)
+    }
+
+    /// The media's preparation's share of the publish.
+    static let preparationShare = 1.0 / 3.0
 
     /// ⚠️ **THE STRIP'S ENTRANCE STARTS HERE, AS THE PUSH BEGINS — NOT WHEN
     /// THE SCREEN HAS LANDED.** Asked for as *"déclencher avant, peut-être dès
@@ -1187,12 +1234,17 @@ final class NewPostViewController: UIViewController {
         // off the one piece of work they are waiting for. It also removes a
         // race: the loop below reads `videoFile(for:)` for the same id.
         stopCover()
+        setPublishProgress(0.02)
 
         Task { [weak self] in
             guard let self else { return }
             do {
                 var media: [ComposeMedia] = []
-                for item in publishOrder {
+                let order = publishOrder
+                for (index, item) in order.enumerated() {
+                    defer {
+                        self.setPublishProgress(Self.preparationShare * Double(index + 1) / Double(max(order.count, 1)))
+                    }
                     if item.isVideo {
                         // ⚠️ **A VIDEO THAT CANNOT BE READ STOPS THE POST; A
                         // PHOTO THAT CANNOT BE READ IS SKIPPED. THE ASYMMETRY IS
@@ -1282,9 +1334,13 @@ final class NewPostViewController: UIViewController {
                     let baked = edited.applied(to: image, artwork: stills)
                     media.append(.image(PickedImage(baked, uploadKey: uploadKey(for: item.id))))
                 }
+                let share = Self.preparationShare
                 let entry = try await composer.publish(
                     media: media, caption: caption, as: nil,
-                    idempotencyKey: postKey.key(for: Self.postContent(caption: caption, media: media))
+                    idempotencyKey: postKey.key(for: Self.postContent(caption: caption, media: media)),
+                    progress: { [weak self] fraction in
+                        Task { @MainActor in self?.setPublishProgress(share + (1 - share) * fraction) }
+                    }
                 )
                 postKey.settle()
                 onPublished(entry)
@@ -1303,13 +1359,17 @@ final class NewPostViewController: UIViewController {
             } catch {
                 isPublishing = false
                 postItem.isEnabled = true
+                hidePublishProgress()
                 if isViewLoaded { list.isUserInteractionEnabled = true }
                 // ⚠️ AN ALERT ON A SCREEN THAT HAS GONE IS NEVER SEEN (#795).
                 guard isShown else {
                     if let presenter = publishPresenter { Self.reportPublishFailure(on: presenter) }
                     return
                 }
-                present(Self.failureAlert(error), animated: true)
+                // A way out (#1775): Try Again posts the same post again,
+                // under the same key, so a post that did land is answered,
+                // not made twice (#795).
+                present(Self.failureAlert(error, retry: { [weak self] in self?.post() }), animated: true)
             }
         }
     }
@@ -1529,14 +1589,32 @@ final class NewPostViewController: UIViewController {
         return alert
     }
 
-    private static func failureAlert(_ error: Error) -> UIAlertController {
+    /// The failed post's alert: Try Again where trying again can help, OK
+    /// where it cannot (an empty post, a signed-out author).
+    static func failureAlert(_ error: Error, retry: @escaping () -> Void) -> UIAlertController {
         let alert = UIAlertController(
             title: "Couldn't post",
             message: (error as? ComposeError).map(message(for:)) ?? "Something went wrong. Try again.",
             preferredStyle: .alert
         )
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        guard Self.isRetryable(error) else {
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            return alert
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        let tryAgain = UIAlertAction(title: TakingLongerCopy.action, style: .default) { _ in retry() }
+        alert.addAction(tryAgain)
+        alert.preferredAction = tryAgain
         return alert
+    }
+
+    /// Whether posting again can help: not for a post with nothing in it, nor
+    /// an author who has to sign in again.
+    static func isRetryable(_ error: Error) -> Bool {
+        switch error as? ComposeError {
+        case .emptyPost?, .notAuthenticated?, .noViewerProfile?: false
+        default: true
+        }
     }
 
     static func message(for error: ComposeError) -> String {
@@ -1627,6 +1705,8 @@ extension NewPostViewController {
     func debugType(caption: String) { self.caption = caption }
     /// Internal for tests: the path "Post" takes, without a bar to tap.
     func debugTapPost() { post() }
+    /// Internal for tests: whether the progress bar shows.
+    var debugShowsPublishProgress: Bool { !publishProgress.isHidden }
     /// Internal for tests: flipping a switch, through the routine the switch
     /// itself calls.
     func debugFlip(saveToPhotos isOn: Bool) { setToggle(isOn, for: .saveToPhotos) }
