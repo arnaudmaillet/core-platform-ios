@@ -5701,17 +5701,17 @@ final class SnapFeedViewController: UIViewController {
     /// believes was filed but wasn't is the worst outcome here.
     private func report(_ id: PostID, reason: ReportReason) {
         guard let reporting else { return }
-        Task { [weak self] in
+        // Under way (#1775): said past the loader's grace, the answer in its place.
+        let pending = PendingFeedback("Sending report…", from: self)
+        Task {
             do {
                 // The surface is a triage signal in its own right: the same post
                 // reported from the feed and from a profile are different
                 // reports.
                 try await reporting.report(.post(id), reason: reason, surface: "ios.feed")
-                guard let self else { return }
-                Feedback.success("Report sent", symbol: "flag.fill", from: self)
+                pending.succeed("Report sent", symbol: "flag.fill")
             } catch {
-                guard let self else { return }
-                Feedback.failure("Couldn't send this report", from: self)
+                pending.fail("Couldn't send this report")
             }
         }
     }
