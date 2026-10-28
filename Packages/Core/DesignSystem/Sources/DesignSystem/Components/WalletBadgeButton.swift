@@ -135,7 +135,7 @@ public final class WalletBadgeButton: UIButton {
         layer.addSublayer(ringLayer)
 
         update(balance: 0, claimAvailable: false)
-        // Power Saving posts the first too (`PowerSavingPreference`); the
+        // Low Power Mode posts the first too (`LowPowerMode`); the
         // second is the app resting or waking (`IdleCalm`, #580).
         for name in [UIAccessibility.reduceMotionStatusDidChangeNotification, .decorativeMotionDidChange] {
             NotificationCenter.default.addObserver(
@@ -298,7 +298,7 @@ public final class WalletBadgeButton: UIButton {
     private static let pulseKey = "wallet.pulse"
 
     /// Whether the breath stands still — Reduce Motion, the app's or iOS's,
-    /// Power Saving, and an app at rest (`IdleCalm`). Swappable for tests.
+    /// Low Power Mode, and an app at rest (`IdleCalm`). Swappable for tests.
     var reducesMotion: () -> Bool = { MotionPreference.stillsDecoration }
     /// Test seams: the breath and the glow as they are on screen.
     var isBreathing: Bool { coinView.layer.animation(forKey: Self.pulseKey) != nil }
@@ -313,7 +313,7 @@ public final class WalletBadgeButton: UIButton {
         applyRing()
     }
 
-    /// Reduce Motion, Power Saving or the app's rest changed: the breath
+    /// Reduce Motion, Low Power Mode or the app's rest changed: the breath
     /// follows, the glow stays.
     @objc private func motionPreferenceChanged() {
         guard wantsPulse else { return }
@@ -325,7 +325,7 @@ public final class WalletBadgeButton: UIButton {
         guard window != nil,
               coinView.layer.animation(forKey: Self.pulseKey) == nil else { return }
         // The glow says "something is waiting" on its own: it is what stays
-        // under Reduce Motion and Power Saving.
+        // under Reduce Motion and Low Power Mode.
         coinView.layer.shadowColor = LikesSymbol.tint.cgColor
         coinView.layer.shadowOpacity = 0.8
         coinView.layer.shadowRadius = 6

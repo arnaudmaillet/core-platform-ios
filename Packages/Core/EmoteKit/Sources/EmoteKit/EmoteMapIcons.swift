@@ -68,7 +68,7 @@ public final class EmoteMapIcons: AnimatedIconProviding {
 public extension EmoteMapIcons {
     /// What a marker's emote face plays under: the one contract every emote
     /// follows (#1504, the owner 2026-10-21) — still under Reduce Motion,
-    /// Animate Emojis off, Power Saving, Low Power Mode and overheating; and,
+    /// Animate Emojis off, Low Power Mode and overheating; and,
     /// unlike the map's decoration, THROUGH idle calm (the owner reversed the
     /// map part of #1072). A face sets it on its player
     /// (`AnimatedIconView.playbackPolicy`).

@@ -238,11 +238,11 @@ struct EmoteSkeletonTests {
     // MARK: - Motion gates
 
     enum Gate: String, CaseIterable, CustomTestStringConvertible {
-        case reduceMotion, powerSaving, idleCalm
+        case reduceMotion, lowPowerMode, idleCalm
         var conditions: EmoteSkeleton.Conditions {
             switch self {
             case .reduceMotion: EmoteSkeleton.Conditions(reducesMotion: true)
-            case .powerSaving: EmoteSkeleton.Conditions(powerSaving: true)
+            case .lowPowerMode: EmoteSkeleton.Conditions(lowPowerMode: true)
             case .idleCalm: EmoteSkeleton.Conditions(idleCalm: true)
             }
         }

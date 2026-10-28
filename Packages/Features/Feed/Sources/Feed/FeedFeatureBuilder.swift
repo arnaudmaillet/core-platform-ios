@@ -163,7 +163,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         Self.forgetRetiredForYouModes(in: .standard)
         self.showsBalance = showsBalance
         // Every grid's tiles follow the feed's playback policy — Autoplay,
-        // the network, Power Saving — For You's and a profile's alike (#580).
+        // the network, Low Power Mode — For You's and a profile's alike (#580).
         GridVideoPlaybackCoordinator.allowsAutoplay = { MediaPlaybackPolicy.autoplays }
     }
 

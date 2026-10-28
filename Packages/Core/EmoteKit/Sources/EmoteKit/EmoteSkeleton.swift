@@ -28,7 +28,7 @@ import UIKit
 ///   has — a failure may have been passing, and the icon catalogue arrives
 ///   after launch.
 /// - **The shimmer is decoration.** Reduce Motion (iOS or the app's),
-///   Power Saving and idle calm leave a still square (`Conditions`), as on
+///   Low Power Mode and idle calm leave a still square (`Conditions`), as on
 ///   every skeleton. And it lives only as long as the skeleton — while art is
 ///   pending — so nothing sweeps at rest: an endless animation recomposites
 ///   the whole frame (#580).
@@ -44,7 +44,7 @@ import UIKit
 /// - **Only over a skeleton.** Art in memory and art read before the
 ///   skeleton's grace was up never bounce.
 /// - **The shimmer's gates.** Under any of them (`Conditions.stillsShimmer`:
-///   Reduce Motion, Power Saving, idle calm) the art takes the square at once
+///   Reduce Motion, Low Power Mode, idle calm) the art takes the square at once
 ///   and the skeleton goes with no fade: a straight swap.
 /// - **It ends.** A spring and a fade, both one-shot; the skeleton leaves the
 ///   hierarchy when its fade ends. Anything that gives the place up mid-way
@@ -61,20 +61,20 @@ final class EmoteSkeleton {
     struct Conditions: Equatable {
         /// iOS Reduce Motion or the app's own switch.
         var reducesMotion = false
-        /// Settings → App and Device → Power Saving.
-        var powerSaving = false
+        /// Low Power Mode, followed (Settings → App and Device, #1808).
+        var lowPowerMode = false
         /// Nobody has touched the app for a while (`IdleCalm`).
         var idleCalm = false
 
         static var current: Conditions {
             Conditions(
                 reducesMotion: MotionPreference.reducesMotion,
-                powerSaving: PowerSavingPreference.isOn,
+                lowPowerMode: LowPowerMode.savesBattery,
                 idleCalm: IdleCalm.isCalm
             )
         }
 
-        var stillsShimmer: Bool { reducesMotion || powerSaving || idleCalm }
+        var stillsShimmer: Bool { reducesMotion || lowPowerMode || idleCalm }
     }
 
     /// The square's corner, as a share of its side: a soft square, not a

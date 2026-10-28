@@ -235,13 +235,13 @@ public final class GridVideoPlaybackCoordinator {
     }
 
     /// Whether a tile may play on its own right now — the viewer's Autoplay
-    /// setting, the network, Power Saving. Feed points it at its playback
-    /// policy (`MediaPlaybackPolicy.autoplays`); until then, Power Saving.
+    /// setting, the network, Low Power Mode. Feed points it at its playback
+    /// policy (`MediaPlaybackPolicy.autoplays`); until then, Low Power Mode.
     ///
     /// ⚠️ EVERY GRID ASKS THIS, and none did (#580): For You and a profile
-    /// played their tiles with Autoplay off and Power Saving on, the vertical
+    /// played their tiles with Autoplay off and Low Power Mode on, the vertical
     /// feed alone asked — measured as the same idle cost either way.
-    public static var allowsAutoplay: () -> Bool = { !PowerSavingPreference.isOn }
+    public static var allowsAutoplay: () -> Bool = { !LowPowerMode.savesBattery }
 
     /// This grid's answer to `allowsAutoplay`, asked on every reconcile.
     /// Swappable for tests, which must not flip the app-wide rule under
@@ -251,7 +251,7 @@ public final class GridVideoPlaybackCoordinator {
     /// the decoration after 30 s without a touch, and the viewer read it as
     /// the videos pausing on their own: a tile playing is a video on screen,
     /// and a video on screen keeps playing (the owner's decision,
-    /// 2026-10-11). Power Saving still stops them (`allowsAutoplay`).
+    /// 2026-10-11). Low Power Mode still stops them (`allowsAutoplay`).
     var autoplayAllowed: () -> Bool = { GridVideoPlaybackCoordinator.allowsAutoplay() }
 
     /// Plays this coordinator's tiles under their OWN scope (`tag:post`), so
@@ -940,7 +940,7 @@ public final class GridVideoPlaybackCoordinator {
     /// an image — put the media, playing"; #1267). Parking only a playing tile
     /// landed every tile past the budget, or still waiting for its start, on
     /// its thumbnail. One that is not playing is parked from the start of its
-    /// clip. Not when autoplay is off (Power Saving, the viewer's setting):
+    /// clip. Not when autoplay is off (Low Power Mode, the viewer's setting):
     /// such a tile is a still on purpose, and lands as one.
     private func parkReturnPlayback(of id: PostID) {
         guard let url = playingURLs[id] ?? (autoplayAllowed() ? candidateURLs[id] : nil)

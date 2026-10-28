@@ -83,7 +83,7 @@ struct GridVideoPlaybackCoordinatorTests {
         #expect(pool.surfaceCount(for: candidate.url) == 1)
     }
 
-    /// With autoplay off — the viewer's setting, or Power Saving — a grid plays
+    /// With autoplay off — the viewer's setting, or Low Power Mode — a grid plays
     /// nothing, and tiles already playing give their players back on the
     /// next reconcile (#580).
     @Test func withAutoplayOffNoTilePlays() async {
@@ -136,7 +136,7 @@ struct GridVideoPlaybackCoordinatorTests {
         let wasCalm = IdleCalm.isCalm
         IdleCalm.set(true)
         let gateWhileResting = coordinator.autoplayAllowed()
-        let powerSavingGate = GridVideoPlaybackCoordinator.allowsAutoplay()
+        let lowPowerModeGate = GridVideoPlaybackCoordinator.allowsAutoplay()
         let playingAfterRest = coordinator.playingIDs
         coordinator.update(candidates: candidates)
         let playingAfterReconcile = coordinator.playingIDs
@@ -144,7 +144,7 @@ struct GridVideoPlaybackCoordinatorTests {
         let pausedWhileResting = surfaces.map { pool.isPaused(in: $0) }
         IdleCalm.set(wasCalm)
 
-        #expect(gateWhileResting == powerSavingGate, "the gate read the app's rest")
+        #expect(gateWhileResting == lowPowerModeGate, "the gate read the app's rest")
         #expect(playingAfterRest == ids, "the rest stopped the tiles")
         #expect(playingAfterReconcile == ids, "a reconcile at rest stopped the tiles")
         #expect(boundWhileResting == [true, true], "a tile gave its player back at rest")

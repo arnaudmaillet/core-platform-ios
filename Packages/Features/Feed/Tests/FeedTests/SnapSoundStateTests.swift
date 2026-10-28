@@ -9,16 +9,16 @@ import Testing
 ///
 /// `SnapSoundState` decides which sound a post is set to, what its bubble and
 /// attribution draw, whether its song is heard, and what the sound sheet
-/// opens with. The mute and Power Saving are READ through closures each test
-/// owns — `FeedSound` and `PowerSavingPreference` are process-wide, and no
+/// opens with. The mute and Low Power Mode are READ through closures each test
+/// owns — `FeedSound` and `LowPowerMode` are process-wide, and no
 /// test here touches them.
 @MainActor
 struct SnapSoundStateTests {
-    /// A mute and a Power Saving switch of the test's own.
+    /// A mute and a Low Power Mode of the test's own.
     @MainActor
     private final class Switches {
         var soundOn = true
-        var powerSaving = false
+        var lowPowerMode = false
     }
 
     private static func state(
@@ -28,7 +28,7 @@ struct SnapSoundStateTests {
             provider: provider,
             isOn: { switches.soundOn },
             toggle: { switches.soundOn.toggle() },
-            powerSaving: { switches.powerSaving }
+            lowPowerMode: { switches.lowPowerMode }
         )
     }
 
@@ -166,16 +166,16 @@ struct SnapSoundStateTests {
 
     // MARK: - What is heard
 
-    @Test func aPhotosSongPlaysOnlyWithTheSoundOnAndNoPowerSaving() {
+    @Test func aPhotosSongPlaysOnlyWithTheSoundOnAndNoLowPowerMode() {
         let provider = FixedSoundProvider(sound: PostSound(
             id: "song-1", title: "Song", artist: nil, previewURL: Self.songFile, artworkURL: nil, duration: 30
         ))
         let switches = Switches()
         let sound = Self.state(switches, provider: provider)
         #expect(sound.song(for: Self.photo(), playingClip: nil) == Self.songFile)
-        switches.powerSaving = true
-        #expect(sound.song(for: Self.photo(), playingClip: nil) == nil, "a song under Power Saving")
-        switches.powerSaving = false
+        switches.lowPowerMode = true
+        #expect(sound.song(for: Self.photo(), playingClip: nil) == nil, "a song in Low Power Mode, followed")
+        switches.lowPowerMode = false
         sound.toggle()
         #expect(sound.song(for: Self.photo(), playingClip: nil) == nil, "a song while muted")
         #expect(sound.song(for: Self.clip(), playingClip: nil) == nil, "a clip page has no song")

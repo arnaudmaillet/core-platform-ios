@@ -862,7 +862,7 @@ final class SnapMediaPageBarView: UIView {
     }
 
     /// Places the pulse in the watched clip's segment while loading, and runs
-    /// its loop — or a still, dim track under Reduce Motion or Power Saving
+    /// its loop — or a still, dim track under Reduce Motion or Low Power Mode
     /// (no endless animation, #580).
     private func layoutPulse(onPage index: Int, isBar: Bool, clipness: CGFloat) {
         guard isBar, isLoading || pulseView.alpha > 0.001 else {

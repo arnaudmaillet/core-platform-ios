@@ -24,37 +24,113 @@ public enum MotionPreference {
         }
     }
 
-    /// What every animation asks: iOS, the app's switch, or Power Saving.
+    /// What every animation asks: iOS, the app's switch, or Low Power Mode
+    /// followed (#1808).
     public static var reducesMotion: Bool {
-        UIAccessibility.isReduceMotionEnabled || appReducesMotion || PowerSavingPreference.isOn
+        UIAccessibility.isReduceMotionEnabled || appReducesMotion || LowPowerMode.savesBattery
     }
 }
 
-/// Settings → App and Device → Power Saving: one switch that stills animated
-/// emojis, turns on Reduce Motion and stops videos from playing on their own.
+/// Settings → App and Device → Follow Low Power Mode (#1808, the owner
+/// 2026-10-28; replacing #527/#580's Power Saving): while the iPhone is in
+/// Low Power Mode, emojis stay still, Reduce Motion is on, videos in grids and
+/// previews don't play on their own, the feed's song is off and Don't Cover
+/// People pauses. On by default; off, someone who keeps Low Power Mode on all
+/// the time keeps the full app. There is no "always on": the app never turns
+/// the effects on by itself.
 ///
 /// It overrides rather than rewrites: the viewer's own Reduce Motion,
 /// Autoplay and Animate Emojis choices are left as they were, and every
-/// reader combines them with this (`MotionPreference.reducesMotion`,
-/// `EmoteAnimationPreference.animatesEmotes`, the feed's autoplay policy).
-/// Turning it off brings their choices back untouched.
-public enum PowerSavingPreference {
-    static let key = "device.powerSaving"
+/// reader combines them with `savesBattery`. Low Power Mode ending, or the
+/// switch going off, brings their choices back untouched.
+///
+/// ⚠️ ONE READ FOR EVERY VISIBLE EFFECT (`savesBattery`). The invisible
+/// budgets (CacheKit's prefetch, the flight's pre-roll) follow iOS directly:
+/// they change nothing the viewer sees, so the switch does not reach them.
+public enum LowPowerMode {
+    static let key = "device.followsLowPowerMode"
+    /// Power Saving's old switch, forgotten once (`forgetPowerSaving`).
+    static let powerSavingKey = "device.powerSaving"
     /// Swappable for tests.
     nonisolated(unsafe) static var defaults: UserDefaults = .standard
+    /// iOS's Low Power Mode. Swappable for tests.
+    nonisolated(unsafe) static var system: () -> Bool = { ProcessInfo.processInfo.isLowPowerModeEnabled }
 
-    public static var isOn: Bool {
-        get { defaults.bool(forKey: key) }
+    /// The viewer's switch; on until they turn it off.
+    public static var isFollowed: Bool {
+        get { defaults.object(forKey: key) as? Bool ?? true }
         set {
-            guard newValue != isOn else { return }
+            guard newValue != isFollowed else { return }
             defaults.set(newValue, forKey: key)
-            let center = NotificationCenter.default
-            // Everything that honours Reduce Motion already listens for this.
-            center.post(name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil)
-            center.post(name: .emoteAnimationPreferenceDidChange, object: nil)
-            center.post(name: .powerSavingPreferenceDidChange, object: nil)
+            reportIfChanged()
         }
     }
+
+    /// What every visible effect asks: the switch on, and iOS in Low Power
+    /// Mode.
+    public static var savesBattery: Bool { isFollowed && system() }
+
+    /// The effect last announced: a change is posted only when the effect
+    /// itself changes — with the switch off, Low Power Mode posts nothing.
+    nonisolated(unsafe) private static var announced: Bool?
+    nonisolated(unsafe) private static var observer: NSObjectProtocol?
+
+    /// Follows iOS's Low Power Mode live (the app calls it once, at start).
+    ///
+    /// ⚠️ iOS POSTS `NSProcessInfoPowerStateDidChange` ON AN ARBITRARY QUEUE:
+    /// the change hops to the main actor before it is re-posted, because the
+    /// observers are UIKit views.
+    @MainActor
+    public static func startFollowingSystem(center: NotificationCenter = .default) {
+        guard observer == nil else { return }
+        announced = savesBattery
+        observer = center.addObserver(forName: .NSProcessInfoPowerStateDidChange, object: nil, queue: nil) { _ in
+            Task { @MainActor in reportIfChanged() }
+        }
+    }
+
+    /// Re-posts the three notifications every existing observer listens for
+    /// when the effect changed, so each re-reads with no new wiring.
+    static func reportIfChanged() {
+        let now = savesBattery
+        guard now != announced else { return }
+        announced = now
+        let center = NotificationCenter.default
+        // Everything that honours Reduce Motion already listens for this.
+        center.post(name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil)
+        center.post(name: .emoteAnimationPreferenceDidChange, object: nil)
+        center.post(name: .lowPowerModeEffectDidChange, object: nil)
+    }
+
+    /// Forgets Power Saving's stored switch (#1808): a viewer who had it on
+    /// now gets the effects only in Low Power Mode, the owner's intent.
+    public static func forgetPowerSaving() {
+        defaults.removeObject(forKey: powerSavingKey)
+    }
+
+    #if DEBUG
+    /// Tests only: forgets what was announced, so the next change posts.
+    static func resetAnnounced() { announced = nil }
+
+    nonisolated(unsafe) private static var simulatedOn = false
+
+    /// QA only (`-simulate-low-power-mode <seconds>`): the simulator has no
+    /// Low Power Mode to turn on, so iOS's state is played instead. It flips
+    /// every `period` seconds, starting off, and each flip is posted as iOS
+    /// posts it — off main — so the live path is the real one. Call before
+    /// `startFollowingSystem`.
+    @MainActor
+    public static func simulateSystem(flippingEvery period: TimeInterval, center: NotificationCenter = .default) {
+        simulatedOn = false
+        system = { simulatedOn }
+        Timer.scheduledTimer(withTimeInterval: period, repeats: true) { _ in
+            simulatedOn.toggle()
+            DispatchQueue.global().async {
+                center.post(name: .NSProcessInfoPowerStateDidChange, object: nil)
+            }
+        }
+    }
+    #endif
 }
 
 /// Settings → App and Device → Emojis: whether emojis and stickers in text
@@ -74,17 +150,19 @@ public enum EmoteAnimationPreference {
         }
     }
 
-    /// What an emote asks: the viewer's switch, unless Power Saving is on.
+    /// What an emote asks: the viewer's switch, unless Low Power Mode is
+    /// followed (#1808).
     public static var animatesEmotes: Bool {
-        isOn && !PowerSavingPreference.isOn
+        isOn && !LowPowerMode.savesBattery
     }
 }
 
 extension Notification.Name {
     /// Posted when `EmoteAnimationPreference.animatesEmotes` may have changed.
     public static let emoteAnimationPreferenceDidChange = Notification.Name("cn.wynn.core-platform-ios.emoteAnimationPreferenceDidChange")
-    /// Posted when Power Saving is switched on or off.
-    public static let powerSavingPreferenceDidChange = Notification.Name("cn.wynn.core-platform-ios.powerSavingPreferenceDidChange")
+    /// Posted when `LowPowerMode.savesBattery` changed: Low Power Mode, or
+    /// the switch that follows it (#1808).
+    public static let lowPowerModeEffectDidChange = Notification.Name("cn.wynn.core-platform-ios.lowPowerModeEffectDidChange")
 }
 
 /// Light, dark, or following iOS — for the whole app (Settings → App and

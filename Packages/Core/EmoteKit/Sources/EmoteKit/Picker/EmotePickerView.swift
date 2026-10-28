@@ -24,7 +24,7 @@ import UIKit
 /// The displayed tiles loop from the moment they show, at rest too (#731),
 /// within the tile slot budget (`EmoteScrollPlayback.playsAtRest`). Their
 /// motion is the keyboard's content, not decoration (#926): idle calm (#650)
-/// does not rest them, and Reduce Motion, Low Power Mode, Power Saving,
+/// does not rest them, and Reduce Motion, Low Power Mode,
 /// Animate Emojis off or overheating still them (`EmoteMotion.keyboardPolicy`).
 /// A change of any of those re-dresses the tiles on screen at once.
 ///

@@ -12,7 +12,7 @@ import UIKit
 ///
 /// Its tiles are keyboard tiles (#958): they loop for as long as they show,
 /// through idle calm, and are still under Reduce Motion, Low Power Mode,
-/// Power Saving, Animate Emojis off or overheating — the panel's gate
+/// Low Power Mode, Animate Emojis off or overheating — the panel's gate
 /// (`EmoteMotion.keyboardPolicy`), re-dressed in place when it changes.
 @MainActor
 final class EmoteSuggestionStrip: UIView {

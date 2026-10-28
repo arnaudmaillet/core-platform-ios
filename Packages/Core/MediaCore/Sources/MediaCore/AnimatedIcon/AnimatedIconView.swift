@@ -45,14 +45,14 @@ public final class AnimatedIconView: UIView {
     }
 
     public static var devicePolicy: MotionPolicy {
-        // Decoration: still under Reduce Motion and Power Saving, and while
+        // Decoration: still under Reduce Motion and Low Power Mode, and while
         // the app rests (`IdleCalm`, #580) — the map's markers, which the
         // owner keeps at rest (#1072). Emotes in text state their own policy
         // through `playbackPolicy`, and play through idle calm.
         if MotionPreference.reducesMotion || isIdleCalm() { return .still }
         if ProcessInfo.processInfo.thermalState.rawValue
             >= ProcessInfo.ThermalState.serious.rawValue { return .still }
-        if ProcessInfo.processInfo.isLowPowerModeEnabled { return .reduced }
+        if LowPowerMode.savesBattery { return .reduced }
         return .full
     }
 
@@ -67,7 +67,7 @@ public final class AnimatedIconView: UIView {
     public static var policy: MotionPolicy { forcedPolicy ?? devicePolicy }
 
     /// The policy THIS view plays under. Nil, the default: the app's
-    /// (`policy`) — decoration, which Reduce Motion, Power Saving, Low Power
+    /// (`policy`) — decoration, which Reduce Motion, Low Power Mode
     /// and idle calm all reach: the map's markers. An owner whose motion is
     /// the content itself states its own: every emote in text, the composer
     /// and the keyboard plays through idle calm (#926, #1072), and the
@@ -93,7 +93,7 @@ public final class AnimatedIconView: UIView {
         _ onChange: @escaping @MainActor @Sendable () -> Void
     ) -> [any NSObjectProtocol] {
         [
-            Notification.Name.NSProcessInfoPowerStateDidChange,
+            Notification.Name.lowPowerModeEffectDidChange,
             UIAccessibility.reduceMotionStatusDidChangeNotification,
             ProcessInfo.thermalStateDidChangeNotification,
             Notification.Name.decorativeMotionDidChange

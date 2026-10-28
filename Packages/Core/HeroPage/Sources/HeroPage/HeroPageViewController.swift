@@ -125,7 +125,7 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
 
     open override func viewDidLoad() {
         super.viewDidLoad()
-        // The video banner rests under Reduce Motion, Power Saving and idle
+        // The video banner rests under Reduce Motion, Low Power Mode and idle
         // calm, and plays again when they end (#944).
         NotificationCenter.default.addObserver(
             self, selector: #selector(decorativeMotionDidChange), name: .decorativeMotionDidChange, object: nil
@@ -534,7 +534,7 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
 
     /// The video banner (#944) plays while this screen is on show or
     /// leaving, the banner on screen and decorative motion allowed — the
-    /// poster under Reduce Motion, Power Saving and idle calm (#580), and as
+    /// poster under Reduce Motion, Low Power Mode and idle calm (#580), and as
     /// soon as the banner has scrolled away.
     public var bannerVideoShouldPlay: Bool {
         view.window != nil && heroHeader.bannerShouldPlay(hostShowing: isShownOnScreen || isLeavingScreen)

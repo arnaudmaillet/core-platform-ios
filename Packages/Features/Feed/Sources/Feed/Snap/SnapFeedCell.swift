@@ -137,8 +137,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             pageActive: isActive,
             playing: isClipAdvancing,
             inFlight: isChromeHeldForFlight,
-            powerSaving: PowerSavingPreference.isOn,
-            lowPowerMode: process.isLowPowerModeEnabled,
+            lowPowerMode: LowPowerMode.savesBattery,
             thermalState: process.thermalState
         )
         #if DEBUG
@@ -2436,7 +2435,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let scope = playbackScope
         let peakBitRate = MediaPlaybackPolicy.peakBitRate
         // ⚠️ NOT HELD WHEN AUTOPLAY IS OFF (#702). The full-screen post is the
-        // one the viewer opened: it plays whatever Autoplay and Power Saving
+        // one the viewer opened: it plays whatever Autoplay and Low Power Mode
         // say, which govern grids, rails and previews (#409 held it here
         // under the pause mark).
         Task {

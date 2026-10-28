@@ -27,7 +27,7 @@ import UIKit
 /// the frame; the loop is removed when the view leaves the window and put back
 /// when it returns.
 ///
-/// Reduce Motion, the app's switch or Power Saving (`MotionPreference`): no
+/// Reduce Motion, the app's switch or Low Power Mode (`MotionPreference`): no
 /// morph and no turn — the static icon, fading in with the pull and pulsing
 /// slowly while loading.
 public final class AppLoaderView: UIView {

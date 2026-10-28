@@ -153,7 +153,7 @@ struct ProfileVideoBannerTests {
         #expect(pool.playerCountByURL.isEmpty, "a player is left in the pool: \(pool.playerCountByURL)")
     }
 
-    /// A stilled loop (Reduce Motion, Power Saving, once gone) leaves the
+    /// A stilled loop (Reduce Motion, Low Power Mode, once gone) leaves the
     /// still drawn under it — never the empty card.
     @Test func aStoppedLoopLeavesItsStill() async throws {
         let banner = HeroBannerView(imagePipeline: ImagePipeline(fetcher: PictureFetch()))

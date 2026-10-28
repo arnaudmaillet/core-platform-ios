@@ -28,7 +28,7 @@ import UIKit
 /// Only a PLAYING tile holds one of `EmoteEngine.maxPlayingTiles` slots: a
 /// still tile is a posed layer with no animation on it, which costs the
 /// render server nothing. A tile denied a slot stays still until its next
-/// start. Under Reduce Motion (or Power Saving, Low Power Mode, Animate
+/// start. Under Reduce Motion (or Low Power Mode, Animate
 /// Emojis off) every emote, an emoji included, shows a still frame of its
 /// own art (`EmoteEngine.Motion.still`).
 ///
@@ -164,7 +164,7 @@ public final class EmoteTileView: UIView {
     /// The policy the tile was last dressed under.
     private var dressedPolicy: AnimatedIconView.MotionPolicy?
 
-    /// Reduce Motion, Power Saving, Low Power or Animate Emojis changed: a
+    /// Reduce Motion, Low Power Mode or Animate Emojis changed: a
     /// tile on screen whose owner does not re-dress it does so itself.
     /// Internal for tests, which call it rather than post a process-wide
     /// notification every live emote of a parallel suite would hear.

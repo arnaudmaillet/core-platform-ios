@@ -20,15 +20,15 @@ import UIKit
 final class SettingsViewController: UIViewController {
     private enum Section: Hashable {
         case scope(SettingsScope)
-        /// Power Saving, on its own right under App and Device: a switch that
-        /// acts here, with no page behind it.
-        case powerSaving
+        /// Follow Low Power Mode (#1808), on its own right under App and
+        /// Device: a switch that acts here, with no page behind it.
+        case followLowPowerMode
         case session
     }
 
     private enum Item: Hashable {
         case section(SettingsSection)
-        case powerSaving
+        case followLowPowerMode
         case switchProfile
         case logOut
         case signIn
@@ -116,18 +116,18 @@ final class SettingsViewController: UIViewController {
             cell.contentConfiguration = content
             cell.accessories = [.disclosureIndicator()]
         }
-        let powerSavingRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, _ in
+        let lowPowerModeRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, _ in
             var content = UIListContentConfiguration.cell()
-            content.text = "Power Saving"
+            content.text = Self.followLowPowerModeTitle
             content.image = UIImage(systemName: "battery.50")
             content.imageProperties.tintColor = .label
             cell.contentConfiguration = content
             let toggle = UISwitch()
-            toggle.isOn = PowerSavingPreference.isOn
-            toggle.accessibilityLabel = "Power Saving"
+            toggle.isOn = LowPowerMode.isFollowed
+            toggle.accessibilityLabel = Self.followLowPowerModeTitle
             toggle.addAction(UIAction { action in
                 guard let toggle = action.sender as? UISwitch else { return }
-                PowerSavingPreference.isOn = toggle.isOn
+                LowPowerMode.isFollowed = toggle.isOn
             }, for: .valueChanged)
             cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
         }
@@ -153,8 +153,8 @@ final class SettingsViewController: UIViewController {
             switch item {
             case .section(let section):
                 collectionView.dequeueConfiguredReusableCell(using: sectionRegistration, for: indexPath, item: section)
-            case .powerSaving:
-                collectionView.dequeueConfiguredReusableCell(using: powerSavingRegistration, for: indexPath, item: item)
+            case .followLowPowerMode:
+                collectionView.dequeueConfiguredReusableCell(using: lowPowerModeRegistration, for: indexPath, item: item)
             case .switchProfile:
                 collectionView.dequeueConfiguredReusableCell(using: switchRegistration, for: indexPath, item: item)
             case .logOut:
@@ -194,8 +194,8 @@ final class SettingsViewController: UIViewController {
             snapshot.appendSections([.scope(scope)])
             snapshot.appendItems(SettingsSection.sections(in: scope).map(Item.section), toSection: .scope(scope))
             if scope == .device {
-                snapshot.appendSections([.powerSaving])
-                snapshot.appendItems([.powerSaving], toSection: .powerSaving)
+                snapshot.appendSections([.followLowPowerMode])
+                snapshot.appendItems([.followLowPowerMode], toSection: .followLowPowerMode)
             }
         }
         snapshot.appendSections([.session])
@@ -216,12 +216,13 @@ final class SettingsViewController: UIViewController {
     }
 
     private func footerText(at index: Int) -> String? {
-        if dataSource.sectionIdentifier(for: index) == .powerSaving { return Self.powerSavingFooter }
+        if dataSource.sectionIdentifier(for: index) == .followLowPowerMode { return Self.followLowPowerModeFooter }
         guard case .scope(let scope) = dataSource.sectionIdentifier(for: index) else { return nil }
         return Self.footerText(for: scope, activeHandle: activeHandle, isGuest: onSignIn != nil)
     }
 
-    static let powerSavingFooter = "Stops animated emojis, turns on Reduce Motion and stops videos in grids and previews from playing on their own (a post you open full screen still plays). Your own settings come back when you turn it off."
+    static let followLowPowerModeTitle = "Follow Low Power Mode"
+    static let followLowPowerModeFooter = "While your iPhone is in Low Power Mode, emojis stay still, Reduce Motion is on, videos in grids and previews don't play on their own and the feed's song is off. A post you open full screen still plays. Your own settings come back when Low Power Mode ends."
 
     /// What Settings shows. A guest has no account and no profile, so only
     /// what works without one: this device's settings, and help and the
@@ -324,10 +325,10 @@ final class SettingsViewController: UIViewController {
 extension SettingsViewController: UICollectionViewDelegate {
     /// ⚠️ The Switch Profile row must not highlight. A highlightable cell
     /// claims the touch for selection and its button's menu never opens.
-    /// Power Saving neither: its switch is the whole row.
+    /// Low Power Mode neither: its switch is the whole row.
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         let item = dataSource.itemIdentifier(for: indexPath)
-        return item != .switchProfile && item != .powerSaving
+        return item != .switchProfile && item != .followLowPowerMode
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -339,7 +340,7 @@ extension SettingsViewController: UICollectionViewDelegate {
             confirmLogout()
         case .signIn:
             onSignIn?()
-        case .switchProfile, .powerSaving, nil:
+        case .switchProfile, .followLowPowerMode, nil:
             // The row's own button opens the menu; selection never reaches here.
             break
         }

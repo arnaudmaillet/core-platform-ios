@@ -7,7 +7,7 @@ import UIKit
 /// The emote keyboard's emotes always animate (#926): their motion is the
 /// keyboard's content, so idle calm (#650) does not rest them — only Reduce
 /// Motion and Low Power Mode do, with what already stills every emote (Animate
-/// Emojis off, Power Saving, overheating). Since #1072 no emote rests in idle
+/// Emojis off, Low Power Mode, overheating). Since #1072 no emote rests in idle
 /// calm; the keyboard differs from the rest only under Low Power.
 ///
 /// ⚠️ SYNCHRONOUS, AND IT MUST STAY SO: `AnimatedIconView.forcedPolicy`,
@@ -41,7 +41,7 @@ struct EmoteKeyboardMotionTests {
         #expect(EmoteMotion.keyboardPolicy(for: Conditions(lowPower: true, idleCalm: true)) == .still)
     }
 
-    /// The viewer's own switch (and Power Saving, which turns it off).
+    /// The viewer's own switch (and Low Power Mode, which turns it off).
     @Test func animateEmojisOffStillsIt() {
         #expect(EmoteMotion.keyboardPolicy(for: Conditions(animatesEmotes: false)) == .still)
     }

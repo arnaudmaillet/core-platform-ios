@@ -84,6 +84,20 @@ final class AppPreferencesViewController: UIViewController {
             self, selector: #selector(motionSettingChanged),
             name: UIAccessibility.reduceMotionStatusDidChangeNotification, object: nil
         )
+        // Low Power Mode, followed, overrides several sections (#1808): their
+        // notes and controls follow it live, on every page.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(lowPowerModeChanged),
+            name: .lowPowerModeEffectDidChange, object: nil
+        )
+    }
+
+    @objc private func lowPowerModeChanged() {
+        guard dataSource != nil else { return }
+        var snapshot = dataSource.snapshot()
+        snapshot.reconfigureItems(snapshot.itemIdentifiers)
+        snapshot.reloadSections(snapshot.sectionIdentifiers)
+        dataSource.apply(snapshot, animatingDifferences: false)
     }
 
     deinit {
@@ -98,10 +112,10 @@ final class AppPreferencesViewController: UIViewController {
         dataSource.apply(snapshot, animatingDifferences: false)
     }
 
-    /// Power Saving overrides Reduce Motion, Autoplay and Animate Emojis
-    /// while it is on: their rows show what applies, and can't be changed
-    /// until it is off.
-    private var isPowerSaving: Bool { PowerSavingPreference.isOn }
+    /// Low Power Mode, followed (#1808), overrides Reduce Motion, Autoplay and
+    /// Animate Emojis while it lasts: their rows show what applies, and can't
+    /// be changed until it ends or the switch is off.
+    private var isSavingBattery: Bool { LowPowerMode.savesBattery }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
@@ -134,23 +148,23 @@ final class AppPreferencesViewController: UIViewController {
         case .care: "Larger, bolder text everywhere in the app, and the reaction band switched off for a calmer screen. If your iPhone's own text size is larger, it is kept."
         case .sounds: "Interface sounds are the small pops and clicks of the app's own controls; a video's sound is set above. A phone on silent stays silent, and iOS's System Haptics setting still applies."
         case .motion:
-            PowerSavingPreference.isOn
-                ? Self.powerSavingNote
+            LowPowerMode.savesBattery
+                ? Self.lowPowerModeNote
                 : MotionPreference.appReducesMotion
                 ? "Transitions and effects are kept to a minimum in the app."
                 : "Off, the app follows iOS (Accessibility → Motion → Reduce Motion is currently "
                     + (UIAccessibility.isReduceMotionEnabled ? "on" : "off") + ")."
         case .emojis:
-            PowerSavingPreference.isOn
-                ? Self.powerSavingNote
+            LowPowerMode.savesBattery
+                ? Self.lowPowerModeNote
                 : "Emojis and stickers in comments, messages and posts play their animation. Off, they stay still."
         case .language: "The app is in English for now. When more languages arrive, you'll choose yours here and in iOS Settings."
         case .players: Self.playerPoolFooter
         case .playback:
-            (PowerSavingPreference.isOn ? Self.powerSavingNote + " " : "")
+            (LowPowerMode.savesBattery ? Self.lowPowerModeNote + " " : "")
                 + "Autoplay applies to videos in grids, rails and previews; a post you open full screen always plays. A video that doesn't start on its own shows its first frame with a play mark; tap it to play. To use less cellular data, see Storage. "
                 + Self.backgroundPlayNote
-        case .band: "The short reactions that scroll over videos and photos. Background darkens the strip behind them; it darkens more while you scrub through them. Don't Cover People lets reactions pass behind the people in a playing video; it pauses in Low Power Mode, with Power Saving on, or when your iPhone is hot."
+        case .band: "The short reactions that scroll over videos and photos. Background darkens the strip behind them; it darkens more while you scrub through them. Don't Cover People lets reactions pass behind the people in a playing video; it pauses in Low Power Mode or when your iPhone is hot."
         case .muted: "Comments with these words, or from these accounts, never appear in the reaction band or the subtitles. They still show in the comments."
         case .subtitles: "Comments shown as captions above the reaction band. Background is the shade behind each caption."
         case .commentsScreen: "How dark a video or photo gets behind its comments when you open them. Darker reads more easily; lighter keeps more of the post."
@@ -159,7 +173,7 @@ final class AppPreferencesViewController: UIViewController {
 
     static let backgroundPlayNote = "With Background Play on, a video you're listening to keeps playing when you leave the app or lock your iPhone, with controls on the Lock Screen. With Picture in Picture on, a playing video moves into a small window over your other apps, and videos play their sound even when your iPhone is on silent."
 
-    /// What an overridden section says while Power Saving is on.
+    /// What an overridden section says while Low Power Mode is followed.
     /// Under the player pool control (#702): what it trades, never a number.
     static let playerPoolFooter = "How many videos the app keeps ready to play. More makes scrolling smoother but uses more performance and battery; Less saves battery."
 
@@ -190,7 +204,7 @@ final class AppPreferencesViewController: UIViewController {
         }
     }
 
-    static let powerSavingNote = "Power Saving is on, so this is set for you. Turn it off in Settings → App and Device to use your own choice."
+    static let lowPowerModeNote = "Low Power Mode is on, so this is set for you. Your own choice comes back when Low Power Mode ends, or when Follow Low Power Mode is off in Settings → App and Device."
 
     static func appearanceTitle(_ appearance: AppearancePreference) -> String {
         appearance.title
@@ -309,14 +323,14 @@ final class AppPreferencesViewController: UIViewController {
         case .reduceMotion:
             cell.contentConfiguration = Self.label("Reduce Motion", symbol: "figure.walk.motion")
             cell.accessories = [switchAccessory(
-                isOn: MotionPreference.appReducesMotion || isPowerSaving, isEnabled: !isPowerSaving
+                isOn: MotionPreference.appReducesMotion || isSavingBattery, isEnabled: !isSavingBattery
             ) { isOn in
                 MotionPreference.appReducesMotion = isOn
             }]
         case .animatedEmojis:
             cell.contentConfiguration = Self.label("Animate Emojis", symbol: "face.smiling")
             cell.accessories = [switchAccessory(
-                isOn: EmoteAnimationPreference.animatesEmotes, isEnabled: !isPowerSaving
+                isOn: EmoteAnimationPreference.animatesEmotes, isEnabled: !isSavingBattery
             ) { isOn in
                 EmoteAnimationPreference.isOn = isOn
             }]
@@ -328,9 +342,9 @@ final class AppPreferencesViewController: UIViewController {
             cell.contentConfiguration = nil
             let options = MediaPlaybackPreferences.Autoplay.allCases
             let control = UISegmentedControl(items: options.map(Self.autoplayTitle))
-            let shown = isPowerSaving ? .never : playback.preferences.autoplay
+            let shown = isSavingBattery ? .never : playback.preferences.autoplay
             control.selectedSegmentIndex = options.firstIndex(of: shown) ?? 0
-            control.isEnabled = !isPowerSaving
+            control.isEnabled = !isSavingBattery
             control.accessibilityLabel = "Autoplay"
             control.addAction(UIAction { [weak self] action in
                 guard let control = action.sender as? UISegmentedControl else { return }

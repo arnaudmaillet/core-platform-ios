@@ -92,7 +92,7 @@ public final class SkeletonBoneView: UIView {
         )
         // ⚠️ STILL WHEN DECORATION RESTS (#789): an endless window-sized sweep
         // on a load that never answers (offline, a hung request) recomposited
-        // the whole frame forever — the #580 cost. Reduce Motion, Power Saving
+        // the whole frame forever — the #580 cost. Reduce Motion, Low Power Mode
         // and an app at rest all still it; the bones stay, which is the state.
         for name in [UIAccessibility.reduceMotionStatusDidChangeNotification, .decorativeMotionDidChange] {
             NotificationCenter.default.addObserver(

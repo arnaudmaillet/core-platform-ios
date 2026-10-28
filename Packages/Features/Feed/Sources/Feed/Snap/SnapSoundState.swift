@@ -7,8 +7,8 @@ import Foundation
 /// its attribution and its sound bubble draw, whether its song may be heard,
 /// whether the record turns, and what the sound sheet opens with.
 ///
-/// The session's mute is `FeedSound`'s and Power Saving is
-/// `PowerSavingPreference`'s — both process-wide, so both are READ through
+/// The session's mute is `FeedSound`'s and Low Power Mode, followed, is
+/// `LowPowerMode`'s — both process-wide, so both are READ through
 /// injected closures: the screen passes the real ones (the defaults), tests
 /// their own, and no test ever forces the shared answer.
 ///
@@ -43,18 +43,18 @@ struct SnapSoundState {
     let provider: (any PostSoundProviding)?
     private let readsSoundOn: @MainActor () -> Bool
     private let flipsSound: @MainActor () -> Void
-    private let readsPowerSaving: @MainActor () -> Bool
+    private let readsLowPowerMode: @MainActor () -> Bool
 
     init(
         provider: (any PostSoundProviding)?,
         isOn: @escaping @MainActor () -> Bool = { FeedSound.isOn },
         toggle: @escaping @MainActor () -> Void = { FeedSound.toggle() },
-        powerSaving: @escaping @MainActor () -> Bool = { PowerSavingPreference.isOn }
+        lowPowerMode: @escaping @MainActor () -> Bool = { LowPowerMode.savesBattery }
     ) {
         self.provider = provider
         self.readsSoundOn = isOn
         self.flipsSound = toggle
-        self.readsPowerSaving = powerSaving
+        self.readsLowPowerMode = lowPowerMode
     }
 
     // MARK: - Mute
@@ -164,20 +164,20 @@ struct SnapSoundState {
     /// a text post — when the page may be heard at all; nil for a clip page,
     /// whose sound is the clip's own.
     ///
-    /// ⚠️ **NOTHING UNDER POWER SAVING (#580).** A clip under Power Saving
+    /// ⚠️ **NOTHING IN LOW POWER MODE, FOLLOWED (#580, #1808).** A clip there
     /// does not start on its own; a photograph's song is the same thing
     /// without a picture, so it is silent too — the viewer's decision.
     func song(for model: FeedItemDisplayModel, playingClip: URL?) -> URL? {
-        guard Self.pageSongPlays(soundOn: isOn, powerSaving: readsPowerSaving()),
+        guard Self.pageSongPlays(soundOn: isOn, lowPowerMode: readsLowPowerMode()),
               !(model.mediaKind == .video || model.extraMedia.contains { $0.videoURL != nil })
         else { return nil }
         return sound(for: model, playingClip: playingClip)?.previewURL
     }
 
     /// Whether a page's song may be heard at all: the feed's sound on, and
-    /// Power Saving off (#580).
-    static func pageSongPlays(soundOn: Bool, powerSaving: Bool) -> Bool {
-        soundOn && !powerSaving
+    /// Low Power Mode not followed (#580, #1808).
+    static func pageSongPlays(soundOn: Bool, lowPowerMode: Bool) -> Bool {
+        soundOn && !lowPowerMode
     }
 
     // MARK: - The sound sheet

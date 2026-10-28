@@ -19,7 +19,7 @@ import UIKit
 ///
 /// It owns no player and calls nothing. Every call to
 /// `GridVideoPlaybackCoordinator` stays on the page, in the order it always
-/// had, and so does the hero handoff seam; the Power Saving gate and the
+/// had, and so does the hero handoff seam; the Low Power Mode gate and the
 /// chosen set already live in the coordinator (idle calm no longer gates it,
 /// #882).
 @MainActor

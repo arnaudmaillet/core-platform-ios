@@ -556,7 +556,7 @@ public final class ShopStorefrontViewController: UIViewController {
 
     /// The cards play their videos muted, as For You's rows do: every video
     /// card at least `playsWhenVisible` on screen, the leftmost first, at most
-    /// `concurrentPlayers`. None under Reduce Motion or Power Saving
+    /// `concurrentPlayers`. None under Reduce Motion or Low Power Mode
     /// (`MotionPreference`), none without a player pool.
     func updatePreview() {
         guard let videos = media?.videos, view.window != nil, !MotionPreference.reducesMotion,
