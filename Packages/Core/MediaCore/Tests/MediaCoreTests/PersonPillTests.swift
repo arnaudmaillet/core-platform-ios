@@ -13,19 +13,36 @@ struct PersonPillTests {
         return pill
     }
 
-    /// ⚠️ LARGER, AND CENTRED ON THE FACE'S EDGE (the owner, 2026-10-16): the
-    /// badge's centre sits on the far end of the face's disc, at its
-    /// mid-height, and the name starts clear of it.
+    /// ⚠️ ON THE FACE'S CIRCLE AT ITS BOTTOM-TRAILING CORNER (the owner,
+    /// 2026-10-28, #1793, replacing #1277's mid-height): the badge's centre
+    /// sits on the face's rim, 45° below its trailing side; its size is
+    /// unchanged and the name starts clear of it.
     @Test(arguments: [PersonPill.Badge.follow, .following, .friends, .pending])
-    func theBadgeIsCentredOnTheFacesEdge(_ badge: PersonPill.Badge) throws {
+    func theBadgeSitsOnTheFacesBottomTrailingCorner(_ badge: PersonPill.Badge) throws {
         let pill = PersonPill(carriesBadge: true)
         pill.setBadge(badge, animated: false)
         let geometry = Self.laidOut(pill).debugGeometry
         let drawn = try #require(geometry.badge)
         #expect(abs(drawn.width - 20) < 0.5 && abs(drawn.height - 20) < 0.5, "not the larger badge: \(drawn)")
-        #expect(abs(drawn.midX - geometry.face.maxX) < 0.5, "the centre is not on the disc's edge")
-        #expect(abs(drawn.midY - geometry.face.midY) < 0.5, "not level with the face")
+        let face = geometry.face
+        let radius = face.width / 2
+        let corner = CGPoint(x: face.midX + radius * cos(.pi / 4), y: face.midY + radius * sin(.pi / 4))
+        #expect(abs(drawn.midX - corner.x) < 0.5 && abs(drawn.midY - corner.y) < 0.5,
+                "the centre \(CGPoint(x: drawn.midX, y: drawn.midY)) is not on the rim at 45° \(corner)")
         #expect(drawn.maxX <= geometry.name.minX, "the badge covers the name")
+    }
+
+    /// Mirrored under right-to-left: the bottom-LEADING corner of the face,
+    /// as seen, since the anchors are trailing ones.
+    @Test func theCornerMirrorsUnderRightToLeft() throws {
+        let pill = PersonPill(carriesBadge: true)
+        pill.semanticContentAttribute = .forceRightToLeft
+        pill.subviews.forEach { $0.semanticContentAttribute = .forceRightToLeft }
+        pill.setBadge(.follow, animated: false)
+        let geometry = Self.laidOut(pill).debugGeometry
+        let drawn = try #require(geometry.badge)
+        #expect(drawn.midX < geometry.face.midX, "the badge did not mirror: \(drawn) face \(geometry.face)")
+        #expect(drawn.midY > geometry.face.midY)
     }
 
     /// The badge is optional: the profile's pill has none, and its name sits
