@@ -6436,6 +6436,12 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// fetch returns — so the page configures at push time instead of ~0.7s
     /// later. Additive: a real page replaces it, and a seed arriving after one
     /// is ignored.
+    ///
+    /// A seed may be PARTIAL (#1863): the members of a set the app holds, as
+    /// long as the opening post is one of them. The rest are not seeded later
+    /// (a second seed is ignored): the screen's own first page brings the
+    /// whole set, replaces the seed, and the late members arrive in their
+    /// places through the snapshot.
     public func seedProjection(_ models: [FeedItemDisplayModel]) {
         loadViewIfNeeded()
         viewModel.seed(models)

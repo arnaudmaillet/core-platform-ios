@@ -273,7 +273,23 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
 
     @MainActor
     public func heldGalleryPost(_ id: PostID) -> GalleryPost? {
-        heldEntry(id).map(ForYouRepository.galleryPost(from:))
+        guard var post = heldEntry(id).map(ForYouRepository.galleryPost(from:)) else { return nil }
+        // A like count the store does not know is the card's unknown state,
+        // not a zero (#1863): the hydration's counter read fills it.
+        if repository.peekPost(id) == nil, entities.post(id)?.likeCount == nil { post.reactionCount = nil }
+        return post
+    }
+
+    /// `ids`' posts, loaded together and returned in `ids`' order; a post
+    /// that cannot be loaded is left out (#1863).
+    nonisolated static func loadConcurrently(_ ids: [PostID], from repository: any FeedProviding) async -> [FeedEntry] {
+        let loaded = await withTaskGroup(of: (PostID, FeedEntry?).self) { group in
+            for id in ids { group.addTask { (id, try? await repository.loadPost(id)) } }
+            return await group.reduce(into: [PostID: FeedEntry]()) { found, pair in
+                if let entry = pair.1 { found[pair.0] = entry }
+            }
+        }
+        return ids.compactMap { loaded[$0] }
     }
 
     /// A post the app holds, read synchronously (#1862): the feed's small
@@ -281,6 +297,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// backing reloads hundreds of posts at launch the mirror never saw. The
     /// store's like count is a copy: a real load replaces it.
     func heldEntry(_ id: PostID) -> FeedEntry? {
+        // A post deleted in this session is held by no one (#896).
+        guard !entities.isDeleted(id) else { return nil }
         if let entry = repository.peekPost(id) { return entry }
         return Self.entry(id, in: entities)
     }
@@ -733,6 +751,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             imagePipeline: imagePipeline,
             // The app's one pool, the same instance For You's tabs borrow from.
             videoPlayback: videoPlayback,
+            // What the app holds, drawn before the hydration lands (#1863).
+            held: { [self] id in heldGalleryPost(id) },
             hydrate: { ids in
                 // The place profile's hydration, verbatim in shape: a fixed-set
                 // provider through the For You repository so every member is a
@@ -1501,17 +1521,20 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             #else
             let maySeed = true
             #endif
-            if maySeed, cached.count == postIDs.count, !cached.isEmpty {
-                // ALL answered — the normal pin case, since pins prewarm on
-                // viewport settle.
+            if maySeed, let opening = postIDs.first, cached.first?.post.id == opening {
+                // ⚠️ WHAT IS KNOWN, AS LONG AS THE OPENING POST IS (#1863). A
+                // cluster with one cold member used to take the whole async
+                // path. The seed is the set's held members in its order; the
+                // view model's own first page (`FixedPostsFeedProvider`, the
+                // whole window, concurrently) then replaces it and the late
+                // members arrive in their places through the snapshot — the
+                // "second seed is ignored" contract never has to admit them
+                // (`SnapFeedViewController.seedProjection`).
                 snapFeed.seedProjection(SnapFeedViewController.keepingOpeningKind(
                     FeedDisplayModelBuilder().build(cached, relativeTo: Date())
                 ))
             } else {
-                // A partial synchronous seed would TRUNCATE the corpus (a
-                // second seed is ignored by contract), so a cold or
-                // half-warm set takes the whole async path — late, but no
-                // later than the old behaviour.
+                // The opening post is unknown: its loading page, as before.
                 // A feed pushed before its corpus has nothing to draw for as
                 // long as this Task takes. Arm the ARRIVAL screen's own loading
                 // state; the text-reveal installer is what draws it. For a
@@ -1520,11 +1543,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 if let head = postIDs.first { snapFeed.armLoadingPage(for: head) }
                 let repository = repository
                 Task { @MainActor [weak snapFeed] in
-                    var entries: [FeedEntry] = []
-                    for id in postIDs {
-                        guard let entry = try? await repository.loadPost(id) else { continue }
-                        entries.append(entry)
-                    }
+                    // Concurrently (#1863): five cold members were five round
+                    // trips in a row.
+                    let entries = await Self.loadConcurrently(postIDs, from: repository)
                     guard !entries.isEmpty else { return }
                     snapFeed?.seedProjection(SnapFeedViewController.keepingOpeningKind(
                         FeedDisplayModelBuilder().build(entries, relativeTo: Date())
