@@ -147,6 +147,33 @@ struct HeroHeaderViewTests {
 
     /// Any view can stand in the disc — a place's flag — filling it; with no
     /// person's avatar to wait for, the pictures are settled.
+    /// ⚠️ ONE QUIET GREY ROUND THE AVATAR (#1792): the ring is
+    /// `Surface.avatarRim` in both styles, never the page's white or black,
+    /// and follows a style flip (a `CGColor` does not resolve itself).
+    @Test func theAvatarRingIsOneQuietGreyInBothStyles() throws {
+        let header = makeHeader()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        window.addSubview(header)
+        window.isHidden = false
+        var rings: [UIUserInterfaceStyle: UIColor] = [:]
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            window.overrideUserInterfaceStyle = style
+            header.layoutIfNeeded()
+            let ring = try #require(header.debugAvatarRingColor)
+            let expected = Surface.avatarRim.resolvedColor(with: UITraitCollection(userInterfaceStyle: style))
+            #expect(UIColor(cgColor: ring) == expected, "the \(style == .dark ? "dark" : "light") ring is not the rim's grey")
+            #expect(UIColor(cgColor: ring) != Surface.page.resolvedColor(with: UITraitCollection(userInterfaceStyle: style)))
+            rings[style] = UIColor(cgColor: ring)
+        }
+        // "Barely varies": the two styles' rings are a few points apart at most.
+        var light: (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+        var dark: (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+        rings[.light]?.getRed(&light.0, green: &light.1, blue: &light.2, alpha: &light.3)
+        rings[.dark]?.getRed(&dark.0, green: &dark.1, blue: &dark.2, alpha: &dark.3)
+        #expect(abs(light.0 - dark.0) < 0.05 && abs(light.1 - dark.1) < 0.05 && abs(light.2 - dark.2) < 0.05)
+        window.isHidden = true
+    }
+
     @Test func aCustomViewFillsTheDisc() {
         // A picture with a size of its own, as a flag is: it must not vote.
         let flag = UIImageView(image: UIGraphicsImageRenderer(size: CGSize(width: 300, height: 200)).image { _ in })
