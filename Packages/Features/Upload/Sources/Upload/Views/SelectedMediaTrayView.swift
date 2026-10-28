@@ -290,6 +290,8 @@ extension SelectedMediaTrayView: UICollectionViewDelegate {
 /// One thumbnail in the strip, with the cross that drops it.
 private final class TrayCell: UICollectionViewCell {
     private let thumbnail = UIImageView()
+    /// The media ground while it decodes, its arrival (#1772).
+    private lazy var thumbnailSlot = LocalThumbnailSlot(view: thumbnail)
     private let remove = UIButton(type: .system)
     private var representedID: String?
     private var removeHandler: (() -> Void)?
@@ -299,7 +301,7 @@ private final class TrayCell: UICollectionViewCell {
 
         thumbnail.contentMode = .scaleAspectFill
         thumbnail.clipsToBounds = true
-        thumbnail.backgroundColor = .secondarySystemBackground
+        _ = thumbnailSlot
         thumbnail.layer.cornerRadius = 10
         thumbnail.layer.cornerCurve = .continuous
         thumbnail.constrain(in: contentView) { parent in
@@ -336,7 +338,7 @@ private final class TrayCell: UICollectionViewCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         representedID = nil
-        thumbnail.image = nil
+        thumbnailSlot.reset()
         thumbnail.layer.borderWidth = 0
         thumbnail.transform = .identity
         removeHandler = nil
@@ -344,12 +346,12 @@ private final class TrayCell: UICollectionViewCell {
 
     func configure(id: String, onRemove: @escaping () -> Void) {
         representedID = id
+        thumbnailSlot.begin(id)
         removeHandler = onRemove
     }
 
     func showThumbnail(_ image: UIImage?, for id: String) {
-        guard representedID == id else { return }
-        thumbnail.image = image
+        thumbnailSlot.show(image, for: id)
     }
 
     /// The ring a thumbnail wears while a finger is carrying it.

@@ -73,22 +73,18 @@ final class AuthorizedAppsViewController: UIViewController {
             content.secondaryText = Self.subtitle(for: app)
             content.secondaryTextProperties.color = .secondaryLabel
             content.secondaryTextProperties.numberOfLines = 2
-            content.image = UIImage(systemName: "app.badge.checkmark")
-            content.imageProperties.tintColor = .secondaryLabel
+            // The icon's place on the media ground while it loads (#1772);
+            // the glyph for an app with no icon, or one that will not come.
+            let awaitsIcon = app.iconURL != nil && self?.imagePipeline != nil
+            content.image = awaitsIcon ? Surface.groundImage(size: CGSize(width: 36, height: 36)) : Self.iconGlyph
+            content.imageProperties.tintColor = awaitsIcon ? Surface.mediaGround : .secondaryLabel
             content.imageProperties.maximumSize = CGSize(width: 36, height: 36)
             content.imageProperties.reservedLayoutSize = CGSize(width: 36, height: 36)
             content.imageProperties.cornerRadius = 8
             cell.contentConfiguration = content
-            // ⚠️ STARTED: a loader that is not animating hides itself, and the
-            // stock spinner this replaced never showed here for that reason.
-            let removing: () -> AppLoaderView = {
-                let loader = AppLoaderView(size: .medium)
-                loader.startAnimating()
-                return loader
-            }
-            cell.accessories = self?.viewModel.removing.contains(app.id) == true
-                ? [.customView(configuration: .init(customView: removing(), placement: .trailing()))]
-                : []
+            // The removal on its way: the shared busy accessory (#1775), on
+            // the loader's timing.
+            cell.accessories = self?.viewModel.removing.contains(app.id) == true ? [.busy()] : []
             self?.loadIcon(app, into: cell)
         }
         let messageRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
@@ -145,13 +141,21 @@ final class AuthorizedAppsViewController: UIViewController {
         iconTasks[key]?.cancel()
         guard let url = app.iconURL, let imagePipeline else { return }
         iconTasks[key] = Task { [weak cell] in
-            guard let image = try? await imagePipeline.image(for: url, size: .avatar), !Task.isCancelled,
-                  let cell, var content = cell.contentConfiguration as? UIListContentConfiguration,
+            let image = try? await imagePipeline.image(for: url, size: .avatar)
+            guard !Task.isCancelled, let cell, var content = cell.contentConfiguration as? UIListContentConfiguration,
                   content.text == app.name else { return }
-            content.image = image
-            cell.contentConfiguration = content
+            // The icon dissolves over its ground; a failed one gives the
+            // glyph back.
+            content.image = image ?? Self.iconGlyph
+            content.imageProperties.tintColor = image == nil ? .secondaryLabel : nil
+            UIView.transition(with: cell, duration: 0.2, options: [.transitionCrossDissolve, .allowUserInteraction]) {
+                cell.contentConfiguration = content
+            }
         }
     }
+
+    /// An app with no icon of its own.
+    private static let iconGlyph = UIImage(systemName: "app.badge.checkmark")
 
     /// The list's loading on the kit's timing (#1770). Injectable so a test
     /// steps it.

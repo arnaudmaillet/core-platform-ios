@@ -64,6 +64,10 @@ final class MapPillButton: UIButton {
     /// Circular avatar thumbnail replacing the symbol (people pills). Set
     /// async once the pipeline resolves; nil keeps the symbol placeholder.
     private var avatarImage: UIImage?
+    /// A face is on its way (#1772): the pill keeps its place on the media
+    /// ground — a disc where the face will stand, the face's spacing — rather
+    /// than a glyph the face then replaces.
+    private var awaitsAvatar = false
 
     /// The pill currently renders as a perfect circle: permanently for
     /// title-less pills, at rest for morphing (`expandsWhenSelected`) ones.
@@ -189,6 +193,7 @@ final class MapPillButton: UIButton {
         guard newContent != content else { return }
         content = newContent
         avatarImage = nil
+        awaitsAvatar = false
         accessibilityLabel = newContent.accessibilityLabel
         circleConstraint.isActive = isCircular
         UIView.performWithoutAnimation {
@@ -199,9 +204,26 @@ final class MapPillButton: UIButton {
     /// Swaps the symbol for a real avatar, pre-cropped to a circle sized for
     /// the pill. The raw image is rendered once here, not per configuration.
     func setAvatar(_ image: UIImage?) {
+        let arrives = image != nil && avatarImage == nil && awaitsAvatar && window != nil
         avatarImage = image.map { Self.circularThumbnail(from: $0, diameter: avatarDiameter) }
+        guard arrives else { return applyConfiguration() }
+        // The face arrives over its ground disc: a dissolve, the width the
+        // same (the disc kept the face's spacing).
+        UIView.transition(with: self, duration: 0.2, options: [.transitionCrossDissolve, .allowUserInteraction]) {
+            self.configuration = self.makeConfiguration(glass: self.hasGlass, selected: self.isSelectedAppearance)
+        }
+    }
+
+    /// Whether a face is on its way: the media ground's disc in its place,
+    /// or the glyph again (a face that will not come).
+    func setAwaitingAvatar(_ awaiting: Bool) {
+        guard awaiting != awaitsAvatar else { return }
+        awaitsAvatar = awaiting
         applyConfiguration()
     }
+
+    /// A face's place: an avatar, or the disc that waits for one.
+    private var showsFacePlace: Bool { avatarImage != nil || awaitsAvatar }
 
     /// Whether a face is showing rather than the symbol.
     var showsAvatar: Bool { avatarImage != nil }
@@ -325,7 +347,7 @@ final class MapPillButton: UIButton {
             // Avatar pills sit the name snugly against the photo; symbol
             // pills keep a hairline gap (glyphs carry whitespace of their
             // own).
-            config.imagePadding = avatarImage == nil ? 4 : 6
+            config.imagePadding = showsFacePlace ? 6 : 4
             // Titles are single-line by contract: at the cap the label is
             // narrower than the text it holds, so it must truncate with an
             // ellipsis — never wrap into a two-line pill inside a
@@ -339,7 +361,11 @@ final class MapPillButton: UIButton {
         // vibrancy to template images and neither `baseForegroundColor` nor
         // an `imageColorTransformer` reliably lands on the glyph.
         let contentColor: UIColor = selected ? Palette.tint : .secondaryLabel
-        config.image = avatarImage ?? UIImage(
+        let groundDisc = awaitsAvatar
+            ? Surface.groundDisc(diameter: avatarDiameter)
+                .withTintColor(Surface.mediaGround.resolvedColor(with: traitCollection), renderingMode: .alwaysOriginal)
+            : nil
+        config.image = avatarImage ?? groundDisc ?? UIImage(
             systemName: selected ? content.selectedSymbolName : content.symbolName
         )?.withConfiguration(UIImage.SymbolConfiguration(
             // Roughly a third of the circle — the proportion the 13pt glyph
@@ -355,7 +381,7 @@ final class MapPillButton: UIButton {
         // padding) and keeps standard breathing room after the title.
         config.contentInsets = if isCircular {
             .zero
-        } else if avatarImage != nil {
+        } else if showsFacePlace {
             NSDirectionalEdgeInsets(top: 0, leading: 6, bottom: 0, trailing: 10)
         } else {
             NSDirectionalEdgeInsets(top: 0, leading: Spacing.md, bottom: 0, trailing: Spacing.md)

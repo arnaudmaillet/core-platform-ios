@@ -69,6 +69,26 @@ public enum Surface {
     /// (map pins, the shop's posters, the snap feed): `skeletonOnDark`.
     public static let mediaGroundOnDark: UIColor = skeletonOnDark
 
+    /// A patch of the media ground (#1772): the place of a picture still on
+    /// its way where the host draws it as an IMAGE — a list row's, a
+    /// button's — and a slot cannot stand. A template: the host tints it
+    /// `mediaGround`, so it follows the appearance; a list row rounds it with
+    /// its image's corner.
+    public static func groundImage(size: CGSize) -> UIImage {
+        UIGraphicsImageRenderer(size: size).image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+        }.withRenderingMode(.alwaysTemplate)
+    }
+
+    /// The same, round: a face's place.
+    public static func groundDisc(diameter: CGFloat) -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: diameter, height: diameter)).image { context in
+            UIColor.black.setFill()
+            context.cgContext.fillEllipse(in: CGRect(x: 0, y: 0, width: diameter, height: diameter))
+        }.withRenderingMode(.alwaysTemplate)
+    }
+
     /// A card's corner (#1494): the For You card's, every card of the app's.
     /// A CARD — a surface that holds content, lighter than its page — not a
     /// thumbnail or a media tile, whose corners are their own.
