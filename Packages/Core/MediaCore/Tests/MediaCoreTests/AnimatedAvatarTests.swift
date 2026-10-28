@@ -180,6 +180,19 @@ struct AnimatedAvatarTests {
         #expect(first.playCount == 0, "a pill's first avatar played")
     }
 
+    /// A fresh pill per author (#1791): its avatar, set before the pill
+    /// joins the bar, plays once it is on screen — and never joins the
+    /// rounds.
+    @Test func anArrivingAvatarPlaysOnceOnScreen() async {
+        let window = makeWindow()
+        defer { window.isHidden = true }
+        let rounds = makeRounds()
+        let player = await hosted(Self.face, trigger: .arrival, registry: makeRegistry(), rounds: rounds, in: window)
+        #expect(await eventually { player.playCount > 0 },
+                "an arriving pill's avatar did not play: \(player.lastRefusal ?? "never asked")")
+        #expect(!rounds.isRunning, "an arriving avatar joined the rounds")
+    }
+
     /// A profile's avatar arrives after its header is on show: its first
     /// display is when the sheet lands, and it plays then.
     @Test func anAvatarArrivingOnAScreenAlreadyUpPlaysOnItsFirstDisplay() async {

@@ -5,13 +5,12 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// THE AUTHOR PILL IS ONE ITEM FOR THE SLOT.
+/// A NEW AUTHOR IS A NEW ITEM, UNDER THE AUTHOR'S IDENTIFIER (#1791).
 ///
-/// It was an item per author under a per-author identifier, which bought iOS
-/// 26's native item replacement — and a glass platter that morphed on every
-/// page. Now the item, its identifier and its pill stay; a new author is drawn
-/// IN PLACE, through the pill's own blur (`BarItemContentTransition`), and the
-/// item is re-minted only invisibly (same pill, same identifier).
+/// The owner prefers UIKit's own item replacement to the hand-made blur
+/// (#627's, deleted): a new author is a fresh pill in a fresh item whose
+/// identifier is the author's, so iOS 26/27 transitions it. The same author
+/// keeps the pill and the item; a badge never re-mints it.
 @MainActor
 struct SnapAuthorPillItemTests {
     private static func feed() -> (nav: UINavigationController, feed: SnapFeedViewController) {
@@ -48,7 +47,7 @@ struct SnapAuthorPillItemTests {
         }
     }
 
-    @Test func aNewAuthorIsDrawnInTheSameItem() throws {
+    @Test func aNewAuthorIsANewItemUnderTheirIdentifier() throws {
         let (_, feed) = Self.feed()
         feed.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"))
         let first = try #require(Self.authorItem(feed))
@@ -58,14 +57,33 @@ struct SnapAuthorPillItemTests {
         let second = try #require(Self.authorItem(feed))
         let secondPill = try #require(second.customView as? SnapAuthorIdentityView)
 
-        #expect(second === first, "a new item for a new author: iOS 26 morphs the glass between them")
-        #expect(secondPill === firstPill)
-        #expect(second.identifier == SnapFeedViewController.authorItemIdentifier)
+        #expect(second !== first, "one item for two authors: UIKit has nothing to transition")
+        #expect(secondPill !== firstPill)
+        #expect(second.identifier == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2")))
+        #expect(second.identifier != first.identifier)
         #expect(Self.labels(in: secondPill).contains("Grace Hopper"))
-        #expect(Self.labels(in: secondPill).contains("Ada Lovelace") == false)
+        #expect(Self.labels(in: firstPill).contains("Ada Lovelace"), "the leaving pill still shows who it was")
         // Exactly one author item in the run, however many authors went by.
         let pills = (feed.toolbarItems ?? []).filter { $0.customView is SnapAuthorIdentityView }
         #expect(pills.count == 1)
+
+        // The same author again: no new item, no transition.
+        feed.showAuthor(Self.model(id: "p3", author: "Grace Hopper", authorID: "prof-2", meta: "@grace · 5m"))
+        #expect(Self.authorItem(feed) === second)
+    }
+
+    /// A fresh pill is the same pill to the bar: wired, at the width the bar
+    /// leaves it, and its taps reach the screen.
+    @Test func aFreshPillIsWiredLikeTheFirst() throws {
+        let (_, feed) = Self.feed()
+        feed.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada"))
+        let first = try #require(Self.authorItem(feed)?.customView as? SnapAuthorIdentityView)
+        feed.showAuthor(Self.model(id: "p2", author: "Grace Hopper", authorID: "prof-2", meta: "@grace"))
+        let fresh = try #require(Self.authorItem(feed)?.customView as? SnapAuthorIdentityView)
+
+        #expect(fresh.onAuthorTapped != nil && fresh.onFollowTapped != nil)
+        #expect(fresh.debugTakesLongPress == first.debugTakesLongPress)
+        #expect(fresh.widthCap == first.widthCap)
     }
 
     /// ⚠️ NO DATE ON THE PILL (asked 2026-10-01): its second line is the
@@ -99,22 +117,21 @@ struct SnapAuthorPillItemTests {
         #expect(SnapAuthorIdentityView.pillMetaLine(fromMeta: "") == "")
     }
 
-    /// ⚠️ THE PILL TAKES ITS OWN WIDTH, CAPPED BY THE TOOLBAR (#925). Across
-    /// authors it keeps what the host configured — its taps still route —
-    /// and it is as wide as its face and its two lines: a short name gets a
-    /// short pill, and a long one stops at the room the toolbar's trailing
-    /// run leaves (`SnapBarPillWidths.toolbarAuthor`), truncating inside it.
+    /// ⚠️ THE PILL TAKES ITS OWN WIDTH, CAPPED BY THE TOOLBAR (#925). Every
+    /// author's pill (a fresh one per author, #1791) keeps what the host
+    /// configured — its taps still route — and it is as wide as its face and
+    /// its two lines: a short name gets a short pill, and a long one stops at
+    /// the room the toolbar's trailing run leaves
+    /// (`SnapBarPillWidths.toolbarAuthor`), truncating inside it.
     @Test func thePillHugsItsAuthorUnderTheToolbarsCap() throws {
         let (nav, feed) = Self.feed()
         // A real width to share out, as the screen's first layout pass has.
         nav.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         nav.view.layoutIfNeeded()
-        let pill = try #require(Self.authorItem(feed)?.customView as? SnapAuthorIdentityView)
         let cap = SnapBarPillWidths.resolve(
             navBarWidth: 402, toolbarWidth: 402, walletWidth: nil, sort: nil
         ).toolbarAuthor
-        #expect(abs(pill.widthCap - cap) < 0.5, "the cap is \(pill.widthCap), the toolbar leaves \(cap)")
-        func fitted() -> CGFloat {
+        func fitted(_ pill: SnapAuthorIdentityView) -> CGFloat {
             pill.setNeedsLayout()
             pill.layoutIfNeeded()
             return pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
@@ -127,8 +144,11 @@ struct SnapAuthorPillItemTests {
             ("prof-3", "Ada Byron", "@ada · 3w"),
         ] {
             feed.showAuthor(Self.model(id: "p-\(id)", author: name, authorID: id, meta: meta))
-            #expect(Self.authorItem(feed)?.customView === pill)
-            widths[id] = fitted()
+            let pill = try #require(Self.authorItem(feed)?.customView as? SnapAuthorIdentityView)
+            #expect(abs(pill.widthCap - cap) < 0.5, "\(id)'s cap is \(pill.widthCap), the toolbar leaves \(cap)")
+            #expect(pill.onAuthorTapped != nil)
+            #expect(pill.onFollowTapped != nil)
+            widths[id] = fitted(pill)
         }
         let short = try #require(widths["prof-1"])
         let long = try #require(widths["prof-2"])
@@ -136,8 +156,6 @@ struct SnapAuthorPillItemTests {
         #expect(abs(long - cap) < 0.5, "a long name's pill is \(long), not the cap \(cap)")
         #expect(short < medium && medium < long, "the pill did not take its author's width: \(widths)")
         #expect(short < 100, "a two-letter name kept a wide pill: \(short)")
-        #expect(pill.onAuthorTapped != nil)
-        #expect(pill.onFollowTapped != nil)
     }
 
     /// ⚠️ THE BADGE IS ON THE AVATAR, NOT AT THE TRAILING END (#925): no
@@ -201,8 +219,8 @@ struct SnapAuthorPillItemTests {
     }
 
     /// The pill is the toolbar's (#671): with a media post's thread open the
-    /// ✕ takes the nav bar's slot, and the pill stays where it is, drawing
-    /// an author change in place.
+    /// ✕ takes the nav bar's slot, and the pill stays where it is — a new
+    /// author is still its own item there.
     @Test func anAuthorChangeWithTheThreadOpenIsDrawnInTheToolbar() throws {
         let (_, feed) = Self.feed()
         feed.showAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"))
@@ -212,7 +230,8 @@ struct SnapAuthorPillItemTests {
 
         feed.showAuthor(Self.model(id: "p2", author: "Grace Hopper", authorID: "prof-2", meta: "@grace · 1d"))
         let open = try #require(Self.authorItem(feed))
-        #expect(open === before)
+        #expect(open !== before)
+        #expect(open.identifier == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2")))
         #expect(Self.labels(in: try #require(open.customView)).contains("Grace Hopper"))
     }
 
@@ -238,9 +257,10 @@ struct SnapAuthorPillItemTests {
 
         let landed = try #require(Self.authorItem(feed))
         #expect(landed !== rode)
-        // Same pill, same identifier: the swap is one item to the bar, unseen.
+        // Same pill, under its author's identifier now; not animated, so the
+        // swap is one item to the bar, unseen.
         #expect(landed.customView === rode.customView)
-        #expect(landed.identifier == rode.identifier)
+        #expect(landed.identifier == SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-1")))
         #expect(Self.labels(in: try #require(landed.customView)).contains("Ada Lovelace"))
     }
 

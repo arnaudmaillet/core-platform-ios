@@ -95,22 +95,30 @@ extension SnapFeedViewController {
     /// `[fling] settle` printed exactly as for a real one — a run that scrolled
     /// nothing read as a pass. It now waits for `target > start`, and a page
     /// that never becomes reachable is a `[qa] GAVE UP`, never a fling.
-    func debugFlingPages(_ remaining: Int) {
-        guard remaining > 0 else { return }
+    ///
+    /// `-snap-fling-back`: once there, the same number of pages back up, the
+    /// same way — the hand-off in the other direction (#1791).
+    func debugFlingPages(_ remaining: Int, back: Int = 0) {
+        guard remaining > 0 else {
+            if back > 0 { debugFlingOnePage(back, upward: true) }
+            return
+        }
         QAWait.until("-snap-fling (\(remaining) left)", { [weak self] in
             guard let self else { return false }
             let page = self.collectionView.bounds.height
             guard page > 0 else { return false }
             return CGFloat(self.debugReachableCeiling()) * page > self.collectionView.contentOffset.y + 0.5
         }) { [weak self] in
-            self?.debugFlingOnePage(remaining)
+            self?.debugFlingOnePage(remaining, back: back)
         }
     }
 
-    private func debugFlingOnePage(_ remaining: Int) {
+    private func debugFlingOnePage(_ remaining: Int, back: Int = 0, upward: Bool = false) {
         let page = collectionView.bounds.height
         let start = collectionView.contentOffset.y
-        let target = min(start + page, CGFloat(debugReachableCeiling()) * page)
+        let target = upward
+            ? max(start - page, 0)
+            : min(start + page, CGFloat(debugReachableCeiling()) * page)
         // `-snap-fling-steps N`: frames per page, one every 1/60 s. 24 is a
         // gentle 0.4 s page; 3 is a fling (about 17,000 pt/s on a 874 pt
         // page), the speed #627 is about.
@@ -134,7 +142,11 @@ extension SnapFeedViewController {
                 self.scrollViewDidEndDecelerating(self.collectionView)
                 print("[fling] settle offsetY=\(Int(self.collectionView.contentOffset.y))")
                 DispatchQueue.main.asyncAfter(deadline: .now() + dwell) { [weak self] in
-                    self?.debugFlingPages(remaining - 1)
+                    if upward {
+                        if remaining > 1 { self?.debugFlingOnePage(remaining - 1, upward: true) }
+                    } else {
+                        self?.debugFlingPages(remaining - 1, back: back)
+                    }
                 }
                 return
             }

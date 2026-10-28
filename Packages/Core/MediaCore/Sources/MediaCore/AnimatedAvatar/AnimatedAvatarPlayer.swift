@@ -51,6 +51,11 @@ public final class AnimatedAvatarPlayer: UIView {
         /// screen's author pill, on paging to the next post. Its first
         /// avatar rests.
         case change
+        /// Plays once when it first shows on screen, its sheet landed — a
+        /// FRESH view standing for a change: the post screen's author pill,
+        /// a new pill per author (#1791), whose host keeps `.change` on the
+        /// first one so that one rests. Never in the rounds.
+        case arrival
     }
 
     /// The smallest avatar that plays: a post card's author (40 pt), a
@@ -153,6 +158,7 @@ public final class AnimatedAvatarPlayer: UIView {
         updateMembership()
         guard let url else { return }
         if case .change = trigger, replacesOne, window != nil { owesPlay = true }
+        if case .arrival = trigger { owesPlay = true }
         let rung = resolvedRung
         registry.sheet(for: url, rung: rung) { [weak self] sheet in
             guard let self, self.url == url else { return }
@@ -174,8 +180,13 @@ public final class AnimatedAvatarPlayer: UIView {
         updateMembership()
         if let stillImage { onStill?(stillImage) }
         if owesPlay {
-            owesPlay = false
-            if isVisible { requestPlay() }
+            if isVisible {
+                owesPlay = false
+                requestPlay()
+            } else if case .change = trigger {
+                owesPlay = false
+            }
+            // `.arrival` keeps owing: its display is still to come.
         } else if case .firstAppearance = trigger, isVisible {
             // ⚠️ The avatar often arrives AFTER its screen is up — a profile
             // loads after its header is on show — so the first display was
@@ -198,6 +209,11 @@ public final class AnimatedAvatarPlayer: UIView {
         }
         let visible = isVisible
         wasVisible = visible
+        // An arrival whose sheet landed before it joined the window.
+        if owesPlay, visible, sheet != nil {
+            owesPlay = false
+            requestPlay()
+        }
         guard case .firstAppearance = trigger else { return }
         // Every scroll view it rides in — a face in a row that scrolls
         // sideways: its first display can come with a scroll.
@@ -251,10 +267,13 @@ public final class AnimatedAvatarPlayer: UIView {
         DispatchQueue.main.asyncAfter(deadline: .now() + rounds.tuning.draw(rounds.tuning.firstDisplayDelay), execute: work)
     }
 
-    /// Whether the rounds may pick it: everything but `.change`.
+    /// Whether the rounds may pick it: everything but `.change` and
+    /// `.arrival`.
     private var joinsRounds: Bool {
-        if case .change = trigger { return false }
-        return true
+        switch trigger {
+        case .change, .arrival: false
+        case .rounds, .firstAppearance: true
+        }
     }
 
     private func cancelFirstDisplay() {

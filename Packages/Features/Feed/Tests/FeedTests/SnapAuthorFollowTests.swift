@@ -72,7 +72,7 @@ struct SnapAuthorFollowTests {
         feed.showAuthor(Self.model(authorID: "prof-1"))
 
         #expect(try Self.pill(feed).offersFollow == false)
-        #expect(try Self.authorItem(feed).identifier == SnapFeedViewController.authorItemIdentifier)
+        #expect(try Self.authorItem(feed).identifier == SnapFeedViewController.authorItemIdentifier(for: nil))
     }
 
     @Test(arguments: [FollowRelation.following, .mutual, .viewer, .blocked])
@@ -90,7 +90,7 @@ struct SnapAuthorFollowTests {
         feed.showAuthor(Self.model(authorID: "prof-2"))
 
         #expect(try Self.pill(feed).offersFollow)
-        #expect(try Self.authorItem(feed).identifier == SnapFeedViewController.authorItemIdentifier)
+        #expect(try Self.authorItem(feed).identifier == SnapFeedViewController.authorItemIdentifier(for: nil))
     }
 
     /// The answer arriving for the author ON the pill re-draws its badge — in
@@ -111,7 +111,7 @@ struct SnapAuthorFollowTests {
 
         let after = try Self.authorItem(feed)
         #expect(after === before, "a new item for a badge: iOS 26 morphs the glass between them")
-        #expect(after.identifier == SnapFeedViewController.authorItemIdentifier)
+        #expect(after.identifier == SnapFeedViewController.authorItemIdentifier(for: nil))
         #expect(try Self.pill(feed).offersFollow)
     }
 
@@ -144,7 +144,7 @@ struct SnapAuthorFollowTests {
 
         let followed = try Self.authorItem(feed)
         #expect(followed === offered)
-        #expect(followed.identifier == SnapFeedViewController.authorItemIdentifier)
+        #expect(followed.identifier == SnapFeedViewController.authorItemIdentifier(for: nil))
         #expect(try Self.pill(feed).offersFollow == false)
         #expect(try Self.pill(feed).followBadge == .following, "a follow is drawn, not forgotten")
         await Self.settle { graph.pendingFollows == 1 }
@@ -175,7 +175,7 @@ struct SnapAuthorFollowTests {
 
         #expect(try Self.pill(feed).followBadge == badge)
         #expect(try Self.pill(feed).drawnBadgeSymbol == badge.symbolName, "the avatar wears another symbol")
-        #expect(try Self.authorItem(feed).identifier == SnapFeedViewController.authorItemIdentifier)
+        #expect(try Self.authorItem(feed).identifier == SnapFeedViewController.authorItemIdentifier(for: nil))
     }
 
     /// The badge's symbols are the owner's (#925): "+" to follow, a check
@@ -254,7 +254,10 @@ struct SnapAuthorFollowTests {
         feed.followStore.setRelation(relation, for: ProfileID("prof-2"))
         feed.showAuthor(Self.model(authorID: "prof-2"))
         let pill = try Self.pill(feed)
-        for _ in 0..<300 where pill.isRedrawingWholePill {
+        // The landing install re-mints the item under the author's identifier
+        // (#1791): what a test then holds is the item the screen keeps.
+        let landed = SnapFeedViewController.authorItemIdentifier(for: ProfileID("prof-2"))
+        for _ in 0..<300 where pill.isRedrawingWholePill || (try? Self.authorItem(feed))?.identifier != landed {
             try await Task.sleep(for: .milliseconds(10))
         }
         return (feed, pill, window)
