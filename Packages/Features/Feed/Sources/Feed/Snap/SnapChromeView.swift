@@ -1478,8 +1478,13 @@ final class SnapChromeView: UIView {
     /// screen rather than to this view. That is the right answer as well as
     /// the available one — the way out of a post should not blink away because
     /// a thumb landed on a clip's bar.
+    ///
+    /// The save and share capsule is in here with the like pill and the sound
+    /// bubble, its neighbours in the column (#1847): left standing, it was the
+    /// only piece of the post beside the filmstrip.
     private var scrubFadedViews: [UIView] {
-        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton, soundBubble, authorRow]
+        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton, soundBubble,
+         postActions, authorRow]
     }
 
     /// What each faded view was worth before the scrub took it, so the fade
