@@ -71,4 +71,19 @@ struct UISoundTests {
             )
         }
     }
+
+    /// ⚠️ **A TEST PROCESS NEVER STARTS A SOUND** (`UISound.silencedInTests`).
+    /// On a CI runner whose audio device dropped, each start held the main
+    /// actor 2.5 s, and a lane of editor pops starved every suite for ten
+    /// minutes. The play still takes its player, as in the app.
+    @Test func aTestProcessNeverStartsASound() {
+        #expect(UISound.silencedInTests, "XCTestConfigurationFilePath is unset: this process would start real audio queues")
+        let previous = InterfaceSoundPreference.defaults
+        defer { InterfaceSoundPreference.defaults = previous }
+        InterfaceSoundPreference.defaults = UserDefaults(suiteName: "sounds-\(UUID().uuidString)")!
+        UISound.pop.play()
+        UISound.pop.play(after: 0.04)
+        #expect(UISound.players.debugDepth(of: .pop) > 0, "the play no longer reaches the pool")
+        #expect(!UISound.players.debugPlayers(of: .pop).contains { $0.isPlaying }, "a sound started in a test process")
+    }
 }
