@@ -27,12 +27,12 @@ extension TabGlyph {
     func image(selected: Bool, badged: Bool, traits: UITraitCollection = .current) -> UIImage? {
         let badge = symbol(selected: selected, badged: true)
         if badged {
-            let config = NotificationsBell.barSymbolConfiguration
+            let config = TabGlyph.symbolConfiguration
                 .applying(UIImage.SymbolConfiguration(paletteColors: [.label, TabGlyph.badgeTint]))
             guard let image = badge.image(config) else { return nil }
             return NotificationsBell.baked(image, traits: traits)
         }
-        let config = NotificationsBell.barSymbolConfiguration
+        let config = TabGlyph.symbolConfiguration
         guard let box = badge.image(config),
               let glyph = symbol(selected: selected, badged: false).image(config) else { return nil }
         return Self.template(glyph, inBoxOf: box)

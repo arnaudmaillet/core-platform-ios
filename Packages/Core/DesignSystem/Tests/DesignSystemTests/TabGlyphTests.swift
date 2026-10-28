@@ -30,4 +30,21 @@ struct TabGlyphTests {
         #expect(TabGlyph.forYou.symbol(selected: false, badged: false) == .squarePlay)
         #expect(TabGlyph.messages.symbol(selected: false, badged: false) == .chats)
     }
+
+    /// ⚠️ #1692: a tab's glyph keeps the system's size at every text size, as
+    /// a stock tab item does — at XXXL it drew oversized over its label.
+    @Test(arguments: TabGlyph.allCases)
+    func aGlyphKeepsItsSizeAtEveryTextSize(_ glyph: TabGlyph) throws {
+        func size(_ category: UIContentSizeCategory, selected: Bool) throws -> CGSize {
+            let traits = UITraitCollection(preferredContentSizeCategory: category)
+            let configuration = TabGlyph.symbolConfiguration.withTraitCollection(traits)
+            return try #require(glyph.symbol(selected: selected, badged: false).image(configuration)).size
+        }
+        for selected in [false, true] {
+            let standard = try size(.large, selected: selected)
+            #expect(try size(.accessibilityExtraExtraExtraLarge, selected: selected) == standard,
+                    "the glyph grew with the text size")
+            #expect(try size(.extraSmall, selected: selected) == standard)
+        }
+    }
 }
