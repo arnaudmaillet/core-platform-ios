@@ -44,9 +44,32 @@ public final class LaunchCurtain {
         let arguments = ProcessInfo.processInfo.arguments
         if let index = arguments.firstIndex(of: "-launch-cap"), index + 1 < arguments.count,
            let seconds = TimeInterval(arguments[index + 1]) { return seconds }
+        // A QA launch onto post N waits for that page (`readyMilestone`), past
+        // the start-index hook's own settle.
+        if arguments.contains(startIndexFlag) { return 8 }
         #endif
         return 2
     }()
+
+    /// The milestone the launch screen lifts on: the first page that has what
+    /// it shows (`shots.firstPageReady`).
+    ///
+    /// DEBUG, under `-snap-start-index N` (#1855): the page the QA launch asked
+    /// for, once it has its picture (`qaStartPageReady`, marked by the feed's
+    /// start-index hook). Post 0 is ready first, and the curtain lifted on it
+    /// before the hook jumped to post N, so every QA film opened on the wrong
+    /// post and then cut.
+    public static var readyMilestone: String {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains(startIndexFlag) { return qaStartPageReady }
+        #endif
+        return "shots.firstPageReady"
+    }
+
+    #if DEBUG
+    public static let startIndexFlag = "-snap-start-index"
+    public static let qaStartPageReady = "qa.startPageReady"
+    #endif
     /// The fade: ease-out, no zoom.
     public static let fadeDuration: TimeInterval = 0.3
 

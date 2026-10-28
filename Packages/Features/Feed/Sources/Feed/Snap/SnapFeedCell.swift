@@ -2201,6 +2201,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         return mediaCard.showsPicture || mediaCard.isPictureFailed
     }
 
+    #if DEBUG
+    /// Whether the page has what it shows — the QA start-index hook (#1855).
+    var debugShowsAPicture: Bool { showsAPicture }
+    #endif
+
     /// Re-decides whether the page is announcing a wait — called from every
     /// place the answer can change (`SnapMediaWait.refresh`).
     private func refreshMediaLoader() {
