@@ -36,6 +36,9 @@ final class WhatYouSeeViewController: UIViewController {
         case noInterests
         case interestsLoading
         case interestsFailed
+        /// A section's wait ran past 10 s (#1770): a row a tap retries.
+        case takingLonger
+        case interestsTakingLonger
         case resetInterests
         case following
         case forYou
@@ -266,6 +269,11 @@ final class WhatYouSeeViewController: UIViewController {
                 content.text = Self.failedText(loadFailure)
                 content.textProperties.color = .secondaryLabel
                 cell.accessibilityTraits.insert(.button)
+            case .takingLonger, .interestsTakingLonger:
+                content = .cell()
+                content.text = TakingLongerCopy.row
+                content.textProperties.color = .secondaryLabel
+                cell.accessibilityTraits.insert(.button)
             case .interestsFailed:
                 content = .cell()
                 content.text = Self.interestsFailedText(interestsFailure)
@@ -345,8 +353,17 @@ final class WhatYouSeeViewController: UIViewController {
         guard dataSource != nil else { return }
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         snapshot.appendSections([.sensitive])
+        // The kit's timing (#1770), section by section: nothing for its
+        // delay, the bones, "taking longer" past 10 s.
+        var loading = false
         switch phase {
-        case .loading: snapshot.appendItems([.loading], toSection: .sensitive)
+        case .loading:
+            loading = true
+            switch levelsGate.loading() {
+            case .bones: snapshot.appendItems([.loading], toSection: .sensitive)
+            case .takingLonger: snapshot.appendItems([.takingLonger], toSection: .sensitive)
+            case .nothing: break
+            }
         case .failed: snapshot.appendItems([.failed], toSection: .sensitive)
         case .loaded:
             snapshot.appendItems(SensitiveContentLevel.allCases.map(Item.level), toSection: .sensitive)
@@ -355,7 +372,13 @@ final class WhatYouSeeViewController: UIViewController {
             if interestTags != nil {
                 snapshot.appendSections([.interests])
                 switch interestsPhase {
-                case .loading: snapshot.appendItems([.interestsLoading], toSection: .interests)
+                case .loading:
+                    loading = true
+                    switch interestsGate.loading() {
+                    case .bones: snapshot.appendItems([.interestsLoading], toSection: .interests)
+                    case .takingLonger: snapshot.appendItems([.interestsTakingLonger], toSection: .interests)
+                    case .nothing: break
+                    }
                 case .failed: snapshot.appendItems([.interestsFailed], toSection: .interests)
                 case .loaded(let tags) where tags.isEmpty:
                     snapshot.appendItems([.noInterests], toSection: .interests)
@@ -369,8 +392,26 @@ final class WhatYouSeeViewController: UIViewController {
         snapshot.reconfigureItems(snapshot.itemIdentifiers)
         // Their footers follow state (teen, an empty list).
         snapshot.reloadSections([.sensitive] + (snapshot.sectionIdentifiers.contains(.interests) ? [.interests] : []))
-        dataSource.apply(snapshot, animatingDifferences: false)
+        guard !loading else { return dataSource.apply(snapshot, animatingDifferences: false) }
+        // Each answer waits out its bones' minimum (#1770).
+        levelsGate.landed { [weak self] in
+            self?.interestsGate.landed { [weak self] in self?.dataSource.apply(snapshot, animatingDifferences: false) }
+        }
     }
+
+    /// Each section's loading on the kit's timing (#1770). Injectable so a
+    /// test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var levelsGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
+    private lazy var interestsGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
 
     private func alert(_ message: String) {
         let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
@@ -471,7 +512,7 @@ extension WhatYouSeeViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .level(let level): !(level == .standard && teen)
-        case .failed, .interestsFailed: true
+        case .failed, .interestsFailed, .takingLonger, .interestsTakingLonger: true
         case .resetInterests: !isResetting
         default: false
         }
@@ -483,6 +524,12 @@ extension WhatYouSeeViewController: UICollectionViewDelegate {
         case .level(let level): choose(level)
         case .failed: load()
         case .interestsFailed: loadInterests()
+        case .takingLonger:
+            levelsGate.retry()
+            load()
+        case .interestsTakingLonger:
+            interestsGate.retry()
+            loadInterests()
         case .resetInterests: confirmReset()
         default: break
         }

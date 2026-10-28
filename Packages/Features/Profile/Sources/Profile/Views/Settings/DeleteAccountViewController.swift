@@ -27,6 +27,8 @@ final class DeleteAccountViewController: UIViewController {
         case cancelRequest
         /// The account couldn't be checked: read it again.
         case retry
+        /// The check ran past 10 s (#1770): a row a tap retries.
+        case takingLonger
     }
 
     /// What gets deleted, as concrete as the account allows (#402): the
@@ -178,6 +180,9 @@ final class DeleteAccountViewController: UIViewController {
             case .retry:
                 content.text = "Try Again"
                 content.textProperties.color = .tintColor
+            case .takingLonger:
+                content.text = TakingLongerCopy.row
+                content.textProperties.color = .secondaryLabel
             }
             cell.contentConfiguration = content
         }
@@ -218,9 +223,12 @@ final class DeleteAccountViewController: UIViewController {
 
     private func applySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+        // The kit's timing (#1770): nothing for its delay, the bones,
+        // "taking longer" past 10 s.
+        let shown: ListSkeletonGate.Shown = viewModel.phase == .loading ? loadingGate.loading() : .nothing
         let layout = Self.layout(
             phase: viewModel.phase, checklist: viewModel.checklist,
-            offersDataExport: hasDataExport, canCancel: canceller != nil
+            offersDataExport: hasDataExport, canCancel: canceller != nil, shown: shown
         )
         for (section, items) in layout {
             snapshot.appendSections([section])
@@ -229,16 +237,33 @@ final class DeleteAccountViewController: UIViewController {
         // The footer carries the dates; reload it with the row.
         snapshot.reloadSections([.action])
 
-        let wasShowingSkeleton = isShowingSkeleton
-        isShowingSkeleton = viewModel.phase == .loading
-        if wasShowingSkeleton, !isShowingSkeleton {
-            collectionView.crossfadeSkeleton { [dataSource, snapshot] in
-                dataSource?.apply(snapshot, animatingDifferences: false)
+        guard viewModel.phase != .loading else {
+            isShowingSkeleton = shown == .bones
+            return dataSource.apply(snapshot, animatingDifferences: false)
+        }
+        // The answer waits out the bones' minimum (#1770).
+        loadingGate.landed { [weak self] in
+            guard let self else { return }
+            let wasShowingSkeleton = isShowingSkeleton
+            isShowingSkeleton = false
+            if wasShowingSkeleton {
+                collectionView.crossfadeSkeleton { [dataSource, snapshot] in
+                    dataSource?.apply(snapshot, animatingDifferences: false)
+                }
+            } else {
+                dataSource.apply(snapshot, animatingDifferences: false)
             }
-        } else {
-            dataSource.apply(snapshot, animatingDifferences: false)
         }
     }
+
+    /// The check's loading on the kit's timing (#1770). Injectable so a test
+    /// steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
 
     /// The screen's sections and rows. The sections are the same before and
     /// after the account is read — bones stand in for the consequences and
@@ -250,11 +275,14 @@ final class DeleteAccountViewController: UIViewController {
         phase: DeleteAccountViewModel.Phase,
         checklist: DeletionChecklist?,
         offersDataExport: Bool,
-        canCancel: Bool
+        canCancel: Bool,
+        shown: ListSkeletonGate.Shown = .bones
     ) -> [(Section, [Item])] {
         var layout: [(Section, [Item])] = []
         if phase == .loading {
-            layout.append((.consequences, consequences(for: nil).indices.map(Item.skeleton)))
+            // `shown` (#1770): the bones once the gate lets them, none
+            // before its delay or past 10 s.
+            layout.append((.consequences, shown == .bones ? consequences(for: nil).indices.map(Item.skeleton) : []))
         } else {
             layout.append((.consequences, consequences(for: checklist).map(Item.consequence)))
         }
@@ -263,7 +291,11 @@ final class DeleteAccountViewController: UIViewController {
         }
         switch phase {
         case .loading:
-            layout.append((.action, [.skeleton(consequences(for: nil).count)]))
+            switch shown {
+            case .bones: layout.append((.action, [.skeleton(consequences(for: nil).count)]))
+            case .takingLonger: layout.append((.action, [.takingLonger]))
+            case .nothing: layout.append((.action, []))
+            }
         case .ready:
             layout.append((.action, [.delete]))
         case .requested:
@@ -393,7 +425,7 @@ extension DeleteAccountViewController {
 extension DeleteAccountViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         let item = dataSource.itemIdentifier(for: indexPath)
-        return item == .delete || item == .downloadData || item == .cancelRequest || item == .retry
+        return item == .delete || item == .downloadData || item == .cancelRequest || item == .retry || item == .takingLonger
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -404,6 +436,9 @@ extension DeleteAccountViewController: UICollectionViewDelegate {
         case .cancelRequest:
             cancelRequest()
         case .retry:
+            Task { await viewModel.load() }
+        case .takingLonger:
+            loadingGate.retry()
             Task { await viewModel.load() }
         case .downloadData:
             if let export = makeDataExport() {

@@ -51,6 +51,8 @@ final class AccountTypeViewController: UIViewController {
         case verification
         case loading
         case failed
+        /// The account type ran past 10 s (#1770): a row a tap retries.
+        case takingLonger
     }
 
     private let manager: any AccountTypeManaging
@@ -228,6 +230,10 @@ final class AccountTypeViewController: UIViewController {
                     for: loadFailure, fallback: "Couldn't load your account type. Tap to try again."
                 )
                 content.textProperties.color = .secondaryLabel
+            case .takingLonger:
+                content = .cell()
+                content.text = TakingLongerCopy.row
+                content.textProperties.color = .secondaryLabel
             }
             cell.contentConfiguration = content
         }
@@ -267,7 +273,13 @@ final class AccountTypeViewController: UIViewController {
         snapshot.appendSections([.type])
         switch phase {
         case .loading:
-            snapshot.appendItems([.loading], toSection: .type)
+            // The kit's timing (#1770): nothing for its delay, the bones,
+            // "taking longer" past 10 s.
+            switch loadingGate.loading() {
+            case .bones: snapshot.appendItems([.loading], toSection: .type)
+            case .takingLonger: snapshot.appendItems([.takingLonger], toSection: .type)
+            case .nothing: break
+            }
         case .failed:
             snapshot.appendItems([.failed], toSection: .type)
         case .loaded(let type, _):
@@ -285,8 +297,19 @@ final class AccountTypeViewController: UIViewController {
             snapshot.reconfigureItems(snapshot.itemIdentifiers)
         }
         snapshot.reloadSections(snapshot.sectionIdentifiers)
-        dataSource.apply(snapshot, animatingDifferences: false)
+        if case .loading = phase { return dataSource.apply(snapshot, animatingDifferences: false) }
+        // The answer waits out the bones' minimum (#1770).
+        loadingGate.landed { [weak self] in self?.dataSource.apply(snapshot, animatingDifferences: false) }
     }
+
+    /// The type's loading on the kit's timing (#1770). Injectable so a test
+    /// steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
 
     // MARK: - Changes
 
@@ -400,7 +423,7 @@ extension AccountTypeViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .type(let type): type != .bot
-        case .contact, .failed: true
+        case .contact, .failed, .takingLonger: true
         case .verification:
             switch verification {
             case .failed: true
@@ -418,6 +441,9 @@ extension AccountTypeViewController: UICollectionViewDelegate {
         case .contact(let field): edit(field)
         case .verification: openVerification()
         case .failed: load()
+        case .takingLonger:
+            loadingGate.retry()
+            load()
         default: break
         }
     }

@@ -19,6 +19,8 @@ final class ConsentsViewController: UIViewController {
         case marketing, analytics
         case dataProcessing
         case loading, failed
+        /// Past 10 s (#1770): a row a tap retries.
+        case takingLonger
         case planned(String)
     }
 
@@ -160,15 +162,35 @@ final class ConsentsViewController: UIViewController {
             snapshot.appendSections([.required])
             snapshot.appendItems([.dataProcessing], toSection: .required)
         case .loading:
-            snapshot.appendItems([.loading], toSection: .consents)
+            // The kit's timing (#1770): nothing for its delay, the bones,
+            // "taking longer" past 10 s.
+            switch loadingGate.loading() {
+            case .bones: snapshot.appendItems([.loading], toSection: .consents)
+            case .takingLonger: snapshot.appendItems([.takingLonger], toSection: .consents)
+            case .nothing: break
+            }
         case .failed:
             snapshot.appendItems([.failed], toSection: .consents)
         }
         snapshot.appendSections([.comingSoon])
         snapshot.appendItems(Self.planned.map(Item.planned), toSection: .comingSoon)
         snapshot.reconfigureItems(snapshot.itemIdentifiers)
-        dataSource.apply(snapshot, animatingDifferences: false)
+        if case .loading = viewModel.phase {
+            dataSource.apply(snapshot, animatingDifferences: false)
+        } else {
+            // The answer waits out the bones' minimum (#1770).
+            loadingGate.landed { [weak self] in self?.dataSource.apply(snapshot, animatingDifferences: false) }
+        }
     }
+
+    /// The consents' loading on the kit's timing (#1770). Injectable so a
+    /// test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
 
     private func configure(_ cell: UICollectionViewListCell, for item: Item) {
         cell.accessories = []
@@ -194,6 +216,11 @@ final class ConsentsViewController: UIViewController {
             content.text = FailureCopy.row(
                 for: viewModel.failure, fallback: "Couldn't load your consents. Tap to try again."
             )
+            content.textProperties.color = .secondaryLabel
+            cell.contentConfiguration = content
+        case .takingLonger:
+            var content = UIListContentConfiguration.cell()
+            content.text = TakingLongerCopy.row
             content.textProperties.color = .secondaryLabel
             cell.contentConfiguration = content
         case .planned(let title):
@@ -249,7 +276,7 @@ final class ConsentsViewController: UIViewController {
 extension ConsentsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .failed: true
+        case .failed, .takingLonger: true
         case .dataProcessing: makeDeleteAccount != nil
         default: false
         }
@@ -259,6 +286,9 @@ extension ConsentsViewController: UICollectionViewDelegate {
         collectionView.deselectItem(at: indexPath, animated: true)
         switch dataSource.itemIdentifier(for: indexPath) {
         case .failed:
+            load()
+        case .takingLonger:
+            loadingGate.retry()
             load()
         case .dataProcessing:
             if let screen = makeDeleteAccount?() {

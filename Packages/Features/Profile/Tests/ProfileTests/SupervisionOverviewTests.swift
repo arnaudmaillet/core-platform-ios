@@ -153,8 +153,9 @@ struct SupervisionOverviewTests {
         teenView.loadViewIfNeeded()
         #expect(await settle { teenView.overview?.overview != nil })
         #expect(fake.reads == [nil])
+        // The rows land after the bones' minimum when the bones came (#1770).
+        #expect(await settle { teenView.dataSource.snapshot().indexOfItem(.limit(title: "Daily Limit", value: "1 hr")) != nil })
         #expect(teenView.dataSource.snapshot().indexOfItem(.editLimits) == nil)
-        #expect(teenView.dataSource.snapshot().indexOfItem(.limit(title: "Daily Limit", value: "1 hr")) != nil)
 
         let parentView = SupervisionDetailViewController(
             supervision: Self.link(.teen, "leo"), list: list, overviewing: fake, imagePipeline: nil, router: nil
@@ -162,7 +163,7 @@ struct SupervisionOverviewTests {
         parentView.loadViewIfNeeded()
         #expect(await settle { parentView.overview?.overview != nil })
         #expect(fake.reads == [nil, "leo"])
-        #expect(parentView.dataSource.snapshot().indexOfItem(.editLimits) != nil)
+        #expect(await settle { parentView.dataSource.snapshot().indexOfItem(.editLimits) != nil })
     }
 
     /// No limits and no time say so, rather than an empty section.

@@ -27,6 +27,8 @@ final class TwoStepViewController: UIViewController {
 
     private enum Item: Hashable {
         case loading, failed
+        /// Past 10 s (#1770): a row a tap retries.
+        case takingLonger
         case status(isOn: Bool)
         case codesLeft(Int)
         case turnOn, newBackupCodes, turnOff
@@ -125,6 +127,10 @@ final class TwoStepViewController: UIViewController {
                     for: self?.loadFailure, fallback: "Couldn't load two-step sign-in. Tap to try again."
                 )
                 content.textProperties.color = .secondaryLabel
+            case .takingLonger:
+                content = .cell()
+                content.text = TakingLongerCopy.row
+                content.textProperties.color = .secondaryLabel
             case .status(let isOn):
                 content.text = "Two-Step Sign-In"
                 content.secondaryText = isOn ? "On" : "Off"
@@ -190,7 +196,13 @@ final class TwoStepViewController: UIViewController {
         snapshot.appendSections([.status])
         switch phase {
         case .loading:
-            snapshot.appendItems([.loading], toSection: .status)
+            // The kit's timing (#1770): nothing for its delay, the bones,
+            // "taking longer" past 10 s.
+            switch loadingGate.loading() {
+            case .bones: snapshot.appendItems([.loading], toSection: .status)
+            case .takingLonger: snapshot.appendItems([.takingLonger], toSection: .status)
+            case .nothing: break
+            }
         case .failed:
             snapshot.appendItems([.failed], toSection: .status)
         case .loaded(let isOn, let codesLeft):
@@ -205,8 +217,19 @@ final class TwoStepViewController: UIViewController {
             }
         }
         snapshot.reloadSections(snapshot.sectionIdentifiers)
-        dataSource.apply(snapshot, animatingDifferences: false)
+        if case .loading = phase { return dataSource.apply(snapshot, animatingDifferences: false) }
+        // The answer waits out the bones' minimum (#1770).
+        loadingGate.landed { [weak self] in self?.dataSource.apply(snapshot, animatingDifferences: false) }
     }
+
+    /// The status's loading on the kit's timing (#1770). Injectable so a
+    /// test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
 
     // MARK: - Actions
 
@@ -365,7 +388,7 @@ final class TwoStepViewController: UIViewController {
 extension TwoStepViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .failed, .turnOn, .newBackupCodes, .turnOff: true
+        case .failed, .takingLonger, .turnOn, .newBackupCodes, .turnOff: true
         default: false
         }
     }
@@ -374,6 +397,9 @@ extension TwoStepViewController: UICollectionViewDelegate {
         collectionView.deselectItem(at: indexPath, animated: true)
         switch dataSource.itemIdentifier(for: indexPath) {
         case .failed: load()
+        case .takingLonger:
+            loadingGate.retry()
+            load()
         case .turnOn: turnOn()
         case .newBackupCodes: newBackupCodes()
         case .turnOff: turnOff()

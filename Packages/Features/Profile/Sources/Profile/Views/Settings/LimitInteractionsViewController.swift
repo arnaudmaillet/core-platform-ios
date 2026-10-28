@@ -29,6 +29,8 @@ final class LimitInteractionsViewController: UIViewController {
         case soundReuse
         case loading
         case failed
+        /// Past 10 s (#1770): a row a tap retries.
+        case takingLonger
     }
 
     private let manager: any InteractionLimitsManaging
@@ -168,6 +170,9 @@ final class LimitInteractionsViewController: UIViewController {
                 cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
                 return
+            case .takingLonger:
+                content.text = TakingLongerCopy.row
+                content.textProperties.color = .secondaryLabel
             case .failed:
                 // "You’re offline…" when that is why (#794).
                 content.text = FailureCopy.row(
@@ -218,7 +223,13 @@ final class LimitInteractionsViewController: UIViewController {
         snapshot.appendSections([.limit])
         switch phase {
         case .loading:
-            snapshot.appendItems([.loading], toSection: .limit)
+            // The kit's timing (#1770): nothing for its delay, the bones,
+            // "taking longer" past 10 s.
+            switch loadingGate.loading() {
+            case .bones: snapshot.appendItems([.loading], toSection: .limit)
+            case .takingLonger: snapshot.appendItems([.takingLonger], toSection: .limit)
+            case .nothing: break
+            }
         case .failed:
             snapshot.appendItems([.failed], toSection: .limit)
         case .loaded(let state):
@@ -232,8 +243,23 @@ final class LimitInteractionsViewController: UIViewController {
             snapshot.reconfigureItems(snapshot.itemIdentifiers)
         }
         snapshot.reloadSections(snapshot.sectionIdentifiers)
-        dataSource.apply(snapshot, animatingDifferences: false)
+        let animated = false
+        if case .loading = phase {
+            dataSource.apply(snapshot, animatingDifferences: animated)
+        } else {
+            // The answer waits out the bones' minimum (#1770).
+            loadingGate.landed { [weak self] in self?.dataSource.apply(snapshot, animatingDifferences: animated) }
+        }
     }
+
+    /// The settings' loading on the kit's timing (#1770). Injectable so a
+    /// test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
 
     // MARK: - Changes
 
@@ -327,6 +353,9 @@ extension LimitInteractionsViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .audience(let audience): setAudience(audience)
         case .failed: load()
+        case .takingLonger:
+            loadingGate.retry()
+            load()
         default: break
         }
     }

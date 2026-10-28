@@ -28,6 +28,8 @@ final class SecuritySettingsViewController: UIViewController {
         /// A session-shaped bone while the list loads (charter P8).
         case skeleton(Int)
         case failed
+        /// The sessions ran past 10 s (#1770): a row a tap retries.
+        case takingLonger
         case logOutEverywhere
         case planned(String)
     }
@@ -208,29 +210,57 @@ final class SecuritySettingsViewController: UIViewController {
             snapshot.appendItems([.authorizedApps], toSection: .apps)
         }
         snapshot.appendSections([.sessions, .global, .appLock, .comingSoon])
-        let sessionItems = Self.sessionItems(for: viewModel.phase)
+        // The kit's timing (#1770): nothing for its delay, the bones,
+        // "taking longer" past 10 s.
+        let shown: ListSkeletonGate.Shown = viewModel.phase == .loading ? loadingGate.loading() : .nothing
+        let sessionItems = Self.sessionItems(for: viewModel.phase, shown: shown)
         snapshot.appendItems(sessionItems, toSection: .sessions)
         snapshot.appendItems([.logOutEverywhere], toSection: .global)
         snapshot.appendItems(AppLockPreference.isOn ? [.requireLock, .lockDelay] : [.requireLock], toSection: .appLock)
         snapshot.appendItems(Self.planned.map(Item.planned), toSection: .comingSoon)
 
-        let wasShowingSkeleton = isShowingSkeleton
-        isShowingSkeleton = viewModel.phase == .loading
-        if wasShowingSkeleton, !isShowingSkeleton {
-            collectionView.crossfadeSkeleton { [dataSource, snapshot] in
-                dataSource?.apply(snapshot, animatingDifferences: false)
+        guard viewModel.phase != .loading else {
+            isShowingSkeleton = shown == .bones
+            return dataSource.apply(snapshot, animatingDifferences: view.window != nil)
+        }
+        // The answer waits out the bones' minimum (#1770).
+        loadingGate.landed { [weak self] in
+            guard let self else { return }
+            let wasShowingSkeleton = isShowingSkeleton
+            isShowingSkeleton = false
+            if wasShowingSkeleton {
+                collectionView.crossfadeSkeleton { [dataSource, snapshot] in
+                    dataSource?.apply(snapshot, animatingDifferences: false)
+                }
+            } else {
+                dataSource.apply(snapshot, animatingDifferences: view.window != nil)
             }
-        } else {
-            dataSource.apply(snapshot, animatingDifferences: view.window != nil)
         }
     }
+
+    /// The sessions' loading on the kit's timing (#1770). Injectable so a
+    /// test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
 
     /// The sessions section's rows: bones the shape of a session while the
     /// list loads — never a spinner (P8) — the retry row after a failed first
     /// load, the sessions otherwise.
-    static func sessionItems(for phase: SecuritySettingsViewModel.Phase) -> [Item] {
+    /// `shown`: what the gate lets a loading section show (#1770).
+    static func sessionItems(
+        for phase: SecuritySettingsViewModel.Phase, shown: ListSkeletonGate.Shown = .bones
+    ) -> [Item] {
         switch phase {
-        case .loading: [.skeleton(0), .skeleton(1)]
+        case .loading:
+            switch shown {
+            case .bones: [.skeleton(0), .skeleton(1)]
+            case .takingLonger: [.takingLonger]
+            case .nothing: []
+            }
         case .failed: [.failed]
         case .loaded(let sessions): sessions.map(Item.session)
         }
@@ -323,6 +353,11 @@ final class SecuritySettingsViewController: UIViewController {
         case .failed:
             var content = UIListContentConfiguration.cell()
             content.text = failedSessionsText(failure)
+            content.textProperties.color = .secondaryLabel
+            cell.contentConfiguration = content
+        case .takingLonger:
+            var content = UIListContentConfiguration.cell()
+            content.text = TakingLongerCopy.row
             content.textProperties.color = .secondaryLabel
             cell.contentConfiguration = content
         case .logOutEverywhere:
@@ -493,7 +528,7 @@ extension SecuritySettingsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .session(let session): !session.isCurrent
-        case .failed, .logOutEverywhere, .checkup, .twoStep, .passkeys, .authorizedApps: true
+        case .failed, .takingLonger, .logOutEverywhere, .checkup, .twoStep, .passkeys, .authorizedApps: true
         case .skeleton, .planned, .requireLock, .lockDelay, nil: false
         }
     }
@@ -504,6 +539,9 @@ extension SecuritySettingsViewController: UICollectionViewDelegate {
         case .session(let session) where !session.isCurrent:
             confirmRevoke(session)
         case .failed:
+            Task { await viewModel.load() }
+        case .takingLonger:
+            loadingGate.retry()
             Task { await viewModel.load() }
         case .logOutEverywhere:
             confirmLogOutEverywhere()

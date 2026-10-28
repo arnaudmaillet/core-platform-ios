@@ -20,6 +20,8 @@ final class YourReportsViewController: UIViewController {
         case empty
         case loadingMore
         case retry
+        /// The first page ran past 10 s (#1770): a row a tap retries.
+        case takingLonger
     }
 
     private let history: any ReportHistoryProviding
@@ -30,6 +32,8 @@ final class YourReportsViewController: UIViewController {
     private var reports: [FiledReport] = []
     private var nextPageToken: String?
     private var phase: Phase = .loading
+    /// The newest page read: a superseded one's answer is dropped (#1770).
+    private var pageGeneration = 0
     private var isLoadingPage = false
     private var pageFailed = false
     private var collectionView: UICollectionView!
@@ -88,21 +92,28 @@ final class YourReportsViewController: UIViewController {
     }
 
     /// The first page, or the next one after `nextPageToken`.
-    private func loadPage() {
-        guard !isLoadingPage else { return }
+    ///
+    /// `force` (#1770): Try Again past "taking longer" — a read still out is
+    /// superseded, and its late answer dropped.
+    private func loadPage(force: Bool = false) {
+        guard force || !isLoadingPage else { return }
         isLoadingPage = true
         pageFailed = false
+        pageGeneration += 1
+        let generation = pageGeneration
         applySnapshot()
         let token = reports.isEmpty ? nil : nextPageToken
         Task { [weak self] in
             guard let self else { return }
             do {
                 let page = try await history.myReports(pageToken: token)
+                guard generation == pageGeneration else { return }
                 let known = Set(reports.map(\.id))
                 reports += page.reports.filter { !known.contains($0.id) }
                 nextPageToken = page.nextPageToken
                 phase = .loaded
             } catch {
+                guard generation == pageGeneration else { return }
                 if reports.isEmpty { phase = .failed } else { pageFailed = true }
             }
             isLoadingPage = false
@@ -173,6 +184,11 @@ final class YourReportsViewController: UIViewController {
                 content.text = "Try Again"
                 content.textProperties.color = .tintColor
                 cell.contentConfiguration = content
+            case .takingLonger:
+                var content = UIListContentConfiguration.cell()
+                content.text = TakingLongerCopy.row
+                content.textProperties.color = .secondaryLabel
+                cell.contentConfiguration = content
             }
         }
         dataSource = UICollectionViewDiffableDataSource<Int, Item>(collectionView: collectionView) { collectionView, indexPath, item in
@@ -201,7 +217,13 @@ final class YourReportsViewController: UIViewController {
         snapshot.appendSections([0])
         switch phase {
         case .loading:
-            snapshot.appendItems([.loadingMore])
+            // The kit's timing (#1770): nothing for its delay, the bones,
+            // "taking longer" past 10 s.
+            switch loadingGate.loading() {
+            case .bones: snapshot.appendItems([.loadingMore])
+            case .takingLonger: snapshot.appendItems([.takingLonger])
+            case .nothing: break
+            }
         case .failed:
             snapshot.appendItems([isLoadingPage ? .loadingMore : .retry])
         case .loaded:
@@ -211,8 +233,19 @@ final class YourReportsViewController: UIViewController {
             }
         }
         snapshot.reloadSections([0])
-        dataSource.apply(snapshot, animatingDifferences: false)
+        guard phase != .loading else { return dataSource.apply(snapshot, animatingDifferences: false) }
+        // The first answer waits out the bones' minimum (#1770).
+        loadingGate.landed { [weak self] in self?.dataSource.apply(snapshot, animatingDifferences: false) }
     }
+
+    /// The first page's loading on the kit's timing (#1770). Injectable so a
+    /// test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var loadingGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in self?.applySnapshot() }
+        return gate
+    }()
 
     /// Whether tapping the report does anything: an appeal to file, or a
     /// resolved one to read.
@@ -264,7 +297,7 @@ final class YourReportsViewController: UIViewController {
 extension YourReportsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .retry: true
+        case .retry, .takingLonger: true
         case .report(let report): isActionable(report)
         default: false
         }
@@ -278,6 +311,10 @@ extension YourReportsViewController: UICollectionViewDelegate {
         if dataSource.itemIdentifier(for: indexPath) == .retry {
             if phase == .failed { phase = .loading }
             loadPage()
+        }
+        if dataSource.itemIdentifier(for: indexPath) == .takingLonger {
+            loadingGate.retry()
+            loadPage(force: true)
         }
     }
 
