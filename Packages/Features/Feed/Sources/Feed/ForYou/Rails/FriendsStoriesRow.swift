@@ -404,7 +404,16 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
         let parameters = UIPreviewParameters()
         parameters.backgroundColor = .clear
         let face = story.faceView
-        parameters.visiblePath = ForYouStoryCell.Metrics.faceShape.path(in: face.bounds)
+        // ⚠️ THE FACE'S CORNER, NOT ITS SUPER-ELLIPSE (#1794). UIKit morphs
+        // the menu's platter into this path and back. The super-ellipse is a
+        // polygon of line segments, which Core Animation cannot interpolate
+        // with the platter's rounded rect: the outline jumped whole, so a
+        // dismissal collapsed at once to a face-sized tile at the platter's
+        // top-left (filmed at the row's start) and only then flew to the
+        // face. A rounded rect morphs, as the shelf's cards do; it wears the
+        // corner a flight out of the face wears (`storyFaceCornerRadius`).
+        let radius = ForYouStoryCell.Metrics.faceShape.cornerRadius(side: face.bounds.width)
+        parameters.visiblePath = UIBezierPath(roundedRect: face.bounds, cornerRadius: radius)
         // In the row's view, not in the clipping collection view the face
         // scrolls in: the highlight grows past the face (#1639, the shelf's
         // same fix).
@@ -432,6 +441,15 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
     /// The title's OWN tap path (`SectionTitleView.debugTap`), not the host's
     /// closure: calling the closure is how #312's dead chevron passed.
     func debugTapTitle() { header.debugTap() }
+
+    /// What the menu's dismissal lands on for the face at `index`.
+    func debugDismissalPreview(at index: Int) -> UITargetedPreview? {
+        let configuration = UIContextMenuConfiguration(identifier: nil, previewProvider: nil, actionProvider: nil)
+        return collectionView(
+            storiesView, contextMenuConfiguration: configuration,
+            dismissalPreviewForItemAt: IndexPath(item: index, section: 0)
+        )
+    }
     var debugCountText: String? { header.debugCountText }
 
     /// Opens what a committed preview would — the commit's own path, minus

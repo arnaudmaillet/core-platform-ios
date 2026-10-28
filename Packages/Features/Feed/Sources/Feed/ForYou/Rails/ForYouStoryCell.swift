@@ -44,10 +44,10 @@ final class ForYouStoryCell: UICollectionViewCell {
         /// its corners — a super-ellipse, the user's reference being another
         /// app's category tiles — so the row reads as friends' tiles, not as
         /// the circular badges every person row wears. One outline for the
-        /// face, its ring, the long-press lift and the hand-clipped snapshot; a
-        /// flight, which can only wear a corner, takes the matching circular
-        /// radius (`FriendsStoriesRow.storyFaceCornerRadius`). The map's media
-        /// markers wear the same tile (`AvatarShape.roundedTile`).
+        /// face, its ring and the hand-clipped snapshot; a flight and the
+        /// long-press lift (#1794), which can only wear a corner, take the
+        /// matching circular radius (`FriendsStoriesRow.storyFaceCornerRadius`).
+        /// The map's media markers wear the same tile (`AvatarShape.roundedTile`).
         static let faceShape = AvatarShape.roundedTile
 
         /// The cell for a disc `discSide` across: exactly the disc's width —

@@ -173,6 +173,44 @@ struct ForYouRowsInteractionTests {
         #expect(lead.friends.debugStoryMenuTitles(at: 0) == ["Open", "View Profile"])
     }
 
+    /// ⚠️ #1794: a dismissed Friends lift lands on the face it came from, in
+    /// an outline Core Animation can morph from the menu's platter — a rounded
+    /// rect like the platter's. The face's super-ellipse, a polygon, could not
+    /// morph: the outline jumped to a face-sized tile at the platter's
+    /// top-left and flew to the face from there.
+    @Test func aDismissedFriendsPreviewLandsOnTheFaceInAMorphableOutline() throws {
+        let lead = makeLead()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        window.addSubview(lead.stack)
+        defer { lead.stack.removeFromSuperview() }
+        lead.render(railsState(friends: [
+            story("ana", unseen: true), story("bo", unseen: true), story("cy", unseen: false),
+        ]))
+        lead.layout()
+        lead.friends.storiesView.layoutIfNeeded()
+
+        let preview = try #require(lead.friends.debugDismissalPreview(at: 1))
+        let cell = try #require(lead.friends.storiesView.cellForItem(at: IndexPath(item: 1, section: 0)) as? ForYouStoryCell)
+        let face = cell.discFrame(in: lead.friends, restingBelow: lead.friends.storiesView)
+        #expect(preview.target.container === lead.friends)
+        #expect(abs(preview.target.center.x - face.midX) < 0.5 && abs(preview.target.center.y - face.midY) < 0.5)
+
+        let outline = try #require(preview.parameters.visiblePath)
+        let side = cell.faceView.bounds.width
+        let platterLike = UIBezierPath(
+            roundedRect: cell.faceView.bounds,
+            cornerRadius: ForYouStoryCell.Metrics.faceShape.cornerRadius(side: side)
+        )
+        #expect(outline.bounds.size == cell.faceView.bounds.size)
+        #expect(Self.elementCount(outline) == Self.elementCount(platterLike), "an outline Core Animation cannot morph")
+    }
+
+    private static func elementCount(_ path: UIBezierPath) -> Int {
+        var count = 0
+        path.cgPath.applyWithBlock { _ in count += 1 }
+        return count
+    }
+
     @Test func aMenuTargetSurvivesItsIdentifier() {
         let story = RowMenuTarget.story(ProfileID("ana"))
         let card = RowMenuTarget.card(PostID("post:with:colons"))
