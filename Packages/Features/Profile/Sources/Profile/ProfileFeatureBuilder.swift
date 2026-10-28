@@ -42,6 +42,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     private let cache: ProfileCache
     /// Followers, Following and Friends on the device (#1776).
     private let relationshipsCache: ProfileRelationshipsLocalCache?
+    /// The settings screens' last answers on the device (#1776).
+    private let settingsCache: SettingsLocalCache?
     private let imagePipeline: ImagePipeline
     private let router: (any Router)?
     /// Reads the viewer's account for the settings screen (own profile only).
@@ -82,6 +84,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     ) {
         self.cache = ProfileCache(store: localStore)
         self.relationshipsCache = localStore.map(ProfileRelationshipsLocalCache.init(store:))
+        self.settingsCache = localStore.map(SettingsLocalCache.init(store:))
         self.repository = repository
         self.reporting = reporting
         self.shareTargeting = shareTargeting
@@ -254,7 +257,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 if let lists = repository as? any ListPrivacyManaging {
                     editor.onOpenPrivacy = { [weak editor] in
                         editor?.navigationController?.pushViewController(
-                            ListPrivacyViewController(manager: lists), animated: true
+                            ListPrivacyViewController(manager: lists).cachingSettings(in: settingsCache), animated: true
                         )
                     }
                 }
@@ -348,13 +351,13 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                         }
                                         if let limits = repository as? any InteractionLimitsManaging {
                                             destinations.append(.init(title: "Limits", symbolName: "hand.raised") {
-                                                LimitInteractionsViewController(manager: limits)
+                                                LimitInteractionsViewController(manager: limits).cachingSettings(in: settingsCache)
                                             })
                                         }
                                         let filters = repository as? any CommentFiltersManaging
                                         if let filters {
                                             destinations.append(.init(title: "Hidden Words", symbolName: "text.badge.xmark") {
-                                                HiddenWordsViewController(manager: filters)
+                                                HiddenWordsViewController(manager: filters).cachingSettings(in: settingsCache)
                                             })
                                         }
                                         if let accountStatus {
@@ -384,7 +387,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                         )
                                     }
                                 case .notifications:
-                                    notificationPreferences.map { NotificationSettingsViewController(manager: $0) }
+                                    notificationPreferences.map {
+                                        NotificationSettingsViewController(manager: $0).cachingSettings(in: settingsCache)
+                                    }
                                 case .activity:
                                     YourActivityViewController(makeRecentlyDeleted: {
                                         guard let trash = gallery as? any PostTrashManaging,
@@ -436,7 +441,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                 tabs: repository as? any ProfileTabVisibilityManaging
                                             ),
                                             makeListPrivacy: (repository as? any ListPrivacyManaging).map { lists in
-                                                { ListPrivacyViewController(manager: lists) }
+                                                { ListPrivacyViewController(manager: lists).cachingSettings(in: settingsCache) }
                                             },
                                             makeDataTransparency: { DataTransparencyViewController() },
                                             makeActivityDiscovery: (repository as? any ActivityDiscoveryManaging).map { manager in
@@ -445,11 +450,11 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                         manager: manager,
                                                         shareLinks: repository as? any ShareLinkManaging,
                                                         makeContactFriends: makeContactFriends(account: account)
-                                                    )
+                                                    ).cachingSettings(in: settingsCache)
                                                 }
                                             },
                                             makeLocationSharing: (repository as? any LocationSharingManaging).map { manager in
-                                                { LocationSharingViewController(manager: manager) }
+                                                { LocationSharingViewController(manager: manager).cachingSettings(in: settingsCache) }
                                             },
                                             imagePipeline: imagePipeline
                                         )
