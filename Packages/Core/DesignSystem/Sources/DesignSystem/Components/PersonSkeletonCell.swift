@@ -34,7 +34,8 @@ public final class PersonSkeletonCell: UICollectionViewListCell {
         return max(1, Int((height / Metrics.rowHeight).rounded(.up)))
     }
 
-    private let avatar = SkeletonBoneView(rounding: .capsule)
+    /// The avatar's own skeleton (#1750, #1774), not a generic bone.
+    private let avatar = AvatarSkeletonView()
     private let name = SkeletonBoneView(rounding: .capsule)
     private let handle = SkeletonBoneView(rounding: .capsule)
     private let pill = SkeletonBoneView(rounding: .capsule)
