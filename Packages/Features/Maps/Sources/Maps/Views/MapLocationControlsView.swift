@@ -135,12 +135,26 @@ final class MapLocationControlsView: UIView {
         ])
         return loader
     }()
-    private lazy var locatingGate = LoaderGate { [weak self] showing in self?.showLocating(showing) }
+    /// The wait's clock: the loader's grace and the give-up both read it, so
+    /// a test steps them. Set before the first wait.
+    var clock: LoadingClock = .system
+    private lazy var locatingGate = LoaderGate(clock: clock) { [weak self] showing in self?.showLocating(showing) }
+    /// Bumped by every wait, so an old wait's give-up cannot end a newer one.
+    private var waitGeneration = 0
 
     /// Waiting for the device's first fix after a tap (#1775): past the
-    /// loader's grace, the kit's loader in the glyph's place.
-    func setLocating(_ locating: Bool) {
-        locating ? locatingGate.begin() : locatingGate.end()
+    /// loader's grace, the kit's loader in the glyph's place. Past
+    /// `LoadingTiming.takingLonger` the wait ends and `onGiveUp` says so.
+    func setLocating(_ locating: Bool, onGiveUp: (@MainActor () -> Void)? = nil) {
+        waitGeneration += 1
+        guard locating else { return locatingGate.end() }
+        locatingGate.begin()
+        let generation = waitGeneration
+        clock.after(LoadingTiming.takingLonger) { [weak self] in
+            guard let self, waitGeneration == generation, isLocating else { return }
+            locatingGate.end()
+            onGiveUp?()
+        }
     }
 
     var isLocating: Bool { locatingGate.isArmed || locatingGate.isShowing }

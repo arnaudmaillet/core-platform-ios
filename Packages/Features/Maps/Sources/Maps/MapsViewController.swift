@@ -300,8 +300,6 @@ final class MapsViewController: UIViewController {
     private let locationControls = MapLocationControlsView()
     /// A tap asked where the device is: fly to its country once it is known.
     private var fliesToCurrentCountry = false
-    /// The locate button's wait for a first fix (#1775).
-    private var fixWait: Task<Void, Never>?
 
     // MARK: Guest location lock (#564)
 
@@ -1254,18 +1252,16 @@ final class MapsViewController: UIViewController {
     }
 
     /// The locate button waits for the first fix; past `takingLonger` the
-    /// wait ends and the viewer is told.
+    /// wait ends and the viewer is told (the controls' `LoadingClock`).
     private func waitForFix() {
-        locationControls.setLocating(true)
-        fixWait?.cancel()
-        fixWait = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(LoadingTiming.takingLonger))
-            guard !Task.isCancelled, let self, locationControls.isLocating else { return }
-            locationControls.setLocating(false)
+        locationControls.setLocating(true) { [weak self] in
+            guard let self else { return }
             fliesToCurrentCountry = false
-            Feedback.failure("Couldn't find where you are. Try again.", from: self)
+            Feedback.failure(Self.noFixMessage, from: self)
         }
     }
+
+    static let noFixMessage = "Couldn't find where you are. Try again."
 
 
     /// Whether `pin`'s post is OPEN to the viewer: its country is unlocked (or
