@@ -1,5 +1,6 @@
 import CoreNetworking
 import Foundation
+import LocalStore
 
 /// State for Settings → Ads and Data (#395): the account's consents, and the
 /// changes on their way to the server.
@@ -33,8 +34,19 @@ final class ConsentsViewModel {
     }
 
     private(set) var phase: Phase = .loading {
-        didSet { onChange?() }
+        didSet {
+            // Every answer, a save's included, is the next visit's first
+            // frame (#1776).
+            if case .loaded(let consents) = phase {
+                deviceCache?.store(consents, as: ConsentsRecord.self, viewer: writer)
+            }
+            onChange?()
+        }
     }
+    /// The consents as the server last said (#1776): the screen opens on
+    /// them, then revalidates in place.
+    private let deviceCache: SettingsLocalCache?
+    private let writer: LocalStoreViewer?
     /// The changes being saved, shown as made while they travel.
     private var pending: [Consent: Bool] = [:] {
         didSet { onChange?() }
@@ -49,8 +61,11 @@ final class ConsentsViewModel {
 
     private let manager: any AccountConsentManaging
 
-    init(manager: any AccountConsentManaging) {
+    init(manager: any AccountConsentManaging, deviceCache: SettingsLocalCache? = nil) {
         self.manager = manager
+        self.deviceCache = deviceCache
+        writer = deviceCache?.viewer
+        if let stored = deviceCache?.value(ConsentsRecord.self) { phase = .loaded(stored) }
     }
 
     /// True while any change is on its way.
@@ -70,6 +85,8 @@ final class ConsentsViewModel {
             phase = .loaded(try await manager.consents())
         } catch {
             failure = NetworkFailure.of(error)
+            // A failed revalidation keeps the consents on screen.
+            if case .loaded = phase { return }
             phase = .failed
         }
     }

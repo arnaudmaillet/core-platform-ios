@@ -59,7 +59,17 @@ final class WhatYouSeeViewController: UIViewController {
     private let isTeen: () async throws -> Bool
     private var teen = false
     private var phase: Phase = .loading {
-        didSet { applySnapshot() }
+        didSet {
+            // Every answer, a save's included, is the next visit's first
+            // frame (#1776).
+            if case .loaded(let level, let personalized) = phase {
+                settingsCache?.store(
+                    WhatYouSeeRecord.Value(level: level, personalized: personalized, teen: teen),
+                    as: WhatYouSeeRecord.self, viewer: settingsWriter
+                )
+            }
+            applySnapshot()
+        }
     }
     private var interestsPhase: InterestsPhase = .loading {
         didSet { applySnapshot() }
@@ -131,15 +141,31 @@ final class WhatYouSeeViewController: UIViewController {
         load()
     }
 
+    /// The screen's last answer on the device (#1776): it opens on it, with
+    /// no skeleton, then revalidates in place. Set by the builder.
+    var settingsCache: SettingsLocalCache?
+    /// The viewer the screen opened for: what its answers are stored as.
+    private lazy var settingsWriter = settingsCache?.viewer
+
     private func load() {
         // A retry from the failed row that fails again says so.
         let wasFailed = phase == .failed
-        phase = .loading
+        // ⚠️ CACHE FIRST (#1776): the last answer, the age with it, is the
+        // first frame; the read below revalidates it in place.
+        if case .loaded = phase {
+        } else if let stored = settingsCache?.value(WhatYouSeeRecord.self) {
+            teen = stored.teen
+            phase = .loaded(stored.level, personalized: stored.personalized)
+        } else {
+            phase = .loading
+        }
         Task { [weak self] in
             guard let self else { return }
             let (next, teen, failure) = await Self.loadSensitive(preferences: preferences, isTeen: isTeen)
             self.teen = teen ?? self.teen
             loadFailure = failure
+            // A failed revalidation keeps the answer on screen.
+            if next == .failed, case .loaded = phase { return }
             phase = next
             if wasFailed, next == .failed {
                 // The failed row’s words: "You’re offline" when that is why (#794).

@@ -36,8 +36,11 @@ final class ConsentsViewController: UIViewController {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
-    init(manager: any AccountConsentManaging, makeDeleteAccount: (() -> UIViewController?)? = nil) {
-        self.viewModel = ConsentsViewModel(manager: manager)
+    init(
+        manager: any AccountConsentManaging, makeDeleteAccount: (() -> UIViewController?)? = nil,
+        settingsCache: SettingsLocalCache? = nil
+    ) {
+        self.viewModel = ConsentsViewModel(manager: manager, deviceCache: settingsCache)
         self.makeDeleteAccount = makeDeleteAccount
         super.init(nibName: nil, bundle: nil)
         title = SettingsSection.adsAndData.title

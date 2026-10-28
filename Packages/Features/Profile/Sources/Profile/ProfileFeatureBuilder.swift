@@ -418,7 +418,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                     canceller: lifecycle as? any AccountDeletionCancelling
                                                 )
                                             }
-                                        })
+                                        }, settingsCache: settingsCache)
                                     }
                                 case .playback, .display, .emojis, .mediaComments, .language:
                                     AppPreferencesViewController(page: section)
@@ -472,7 +472,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                     (repository as? any FeedPreferencesManaging).map { preferences in
                                         WhatYouSeeViewController(preferences: preferences, interestTags: interestTags, isTeen: {
                                             try await account.currentAccount().ageBracket.isTeen
-                                        })
+                                        }).cachingSettings(in: settingsCache)
                                     }
                                 // The wallet's history (#400): the app's screen,
                                 // which reads the server wallet.
