@@ -78,6 +78,43 @@ struct LikeOutboxSenderTests {
         #expect(wallet.boostTotal(forTarget: "p1") == 2)
     }
 
+    /// ⚠️ A FINAL FAILURE IS TOLD (#1775): likes the server did not take —
+    /// refused, clamped — are announced with how many and why; likes it took
+    /// are not.
+    @Test func likesThatDidNotGoAreAnnounced() async throws {
+        let (sender, wallet, _, staking) = make()
+        var announced: [LikesGivenBack] = []
+        let token = NotificationCenter.default.addObserver(
+            forName: LikeOutboxSender.likesGivenBack, object: sender, queue: nil
+        ) { note in
+            if let back = note.userInfo?[LikeOutboxSender.givenBackKey] as? LikesGivenBack { announced.append(back) }
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        staking.then(.failure(LikeStakeRejected(reason: "post gone")))
+        staking.then(.success(LikeStakeAnswer(outcome: .staked, spent: 1, myTotal: 1)))
+        staking.then(.success(LikeStakeAnswer(outcome: .staked, spent: 2, myTotal: 2)))
+        for (post, likes) in [("gone", 2), ("clamped", 3), ("taken", 2)] {
+            for _ in 0..<likes { wallet.stake(.likes(1), on: post) }
+            wallet.commitStakes(on: post)
+        }
+        await sender.flush()
+
+        // A refusal settles as `.unknown`: nothing was spent, for no reason
+        // the server gave.
+        #expect(announced == [
+            LikesGivenBack(postID: "gone", likes: 2, outcome: .unknown),
+            LikesGivenBack(postID: "clamped", likes: 2, outcome: .staked),
+        ])
+        #expect(announced.first?.message == "Couldn't like this post. They're back in your balance.")
+        #expect(announced.last?.message == "2 likes didn't go through: the limit was reached. They're back in your balance.")
+    }
+
+    @Test func aGivenBackLikeReadsInTheSingular() {
+        #expect(LikesGivenBack(postID: "p", likes: 1, outcome: .rateLimited).message
+            == "1 like didn't go through: you've liked a lot this hour. It's back in your balance.")
+    }
+
     /// An open batch waits for its 10 s.
     @Test func anOpenBatchIsNotCommittedEarly() async {
         let (sender, wallet, outbox, staking) = make()

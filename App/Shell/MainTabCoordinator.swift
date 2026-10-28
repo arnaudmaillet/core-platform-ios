@@ -236,6 +236,8 @@ final class MainTabCoordinator: NSObject, Coordinator {
             self, selector: #selector(notificationsReadDidChange),
             name: .notificationsReadDidChange, object: nil
         )
+        // A stake's final failure is told (#1775).
+        observeLikesGivenBack()
         // Warm the switcher up front. `makeMenu` is synchronous by design — it
         // reads the last `reload` — so without this the first long-press builds
         // its menu from an empty snapshot and offers only "Add Profile", with

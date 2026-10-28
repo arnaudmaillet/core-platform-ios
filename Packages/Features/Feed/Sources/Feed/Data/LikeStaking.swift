@@ -295,9 +295,54 @@ public final class LikeOutboxSender {
 
     /// What the server did not spend leaves the post's stake and returns to
     /// the balance: a clamp, a refusal, an expired batch.
+    ///
+    /// ⚠️ AND THE VIEWER IS TOLD (#1775). The heart emptied by itself, up to
+    /// a minute after the taps, with no word: a final failure the viewer
+    /// never heard of. `likesGivenBack` carries what came back and why; the
+    /// app says so over whatever screen is on top.
     private func settle(_ batch: LikeOutbox.Batch, with answer: LikeStakeAnswer) {
         guard case .post(let postID) = batch.target else { return }
         let spent = answer.outcome == .staked ? answer.spent : 0
         wallet.settleCommittedStake(targetID: postID, asked: batch.likes, spent: spent)
+        let back = batch.likes - spent
+        guard back > 0 else { return }
+        NotificationCenter.default.post(
+            name: Self.likesGivenBack, object: self,
+            userInfo: [Self.givenBackKey: LikesGivenBack(postID: postID, likes: back, outcome: answer.outcome)]
+        )
+    }
+
+    /// Posted when likes a batch asked for came back to the balance (#1775).
+    public static let likesGivenBack = Notification.Name("LikeOutboxSender.likesGivenBack")
+    /// `likesGivenBack`'s `LikesGivenBack`.
+    public static let givenBackKey = "givenBack"
+}
+
+/// Likes that did not go, back in the balance (#1775): what the viewer is told.
+public struct LikesGivenBack: Equatable, Sendable {
+    public let postID: String
+    public let likes: Int
+    public let outcome: LikeStakeAnswer.Outcome
+
+    public init(postID: String, likes: Int, outcome: LikeStakeAnswer.Outcome) {
+        self.postID = postID
+        self.likes = likes
+        self.outcome = outcome
+    }
+
+    /// "2 likes didn't go through: you've liked a lot this hour. They're
+    /// back in your balance."
+    public var message: String {
+        let count = likes == 1 ? "1 like" : "\(likes) likes"
+        let why: String = switch outcome {
+        case .staked: "\(count) didn't go through: the limit was reached"
+        case .insufficientBalance: "\(count) didn't go through: not enough in your balance"
+        case .rateLimited: "\(count) didn't go through: you've liked a lot this hour"
+        case .targetCapReached: "\(count) didn't go through: you've given this post all you can"
+        case .expired: "\(count) took too long to send"
+        case .targetNotStakeable, .noStakeShots, .shotDoesNotFit, .ownContent, .unknown:
+            "Couldn't like this post"
+        }
+        return why + ". " + (likes == 1 ? "It's" : "They're") + " back in your balance."
     }
 }
