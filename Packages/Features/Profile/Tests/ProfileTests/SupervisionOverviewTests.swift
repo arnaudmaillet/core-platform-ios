@@ -191,7 +191,13 @@ struct SupervisionOverviewTests {
 
         fake.setError = .invalidLimit
         editor.save()
+        // At work (#1775): the word becomes the loader, under its identifier.
+        let busy = editor.ownTrailingBarItems.first
+        #expect(busy?.customView != nil, "the Save did not turn into the loader")
+        #expect(busy?.identifier == SupervisionLimitsViewController.saveID)
         #expect(await settle { !editor.isSaving })
+        #expect(editor.ownTrailingBarItems.first?.title == "Save", "the word did not come back after the failure")
+        #expect(editor.ownTrailingBarItems.first?.customView == nil)
         #expect(savedCount == 0)
         #expect(editor.draft.dailyMinutes == 30, "the draft stays to be fixed")
 

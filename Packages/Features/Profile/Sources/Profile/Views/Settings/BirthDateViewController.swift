@@ -38,8 +38,7 @@ final class BirthDateViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemGroupedBackground
         navigationItem.largeTitleDisplayMode = .never
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Save", style: .prominent, target: self, action: #selector(confirm))
-        navigationItem.rightBarButtonItem?.identifier = "settings.birthDate.save"
+        setOwnTrailingBarItems([saveItem()], animated: false)
 
         picker.datePickerMode = .date
         picker.preferredDatePickerStyle = .wheels
@@ -96,10 +95,24 @@ final class BirthDateViewController: UIViewController {
         let check = BirthDatePolicy.check(chosen, today: today())
         note.text = Self.noteText(for: check)
         note.textColor = check == .ok ? .secondaryLabel : .systemRed
-        navigationItem.rightBarButtonItem?.isEnabled = check == .ok && hasChosen && !isSaving
+        guard !isSaving else { return }
+        ownTrailingBarItems.first?.isEnabled = check == .ok && hasChosen
     }
 
-    @objc private func confirm() {
+    static let saveID = "settings.birthDate.save"
+
+    private func saveItem() -> UIBarButtonItem {
+        BarItems.title(id: Self.saveID, title: "Save", prominent: true) { [weak self] in self?.confirm() }
+    }
+
+    /// Save at work (#1775): the word becomes the kit's loader, under the
+    /// same identifier, and comes back if the save fails.
+    private func showSaving(_ saving: Bool) {
+        let item = saving ? BarItems.busy(id: Self.saveID, label: "Saving") : saveItem()
+        setOwnTrailingBarItems([item], animated: view.window != nil)
+    }
+
+    private func confirm() {
         guard BirthDatePolicy.check(chosen, today: today()) == .ok, hasChosen, !isSaving else { return }
         let formatted = DateFormatter.localizedString(from: picker.date, dateStyle: .long, timeStyle: .none)
         let alert = UIAlertController(
@@ -114,7 +127,7 @@ final class BirthDateViewController: UIViewController {
 
     private func save() {
         isSaving = true
-        refresh()
+        showSaving(true)
         let birthDate = chosen
         Task { [weak self] in
             guard let self else { return }
@@ -127,6 +140,7 @@ final class BirthDateViewController: UIViewController {
                 closeScreen()
             } catch {
                 isSaving = false
+                showSaving(false)
                 refresh()
                 presentFailure(error)
             }

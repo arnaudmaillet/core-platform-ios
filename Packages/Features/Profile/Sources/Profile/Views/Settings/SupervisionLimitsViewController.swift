@@ -46,8 +46,7 @@ final class SupervisionLimitsViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         navigationItem.largeTitleDisplayMode = .never
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "Save", style: .prominent, target: self, action: #selector(save))
-        navigationItem.rightBarButtonItem?.identifier = "settings.supervisionLimits.save"
+        setOwnTrailingBarItems([saveItem()], animated: false)
         var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
         config.footerMode = .supplementary
         collectionView = UICollectionView(
@@ -91,13 +90,28 @@ final class SupervisionLimitsViewController: UIViewController {
     var canSave: Bool { draft != original && !isSaving }
 
     private func updateSave() {
-        navigationItem.rightBarButtonItem?.isEnabled = canSave
+        guard !isSaving else { return }
+        ownTrailingBarItems.first?.isEnabled = canSave
     }
 
-    @objc func save() {
+    static let saveID = "settings.supervisionLimits.save"
+
+    private func saveItem() -> UIBarButtonItem {
+        BarItems.title(id: Self.saveID, title: "Save", prominent: true) { [weak self] in self?.save() }
+    }
+
+    /// Save at work (#1775): the word becomes the kit's loader, under the
+    /// same identifier, and comes back if the save fails.
+    private func showSaving(_ saving: Bool) {
+        let item = saving ? BarItems.busy(id: Self.saveID, label: "Saving") : saveItem()
+        setOwnTrailingBarItems([item], animated: view.window != nil)
+        updateSave()
+    }
+
+    func save() {
         guard canSave else { return }
         isSaving = true
-        updateSave()
+        showSaving(true)
         let limits = draft
         Task { [weak self] in
             guard let self else { return }
@@ -106,7 +120,7 @@ final class SupervisionLimitsViewController: UIViewController {
                 onSaved(self)
             } catch {
                 isSaving = false
-                updateSave()
+                showSaving(false)
                 Feedback.failure(
                     SupervisionCopy.failureText(error, teen: false, fallback: "Couldn't save the limits"), from: self
                 )
