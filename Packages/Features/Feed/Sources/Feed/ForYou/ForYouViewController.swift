@@ -1048,18 +1048,18 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     private func mute(_ id: ProfileID, handle: String) {
         guard let moderation else { return }
         let name = handle.isEmpty ? "this author" : "@\(handle)"
+        let pending = PendingFeedback("Muting \(name)…", from: self)
         Task { [weak self] in
             do {
                 try await moderation.setPostsMuted(true, for: id)
-                guard let self else { return }
-                viewModel.hideAuthor(id)
-                Feedback.undoable(
-                    "Muted \(name)'s posts", symbol: "speaker.slash", from: self,
+                self?.viewModel.hideAuthor(id)
+                pending.undoable(
+                    "Muted \(name)'s posts", symbol: "speaker.slash",
                     commit: {},
                     undo: { [weak self] in self?.unmute(id, name: name) }
                 )
             } catch {
-                self?.presentFailure("Couldn't mute \(name)")
+                pending.fail("Couldn't mute \(name)")
             }
         }
     }
@@ -1067,12 +1067,14 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// Mute's Undo: the compensating unmute.
     private func unmute(_ id: ProfileID, name: String) {
         guard let moderation else { return }
+        let pending = PendingFeedback("Unmuting \(name)…", from: self)
         Task { [weak self] in
             do {
                 try await moderation.setPostsMuted(false, for: id)
                 self?.viewModel.showAuthor(id)
+                pending.end()
             } catch {
-                self?.presentFailure("Couldn't unmute \(name)")
+                pending.fail("Couldn't unmute \(name)")
             }
         }
     }
@@ -1102,20 +1104,21 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// follow edge, which a block severs, goes with them.
     private func block(_ id: ProfileID, name: String, wholeAccount: Bool) {
         guard let moderation else { return }
+        // Under way (#1775): said past the loader's grace, the answer in its place.
+        let pending = PendingFeedback("Blocking \(name)…", from: self)
         Task { [weak self] in
             do {
                 // Every profile blocked, the account's other ones included.
                 let blocked = try await moderation.block(id, wholeAccount: wholeAccount)
-                guard let self else { return }
                 for profile in blocked {
-                    viewModel.hideAuthor(profile)
-                    viewModel.removeAuthor(profile)
+                    self?.viewModel.hideAuthor(profile)
+                    self?.viewModel.removeAuthor(profile)
                 }
                 let count = blocked.count
                 let message = count > 1 ? "Blocked \(name) and \(count - 1) more" : "Blocked \(name)"
-                Feedback.success(message, symbol: "hand.raised", from: self)
+                pending.succeed(message, symbol: "hand.raised")
             } catch {
-                self?.presentFailure("Couldn't block \(name)")
+                pending.fail("Couldn't block \(name)")
             }
         }
     }
@@ -1126,14 +1129,15 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         guard let socialGraph else { return }
         let name = handle.isEmpty ? "this author" : "@\(handle)"
         MemberGates.perform(.follow(handle: handle.isEmpty ? nil : handle), from: self) { [weak self] in
+            guard let self else { return }
+            let pending = PendingFeedback("Following \(name)…", from: self)
             Task { [weak self] in
                 do {
                     try await socialGraph.setFollowing(true, for: id)
-                    guard let self else { return }
-                    viewModel.restoreAuthor(id)
-                    Feedback.success("Following \(name)", symbol: "person.badge.plus", from: self)
+                    self?.viewModel.restoreAuthor(id)
+                    pending.succeed("Following \(name)", symbol: "person.badge.plus")
                 } catch {
-                    self?.presentFailure("Couldn't follow \(name)")
+                    pending.fail("Couldn't follow \(name)")
                 }
             }
         }
@@ -1176,22 +1180,22 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// follow-back is said, and the rows stay as the graph has them.
     private func unfollow(_ id: ProfileID, handle: String) {
         guard let socialGraph else { return }
+        let name = handle.isEmpty ? "this author" : "@\(handle)"
+        let pending = PendingFeedback("Unfollowing \(name)…", from: self)
         Task { [weak self] in
             do {
                 try await socialGraph.setFollowing(false, for: id)
-                guard let self else { return }
                 // Following loses the author — without this the action reads
                 // as having failed. Discover keeps them: it is everyone, not
                 // the people the viewer follows (`removeAuthor`).
-                viewModel.removeAuthor(id)
-                let name = handle.isEmpty ? "this author" : "@\(handle)"
-                Feedback.undoable(
-                    "Unfollowed \(name)", symbol: "person.badge.minus", from: self,
+                self?.viewModel.removeAuthor(id)
+                pending.undoable(
+                    "Unfollowed \(name)", symbol: "person.badge.minus",
                     commit: {},
                     undo: { [weak self] in self?.followAgain(id, name: name) }
                 )
             } catch {
-                self?.presentFailure(handle.isEmpty ? "Couldn't unfollow" : "Couldn't unfollow @\(handle)")
+                pending.fail(handle.isEmpty ? "Couldn't unfollow" : "Couldn't unfollow @\(handle)")
             }
         }
     }
@@ -1199,12 +1203,14 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// The unfollow's Undo: the compensating follow.
     private func followAgain(_ id: ProfileID, name: String) {
         guard let socialGraph else { return }
+        let pending = PendingFeedback("Following \(name) again…", from: self)
         Task { [weak self] in
             do {
                 try await socialGraph.setFollowing(true, for: id)
                 self?.viewModel.restoreAuthor(id)
+                pending.end()
             } catch {
-                self?.presentFailure("Couldn't follow \(name) again")
+                pending.fail("Couldn't follow \(name) again")
             }
         }
     }
@@ -1221,16 +1227,16 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// believes was filed but wasn't is the worst outcome here.
     private func report(_ postID: PostID, reason: ReportReason) {
         guard let reporting else { return }
-        Task { [weak self] in
+        let pending = PendingFeedback("Sending report…", from: self)
+        Task {
             do {
                 // The surface names WHERE this was raised, which is a triage
                 // signal in its own right: the same post reported from a feed
                 // and from a profile are different reports.
                 try await reporting.report(.post(postID), reason: reason, surface: "ios.foryou")
-                guard let self else { return }
-                Feedback.success("Report sent", symbol: "flag.fill", from: self)
+                pending.succeed("Report sent", symbol: "flag.fill")
             } catch {
-                self?.presentFailure("Couldn't send this report")
+                pending.fail("Couldn't send this report")
             }
         }
     }
@@ -1261,10 +1267,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// to know in order to retry: a failure toast with its error haptic, the
     /// same answer the Snap feed gives the same report (#804) — it used to be
     /// an alert here and a toast there.
-    private func presentFailure(_ message: String) {
-        Feedback.failure(message, from: self)
-    }
-
     // MARK: - Discover's whole mosaic
 
     /// "View all" under a chunk, or the "For you" heading over the list:
