@@ -14,12 +14,13 @@ public extension UICellAccessory {
 }
 
 /// The accessory's view: a small loader that starts its grace when it is on
-/// screen and stops when it leaves.
-final class RowBusyView: UIView {
+/// screen and stops when it leaves. Public for a row that is not a list
+/// cell — a `UITableViewCell`'s `accessoryView` (#1775).
+public final class RowBusyView: UIView {
     private let loader = AppLoaderView(size: .medium)
     private lazy var gate = LoaderGate(loader: loader)
 
-    init() {
+    public init() {
         super.init(frame: CGRect(origin: .zero, size: loader.intrinsicContentSize))
         isUserInteractionEnabled = false
         loader.hidesWhenStopped = true
@@ -34,9 +35,9 @@ final class RowBusyView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override var intrinsicContentSize: CGSize { loader.intrinsicContentSize }
+    override public var intrinsicContentSize: CGSize { loader.intrinsicContentSize }
 
-    override func didMoveToWindow() {
+    override public func didMoveToWindow() {
         super.didMoveToWindow()
         window != nil ? gate.begin() : gate.cancel()
     }

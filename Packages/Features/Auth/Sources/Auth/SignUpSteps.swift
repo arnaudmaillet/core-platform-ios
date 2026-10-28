@@ -350,6 +350,7 @@ final class ProfileSetupViewController: SignUpStepViewController {
     /// Asked a beat after the last keystroke, never for every letter.
     private func handleChanged() {
         check = nil
+        statusCell.accessoryView = nil
         renderStatus()
         refreshButton()
         checking?.cancel()
@@ -358,6 +359,9 @@ final class ProfileSetupViewController: SignUpStepViewController {
         checking = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled, let self else { return }
+            // Asked (#1775): the status row wears the kit's loader, after
+            // its grace, until the answer.
+            statusCell.accessoryView = RowBusyView()
             let answer = await setup.checkHandle(typed)
             guard !Task.isCancelled, handle == typed else { return }
             check = answer
@@ -388,6 +392,7 @@ final class ProfileSetupViewController: SignUpStepViewController {
             content.textProperties.color = .secondaryLabel
         }
         statusCell.contentConfiguration = content
+        if check != nil { statusCell.accessoryView = nil }
     }
 
     override func primaryTapped() {
