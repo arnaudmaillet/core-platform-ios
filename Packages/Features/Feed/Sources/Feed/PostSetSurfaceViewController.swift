@@ -121,8 +121,10 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         style: PostSetSurfaceStyle,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController?,
+        held: @escaping @MainActor (PostID) -> GalleryPost? = { _ in nil },
         hydrate: @escaping ([PostID]) async -> [GalleryPost]
     ) {
+        self.held = held
         page = ForYouGridPage(
             imagePipeline: imagePipeline,
             style: Self.pageStyle(for: style),
@@ -139,6 +141,14 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
             lead = GridLeadStack(sections: [shelf])
         }
         super.init(nibName: nil, bundle: nil)
+    }
+
+    /// A held post per id, synchronously, in `ids`' order (#1863): the feed's
+    /// cache, then the app's store (`FeedFeatureBuilder.heldGalleryPost`).
+    private let held: @MainActor (PostID) -> GalleryPost?
+
+    private func knownPosts(_ ids: [PostID]) -> [GalleryPost] {
+        ids.compactMap(held)
     }
 
     /// The lead row's bones on the kit's timing (#1770): none for posts that
@@ -255,8 +265,16 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         leadTask?.cancel()
         // Its title over skeleton cards while the posts hydrate (#1296) — a
         // row whose posts are known (#1773), its bones on the gate (#1770).
-        shelf.isLoading = true
-        leadGate.begin()
+        // Every post already held (#1863): the row is drawn now, no bones;
+        // the hydration below still lands, for the counters.
+        let known = knownPosts(ids)
+        if known.count == ids.count {
+            shelf.render(known)
+            shelf.isLoading = false
+        } else {
+            shelf.isLoading = true
+            leadGate.begin()
+        }
         updateLeadHeight()
         leadTask = Task { [weak self] in
             guard let self else { return }
@@ -284,6 +302,8 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
 
     /// The lead row's posts as drawn, for tests.
     var debugLeadRowIDs: [PostID] { shelf?.cards.map(\.id) ?? [] }
+    /// The posts the page shows — tests (#1863).
+    var debugShownPostIDs: [PostID] { shownPosts.map(\.id) }
     /// The lead's shelf (#1296), for tests.
     var debugShelf: PostShelfSection? { shelf }
     /// Whether this surface has a lead header at all (`.discover` only).
@@ -683,7 +703,17 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
                 page.render(.content([]))
                 return
             }
-            page.render(.loading)
+            // What the app already holds is drawn now (#1863) — a hashtag
+            // opened after its posts were seen in the feed shows them at once;
+            // the hydration then replaces them, with their counters. Bones only
+            // when nothing is known.
+            let known = knownPosts(ids)
+            if known.isEmpty {
+                page.render(.loading)
+            } else {
+                shownPosts = known
+                renderContent()
+            }
             loadTask?.cancel()
             loadTask = Task { [weak self] in
                 guard let self else { return }
