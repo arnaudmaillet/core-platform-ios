@@ -34,14 +34,14 @@ final class SnapFeedViewController: UIViewController {
     /// at a FIXED width read off the bar (`applyBarPillWidths`), so its glass
     /// is the same size on every page and a long name truncates inside it.
     ///
-    /// ONE VIEW FOR THE SCREEN'S LIFE, in one item under one stable
-    /// `identifier` (`authorItemIdentifier`): an author change blurs the pill's
-    /// CONTENT across (`BarItemContentTransition`) and the glass stays put. It
-    /// was a fresh pill in a fresh item per author (#277), which bought iOS
-    /// 26's native item replacement — and with it a glass platter that
-    /// visibly morphed on every page, which read as UIKit's machinery rather
-    /// than the screen's own transition.
-    private let authorIdentityView = SnapAuthorIdentityView()
+    /// A FRESH PILL IN A FRESH ITEM PER AUTHOR (#1791, the owner 2026-10-27),
+    /// under a per-author `identifier` (`authorItemIdentifier(for:)`), so iOS
+    /// 26/27 runs its own item replacement — the glass morphing between the
+    /// two platters. This reverses #627's one-item-per-slot with a hand-made
+    /// scroll blur (`BarPillScrub`, deleted): the owner now prefers UIKit's
+    /// transition. The same author keeps the pill and the item, and changes
+    /// in place (`showAuthor`).
+    private var authorIdentityView = SnapAuthorIdentityView()
     /// The navigation controller whose toolbar this feed is showing — held
     /// weakly across its own pop, when `navigationController` is already nil
     /// but the toolbar bookkeeping must still be settled (`viewDidDisappear`).
@@ -67,20 +67,20 @@ final class SnapFeedViewController: UIViewController {
     /// sort selector beside the author pill and take it away again.
     private var authorItem = UIBarButtonItem()
     private var sortItem = UIBarButtonItem()
-    /// The author item's identifier: ONE for the slot, whoever the author and
-    /// whatever the follow badge — measured behaviour (iPhone 18 Pro, iOS 27)
-    /// is why that means "no native transition".
+    /// The author item's identifier: the AUTHOR's (#1791).
     ///
     /// iOS 26 treats two items with one identifier as ONE item: a fresh item
-    /// under the SAME identifier — even through
-    /// `setRightBarButtonItems(_:animated: true)` — swaps in a single frame,
-    /// while a DIFFERENT identifier gets the bar's own replacement (the glass
-    /// morphs between the two platters while the contents blur). #277/#295/#305
-    /// used a per-author, per-badge identifier to get that morph; the morph is
-    /// what was asked away. So the identifier never changes, the item is
-    /// re-minted only invisibly (`reinstallAuthorItem`), and every change of
-    /// what the pill draws is the pill's own blur.
-    static let authorItemIdentifier = "feed.snap.author-pill"
+    /// under the SAME identifier swaps in a single frame, while a DIFFERENT
+    /// identifier gets the bar's own replacement (the glass morphs between the
+    /// two platters while the contents blur). So a new author is a different
+    /// identifier — UIKit's transition — and the same author's item is
+    /// re-minted only invisibly (`reinstallAuthorItem`). The follow badge is
+    /// not part of it: a relation change is the badge's symbol replace (#925).
+    /// No author yet (the pill before the first page) is the slot's own.
+    static func authorItemIdentifier(for author: ProfileID?) -> String {
+        guard let author else { return "feed.snap.author-pill" }
+        return "feed.snap.author-pill." + author.rawValue
+    }
     /// The back chevron's and the comments exit's identities (#1679): two
     /// items for UIKit, so the swap is its morph between them.
     static let backItemIdentifier = "feed.snap.back"
@@ -631,12 +631,7 @@ final class SnapFeedViewController: UIViewController {
             self.refreshBookmarkGlyph(for: id)
         }
         followStore.onRelationChange = { [weak self] author in
-            guard let self else { return }
-            // The pill's badge is part of what a pair of pages draws: a cached
-            // "the same" from before this answer would leave the scroll's swap
-            // unblurred (#627).
-            self.pillScrub.forgetPair()
-            self.followRelationDidChange(for: author)
+            self?.followRelationDidChange(for: author)
         }
         followSubscription = followEvents?.subscribeOnMain { [weak self] change in
             self?.followStore.graphDidChange(change)
@@ -1094,6 +1089,9 @@ final class SnapFeedViewController: UIViewController {
         // A zoom flight lands in `zoomTransitionDidEnd`; this is every other
         // path's landing (the guard inside waits for the flight).
         installAuthorPillAfterLanding()
+        // An author that arrived under the push swaps in now (#1791); one a
+        // flight is still holding waits for its landing.
+        showPendingAuthor()
         if !isAwaitingZoomPresentation { applyPendingComments(animated: true) }
         #if DEBUG
         runDebugAppearanceHooks()
@@ -1164,8 +1162,9 @@ final class SnapFeedViewController: UIViewController {
             didDebugFling = true
             let pages = arguments.indices.contains(position + 1)
                 ? (Int(arguments[position + 1]) ?? 1) : 1
+            let back = arguments.contains("-snap-fling-back") ? pages : 0
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-                self?.debugFlingPages(pages)
+                self?.debugFlingPages(pages, back: back)
             }
         }
         // ⚠️ WAITS FOR THE PAGE TO EXIST, not for 1.5s. On a cold run the
@@ -1438,8 +1437,6 @@ final class SnapFeedViewController: UIViewController {
         } else {
             handBackChromeTheme(interactive: false) { _ in }
         }
-        // And the pills sharp: nothing scrubs them under a presentation.
-        endBarPillScrub()
         // Unlike the visibility bookkeeping below, the toolbar choreography
         // runs for every disappearance: it registers on the coordinator when
         // one exists (fade, restore-on-cancel) and hides instantly otherwise.
@@ -1888,7 +1885,8 @@ final class SnapFeedViewController: UIViewController {
         }
         // The toolbar's leading slot (#671): the room the audio capsule had —
         // the CAP, since #925: the pill takes its own width under it.
-        authorIdentityView.setWidthBudget(isForYouRoot ? forYouRootPillBudget(bar: bar, sortOnBar: sortOnBar) : widths.toolbarAuthor)
+        authorWidthBudget = isForYouRoot ? forYouRootPillBudget(bar: bar, sortOnBar: sortOnBar) : widths.toolbarAuthor
+        authorIdentityView.setWidthBudget(authorWidthBudget)
     }
 
     /// The For You root's pill (#1681): what the top bar leaves it — its
@@ -2134,6 +2132,16 @@ final class SnapFeedViewController: UIViewController {
 
     /// A fresh item wearing THE pill, under the slot's one identifier.
     private func makeAuthorItem() -> UIBarButtonItem {
+        BarItems.container(
+            id: Self.authorItemIdentifier(for: authorIdentityView.shownAuthor?.authorID), view: authorIdentityView
+        )
+    }
+
+    /// Wires a pill for this screen: its taps, the theme hook, the width the
+    /// bar leaves it and the ground it floats over — everything the screen
+    /// told the pill before, so a fresh pill for a new author (#1791) is the
+    /// same pill to the bar.
+    private func wireAuthorIdentityView(_ pill: SnapAuthorIdentityView) {
         // ⚠️ THE BAR'S THEME, THE MOMENT ITS GLASS EXISTS (#1325). Every
         // opening themed at appearance, and again alongside the push — but
         // UIKit hosts the toolbar's items (and creates the glass container
@@ -2141,27 +2149,105 @@ final class SnapFeedViewController: UIViewController {
         // flight came after both: the bottom bar flew in light over a media
         // post for its first frames (filmed by the owner) while a grid tile's
         // did not. Themed when the pill joins the window, whatever the path.
-        authorIdentityView.onDidMoveToWindow = { [weak self] in
+        pill.onDidMoveToWindow = { [weak self] in
             guard let self, let model = self.arrivalModel, !self.isHandingChromeBack else { return }
             self.applyChromeTheme(hasMedia: model.mediaURL != nil)
         }
-        return BarItems.container(id: Self.authorItemIdentifier, view: authorIdentityView)
+        // ⚠️ THE PILL OPENS THE PROFILE CARD (#1524), not the profile: the
+        // viewer's own pill still pushes theirs.
+        pill.onAuthorTapped = { [weak self] id in
+            guard let self else { return }
+            viewModel.didTapAuthorPill(id, isViewer: followStore.relation(for: id) == .viewer)
+        }
+        // A hold pushes the profile itself (#1669), as the leftward swipe
+        // does; the tap keeps the card.
+        pill.onAuthorLongPressed = { [weak self] id in self?.viewModel.didTapAuthor(id) }
+        // The "+" follows, in place (`followAuthor`). The followed and friends
+        // marks take no tap of their own — a tap on them is a tap on the pill,
+        // which opens the profile — so there is no unfollow here: that is the
+        // profile's Following button, one tap away.
+        pill.onFollowTapped = { [weak self] id in self?.followAuthor(id) }
+        #if DEBUG
+        pill.onContentSettled = { [weak self, weak pill] in
+            guard let self, let pill else { return }
+            self.debugProbeBarItemWidth(pill, slot: "author")
+        }
+        #endif
+        pill.setWidthBudget(authorWidthBudget)
+        pill.setOverMedia(authorOverMedia)
     }
 
-    /// Puts `model`'s author in the bar — IN PLACE: same item, same pill, and
-    /// the pill blurs its old content out and the new in
-    /// (`SnapAuthorIdentityView.setAuthor`). The badge is set AFTER, so a new
-    /// author and their relation land in ONE swap — and a badge change for
-    /// the same author is its symbol replace alone (#925).
+    /// The width the toolbar leaves the pill (`applyBarPillWidths`) and the
+    /// ground it floats over (`updateBarChrome`): kept, so a fresh pill
+    /// (#1791) is told them too.
+    private var authorWidthBudget: CGFloat?
+    private var authorOverMedia = true
+
+    /// Puts `model`'s author in the bar (#1791).
     ///
-    /// Paging between two posts by the same person moves only the post's age.
+    /// - A NEW AUTHOR is a fresh pill in a fresh item under the author's
+    ///   identifier, handed to the toolbar animated: UIKit's own item
+    ///   replacement. The pill is drawn — face, name AND follow badge (#925) —
+    ///   before it is handed over, so the new author and their relation land
+    ///   in that one swap.
+    /// - The SAME AUTHOR (paging between their posts, or better data for
+    ///   them) changes in place, with no transition: the pill's meta line is
+    ///   the handle alone, so usually nothing moves at all; a badge change is
+    ///   its symbol replace alone.
+    /// - ⚠️ NEVER DURING A PRESENTATION'S TRANSITION (`canAnimateBarItems`):
+    ///   that transition owns the bar, and an item swap started under it lands
+    ///   in its first frames. The author waits (`pendingAuthor`) and swaps
+    ///   once, natively, when the screen has landed. Off screen there is
+    ///   nothing to see: the swap is made at once.
+    ///
+    /// Called when the playback owner changes (`updateViewportPlayback`), so
+    /// the pill and the picture change owner on the same frame, and at every
+    /// settle (`updateBarChrome`) — a no-op there after a scroll.
     ///
     /// Internal, not private, so the item contract is testable without a
     /// populated feed.
     func showAuthor(_ model: FeedItemDisplayModel) {
-        let animated = canAnimateBarItems
-        authorIdentityView.setAuthor(model, pipeline: imagePipeline, animated: animated)
-        authorIdentityView.setFollowBadge(followStore.badge(for: model.authorID), animated: animated)
+        let badge = followStore.badge(for: model.authorID)
+        let shown = authorIdentityView.shownAuthor?.authorID
+        // The For You root wears the pill in no bar (#1699): nothing to
+        // transition, so no fresh pill per page of the tab's endless scroll.
+        guard let shown, shown != model.authorID, !isForYouRoot else {
+            pendingAuthor = nil
+            authorIdentityView.setAuthor(model, pipeline: imagePipeline, animated: false)
+            authorIdentityView.setFollowBadge(badge, animated: canAnimateBarItems)
+            return
+        }
+        guard view.window == nil || canAnimateBarItems else {
+            pendingAuthor = model
+            showPendingAuthorAfterTransition()
+            return
+        }
+        pendingAuthor = nil
+        let pill = SnapAuthorIdentityView(arrives: true)
+        wireAuthorIdentityView(pill)
+        pill.setFollowBadge(badge)
+        pill.setAuthor(model, pipeline: imagePipeline, animated: false)
+        authorIdentityView = pill
+        reinstallAuthorItem(animated: view.window != nil)
+    }
+
+    /// An author that arrived while a transition owned the bar — swapped in
+    /// once it has landed (`showAuthor`).
+    private var pendingAuthor: FeedItemDisplayModel?
+
+    /// Shows `pendingAuthor` once the presentation's transition is over — a
+    /// flight's landing calls it too (`installAuthorPillAfterLanding`).
+    private func showPendingAuthorAfterTransition() {
+        guard let coordinator = transitionCoordinator else { return }
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+            // One turn later: out of the transition's completion.
+            DispatchQueue.main.async { self?.showPendingAuthor() }
+        }
+    }
+
+    private func showPendingAuthor() {
+        guard let model = pendingAuthor else { return }
+        showAuthor(model)
     }
 
     /// Whether a bar-item change may animate now: on screen, and not inside a
@@ -2171,14 +2257,15 @@ final class SnapFeedViewController: UIViewController {
         view.window != nil && transitionCoordinator == nil && !isAwaitingAnyFlight
     }
 
-    /// Re-mints the author item — the SAME pill in a fresh item under the same
-    /// identifier, so the bar swaps it in one unseen frame — and swaps it into
-    /// the toolbar.
+    /// Mints the author item for the pill shown now and swaps it into the
+    /// toolbar. The SAME pill re-minted keeps its identifier, so the bar swaps
+    /// it in one unseen frame — the landing install. A NEW author's pill has a
+    /// new identifier, and `animated` hands it to UIKit's replacement (#1791).
     ///
     /// A fresh item is a fresh custom-view wrapper, measured at hand-over — the
     /// landing install's second guard, and the cure for a wrapper whose width
     /// drifted from the pill's (memory `bar-item-wrapper-drift`), should one.
-    private func reinstallAuthorItem() {
+    private func reinstallAuthorItem(animated: Bool = false) {
         let previousItem = authorItem
         authorItem = makeAuthorItem()
         // The toolbar's leading item (#671).
@@ -2187,7 +2274,7 @@ final class SnapFeedViewController: UIViewController {
         if isForYouRoot { return }
         guard var items = toolbarItems, let index = items.firstIndex(of: previousItem) else { return }
         items[index] = authorItem
-        setToolbarItems(items, animated: false)
+        setToolbarItems(items, animated: animated)
     }
 
     /// Set by an appearance, spent once the screen has LANDED: the pill that
@@ -2227,6 +2314,8 @@ final class SnapFeedViewController: UIViewController {
             self.authorIdentityView.setFollowBadge(
                 self.followStore.badge(for: author), animated: self.canAnimateBarItems
             )
+            // An author the flight kept waiting swaps in now, natively (#1791).
+            self.showPendingAuthor()
         }
     }
 
@@ -2295,22 +2384,16 @@ final class SnapFeedViewController: UIViewController {
         navigationItem.scrollEdgeAppearance = appearance
         navigationItem.compactAppearance = appearance
 
-        // The author identity rides the *trailing* bar item (right-aligned,
-        // like a system floating action), not the centered titleView. One
-        // pill in one item under one identifier: an author change blurs the
-        // pill's content across (`showAuthor`). The run is closed on its left
-        // by the wallet badge (when a wallet is wired) — the feed's chrome
-        // stays identical on every entry path (menu push and pin flight), so
-        // nothing else may install items, here or from outside.
+        // The author identity rides the toolbar's leading item (#671), not
+        // the centered titleView: a pill per author, in an item under the
+        // author's identifier, so a new author is UIKit's item replacement
+        // (`showAuthor`, #1791). The feed's chrome stays identical on every
+        // entry path (menu push and pin flight), so nothing else may install
+        // items, here or from outside.
+        wireAuthorIdentityView(authorIdentityView)
         // No badge until the graph has answered for an author.
         authorIdentityView.setFollowBadge(.none)
         authorItem = makeAuthorItem()
-        #if DEBUG
-        authorIdentityView.onContentSettled = { [weak self] in
-            guard let self else { return }
-            self.debugProbeBarItemWidth(self.authorIdentityView, slot: "author")
-        }
-        #endif
         sortItem = BarItems.container(id: "feed.snap.sort", view: commentSortButton)
         if wallet != nil {
             // Tappable exactly when a sheet is wired: the badge opens the
@@ -2383,20 +2466,6 @@ final class SnapFeedViewController: UIViewController {
         closeCommentsItem = BarItems.icon(
             id: Self.closeCommentsItemIdentifier, image: UIImage(systemName: "xmark"), label: "Close comments"
         ) { [weak self] in self?.dismissComments() }
-        // ⚠️ THE PILL OPENS THE PROFILE CARD (#1524), not the profile: the
-        // viewer's own pill still pushes theirs.
-        authorIdentityView.onAuthorTapped = { [weak self] id in
-            guard let self else { return }
-            viewModel.didTapAuthorPill(id, isViewer: followStore.relation(for: id) == .viewer)
-        }
-        // A hold pushes the profile itself (#1669), as the leftward swipe
-        // does; the tap keeps the card.
-        authorIdentityView.onAuthorLongPressed = { [weak self] id in self?.viewModel.didTapAuthor(id) }
-        // The "+" follows, in place (`followAuthor`). The followed and friends
-        // marks take no tap of their own — a tap on them is a tap on the pill,
-        // which opens the profile — so there is no unfollow here: that is the
-        // profile's Following button, one tap away.
-        authorIdentityView.onFollowTapped = { [weak self] id in self?.followAuthor(id) }
 
         // Keep `title` (it feeds pushed screens' back labels) but suppress its
         // centered rendering — the bar's center stays empty by design.
@@ -2411,8 +2480,8 @@ final class SnapFeedViewController: UIViewController {
     /// bar-bubble invariant the top bar's controls already follow.
     ///
     /// Items are installed once; the bookmark glyph follows the active page in
-    /// place, and so does the author pill, blurring across inside its item
-    /// (`showAuthor`). Every action
+    /// place, and a new author is a new pill in a new item, which UIKit
+    /// transitions (`showAuthor`, #1791). Every action
     /// resolves the active post at action time, so none can act on a page the
     /// user has scrolled past.
     private func configureToolbarItems() {
@@ -2828,9 +2897,6 @@ final class SnapFeedViewController: UIViewController {
             !notInterestedIDs.contains($0) || $0 == activePostID
         }
         modelsByID = Dictionary(uniqueKeysWithValues: state.items.map { ($0.id, $0) })
-        // A neighbour's model may have arrived or changed: what the pills draw
-        // for a pair of pages is asked again (#627).
-        pillScrub.forgetPair()
         // ⚠️ BEFORE `dataSource.apply`. `willDisplay` fires inside the apply's
         // own layout pass and asks for a resting panel, so the parked one has
         // to already be in the slot by then.
@@ -4740,7 +4806,7 @@ final class SnapFeedViewController: UIViewController {
     /// lifecycle's is settle-quantized, because everything it drives — chrome,
     /// warm window, resting interface, the pager's lock — must not move under a
     /// finger. Playback is the one thing that should.
-    private var playbackOwner: Int?
+    private(set) var playbackOwner: Int?
 
     /// Hands the picture to whichever page owns the screen, and takes it back
     /// from the one that lost it. Runs on EVERY scroll callback, so it must
@@ -4761,6 +4827,12 @@ final class SnapFeedViewController: UIViewController {
             (lifecycleCell(at: owner) as? SnapFeedCell)?.setOwnsViewport(true)
         }
         refreshAudibleSurface()
+        // The pill changes owner with the picture (#1791): one rule — the
+        // page covering most of the screen — so the author and the clip
+        // change hands on the same frame, in either direction.
+        if let owner, orderedIDs.indices.contains(owner), let model = modelsByID[orderedIDs[owner]] {
+            showAuthor(model)
+        }
     }
 
     private func updateActiveItem() {
@@ -4948,11 +5020,10 @@ final class SnapFeedViewController: UIViewController {
     private func updateBarChrome(at index: Int) {
         guard orderedIDs.indices.contains(index),
               let model = modelsByID[orderedIDs[index]] else { return }
-        // Usually a no-op for the pills: the scroll that brought this page in
-        // already swapped them to it, under its blur (`updateBarPillScrub`).
-        // A page reached without passing through the middle of the screen (a
-        // jump, a landing) blurs across here, on the clock.
-        pillScrub.settle(at: index)
+        // Usually a no-op for the pill: the scroll that brought this page in
+        // already swapped it when the picture changed owner
+        // (`updateViewportPlayback`). A page reached without a scroll (a jump,
+        // a landing) swaps here (#1791).
         showAuthor(model)
         // The neighbours' faces, so the pill paged to next arrives wearing one.
         for neighbour in [index - 1, index + 1] where orderedIDs.indices.contains(neighbour) {
@@ -4991,6 +5062,7 @@ final class SnapFeedViewController: UIViewController {
         // float over an arbitrary photo with no background of their own, and
         // a text page's own ground makes them unnecessary. The colours now
         // come from the theme above.
+        authorOverMedia = overMedia
         authorIdentityView.setOverMedia(overMedia)
         refreshBookmarkGlyph(for: model.id)
         applyToolbarPostActions(for: model.id)
@@ -5005,83 +5077,6 @@ final class SnapFeedViewController: UIViewController {
         for model: FeedItemDisplayModel
     ) -> (sound: SnapMediaAttributionView.SoundCredit, cover: SnapMediaAttributionView.Cover) {
         soundState.attribution(for: model, playingClip: playingClip(of: model))
-    }
-
-    // MARK: - Bar pills under the scroll
-
-    /// The pill's page and blur under the scroll — see `SnapPillScrubController`.
-    private var pillScrub = SnapPillScrubController()
-    #if DEBUG
-    private var debugLastScrubBlur: CGFloat = 0
-    #endif
-
-    /// Applies one scroll frame of `SnapPillScrubController` to the author
-    /// pill: its blur, and the incoming post's author once that page covers
-    /// more than half the screen.
-    private func updateBarPillScrub() {
-        guard let step = pillScrub.update(
-            offset: collectionView.contentOffset.y,
-            pageHeight: collectionView.bounds.height,
-            itemCount: orderedIDs.count,
-            canScrub: canAnimateBarItems,
-            // ⚠️ Runs while `pillScrub` is being mutated: it must never touch
-            // `pillScrub` (a `forgetPair()` from here would trap with a
-            // simultaneous-access error). It reads only the models and the
-            // follow badges.
-            pillDiffers: { self.authorPillDiffers(upper: $0) }
-        ) else { return endBarPillScrub() }
-        let authorBlur = step.blur
-        // Blur first — a scrub that starts on this frame pictures the content
-        // being left — then the swap, which lands under that blur on the
-        // second call.
-        authorIdentityView.setScrubBlur(authorBlur)
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-pill-probe"),
-           (authorBlur * 10).rounded() != (debugLastScrubBlur * 10).rounded() {
-            debugLastScrubBlur = authorBlur
-            print(String(format: "[pill-probe] scrub pos=%.3f blur=%.2f alpha=%.2f",
-                         step.position, authorBlur, authorIdentityView.subviews.first?.alpha ?? -1))
-        }
-        #endif
-        guard let index = step.swapTo,
-              orderedIDs.indices.contains(index), let model = modelsByID[orderedIDs[index]] else { return }
-        showAuthor(model)
-        // Lands the swap under the blur, at FULL blur, and starts its
-        // envelope (`BarItemContentTransition.swapEnvelope`). A frame that
-        // jumped the whole window swaps with the scroll's blur at 0: the
-        // change then took the clock's timeline, which this call leaves to
-        // run (#627).
-        authorIdentityView.setScrubBlur(authorBlur)
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
-            print(String(format: "[pill-probe] scrub swap -> %d at %.3f blur=%.2f shown=%.2f",
-                         index, step.position, authorBlur, authorIdentityView.shownScrubBlur))
-        }
-        #endif
-    }
-
-    /// Whether the author pill draws pages `upper` and `upper + 1`
-    /// differently — nil while either page has no model yet (see
-    /// `SnapPillScrubController.update`).
-    private func authorPillDiffers(upper: Int) -> Bool? {
-        guard orderedIDs.indices.contains(upper), orderedIDs.indices.contains(upper + 1),
-              let first = modelsByID[orderedIDs[upper]],
-              let second = modelsByID[orderedIDs[upper + 1]] else { return nil }
-        return SnapPillScrubController.authorPillDiffers(first, second) { followStore.badge(for: $0) }
-    }
-
-    /// Renders the stills a drag may need before the page moves.
-    private func prepareBarPillScrub() {
-        pillScrub.forgetPair()
-        guard canAnimateBarItems else { return }
-        authorIdentityView.prepareScrub()
-    }
-
-    /// Both pills sharp and alone: the scroll has stopped, or stopped owning
-    /// them.
-    private func endBarPillScrub() {
-        pillScrub.forgetPair()
-        authorIdentityView.setScrubBlur(0)
     }
 
     // MARK: - Sound
@@ -6111,9 +6106,6 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         if commentsEngagedID != nil {
             dismissComments()
         }
-        // The pills' blurred stills, rendered now rather than on a frame of
-        // the drag (`updateBarPillScrub`).
-        prepareBarPillScrub()
     }
 
     /// ⚠️ THE FLICK STOPS AT THE LAST PAGE THAT IS READY.
@@ -6163,14 +6155,9 @@ extension SnapFeedViewController: UICollectionViewDelegate {
             sideList?.pagerDidScroll()
             updateSideListRing(scrollView)
         }
-        // The bar pills ride the scroll too — two alphas a frame, and the
-        // content they draw only at the midpoint. Unlike activation, this
-        // moves nothing on the page.
-        updateBarPillScrub()
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        endBarPillScrub()
         updateActiveItem()
         updatePagingFooter(for: scrollView)
     }
@@ -6179,14 +6166,12 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     /// in the drag callbacks — without it the page it lands on is never
     /// settled.
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
-        endBarPillScrub()
         updateActiveItem()
         updatePagingFooter(for: scrollView)
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if !decelerate {
-            endBarPillScrub()
             updateActiveItem()
         }
         updatePagingFooter(for: scrollView)

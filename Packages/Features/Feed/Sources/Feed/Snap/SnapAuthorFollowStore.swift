@@ -10,7 +10,7 @@ import EntityStore
 /// and a viewer change forgets them all at once. This keeps what is the
 /// screen's own: the lookups and follows it has in flight.
 ///
-/// The screen keeps the drawing (the badge, through the pill's own blur),
+/// The screen keeps the drawing (the badge, by its symbol replace),
 /// the member gate, the failure toast and the graph-event subscription; it
 /// hears every change of answer through `onRelationChange`.
 ///

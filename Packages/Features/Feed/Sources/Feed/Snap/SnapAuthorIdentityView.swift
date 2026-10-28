@@ -12,9 +12,10 @@ import UIKit
 /// THE DRAWING IS THE APP'S ONE PERSON PILL (`PersonPill`, MediaCore, #1277):
 /// the face, the two lines, the relation badge centred on the face's edge.
 /// What this view adds is the FEED's: who is shown (a post's author, a
-/// conversation's correspondent), the swaps between people (blurred in place,
-/// `BarItemContentTransition`), the scroll's scrub blur, and the bar
-/// remeasures a width change asks for.
+/// conversation's correspondent), the changes inside one person (blurred in
+/// place, `BarItemContentTransition`), and the bar remeasures a width change
+/// asks for. On the post page a new AUTHOR is a new pill in a new item, which
+/// UIKit transitions (#1791, `SnapFeedViewController.showAuthor`).
 ///
 /// ITS WIDTH IS ITS CONTENT'S (#925): the pill hugs the face and the two
 /// lines, under a cap — the room its bar leaves it (`setWidthBudget`) — and a
@@ -100,17 +101,6 @@ final class SnapAuthorIdentityView: UIView {
     /// Once a content change has fully landed.
     var onContentSettled: (() -> Void)?
 
-    /// Blurs the pill by `amount` (0…1) as the SCROLL says — the feed's paging
-    /// drives it (`BarPillScrub`), and an author set meanwhile lands under
-    /// the blur (`BarItemContentTransition.setScrubBlur`).
-    func setScrubBlur(_ amount: CGFloat) { contentTransition.setScrubBlur(amount) }
-
-    /// How blurred the pill SHOWS: the scroll's blur, or a swap's envelope.
-    var shownScrubBlur: CGFloat { contentTransition.scrubBlur }
-
-    /// Renders the blurred still a scroll may need, before the page moves.
-    func prepareScrub() { contentTransition.prepareScrub() }
-
     /// Whose face the avatar task is loading — compared on arrival so a fast
     /// page-past cannot land a picture on the wrong pill.
     private var authorID: ProfileID?
@@ -118,12 +108,15 @@ final class SnapAuthorIdentityView: UIView {
     /// from "same page, better data".
     private var renderedModel: FeedItemDisplayModel?
 
-    init() {
+    /// - Parameter arrives: a pill standing for a new author (#1791) — its
+    ///   animated avatar plays once on screen. Otherwise the pill's FIRST
+    ///   avatar rests, and one that replaces it plays.
+    init(arrives: Bool = false) {
         super.init(frame: .zero)
         // The post screen's author: an animated avatar plays once when
-        // paging brings the next author in; the first one opened rests
-        // (#1358).
-        pill.avatar.animationTrigger = .change
+        // paging brings the next author in — a fresh pill per author (#1791)
+        // — and the first one opened rests (#1358).
+        pill.avatar.animationTrigger = arrives ? .arrival : .change
         // The bar is transparent over arbitrary media; shadows keep the
         // identity legible without a background (`setOverMedia`).
         pill.setOverMedia(true)
@@ -169,11 +162,12 @@ final class SnapAuthorIdentityView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// Shows `model`'s author, IN PLACE: the pill is one view in one bar item
-    /// for the screen's life, and a change of what it draws blurs the old
-    /// content out and the new in (`BarItemContentTransition`) while the
+    /// Shows `model`'s author, IN PLACE: a change of what it draws blurs the
+    /// old content out and the new in (`BarItemContentTransition`) while the
     /// item's glass stays where it is, gliding to the new author's width
-    /// while only the blurred stills show.
+    /// while only the blurred stills show. The post page draws a new author
+    /// in a NEW pill instead (#1791), so there this is the first author, or
+    /// the same author's better data.
     ///
     /// The meta line is the author's HANDLE alone (`pillMetaLine`): the post's
     /// age is not the pill's to say (asked 2026-10-01) — so paging between
