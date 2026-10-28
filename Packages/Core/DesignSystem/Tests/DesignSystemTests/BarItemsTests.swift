@@ -57,6 +57,25 @@ struct BarItemsTests {
         #expect(!view.debugIsLoading)
     }
 
+    /// A wide control at work (#1775): the loader in the glyph's place, no
+    /// tap, the word kept.
+    @Test func aBusyStretchedItemTurnsAndTakesNoTap() {
+        var tapped = 0
+        let made = BarItems.stretched(id: "test.mute", title: "Mute", image: UIImage(systemName: "bell"), busy: true) {
+            tapped += 1
+        }
+        #expect(made.label.isBusy)
+        #expect(made.label.title == "Mute")
+        made.label.debugTap()
+        #expect(tapped == 0, "a busy control took a tap")
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 300, height: 100))
+        window.addSubview(made.label)
+        window.isHidden = false
+        #expect(made.label.debugIsLoading)
+        made.label.removeFromSuperview()
+        #expect(!made.label.debugIsLoading, "turning off screen (#580)")
+    }
+
     /// R5: the wide item's bubble is the BAR's — no glass of its own — and
     /// its prominence is the bar's `.prominent`.
     @Test func aStretchedItemLetsTheBarDrawItsBubble() {

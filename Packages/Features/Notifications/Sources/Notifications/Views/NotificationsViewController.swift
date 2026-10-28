@@ -61,6 +61,9 @@ final class NotificationsViewController: UIViewController {
     /// reveal (#1447: the old look holds while a write is on its way).
     var shownPause: PushPause = .off
     var shownMuteLook: MuteLook?
+    /// A mute or unmute on its way, until its toast hands the bar the new
+    /// look or it fails (#1775): the wide button wears the loader.
+    var isWritingMute = false
     weak var muteButton: StretchedBarLabel?
     var muteTimerItem: UIBarButtonItem?
     var muteTick: Timer?

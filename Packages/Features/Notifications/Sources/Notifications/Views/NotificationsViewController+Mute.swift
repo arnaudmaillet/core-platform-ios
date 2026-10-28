@@ -6,6 +6,8 @@ struct MuteLook: Equatable {
     var paused: Bool
     /// The trailing item's text; nil for the timer glyph.
     var timeLeft: String?
+    /// A write on its way (#1775): the wide button's loader.
+    var busy = false
 }
 
 // MARK: - The mute toolbar (#1575)
@@ -53,13 +55,16 @@ extension NotificationsViewController {
     func applyMuteToolbar() {
         guard let muteModel else { return }
         let now = muteModel.clock
-        let look = MuteLook(paused: shownPause.isPaused, timeLeft: NotificationsMuteModel.timeLeft(shownPause, now: now))
+        let look = MuteLook(
+            paused: shownPause.isPaused, timeLeft: NotificationsMuteModel.timeLeft(shownPause, now: now), busy: isWritingMute
+        )
         if look != shownMuteLook {
             let shown = toolbarItems?.first { $0.identifier == Self.muteWideIdentifier }
-            let kept = look.paused == shownMuteLook?.paused ? shown : nil
+            let same = look.paused == shownMuteLook?.paused && look.busy == shownMuteLook?.busy
+            let kept = same ? shown : nil
             let animated = view.window != nil && shown != nil
             shownMuteLook = look
-            let wide = kept ?? makeMuteWideItem(paused: look.paused)
+            let wide = kept ?? makeMuteWideItem(paused: look.paused, busy: look.busy)
             let timer = makeMuteTimerItem(look)
             muteTimerItem = timer
             setToolbarItems([wide, .fixedSpace(), timer], animated: animated)
@@ -76,11 +81,12 @@ extension NotificationsViewController {
     /// bar item and a `.prominent` title item's `width` is ignored on iOS 27.
     /// The bar draws its bubble (#1679). The glyph and the word say what a
     /// tap WILL do.
-    private func makeMuteWideItem(paused: Bool) -> UIBarButtonItem {
+    private func makeMuteWideItem(paused: Bool, busy: Bool) -> UIBarButtonItem {
         let made = BarItems.stretched(
             id: Self.muteWideIdentifier,
             title: paused ? "Unmute" : "Mute",
-            image: UIImage(systemName: paused ? "bell" : "bell.slash")
+            image: UIImage(systemName: paused ? "bell" : "bell.slash"),
+            busy: busy
         ) { [weak self] in self?.muteButtonTapped() }
         made.label.accessibilityIdentifier = "notifications.mute"
         made.label.accessibilityLabel = paused ? "Unmute notifications" : "Mute notifications for 8 hours"
@@ -135,10 +141,12 @@ extension NotificationsViewController {
     }
 
     /// #1447's order: the bar keeps its old look while the write is on its
-    /// way; the toast's reveal hands it the new one. A refusal is a failure
-    /// toast and the look stays (#802).
+    /// way — its wide button wearing the loader (#1775) — and the toast's
+    /// reveal hands it the new one. A refusal is a failure toast and the
+    /// look stays (#802).
     private func write(_ target: PushPause) {
-        guard let muteModel, !muteModel.isSaving else { return }
+        guard let muteModel, !muteModel.isSaving, !isWritingMute else { return }
+        setWritingMute(true)
         Task { [weak self] in
             do {
                 let held = try await muteModel.set(target)
@@ -149,16 +157,22 @@ extension NotificationsViewController {
                     from: self,
                     revealing: { [weak self] in
                         self?.shownPause = held
-                        self?.applyMuteToolbar()
+                        self?.setWritingMute(false)
                     }
                 )
             } catch is CancellationError {
-                return
+                self?.setWritingMute(false)
             } catch {
                 guard let self else { return }
+                setWritingMute(false)
                 Feedback.failure(NotificationsMuteModel.failure(muting: target.isPaused), from: self)
             }
         }
+    }
+
+    private func setWritingMute(_ writing: Bool) {
+        isWritingMute = writing
+        applyMuteToolbar()
     }
 
     // MARK: The minute tick
@@ -186,5 +200,7 @@ extension NotificationsViewController {
     var debugMuteTimerText: String? { muteTimerItem?.title }
     /// The wide button's word. Tests.
     var debugMuteButtonTitle: String? { muteButton?.title }
+    /// Whether the wide button wears the loader. Tests.
+    var debugMuteButtonIsBusy: Bool { muteButton?.isBusy ?? false }
     #endif
 }
