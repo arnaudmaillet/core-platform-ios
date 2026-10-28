@@ -149,7 +149,8 @@ public final class PersonListSkeletonView: UIView {
     }
 
     private func makeRow(at index: Int) -> UIView {
-        let avatar = SkeletonBoneView(rounding: .capsule)
+        // The avatar's own skeleton (#1750, #1774), not a generic bone.
+        let avatar = AvatarSkeletonView()
         NSLayoutConstraint.activate([
             avatar.widthAnchor.constraint(equalToConstant: avatarSize),
             avatar.heightAnchor.constraint(equalToConstant: avatarSize)

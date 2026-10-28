@@ -25,4 +25,18 @@ struct StructuralSkeletonTests {
         _ = plain.debugFirstRowBoneCount
         #expect(!plain.debugHasHeader)
     }
+
+    /// A person row's skeleton draws its avatar with the avatar's own
+    /// skeleton (#1750, #1774), in the cell and in the list alike.
+    @Test func personRowsWearTheAvatarsOwnSkeleton() {
+        func avatars(in view: UIView) -> Int {
+            view.subviews.reduce(0) { $0 + ($1 is AvatarSkeletonView ? 1 : avatars(in: $1)) }
+        }
+        let cell = PersonSkeletonCell(frame: CGRect(x: 0, y: 0, width: 390, height: 64))
+        #expect(avatars(in: cell.contentView) == 1)
+        let list = PersonListSkeletonView(trailing: .timeBone)
+        list.frame = CGRect(x: 0, y: 0, width: 390, height: 200)
+        list.layoutIfNeeded()
+        #expect(avatars(in: list) > 0)
+    }
 }
