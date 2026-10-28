@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import DesignSystem
 import FeedInterface
+import LocalStore
 import MapKit
 import MapsInterface
 import MediaCore
@@ -325,6 +326,10 @@ final class MapsViewController: UIViewController {
     /// deletions per primary, the mutes — and its pure rules
     /// (`MapSubFilterRowMemory`).
     private var subFilterMemory = MapSubFilterRowMemory()
+    /// The dock's and the rows' people on the device (#1776): the screen
+    /// opens on them, then revalidates. Set by the builder before the view
+    /// loads; nil keeps them for the session.
+    var peopleCache: MapPeopleLocalCache?
     /// What the people row is currently SHOWING — the yardstick a refresh
     /// measures itself against. Nil whenever the row holds something else
     /// (place categories) or nothing at all.
@@ -502,6 +507,7 @@ final class MapsViewController: UIViewController {
         observeAppLifecycle()
         observeFavoriteChanges()
         observeDockedPlaces()
+        restorePeople()
         loadFavorites()
         prefetchPeople()
         mapView.setRegion(Self.defaultRegion, animated: false)
@@ -1427,6 +1433,8 @@ final class MapsViewController: UIViewController {
     private func prefetchPeople() {
         guard isMember() else { return }
         let repository = favoritesRepository
+        // The viewer the lists are read for, captured BEFORE the fetch.
+        let writer = peopleCache?.viewer
         Task { [weak self] in
             async let friends = repository.friends()
             async let following = repository.following()
@@ -1440,7 +1448,38 @@ final class MapsViewController: UIViewController {
             self.subFilterMemory.people[.friends] = friendsRow
             let followingRow = await self.people(for: .following)
             self.subFilterMemory.people[.following] = followingRow
+            self.storePeople(primary: .friends, row: friendsRow, catalogue: friendsList, as: writer)
+            self.storePeople(primary: .following, row: followingRow, catalogue: followingList, as: writer)
         }
+    }
+
+    /// The last people of the dock and both rows (#1776), on the first frame:
+    /// the dock's pills and a primary's first tap need no network. The fetches
+    /// that follow revalidate them in place. Never after a viewer change:
+    /// that path goes straight to the network (the wipe may not have run).
+    private func restorePeople() {
+        guard isMember(), let peopleCache else { return }
+        if let dock = peopleCache.people(.dock), !dock.isEmpty {
+            currentFavorites = dock
+            filterBar.setFavorites(dock)
+        }
+        for primary in [MapFilter.friends, .following] {
+            if let slot = MapPeopleLocalCache.Slot.row(primary), let row = peopleCache.people(slot) {
+                subFilterMemory.people[primary] = row
+            }
+            if let slot = MapPeopleLocalCache.Slot.catalogue(primary), let catalogue = peopleCache.people(slot) {
+                subFilterMemory.catalogue[primary] = catalogue
+            }
+        }
+    }
+
+    private func storePeople(
+        primary: MapFilter, row: [MapFavorite], catalogue: [MapFavorite], as writer: LocalStoreViewer?
+    ) {
+        guard let peopleCache, let rowSlot = MapPeopleLocalCache.Slot.row(primary),
+              let catalogueSlot = MapPeopleLocalCache.Slot.catalogue(primary) else { return }
+        peopleCache.store(row, in: rowSlot, as: writer)
+        peopleCache.store(catalogue, in: catalogueSlot, as: writer)
     }
 
     /// Repopulates (or hides) the refinement row for a newly selected
@@ -1464,6 +1503,7 @@ final class MapsViewController: UIViewController {
             // 2) Refresh behind it (also the cold path pre-prefetch, where
             // the row fills in when data lands).
             let repository = favoritesRepository
+            let writer = peopleCache?.viewer
             subFilterLoadTask = Task { [weak self] in
                 guard let people = await self?.people(for: primary) else { return }
                 let catalogue = primary == .friends
@@ -1472,6 +1512,7 @@ final class MapsViewController: UIViewController {
                 guard let self, !Task.isCancelled else { return }
                 self.subFilterMemory.catalogue[primary] = catalogue
                 self.subFilterMemory.people[primary] = people
+                self.storePeople(primary: primary, row: people, catalogue: catalogue, as: writer)
                 guard self.filterBar.selectedFilter == primary else { return }
                 self.applyPeopleRow(people, for: primary)
             }
@@ -1792,6 +1833,7 @@ final class MapsViewController: UIViewController {
         }
         let repository = favoritesRepository
         let curated = pinService.curatedProfileIDs(in: .dock)
+        let writer = peopleCache?.viewer
         favoritesTask = Task { [weak self] in
             let people = if let curated {
                 await repository.profiles(for: curated)
@@ -1815,6 +1857,7 @@ final class MapsViewController: UIViewController {
             self.favoritesRetries = 0
             self.currentFavorites = people
             self.filterBar.setFavorites(people)
+            self.peopleCache?.store(people, in: .dock, as: writer)
         }
     }
 

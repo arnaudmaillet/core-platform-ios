@@ -68,6 +68,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     /// One for the app's lifetime: every map the builder makes reads and
     /// folds into the same stored pins.
     private let pinsCache: MapPinsLocalCache?
+    /// The dock's and the rows' people on the device (#1776).
+    private let peopleCache: MapPeopleLocalCache?
 
     public init(
         repository: any GeoDiscoveryProviding,
@@ -109,6 +111,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         localStore: LocalStore? = nil
     ) {
         self.pinsCache = localStore.map(MapPinsLocalCache.init(store:))
+        self.peopleCache = localStore.map(MapPeopleLocalCache.init(store:))
         self.isMember = isMember
         self.locator = locator
         self.countryAccess = countryAccess
@@ -206,7 +209,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     public func makeMapViewController() -> UIViewController {
         let feedFeature = feedFeature
         let placeFollows = placeFollows
-        return MapsViewController(
+        let map = MapsViewController(
             viewModel: MapsViewModel(
                 repository: repository,
                 followedPlaceIDs: { placeFollows.followedPlaceIDs },
@@ -289,6 +292,9 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             // Members there still see no location controls without it.
             locator: locator
         )
+        // The dock's and the rows' people open on their last list (#1776).
+        map.peopleCache = peopleCache
+        return map
     }
 }
 
