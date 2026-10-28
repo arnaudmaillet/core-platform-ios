@@ -191,6 +191,13 @@ final class ConversationThreadViewController: UIViewController {
     /// see `pinToTail`.
     private var owesTailPin = false
     private var hasEstablishedClearance = false
+    /// Whether a short transcript starts from the bottom (#1799, the
+    /// `-stream-bottom-anchor` experiment). Settable for tests, before the
+    /// view loads.
+    var anchorsShortStream = StreamBottomAnchor.isEnabled
+    /// The room above a short transcript, worn in the top inset
+    /// (`syncBottomAnchor`).
+    private(set) var bottomAnchorSlack: CGFloat = 0
     private var newestID: String?
     /// The oldest message shown — older history landing above it is told
     /// apart from new messages landing below (#600).
@@ -294,6 +301,11 @@ final class ConversationThreadViewController: UIViewController {
             return
         }
         syncBottomClearance()
+        // In the same pass as the clearance (#1799): a composer the keyboard
+        // or a growing field moves carries a short transcript with it, the
+        // slack absorbing the travel. A finger scrubbing the keyboard down
+        // owns the offset; the bounce back puts it where it rests.
+        syncBottomAnchor(movesOffset: !collectionView.isTracking)
         syncDayItem()
         // After the clearance, in the same pass: see `pinToTail`.
         if owesTailPin { pinToTail() }
@@ -1066,7 +1078,12 @@ final class ConversationThreadViewController: UIViewController {
         // `deliveredIDs`: a delivery that landed mid-rise plays on the
         // pending row and never enters `deliveredIDs` — and its swap
         // cross-faded, a dim on the row and its avatar (#756).
-        applySnapshot(animated: hasRenderedContent && anchor == nil && swappedIDs.isEmpty)
+        let animatedApply = hasRenderedContent && anchor == nil && swappedIDs.isEmpty
+        applySnapshot(animated: animatedApply)
+        // The slack follows the content (#1799): a message arriving or deleted
+        // in a short transcript slides the others in the apply's animation.
+        // Older history is held by its anchor instead.
+        syncBottomAnchor(movesOffset: anchor == nil, animated: animatedApply)
         if let anchor { hold(anchor) }
         guard case .content(let messages) = phase else { return }
         hasRenderedContent = true
@@ -1511,6 +1528,47 @@ final class ConversationThreadViewController: UIViewController {
         guard let id = pendingFlashID, let indexPath = dataSource.indexPath(for: .message(id)) else { return }
         pendingFlashID = nil
         (collectionView.cellForItem(at: indexPath) as? ThreadRowCell)?.flash()
+    }
+
+    /// A short transcript STARTS FROM THE BOTTOM, as in a messaging app
+    /// (#1799, behind `-stream-bottom-anchor`): the room above it — the
+    /// slack, `StreamBottomAnchor` — is worn in the top inset, so two
+    /// messages rest just above the composer. A transcript taller than the
+    /// stream has no slack and is exactly as before; growing past it, the
+    /// slack shrinks to 0 with no jump.
+    ///
+    /// Measured after layout: while there is slack every row is realised, so
+    /// the content height is exact. The empty state (full height, centred) is
+    /// left alone. Not before the composer's clearance exists: the first
+    /// resting bottom inset is what the slack is measured against.
+    ///
+    /// `movesOffset`: the stream rests at its tail (with slack, that is the
+    /// whole transcript just above the composer). Off for older history, which
+    /// its anchor holds (`hold`), and under a finger.
+    private func syncBottomAnchor(movesOffset: Bool = true, animated: Bool = false) {
+        guard anchorsShortStream, mode == .full, hasEstablishedClearance, collectionView.bounds.height > 0 else { return }
+        collectionView.layoutIfNeeded()
+        var showsEmpty = false
+        if case .content(let messages) = phase { showsEmpty = messages.isEmpty }
+        let slack = showsEmpty ? 0 : StreamBottomAnchor.slack(for: collectionView, wearing: bottomAnchorSlack)
+        let previous = bottomAnchorSlack
+        guard abs(slack - previous) > 0.5 else { return }
+        bottomAnchorSlack = slack
+        let apply = {
+            self.collectionView.contentInset.top = SnapCommentsLayout.streamTopBreath + slack
+            guard movesOffset, slack > 0 || previous > 0 else { return }
+            let insets = self.collectionView.adjustedContentInset
+            let tail = self.collectionView.contentSize.height + insets.bottom - self.collectionView.bounds.height
+            self.collectionView.contentOffset.y = max(-insets.top, tail)
+        }
+        if animated, view.window != nil {
+            UIView.animate(
+                withDuration: 0.3, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction],
+                animations: apply
+            )
+        } else {
+            apply()
+        }
     }
 
     /// Keeps the newest message clear of the composer, and carries the reader
