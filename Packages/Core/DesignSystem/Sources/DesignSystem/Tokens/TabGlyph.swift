@@ -14,6 +14,17 @@ public enum TabGlyph: CaseIterable, Sendable {
     /// The badge's colour: the accent pink.
     @MainActor public static var badgeTint: UIColor { Palette.tint }
 
+    /// The glyph's size in the tab bar: the body style's at the DEFAULT text
+    /// size, fixed.
+    ///
+    /// ⚠️ NOT THE BODY STYLE (#1692). A stock tab item keeps its glyph's size
+    /// at every text size — the system shows the Large Content Viewer instead
+    /// — but these glyphs are made (and baked) by the app, and sized by the
+    /// body text style they grew with Dynamic Type: at XXXL they drew
+    /// oversized over their labels.
+    public static let symbolConfiguration = AppSymbol.fixed(17)
+        .applying(UIImage.SymbolConfiguration(scale: .large))
+
     /// The symbol for a tab's state.
     public func symbol(selected: Bool, badged: Bool) -> AppSymbol {
         switch (self, selected, badged) {
