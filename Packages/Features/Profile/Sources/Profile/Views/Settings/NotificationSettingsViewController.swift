@@ -5,7 +5,9 @@ import UserNotifications
 
 /// Settings → Notifications (#392, backend #725): pause everything, push per
 /// category and quiet hours, for the active profile. Saved on the server,
-/// which decides each push from them. Not optimistic.
+/// which decides each push from them. Not optimistic: a change shows where
+/// the tap put it, with the loader beside it, until the server holds it
+/// (#1775, `SettingSaves`).
 final class NotificationSettingsViewController: UIViewController {
     enum Phase: Equatable {
         case loading
@@ -61,7 +63,19 @@ final class NotificationSettingsViewController: UIViewController {
     /// can say "You’re offline" when that is the cause (#794). Set before
     /// the phase, so the redraw `.failed` triggers already reads it.
     private var loadFailure: NetworkFailure?
-    private var isSaving = false
+    /// The changes on their way to the server (#1775).
+    private lazy var saves: SettingSaves<NotificationPreferencesChange.Target, NotificationPreferencesChange> = {
+        let saves = SettingSaves<NotificationPreferencesChange.Target, NotificationPreferencesChange>()
+        saves.onChange = { [weak self] in self?.applySnapshot() }
+        return saves
+    }()
+
+    /// The preferences as the rows show them: the changes on their way over
+    /// the server's.
+    private var shownPreferences: NotificationPreferences? {
+        guard case .loaded(let preferences) = phase else { return nil }
+        return saves.values.values.reduce(preferences) { $0.applying($1) }
+    }
     /// iOS's notification permission for this app, read on every appearance —
     /// it changes in iOS Settings, behind this screen's back.
     private var systemPermission: UNAuthorizationStatus? {
@@ -115,10 +129,10 @@ final class NotificationSettingsViewController: UIViewController {
     /// Re-reads the preferences under what is shown: no skeleton, and a
     /// failure keeps the rows (the next change or appearance tries again).
     private func refreshQuietly() {
-        guard case .loaded = phase, !isSaving else { return }
+        guard case .loaded = phase, saves.isIdle else { return }
         Task { [weak self] in
             guard let self, let next = try? await manager.notificationPreferences() else { return }
-            guard case .loaded = phase, !isSaving else { return }
+            guard case .loaded = phase, saves.isIdle else { return }
             phase = .loaded(next)
         }
     }
@@ -198,7 +212,7 @@ final class NotificationSettingsViewController: UIViewController {
         case .system:
             return Self.systemFooter(permission: systemPermission)
         case .pause:
-            if case .loaded(let preferences) = phase {
+            if let preferences = shownPreferences {
                 return Self.pauseFooter(until: preferences.pausedUntil, now: now())
             }
             return Self.pauseFooter(until: nil, now: now())
@@ -239,7 +253,7 @@ final class NotificationSettingsViewController: UIViewController {
             guard let self else { return }
             cell.accessories = []
             var content = UIListContentConfiguration.cell()
-            let preferences: NotificationPreferences? = if case .loaded(let current) = phase { current } else { nil }
+            let preferences = shownPreferences
             switch item {
             case .allow:
                 content.text = "Allow Notifications"
@@ -268,24 +282,25 @@ final class NotificationSettingsViewController: UIViewController {
                 if preferences?.pausedUntil != nil {
                     actions.insert(UIAction(title: "Resume Now") { [weak self] _ in self?.resume() }, at: 0)
                 }
-                cell.accessories = [.popUpMenu(UIMenu(children: actions), displayed: .always)]
+                let menu = UICellAccessory.popUpMenu(UIMenu(children: actions), displayed: .always)
+                cell.accessories = saves.isSaving(.pause) ? [.busy(), menu] : [menu]
             case .category(let category):
                 content.text = category.title
-                cell.accessories = [switchAccessory(isOn: !(preferences?.mutedCategories.contains(category) ?? false)) { [weak self] isOn in
+                cell.accessories = switchAccessories(isOn: !(preferences?.mutedCategories.contains(category) ?? false), for: .push(category)) { [weak self] isOn in
                     self?.apply(.push(category, isOn))
-                }]
+                }
             case .emailCategory(let category):
                 content.text = category.title
-                cell.accessories = [switchAccessory(isOn: preferences?.emailCategories.contains(category) ?? false) { [weak self] isOn in
+                cell.accessories = switchAccessories(isOn: preferences?.emailCategories.contains(category) ?? false, for: .email(category)) { [weak self] isOn in
                     self?.apply(.email(category, isOn))
-                }]
+                }
             case .quietSwitch:
                 content.text = "Quiet Hours"
                 content.image = UIImage(systemName: "moon")
                 content.imageProperties.tintColor = .label
-                cell.accessories = [switchAccessory(isOn: preferences?.quietHours != nil) { [weak self] isOn in
+                cell.accessories = switchAccessories(isOn: preferences?.quietHours != nil, for: .quietHours) { [weak self] isOn in
                     self?.apply(.quietHours(isOn ? QuietHours() : nil))
-                }]
+                }
             case .quietStart, .quietEnd:
                 let isStart = item == .quietStart
                 content.text = isStart ? "From" : "To"
@@ -340,15 +355,21 @@ final class NotificationSettingsViewController: UIViewController {
         }
     }
 
-    private func switchAccessory(isOn: Bool, onChange: @escaping (Bool) -> Void) -> UICellAccessory {
+    /// A switch for `target`; on its way, it waits with the loader beside
+    /// it (#1775).
+    private func switchAccessories(
+        isOn: Bool, for target: NotificationPreferencesChange.Target, onChange: @escaping (Bool) -> Void
+    ) -> [UICellAccessory] {
         let toggle = UISwitch()
         toggle.isOn = isOn
-        toggle.isEnabled = !isSaving
+        let travels = saves.isSaving(target)
+        toggle.isEnabled = !travels
         toggle.addAction(UIAction { action in
             guard let toggle = action.sender as? UISwitch else { return }
             onChange(toggle.isOn)
         }, for: .valueChanged)
-        return .customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))
+        let control = UICellAccessory.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))
+        return travels ? [.busy(), control] : [control]
     }
 
     /// A compact time picker; the change saves when the picker settles.
@@ -362,7 +383,7 @@ final class NotificationSettingsViewController: UIViewController {
         components.hour = minutes / 60
         components.minute = minutes % 60
         picker.date = Calendar.current.date(from: components) ?? Date()
-        picker.isEnabled = !isSaving
+        picker.isEnabled = !saves.isSaving(.quietHours)
         picker.addAction(UIAction { [weak self] action in
             guard let picker = action.sender as? UIDatePicker else { return }
             let parts = Calendar.current.dateComponents([.hour, .minute], from: picker.date)
@@ -381,7 +402,9 @@ final class NotificationSettingsViewController: UIViewController {
         // "taking longer" past 10 s.
         let loading = phase == .loading
         let shown: ListSkeletonGate.Shown = loading ? loadingGate.loading() : .nothing
-        let layout = Self.layout(permission: systemPermission, phase: phase, shown: shown)
+        // The changes on their way laid over the record (#1775): quiet
+        // hours turned on show their times at once.
+        let layout = Self.layout(permission: systemPermission, phase: shownPreferences.map(Phase.loaded) ?? phase, shown: shown)
         for (section, items) in layout {
             snapshot.appendSections([section])
             snapshot.appendItems(items, toSection: section)
@@ -492,23 +515,19 @@ final class NotificationSettingsViewController: UIViewController {
 
     // MARK: - Changes
 
+    /// Saves `change` after the changes before it; its row shows it made,
+    /// with the loader, until the server answers (#1775).
     private func apply(_ change: NotificationPreferencesChange) {
-        guard case .loaded = phase, !isSaving else { return }
-        isSaving = true
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                let next = try await manager.updateNotificationPreferences(change)
-                isSaving = false
-                phase = .loaded(next)
-            } catch {
-                isSaving = false
-                applySnapshot()
-                let alert = UIAlertController(title: nil, message: "Couldn't save your notification settings. Try again.", preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
-                present(alert, animated: true)
-            }
-        }
+        guard case .loaded = phase else { return }
+        let manager = manager
+        saves.save(change, for: change.target, { [weak self] change in
+            let next = try await manager.updateNotificationPreferences(change)
+            self?.phase = .loaded(next)
+        }, failed: { [weak self] _ in
+            let alert = UIAlertController(title: nil, message: "Couldn't save your notification settings. Try again.", preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            self?.present(alert, animated: true)
+        })
     }
 
     private func pause(minutes: Int) {

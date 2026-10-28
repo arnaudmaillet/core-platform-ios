@@ -43,7 +43,12 @@ final class ActivityDiscoveryViewController: UIViewController {
     /// can say "You’re offline" when that is the cause (#794). Set before
     /// the phase, so the redraw `.failed` triggers already reads it.
     private var loadFailure: NetworkFailure?
-    private var saving: Set<ActivityDiscoverySettings.Switch> = []
+    /// The switches on their way to the server (#1775).
+    private lazy var saves: SettingSaves<ActivityDiscoverySettings.Switch, Bool> = {
+        let saves = SettingSaves<ActivityDiscoverySettings.Switch, Bool>()
+        saves.onChange = { [weak self] in self?.applySnapshot() }
+        return saves
+    }()
     private var resetting = false
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -160,22 +165,20 @@ final class ActivityDiscoveryViewController: UIViewController {
                 content.image = UIImage(systemName: Self.symbol(key))
                 content.imageProperties.tintColor = key == .activityStatus ? .systemGreen : .label
                 let toggle = UISwitch()
-                if case .loaded(let settings) = phase { toggle.isOn = settings[key] }
-                toggle.isEnabled = !saving.contains(key)
+                if case .loaded(let settings) = phase { toggle.isOn = saves.value(for: key) ?? settings[key] }
+                toggle.isEnabled = !saves.isSaving(key)
                 toggle.accessibilityLabel = Self.title(key)
                 toggle.addAction(UIAction { [weak self] action in
                     guard let toggle = action.sender as? UISwitch else { return }
                     self?.set(key, to: toggle.isOn)
                 }, for: .valueChanged)
-                cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
+                let control = UICellAccessory.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))
+                // On its way (#1775): where the tap put it, the loader beside it.
+                cell.accessories = saves.isSaving(key) ? [.busy(), control] : [control]
             case .resetLink:
                 content.text = Self.resetTitle
                 content.textProperties.color = resetting ? .secondaryLabel : .systemRed
-                if resetting {
-                    let spinner = AppLoaderView(size: .medium)
-                    spinner.startAnimating()
-                    cell.accessories = [.customView(configuration: .init(customView: spinner, placement: .trailing(displayed: .always)))]
-                }
+                if resetting { cell.accessories = [.busy()] }
             case .findContacts:
                 content.text = Self.findContactsTitle
                 content.image = UIImage(systemName: "person.crop.circle.badge.plus")
@@ -266,29 +269,25 @@ final class ActivityDiscoveryViewController: UIViewController {
         return gate
     }()
 
-    /// Not optimistic: the switch disables while saving, then shows what
-    /// the server holds.
+    /// Not optimistic (#1775): the switch stays where the tap put it, with
+    /// the loader beside it, until the server holds it, or snaps back.
     private func set(_ key: ActivityDiscoverySettings.Switch, to isOn: Bool) {
-        guard case .loaded(var settings) = phase, !saving.contains(key) else { return }
-        saving.insert(key)
-        applySnapshot()
-        Task { [weak self] in
+        guard case .loaded = phase else { return }
+        saves.save(isOn, for: key, { [weak self] isOn in
             guard let self else { return }
-            do {
-                try await manager.setActivityDiscovery(key, to: isOn)
+            try await manager.setActivityDiscovery(key, to: isOn)
+            if case .loaded(var settings) = phase {
                 settings[key] = isOn
-                saving.remove(key)
                 phase = .loaded(settings)
-            } catch {
-                saving.remove(key)
-                applySnapshot()
-                // A supervisor's floor holds it (PRF-5006, #417): say who.
-                let message = SupervisionLock.message(for: error, fallback: "Couldn't change \(Self.title(key)). Try again.")
-                let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
-                present(alert, animated: true)
             }
-        }
+        }, failed: { [weak self] error in
+            guard let self else { return }
+            // A supervisor's floor holds it (PRF-5006, #417): say who.
+            let message = SupervisionLock.message(for: error, fallback: "Couldn't change \(Self.title(key)). Try again.")
+            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+        })
     }
 
     /// Asks first: the codes people already scanned or saved stop working.
@@ -351,3 +350,22 @@ extension ActivityDiscoveryViewController: UICollectionViewDelegate {
         }
     }
 }
+
+#if DEBUG
+extension ActivityDiscoveryViewController {
+    /// Internal for tests: the switch on screen for `key`, and whether its
+    /// row shows the loader (#1775).
+    func debugToggle(_ key: ActivityDiscoverySettings.Switch) -> (toggle: UISwitch, busy: Bool)? {
+        collectionView.layoutIfNeeded()
+        func descendants(_ view: UIView) -> [UIView] { view.subviews + view.subviews.flatMap(descendants) }
+        for cell in collectionView.visibleCells {
+            guard ((cell as? UICollectionViewListCell)?.contentConfiguration as? UIListContentConfiguration)?.text
+                == Self.title(key) else { continue }
+            let views = descendants(cell)
+            guard let toggle = views.compactMap({ $0 as? UISwitch }).first else { return nil }
+            return (toggle, views.contains { $0.accessibilityLabel == "In progress" })
+        }
+        return nil
+    }
+}
+#endif

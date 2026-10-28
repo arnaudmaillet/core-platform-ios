@@ -5,7 +5,9 @@ import UIKit
 /// Settings → Safety and Interactions → Hidden Words (#404, backend #728):
 /// comments on the active profile's posts that contain a hidden word, or a
 /// commonly reported offensive term, are hidden from everyone but their
-/// author. Each change replaces the server's list; nothing here is optimistic.
+/// author. Each change replaces the server's list; nothing here is
+/// optimistic: a change shows as made, with the loader beside it, until the
+/// server holds it (#1775, `SettingSaves`).
 final class HiddenWordsViewController: UIViewController {
     enum Phase: Equatable {
         case loading
@@ -35,7 +37,17 @@ final class HiddenWordsViewController: UIViewController {
     /// can say "You’re offline" when that is the cause (#794). Set before
     /// the phase, so the redraw `.failed` triggers already reads it.
     private var loadFailure: NetworkFailure?
-    private var isSaving = false
+    /// A change on its way to the server (#1775): the switch, or the list.
+    private enum Change: Sendable {
+        case offensive(Bool)
+        case words([String])
+    }
+
+    private lazy var saves: SettingSaves<Section, Change> = {
+        let saves = SettingSaves<Section, Change>()
+        saves.onChange = { [weak self] in self?.applySnapshot() }
+        return saves
+    }()
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
@@ -127,18 +139,22 @@ final class HiddenWordsViewController: UIViewController {
                 content.image = UIImage(systemName: "eye.slash")
                 content.imageProperties.tintColor = .label
                 let toggle = UISwitch()
-                if case .loaded(let filters) = phase { toggle.isOn = filters.filtersOffensive }
-                toggle.isEnabled = !isSaving
+                if let filters = shown { toggle.isOn = filters.filtersOffensive }
+                toggle.isEnabled = !saves.isSaving(.offensive)
                 toggle.addAction(UIAction { [weak self] action in
                     guard let toggle = action.sender as? UISwitch else { return }
                     self?.setOffensive(toggle.isOn)
                 }, for: .valueChanged)
-                cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
+                let control = UICellAccessory.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))
+                cell.accessories = saves.isSaving(.offensive) ? [.busy(), control] : [control]
             case .word(let word):
                 content.text = word
             case .add:
                 content.text = "Add Words…"
-                content.textProperties.color = .tintColor
+                // The list on its way: the loader, and the row waits.
+                let travels = saves.isSaving(.words)
+                content.textProperties.color = travels ? .secondaryLabel : .tintColor
+                if travels { cell.accessories = [.busy()] }
             case .loading:
                 cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
@@ -195,11 +211,12 @@ final class HiddenWordsViewController: UIViewController {
         case .failed:
             snapshot.appendSections([.offensive])
             snapshot.appendItems([.failed], toSection: .offensive)
-        case .loaded(let filters):
+        case .loaded(let saved):
+            let filters = shown ?? saved
             snapshot.appendSections([.offensive, .words])
             snapshot.appendItems([.offensive], toSection: .offensive)
             snapshot.appendItems(filters.hiddenWords.map(Item.word) + [.add], toSection: .words)
-            snapshot.reconfigureItems([.offensive])
+            snapshot.reconfigureItems([.offensive, .add])
         }
         let animated = view.window != nil
         if case .loading = phase {
@@ -221,36 +238,54 @@ final class HiddenWordsViewController: UIViewController {
 
     // MARK: - Changes
 
-    private func save(_ change: (inout CommentFilterSettings) -> Void) {
-        guard case .loaded(let current) = phase, !isSaving else { return }
-        var next = current
-        change(&next)
-        guard next != current else { return }
-        isSaving = true
-        applySnapshot()
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                phase = .loaded(try await manager.setCommentFilters(next))
-            } catch {
-                let message = (error as? CommentFiltersError) == .tooMany
-                    ? "You can hide up to \(CommentFilterSettings.maximumWords) words, each up to \(CommentFilterSettings.maximumWordLength) characters."
-                    : "Couldn't save your filters. Try again."
-                let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "OK", style: .default))
-                present(alert, animated: true)
-            }
-            isSaving = false
-            applySnapshot()
+    /// The filters as the rows show them: the changes on their way over the
+    /// server's.
+    private var shown: CommentFilterSettings? {
+        guard case .loaded(var filters) = phase else { return nil }
+        if case .offensive(let isOn)? = saves.value(for: .offensive) { filters.filtersOffensive = isOn }
+        if case .words(let words)? = saves.value(for: .words) { filters.hiddenWords = words }
+        return filters
+    }
+
+    /// Saves one change over the record the saves before it left — the
+    /// server takes the whole list.
+    private func save(_ change: Change) {
+        guard let current = shown else { return }
+        let key: Section
+        switch change {
+        case .offensive(let isOn):
+            guard isOn != current.filtersOffensive else { return }
+            key = .offensive
+        case .words(let words):
+            guard words != current.hiddenWords else { return }
+            key = .words
         }
+        let manager = manager
+        saves.save(change, for: key, { [weak self] change in
+            guard let self, case .loaded(var next) = phase else { return }
+            switch change {
+            case .offensive(let isOn): next.filtersOffensive = isOn
+            case .words(let words): next.hiddenWords = words
+            }
+            let saved = try await manager.setCommentFilters(next)
+            phase = .loaded(saved)
+        }, failed: { [weak self] error in
+            let message = (error as? CommentFiltersError) == .tooMany
+                ? "You can hide up to \(CommentFilterSettings.maximumWords) words, each up to \(CommentFilterSettings.maximumWordLength) characters."
+                : "Couldn't save your filters. Try again."
+            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            self?.present(alert, animated: true)
+        })
     }
 
     private func setOffensive(_ isOn: Bool) {
-        save { $0.filtersOffensive = isOn }
+        save(.offensive(isOn))
     }
 
     private func remove(_ word: String) {
-        save { $0.hiddenWords.removeAll { $0 == word } }
+        guard let current = shown else { return }
+        save(.words(current.hiddenWords.filter { $0 != word }))
     }
 
     private func presentAdd() {
@@ -268,7 +303,8 @@ final class HiddenWordsViewController: UIViewController {
         alert.addAction(UIAlertAction(title: "Add", style: .default) { [weak self, weak alert] _ in
             let words = Self.words(fromInput: alert?.textFields?.first?.text ?? "")
             guard !words.isEmpty else { return }
-            self?.save { $0.hiddenWords = CommentFilterSettings.normalized($0.hiddenWords + words) }
+            guard let self, let current = shown else { return }
+            save(.words(CommentFilterSettings.normalized(current.hiddenWords + words)))
         })
         present(alert, animated: true)
     }
@@ -285,7 +321,7 @@ extension HiddenWordsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .add: presentAdd()
+        case .add where !saves.isSaving(.words): presentAdd()
         case .failed: load()
         case .takingLonger:
             loadingGate.retry()
