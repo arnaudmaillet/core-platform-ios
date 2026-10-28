@@ -52,6 +52,18 @@ final class SecuritySettingsViewController: UIViewController {
     /// Whether the sessions section last drew bones: the swap away from them
     /// cross-fades (P10), every other redraw is plain.
     private var isShowingSkeleton = false
+    /// The sessions whose log out is on its way (#1775): they wear the busy
+    /// accessory until the row leaves, or comes back with the error.
+    private var revoking: Set<AccountSession.ID> = []
+    /// Log Out of All Devices on its way.
+    private var isLoggingOutEverywhere = false
+
+    private func reconfigure(_ item: Item) {
+        var snapshot = dataSource.snapshot()
+        guard snapshot.indexOfItem(item) != nil else { return }
+        snapshot.reconfigureItems([item])
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
 
     init(
         viewModel: SecuritySettingsViewModel,
@@ -135,7 +147,7 @@ final class SecuritySettingsViewController: UIViewController {
 
     private func configureDataSource() {
         let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
-            Self.configure(cell, for: item, failure: self?.viewModel.failure)
+            Self.configure(cell, for: item, failure: self?.viewModel.failure, busy: self?.isBusy(item) ?? false)
             self?.configureOwnRow(cell, for: item)
         }
         let skeletonRegistration = UICollectionView.CellRegistration<SettingsSkeletonRowCell, Int> { cell, _, index in
@@ -312,7 +324,16 @@ final class SecuritySettingsViewController: UIViewController {
         FailureCopy.row(for: failure, fallback: "Couldn't load your sessions. Tap to try again.")
     }
 
-    private static func configure(_ cell: UICollectionViewListCell, for item: Item, failure: NetworkFailure?) {
+    /// Whether `item`'s action is on its way (#1775).
+    private func isBusy(_ item: Item) -> Bool {
+        switch item {
+        case .session(let session): revoking.contains(session.id)
+        case .logOutEverywhere: isLoggingOutEverywhere
+        default: false
+        }
+    }
+
+    private static func configure(_ cell: UICollectionViewListCell, for item: Item, failure: NetworkFailure?, busy: Bool) {
         cell.accessories = []
         cell.contentView.subviews.filter { $0.tag == lockControlTag }.forEach { $0.removeFromSuperview() }
         switch item {
@@ -347,6 +368,7 @@ final class SecuritySettingsViewController: UIViewController {
             content.image = UIImage(systemName: symbol(for: session.device.kind))
             content.imageProperties.tintColor = .label
             cell.contentConfiguration = content
+            if busy { cell.accessories = [.busy()] }
         case .skeleton:
             // Drawn by `SettingsSkeletonRowCell`.
             break
@@ -363,8 +385,9 @@ final class SecuritySettingsViewController: UIViewController {
         case .logOutEverywhere:
             var content = UIListContentConfiguration.cell()
             content.text = "Log Out of All Devices"
-            content.textProperties.color = .systemRed
+            content.textProperties.color = busy ? .secondaryLabel : .systemRed
             cell.contentConfiguration = content
+            if busy { cell.accessories = [.busy()] }
         case .planned(let title):
             var content = UIListContentConfiguration.cell()
             content.text = title
@@ -470,9 +493,18 @@ final class SecuritySettingsViewController: UIViewController {
         presentSheet(sheet)
     }
 
+    /// The row says so while the device is logged out (#1775), then leaves,
+    /// or comes back as it was, with the error.
     private func revoke(_ session: AccountSession) {
+        guard !revoking.contains(session.id) else { return }
+        revoking.insert(session.id)
+        reconfigure(.session(session))
         Task { [weak self] in
             guard let self else { return }
+            defer {
+                revoking.remove(session.id)
+                reconfigure(.session(session))
+            }
             do {
                 try await viewModel.revoke(session)
             } catch {
@@ -495,12 +527,17 @@ final class SecuritySettingsViewController: UIViewController {
     }
 
     private func logOutEverywhere() {
+        guard !isLoggingOutEverywhere else { return }
+        isLoggingOutEverywhere = true
+        reconfigure(.logOutEverywhere)
         Task { [weak self] in
             guard let self else { return }
             do {
                 try await viewModel.revokeAll()
                 onSignedOutEverywhere()
             } catch {
+                isLoggingOutEverywhere = false
+                reconfigure(.logOutEverywhere)
                 presentInfo("Couldn't log out of all devices. Try again.")
             }
         }

@@ -20,6 +20,17 @@ final class RecentlyDeletedViewController: UIViewController {
     private let imagePipeline: ImagePipeline?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, Item>!
+    /// The posts whose restore is on its way (#1775): their rows wear the
+    /// busy accessory until they leave, or come back with the error.
+    private var restoring: Set<PostID> = []
+
+    /// The row's accessory, set on the cell on screen — a reconfigure would
+    /// draw its thumbnail again.
+    private func showRestoring(_ id: PostID) {
+        guard let indexPath = dataSource.indexPath(for: .post(id)),
+              let cell = collectionView.cellForItem(at: indexPath) as? UICollectionViewListCell else { return }
+        cell.accessories = restoring.contains(id) ? [.busy()] : []
+    }
 
     init(viewModel: RecentlyDeletedViewModel, imagePipeline: ImagePipeline?) {
         self.viewModel = viewModel
@@ -92,6 +103,7 @@ final class RecentlyDeletedViewController: UIViewController {
                 if let url = deleted.post.thumbnailURL, let pipeline = imagePipeline {
                     Self.loadThumbnail(url, pipeline: pipeline, into: cell, title: content.text, glyph: glyph)
                 }
+                cell.accessories = restoring.contains(deleted.post.id) ? [.busy()] : []
             case .loading:
                 cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
                 cell.accessories = []
@@ -179,9 +191,19 @@ final class RecentlyDeletedViewController: UIViewController {
         present(sheet, animated: true)
     }
 
+    /// The row says so while the post comes back (#1775), then leaves, or
+    /// returns to normal with the error.
     private func restore(_ deleted: DeletedPost) {
+        let id = deleted.post.id
+        guard !restoring.contains(id) else { return }
+        restoring.insert(id)
+        showRestoring(id)
         Task { [weak self] in
             guard let self else { return }
+            defer {
+                restoring.remove(id)
+                showRestoring(id)
+            }
             do {
                 try await viewModel.restore(deleted)
                 Feedback.success("Post restored", symbol: "arrow.uturn.backward", from: self)
@@ -236,3 +258,23 @@ extension RecentlyDeletedViewController {
         }
     }
 }
+
+#if DEBUG
+extension RecentlyDeletedViewController {
+    /// Internal for tests: restores the post at `index`, as the swipe does.
+    func debugRestore(at index: Int) {
+        guard case .loaded(let posts) = viewModel.phase, posts.indices.contains(index) else { return }
+        restore(posts[index])
+    }
+
+    /// Internal for tests: whether `id`'s row is on screen, and wears the
+    /// loader (#1775).
+    func debugRow(_ id: PostID) -> (shown: Bool, busy: Bool) {
+        collectionView.layoutIfNeeded()
+        guard let indexPath = dataSource.indexPath(for: .post(id)),
+              let cell = collectionView.cellForItem(at: indexPath) else { return (false, false) }
+        func descendants(_ view: UIView) -> [UIView] { view.subviews + view.subviews.flatMap(descendants) }
+        return (true, descendants(cell).contains { $0.accessibilityLabel == "In progress" })
+    }
+}
+#endif
