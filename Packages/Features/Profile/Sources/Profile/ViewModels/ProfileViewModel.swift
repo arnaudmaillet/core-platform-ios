@@ -682,8 +682,8 @@ public final class ProfileViewModel {
         guard let profile else { return }
         relationshipLoad?.cancel()
         loadRelationship(for: profile.id)
-        // Liked, and someone else's Saved, are kept nowhere (#411): read now,
-        // or the revisit would show neither tab.
+        // Someone else's Saved is kept nowhere (#411), and Liked's stored copy
+        // (#1776) is only the tab's first frame: both are read again now.
         loadEngagementTabs(for: profile)
         onLoadSettled?()
     }
@@ -1449,11 +1449,16 @@ public final class ProfileViewModel {
 
     /// The Liked tab, and someone else's Saved tab (#411, #837): the
     /// server's lists, read with the grid's first pages — beside them, never
-    /// a second grid load — and kept nowhere but this screen: no device
-    /// cache, so a viewer change cannot show them to the next viewer. A tab
-    /// shows only once its list holds something (#742), so a hidden tab
-    /// (the server answers empty) never appears; a failed read leaves what
-    /// was shown.
+    /// a second grid load. A tab shows only once its list holds something
+    /// (#742), so a hidden tab (the server answers empty) never appears; a
+    /// failed read leaves what was shown.
+    ///
+    /// ⚠️ LIKED IS KEPT WITH THE GRID (#1776), cache first like Posts: it used
+    /// to be kept nowhere, so that a viewer change could not show it to the
+    /// next viewer. The device copy is the viewer's own (the LocalStore's
+    /// viewer scope; `ProfileCache` drops its memory on `.viewerDidChange`),
+    /// so that rule holds without a cold tab at every visit. Someone else's
+    /// Saved stays out of it.
     private func loadEngagementTabs(for profile: UserProfile) {
         guard let gallery else { return }
         engagementTabsLoad?.cancel()
@@ -1470,6 +1475,7 @@ public final class ProfileViewModel {
                 galleryStore.othersSaved = savedPosts.isEmpty ? .empty(message: "") : .content(savedPosts)
             }
             engagementTabsLoad = nil
+            if likedPosts != nil { rememberGallery(of: profile.id) }
             renderGallery()
         }
     }

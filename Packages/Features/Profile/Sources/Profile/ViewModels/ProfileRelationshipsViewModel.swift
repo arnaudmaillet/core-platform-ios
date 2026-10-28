@@ -3,6 +3,7 @@ import CoreNavigation
 import CoreNetworking
 import DesignSystem
 import Foundation
+import LocalStore
 
 /// Drives the follower / following screen: one state machine per direction,
 /// only the visible one loaded.
@@ -173,7 +174,7 @@ public final class ProfileRelationshipsViewModel {
     /// Counts behind the segment titles — Followers and Following only, seeded
     /// from the subject. Friends is deliberately absent; see `segmentTitle`.
     private var counts: [RelationshipDirection: CountEstimate] = [:]
-    public init(
+    public convenience init(
         subject: Subject,
         repository: any ProfileRelationshipsProviding,
         router: (any Router)? = nil,
@@ -181,12 +182,40 @@ public final class ProfileRelationshipsViewModel {
         pageSize: Int32 = 24,
         followEvents: FollowGraphEvents? = nil
     ) {
+        self.init(
+            subject: subject, repository: repository, router: router, direction: direction,
+            pageSize: pageSize, followEvents: followEvents, deviceCache: nil
+        )
+    }
+
+    init(
+        subject: Subject,
+        repository: any ProfileRelationshipsProviding,
+        router: (any Router)? = nil,
+        direction: RelationshipDirection = .followers,
+        pageSize: Int32 = 24,
+        followEvents: FollowGraphEvents? = nil,
+        deviceCache: ProfileRelationshipsLocalCache?
+    ) {
         self.subject = subject
         self.repository = repository
         self.router = router
         self.direction = direction
         self.pageSize = pageSize
+        self.deviceCache = deviceCache
         counts = [.followers: subject.followerCount, .following: subject.followingCount]
+        // ⚠️ CACHE FIRST (#1776, the rule of #1756): each list's last first
+        // page is its first frame, with no skeleton; its first activation
+        // still asks, in place (`revalidates`).
+        if let deviceCache {
+            for direction in RelationshipDirection.allCases {
+                guard let stored = deviceCache.firstPage(of: subject.id, direction) else { continue }
+                states[direction]?.relations = stored.relations
+                states[direction]?.nextPageToken = stored.nextPageToken
+                states[direction]?.hasLoaded = true
+                revalidates.insert(direction)
+            }
+        }
         followSubscription = followEvents?.subscribeOnMain { [weak self] change in
             self?.followGraphDidChange(change)
         }
@@ -445,15 +474,25 @@ public final class ProfileRelationshipsViewModel {
 
     // MARK: - Loading
 
+    /// The lists stored on the device (#1776).
+    private let deviceCache: ProfileRelationshipsLocalCache?
+    /// Lists opened on their stored copy that have not asked yet: their first
+    /// activation revalidates in place, rows kept.
+    private var revalidates: Set<RelationshipDirection> = []
+
     private func loadIfNeeded(_ direction: RelationshipDirection) {
         guard access == .visible else { return }
-        guard let state = states[direction], !state.hasLoaded, !state.isLoading else { return }
+        guard let state = states[direction], !state.isLoading else { return }
+        if revalidates.remove(direction) != nil { return load(direction, reset: true) }
+        guard !state.hasLoaded else { return }
         load(direction, reset: true)
     }
 
     private func load(_ direction: RelationshipDirection, reset: Bool) {
         guard var state = states[direction], !state.isLoading else { return }
         let token = reset ? "" : state.nextPageToken
+        // The viewer the page is read for, captured BEFORE the fetch.
+        let writer = deviceCache?.viewer
         state.isLoading = true
         state.isAppending = !reset
         if reset { state.failure = nil }
@@ -471,6 +510,11 @@ public final class ProfileRelationshipsViewModel {
                 )
                 guard !Task.isCancelled else { return }
                 self.apply(page, to: direction, reset: reset)
+                if reset {
+                    self.deviceCache?.storeFirstPage(
+                        page, of: self.subject.id, direction, isSelf: self.subject.isSelf, as: writer
+                    )
+                }
             } catch is CancellationError {
                 // Superseded; leave the tab's state alone.
                 return

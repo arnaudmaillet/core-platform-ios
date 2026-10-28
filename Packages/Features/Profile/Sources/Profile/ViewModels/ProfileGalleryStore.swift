@@ -102,13 +102,19 @@ final class ProfileGalleryStore {
     struct Corpora: Equatable {
         var authored: Corpus?
         var tagged: Corpus?
+        /// The Liked tab's posts as last read (#1776); nil when it was not
+        /// read or held nothing.
+        var liked: [GalleryPost]? = nil
     }
 
     /// The loaded corpora, or nil when neither has loaded.
     var corpora: Corpora? {
+        var liked: [GalleryPost]?
+        if case .content(let posts) = reactions { liked = posts }
         let loaded = Corpora(
             authored: authored.map { Corpus(posts: $0, nextToken: authoredToken, hasLaterPages: authoredHasLaterPages) },
-            tagged: tagged.map { Corpus(posts: $0, nextToken: taggedToken, hasLaterPages: taggedHasLaterPages) }
+            tagged: tagged.map { Corpus(posts: $0, nextToken: taggedToken, hasLaterPages: taggedHasLaterPages) },
+            liked: liked
         )
         return loaded.authored == nil && loaded.tagged == nil ? nil : loaded
     }
@@ -124,6 +130,8 @@ final class ProfileGalleryStore {
         tagged = corpora.tagged?.posts
         taggedToken = corpora.tagged?.nextToken
         taggedHasLaterPages = corpora.tagged?.hasLaterPages ?? false
+        // The Liked tab opens with the grid (#1776), not popping in after it.
+        if let liked = corpora.liked, !liked.isEmpty { reactions = .content(liked) }
     }
 
     // MARK: - Mutations

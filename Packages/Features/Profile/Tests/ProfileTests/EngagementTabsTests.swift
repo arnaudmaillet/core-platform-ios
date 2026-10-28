@@ -129,7 +129,8 @@ struct EngagementTabsTests {
     }
 
     /// A revisit inside the cache's freshness window asks for neither the
-    /// header nor the grid — but Liked is kept nowhere, so it is read again.
+    /// header nor the grid — but Liked is read again: its stored copy
+    /// (#1776) opens the tab, the read keeps it true.
     @Test func aFreshRevisitStillReadsTheLists() async {
         let cache = ProfileCache()
         let gallery = CorporaGallery(liked: ["prof-x": [tile("l1")]])
@@ -149,7 +150,7 @@ struct EngagementTabsTests {
         second.viewDidLoad()
 
         #expect(await settle { snapshots.last?.reactions == .content([tile("l1")]) })
-        #expect(await gallery.likedAsks.count == 2)
+        #expect(await settle { await gallery.likedAsks.count == 2 }, "the revisit did not read Liked again")
         withExtendedLifetime(first) {}
     }
 
