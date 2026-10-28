@@ -1,35 +1,33 @@
 import QuartzCore
 import UIKit
 
-/// The app's branded loader (#1329), replacing the stock spinner: the app
-/// icon's four rounded pieces (the mark) that spin up and thin, over three
-/// turns, into a turning ring while loading (#1744).
+/// The app's branded loader (#1329, #1795), replacing the stock spinner: three
+/// pills side by side, each a dot at rest that grows into a taller pill and
+/// back, rippling left to right as a continuous wave — never stopping — each
+/// with a pale lead running just ahead of it.
 ///
 /// Its API mirrors `UIActivityIndicatorView` — `startAnimating()`,
 /// `stopAnimating()`, `isAnimating`, `hidesWhenStopped`, a size — so a call site
 /// migrates mechanically, plus `setProgress(_:)` for a pull to scrub it.
 ///
-/// - **Pulled** (`setProgress`): the frame follows the finger exactly
-///   (`AppLoaderTimeline.pull`); pulling back plays it in reverse.
-/// - **Loading** (`startAnimating`): from wherever the pull left it — the rest
-///   of the entry (`AppLoaderTimeline.entryRoute`), which a pull only ever
-///   starts, then the loop, turning on at the same speed, with no jump.
-/// - **Done** (`stopAnimating`): the mark fades where it is, still turning —
-///   no closing back into the mark (the owner, 2026-10-17), so a short
-///   load never plays more than it showed — the entry lasts ≈4.7 s, and many
-///   loads end during it.
+/// - **Pulled** (`setProgress`): the wave follows the finger exactly
+///   (`AppLoaderTimeline.pull`), at most one cycle; pulling back plays it in
+///   reverse. Progress 0 is three dots.
+/// - **Loading** (`startAnimating`): the same wave runs on from the time the
+///   pull reached, forever, with no jump.
+/// - **Done** (`stopAnimating`): the pills fade and shrink a little where
+///   they are (the owner, 2026-10-17: no closing back).
 ///
 /// ⚠️ **CORE ANIMATION, NOT LOTTIE.** DesignSystem is under every package and
 /// does not pull Lottie in, and CA animations run on the render server, so the
-/// loader keeps turning while the main thread is busy loading.
+/// loader keeps moving while the main thread is busy loading.
 ///
 /// ⚠️ **NO ANIMATION OFF-WINDOW (#580).** An endless animation recomposites
 /// the frame; the loop is removed when the view leaves the window and put back
-/// when it returns.
+/// when it returns, at the point of the wave it would have reached.
 ///
 /// Reduce Motion, the app's switch or Low Power Mode (`MotionPreference`): no
-/// morph and no turn — the static icon, fading in with the pull and pulsing
-/// slowly while loading.
+/// wave — three dots, fading in with the pull and pulsing slowly while loading.
 public final class AppLoaderView: UIView {
     public enum Size: Sendable {
         /// Paging footers, rows, buttons: `UIActivityIndicatorView.medium`'s 20pt.
@@ -57,7 +55,9 @@ public final class AppLoaderView: UIView {
 
     private let side: CGFloat
     private let mark = CALayer()
-    private let pieces: [CAShapeLayer]
+    /// The pills, left to right, each over its lead.
+    private let pills: [CALayer]
+    private let leads: [CALayer]
     private var progress: CGFloat = 0
     private var phase: Phase = .idle
     /// Bumped by every start and stop, so a completion from an older run
@@ -69,11 +69,8 @@ public final class AppLoaderView: UIView {
 
     private enum Phase: Equatable {
         case idle
-        /// The icon appearing and thinning into the ring, from `from` seconds
-        /// into the entry.
-        case entering(begin: CFTimeInterval, from: TimeInterval, duration: CFTimeInterval)
-        /// The ring turning, from `angle`.
-        case looping(angle: CGFloat)
+        /// The wave running; `origin` is the media time its `t = 0` stands at.
+        case looping(origin: CFTimeInterval)
         case exiting
     }
 
@@ -83,17 +80,25 @@ public final class AppLoaderView: UIView {
 
     public init(side: CGFloat) {
         self.side = side
-        pieces = Palette.loaderTones.map { tone in
-            let piece = CAShapeLayer()
-            piece.fillColor = tone.cgColor
-            return piece
-        }
+        pills = Palette.loaderTones.map { _ in CALayer() }
+        leads = Palette.loaderLeadTones.map { _ in CALayer() }
         super.init(frame: CGRect(x: 0, y: 0, width: side, height: side))
         isUserInteractionEnabled = false
         isAccessibilityElement = true
         accessibilityLabel = "Loading"
         layer.addSublayer(mark)
-        pieces.forEach(mark.addSublayer)
+        let width = AppLoaderGeometry.pillWidth(side: side)
+        for (lead, pill) in zip(leads, pills) {
+            for piece in [lead, pill] {
+                piece.cornerRadius = width / 2
+                piece.cornerCurve = .circular
+                mark.addSublayer(piece)
+            }
+        }
+        applyTones()
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _: UITraitCollection) in
+            self.applyTones()
+        }
         apply(AppLoaderTimeline.pull(0))
         updateVisibility()
     }
@@ -109,13 +114,23 @@ public final class AppLoaderView: UIView {
         CATransaction.setDisableActions(true)
         mark.bounds = CGRect(x: 0, y: 0, width: side, height: side)
         mark.position = CGPoint(x: bounds.midX, y: bounds.midY)
-        for piece in pieces { piece.frame = mark.bounds }
+        CATransaction.commit()
+    }
+
+    /// The pills' tones; the leads' resolve against the page, per appearance.
+    private func applyTones() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (pill, tone) in zip(pills, Palette.loaderTones) { pill.backgroundColor = tone.cgColor }
+        for (lead, tone) in zip(leads, Palette.loaderLeadTones) {
+            lead.backgroundColor = tone.resolvedColor(with: traitCollection).cgColor
+        }
         CATransaction.commit()
     }
 
     // MARK: - The pull
 
-    /// Scrubs the entry: `progress` is overscroll ÷ threshold, clamped to 0…1.
+    /// Scrubs the wave: `progress` is overscroll ÷ threshold, clamped to 0…1.
     /// Ignored while loading or leaving — the finger no longer drives it then.
     public func setProgress(_ progress: CGFloat) {
         self.progress = min(1, max(0, progress))
@@ -136,22 +151,17 @@ public final class AppLoaderView: UIView {
         generation += 1
         removeAllAnimations()
         updateVisibility()
+        // The wave runs on from the time the pull reached: the same function,
+        // so the release never jumps.
+        let origin = CACurrentMediaTime() - AppLoaderTimeline.pullTime(progress)
+        phase = .looping(origin: origin)
         if reducesMotion() {
             applyStill(opacity: 1)
-            phase = .looping(angle: 0)
             if window != nil { addPulse() }
             return
         }
-        guard window != nil else {
-            // Off-window, the loop waits for the window (`didMoveToWindow`),
-            // on the ring the entry lands on.
-            apply(AppLoaderTimeline.entry(at: AppLoaderTimeline.entryDuration))
-            phase = .looping(angle: AppLoaderTimeline.landingRotation)
-            return
-        }
-        // Even a full pull has only started the entry: the rest plays from
-        // the frame it reached.
-        enter(from: AppLoaderTimeline.pullTime(progress))
+        // Off-window, the loop waits for the window (`didMoveToWindow`).
+        if window != nil { beginLoop(origin: origin) }
     }
 
     /// Stops at once, with no fade of its own — for a host that has already
@@ -175,13 +185,9 @@ public final class AppLoaderView: UIView {
         generation += 1
         let run = generation
         guard window != nil else { return finishExit() }
-        // ⚠️ THE RING FADES WHERE IT IS, STILL TURNING (the owner, 2026-10-17,
-        // on device). It used to close back into the square first — ≈0.9 s
-        // that outlived the load: a refresh control had already folded away
-        // and the square reappeared at the top of the list, and a load that
-        // ended during the entry showed the whole ring before fading. Nothing
-        // is removed here: whatever runs — the loop, or the entry still on its
-        // way — carries on under the fade.
+        // ⚠️ THE PILLS FADE WHERE THEY ARE, STILL MOVING (the owner,
+        // 2026-10-17, on device): nothing is removed here — the wave carries
+        // on under the fade.
         phase = .exiting
         fadeOut(run: run)
     }
@@ -191,109 +197,54 @@ public final class AppLoaderView: UIView {
     public override func didMoveToWindow() {
         super.didMoveToWindow()
         if window == nil {
-            // #580: nothing turns where nobody can see it.
+            // #580: nothing moves where nobody can see it.
             if phase == .exiting { return finishExit() }
-            if case .entering = phase { phase = .looping(angle: AppLoaderTimeline.landingRotation) }
             removeAllAnimations()
             return
         }
-        guard isAnimating, case let .looping(angle) = phase else { return }
+        guard isAnimating, case let .looping(origin) = phase else { return }
         if reducesMotion() {
             addPulse()
         } else {
-            apply(AppLoaderTimeline.Frame(
-                outlines: (0..<AppLoaderGeometry.pieceCount).map(AppLoaderGeometry.restingRing),
-                opacities: [1, 1, 1, 1], rotation: angle
-            ))
-            beginLoop(at: angle)
+            beginLoop(origin: origin)
         }
     }
 
     // MARK: - Animations
 
-    private static let loopKeyframes = AppLoaderTimeline.loopKeyframes()
-    /// The whole entry, without a pull — most loaders play it.
-    private static let fullEntry = AppLoaderTimeline.entryRoute(from: 0)
-    /// Its paths per side, `[piece][keyframe]`, shared by every loader of that
-    /// side: ≈140 keyframes × 4 pieces would be a megabyte per loader.
-    private static var fullEntryShapes: [CGFloat: [[CGPath]]] = [:]
+    /// The keyframes of one cycle, shared by every loader.
+    private static let cycle = AppLoaderTimeline.cycleSamples()
 
-    /// The rest of the entry, from `start` seconds in to the ring, at the
-    /// entry's own pace, then the loop.
-    private func enter(from start: TimeInterval) {
-        let duration = AppLoaderTimeline.entryDuration - start
-        let route: [AppLoaderTimeline.Frame]
-        let routeShapes: [[CGPath]]
-        if start == 0 {
-            route = Self.fullEntry
-            if let shared = Self.fullEntryShapes[side] {
-                routeShapes = shared
-            } else {
-                routeShapes = shapes(of: route)
-                Self.fullEntryShapes[side] = routeShapes
-            }
-        } else {
-            route = AppLoaderTimeline.entryRoute(from: start)
-            routeShapes = shapes(of: route)
-        }
-        let run = generation
-        phase = .entering(begin: CACurrentMediaTime(), from: start, duration: duration)
-        CATransaction.begin()
-        CATransaction.setCompletionBlock { [weak self] in
-            guard let self, generation == run, isAnimating, window != nil else { return }
-            beginLoop(at: AppLoaderTimeline.landingRotation)
-        }
-        play(route, shapes: routeShapes, duration: duration, timing: .linear)
-        CATransaction.commit()
-    }
-
-    /// The ring turning and its arcs trading length, forever, from `angle`.
-    private func beginLoop(at angle: CGFloat) {
-        phase = .looping(angle: angle)
-        for (index, piece) in pieces.enumerated() {
-            let shapes = CAKeyframeAnimation(keyPath: "path")
-            shapes.values = Self.loopKeyframes[index].map(path)
-            shapes.duration = AppLoaderTimeline.loopDuration
-            shapes.repeatCount = .infinity
-            shapes.calculationMode = .linear
-            piece.add(shapes, forKey: Self.loopKey)
-        }
-        let spin = CABasicAnimation(keyPath: "transform.rotation.z")
-        spin.fromValue = angle
-        spin.toValue = angle + 2 * .pi * CGFloat(AppLoaderTimeline.turnsPerLoop)
-        spin.duration = AppLoaderTimeline.loopDuration
-        spin.repeatCount = .infinity
-        mark.add(spin, forKey: Self.loopKey)
-    }
-
-    /// Keyframes through `route` — its outlines already made `shapes`,
-    /// `[piece][keyframe]` — over `duration`; the model left on its last.
-    private func play(
-        _ route: [AppLoaderTimeline.Frame], shapes routeShapes: [[CGPath]],
-        duration: CFTimeInterval, timing: CAMediaTimingFunctionName
-    ) {
-        guard let last = route.last else { return }
-        for (index, piece) in pieces.enumerated() {
-            let shapes = CAKeyframeAnimation(keyPath: "path")
-            shapes.values = routeShapes[index]
-            let fades = CAKeyframeAnimation(keyPath: "opacity")
-            fades.values = route.map { Float($0.opacities[index]) }
-            for animation in [shapes, fades] {
-                animation.duration = duration
-                animation.timingFunction = CAMediaTimingFunction(name: timing)
-                piece.add(animation, forKey: animation.keyPath)
+    /// The wave, forever: each pill and lead runs the same cycle, at the
+    /// point of it `t` stands at now — `t` counted from `origin`. One whose
+    /// own time has not started yet holds its dot until it does.
+    private func beginLoop(origin: CFTimeInterval) {
+        let now = CACurrentMediaTime()
+        let time = now - origin
+        for index in 0..<AppLoaderGeometry.pillCount {
+            for (piece, lead) in [(pills[index], false), (leads[index], true)] {
+                let own = AppLoaderTimeline.cycleTime(pill: index, at: time, lead: lead)
+                let grow = CAKeyframeAnimation(keyPath: "bounds.size.height")
+                grow.values = Self.cycle.map { AppLoaderGeometry.pillHeight($0, side: side) }
+                grow.duration = AppLoaderTimeline.period
+                grow.repeatCount = .infinity
+                grow.calculationMode = .linear
+                if own < 0 {
+                    // Still a dot: starts its cycle when its time comes.
+                    grow.beginTime = layer.convertTime(now - own, from: nil)
+                    grow.fillMode = .backwards
+                } else {
+                    grow.timeOffset = own
+                }
+                piece.add(grow, forKey: Self.loopKey)
             }
         }
-        let turn = CAKeyframeAnimation(keyPath: "transform.rotation.z")
-        turn.values = route.map(\.rotation)
-        turn.duration = duration
-        turn.timingFunction = CAMediaTimingFunction(name: timing)
-        mark.add(turn, forKey: turn.keyPath)
-        apply(last)
+        // The model as the wave stands now, under the animation.
+        apply(AppLoaderTimeline.frame(at: time))
     }
 
-    /// The mark fades and shrinks a little — over whatever is still running —
-    /// then rests hidden.
+    /// The pills fade and shrink a little — over the wave still running —
+    /// then rest hidden.
     private func fadeOut(run: Int) {
         CATransaction.begin()
         CATransaction.setCompletionBlock { [weak self] in
@@ -326,7 +277,7 @@ public final class AppLoaderView: UIView {
         updateVisibility()
     }
 
-    /// Reduced motion while loading: the icon breathing slowly.
+    /// Reduced motion while loading: the dots breathing slowly.
     private func addPulse() {
         let pulse = CABasicAnimation(keyPath: "opacity")
         pulse.fromValue = 1
@@ -339,7 +290,7 @@ public final class AppLoaderView: UIView {
 
     private func removeAllAnimations() {
         mark.removeAllAnimations()
-        pieces.forEach { $0.removeAllAnimations() }
+        (pills + leads).forEach { $0.removeAllAnimations() }
     }
 
     private static let loopKey = "appLoader.loop"
@@ -350,33 +301,21 @@ public final class AppLoaderView: UIView {
     private func apply(_ frame: AppLoaderTimeline.Frame) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for (index, piece) in pieces.enumerated() {
-            piece.path = path(frame.outlines[index])
-            piece.opacity = Float(frame.opacities[index])
+        for index in 0..<AppLoaderGeometry.pillCount {
+            pills[index].frame = AppLoaderGeometry.pillFrame(index, height: frame.heights[index], side: side)
+            leads[index].frame = AppLoaderGeometry.pillFrame(index, height: frame.leadHeights[index], side: side)
         }
-        mark.transform = CATransform3DMakeRotation(frame.rotation, 0, 0, 1)
+        mark.opacity = 1
         CATransaction.commit()
     }
 
-    /// Reduced motion: the icon, as on the app icon, at `opacity`.
+    /// Reduced motion: three dots at `opacity`.
     private func applyStill(opacity: CGFloat) {
-        apply(AppLoaderTimeline.Frame(
-            outlines: (0..<AppLoaderGeometry.pieceCount).map(AppLoaderGeometry.icon),
-            opacities: Array(repeating: opacity, count: AppLoaderGeometry.pieceCount),
-            rotation: 0
-        ))
-    }
-
-    /// `route`'s outlines as paths, `[piece][keyframe]`.
-    private func shapes(of route: [AppLoaderTimeline.Frame]) -> [[CGPath]] {
-        (0..<AppLoaderGeometry.pieceCount).map { index in route.map { path($0.outlines[index]) } }
-    }
-
-    private func path(_ points: [CGPoint]) -> CGPath {
-        let path = CGMutablePath()
-        path.addLines(between: points.map { CGPoint(x: $0.x * side, y: $0.y * side) })
-        path.closeSubpath()
-        return path
+        apply(AppLoaderTimeline.pull(0))
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        mark.opacity = Float(opacity)
+        CATransaction.commit()
     }
 
     private func updateVisibility() {
@@ -386,31 +325,20 @@ public final class AppLoaderView: UIView {
     #if DEBUG
     /// What a test reads.
     var debugIsLooping: Bool { if case .looping = phase { return true } else { return false } }
-    var debugIsEntering: Bool { if case .entering = phase { return true } else { return false } }
     var debugIsExiting: Bool { phase == .exiting }
     var debugAnimationCount: Int {
-        (mark.animationKeys()?.count ?? 0) + pieces.reduce(0) { $0 + ($1.animationKeys()?.count ?? 0) }
+        (mark.animationKeys()?.count ?? 0) + (pills + leads).reduce(0) { $0 + ($1.animationKeys()?.count ?? 0) }
     }
+    /// The model's heights, 0 (a dot) … 1 (the peak).
     var debugModelFrame: AppLoaderTimeline.Frame {
-        AppLoaderTimeline.Frame(
-            outlines: pieces.map { ($0.path?.loaderPoints ?? []).map { CGPoint(x: $0.x / side, y: $0.y / side) } },
-            opacities: pieces.map { CGFloat($0.opacity) },
-            rotation: (mark.value(forKeyPath: "transform.rotation.z") as? CGFloat) ?? 0
-        )
-    }
-    #endif
-}
-
-private extension CGPath {
-    /// The polygon's points, in order — every loader path is one.
-    var loaderPoints: [CGPoint] {
-        var points: [CGPoint] = []
-        applyWithBlock { element in
-            switch element.pointee.type {
-            case .moveToPoint, .addLineToPoint: points.append(element.pointee.points[0])
-            default: break
-            }
+        let width = AppLoaderGeometry.pillWidth(side: side)
+        func fraction(_ piece: CALayer) -> CGFloat {
+            (piece.bounds.height / width - 1) / (AppLoaderGeometry.peakRatio - 1)
         }
-        return points
+        return AppLoaderTimeline.Frame(heights: pills.map(fraction), leadHeights: leads.map(fraction))
     }
+    var debugOpacity: Float { mark.opacity }
+    /// The tones the pills and their leads wear now.
+    var debugTones: (pills: [CGColor?], leads: [CGColor?]) { (pills.map(\.backgroundColor), leads.map(\.backgroundColor)) }
+    #endif
 }
