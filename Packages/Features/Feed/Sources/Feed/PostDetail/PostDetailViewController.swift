@@ -326,6 +326,8 @@ final class PostDetailViewController: UIViewController {
         remeasureStreamOnWidthChange()
         refitEmptyPageOnHeightChange()
         syncDayUnderHeader()
+        // Rows realised as the engaged stream grows into its room (#1799).
+        syncBottomAnchor()
     }
 
     /// This view's height as last laid out — see `refitEmptyPageOnHeightChange`.
@@ -1086,6 +1088,11 @@ final class PostDetailViewController: UIViewController {
             top: max(0, top),
             bottom: max(0, bottomInset) + engagedFooterClearance
         )
+        // On top of the engaged top, never instead of it (#1799): the slack
+        // is measured against the settled room, and the stream lands at
+        // `-(top + slack)`.
+        bottomAnchorSlack = 0
+        syncBottomAnchor()
         updateComposerBackdropVisibility()
         // Z-ORDER, load-bearing: the scroll view is added AFTER the compose
         // bar at build time (harmless while it ended at the bar's top), so
@@ -1115,6 +1122,71 @@ final class PostDetailViewController: UIViewController {
         )
         composeBottomEngaged = [rest]
         rest.isActive = true
+    }
+
+    /// Whether a stream shorter than its room starts from the bottom (#1799,
+    /// the `-stream-bottom-anchor` experiment). Settable for tests, before
+    /// the stream is engaged.
+    var anchorsShortStream = StreamBottomAnchor.isEnabled
+
+    /// The room above a short stream, worn in the top inset on top of the
+    /// engaged top (`syncBottomAnchor`).
+    private(set) var bottomAnchorSlack: CGFloat = 0
+
+    /// A short stream STARTS FROM THE BOTTOM (#1799, behind
+    /// `-stream-bottom-anchor`): the caption and its comments are one block,
+    /// the post its first message, resting just above the composer — the
+    /// room above them (`StreamBottomAnchor`) worn in the top inset, ON TOP
+    /// of the engaged top. No order changes: Recent, Trending, replies under
+    /// their parent and downward paging are as before; expanding a thread's
+    /// replies in a short stream grows the block upward.
+    ///
+    /// Measured against the SETTLED room (`availableStreamHeight`): the stream
+    /// is still growing into the engaged geometry while the transition runs.
+    /// A stream as tall as its room wears no slack and is exactly as before.
+    ///
+    /// The stream rests at its top, `-(top + slack)`: a stream resting there
+    /// keeps resting there as the slack changes (and so the pull-down
+    /// dismissal, armed at `-contentInset.top`, stays armed); one the reader
+    /// scrolled is left where it is.
+    private func syncBottomAnchor(animated: Bool = false) {
+        guard anchorsShortStream, let engaged = engagedStreamInsets else { return }
+        let room = availableStreamHeight - keyboardLift
+        guard room > 0 else { return }
+        collectionView.layoutIfNeeded()
+        let slack = StreamBottomAnchor.slack(viewport: room, contentHeight: collectionView.contentSize.height)
+        guard abs(slack - bottomAnchorSlack) > 0.5 || abs(collectionView.contentInset.top - (engaged.top + slack)) > 0.5
+        else { return }
+        let wasResting = collectionView.contentOffset.y <= -collectionView.contentInset.top + 0.5
+        bottomAnchorSlack = slack
+        let apply = {
+            self.collectionView.contentInset.top = engaged.top + slack
+            self.collectionView.verticalScrollIndicatorInsets.top = engaged.top + slack
+            if wasResting { self.collectionView.contentOffset.y = -(engaged.top + slack) }
+        }
+        if animated, view.window != nil {
+            UIView.animate(
+                withDuration: 0.3, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction],
+                animations: apply
+            )
+        } else {
+            apply()
+        }
+    }
+
+    /// How far the keyboard lifts the composer's input row above where it
+    /// rests: the room a short stream gives up, so it rises with the row
+    /// rather than going behind the keys (#1799). The keyboard never touches
+    /// the stream's insets (`currentEmptyPageFit`).
+    private var keyboardLift: CGFloat {
+        guard composerTracksKeyboard, let covered = keyboardHeightFromBottom,
+              let engaged = engagedStreamInsets else { return 0 }
+        let category = traitCollection.preferredContentSizeCategory
+        let restingBottomInset = engaged.bottom - engagedFooterClearance
+        let restingTop = view.bounds.height - restingBottomInset - composerRestingGap
+            - CommentsInputBar.restingHeight(for: category, postActions: composeBar.showsPostActions)
+        let risenTop = view.bounds.height - covered - Spacing.sm - CommentsInputBar.restingInputRowHeight(for: category)
+        return max(0, restingTop - risenTop)
     }
 
     /// Whether the composer's input row is allowed to be lifted by the
@@ -2105,6 +2177,9 @@ final class PostDetailViewController: UIViewController {
         hasAppliedStream = true
         nearEndItems = Self.nearEndItems(of: snapshot.itemIdentifiers)
         streamDataSource.apply(snapshot, animatingDifferences: animated) { completion?() }
+        // The slack follows the content (#1799): a comment, a page of them,
+        // a sort or a thread's replies only change its height.
+        syncBottomAnchor(animated: animated)
     }
 
     /// The stream's last few rows: one of them coming on screen asks for the
@@ -2232,6 +2307,7 @@ final class PostDetailViewController: UIViewController {
         guard !snapshot.itemIdentifiers.isEmpty else { return }
         snapshot.reconfigureItems(snapshot.itemIdentifiers)
         streamDataSource.apply(snapshot, animatingDifferences: false)
+        syncBottomAnchor()
     }
 
     // MARK: - The empty page's fit
@@ -2298,6 +2374,12 @@ final class PostDetailViewController: UIViewController {
         // reported on an iPhone SE.
         if let space, let roomBased = available {
             available = min(roomBased, floor(space.bottom - Spacing.lg - space.rowTop))
+        }
+        // Anchored to the bottom (#1799), the page is its block alone: the
+        // caption and the invitation rest together just above the composer,
+        // the slack above them — not a page filling the room.
+        if anchorsShortStream, engagedStreamInsets != nil {
+            return EmptyPageFit(copy: emptyPageCopy, height: block, blockOffset: 0)
         }
         let height = SnapCommentsLayout.emptyPageHeight(availableHeight: available, blockHeight: block)
         return EmptyPageFit(
@@ -2414,12 +2496,15 @@ final class PostDetailViewController: UIViewController {
         guard keyboardHeightFromBottom != covered else { return }
         keyboardHeightFromBottom = covered
         refitEmptyPage()
+        // A short stream rises with the composer's input row (#1799).
+        syncBottomAnchor(animated: true)
     }
 
     private func keyboardWentDown() {
         guard keyboardHeightFromBottom != nil else { return }
         keyboardHeightFromBottom = nil
         refitEmptyPage()
+        syncBottomAnchor(animated: true)
     }
 
     /// The empty stream's section insets, mirroring the layout
