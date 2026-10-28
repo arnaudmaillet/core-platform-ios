@@ -135,13 +135,13 @@ struct SnapComposerSoundSlotTests {
         defer { try? FileManager.default.removeItem(at: url) }
 
         let file = SnapSoundFace(coverURL: url, isAvailable: true, isMuted: false)
-        #expect(file.cachedCover != nil)
+        #expect(file.localCover != nil)
 
         let remote = SnapSoundFace(
             coverURL: URL(string: "https://example.test/\(UUID().uuidString).jpg"),
             isAvailable: true, isMuted: false
         )
-        #expect(remote.cachedCover == nil, "a remote cover drew before its fetch")
+        #expect(remote.localCover == nil, "a remote cover drew before its fetch")
     }
 }
 

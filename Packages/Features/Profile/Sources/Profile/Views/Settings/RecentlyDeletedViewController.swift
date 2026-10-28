@@ -79,18 +79,18 @@ final class RecentlyDeletedViewController: UIViewController {
                 content.textProperties.numberOfLines = 2
                 content.secondaryText = RecentlyDeletedViewModel.remaining(deleted)
                 content.secondaryTextProperties.color = .secondaryLabel
-                content.image = UIImage(systemName: deleted.post.kind == .text ? "text.alignleft" : "photo")
-                content.imageProperties.tintColor = .secondaryLabel
+                let glyph = UIImage(systemName: deleted.post.kind == .text ? "text.alignleft" : "photo")
+                // The thumbnail's place on the media ground while it loads
+                // (#1772); the glyph for a post with none, or one that will
+                // not come.
+                let awaitsThumbnail = deleted.post.thumbnailURL != nil && imagePipeline != nil
+                content.image = awaitsThumbnail ? Surface.groundImage(size: CGSize(width: 48, height: 48)) : glyph
+                content.imageProperties.tintColor = awaitsThumbnail ? Surface.mediaGround : .secondaryLabel
                 content.imageProperties.maximumSize = CGSize(width: 48, height: 48)
                 content.imageProperties.reservedLayoutSize = CGSize(width: 48, height: 48)
                 content.imageProperties.cornerRadius = 8
                 if let url = deleted.post.thumbnailURL, let pipeline = imagePipeline {
-                    Task { [weak cell] in
-                        guard let image = try? await pipeline.image(for: url, size: .px256),
-                              var current = cell?.contentConfiguration as? UIListContentConfiguration else { return }
-                        current.image = image
-                        cell?.contentConfiguration = current
-                    }
+                    Self.loadThumbnail(url, pipeline: pipeline, into: cell, title: content.text, glyph: glyph)
                 }
             case .loading:
                 cell.contentConfiguration = SkeletonRowConfiguration(sample: "A row of this list")
@@ -214,6 +214,25 @@ extension RecentlyDeletedViewController: UICollectionViewDelegate {
             loadingGate.retry()
             Task { await viewModel.load() }
         default: break
+        }
+    }
+}
+
+extension RecentlyDeletedViewController {
+    /// A post's thumbnail over its ground (#1772): it dissolves in when it
+    /// lands; a failed one gives the glyph back.
+    static func loadThumbnail(
+        _ url: URL, pipeline: ImagePipeline, into cell: UICollectionViewListCell, title: String?, glyph: UIImage?
+    ) {
+        Task { [weak cell] in
+            let image = try? await pipeline.image(for: url, size: .px256)
+            guard let cell, var current = cell.contentConfiguration as? UIListContentConfiguration,
+                  current.text == title else { return }
+            current.image = image ?? glyph
+            current.imageProperties.tintColor = image == nil ? .secondaryLabel : nil
+            UIView.transition(with: cell, duration: 0.2, options: [.transitionCrossDissolve, .allowUserInteraction]) {
+                cell.contentConfiguration = current
+            }
         }
     }
 }

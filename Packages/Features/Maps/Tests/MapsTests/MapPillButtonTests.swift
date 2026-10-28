@@ -60,6 +60,18 @@ struct MapPillButtonTests {
         #expect(width < MapPillButton.widthCeiling)
     }
 
+    /// A face on its way holds its place on the media ground (#1772): the
+    /// pill is already the face's width, so the face landing moves nothing.
+    @Test func aFaceOnItsWayKeepsTheFacesWidth() {
+        let face = UIGraphicsImageRenderer(size: CGSize(width: 40, height: 40)).image { _ in }
+        let waiting = MapPillButton(content: Self.content(title: "Ava"), height: 36)
+        waiting.setAwaitingAvatar(true)
+        let landed = MapPillButton(content: Self.content(title: "Ava"), height: 36)
+        landed.setAvatar(face)
+        #expect(!waiting.showsAvatar)
+        #expect(abs(Self.width(of: waiting) - Self.width(of: landed)) < 0.5)
+    }
+
     @Test func circularPillIsUnaffectedByTheCap() {
         // Title-less pills stay perfect circles: width == height, far below
         // the cap, so the two constraints can never fight.

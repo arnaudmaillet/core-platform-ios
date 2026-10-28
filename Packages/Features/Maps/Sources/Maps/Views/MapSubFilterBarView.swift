@@ -349,7 +349,7 @@ final class MapSubFilterBarView: UIView {
                 // Native pill interaction: tap → selection; long-press → the
                 // entity-aware menu, built fresh at presentation time.
                 cell.onTap = { [weak self] in self?.didTap(subFilter) }
-                cell.setAvatar(self.avatar(for: self.optionsBySubFilter[subFilter]?.favorite))
+                self.applyFace(to: cell, favorite: self.optionsBySubFilter[subFilter]?.favorite)
                 cell.menuProvider = { [weak self] in self?.pillMenu(for: subFilter) }
             }
         }
@@ -632,6 +632,15 @@ final class MapSubFilterBarView: UIView {
         return nil
     }
 
+    /// A pill's face: drawn when the pipeline holds it, else the media
+    /// ground's disc while it loads (#1772) — the glyph only for a person
+    /// with no picture at all.
+    private func applyFace(to cell: MapPillCell, favorite: MapFavorite?) {
+        let face = avatar(for: favorite)
+        cell.setAwaitingAvatar(face == nil && favorite?.avatarURL != nil)
+        cell.setAvatar(face)
+    }
+
     private func loadAvatars(for options: [MapSubFilterOption]) {
         guard let imagePipeline else { return }
         for option in options {
@@ -649,7 +658,17 @@ final class MapSubFilterBarView: UIView {
             let image = try? await imagePipeline.image(for: url, size: Self.avatarBucket)
             guard let self, !Task.isCancelled else { return }
             self.avatarLoads[url] = nil
-            guard let image else { return }
+            guard let image else {
+                // A face that will not come: the glyph again, not a disc
+                // waiting for nothing.
+                for case let cell as MapPillCell in self.collectionView.visibleCells {
+                    guard let indexPath = self.collectionView.indexPath(for: cell),
+                          case .subFilter(let subFilter)? = self.dataSource.itemIdentifier(for: indexPath),
+                          self.optionsBySubFilter[subFilter]?.favorite?.avatarURL == url else { continue }
+                    cell.setAwaitingAvatar(false)
+                }
+                return
+            }
             self.headerImageCache[url] = nil
             let showing = self.optionsBySubFilter.values
                 .filter { $0.favorite?.avatarURL == url }
@@ -863,7 +882,7 @@ final class MapSubFilterBarView: UIView {
                 cell.configure(content: content, height: Self.pillHeight, selected: selected)
                 if case .subFilter(let subFilter) = item,
                    let favorite = optionsBySubFilter[subFilter]?.favorite {
-                    cell.setAvatar(avatar(for: favorite))
+                    applyFace(to: cell, favorite: favorite)
                 }
             }
         }

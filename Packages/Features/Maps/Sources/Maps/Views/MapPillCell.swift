@@ -95,6 +95,12 @@ final class MapPillCell: UICollectionViewCell {
         pill?.setAvatar(image)
     }
 
+    /// A face is on its way (#1772): the pill holds its place on the media
+    /// ground; false gives the glyph back.
+    func setAwaitingAvatar(_ awaiting: Bool) {
+        pill?.setAwaitingAvatar(awaiting)
+    }
+
     /// Whether the pill wears a face rather than its glyph.
     var showsAvatar: Bool { pill?.showsAvatar ?? false }
 

@@ -38,6 +38,7 @@ final class MediaPickerGridCell: UICollectionViewCell {
     private(set) var representedID: String?
 
     private let thumbnail = UIImageView()
+    private lazy var thumbnailSlot = LocalThumbnailSlot(view: thumbnail)
     private let badge = SelectionBadgeView()
     private let duration = UILabel()
 
@@ -46,7 +47,8 @@ final class MediaPickerGridCell: UICollectionViewCell {
 
         thumbnail.contentMode = .scaleAspectFill
         thumbnail.clipsToBounds = true
-        thumbnail.backgroundColor = .secondarySystemBackground
+        // The media ground while it decodes (#1772): `LocalThumbnailSlot`.
+        _ = thumbnailSlot
         thumbnail.layer.cornerRadius = Metrics.corner
         thumbnail.layer.cornerCurve = .continuous
         thumbnail.pin(to: contentView)
@@ -83,7 +85,7 @@ final class MediaPickerGridCell: UICollectionViewCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         representedID = nil
-        thumbnail.image = nil
+        thumbnailSlot.reset()
         thumbnail.transform = .identity
         thumbnail.layer.borderWidth = 0
         contentView.alpha = 1
@@ -94,6 +96,7 @@ final class MediaPickerGridCell: UICollectionViewCell {
     /// tile says beforehand that it is not on offer.
     func configure(item: MediaLibraryItem, order: Int?, isSelectable: Bool, animated: Bool = false) {
         representedID = item.id
+        thumbnailSlot.begin(item.id)
 
         if case .video(let seconds) = item.kind {
             duration.text = Self.durationText(seconds)
@@ -127,8 +130,7 @@ final class MediaPickerGridCell: UICollectionViewCell {
     /// Hands over an image that was fetched for `id`, and ignores one whose tile
     /// has moved on.
     func showThumbnail(_ image: UIImage?, for id: String) {
-        guard representedID == id else { return }
-        thumbnail.image = image
+        thumbnailSlot.show(image, for: id)
     }
 
     /// "0:07", "1:04", "12:30" — a stamp, not a sentence, so it is built here

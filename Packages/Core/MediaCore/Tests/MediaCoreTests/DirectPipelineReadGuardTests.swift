@@ -33,14 +33,15 @@ struct DirectPipelineReadGuardTests {
         "MapsViewController.swift": "a returning flight's cover",
         "ProfileFeatureBuilder.swift": "an account switcher's face, handed to a menu",
         "ProfileSwitcherMenuFactory.swift": "a menu row's image (UIMenu draws no view of ours)",
-        // Pictures drawn in a list configuration or a bar pill's blur, not in
-        // a view a slot can hold — follow-up of #1772.
-        "AuthorizedAppsViewController.swift": "an app icon in a UIListContentConfiguration",
-        "RecentlyDeletedViewController.swift": "a post thumbnail in a UIListContentConfiguration",
-        "SnapMediaAttributionView.swift": "the sound pill's cover, drawn inside its blur transition",
-        "SnapSoundBubble.swift": "the sound bubble's cover, read for the pill's still",
-        "MapSubFilterBarView.swift": "a sub-filter's face inside a button configuration",
-        "MapSubFilterSheetViewController.swift": "a sub-filter's face inside a button configuration",
+        // Pictures drawn as an IMAGE (a list configuration, a button
+        // configuration), where no slot can stand: they wait on the media
+        // ground's patch and dissolve in (#1772).
+        "AuthorizedAppsViewController.swift": "an app icon drawn as a list row's image: it waits on the media ground (Surface.groundImage)",
+        "RecentlyDeletedViewController.swift": "a thumbnail drawn as a list row's image: it waits on the media ground (Surface.groundImage)",
+        "SnapMediaAttributionView.swift": "the next page's cover warm-up and a FILE cover's memory lookup (#680); remote covers draw through CoverSlot",
+        "SnapSoundBubble.swift": "a FILE cover's memory lookup (#680); remote covers draw through CoverSlot",
+        "MapSubFilterBarView.swift": "a face drawn as a pill button's image: it waits on the media ground (Surface.groundDisc)",
+        "MapSubFilterSheetViewController.swift": "a face drawn as a list row's image: it waits on the media ground (Surface.groundDisc)",
     ]
 
     /// `pipeline.image(for:`, `pipeline?.cachedImage(for:`, `.cachedCover(for:`.

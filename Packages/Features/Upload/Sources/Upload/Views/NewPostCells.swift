@@ -193,7 +193,9 @@ final class NewPostMediaCell: UICollectionViewListCell {
             // its ground on two sides, and that ground IS the letterbox — it
             // should read as the editor's canvas does, not as a placeholder
             // still waiting for an image.
-            picture.backgroundColor = .black
+            // Its arrival is the local slot's (#1772), on this black ground.
+            let slot = LocalThumbnailSlot(view: picture, ground: .black)
+            slot.begin(item.id)
             picture.layer.cornerRadius = Metrics.corner
             picture.layer.cornerCurve = .continuous
             picture.translatesAutoresizingMaskIntoConstraints = false
@@ -253,7 +255,7 @@ final class NewPostMediaCell: UICollectionViewListCell {
             let id = item.id
             tiles[id] = picture
             let chosen = edits[id] ?? .untouched
-            Task { [weak picture] in
+            Task { [slot] in
                 let image = await thumbnail(id, size)
                 // Drawn off the main actor (charter P13): a page with a cut
                 // or a look is a CoreImage render, and this ran it on the
@@ -263,7 +265,7 @@ final class NewPostMediaCell: UICollectionViewListCell {
                 } else {
                     image
                 }
-                picture?.image = dressed
+                slot.show(dressed, for: id)
             }
         }
         // ⚠️ **HELD HERE, AT BUILD, AND NOT WHEN THE RIPPLE STARTS.** The build

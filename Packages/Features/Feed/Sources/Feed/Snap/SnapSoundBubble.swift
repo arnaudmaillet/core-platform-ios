@@ -29,8 +29,9 @@ struct SnapSoundFace: Equatable {
         lhs.coverURL == rhs.coverURL && lhs.isAvailable == rhs.isAvailable && lhs.isMuted == rhs.isMuted
     }
 
-    /// The cover as it can be drawn on THIS turn: the note, a picture already
-    /// decoded in the pipeline's memory, or a FILE read here.
+    /// The cover drawn without a fetch: the struck note, the note, or a FILE
+    /// read here. Nil for a remote cover — the host's `CoverSlot` loads it
+    /// (#1772), its bone and its arrival the media's.
     ///
     /// ⚠️ A FILE IS READ, NEVER FETCHED (#680). Mock posters and local covers
     /// are file URLs, and the image pipeline paints a flat colour for any URL
@@ -38,13 +39,29 @@ struct SnapSoundFace: Equatable {
     /// bubble wore a coloured disc instead of the post's picture, and the
     /// composer's slot wore nothing, since a file was never cached. The
     /// attribution has always read files directly (`SnapMediaAttributionView`).
-    @MainActor var cachedCover: UIImage? {
+    @MainActor var localCover: UIImage? {
         guard isAvailable else { return Self.noSoundImage }
         guard let coverURL else { return SnapMediaAttributionView.noteImage }
-        if let hit = pipeline?.cachedImage(for: coverURL, size: SnapMediaAttributionView.coverBucket) { return hit }
-        guard coverURL.isFileURL, let image = UIImage(contentsOfFile: coverURL.path) else { return nil }
+        guard coverURL.isFileURL else { return nil }
+        // Read once, then kept in the pipeline's memory: the next face for the
+        // same file does not touch the disk again.
+        if let kept = pipeline?.cachedImage(for: coverURL, size: SnapMediaAttributionView.coverBucket) { return kept }
+        guard let image = UIImage(contentsOfFile: coverURL.path) else { return nil }
         pipeline?.store(image, for: coverURL)
         return image
+    }
+
+    /// Draws this face's cover through `slot` (#1772): a local one handed in,
+    /// a remote one loaded on the media's ladder.
+    @MainActor func draw(into slot: CoverSlot) {
+        if let local = localCover {
+            slot.reset()
+            slot.apply(local)
+        } else if let coverURL {
+            slot.load(coverURL, pipeline: pipeline, item: coverURL)
+        } else {
+            slot.reset()
+        }
     }
 
     /// A post with no sound (#683): the note struck through, greyed — the
@@ -63,14 +80,6 @@ struct SnapSoundFace: Equatable {
         }
     }()
     static let noSoundSymbol = "music.note.slash"
-
-    /// Fetches a remote cover into the pipeline, for a host that has to
-    /// redraw once it lands (the composer's slot). Nil for a file, the note,
-    /// or a fetch that fails — `cachedCover` already answers the first two.
-    @MainActor static func fetchCover(_ url: URL, pipeline: ImagePipeline) async -> UIImage? {
-        guard !url.isFileURL else { return nil }
-        return try? await pipeline.image(for: url, size: SnapMediaAttributionView.coverBucket)
-    }
 }
 
 /// The column's lower bubble (#671): the sound's record IN its glass
@@ -97,7 +106,13 @@ final class SnapSoundBubbleButton: UIButton {
     private let record = SoundRecordGlass()
     private var coverView: UIImageView { record.cover }
     private(set) var face: SnapSoundFace?
-    private var coverTask: Task<Void, Never>?
+    /// The record's cover on the media slot (#1772): a bone on the dark
+    /// ground while it loads, the slot's arrival.
+    private lazy var coverSlot: CoverSlot = {
+        let slot = CoverSlot(view: record.cover, size: SnapMediaAttributionView.coverBucket)
+        slot.bone?.fill = Surface.skeletonOnDark
+        return slot
+    }()
 
     init() {
         super.init(frame: .zero)
@@ -155,15 +170,8 @@ final class SnapSoundBubbleButton: UIButton {
         alpha = face?.isAvailable == false ? 0.45 : 1
         accessibilityValue = face.map { !$0.isAvailable ? "No audio" : ($0.isMuted ? "Muted" : "On") }
         guard coverChanged else { return }
-        coverTask?.cancel()
         coverView.layer.removeAllAnimations()
-        coverView.image = face?.cachedCover
-        guard let face, coverView.image == nil, let url = face.coverURL, let pipeline else { return }
-        coverTask = Task { [weak self] in
-            guard let image = await SnapSoundFace.fetchCover(url, pipeline: pipeline) else { return }
-            guard let self, self.face?.coverURL == url else { return }
-            self.coverView.image = image
-        }
+        if let face { face.draw(into: coverSlot) } else { coverSlot.reset() }
     }
 
     /// Turns the cover like a record while the post plays audibly.

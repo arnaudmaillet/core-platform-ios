@@ -87,7 +87,7 @@ struct SnapPillFooterTests {
             #expect(photo?.isAvailable == false, "a photograph with no audio is not greyed")
             let text = feed.soundFace(for: Self.text())
             #expect(text?.isAvailable == false, "a text post with no sound lost its slot")
-            #expect(text?.cachedCover === SnapSoundFace.noSoundImage)
+            #expect(text?.localCover === SnapSoundFace.noSoundImage)
         }
     }
 
