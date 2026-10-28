@@ -3330,6 +3330,16 @@ final class MediaEditorViewController: UIViewController {
     /// store it, and then have it overwritten by the arrival below; a turn of the
     /// dial would do the same. Both controls are dead for exactly as long as there
     /// is nothing to cut.
+    /// The picture to cut on its way (#1775): the kit's centred loader past
+    /// its grace — a full-screen picture waits under it (#1764), never a
+    /// dead, empty surface.
+    private lazy var cropLoader: AppLoaderView = {
+        let loader = AppLoaderView(size: .large)
+        loader.translatesAutoresizingMaskIntoConstraints = false
+        return loader
+    }()
+    private lazy var cropLoaderGate = LoaderGate(loader: cropLoader)
+
     private func showCropPicture(for id: String) {
         let chosen = edits(for: id)
         let ratio = cropRatios[id] ?? .free
@@ -3345,10 +3355,19 @@ final class MediaEditorViewController: UIViewController {
         }
         cropSurface.isUserInteractionEnabled = false
         cropTools.isUserInteractionEnabled = false
+        if cropLoader.superview !== cropSurface {
+            cropSurface.addSubview(cropLoader)
+            NSLayoutConstraint.activate([
+                cropLoader.centerXAnchor.constraint(equalTo: cropSurface.centerXAnchor),
+                cropLoader.centerYAnchor.constraint(equalTo: cropSurface.centerYAnchor),
+            ])
+        }
+        cropLoaderGate.begin { [weak self] in self?.isCropping == true && self?.croppingID == id }
         Task { [weak self] in
             guard let self else { return }
             let source = await library.thumbnail(for: id, size: size)
             remember(source, for: id)
+            cropLoaderGate.end()
             guard isCropping, croppingID == id else { return }
             // ⚠️ RE-READ, NOT THE VALUES CAPTURED BEFORE THE AWAIT. Nothing can
             // have changed them while the controls were dead, but reading them

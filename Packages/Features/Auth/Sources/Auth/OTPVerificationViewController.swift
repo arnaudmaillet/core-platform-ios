@@ -14,12 +14,10 @@ final class OTPVerificationViewController: UITableViewController {
     private let codeCell = TextFieldCell()
     private var hasSubmitted = false
 
-    private lazy var verifyButton = UIBarButtonItem(
-        title: "Verify",
-        style: .done,
-        target: self,
-        action: #selector(verifyTapped)
-    )
+    private lazy var verifyButton = BarItems.title(id: Self.verifyID, title: "Verify", prominent: true) { [weak self] in
+        self?.verifyTapped()
+    }
+    static let verifyID = "auth.otp.verify"
 
     #if DEBUG
     /// Sim QA hook: the code typed ~1s after appear (auto-verifies at full
@@ -41,8 +39,7 @@ final class OTPVerificationViewController: UITableViewController {
         // A titled header: the soft blur covers the bar (#1591) — see
         // `applyTopEdge(for:)`.
         tableView.applyTopEdge(for: .titled)
-        verifyButton.identifier = "auth.otp.verify"
-        navigationItem.rightBarButtonItem = verifyButton
+        setOwnTrailingBarItems([verifyButton], animated: false)
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             systemItem: .cancel,
             primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) }
@@ -85,11 +82,24 @@ final class OTPVerificationViewController: UITableViewController {
         }
     }
 
-    @objc private func verifyTapped() {
+    private func verifyTapped() {
         guard !hasSubmitted, code.count == Self.codeLength else { return }
         hasSubmitted = true
+        // At work (#1775): the word becomes the kit's loader, under its
+        // identifier, until the flow answers.
+        setOwnTrailingBarItems([BarItems.busy(id: Self.verifyID, label: "Verifying")], animated: view.window != nil)
         onVerify?(code)
     }
+
+    #if DEBUG
+    /// Internal for tests: whether Verify is its busy twin.
+    var debugVerifyIsBusy: Bool { ownTrailingBarItems.first?.customView != nil }
+    /// Internal for tests: types `code` as the field would.
+    func debugType(_ code: String) {
+        codeCell.textField.text = code
+        codeChanged()
+    }
+    #endif
 
     // MARK: - Table
 

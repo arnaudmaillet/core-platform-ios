@@ -107,16 +107,57 @@ final class MapLocationControlsView: UIView {
             buttonRow.isHidden = false
             card.isEnabled = false
             locateButton.isEnabled = true
-            locateButton.configuration?.image = UIImage(
+            glyph = UIImage(
                 systemName: permission == .allowed ? "location.fill" : "location",
                 withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
             )
+            locateButton.configuration?.image = isShowingLocating ? nil : glyph
             locateButton.accessibilityLabel = permission == .allowed
                 ? "Go to the country you're in" : "Use your location"
             locateButton.accessibilityHint = permission == .denied ? "Opens Settings" : nil
         }
         isHidden = face == .none
     }
+
+    // MARK: - Locating (#1775)
+
+    /// The button's glyph, held while the loader takes its place.
+    private var glyph: UIImage?
+    private var isShowingLocating = false
+    private lazy var locatingLoader: AppLoaderView = {
+        let loader = AppLoaderView(size: .medium)
+        loader.translatesAutoresizingMaskIntoConstraints = false
+        loader.isAccessibilityElement = false
+        locateButton.addSubview(loader)
+        NSLayoutConstraint.activate([
+            loader.centerXAnchor.constraint(equalTo: locateButton.centerXAnchor),
+            loader.centerYAnchor.constraint(equalTo: locateButton.centerYAnchor),
+        ])
+        return loader
+    }()
+    private lazy var locatingGate = LoaderGate { [weak self] showing in self?.showLocating(showing) }
+
+    /// Waiting for the device's first fix after a tap (#1775): past the
+    /// loader's grace, the kit's loader in the glyph's place.
+    func setLocating(_ locating: Bool) {
+        locating ? locatingGate.begin() : locatingGate.end()
+    }
+
+    var isLocating: Bool { locatingGate.isArmed || locatingGate.isShowing }
+
+    private func showLocating(_ showing: Bool) {
+        isShowingLocating = showing
+        locateButton.configuration?.image = showing ? nil : glyph
+        showing ? locatingLoader.startAnimating() : locatingLoader.stopAnimating()
+        locateButton.accessibilityValue = showing ? "Finding where you are" : nil
+    }
+
+    #if DEBUG
+    /// Internal for tests: runs the loader's grace out.
+    func debugElapseLocatingGrace() { locatingGate.debugElapseGrace() }
+    /// Internal for tests: whether the loader stands in the glyph's place.
+    var debugShowsLocating: Bool { isShowingLocating }
+    #endif
 
     private func tapped() {
         switch face {
