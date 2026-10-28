@@ -134,6 +134,9 @@ final class WalletSheetViewController: UIViewController {
     static let closeItemIdentifier = "wallet.close"
     static let helpItemIdentifier = "wallet.help"
 
+    /// The history's first pages on the device (#1776).
+    private let historyCache: WalletHistoryLocalCache?
+
     init(
         wallet: WalletStore,
         lookUpPosts: PostLookup? = nil,
@@ -144,8 +147,10 @@ final class WalletSheetViewController: UIViewController {
         stakePacks: (any StakePackSelling)? = nil,
         profileItems: (any ProfileItemSelling)? = nil,
         themes: (any ThemeSelling)? = nil,
-        shopMedia: ShopMedia? = nil
+        shopMedia: ShopMedia? = nil,
+        historyCache: WalletHistoryLocalCache? = nil
     ) {
+        self.historyCache = historyCache
         self.wallet = wallet
         self.claimer = WalletClaimer(wallet: wallet)
         self.lookUpPosts = lookUpPosts
@@ -567,7 +572,7 @@ final class WalletSheetViewController: UIViewController {
 
     /// Activity: the wallet's history, pushed in the sheet (#1478).
     private func openActivity() {
-        pushInSheet(WalletHistoryViewController(wallet: wallet, filterInBar: true))
+        pushInSheet(WalletHistoryViewController(wallet: wallet, filterInBar: true, deviceCache: historyCache))
     }
 
     /// The Shop — where the gems go, from the Shop door: this sheet comes

@@ -795,7 +795,8 @@ final class AppContainer {
             stakePacks: stakePacks,
             profileItems: profileItems,
             themes: accentThemes,
-            shopMedia: shopMedia
+            shopMedia: shopMedia,
+            historyCache: walletHistoryCache
         ).wrappedInSheet()
     }
 
@@ -898,6 +899,8 @@ final class AppContainer {
     /// The feed's lists in `localStore`: For You's two corpora and the
     /// Following feed.
     private lazy var feedLocalCache: FeedLocalCache? = localStore.map(FeedLocalCache.init(store:))
+    /// The wallet history's first pages in `localStore` (#1776).
+    private lazy var walletHistoryCache: WalletHistoryLocalCache? = localStore.map(WalletHistoryLocalCache.init(store:))
 
     /// Forwards every profile switch to `commentsRepository`, for as long as the
     /// container lives.
@@ -1495,7 +1498,9 @@ final class AppContainer {
         // The gallery cards' like chips stake from the app's one wallet.
         builder.wallet = walletStore
         // Settings → Wallet and Purchases: the server wallet's history (#400).
-        builder.makeWalletSection = { [unowned self] in WalletHistoryViewController(wallet: self.walletStore) }
+        builder.makeWalletSection = { [unowned self] in
+            WalletHistoryViewController(wallet: self.walletStore, deviceCache: self.walletHistoryCache)
+        }
         // …and draw their posts' live counts (#896).
         builder.makeCardStaking = { [unowned self] in
             PostCardStaking(wallet: self.walletStore, entities: self.entityStore)
