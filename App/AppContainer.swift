@@ -1962,6 +1962,24 @@ private struct MockAnimatedAvatarResolver: AnimatedAvatarResolving, @unchecked S
         let clips = await MainActor.run { catalog.ids.filter { $0.hasSuffix("-0") } }
         guard !clips.isEmpty else { return nil }
         let previewID = clips[index % clips.count]
+        // Baked once, then read back on every launch after (#1841): cutting
+        // 48 frames out of a clip at launch kept the first post's avatar on
+        // its skeleton for 8–17 s on the simulator.
+        let key = "\(previewID)-\(rung.rawValue)-v\(Self.bakeVersion)"
+        if let kept = await Task.detached(priority: .utility, operation: { Self.store.sheet(forKey: key) }).value {
+            return kept
+        }
+        guard let baked = await bake(previewID: previewID, rung: rung) else { return nil }
+        Task.detached(priority: .utility) { Self.store.store(baked, forKey: key) }
+        return baked
+    }
+
+    /// Where the baked sheets are kept across launches.
+    private static let store = AnimatedIconSheetDiskStore.caches(named: "MockAnimatedAvatarSheets")
+    /// Bumped whenever the bake changes, so a kept sheet is never stale.
+    private static let bakeVersion = 1
+
+    private func bake(previewID: String, rung: AnimatedAvatars.Rung) async -> AnimatedIconSheet? {
         // 48 frames, 4 s at 12 fps, cut from the clip itself (the owner,
         // 2026-10-25: avatars twice as long) — the map preview carries only
         // 24 frames over 2 s. The preview stays the fallback.
