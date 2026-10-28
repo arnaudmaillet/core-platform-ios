@@ -3198,7 +3198,7 @@ final class SnapFeedViewController: UIViewController {
     /// What the sound bubble and the composer's rail slot draw for `model`
     /// (#671) — see `SnapSoundState.face`.
     func soundFace(for model: FeedItemDisplayModel) -> SnapSoundFace? {
-        var face = soundState.face(for: model, playingClip: playingClip(of: model))
+        guard var face = soundState.face(for: model, playingClip: playingClip(of: model)) else { return nil }
         face.pipeline = imagePipeline
         return face
     }
@@ -3229,7 +3229,8 @@ final class SnapFeedViewController: UIViewController {
         // the loading page has no page above it and keeps its own.
         detail.setActionColumnHostedByPage(hostedByPage)
         let face = soundFace(for: model)
-        detail.setRailSoundFace(face)
+        // No face on a text post with no sound (#1790): no slot either.
+        detail.setRailSoundFace(face, keepsSlot: face != nil || !SnapSoundState.isText(model))
         // The For You root's save and repost (#1681), in the composer's
         // column too — drawn on a text page, reserved under a media page's.
         detail.setPostActions(

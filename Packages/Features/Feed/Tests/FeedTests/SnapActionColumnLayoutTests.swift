@@ -341,6 +341,28 @@ struct SnapActionColumnLayoutTests {
         #expect(!bar.hasAmbiguousLayout)
     }
 
+    /// A text post with no sound has no slot (#1790): the field reaches
+    /// where the slot ended; with a face, or empty (a draft), it stops short.
+    @Test func withNoSlotTheFieldTakesItsPlace() throws {
+        let (withSlot, _) = hostedColumnBar(railFace: .empty)
+        let (without, host) = hostedColumnBar(railFace: .noSlot)
+        let slot = withSlot.debugRailButton
+        let kept = try #require(Self.fieldView(in: withSlot))
+        let widened = try #require(Self.fieldView(in: without))
+        #expect(kept.frame.maxX < slot.frame.minX, "the field ran under the kept slot")
+        #expect(abs(widened.frame.maxX - slot.frame.maxX) < 0.5, "the field did not reach where the slot ended")
+        #expect(without.debugRailButton.isHidden)
+        #expect(!without.hasAmbiguousLayout)
+        #expect(CommentsInputBar.fieldTrailingInset(progress: 0, keepsSlot: false) == 0)
+
+        // The slot comes back on the next page: the field steps back.
+        without.railFace = .empty
+        without.layoutIfNeeded()
+        _ = host
+        let back = try #require(Self.fieldView(in: without))
+        #expect(abs(back.frame.maxX - kept.frame.maxX) < 0.5, "the field did not step back for the slot")
+    }
+
     /// ⚠️ THE RAIL IS THE HOST'S ACTION AND NOTHING ELSE (asked 2026-10-02).
     /// Typing never turns the repost bubble into send: a tap on it reposts
     /// over a draft as over an empty field, and the draft stays.
