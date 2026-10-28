@@ -90,6 +90,43 @@ struct CountryUnlockToolbarTests {
         #expect(labels.contains("You need 40 more gems"))
     }
 
+    /// Holds its unlock until the test lets it answer, then fails it.
+    private final class GatedAccess: CountryAccess {
+        let homeCountry: String? = "FR"
+        let gems = 100
+        private var held: CheckedContinuation<Void, Never>?
+        var isHeld: Bool { held != nil }
+        func isUnlocked(_ code: String) -> Bool { code == "FR" }
+        func standing(of code: String) -> CountryStanding? {
+            CountryStanding(code: code, rank: 4, likes: 8_700, posts: 86, price: 50)
+        }
+        func standings() -> [CountryStanding] { [] }
+        func unlock(_ code: String) async -> CountryUnlockOutcome {
+            await withCheckedContinuation { held = $0 }
+            return .failed
+        }
+        func release() { held?.resume(); held = nil }
+    }
+
+    /// At work (#1775): the unlock is its busy twin — the loader, no tap —
+    /// under its identifier, and its word again when the unlock fails.
+    @Test func theUnlockWearsTheLoaderWhileTheServerIsAsked() async throws {
+        let spain = try #require(CountryAtlas.shared.country(code: "ES"))
+        let access = GatedAccess()
+        let sheet = CountryUnlockSheetViewController(country: spain, access: access)
+        _ = sheet.wrappedInSheet()
+        sheet.loadViewIfNeeded()
+
+        let unlocking = Task { await sheet.debugUnlock() }
+        while !access.isHeld { await Task.yield() }
+        #expect(sheet.unlockControl?.isBusy == true, "the unlock sat unchanged while the server was asked")
+        #expect(sheet.toolbarItems?.first?.identifier == "countryUnlock.unlock")
+        access.release()
+        await unlocking.value
+        #expect(sheet.unlockControl?.isBusy == false, "the word did not come back after the failure")
+        #expect(sheet.unlockControl?.title == "Unlock · 50")
+    }
+
     /// The detent counts the toolbar: the map frames the country above the
     /// WHOLE sheet.
     @Test func theSheetsHeightIsTheContentAndTheToolbar() throws {
