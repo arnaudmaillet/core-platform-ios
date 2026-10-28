@@ -1194,6 +1194,13 @@ final class SnapFeedViewController: UIViewController {
                     self.updateActiveItem()
                     if self.lifecycle.activeIndex == target {
                         print("[qa] \(label): active page \(target) of \(self.orderedIDs.count)")
+                        // The launch screen lifts on THIS page, once it has its
+                        // picture (#1855; `LaunchCurtain.readyMilestone`).
+                        QAWait.until("\(label) picture", { [weak self] in
+                            self?.activeSnapCell?.debugShowsAPicture == true
+                        }) {
+                            LaunchTimeline.mark(LaunchCurtain.qaStartPageReady)
+                        }
                     } else {
                         QAWait.fail(label, "jumped but active page is \(self.lifecycle.activeIndex.map(String.init) ?? "nil")")
                     }

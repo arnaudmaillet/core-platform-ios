@@ -714,7 +714,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             // The launch screen stays OVER the shell until the first post's
             // media is on screen, then fades out (#1812).
             if let launch, viewController === mainTabCoordinator?.rootViewController {
-                let curtain = LaunchCurtain(curtain: launch.view, owner: launch)
+                let curtain = LaunchCurtain(curtain: launch.view, owner: launch, readyMilestone: LaunchCurtain.readyMilestone)
                 curtain.hold(over: window, opensElsewhere: launchOpensElsewhere)
                 launchCurtain = curtain
             }

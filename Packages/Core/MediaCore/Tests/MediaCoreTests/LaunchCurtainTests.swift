@@ -9,6 +9,15 @@ import UIKit
 struct LaunchCurtainTests {
     /// What decides the lift: a launch elsewhere at once, the page's signal,
     /// or the cap — nothing else.
+    /// Without a QA start index, the curtain lifts on the first page that has
+    /// what it shows; under `-snap-start-index` (DEBUG) it waits for the page
+    /// asked for (#1855). A test process carries no such flag.
+    @Test func theCurtainLiftsOnTheFirstPageOutsideAQAStartIndex() {
+        #expect(!ProcessInfo.processInfo.arguments.contains(LaunchCurtain.startIndexFlag))
+        #expect(LaunchCurtain.readyMilestone == "shots.firstPageReady")
+        #expect(LaunchCurtain.cap == 2)
+    }
+
     @Test func theRevealDecision() {
         #expect(LaunchCurtain.decision(pageReady: false, sinceLaunch: 0.4, opensElsewhere: true) == .route)
         #expect(LaunchCurtain.decision(pageReady: true, sinceLaunch: 0.4, opensElsewhere: false) == .ready)
