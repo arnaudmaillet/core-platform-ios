@@ -1,19 +1,7 @@
 import AuthInterface
 import DesignSystem
+import SafariServices
 import UIKit
-
-/// Destinations of the flow-wide toolbar legal links.
-enum AuthLegalLink: CaseIterable {
-    case privacy
-    case contact
-
-    var displayName: String {
-        switch self {
-        case .privacy: "Privacy & Legal"
-        case .contact: "Contact"
-        }
-    }
-}
 
 /// Orchestrates the sign-in flow on its own navigation stack: an explicit
 /// method-selection menu branching to a code sent by email or SMS, or to
@@ -44,6 +32,8 @@ final class LoginFlowCoordinator {
     private let profileSetup: (any AccountProfileSetup)?
     /// The account's home country: the current one, else the storefront's.
     private let homeCountry: @Sendable () async -> String
+    /// The pages the legal line and the consent step open (#1811).
+    private let legalLinks: AuthLegalLinks
     /// What the steps have collected so far.
     private var challenge: VerificationChallenge?
     /// What proved the identity: the code, or the provider's id_token. It
@@ -63,66 +53,15 @@ final class LoginFlowCoordinator {
     /// The calls out right now.
     private(set) var callsInFlight: Set<Call> = []
 
-    /// One toolbar item set for the WHOLE flow, shared by every step (see
-    /// `flowToolbarItems` on the base controller for why identical instances
-    /// matter): Privacy & Legal pinned leading, Contact pinned trailing, one
-    /// flexible space stretching between. The language selector lives in the
-    /// credential screens' navigation bars, not here.
-    private lazy var flowToolbarItems: [UIBarButtonItem] = {
-        let privacyItem = makeCapsuleItem(id: "auth.flow.privacy", title: AuthLegalLink.privacy.displayName) {
-            [weak self] in self?.showLegalPlaceholder(.privacy)
-        }
-        let contactItem = makeCapsuleItem(id: "auth.flow.contact", title: AuthLegalLink.contact.displayName) {
-            [weak self] in self?.showLegalPlaceholder(.contact)
-        }
-        return [
-            privacyItem,
-            .flexibleSpace(),
-            contactItem
-        ]
-    }()
-
-    /// The language selector as a top-right navigation bar item — globe +
-    /// locale code in ONE bubble the bar draws (`BarItems.labeled`, #1679: a
-    /// stock item shows only its image when given both, and a `UIButton` in
-    /// a custom view is what the bar contract retires). Minted fresh per
-    /// screen: a `UIBarButtonItem` can't be installed in two
-    /// `navigationItem`s; the shared identifier carries it across a push.
-    private func makeLanguageNavItem() -> UIBarButtonItem {
-        // Weak: the item holds the label, which holds this action.
-        weak var anchor: UIBarButtonItem?
-        let made = BarItems.labeled(
-            id: "auth.language", title: Locale.current.identifier(.bcp47), image: UIImage(systemName: "globe"),
-            ink: .secondaryLabel, textStyle: .footnote
-        ) { [weak self] in
-            guard let self, let anchor else { return }
-            presentLanguageSheet(from: anchor)
-        }
-        made.label.accessibilityLabel = String(localized: "Change language")
-        anchor = made.item
-        return made.item
-    }
-
-    /// Standard titled bar item in the system's own capsule.
-    private func makeCapsuleItem(id: String, title: String, handler: @escaping () -> Void) -> UIBarButtonItem {
-        let item = UIBarButtonItem(primaryAction: UIAction(title: title) { _ in handler() })
-        item.identifier = id
-        item.tintColor = .secondaryLabel
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.appFont(forTextStyle: .footnote)
-        ]
-        item.setTitleTextAttributes(attributes, for: .normal)
-        item.setTitleTextAttributes(attributes, for: .highlighted)
-        return item
-    }
-
     init(
         signUp: (any SignUpPerforming)? = nil,
         federated: (any FederatedSignInProviding)? = nil,
         passkeys: (any PasskeyAuthorizing)? = nil,
         profileSetup: (any AccountProfileSetup)? = nil,
-        homeCountry: @escaping @Sendable () async -> String = { Locale.current.region?.identifier ?? "" }
+        homeCountry: @escaping @Sendable () async -> String = { Locale.current.region?.identifier ?? "" },
+        legalLinks: AuthLegalLinks = AuthLegalLinks()
     ) {
+        self.legalLinks = legalLinks
         self.signUp = signUp
         self.federated = federated
         self.passkeys = passkeys
@@ -130,40 +69,26 @@ final class LoginFlowCoordinator {
         self.homeCountry = homeCountry
     }
 
-    /// `onClose` non-nil = presented over the app rather than installed as the
-    /// window's root: the first screen gets a close button, because a guest
-    /// who opened it must be able to go back to browsing.
-    func start(prompt: String? = nil, onClose: (() -> Void)? = nil) -> UIViewController {
+    /// The flow's stack, with the method list on it. Presented as a sheet
+    /// over the app (`ContentFittingNavigationController.fit`) it has no close
+    /// button (#1811): the swipe is the way out, protected once a code was
+    /// sent. `prompt` is the gated action's headline; nil says "Log in or sign
+    /// up".
+    func start(prompt: String? = nil) -> UIViewController {
         let methodSelection = MethodSelectionViewController(
             methods: SignInMethod.offered(passkeys: passkeys != nil && signUp != nil)
         )
-        methodSelection.prompt = prompt
-        if let onClose {
-            methodSelection.navigationItem.leftBarButtonItem = UIBarButtonItem(
-                systemItem: .close,
-                primaryAction: UIAction { _ in onClose() }
-            )
-            methodSelection.navigationItem.leftBarButtonItem?.identifier = "auth.close"
-        }
+        methodSelection.prompt = prompt ?? MethodSelectionViewController.defaultPrompt
+        methodSelection.legalLinks = legalLinks
+        methodSelection.onOpenLink = { [weak self] url in self?.openPage(url) }
         methodSelection.onMethodSelected = { [self] method in
             select(method)
         }
-        // An account signs in the way it signs up: a code proves the
-        // address, and an address with an account goes straight in.
-        methodSelection.onLogIn = { [self] in
-            select(.email)
-        }
-        methodSelection.flowToolbarItems = flowToolbarItems
 
-        // Sized to its top step when presented as a sheet (#563).
+        // A short sheet for the list, a full-height one for the form (#563,
+        // #1811).
         let navigation = ContentFittingNavigationController(rootViewController: methodSelection)
-        // The language toolbar blends with the canvas instead of drawing bar
-        // chrome of its own.
-        let toolbarAppearance = UIToolbarAppearance()
-        toolbarAppearance.configureWithTransparentBackground()
-        navigation.toolbar.standardAppearance = toolbarAppearance
-        navigation.toolbar.scrollEdgeAppearance = toolbarAppearance
-        navigation.toolbar.compactAppearance = toolbarAppearance
+        navigation.protectsInput = Self.protectsInput(at:)
         navigationController = navigation
         #if DEBUG
         runQAHooksIfNeeded()
@@ -195,36 +120,27 @@ final class LoginFlowCoordinator {
                 beginOTPVerification(e164: e164, display: display)
             }
         }
-        phone.flowToolbarItems = flowToolbarItems
-        phone.navigationItem.rightBarButtonItem = makeLanguageNavItem()
         push(phone)
     }
 
-    /// The OTP seam. There is no SMS/OTP plane on the BFF yet (see
-    /// `dev/BACKEND_GAPS.md` §6): when it exists, the dispatch call goes
-    /// here before presenting, and `onVerify` exchanges the code for a
-    /// session (the app's session observer then swaps the root). Until
-    /// then verification lands on an honest unavailable alert.
+    /// The OTP seam, reached only without sign-up services. There is no
+    /// SMS/OTP plane on the BFF yet (see `dev/BACKEND_GAPS.md` §6): when it
+    /// exists, the dispatch call goes here, and `onVerify` exchanges the code
+    /// for a session (the app's session observer then swaps the root). Until
+    /// then verification lands on an honest unavailable alert. PUSHED like
+    /// every other step (#1811): never a second sheet over the sign-in sheet.
     private func beginOTPVerification(e164: String, display: String) {
         _ = e164 // The dispatch payload, unused until the backend exists.
         let verification = OTPVerificationViewController(phoneDisplay: display)
         verification.onVerify = { [self] _ in
-            navigationController?.presentedViewController?.dismiss(animated: true) { [self] in
-                presentPhoneSignInUnavailable()
-            }
+            presentPhoneSignInUnavailable()
         }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-login-demo-phone") {
             verification.qaAutoVerify = "123456"
         }
         #endif
-        // As tall as the code card, like the flow's own sheet (#563).
-        let sheet = ContentFittingNavigationController(rootViewController: verification)
-        if let presentation = sheet.sheetPresentationController {
-            sheet.fit(presentation, fallback: 280)
-            presentation.prefersGrabberVisible = true
-        }
-        navigationController?.present(sheet, animated: true)
+        push(verification)
     }
 
     private func presentPhoneSignInUnavailable() {
@@ -244,13 +160,7 @@ final class LoginFlowCoordinator {
         step.onContinue = { [weak self, weak step] address in
             self?.sendCode(.email, to: address, display: address, from: step)
         }
-        prepare(step)
         push(step)
-    }
-
-    private func prepare(_ step: UIViewController) {
-        (step as? BottomAnchoredTableViewController)?.flowToolbarItems = flowToolbarItems
-        step.navigationItem.rightBarButtonItem = makeLanguageNavItem()
     }
 
     /// `step` is the screen whose button sent it — the email step, or the
@@ -280,7 +190,6 @@ final class LoginFlowCoordinator {
         let step = VerificationCodeViewController(destination: display, resendAfter: challenge.resendAfter)
         step.onSubmit = { [weak self, weak step] code in self?.verify(code, from: step) }
         step.onResend = { [weak self, weak step] in self?.resendCode(from: step) }
-        prepare(step)
         push(step)
     }
 
@@ -441,7 +350,6 @@ final class LoginFlowCoordinator {
         step.onSubmit = { [weak self, weak step] code in
             self?.completeSecondStep(challenge, code: code, from: step)
         }
-        prepare(step)
         push(step)
     }
 
@@ -483,7 +391,6 @@ final class LoginFlowCoordinator {
             self?.dateOfBirth = birthday
             self?.showConsent()
         }
-        prepare(step)
         push(step)
     }
 
@@ -492,8 +399,9 @@ final class LoginFlowCoordinator {
         step.onAgree = { [weak self, weak step] marketing, analytics in
             self?.createAccount(marketing: marketing, analytics: analytics, from: step)
         }
-        step.onOpenPolicy = { [weak self] in self?.showLegalPlaceholder(.privacy) }
-        prepare(step)
+        if let policy = legalLinks.privacyPolicy {
+            step.onOpenPolicy = { [weak self] in self?.openPage(policy) }
+        }
         push(step)
     }
 
@@ -544,7 +452,6 @@ final class LoginFlowCoordinator {
                 }
             }
         }
-        prepare(step)
         // No way back past an account that now exists: the step replaces the
         // flow behind it.
         step.navigationItem.hidesBackButton = true
@@ -605,31 +512,25 @@ final class LoginFlowCoordinator {
         navigationController?.topViewController?.present(alert, animated: true)
     }
 
-    /// The legal/contact destinations don't exist yet either.
-    private func showLegalPlaceholder(_ link: AuthLegalLink) {
-        switch link {
-        case .privacy:
-            pushPlaceholder(
-                title: link.displayName,
-                symbolName: "hand.raised.fill",
-                text: "Privacy & Legal",
-                secondaryText: "Policies aren\u{2019}t available here yet."
-            )
-        case .contact:
-            pushPlaceholder(
-                title: link.displayName,
-                symbolName: "envelope.fill",
-                text: "Contact",
-                secondaryText: "Contact options aren\u{2019}t available yet."
-            )
-        }
-    }
-
-    /// Pushes a step of the flow. The sheet follows the step's own height
-    /// (`ContentFittingNavigationController`, #563) — it no longer jumps to
-    /// full height for a credential step and stays there after the pop.
+    /// Pushes a step of the flow. The sheet grows to full height with the
+    /// first push off the method list, and stays there (#1811,
+    /// `ContentFittingNavigationController.stage(for:)`).
     private func push(_ screen: UIViewController) {
         navigationController?.pushViewController(screen, animated: true)
+    }
+
+    /// Whether leaving at `step` would lose what was typed (#1811): the code
+    /// has been sent there. The method list and the address or number entry
+    /// lose nothing that a swipe should guard — every later step does.
+    static func protectsInput(at step: UIViewController) -> Bool {
+        !(step is MethodSelectionViewController || step is EmailEntryViewController
+            || step is PhoneAuthViewController || step is PlaceholderViewController)
+    }
+
+    /// A legal page, in place over the sheet (#1811).
+    private func openPage(_ url: URL) {
+        let page = SFSafariViewController(url: url)
+        navigationController?.topViewController?.present(page, animated: true)
     }
 
     /// The account-creation steps (code, date of birth, handle) land here once
@@ -645,19 +546,6 @@ final class LoginFlowCoordinator {
             text: "Create Account",
             secondaryText: "Registration isn\u{2019}t available yet."
         )
-    }
-
-    /// Language selection has no screen yet; the switcher opens an empty
-    /// action sheet until it does.
-    private func presentLanguageSheet(from item: UIBarButtonItem) {
-        let sheet = UIAlertController(
-            title: "Language",
-            message: "Language selection isn\u{2019}t available yet.",
-            preferredStyle: .actionSheet
-        )
-        sheet.addAction(UIAlertAction(title: "OK", style: .cancel))
-        sheet.popoverPresentationController?.sourceItem = item
-        navigationController?.topViewController?.present(sheet, animated: true)
     }
 
     /// Native empty state for destinations that exist in the layout before
@@ -740,11 +628,10 @@ final class LoginFlowCoordinator {
     #endif
 }
 
-/// Pushed stand-in screens drop the flow's language toolbar; the step
-/// controllers restore it on re-appear.
-private final class PlaceholderViewController: UIViewController {
+/// A pushed stand-in screen, with its bar for the way back.
+final class PlaceholderViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        navigationController?.setToolbarHidden(true, animated: animated)
+        navigationController?.setNavigationBarHidden(false, animated: animated)
     }
 }

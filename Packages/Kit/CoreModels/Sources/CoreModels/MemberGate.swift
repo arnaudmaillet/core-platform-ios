@@ -23,22 +23,23 @@ public enum GatedAction: Sendable, Equatable {
     /// by a guest.
     case supervision
 
-    /// The sign-up sheet's title: the reason it opened, in the person's terms.
+    /// The sign-up sheet's title: the reason it opened, in the person's terms
+    /// — "Log in or sign up to…", since every method does both (#1811).
     public var signUpPrompt: String {
         switch self {
-        case .like: "Sign up to like this post"
-        case .comment: "Sign up to join the conversation"
-        case .follow(let handle): handle.map { "Sign up to follow @\($0)" } ?? "Sign up to follow"
-        case .save: "Sign up to save posts"
-        case .repost: "Sign up to repost"
-        case .message(let handle): handle.map { "Sign up to message @\($0)" } ?? "Sign up to send messages"
-        case .create: "Sign up to post"
-        case .useSound, .saveSound: "Sign up to use this sound"
-        case .followingFeed: "Sign up to see posts from people you follow"
-        case .inbox: "Sign up to message friends"
-        case .ownProfile: "Sign up to create your profile"
-        case .followPlace, .unlockCountry, .shop: "Sign up to explore more places"
-        case .supervision: "Sign up to link a family account"
+        case .like: "Log in or sign up to like this post"
+        case .comment: "Log in or sign up to join the conversation"
+        case .follow(let handle): handle.map { "Log in or sign up to follow @\($0)" } ?? "Log in or sign up to follow"
+        case .save: "Log in or sign up to save posts"
+        case .repost: "Log in or sign up to repost"
+        case .message(let handle): handle.map { "Log in or sign up to message @\($0)" } ?? "Log in or sign up to send messages"
+        case .create: "Log in or sign up to post"
+        case .useSound, .saveSound: "Log in or sign up to use this sound"
+        case .followingFeed: "Log in or sign up to see posts from people you follow"
+        case .inbox: "Log in or sign up to message friends"
+        case .ownProfile: "Log in or sign up to create your profile"
+        case .followPlace, .unlockCountry, .shop: "Log in or sign up to explore more places"
+        case .supervision: "Log in or sign up to link a family account"
         }
     }
 }

@@ -25,9 +25,10 @@ public protocol AuthFeatureBuilding {
     /// `AuthSessionProviding.stateUpdates()`, not a callback, so every
     /// observer sees the same transition.
     func makeLoginViewController() -> UIViewController
-    /// The same flow, presented over the app by a guest who chose to sign in:
-    /// it carries a close button that calls `onClose`, and `prompt` — the
-    /// reason a gated action opened it — as its headline. Success is still
-    /// observed via `stateUpdates()`, and the presenter dismisses it then.
-    func makeSignInViewController(prompt: String?, onClose: @escaping () -> Void) -> UIViewController
+    /// The same flow, presented over the app by a guest who chose to sign in,
+    /// with `prompt` — the reason a gated action opened it — in its headline.
+    /// It has no close button (#1811): the sheet's swipe is the way out, and
+    /// the presenter hears it from the sheet's own disappearance. Success is
+    /// still observed via `stateUpdates()`, and the presenter dismisses it then.
+    func makeSignInViewController(prompt: String?) -> UIViewController
 }

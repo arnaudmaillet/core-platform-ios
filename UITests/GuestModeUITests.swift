@@ -164,10 +164,12 @@ final class GuestModeUITests: XCTestCase {
         XCTAssertTrue(follow.waitForExistence(timeout: 25), "the profile has no Follow button")
         follow.tap()
 
-        let prompt = staticText(beginningWith: "Sign up to follow", in: app)
+        let prompt = staticText(beginningWith: "Log in or sign up to follow", in: app)
         XCTAssertTrue(prompt.waitForExistence(timeout: 8), "Follow did not ask the guest to sign up")
-        // The bar's system close item, labelled "close".
-        app.buttons.matching(NSPredicate(format: "label ==[c] 'close'")).firstMatch.tap()
+        // No close button (#1811): the sheet closes with a swipe down, from
+        // its grabber, above the headline, to the bottom of the screen.
+        let grabber = prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: -1.5))
+        grabber.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
 
         XCTAssertTrue(prompt.waitForNonExistence(timeout: 8), "the sign-up sheet did not close")
         XCTAssertTrue(follow.waitForExistence(timeout: 5), "closing the sheet moved the guest off the profile")
@@ -236,7 +238,7 @@ final class GuestModeUITests: XCTestCase {
         like.tap()
         // The generic like prompt: a guest is never told about the welcome
         // gift, nor an amount of likes (#1146, the owner 2026-10-14).
-        let prompt = staticText(beginningWith: "Sign up to like this post", in: app)
+        let prompt = staticText(beginningWith: "Log in or sign up to like this post", in: app)
         XCTAssertTrue(prompt.waitForExistence(timeout: 8), "like did not ask the guest to sign up")
         XCTAssertFalse(prompt.label.contains(where: \.isNumber), "the like prompt names an amount: \(prompt.label)")
         return (like, before, prompt)

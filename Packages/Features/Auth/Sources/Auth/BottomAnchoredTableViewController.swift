@@ -11,14 +11,10 @@ import UIKit
 /// collapsed footers, and self-sizing headers, so every visible gap belongs
 /// to an explicit header height.
 class BottomAnchoredTableViewController: UITableViewController {
-    /// The flow-shared toolbar items (language selector + legal links),
-    /// injected by the coordinator BEFORE the controller's view loads.
-    /// Crucially these are the SAME instances on every step: items with
-    /// `hidesSharedBackground` are composited only after a toolbar content
-    /// transition settles, so any per-screen item diff makes the bare text
-    /// items pop in late — with identical instances the toolbar has no diff
-    /// to animate and the whole bar stays rendered through the push.
-    var flowToolbarItems: [UIBarButtonItem] = []
+    /// Whether this step shows no navigation bar: the method list (#1811),
+    /// whose headline is its table's. The form steps show one, for the way
+    /// back.
+    var hidesNavigationBar: Bool { false }
 
     /// Footers collapse to 1pt (a literal 0 falls back to the grouped
     /// default), set via the `sectionFooterHeight`/`estimatedSectionFooterHeight`
@@ -40,25 +36,18 @@ class BottomAnchoredTableViewController: UITableViewController {
         tableView.sectionHeaderTopPadding = 0
         tableView.sectionFooterHeight = Self.collapsedFooterHeight
         tableView.estimatedSectionFooterHeight = Self.collapsedFooterHeight
-
-        // The legal footer rides at the very end of the content, which the
-        // bottom anchoring keeps at the canvas bottom (above the keyboard
-        // when up, above the home indicator otherwise).
-        // Flow chrome (language switcher + legal links) lives in the
-        // navigation controller's bottom toolbar. The keyboard covers bottom
-        // bars while up (standard UIKit), so it surfaces whenever the
-        // keyboard is down.
-        toolbarItems = flowToolbarItems
     }
 
+    /// No toolbar on any step (#1811): its legal links became the method
+    /// list's legal line, and the language globe went.
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        navigationController?.setToolbarHidden(false, animated: animated)
+        navigationController?.setNavigationBarHidden(hidesNavigationBar, animated: animated)
     }
 
     #if DEBUG
     /// `-login-landscape`: rotates the scene on appear — sim QA for the
-    /// toolbar split layout (no tap/rotation injection available).
+    /// landscape layout (no tap/rotation injection available).
     /// `-login-layout-audit`: prints the resolved section/header/footer/row
     /// frames so spacing can be audited numerically from the console.
     override func viewDidAppear(_ animated: Bool) {
@@ -89,7 +78,7 @@ class BottomAnchoredTableViewController: UITableViewController {
     }
 
     /// Plain-text link row (clear background, centered, tinted) — the flow's
-    /// secondary-action register: Create Account, Log In.
+    /// secondary-action register: Resend, Read the Privacy Policy.
     func makeLinkCell(title: String) -> UITableViewCell {
         let cell = UITableViewCell()
         cell.backgroundConfiguration = .clear()
@@ -139,32 +128,6 @@ class BottomAnchoredTableViewController: UITableViewController {
             stack.widthAnchor.constraint(lessThanOrEqualTo: parent.widthAnchor)
             stack.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.sm)
             stack.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.xl)
-        }
-        return header
-    }
-
-    /// Centered single-label section header, used for the flow's in-layout
-    /// text ("or" separator, contextual email line).
-    func makeCenteredTextHeader(
-        text: String,
-        textStyle: UIFont.TextStyle,
-        topInset: CGFloat,
-        bottomInset: CGFloat
-    ) -> UITableViewHeaderFooterView {
-        let label = UILabel()
-        label.text = text
-        label.font = .appFont(forTextStyle: textStyle)
-        label.adjustsFontForContentSizeCategory = true
-        label.textColor = .secondaryLabel
-        label.textAlignment = .center
-        label.numberOfLines = 0
-
-        let header = UITableViewHeaderFooterView()
-        label.constrain(in: header.contentView) { parent in
-            label.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            label.widthAnchor.constraint(lessThanOrEqualTo: parent.widthAnchor)
-            label.topAnchor.constraint(equalTo: parent.topAnchor, constant: topInset)
-            label.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -bottomInset)
         }
         return header
     }

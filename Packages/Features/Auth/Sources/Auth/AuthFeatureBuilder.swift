@@ -15,14 +15,19 @@ public struct AuthFeatureBuilder: AuthFeatureBuilding {
     /// The device's passkeys (#551). Nil leaves "Sign in with a passkey" off
     /// the first screen.
     private let passkeys: (@MainActor () -> any PasskeyAuthorizing)?
+    /// The legal line's pages (#1811), the same as Settings → Support and
+    /// Legal's.
+    private let legalLinks: AuthLegalLinks
 
     public init(
         sessionManager: SessionManager,
         profileSetup: (any AccountProfileSetup)? = nil,
         homeCountry: @escaping @Sendable () async -> String = { Locale.current.region?.identifier ?? "" },
         federated: (any FederatedSignInProviding)? = nil,
-        passkeys: (@MainActor () -> any PasskeyAuthorizing)? = nil
+        passkeys: (@MainActor () -> any PasskeyAuthorizing)? = nil,
+        legalLinks: AuthLegalLinks = AuthLegalLinks()
     ) {
+        self.legalLinks = legalLinks
         self.passkeys = passkeys
         self.sessionManager = sessionManager
         self.profileSetup = profileSetup
@@ -37,7 +42,8 @@ public struct AuthFeatureBuilder: AuthFeatureBuilding {
             federated: federated,
             passkeys: passkeys?(),
             profileSetup: profileSetup,
-            homeCountry: homeCountry
+            homeCountry: homeCountry,
+            legalLinks: legalLinks
         )
     }
 
@@ -45,7 +51,7 @@ public struct AuthFeatureBuilder: AuthFeatureBuilding {
         makeFlow().start()
     }
 
-    public func makeSignInViewController(prompt: String?, onClose: @escaping () -> Void) -> UIViewController {
-        makeFlow().start(prompt: prompt, onClose: onClose)
+    public func makeSignInViewController(prompt: String?) -> UIViewController {
+        makeFlow().start(prompt: prompt)
     }
 }

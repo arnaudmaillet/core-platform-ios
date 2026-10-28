@@ -2,33 +2,37 @@ import DesignSystem
 import UIKit
 
 /// Screen 1 of the sign-in flow: an explicit method menu — the federated
-/// providers plus the email and phone credential flows — with "Already have
-/// an account? Log in" set off below an "or" separator. No input, no keyboard:
-/// a pure branch point. Dumb view: reports selections upward; the flow
+/// providers plus the email and phone credential flows — under ONE headline
+/// that says both (#1811): every method logs an account in and signs a new
+/// one up (a code proves the address, and an address with an account signs
+/// straight in, #840), so there is no separate "Log in" link. It ends on the
+/// legal line. No input, no keyboard, no navigation bar: a pure branch point
+/// in a content-fitted sheet. Dumb view: reports selections upward; the flow
 /// coordinator decides where to go.
 final class MethodSelectionViewController: BottomAnchoredTableViewController {
     var onMethodSelected: ((SignInMethod) -> Void)?
-    /// "Already have an account? Log in": the email code, which signs an
-    /// address with an account straight in (#840).
-    var onLogIn: (() -> Void)?
-    /// Why the flow opened, when a guest's gated action opened it ("Sign up to
-    /// like this post"): set as the headline over the methods. Nil from a
-    /// plain "Log in or sign up", which needs no reason.
-    var prompt: String?
+    /// The headline over the methods: "Log in or sign up", or why the flow
+    /// opened when a guest's gated action did ("Log in or sign up to like this
+    /// post").
+    var prompt: String = MethodSelectionViewController.defaultPrompt
+    /// The headline when nothing gated opened the flow.
+    static let defaultPrompt = "Log in or sign up"
+    /// The legal line's pages (#1811); a nil one shows its name as plain text.
+    var legalLinks = AuthLegalLinks()
+    /// A legal link was tapped: the flow opens the page in place.
+    var onOpenLink: ((URL) -> Void)?
 
     private static let methodCornerRadius: CGFloat = 12
 
-    /// Each method gets its own standalone section (one row each); the
-    /// log-in link closes the menu below the "or" separator.
+    /// Each method gets its own standalone section (one row each); the legal
+    /// line closes the list, as a header with no rows.
     private enum Section: Equatable {
         case method(SignInMethod)
-        case logIn
+        case legal
     }
 
     private let methods: [SignInMethod]
     private let sections: [Section]
-
-    private lazy var logInCell = makeLinkCell(title: "Already have an account? Log in")
 
     /// The method whose sign-in is running (Sign in with Apple): its row
     /// carries a spinner until the call ends (#827).
@@ -36,12 +40,16 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
 
     init(methods: [SignInMethod] = SignInMethod.all) {
         self.methods = methods
-        sections = methods.map(Section.method) + [.logIn]
+        sections = methods.map(Section.method) + [.legal]
         super.init(style: .insetGrouped)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// The list shows no bar (#1811): no close, no globe, and the headline is
+    /// the table's.
+    override var hidesNavigationBar: Bool { true }
 
     // MARK: - Table
 
@@ -50,13 +58,13 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
     }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        1
+        sections[section] == .legal ? 0 : 1
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         switch sections[indexPath.section] {
-        case .logIn:
-            return logInCell
+        case .legal:
+            return UITableViewCell()
         case .method(let method):
             let cell = UITableViewCell()
             // Sharper corners than input capsules so methods read as
@@ -107,43 +115,104 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
         switch sections[indexPath.section] {
         case .method(let method):
             onMethodSelected?(method)
-        case .logIn:
-            onLogIn?()
+        case .legal:
+            break
         }
     }
 
-    /// The "or" separator sits between the method menu and the account
-    /// creation action, as the sign-up section's header so it travels with
-    /// the grouped layout.
+    /// The headline over the first method; the legal line under the last.
     override func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
-        if let prompt, section == 0 {
+        switch sections[section] {
+        case .method(let method) where method == methods.first:
             return makePromptHeader(prompt)
+        case .method:
+            return nil
+        case .legal:
+            return makeLegalHeader()
         }
-        guard sections[section] == .logIn else { return nil }
-        return makeCenteredTextHeader(
-            text: "or",
-            textStyle: .footnote,
-            topInset: Spacing.lg - Self.collapsedFooterHeight,
-            bottomInset: Spacing.lg
-        )
     }
 
     override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
         switch sections[section] {
         case .method(let method):
-            if method == methods.first {
-                // The prompt sizes itself; without one, breathing room under
-                // the nav bar.
-                return prompt == nil ? Spacing.xl : UITableView.automaticDimension
-            }
+            if method == methods.first { return UITableView.automaticDimension } // the headline
             return Spacing.sm - Self.collapsedFooterHeight // tight cohesive menu
-        case .logIn:
-            return UITableView.automaticDimension // the "or" separator view
+        case .legal:
+            return UITableView.automaticDimension
         }
+    }
+
+    /// The legal line, as text. Tests.
+    var debugLegalLine: NSAttributedString { Self.legalLine(legalLinks) }
+}
+
+/// The two pages the sign-in sheet's legal line opens (#1811) — the same as
+/// Settings → Support and Legal's, injected by the composition root (Auth does
+/// not import Profile). Nil while the page has no address yet: the name is
+/// plain text then, never a dead link.
+public struct AuthLegalLinks: Equatable, Sendable {
+    public var termsOfService: URL?
+    public var privacyPolicy: URL?
+
+    public init(termsOfService: URL? = nil, privacyPolicy: URL? = nil) {
+        self.termsOfService = termsOfService
+        self.privacyPolicy = privacyPolicy
+    }
+}
+
+extension MethodSelectionViewController: UITextViewDelegate {
+    /// "By continuing, you agree to our Terms of Service and acknowledge our
+    /// Privacy Policy." — each name a link to its page when it has one.
+    static func legalLine(_ links: AuthLegalLinks) -> NSAttributedString {
+        let font = UIFont.appFont(forTextStyle: .footnote)
+        let base: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.secondaryLabel]
+        let line = NSMutableAttributedString(string: "By continuing, you agree to our ", attributes: base)
+        func name(_ text: String, _ url: URL?) {
+            var attributes = base
+            if let url { attributes[.link] = url }
+            line.append(NSAttributedString(string: text, attributes: attributes))
+        }
+        name("Terms of Service", links.termsOfService)
+        line.append(NSAttributedString(string: " and acknowledge our ", attributes: base))
+        name("Privacy Policy", links.privacyPolicy)
+        line.append(NSAttributedString(string: ".", attributes: base))
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        line.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: line.length))
+        return line
+    }
+
+    func textView(
+        _ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction
+    ) -> UIAction? {
+        guard case .link(let url) = textItem.content else { return defaultAction }
+        return UIAction { [weak self] _ in self?.onOpenLink?(url) }
     }
 }
 
 private extension MethodSelectionViewController {
+    /// The legal line closing the list.
+    func makeLegalHeader() -> UITableViewHeaderFooterView {
+        let text = UITextView()
+        text.attributedText = Self.legalLine(legalLinks)
+        text.adjustsFontForContentSizeCategory = true
+        text.isEditable = false
+        text.isScrollEnabled = false
+        text.backgroundColor = .clear
+        text.textContainerInset = .zero
+        text.textContainer.lineFragmentPadding = 0
+        text.linkTextAttributes = [.foregroundColor: UIColor.label, .underlineStyle: NSUnderlineStyle.single.rawValue]
+        text.delegate = self
+        let header = UITableViewHeaderFooterView()
+        text.constrain(in: header.contentView) { parent in
+            text.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Spacing.lg)
+            text.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Spacing.lg)
+            text.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.lg)
+            text.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.md)
+        }
+        return header
+    }
+
     /// The reason the flow opened, as the headline over the methods.
     func makePromptHeader(_ prompt: String) -> UITableViewHeaderFooterView {
         let label = UILabel()

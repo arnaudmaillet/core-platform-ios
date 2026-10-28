@@ -10,30 +10,75 @@ struct LoginFlowCoordinatorTests {
         return try #require(navigation.viewControllers.first)
     }
 
-    /// Presented over the app for a guest, the flow can be closed.
-    @Test func presentedOverTheAppItCarriesAWorkingCloseButton() throws {
-        var closed = false
-        let flow = LoginFlowCoordinator().start { closed = true }
+    /// No close button (#1811): the sheet's swipe is the way out. The method
+    /// list shows no bar at all — no close, no globe — and no toolbar.
+    @Test func theMethodListHasNoCloseButtonAndNoBars() throws {
+        let flow = LoginFlowCoordinator().start()
+        let methods = try #require(try firstScreen(of: flow) as? MethodSelectionViewController)
 
-        let close = try #require(try firstScreen(of: flow).navigationItem.leftBarButtonItem)
-        close.primaryAction?.performWithSender(nil, target: nil)
-
-        #expect(closed)
+        #expect(methods.navigationItem.leftBarButtonItem == nil)
+        #expect(methods.navigationItem.rightBarButtonItem == nil)
+        #expect(methods.hidesNavigationBar)
+        #expect(methods.toolbarItems?.isEmpty ?? true)
     }
 
-    /// Installed without a way out, it offers none.
-    @Test func withoutACloseHandlerItHasNoCloseButton() throws {
+    /// With no gated action, the headline says both: every method logs in
+    /// and signs up (#1811).
+    @Test func withNoGatedActionTheHeadlineSaysBoth() throws {
         let flow = LoginFlowCoordinator().start()
 
-        #expect(try firstScreen(of: flow).navigationItem.leftBarButtonItem == nil)
+        let methods = try #require(try firstScreen(of: flow) as? MethodSelectionViewController)
+        #expect(methods.prompt == "Log in or sign up")
     }
 
     /// Opened by a gated action, the flow leads with the reason.
     @Test func aGatedActionsPromptIsTheHeadline() throws {
-        let flow = LoginFlowCoordinator().start(prompt: "Sign up to like this post") {}
+        let flow = LoginFlowCoordinator().start(prompt: GatedAction.like.signUpPrompt)
 
         let methods = try #require(try firstScreen(of: flow) as? MethodSelectionViewController)
-        #expect(methods.prompt == "Sign up to like this post")
+        #expect(methods.prompt == "Log in or sign up to like this post")
+    }
+
+    /// No "Already have an account? Log in" row and no "or" (#1811): one
+    /// section per method, then the legal line, which has no rows.
+    @Test func theListEndsOnTheLegalLineWithNoLogInRow() throws {
+        let flow = LoginFlowCoordinator().start()
+        let methods = try #require(try firstScreen(of: flow) as? MethodSelectionViewController)
+        methods.loadViewIfNeeded()
+        let table = methods.tableView!
+
+        let offered = SignInMethod.offered(passkeys: false).count
+        #expect(table.numberOfSections == offered + 1)
+        #expect(table.numberOfRows(inSection: offered) == 0)
+        #expect(methods.debugLegalLine.string
+            == "By continuing, you agree to our Terms of Service and acknowledge our Privacy Policy.")
+    }
+
+    /// The legal line's names are links to their pages — and plain text while
+    /// a page has no address, never a dead link (#1811).
+    @Test func theLegalLinesLinksFollowTheirURLs() throws {
+        let terms = URL(string: "https://example.com/terms")!
+        func links(_ legal: AuthLegalLinks) -> [URL] {
+            let line = MethodSelectionViewController.legalLine(legal)
+            var found: [URL] = []
+            line.enumerateAttribute(.link, in: NSRange(location: 0, length: line.length)) { value, _, _ in
+                if let url = value as? URL { found.append(url) }
+            }
+            return found
+        }
+        #expect(links(AuthLegalLinks()).isEmpty)
+        #expect(links(AuthLegalLinks(termsOfService: terms)) == [terms])
+    }
+
+    /// A swipe protects what was typed only once a code was sent (#1811).
+    @Test func onlyStepsAfterTheCodeAreProtected() {
+        #expect(!LoginFlowCoordinator.protectsInput(at: MethodSelectionViewController()))
+        #expect(!LoginFlowCoordinator.protectsInput(at: EmailEntryViewController()))
+        #expect(!LoginFlowCoordinator.protectsInput(at: PhoneAuthViewController()))
+        #expect(LoginFlowCoordinator.protectsInput(at: VerificationCodeViewController(destination: "a@b.c", resendAfter: 30)))
+        #expect(LoginFlowCoordinator.protectsInput(at: BirthdayViewController()))
+        #expect(LoginFlowCoordinator.protectsInput(at: ConsentViewController()))
+        #expect(LoginFlowCoordinator.protectsInput(at: SecondStepViewController()))
     }
 }
 

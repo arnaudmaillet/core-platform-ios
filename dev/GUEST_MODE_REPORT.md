@@ -248,11 +248,15 @@ This is the `GatedAction` enum the code would carry (§6.3). Each case maps to o
 
 ## 5. Sign-up prompt and conversion
 
-**The sheet.**
-- A sheet exactly as tall as the step it shows, with a contextual title from the gated action. It has one content-sized detent, capped at the screen's height (taller content scrolls), and it cannot be dragged taller than its content. Pushing or popping a step animates it to that step's height (#563).
-- Below the title: Continue with Apple, Continue with Google, then Continue with email / phone (decision 2).
-- Footer: "Already have an account? Log in".
-- It is dismissible by swipe or ✕, and dismissing does nothing else: no nag, no counter.
+**The sheet: a hybrid (#1811, the owner 2026-10-28).**
+- **The method choice is a content-fitted sheet** over what the guest was doing (#563): one content-sized detent, capped at the screen's height (taller content scrolls), never draggable taller than its content, with the grabber. Sign in with Apple and passkeys finish there, through the system's own sheets.
+- **The headline always says both**: "Log in or sign up", or "Log in or sign up to like this post" (the gated action's words). Every method logs an account in and signs a new one up, so there is no separate "Already have an account? Log in" link and no "or".
+- Below the headline: Continue with Apple, Continue with Google, then Continue with email / phone (decision 2), and one legal line: "By continuing, you agree to our Terms of Service and acknowledge our Privacy Policy." The two names open their pages in place, and they are plain text while a page has no address.
+- **The form is the same sheet at full height.** Picking email or phone grows it with the push, every later step stays at full height, and back to the method list restores the fitted height. The SMS code is a step of that stack, never a second sheet.
+- **No close button, no toolbar, no language globe.** The method list shows no bar at all; the form steps show one for the way back. The swipe is the way out:
+  - before a code is sent, a swipe closes the sheet at once;
+  - once a code has been sent, and on every later step, the sheet asks once: "Leave now?", "What you've entered won't be kept.", Keep going or Stop. VoiceOver's escape gesture follows the same rule.
+  - Closing does nothing else: no nag, no counter.
 - It opens over whatever is on screen, including a hero-presented post or another sheet.
 
 **Methods.**
@@ -262,7 +266,7 @@ This is the `GatedAction` enum the code would carry (§6.3). Each case maps to o
 - Password login stays for existing accounts.
 - **One person, one account.** If a sign-up's verified email already belongs to an account created with another method, the sheet offers to log in with that method instead of creating a duplicate. Apple's private relay addresses never match, so linking methods from Settings comes later.
 
-**Sign-up flow** (inside the sheet, expanding to large):
+**Sign-up flow** (inside the sheet, at full height from the first step past the method list):
 1. Method.
 2. Verification code, if email or phone.
 3. Date of birth (#394).

@@ -251,8 +251,11 @@ final class ConsentViewController: SignUpStepViewController {
             toggleRow("Marketing emails", detail: "News and offers from us.", toggle: marketing, id: "signup.marketing"),
             toggleRow("Analytics", detail: "Usage data that helps us improve the app.", toggle: analytics, id: "signup.analytics"),
         ]
-        trailingRows = [makeLinkCell(title: "Read the Privacy Policy")]
-        onTrailingRowSelected = { [weak self] _ in self?.onOpenPolicy?() }
+        // The policy's page (#1811), or no row while it has no address yet.
+        if onOpenPolicy != nil {
+            trailingRows = [makeLinkCell(title: "Read the Privacy Policy")]
+            onTrailingRowSelected = { [weak self] _ in self?.onOpenPolicy?() }
+        }
         super.viewDidLoad()
     }
 
