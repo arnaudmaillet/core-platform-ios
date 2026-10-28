@@ -1343,15 +1343,20 @@ final class PostDetailViewController: UIViewController {
     /// feed hands over (`setRailSoundFace`, #671) — nothing for a post with
     /// no sound bubble.
     private var publishedRailFace: CommentsInputBar.RailFace {
-        railSoundFace.map { .sound($0) } ?? .empty
+        guard railKeepsSlot else { return .noSlot }
+        return railSoundFace.map { .sound($0) } ?? .empty
     }
 
     private var railSoundFace: SnapSoundFace?
+    /// False for a text post with no sound (#1790): the composer has no
+    /// slot, its field widens into it.
+    private var railKeepsSlot = true
 
     /// The snap feed's sound bubble face, for the rail slot that stands on it
-    /// (#671).
-    func setRailSoundFace(_ face: SnapSoundFace?) {
+    /// (#671); `keepsSlot` false takes the slot away (#1790).
+    func setRailSoundFace(_ face: SnapSoundFace?, keepsSlot: Bool = true) {
         railSoundFace = face
+        railKeepsSlot = keepsSlot
         guard !viewModel.isDraft else { return }
         composeBar.railFace = publishedRailFace
     }

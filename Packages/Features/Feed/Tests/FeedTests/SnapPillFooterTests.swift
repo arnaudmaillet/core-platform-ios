@@ -78,16 +78,16 @@ struct SnapPillFooterTests {
 
     // MARK: - The sound bubble's face
 
-    /// A post with no sound — media or text — keeps its bubble, greyed, with
-    /// the struck-through note (#683).
+    /// A MEDIA post with no sound keeps its bubble, greyed, with the
+    /// struck-through note (#683); a TEXT post with no sound has none (#1790,
+    /// the owner 2026-10-27: such a post can have no sound at all).
     @Test func whoGetsASoundBubble() {
         do {
             let feed = feed()
             let photo = feed.soundFace(for: Self.photo())
             #expect(photo?.isAvailable == false, "a photograph with no audio is not greyed")
-            let text = feed.soundFace(for: Self.text())
-            #expect(text?.isAvailable == false, "a text post with no sound lost its slot")
-            #expect(text?.localCover === SnapSoundFace.noSoundImage)
+            #expect(photo?.localCover === SnapSoundFace.noSoundImage)
+            #expect(feed.soundFace(for: Self.text()) == nil, "a text post with no sound kept a slot")
         }
     }
 

@@ -101,7 +101,13 @@ final class CommentsInputBar: UIView {
         /// The post's sound (#671): the snap feed's sound bubble's cover, on
         /// that bubble's frame.
         case sound(SnapSoundFace)
+        /// No slot at all (#1790): a text post with no sound. Unlike `.empty`,
+        /// the field widens into the slot's place.
+        case noSlot
     }
+
+    /// Whether the slot has a place in the row: the field stops short of it.
+    var keepsRailSlot: Bool { railFace != .noSlot }
 
     /// The slot's face: ONE glass button wearing the host's action. It is the
     /// action and only the action — a draft never turns it into send (asked
@@ -111,6 +117,9 @@ final class CommentsInputBar: UIView {
         didSet {
             guard railFace != oldValue else { return }
             applyRailFace()
+            // The slot came or went (#1790): the field's edge moves with the
+            // next layout pass, which the page change carries.
+            if (railFace == .noSlot) != (oldValue == .noSlot) { setNeedsLayout() }
         }
     }
 
@@ -255,7 +264,9 @@ final class CommentsInputBar: UIView {
 
     /// The field's trailing edge from the bar's at `progress`: the column's
     /// width and the gap before it at rest (0), nothing at 1. Pure, for tests.
-    @MainActor static func fieldTrailingInset(progress: CGFloat) -> CGFloat {
+    /// With no slot (#1790), the field reaches the bar's trailing margin.
+    @MainActor static func fieldTrailingInset(progress: CGFloat, keepsSlot: Bool = true) -> CGFloat {
+        guard keepsSlot else { return 0 }
         let rest = SnapActionColumn.bubbleSize + Spacing.sm
         return rest * (1 - min(max(progress, 0), 1))
     }
@@ -1006,7 +1017,7 @@ final class CommentsInputBar: UIView {
         }
         #endif
         riseProgress = progress
-        let inset = Self.fieldTrailingInset(progress: progress)
+        let inset = Self.fieldTrailingInset(progress: progress, keepsSlot: keepsRailSlot)
         guard abs(fieldTrailing.constant + inset) > 0.01 else { return false }
         fieldTrailing.constant = -inset
         return true
@@ -1817,7 +1828,7 @@ final class CommentsInputBar: UIView {
     private func applyRailFace() {
         let symbol: String?
         switch railFace {
-        case .empty:
+        case .empty, .noSlot:
             symbol = nil
             railButton.accessibilityLabel = nil
         case .repost:

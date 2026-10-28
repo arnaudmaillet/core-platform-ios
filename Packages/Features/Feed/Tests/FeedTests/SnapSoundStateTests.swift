@@ -60,13 +60,13 @@ struct SnapSoundStateTests {
         let switches = Switches()
         let sound = Self.state(switches)
         #expect(sound.isOn)
-        #expect(sound.face(for: Self.clip(), playingClip: nil).isMuted == false)
+        #expect(sound.face(for: Self.clip(), playingClip: nil)?.isMuted == false)
         sound.toggle()
         #expect(!sound.isOn)
-        #expect(sound.face(for: Self.clip(), playingClip: nil).isMuted)
+        #expect(sound.face(for: Self.clip(), playingClip: nil)?.isMuted == true)
         sound.toggle()
         #expect(sound.isOn)
-        #expect(sound.face(for: Self.clip(), playingClip: nil).isMuted == false)
+        #expect(sound.face(for: Self.clip(), playingClip: nil)?.isMuted == false)
     }
 
     // MARK: - A page without audio
@@ -75,10 +75,28 @@ struct SnapSoundStateTests {
         let sound = Self.state(Switches())
         let page = Self.photo()
         #expect(sound.sound(for: page, playingClip: nil) == nil)
-        #expect(sound.face(for: page, playingClip: nil).isAvailable == false)
+        #expect(sound.face(for: page, playingClip: nil)?.isAvailable == false, "a photo with no sound keeps its greyed slot (#683)")
         #expect(sound.attribution(for: page, playingClip: nil).sound == SnapMediaAttributionView.SoundCredit.none)
         #expect(sound.song(for: page, playingClip: nil) == nil)
         #expect(sound.sheetInputs(for: page, playingClip: nil) == nil, "a sheet for nothing")
+    }
+
+    /// ⚠️ A TEXT POST WITH NO SOUND HAS NO SLOT (#1790): no face at all, so
+    /// neither the composer's slot nor the page's bubble; a text post WITH a
+    /// sound, and every media post, keep theirs.
+    @Test func aTextPostWithNoSoundHasNoSlot() {
+        let sound = Self.state(Switches())
+        let text = FeedItemDisplayModel(
+            id: PostID("t1"), authorID: ProfileID("a"), authorName: "Ava", metaText: "",
+            avatarURL: nil, caption: "words", mediaURL: nil, mediaKind: .image, thumbnailURL: nil, audioText: nil
+        )
+        #expect(SnapSoundState.isText(text))
+        #expect(sound.face(for: text, playingClip: nil) == nil, "a text post with no sound kept a slot")
+        #expect(!SnapSoundState.isText(Self.photo()))
+        #expect(SnapSoundState.hasSoundSlot(isText: false, sound: nil), "a media post lost its greyed slot")
+        let song = PostSound(id: "s", title: "Song", artist: nil, previewURL: Self.songFile, artworkURL: nil, duration: nil)
+        #expect(SnapSoundState.hasSoundSlot(isText: true, sound: song), "a text post with a sound lost its record")
+        #expect(!SnapSoundState.hasSoundSlot(isText: true, sound: nil))
     }
 
     // MARK: - Which sound
