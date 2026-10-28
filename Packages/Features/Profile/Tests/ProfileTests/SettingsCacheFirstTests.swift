@@ -106,6 +106,30 @@ struct SettingsCacheFirstTests {
         #expect(!storedLimits.allowsSoundReuse)
     }
 
+    @Test func whatYouSeeAndConsentsRoundTrip() throws {
+        let cache = try launch()
+        cache.store(WhatYouSeeRecord.Value(level: .standard, personalized: false, teen: false), as: WhatYouSeeRecord.self, viewer: cache.viewer)
+        let consents = AccountConsents(
+            dataProcessing: .init(isGiven: true), marketing: .init(isGiven: false, changedAt: Date(timeIntervalSince1970: 10)),
+            analytics: .init(isGiven: true)
+        )
+        cache.store(consents, as: ConsentsRecord.self, viewer: cache.viewer)
+        cache.waitForPendingWrites()
+        let relaunched = try launch()
+        #expect(relaunched.value(WhatYouSeeRecord.self) == WhatYouSeeRecord.Value(level: .standard, personalized: false, teen: false))
+        #expect(relaunched.value(ConsentsRecord.self) == consents)
+        // The consents screen's model opens on them, with no skeleton.
+        let model = ConsentsViewModel(manager: OfflineConsents(), deviceCache: relaunched)
+        #expect(model.phase == .loaded(consents))
+    }
+
+    private struct OfflineConsents: AccountConsentManaging {
+        func consents() async throws -> AccountConsents { throw ProfileError.transport(message: "offline") }
+        func updateConsents(marketing: Bool?, analytics: Bool?) async throws -> AccountConsents {
+            throw ProfileError.transport(message: "offline")
+        }
+    }
+
     /// A pause or a limit that ended while the app was closed opens as off.
     @Test func whatEndedWhileClosedOpensAsOff() throws {
         let cache = try launch()

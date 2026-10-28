@@ -236,6 +236,62 @@ struct InteractionLimitsRecord: SettingsRecord {
     }
 }
 
+struct WhatYouSeeRecord: SettingsRecord {
+    struct Value: Equatable, Sendable {
+        var level: SensitiveContentLevel
+        var personalized: Bool
+        /// The age that decides whether Standard is offered, as last read.
+        var teen: Bool
+    }
+
+    static let name = "whatYouSee"
+    var level: String
+    var personalized: Bool
+    var teen: Bool
+
+    init(_ value: Value) {
+        level = value.level == .standard ? "standard" : "less"
+        personalized = value.personalized
+        teen = value.teen
+    }
+
+    var value: Value? {
+        let decoded: SensitiveContentLevel
+        switch level {
+        case "standard": decoded = .standard
+        case "less": decoded = .less
+        default: return nil
+        }
+        return Value(level: decoded, personalized: personalized, teen: teen)
+    }
+}
+
+struct ConsentsRecord: SettingsRecord {
+    struct Consent: Codable, Sendable {
+        var isGiven: Bool
+        var changedAt: Date?
+    }
+
+    static let name = "consents"
+    var dataProcessing: Consent
+    var marketing: Consent
+    var analytics: Consent
+
+    init(_ value: AccountConsents) {
+        dataProcessing = Consent(isGiven: value.dataProcessing.isGiven, changedAt: value.dataProcessing.changedAt)
+        marketing = Consent(isGiven: value.marketing.isGiven, changedAt: value.marketing.changedAt)
+        analytics = Consent(isGiven: value.analytics.isGiven, changedAt: value.analytics.changedAt)
+    }
+
+    var value: AccountConsents? {
+        AccountConsents(
+            dataProcessing: .init(isGiven: dataProcessing.isGiven, changedAt: dataProcessing.changedAt),
+            marketing: .init(isGiven: marketing.isGiven, changedAt: marketing.changedAt),
+            analytics: .init(isGiven: analytics.isGiven, changedAt: analytics.changedAt)
+        )
+    }
+}
+
 /// A settings screen that opens on its stored answer (#1776).
 @MainActor
 protocol SettingsCaching: AnyObject {
@@ -257,3 +313,4 @@ extension ActivityDiscoveryViewController: SettingsCaching {}
 extension HiddenWordsViewController: SettingsCaching {}
 extension LimitInteractionsViewController: SettingsCaching {}
 extension NotificationSettingsViewController: SettingsCaching {}
+extension WhatYouSeeViewController: SettingsCaching {}
