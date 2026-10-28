@@ -59,9 +59,20 @@ private actor ColdGallery: ProfileGalleryProviding {
     private var isHeld = false
     private var held: [CheckedContinuation<Void, Never>] = []
 
-    init(pages: [String?: GalleryPage]) { self.pages = pages }
+    /// The Liked tab's posts (#1776).
+    private let liked: [GalleryPost]
+
+    init(pages: [String?: GalleryPage], liked: [GalleryPost] = []) {
+        self.pages = pages
+        self.liked = liked
+    }
 
     func goOffline() { offline = true }
+
+    func likedPosts(of profileID: ProfileID) async throws -> [GalleryPost] {
+        if offline { throw URLError(.notConnectedToInternet) }
+        return liked
+    }
 
     /// Holds every later first-page fetch until `release()`: the test decides
     /// which of the header and the grid answers first (#1091).
@@ -180,11 +191,11 @@ final class ProfileColdStartTests {
         try launchCache(later: LocalStorePolicy.profileScreenRevalidation + 60)
     }
 
-    private func gallery() -> ColdGallery {
+    private func gallery(liked: [GalleryPost] = []) -> ColdGallery {
         ColdGallery(pages: [
             nil: GalleryPage(posts: [tile("a", at: 60), tile("b", at: 50)], nextPageToken: "p2"),
             "p2": GalleryPage(posts: [tile("c", at: 40)], nextPageToken: nil)
-        ])
+        ], liked: liked)
     }
 
     private func open(
@@ -236,7 +247,8 @@ final class ProfileColdStartTests {
     @Test func aRecordRoundTripsEveryField() throws {
         let corpora = ProfileGalleryStore.Corpora(
             authored: ProfileGalleryStore.Corpus(posts: [tile("a", at: 1), tile("b", at: 2)], nextToken: "t", hasLaterPages: true),
-            tagged: ProfileGalleryStore.Corpus(posts: [], nextToken: nil, hasLaterPages: false)
+            tagged: ProfileGalleryStore.Corpus(posts: [], nextToken: nil, hasLaterPages: false),
+            liked: [tile("l", at: 3)]
         )
         let record = ProfileDiskRecord(
             profile: ProfileDiskRecord.Header(person("prof-1", visibility: .private)),
@@ -285,6 +297,37 @@ final class ProfileColdStartTests {
         try? await Task.sleep(for: .milliseconds(150))
         #expect(isContent(shown.phases.last))
         #expect(ids(shown.snapshots.last?.activity) == ["a", "b", "c"])
+    }
+
+    /// The Liked tab opens with the grid at the next launch (#1776), instead
+    /// of popping in once its read lands.
+    @Test func theLikedTabOpensWithTheGridAfterAColdStart() async throws {
+        let cache = try launchCache()
+        let liked = [tile("l1", at: 70), tile("l2", at: 65)]
+        let (first, shownFirst) = open(.currentUser, cache: cache, profiles: ColdProfiles(), gallery: gallery(liked: liked))
+        try #require(await settle { ids(shownFirst.snapshots.last?.reactions) == ["l1", "l2"] })
+        cache.waitForDeviceWrites()
+        withExtendedLifetime(first) {}
+
+        let profiles = ColdProfiles()
+        await profiles.goOffline()
+        let offlineGallery = gallery(liked: liked)
+        await offlineGallery.goOffline()
+        let (viewModel, shown) = open(.currentUser, cache: try staleLaunchCache(), profiles: profiles, gallery: offlineGallery)
+        #expect(ids(shown.snapshots.first?.reactions) == ["l1", "l2"], "the Liked tab popped in after the grid")
+        try? await Task.sleep(for: .milliseconds(150))
+        #expect(ids(shown.snapshots.last?.reactions) == ["l1", "l2"], "a failed read took the likes back")
+        withExtendedLifetime(viewModel) {}
+    }
+
+    /// A Liked list the server now answers empty is not kept from before.
+    @Test func anEmptiedLikedTabIsNotKept() throws {
+        let cache = try launchCache()
+        let id = ProfileID("me")
+        let grid = ProfileGalleryStore.Corpus(posts: [tile("a", at: 1)], nextToken: nil, hasLaterPages: false)
+        cache.store(ProfileGalleryStore.Corpora(authored: grid, tagged: nil, liked: [tile("l", at: 2)]), for: id)
+        cache.store(ProfileGalleryStore.Corpora(authored: grid, tagged: nil, liked: nil), for: id)
+        #expect(cache.gallery(for: id)?.liked == nil)
     }
 
     @Test func theViewersOwnProfileOpensOnItsLastContentOffline() async throws {

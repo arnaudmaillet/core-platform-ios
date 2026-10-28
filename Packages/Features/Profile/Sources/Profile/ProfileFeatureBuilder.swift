@@ -40,6 +40,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// already seen renders instantly. One per app, like the preferences;
     /// backed by the device store when the app hands one in (#893).
     private let cache: ProfileCache
+    /// Followers, Following and Friends on the device (#1776).
+    private let relationshipsCache: ProfileRelationshipsLocalCache?
     private let imagePipeline: ImagePipeline
     private let router: (any Router)?
     /// Reads the viewer's account for the settings screen (own profile only).
@@ -79,6 +81,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         localStore: LocalStore? = nil
     ) {
         self.cache = ProfileCache(store: localStore)
+        self.relationshipsCache = localStore.map(ProfileRelationshipsLocalCache.init(store:))
         self.repository = repository
         self.reporting = reporting
         self.shareTargeting = shareTargeting
@@ -120,14 +123,15 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         (ProfileRelationshipsViewModel.Subject, RelationshipDirection) -> UIViewController
     )? {
         guard let relationships else { return nil }
-        return { [imagePipeline, router, followEvents] subject, direction in
+        return { [imagePipeline, router, followEvents, relationshipsCache] subject, direction in
             ProfileRelationshipsViewController(
                 viewModel: ProfileRelationshipsViewModel(
                     subject: subject,
                     repository: relationships,
                     router: router,
                     direction: direction,
-                    followEvents: followEvents
+                    followEvents: followEvents,
+                    deviceCache: relationshipsCache
                 ),
                 imagePipeline: imagePipeline
             )

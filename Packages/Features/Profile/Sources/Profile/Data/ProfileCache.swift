@@ -178,7 +178,11 @@ public final class ProfileCache {
         let kept = entries[id]?.gallery
         entries[id, default: Entry()].gallery = ProfileGalleryStore.Corpora(
             authored: gallery.authored ?? kept?.authored,
-            tagged: gallery.tagged ?? kept?.tagged
+            tagged: gallery.tagged ?? kept?.tagged,
+            // ⚠️ NO FALLBACK FOR LIKED (#1776): nil is the screen's answer (the
+            // server said empty, or the tab is hidden), and keeping the old
+            // posts would show likes the profile took back.
+            liked: gallery.liked
         )
         touch(id)
         persist(id)

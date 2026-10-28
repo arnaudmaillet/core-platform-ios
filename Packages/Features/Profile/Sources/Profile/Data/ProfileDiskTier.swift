@@ -144,6 +144,9 @@ struct ProfileDiskRecord: Codable, Equatable {
     struct Gallery: Codable, Equatable {
         var authored: Corpus?
         var tagged: Corpus?
+        /// The Liked tab (#1776); optional, so a row stored before it decodes
+        /// with none.
+        var liked: [Post]?
     }
 
     struct Corpus: Codable, Equatable {
@@ -283,10 +286,13 @@ extension ProfileDiskRecord.Gallery {
     init(_ corpora: ProfileGalleryStore.Corpora) {
         authored = corpora.authored.map(ProfileDiskRecord.Corpus.init)
         tagged = corpora.tagged.map(ProfileDiskRecord.Corpus.init)
+        liked = corpora.liked?.map(ProfileDiskRecord.Post.init)
     }
 
     var corpora: ProfileGalleryStore.Corpora {
-        ProfileGalleryStore.Corpora(authored: authored?.corpus, tagged: tagged?.corpus)
+        ProfileGalleryStore.Corpora(
+            authored: authored?.corpus, tagged: tagged?.corpus, liked: liked?.compactMap(\.galleryPost)
+        )
     }
 }
 
