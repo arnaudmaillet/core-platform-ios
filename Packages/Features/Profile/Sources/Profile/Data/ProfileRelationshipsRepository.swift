@@ -221,8 +221,10 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
         profileClient: any Profile_V1_ProfileServiceClientInterface,
         viewer: any ProfileViewerResolving,
         supportsFollowerRemoval: Bool,
-        followEvents: FollowGraphEvents? = nil
+        followEvents: FollowGraphEvents? = nil,
+        people: (any PeopleSightings)? = nil
     ) {
+        self.people = people
         self.socialGraphClient = socialGraphClient
         self.profileClient = profileClient
         self.viewer = viewer
@@ -233,6 +235,8 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
     /// Announces this repository's own accepted follows, and keeps the cached
     /// follow set honest about everyone else's — see `FollowGraphEvents`.
     private let followEvents: FollowGraphEvents?
+    /// Where every person a list shows is reported (#1858).
+    private let people: (any PeopleSightings)?
     /// Registered with the cache it keeps: nothing to fold before there is one.
     private var followSubscription: FollowGraphSubscription?
 
@@ -426,6 +430,7 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
                 if let view, !view.profileID.isEmpty { byID[view.profileID] = view }
             }
         }
+        people?.saw(ids.compactMap { byID[$0] }.map(AuthorSummary.init(profileView:)))
         if byID.count < ids.count {
             logger.info("relationship page: \(ids.count - byID.count, privacy: .public) of \(ids.count, privacy: .public) profiles unreadable")
         }

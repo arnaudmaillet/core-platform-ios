@@ -16,7 +16,9 @@ private struct AuthenticatedSessionStub: AuthSessionProviding {
 }
 
 struct CommentsRepositoryTests {
-    private func makeRepository(viewer: (any ViewerProviding)? = nil) -> CommentsRepository {
+    private func makeRepository(
+        viewer: (any ViewerProviding)? = nil, people: (any PeopleSightings)? = nil
+    ) -> CommentsRepository {
         let dataset = MockSocialDataset()
         let bff = MockBFF()
         MockSocialServices(dataset: dataset).register(on: bff) // viewer resolve + author hydration
@@ -26,8 +28,25 @@ struct CommentsRepositoryTests {
             commentClient: Comment_V1_CommentServiceClient(client: client),
             profileClient: Profile_V1_ProfileServiceClient(client: client),
             authSession: AuthenticatedSessionStub(),
-            viewer: viewer
+            viewer: viewer,
+            people: people
         )
+    }
+
+    /// ⚠️ A COMMENT'S AUTHOR IS KNOWN THE NEXT TIME THEY ARE OPENED (#1858):
+    /// every author the thread hydrated is reported, name, handle and avatar.
+    @Test func theAuthorsOfAThreadAreReported() async throws {
+        let people = RecordedPeople()
+        let repository = makeRepository(people: people)
+        let comments = try await repository.loadComments(for: PostID("post-0001"))
+        try #require(!comments.isEmpty)
+        let seen = people.seen
+        for comment in comments {
+            let person = try #require(seen.first { $0.id == comment.authorID }, "\(comment.authorID) not reported")
+            #expect(person.displayName == comment.authorName)
+            #expect(person.handle == comment.authorHandle)
+            #expect(person.avatarURL == comment.authorAvatarURL)
+        }
     }
 
     /// A switch made through ONE repository reaches every other repository on
@@ -122,4 +141,17 @@ struct CommentsRepositoryTests {
         #expect(Set(cues.map(\.id)).isDisjoint(with: queue.map(\.id))) // one comment, one surface
         #expect(cues.allSatisfy { !$0.text.contains(where: \.isNewline) })
     }
+}
+
+/// What a writer reported (#1858).
+final class RecordedPeople: PeopleSightings, @unchecked Sendable {
+    private let lock = NSLock()
+    private var sightings: [AuthorSummary] = []
+    private var loads: [AuthorSummary] = []
+
+    func saw(_ people: [AuthorSummary]) { lock.withLock { sightings += people } }
+    func loaded(_ person: AuthorSummary) { lock.withLock { loads.append(person) } }
+
+    var seen: [AuthorSummary] { lock.withLock { sightings } }
+    var loaded: [AuthorSummary] { lock.withLock { loads } }
 }

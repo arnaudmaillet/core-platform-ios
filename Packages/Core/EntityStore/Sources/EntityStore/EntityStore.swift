@@ -225,15 +225,67 @@ public final class EntityStore: Sendable {
         profiles.value(for: id)
     }
 
-    public func upsert(_ summary: AuthorSummary, tier: CacheTier = .recent) {
+    /// A person as a screen showed them.
+    ///
+    /// - `.fresh`: the full profile, read just now — it replaces what the
+    ///   store holds.
+    /// - `.ifUnknown` (#1858): a row's projection — a comment's author, a
+    ///   conversation's peer, a search result. It fills what the store does
+    ///   not know and replaces nothing: a thin summary (no avatar, no frame)
+    ///   written after a full one never erases them.
+    public func upsert(_ summary: AuthorSummary, tier: CacheTier = .recent, freshness: CountFreshness = .fresh) {
         let changed = writes.withLock { _ in
             writeProfile(summary.id, tier: tier) { current in
                 var next = current ?? ProfileEntity(id: summary.id)
-                next.summary = summary
+                next.summary = Self.merge(summary, over: next.summary, freshness)
                 return next
             }
         }
         if changed { notifyProfiles(.some([summary.id])) }
+    }
+
+    /// `summary` over what the store holds: all of it when fresh; field by
+    /// field, only where the store knows nothing, when a copy.
+    static func merge(_ summary: AuthorSummary, over current: AuthorSummary?, _ freshness: CountFreshness) -> AuthorSummary {
+        guard freshness == .ifUnknown, let current else { return summary }
+        return AuthorSummary(
+            id: current.id,
+            handle: current.handle.isEmpty ? summary.handle : current.handle,
+            displayName: current.displayName.isEmpty ? summary.displayName : current.displayName,
+            avatarURL: current.avatarURL ?? summary.avatarURL,
+            avatarFrameID: current.avatarFrameID ?? summary.avatarFrameID
+        )
+    }
+
+    /// The best known identity of a person about to be opened (#1858): the
+    /// origin's stub field by field, then what the store holds for what it
+    /// lacks — name, handle, avatar, frame from the person's summary, the
+    /// follow state from the viewer's relation. Nil only when neither knows
+    /// the person. Nothing is invented: an unknown field stays nil.
+    public func knownIdentity(of id: ProfileID, stub: ProfileIdentityStub?) -> ProfileIdentityStub? {
+        Self.identity(stub: stub, summary: profiles.value(for: id)?.summary, relation: relations.cache.value(for: id))
+    }
+
+    /// The resolver's rule, pure.
+    static func identity(
+        stub: ProfileIdentityStub?, summary: AuthorSummary?, relation: FollowRelation?
+    ) -> ProfileIdentityStub? {
+        guard stub != nil || summary != nil else { return nil }
+        let name = stub.map(\.displayName).flatMap { $0.isEmpty ? nil : $0 } ?? summary?.displayName ?? ""
+        let followed: Bool? = switch relation {
+        case .following, .mutual: true
+        case .notFollowing, .followedBy: false
+        default: nil
+        }
+        return ProfileIdentityStub(
+            handle: stub?.handle ?? summary?.handle,
+            displayName: name,
+            isFollowing: stub?.isFollowing ?? followed,
+            isSelf: (stub?.isSelf ?? false) || relation == .viewer,
+            avatarURL: stub?.avatarURL ?? summary?.avatarURL,
+            avatarFrameID: stub?.avatarFrameID ?? summary?.avatarFrameID,
+            hasBanner: stub?.hasBanner
+        )
     }
 
     // MARK: - The viewer's facts
@@ -572,5 +624,20 @@ public final class EntityStore: Sendable {
             guard tombstones.remove(id) != nil else { return }
             tombstoneOrder.removeAll { $0 == id }
         }
+    }
+}
+
+// MARK: - People seen (#1858)
+
+extension EntityStore: PeopleSightings {
+    /// The people a screen showed: every one kept, filling only what the
+    /// store did not know.
+    public func saw(_ people: [AuthorSummary]) {
+        for person in people { upsert(person, freshness: .ifUnknown) }
+    }
+
+    /// A full profile, read just now: it is the person.
+    public func loaded(_ person: AuthorSummary) {
+        upsert(person, freshness: .fresh)
     }
 }

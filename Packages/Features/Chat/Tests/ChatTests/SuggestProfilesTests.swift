@@ -18,7 +18,8 @@ private struct Viewer: ViewerIdentityProviding {
 struct SuggestProfilesRepositoryTests {
     private func makeRepository(
         isPrivate: @escaping @Sendable (String) -> Bool = { _ in false },
-        isSuggestible: @escaping @Sendable (String) -> Bool = { _ in true }
+        isSuggestible: @escaping @Sendable (String) -> Bool = { _ in true },
+        people: (any PeopleSightings)? = nil
     ) -> (SocialConnectionsRepository, MockBFF) {
         let dataset = MockSocialDataset()
         let bff = MockBFF()
@@ -29,9 +30,31 @@ struct SuggestProfilesRepositoryTests {
             socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: client),
             profileClient: Profile_V1_ProfileServiceClient(client: client),
             viewer: Viewer(),
-            pageSize: 200
+            pageSize: 200,
+            people: people
         )
         return (repository, bff)
+    }
+
+    /// ⚠️ EVERY PERSON CHAT HYDRATES IS REPORTED (#1858): Suggestions, and the
+    /// inbox's faces and a thread's peer through the same read.
+    @Test func thePeopleChatShowsAreReported() async throws {
+        let people = RecordedChatPeople()
+        let (repository, _) = makeRepository(people: people)
+        let suggested = try await repository.suggestions(limit: 3)
+        try #require(!suggested.isEmpty)
+        for account in suggested {
+            let person = try #require(people.seen.first { $0.id == account.id }, "\(account.id) not reported")
+            #expect(person.handle == account.handle)
+            #expect(person.displayName == account.displayName)
+            #expect(person.avatarURL == account.avatarURL)
+        }
+        // A face asked by a row: reported too.
+        let (rows, _) = makeRepository(people: people)
+        let peer = try #require(suggested.first?.id)
+        let before = people.seen.count
+        _ = await rows.avatarURLs(for: [peer])
+        #expect(people.seen.count > before, "an inbox face not reported")
     }
 
     /// One ranked call, one read of who follows the viewer — and none of
@@ -591,4 +614,15 @@ struct SuggestionsScreenPagingTests {
         #expect(reached, "the list stalled under its footer: \(viewModel.phase)")
         #expect(await source.asked.count == 1 + bound + 1)
     }
+}
+
+/// What a writer reported (#1858).
+private final class RecordedChatPeople: PeopleSightings, @unchecked Sendable {
+    private let lock = NSLock()
+    private var sightings: [AuthorSummary] = []
+
+    func saw(_ people: [AuthorSummary]) { lock.withLock { sightings += people } }
+    func loaded(_ person: AuthorSummary) { lock.withLock { sightings.append(person) } }
+
+    var seen: [AuthorSummary] { lock.withLock { sightings } }
 }

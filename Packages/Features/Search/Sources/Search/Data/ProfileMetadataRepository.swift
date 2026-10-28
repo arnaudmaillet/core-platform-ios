@@ -1,6 +1,7 @@
 import AuthInterface
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// What a person row shows beyond the name the search response gave it.
@@ -90,12 +91,17 @@ public actor ProfileMetadataRepository: ProfileMetadataProviding {
     /// were made (`applyFollowChange`): newer than any read, so a read in
     /// flight when one lands answers with it.
     private var acceptedFollows: [ProfileID: Bool] = [:]
+    /// Where the people a search shows are reported, with the profile this
+    /// read already fetched for their avatar (#1858).
+    private let people: (any PeopleSightings)?
 
     public init(
         profileClient: any Profile_V1_ProfileServiceClientInterface,
         socialGraphClient: any SocialGraph_V1_SocialGraphServiceClientInterface,
-        viewerID: @escaping @Sendable () async -> ProfileID?
+        viewerID: @escaping @Sendable () async -> ProfileID?,
+        people: (any PeopleSightings)? = nil
     ) {
+        self.people = people
         self.profileClient = profileClient
         self.socialGraphClient = socialGraphClient
         self.viewerID = viewerID
@@ -122,9 +128,9 @@ public actor ProfileMetadataRepository: ProfileMetadataProviding {
 
     private func task(for id: ProfileID) -> Task<ProfileRowMetadata, Never> {
         if let existing = inFlight[id] { return existing }
-        let task = Task<ProfileRowMetadata, Never> { [profileClient, socialGraphClient, viewerID] in
+        let task = Task<ProfileRowMetadata, Never> { [profileClient, socialGraphClient, viewerID, people] in
             // Concurrently: one round of latency per person, not two.
-            async let avatar = Self.avatarURL(of: id, profileClient: profileClient)
+            async let avatar = Self.avatarURL(of: id, profileClient: profileClient, people: people)
             async let relation = Self.relation(
                 to: id, socialGraphClient: socialGraphClient, viewerID: viewerID
             )
@@ -140,12 +146,14 @@ public actor ProfileMetadataRepository: ProfileMetadataProviding {
     }
 
     private static func avatarURL(
-        of id: ProfileID, profileClient: any Profile_V1_ProfileServiceClientInterface
+        of id: ProfileID, profileClient: any Profile_V1_ProfileServiceClientInterface,
+        people: (any PeopleSightings)?
     ) async -> URL? {
         var request = Profile_V1_GetProfileByIdRequest()
         request.profileID = id.rawValue
         let response = await profileClient.getProfileByID(request: request, headers: [:])
         guard case .success(let view) = response.result else { return nil }
+        people?.saw([AuthorSummary(profileView: view)])
         return URL(string: view.avatarURL)
     }
 

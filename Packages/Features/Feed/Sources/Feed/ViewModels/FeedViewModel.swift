@@ -348,13 +348,20 @@ public final class FeedViewModel {
     /// cell already renders (handle, name) rides along so the profile screen
     /// can compose its navigation chrome before the push animates.
     public func didTapAuthor(_ id: ProfileID) {
-        router?.route(to: .profile(id, stub: authorStubs[id]))
+        router?.route(to: .profile(id, stub: identity(of: id)))
+    }
+
+    /// What the feed knows of `id` as it opens them (#1858): the pill's stub,
+    /// with the viewer's follow state from the store — the badge the pill
+    /// shows — and what the store holds for anything the stub lacks.
+    private func identity(of id: ProfileID) -> ProfileIdentityStub? {
+        entities.knownIdentity(of: id, stub: authorStubs[id])
     }
 
     /// The bottom toolbar's author pill (#1524): the author's profile CARD,
     /// or, on the viewer's own post, their profile.
     public func didTapAuthorPill(_ id: ProfileID, isViewer: Bool) {
-        let stub = authorStubs[id]
+        let stub = identity(of: id)
         router?.route(to: .profileCard(id, stub: Self.pillStub(stub, isViewer: isViewer)))
     }
 
@@ -362,8 +369,9 @@ public final class FeedViewModel {
     nonisolated static func pillStub(_ stub: ProfileIdentityStub?, isViewer: Bool) -> ProfileIdentityStub? {
         guard isViewer else { return stub }
         return ProfileIdentityStub(
-            handle: stub?.handle ?? "", displayName: stub?.displayName ?? "",
-            isFollowing: stub?.isFollowing, isSelf: true
+            handle: stub?.handle, displayName: stub?.displayName ?? "",
+            isFollowing: stub?.isFollowing, isSelf: true,
+            avatarURL: stub?.avatarURL, avatarFrameID: stub?.avatarFrameID, hasBanner: stub?.hasBanner
         )
     }
 
@@ -371,7 +379,7 @@ public final class FeedViewModel {
     /// pushes following the finger (#1525). Nil without a router that makes
     /// one.
     public func authorProfileDestination(_ id: ProfileID) -> UIViewController? {
-        router?.destination(for: .profile(id, stub: authorStubs[id]))
+        router?.destination(for: .profile(id, stub: identity(of: id)))
     }
 
     /// The comment button tapped — open the post's comments via routing. On the
@@ -855,9 +863,13 @@ public final class FeedViewModel {
         // refreshes, composed-post prepends), so this is the one place to
         // remember each author's identity slice for profile routing.
         for entry in entries {
+            // What the pill draws (#1858): name, handle, avatar and frame. The
+            // follow state is read when the person is opened (`identity(of:)`).
             authorStubs[entry.author.id] = ProfileIdentityStub(
                 handle: entry.author.handle,
-                displayName: entry.author.displayName
+                displayName: entry.author.displayName,
+                avatarURL: entry.author.avatarURL,
+                avatarFrameID: entry.author.avatarFrameID
             )
         }
         let now = now()

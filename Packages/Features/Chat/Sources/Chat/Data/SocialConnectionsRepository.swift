@@ -142,6 +142,9 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProvid
     /// app (a profile's button, a feed's "+") — see `FollowGraphEvents`.
     private let followEvents: FollowGraphEvents?
     private var profileCache: [ProfileID: Profile_V1_ProfileView] = [:]
+    /// Where every person this repository hydrates is reported — the inbox's
+    /// rows, a thread's peer, Suggestions, inbox search (#1858).
+    private let people: (any PeopleSightings)?
     /// Who followed the viewer when the first page of suggestions was read —
     /// reused by the pages after it.
     private var viewerFollowers: (viewer: ProfileID, ids: Set<ProfileID>)?
@@ -154,8 +157,10 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProvid
         profileClient: any Profile_V1_ProfileServiceClientInterface,
         viewer: any ViewerIdentityProviding,
         pageSize: Int32,
-        followEvents: FollowGraphEvents? = nil
+        followEvents: FollowGraphEvents? = nil,
+        people: (any PeopleSightings)? = nil
     ) {
+        self.people = people
         self.socialGraphClient = socialGraphClient
         self.profileClient = profileClient
         self.viewer = viewer
@@ -317,6 +322,7 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProvid
             }
         }
         for (id, view) in fetched { profileCache[id] = view }
+        people?.saw(fetched.map { AuthorSummary(profileView: $0.1) })
     }
 
     /// A candidate becomes a row only once its own profile resolved — a

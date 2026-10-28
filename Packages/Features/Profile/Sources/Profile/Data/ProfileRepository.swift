@@ -350,6 +350,9 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
     /// Who is signed in, and as which profile — shared with every other
     /// repository (`ViewerSession`), so a switch or a sign-out reaches all of them.
     private let viewer: any ViewerProviding
+    /// Where a profile read in full is reported: it IS the person, and
+    /// replaces what any row projected (#1858).
+    private let people: (any PeopleSightings)?
 
     public init(
         profileClient: any Profile_V1_ProfileServiceClientInterface,
@@ -358,8 +361,10 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         authSession: any AuthSessionProviding,
         viewer: (any ViewerProviding)? = nil,
         edgeSampleLimit: Int32 = 200,
-        followEvents: FollowGraphEvents? = nil
+        followEvents: FollowGraphEvents? = nil,
+        people: (any PeopleSightings)? = nil
     ) {
+        self.people = people
         self.followEvents = followEvents
         let pendingRequests = PendingFollowRequests()
         self.pendingRequests = pendingRequests
@@ -622,6 +627,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         async let countsResult = fetchSocialCounts(for: id)
         let view = try await viewResult
         let counts = await countsResult
+        people?.loaded(AuthorSummary(profileView: view))
         return Self.makeProfile(from: view, counts: counts)
     }
 

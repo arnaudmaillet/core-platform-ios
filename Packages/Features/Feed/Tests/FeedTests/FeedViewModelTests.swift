@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import Foundation
 import CoreNetworking
+import EntityStore
 import Testing
 @testable import Feed
 
@@ -157,6 +158,37 @@ struct FeedViewModelTests {
         }
         #expect(id == ProfileID("me") && stub?.isSelf == true, "one's own pill did not say so")
         #expect(router.routes.last?.profileCardResolution == .pushProfile(.profile(ProfileID("me"), stub: stub)))
+    }
+
+    /// ⚠️ THE PROFILE OPENS WITH WHAT THE PILL DREW (#1858): its name, handle,
+    /// avatar and frame, and the follow state the pill's badge shows (the
+    /// store's relation).
+    @Test func theAuthorsStubCarriesWhatThePillDrew() async {
+        let avatar = URL(string: "https://example.test/ava.jpg")!
+        let author = AuthorSummary(
+            id: ProfileID("prof-1"), handle: "ava", displayName: "Ava", avatarURL: avatar, avatarFrameID: "frame.gold"
+        )
+        let post = Post(id: PostID("post-1"), authorID: author.id, caption: "c", attachments: [], publishedAt: Date())
+        let provider = FakeFeedProvider()
+        provider.pages[""] = .success(FeedPage(entries: [FeedEntry(post: post, author: author)], nextPageToken: nil, isCold: false))
+        let entities = EntityStore()
+        entities.setRelation(.mutual, for: author.id)
+        let router = SpyRouter()
+        let viewModel = FeedViewModel(repository: provider, router: router, entities: entities)
+        async let states = collectStates(viewModel) { $0.items.count == 1 }
+        viewModel.viewDidLoad()
+        _ = await states
+
+        viewModel.didTapAuthor(author.id)
+        guard case .profile(_, let stub)? = router.routes.last else {
+            Issue.record("not a profile route: \(router.routes)")
+            return
+        }
+        #expect(stub?.handle == "ava")
+        #expect(stub?.displayName == "Ava")
+        #expect(stub?.avatarURL == avatar)
+        #expect(stub?.avatarFrameID == "frame.gold")
+        #expect(stub?.isFollowing == true, "the pill's badge says followed, the stub doesn't")
     }
 
     @Test func tappingCommentsRoutesToComments() {
