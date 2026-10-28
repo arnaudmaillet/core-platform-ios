@@ -222,13 +222,38 @@ public enum Palette {
 
     // MARK: - The loader (#1329)
 
-    /// The branded loader's four pieces, one solid tone each, from the pink to
-    /// the violet clockwise from the top-left: `tint` → `secondary` (dark)
-    /// with two even steps between. The same in both appearances — the mark
-    /// is a logo, not text (owner, 2026-10-17). Read through `AppLoaderView`.
+    /// The branded loader's three pills (#1795), the brand gradient across them
+    /// left to right: pink, mauve, violet. The same in both appearances — the
+    /// mark is a logo, not text (owner, 2026-10-17). Read through
+    /// `AppLoaderView`.
     public static let loaderTones: [UIColor] = [
-        rgb(0xF37AB4), rgb(0xA78BFA), rgb(0xC08BE6), rgb(0xD98AD0),
+        rgb(0xF37AB4), rgb(0xD98AD0), rgb(0xA78BFA),
     ]
+
+    /// Each pill's lead — its pale wake (#1795): the pill's tone mixed
+    /// `loaderLeadMix` toward the page (`F2F2F7` light, black dark), so it
+    /// resolves per appearance.
+    public static let loaderLeadTones: [UIColor] = loaderTones.map { tone in
+        UIColor { traits in
+            mixed(tone, toward: traits.userInterfaceStyle == .dark ? .black : rgb(0xF2F2F7), by: loaderLeadMix)
+        }
+    }
+
+    /// How far a lead is mixed toward the page.
+    static let loaderLeadMix: CGFloat = 0.55
+
+    /// `color` moved `amount` (0…1) of the way to `target`, in sRGB — an
+    /// opaque colour, through `rgb`.
+    static func mixed(_ color: UIColor, toward target: UIColor, by amount: CGFloat) -> UIColor {
+        var from: (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+        var to: (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+        color.getRed(&from.0, green: &from.1, blue: &from.2, alpha: &from.3)
+        target.getRed(&to.0, green: &to.1, blue: &to.2, alpha: &to.3)
+        func channel(_ a: CGFloat, _ b: CGFloat) -> UInt32 {
+            UInt32((min(1, max(0, a + (b - a) * amount)) * 255).rounded())
+        }
+        return rgb(channel(from.0, to.0) << 16 | channel(from.1, to.1) << 8 | channel(from.2, to.2))
+    }
 
     // MARK: - Economy
 

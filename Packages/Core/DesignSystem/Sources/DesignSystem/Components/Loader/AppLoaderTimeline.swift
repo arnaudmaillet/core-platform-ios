@@ -1,218 +1,106 @@
 import CoreGraphics
 import Foundation
 
-/// When the loader's pieces take which form — pure, so the same pull always
-/// draws the same frame and every rule is a test away.
+/// The loader's wave (#1795, the owner 2026-10-27): three pills rippling left
+/// to right, never stopping — pure, so the same time always draws the same
+/// frame and every rule is a test away.
 ///
-/// - **Entry** (`entry(at:)`, #1744): the icon's pieces appear one after
-///   another clockwise from the pink, the icon holds, then spins up to loop
-///   speed while its pieces thin into the ring's arcs over `morphTurns` whole
-///   turns — the morph keyed to the turn, not the clock, so each turn thins
-///   them a little more — and lands on the resting ring turning at loop speed.
-/// - **Pull** (`pull(_:)`, scrubbed by a finger): the start of that same entry
-///   — the appearance and the first `pullTurns` of the spin; the rest plays on
-///   release from the frame the pull reached.
-/// - **Loop** (`loopKeyframes`): the ring turns once per `rotationPeriod`
-///   while its arcs trade length — seeded keyframes that begin and end on
-///   equal quarters, over a whole number of turns, so the loop has no seam.
-/// - **Exit**: the mark fades and shrinks a little where it is, still
-///   turning (the owner, 2026-10-17: no closing back into the mark).
+/// ONE FUNCTION OF TIME, TWO DRIVERS:
+/// - each pill's height is a continuous cosine, `½ − ½·cos(2πt / period)`:
+///   no hold at the top, no rest at the bottom; pill `i` runs `i × stagger`
+///   behind pill `i − 1`;
+/// - the PULL reads it at `t = progress × period`, so a full pull plays at
+///   most one cycle and pulling back plays it in reverse. Each pill stays a
+///   dot until its own time starts — progress 0 is three dots — and the cosine
+///   leaves zero with zero speed, so each start is smooth;
+/// - the LOOP (loading) runs the same function from the `t` the pull reached,
+///   so a release never jumps.
+///
+/// Behind each pill, its LEAD: the same pill `leadAhead` seconds ahead, in a
+/// lighter tone — a pale wake while the pill rises, hidden behind it while it
+/// falls. Its head start grows in over the first `leadAhead` of the wave, so
+/// pull 0 is three plain dots.
+///
+/// Exit: the pills fade and shrink a little where they are.
 public enum AppLoaderTimeline {
-    /// One frame of the four pieces.
+    /// The heights, 0 (a dot) … 1 (the peak), of the pills and their leads.
     public struct Frame: Equatable {
-        /// Normalised outlines, one per piece (`AppLoaderGeometry`).
-        public var outlines: [[CGPoint]]
-        public var opacities: [CGFloat]
-        /// The whole mark's turn, in radians, clockwise.
-        public var rotation: CGFloat
+        public var heights: [CGFloat]
+        public var leadHeights: [CGFloat]
     }
 
     // MARK: - Timings
 
-    /// One turn of the ring while loading.
-    public static let rotationPeriod: TimeInterval = 1.2
-    /// One loop of the arcs trading length — three turns, so it closes on
-    /// the frame it opened with.
-    public static let loopDuration: TimeInterval = 3.6
-    /// Loading ended: the mark fades and shrinks where it is.
+    /// One cycle of a pill: dot, peak, dot.
+    public static let period: TimeInterval = 1.2
+    /// How far each pill runs behind the one before it: a sixth of a cycle.
+    public static let stagger: TimeInterval = 0.2
+    /// How far each lead runs ahead of its pill.
+    public static let leadAhead: TimeInterval = 0.1
+    /// Loading ended: the pills fade and shrink where they are.
     public static let exitFadeDuration: TimeInterval = 0.2
     public static let exitScale: CGFloat = 0.85
 
-    /// Turns per loop — whole, which is what makes the loop seamless.
-    public static var turnsPerLoop: Double { loopDuration / rotationPeriod }
+    // MARK: - The wave
 
-    // MARK: - The entry
-
-    /// Each piece's appearance, staggered clockwise from the pink: all four
-    /// in by `appearEnd` (0.4 s).
-    static let appearStagger: TimeInterval = 0.06
-    static let appearLength: TimeInterval = 0.22
-    static let appearScale: CGFloat = 0.3
-    static var appearEnd: TimeInterval {
-        Double(AppLoaderGeometry.pieceCount - 1) * appearStagger + appearLength
+    /// One pill's height `time` seconds into its own cycle: 0 before it
+    /// starts, then the continuous cosine.
+    public static func wave(at time: TimeInterval) -> CGFloat {
+        guard time > 0 else { return 0 }
+        return CGFloat(0.5 - 0.5 * cos(2 * .pi * time / period))
     }
-    /// The icon holds still until here…
-    static let spinStart: TimeInterval = 0.7
-    /// …then spins up, accelerating evenly, to one turn per `rotationPeriod`.
-    static let spinUpDuration: TimeInterval = 0.8
-    /// The whole turns, counted from the spin's start, over which the icon's
-    /// pieces thin into the ring's arcs.
-    public static let morphTurns: CGFloat = 3
-    /// How much of the spin a pull scrubs; the rest plays on release.
-    static let pullTurns: CGFloat = 0.5
 
-    /// The turn the spin-up ends on (a third of a turn).
-    static var spinUpTurns: CGFloat { CGFloat(spinUpDuration / rotationPeriod / 2) }
-
-    /// From the first piece appearing to the resting ring, without a pull
-    /// (≈4.7 s).
-    public static var entryDuration: TimeInterval { time(atTurns: morphTurns) }
-    /// Where on the entry a full pull is: half a turn into the spin (1.7 s).
-    public static var pullDuration: TimeInterval { time(atTurns: pullTurns) }
-    /// The mark's turn as the entry lands on the ring.
-    public static var landingRotation: CGFloat { 2 * .pi * morphTurns }
-
-    /// The entry's frame `time` seconds in: the pieces appearing, the icon,
-    /// then the icon thinning into the ring as it turns; from `entryDuration`
-    /// on, the resting ring.
-    public static func entry(at time: TimeInterval) -> Frame {
-        let turn = rotation(at: time)
-        let thinning = time >= entryDuration ? 1 : morph(atRotation: turn)
-        var outlines: [[CGPoint]] = []
-        var opacities: [CGFloat] = []
-        for piece in 0..<AppLoaderGeometry.pieceCount {
-            let start = Double(piece) * appearStagger
-            let shown = easeOut(CGFloat(min(1, max(0, (time - start) / appearLength))))
-            let form = AppLoaderGeometry.mix(
-                AppLoaderGeometry.icon(piece), AppLoaderGeometry.restingRing(piece), thinning
-            )
-            outlines.append(shown >= 1 ? form : AppLoaderGeometry.scaled(form, by: appearScale + (1 - appearScale) * shown))
-            opacities.append(shown)
-        }
-        return Frame(outlines: outlines, opacities: opacities, rotation: turn)
+    /// Pill `index`'s height `time` seconds into the wave.
+    public static func height(pill index: Int, at time: TimeInterval) -> CGFloat {
+        wave(at: time - Double(index) * stagger)
     }
+
+    /// Pill `index`'s lead's height: the pill, `leadAhead` ahead — that head
+    /// start growing in over the wave's first `leadAhead`, so nothing shows
+    /// before the wave starts.
+    public static func leadHeight(pill index: Int, at time: TimeInterval) -> CGFloat {
+        guard time > 0 else { return 0 }
+        return wave(at: time - Double(index) * stagger + min(time, leadAhead))
+    }
+
+    /// The whole frame `time` seconds into the wave.
+    public static func frame(at time: TimeInterval) -> Frame {
+        let pills = 0..<AppLoaderGeometry.pillCount
+        return Frame(
+            heights: pills.map { height(pill: $0, at: time) },
+            leadHeights: pills.map { leadHeight(pill: $0, at: time) }
+        )
+    }
+
+    // MARK: - The pull
 
     /// The frame for a pull `progress` (overscroll ÷ threshold), clamped to
-    /// 0…1: the entry at `pullTime(progress)`. The same progress always gives
-    /// the same frame.
+    /// 0…1. The same progress always gives the same frame.
     public static func pull(_ progress: CGFloat) -> Frame {
-        entry(at: pullTime(progress))
+        frame(at: pullTime(progress))
     }
 
-    /// Where on the entry a pull `progress` is — where release plays on from.
+    /// Where on the wave a pull `progress` is — where release plays on from.
     public static func pullTime(_ progress: CGFloat) -> TimeInterval {
-        Double(min(1, max(0, progress))) * pullDuration
-    }
-
-    /// The rest of the entry from `start`, sampled evenly in time at
-    /// `entryFrameRate` — its first frame `entry(at: start)`, its last the
-    /// resting ring. Played linearly over `entryDuration − start`.
-    public static func entryRoute(from start: TimeInterval) -> [Frame] {
-        let begin = min(max(0, start), entryDuration)
-        let steps = max(1, Int(((entryDuration - begin) * entryFrameRate).rounded(.up)))
-        return (0...steps).map { step in
-            entry(at: step == steps ? entryDuration : begin + (entryDuration - begin) * Double(step) / Double(steps))
-        }
-    }
-
-    /// Keyframes per second of the entry; the path animation interpolates
-    /// between them.
-    static let entryFrameRate: Double = 30
-
-    /// Still until `spinStart`, an even spin-up over `spinUpDuration`, then
-    /// one turn per `rotationPeriod` — on past the landing, as the loop does.
-    static func rotation(at time: TimeInterval) -> CGFloat {
-        let speed = 2 * .pi / rotationPeriod
-        let spun = time - spinStart
-        guard spun > 0 else { return 0 }
-        if spun < spinUpDuration { return CGFloat(speed * spun * spun / (2 * spinUpDuration)) }
-        return CGFloat(speed * (spinUpDuration / 2 + spun - spinUpDuration))
-    }
-
-    /// When the spin has made `turns` turns.
-    static func time(atTurns turns: CGFloat) -> TimeInterval {
-        let made = Double(max(0, turns))
-        if made < Double(spinUpTurns) {
-            return spinStart + (2 * spinUpDuration * made * rotationPeriod).squareRoot()
-        }
-        return spinStart + spinUpDuration + (made - Double(spinUpTurns)) * rotationPeriod
-    }
-
-    /// How far the icon has thinned into the ring after the spin's `rotation`:
-    /// 0 still, 1 at `morphTurns` turns. Close to linear
-    /// (`0.75·x + 0.25·sine`), so no single turn does most of the thinning.
-    static func morph(atRotation rotation: CGFloat) -> CGFloat {
-        let x = min(1, max(0, rotation / landingRotation))
-        return 0.75 * x + 0.25 * (1 - cos(.pi * x)) / 2
+        Double(min(1, max(0, progress))) * period
     }
 
     // MARK: - The loop
 
-    /// The seed the shipped loop is drawn from.
-    public static let defaultSeed: UInt64 = 0x5EED_1329
-
-    /// Arc fractions over one loop: equal quarters, `anchors` seeded shapes
-    /// (each arc at least `minimumFraction`, the four summing to 1), equal
-    /// quarters again — then `samplesPerStep` eased steps between each pair,
-    /// so every keyframe is an exact ring and the path interpolation between
-    /// neighbours stays a hair from one.
-    public static func loopFractions(
-        seed: UInt64 = defaultSeed, anchors: Int = 4, samplesPerStep: Int = 9
-    ) -> [[CGFloat]] {
-        var generator = SplitMix64(seed: seed)
-        var keys = [AppLoaderGeometry.equalQuarters]
-        for _ in 0..<anchors {
-            let weights = (0..<AppLoaderGeometry.pieceCount).map { _ in 0.15 + generator.nextUnit() }
-            let total = weights.reduce(0, +)
-            let free = 1 - CGFloat(AppLoaderGeometry.pieceCount) * minimumFraction
-            keys.append(weights.map { minimumFraction + free * CGFloat($0 / total) })
+    /// One cycle of a pill's height, sampled evenly from the start of its
+    /// cycle — the keyframes the loop repeats. The first and last are the
+    /// same dot, so the repeat has no seam.
+    public static func cycleSamples(count: Int = 48) -> [CGFloat] {
+        (0...count).map { step in
+            step == count ? 0 : wave(at: period * Double(step) / Double(count))
         }
-        keys.append(AppLoaderGeometry.equalQuarters)
-        var frames: [[CGFloat]] = []
-        for index in 0..<(keys.count - 1) {
-            for step in 0..<samplesPerStep {
-                let t = easeInOut(CGFloat(step) / CGFloat(samplesPerStep))
-                frames.append(zip(keys[index], keys[index + 1]).map { $0 + ($1 - $0) * t })
-            }
-        }
-        frames.append(AppLoaderGeometry.equalQuarters)
-        return frames
     }
 
-    /// The smallest share of the turn an arc ever covers.
-    public static let minimumFraction: CGFloat = 0.1
-
-    /// The loop's outlines per piece: `[piece][keyframe]`.
-    public static func loopKeyframes(seed: UInt64 = defaultSeed) -> [[[CGPoint]]] {
-        let rings = loopFractions(seed: seed).map(AppLoaderGeometry.ring(fractions:))
-        return (0..<AppLoaderGeometry.pieceCount).map { piece in rings.map { $0[piece] } }
-    }
-
-    // MARK: - Easing
-
-    static func easeOut(_ t: CGFloat) -> CGFloat { 1 - pow(1 - t, 3) }
-
-    static func easeInOut(_ t: CGFloat) -> CGFloat {
-        t < 0.5 ? 4 * t * t * t : 1 - pow(-2 * t + 2, 3) / 2
-    }
-}
-
-/// A small deterministic generator, so a seed always draws the same loop.
-struct SplitMix64 {
-    private var state: UInt64
-
-    init(seed: UInt64) { state = seed }
-
-    mutating func next() -> UInt64 {
-        state &+= 0x9E37_79B9_7F4A_7C15
-        var z = state
-        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
-        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
-        return z ^ (z >> 31)
-    }
-
-    /// Uniform in 0..<1.
-    mutating func nextUnit() -> Double {
-        Double(next() >> 11) / Double(1 << 53)
+    /// Where in its own cycle pill `index` is `time` seconds into the wave —
+    /// negative while it has yet to start (its loop then waits that long).
+    public static func cycleTime(pill index: Int, at time: TimeInterval, lead: Bool = false) -> TimeInterval {
+        let own = time - Double(index) * stagger + (lead ? min(max(0, time), leadAhead) : 0)
+        guard own > 0 else { return own }
+        return own.truncatingRemainder(dividingBy: period)
     }
 }
