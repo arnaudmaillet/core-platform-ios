@@ -34,6 +34,15 @@ final class WalletHistoryViewController: UIViewController {
             case .gems: .gems
             }
         }
+
+        /// Its stored list's name (#1776).
+        var storedName: String {
+            switch self {
+            case .all: "all"
+            case .likes: "likes"
+            case .gems: "gems"
+            }
+        }
     }
 
     /// The list's sections: the filter, one per day of movements (the
@@ -88,10 +97,14 @@ final class WalletHistoryViewController: UIViewController {
     /// bar's trailing end — the Stakes screen's bar; in Settings, "Wallet and
     /// Purchases" with the filter as its first row.
     private let filterInBar: Bool
+    /// Each filter's first page on the device (#1776): the history opens on
+    /// it, and so does a filter change, then revalidates in place.
+    private let deviceCache: WalletHistoryLocalCache?
 
-    init(wallet: WalletStore, filterInBar: Bool = false) {
+    init(wallet: WalletStore, filterInBar: Bool = false, deviceCache: WalletHistoryLocalCache? = nil) {
         self.wallet = wallet
         self.filterInBar = filterInBar
+        self.deviceCache = deviceCache
         super.init(nibName: nil, bundle: nil)
         title = filterInBar ? "Activity" : "Wallet and Purchases"
         hidesBottomBarWhenPushed = true
@@ -126,7 +139,7 @@ final class WalletHistoryViewController: UIViewController {
                 id: "wallet.history.filter", view: control, ownBackground: true
             )
         }
-        reload()
+        if !openOnStoredPage() { reload() }
     }
 
     // MARK: Loading
@@ -138,7 +151,9 @@ final class WalletHistoryViewController: UIViewController {
         pageLoad = nil
         filter = next
         guard let kept = listings[next], kept.phase == .loaded else {
-            reload()
+            // ⚠️ CACHE FIRST (#1776): the filter's stored first page, or the
+            // All listing narrowed to its currency, before the network says.
+            if !openOnStoredPage() { reload() }
             return
         }
         transactions = kept.transactions
@@ -156,16 +171,42 @@ final class WalletHistoryViewController: UIViewController {
         loadPage(after: nil)
     }
 
-    private func loadPage(after token: String?) {
+    /// Opens the filter on what is already known (#1776) — its stored first
+    /// page, else, for Likes or Gems, the All listing's rows in that currency
+    /// — and revalidates its first page in place. False when nothing is known.
+    private func openOnStoredPage() -> Bool {
+        var known = deviceCache?.firstPage(filter.storedName)
+        if known == nil || known?.transactions.isEmpty == true, let currency = filter.currency,
+           let all = listings[.all], all.phase == .loaded {
+            known = WalletTransactionPage(transactions: all.transactions.filter { $0.currency == currency }, nextPageToken: nil)
+        }
+        guard let known, !known.transactions.isEmpty else { return false }
+        transactions = known.transactions
+        nextPageToken = known.nextPageToken
+        phase = .loaded
+        applySnapshot()
+        loadPage(after: nil, replacing: true)
+        return true
+    }
+
+    /// `replacing`: a revalidation of the first page shown — its answer
+    /// replaces the rows, and a failure keeps them.
+    private func loadPage(after token: String?, replacing: Bool = false) {
         let asked = filter
+        let writer = token == nil ? deviceCache?.viewer : nil
         pageLoad = Task { [weak self] in
             guard let self else { return }
             do {
                 let page = try await wallet.transactions(currency: asked.currency, after: token)
                 guard !Task.isCancelled, asked == filter else { return }
-                // A movement can sit on both sides of a page boundary.
-                let known = Set(transactions.map(\.id))
-                transactions += page.transactions.filter { !known.contains($0.id) }
+                if token == nil { deviceCache?.storeFirstPage(page, of: asked.storedName, as: writer) }
+                if replacing {
+                    transactions = page.transactions
+                } else {
+                    // A movement can sit on both sides of a page boundary.
+                    let known = Set(transactions.map(\.id))
+                    transactions += page.transactions.filter { !known.contains($0.id) }
+                }
                 nextPageToken = page.nextPageToken
                 phase = .loaded
             } catch {
