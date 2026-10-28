@@ -27,14 +27,19 @@ struct ScreenSkeletonGateGuardTests {
         "DataExportViewController.swift": "the archive row redacted in place",
         "SecurityCheckupViewController.swift": "the summary header redacted in place",
         "StorageSettingsViewController.swift": "the sizes redacted in place while the device measures",
+        // The media picker (measured on an iPhone 17 Pro Max, 22 albums, 2 664
+        // items, three launches: its first album lands 0.46–0.53 s after the
+        // sheet opens). The bones are always due and their minimum always met,
+        // so the gate's only effect would be a 0.15 s blank while the sheet
+        // rises — the sheet arrives with its structure instead.
+        "MediaPickerViewController.swift": "a local library always slower than the delay: the bones ride the sheet in",
+        "MediaAlbumPageView.swift": "the picker's bones, handed over to each album page in place (#831)",
     ]
 
     /// Screens still showing their bones at t = 0, moved onto the gate one by
     /// one (#1770). Shrinks; a file that no longer needs its entry fails the
     /// guard until the entry goes.
     static let pending: Set<String> = [
-        "PostDetailViewController.swift",
-        "MediaAlbumPageView.swift", "MediaPickerViewController.swift",
     ]
 
     private static var root: URL {

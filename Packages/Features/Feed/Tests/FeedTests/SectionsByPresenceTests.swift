@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 import MediaCore
 import Testing
@@ -8,16 +9,24 @@ import UIKit
 /// SECTIONS BY PRESENCE (#1773, the rule of #1756): no skeleton for a section
 /// known to be empty — never bones that turn into an empty state.
 @MainActor
-struct SectionsByPresenceTests {
+final class SectionsByPresenceTests {
     private func detail() -> PostDetailViewController {
         let controller = PostDetailViewController(
             viewModel: PostDetailViewModel(postID: PostID("p"), repository: NoAnswerFeedProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
+        // The bones come after the kit's delay (#1770).
+        let time = ManualLoadingClock()
+        controller.skeletonClock = time.clock
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
         controller.loadViewIfNeeded()
+        time.advance(LoadingTiming.skeletonDelay)
+        clocks.append(time)
         return controller
     }
+
+    /// Kept alive for the test: the controller holds its clock weakly.
+    private var clocks: [ManualLoadingClock] = []
 
     @Test func aKnownCountCapsTheCommentBones() {
         #expect(SnapCommentsLayout.skeletonPlaceholderCount(viewportHeight: 844, knownComments: 0) == 0)
@@ -34,6 +43,17 @@ struct SectionsByPresenceTests {
         #expect(controller.debugSkeletonRowCount == 0)
         controller.seedCommentCount(2)
         #expect(controller.debugSkeletonRowCount == 2)
+    }
+
+    /// Past 10 s with no first page (#1770): the bones go, and the empty
+    /// page's row says the comments are taking longer.
+    @Test func aFirstPageThatNeverAnswersSaysSo() throws {
+        let controller = detail()
+        #expect(controller.debugSkeletonRowCount > 0)
+        let time = try #require(clocks.last)
+        time.advance(LoadingTiming.takingLonger)
+        #expect(controller.debugSkeletonRowCount == 0, "bones past the long wait")
+        #expect(controller.debugShowsTakingLonger)
     }
 }
 

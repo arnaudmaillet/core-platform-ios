@@ -61,6 +61,9 @@ public final class ListSkeletonGate {
         gate.finish(apply)
     }
 
+    /// Whether the wait ran past 10 s and no answer has landed since.
+    public var isTakingLonger: Bool { tookLonger }
+
     /// Try Again: the next `loading()` starts the wait over.
     public func retry() {
         tookLonger = false

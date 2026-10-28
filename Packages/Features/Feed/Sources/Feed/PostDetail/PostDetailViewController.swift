@@ -1309,6 +1309,10 @@ final class PostDetailViewController: UIViewController {
     }
 
     #if DEBUG
+    /// Whether the empty page's row says the first page is taking longer.
+    var debugShowsTakingLonger: Bool {
+        streamItems().contains(.emptyState) && emptyPageCopy == Self.commentsTakingLongerPageCopy
+    }
     /// The skeleton rows in the stream now — what a test reads.
     var debugSkeletonRowCount: Int {
         streamItems().filter { if case .skeletonPlaceholder = $0 { true } else { false } }.count
@@ -1439,7 +1443,28 @@ final class PostDetailViewController: UIViewController {
         return collectionView.convert(attributes.frame, to: space)
     }
 
+    /// The first page's bones on the kit's timing (#1770). Injectable so a
+    /// test steps it.
+    var skeletonClock: LoadingClock = .system
+    private lazy var commentsGate: ListSkeletonGate = {
+        let gate = ListSkeletonGate(clock: skeletonClock)
+        gate.onChange = { [weak self] in
+            guard let self, !commentsLoaded, hasAppliedStream else { return }
+            applyStream(animated: false)
+        }
+        return gate
+    }()
+
     private func renderComments(_ state: PostDetailViewModel.CommentsState) {
+        // ⚠️ THE FIRST PAGE WAITS OUT ITS BONES' MINIMUM (#1770) — the
+        // newest answer, once; the staged reveal plays when it lands.
+        if !commentsLoaded, state != .loading {
+            return commentsGate.landed { [weak self] in self?.renderCommentsNow(state) }
+        }
+        renderCommentsNow(state)
+    }
+
+    private func renderCommentsNow(_ state: PostDetailViewModel.CommentsState) {
         let models: [CommentDisplayModel]
         switch state {
         case .loaded(let loaded):
@@ -1848,7 +1873,7 @@ final class PostDetailViewController: UIViewController {
                 height: fit.height,
                 blockOffset: fit.blockOffset,
                 actionTitle: fit.copy.actionTitle,
-                action: fit.copy.actionTitle == nil ? nil : { [weak self] in self?.viewModel.retryComments() }
+                action: fit.copy.actionTitle == nil ? nil : { [weak self] in self?.retryCommentsFromPage() }
             )
             // What the cell was actually given — see `applyStream`.
             self?.renderedEmptyPageFit = fit
@@ -2003,6 +2028,18 @@ final class PostDetailViewController: UIViewController {
             // height down to the input bar (the list clips the excess),
             // so no form factor — SE, Pro Max, iPad — strands blank
             // space under a too-short shimmer block.
+            //
+            // ⚠️ ON THE KIT'S TIMING (#1770): no bones before its delay, and
+            // past 10 s the empty page's row says "taking longer".
+            switch commentsGate.loading() {
+            case .nothing:
+                return items
+            case .takingLonger:
+                items.append(.emptyState)
+                return items
+            case .bones:
+                break
+            }
             let viewport = collectionView.bounds.height > 0
                 ? collectionView.bounds.height
                 : view.bounds.height
@@ -2122,6 +2159,24 @@ final class PostDetailViewController: UIViewController {
         )
     }
 
+    /// The empty page's Try Again: a failed first page, or one still out
+    /// past 10 s (#1770) — which a new read supersedes.
+    private func retryCommentsFromPage() {
+        guard !commentsLoaded, commentsGate.isTakingLonger else { return viewModel.retryComments() }
+        commentsGate.retry()
+        applyStream(animated: false)
+        viewModel.retryCommentsAfterWait()
+    }
+
+    /// The first page past 10 s (#1770): the empty page's row, saying so,
+    /// with Try Again.
+    static let commentsTakingLongerPageCopy = EmptyPageCopy(
+        symbol: TakingLongerCopy.symbol,
+        title: TakingLongerCopy.title,
+        subtitle: "The comments are still on their way.",
+        actionTitle: TakingLongerCopy.action
+    )
+
     /// The failed page's headline (#794): offline and a timeout get their
     /// short forms, since the subtitle already says what to do and saying
     /// "try again" twice reads as a stutter; anything else is the view
@@ -2136,6 +2191,7 @@ final class PostDetailViewController: UIViewController {
 
     private var emptyPageCopy: EmptyPageCopy {
         if commentsFailed { return Self.commentsFailedPageCopy(commentsFailureText) }
+        if !commentsLoaded, commentsGate.isTakingLonger { return Self.commentsTakingLongerPageCopy }
         return viewModel.isDraft ? Self.draftEmptyPageCopy : Self.commentsEmptyPageCopy
     }
 
