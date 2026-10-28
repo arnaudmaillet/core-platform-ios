@@ -86,8 +86,8 @@ struct MemberGateTests {
     }
 
     @Test func thePromptNamesTheReason() {
-        #expect(GatedAction.follow(handle: "ava.moreau").signUpPrompt == "Sign up to follow @ava.moreau")
-        #expect(GatedAction.follow(handle: nil).signUpPrompt == "Sign up to follow")
-        #expect(GatedAction.like.signUpPrompt == "Sign up to like this post")
+        #expect(GatedAction.follow(handle: "ava.moreau").signUpPrompt == "Log in or sign up to follow @ava.moreau")
+        #expect(GatedAction.follow(handle: nil).signUpPrompt == "Log in or sign up to follow")
+        #expect(GatedAction.like.signUpPrompt == "Log in or sign up to like this post")
     }
 }

@@ -1,15 +1,21 @@
 import UIKit
 
-/// The sign-in flow's navigation stack, as tall as the step on top of it
-/// (#563).
+/// The sign-in flow's navigation stack, and the sheet it is presented in
+/// (#563, #1811): a short sheet for the method choice, a full-height one for
+/// the form.
 ///
-/// Every step is a table, and a table knows its content's height
-/// (`contentSize`). The sheet this stack is presented in asks
-/// `fittedHeight` — navigation bar + that content + toolbar band — through
-/// one custom detent (`fit(_:fallback:)`), so the sheet is exactly as tall as
-/// the step and can never be dragged taller. Pushing or popping a step, or a
-/// step's content changing (an error row, the prompt header, a text size),
-/// animates the sheet to the new height.
+/// - THE METHOD LIST is a content-fitted sheet over what the guest was doing
+///   (#563): every step is a table, and a table knows its content's height
+///   (`contentSize`); the sheet asks `fittedHeight` — navigation bar + that
+///   content — through one custom detent, so it is exactly as tall as the
+///   list and can never be dragged taller. Sign in with Apple and passkeys
+///   finish here, through the system's own sheets.
+/// - THE FORM (email or phone, then the code and the steps after it) is the
+///   same sheet at `.large()` (#1811, the owner 2026-10-28): up to six steps,
+///   most with the keyboard up, had no room in a short sheet and jumped at
+///   every push. Picking a method grows the sheet with the push; every later
+///   step stays at full height; back to the list brings the fitted detent
+///   back (`stage(for:)`).
 ///
 /// ⚠️ THE HEIGHT IS READ, NEVER PUSHED FROM LAYOUT. The share sheet crashed
 /// measuring in `viewDidLayoutSubviews` and invalidating from there: dragging
@@ -18,13 +24,40 @@ import UIKit
 /// `contentSize` does — which a sheet resize never touches (the bottom
 /// anchoring moves the content inset, not the content). The change is
 /// reported on the next turn, outside the layout pass that produced it.
-public final class ContentFittingNavigationController: UINavigationController, UINavigationControllerDelegate {
+///
+/// THE SWIPE IS THE WAY OUT (#1811): no close button. Before a code is sent a
+/// swipe closes the sheet at once; once one has (`protectsInput`), a swipe —
+/// or VoiceOver's escape — asks one confirmation first, so what was typed is
+/// never thrown away by accident.
+public final class ContentFittingNavigationController: UINavigationController, UINavigationControllerDelegate,
+    UISheetPresentationControllerDelegate {
     /// The top step's height changed: the sheet should ask `fittedHeight`
     /// again.
     public var onFittedHeightChange: (() -> Void)?
 
+    /// Whether leaving at `step` would lose what was typed: the code was sent
+    /// (#1811). Set by the flow; nil protects nothing.
+    var protectsInput: ((UIViewController) -> Bool)?
+
+    /// The sheet's two heights.
+    enum Stage: Equatable {
+        /// Content-fitted: the method list.
+        case fitted
+        /// Full height: the form.
+        case large
+    }
+
+    /// The method list is the root; every step pushed over it is the form.
+    func stage(for step: UIViewController) -> Stage {
+        step === viewControllers.first ? .fitted : .large
+    }
+
     private var contentObservation: NSKeyValueObservation?
     private var lastReportedHeight: CGFloat?
+    private weak var sheet: UISheetPresentationController?
+    private var fallback: CGFloat = 0
+    /// The stage the sheet's detents were last set to.
+    private(set) var shownStage: Stage = .fitted
 
     public override init(rootViewController: UIViewController) {
         super.init(rootViewController: rootViewController)
@@ -41,44 +74,72 @@ public final class ContentFittingNavigationController: UINavigationController, U
 
     /// The sheet height the top step needs, excluding the bottom safe area
     /// (the sheet adds it). Nil while the step is not a table, is not on
-    /// screen (off-window, the bars add no safe area yet and the answer would
-    /// be short by both bands), or has not been laid out.
+    /// screen (off-window, the bar adds no safe area yet and the answer would
+    /// be short by its band), or has not been laid out.
     public var fittedHeight: CGFloat? {
         guard let step = topViewController as? UITableViewController,
               step.viewIfLoaded?.window != nil,
               step.tableView.contentSize.height > 0 else { return nil }
         let table: UITableView = step.tableView
-        // The bars' bands as the step sees them: what they add to its safe
-        // area over the stack's own. ⚠️ NOT the bars' frames — on iOS 27 the
-        // floating toolbar's frame spans the whole view (874 pt measured),
-        // and the navigation bar's carries the sheet's top padding unevenly.
+        // The bar's band as the step sees it: what it adds to its safe area
+        // over the stack's own — none on the method list, which shows no bar
+        // (#1811). ⚠️ NOT the bar's frame, which carries the sheet's top
+        // padding unevenly.
         let bar = max(0, step.view.safeAreaInsets.top - view.safeAreaInsets.top)
-        let toolbarBand = max(0, step.view.safeAreaInsets.bottom - view.safeAreaInsets.bottom)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-sheet-fit-trace") {
-            print("[sheet-fit] bar=\(bar) content=\(table.contentSize.height) toolbar=\(toolbarBand) "
+            print("[sheet-fit] bar=\(bar) content=\(table.contentSize.height) "
                 + "inset=\(table.contentInset.top) step=\(type(of: topViewController!))")
         }
         #endif
-        return (bar + table.contentSize.height + toolbarBand).rounded(.up)
+        return (bar + table.contentSize.height).rounded(.up)
     }
 
-    /// Makes `sheet` exactly as tall as the top step: ONE content-sized
-    /// detent, capped at the screen's maximum (taller content scrolls), and
-    /// re-asked whenever the step's height changes. `fallback` serves while
-    /// the step has no height to give.
+    private static let fittedIdentifier = UISheetPresentationController.Detent.Identifier("fittedContent")
+
+    /// Presents the flow in `sheet`: the method list exactly as tall as its
+    /// content — ONE content-sized detent, capped at the screen's maximum
+    /// (taller content scrolls), re-asked whenever the step's height changes
+    /// — and the form at full height. `fallback` serves while the list has no
+    /// height to give.
     public func fit(_ sheet: UISheetPresentationController, fallback: CGFloat) {
-        let identifier = UISheetPresentationController.Detent.Identifier("fittedContent")
-        sheet.detents = [
-            .custom(identifier: identifier) { [weak self] context in
-                Self.detentHeight(fitted: self?.fittedHeight, fallback: fallback, maximum: context.maximumDetentValue)
-            }
-        ]
-        sheet.selectedDetentIdentifier = identifier
+        self.sheet = sheet
+        self.fallback = fallback
+        sheet.delegate = self
+        sheet.prefersGrabberVisible = true
+        shownStage = topViewController.map(stage(for:)) ?? .fitted
+        applyDetents(for: shownStage, to: sheet)
         onFittedHeightChange = { [weak sheet] in
             guard let sheet else { return }
             sheet.animateChanges { sheet.invalidateDetents() }
         }
+    }
+
+    /// One detent per stage, so the list can never be dragged to full height
+    /// nor the form down to the list's.
+    private func applyDetents(for stage: Stage, to sheet: UISheetPresentationController) {
+        switch stage {
+        case .fitted:
+            let fallback = fallback
+            sheet.detents = [
+                .custom(identifier: Self.fittedIdentifier) { [weak self] context in
+                    Self.detentHeight(fitted: self?.fittedHeight, fallback: fallback, maximum: context.maximumDetentValue)
+                }
+            ]
+            sheet.selectedDetentIdentifier = Self.fittedIdentifier
+        case .large:
+            sheet.detents = [.large()]
+            sheet.selectedDetentIdentifier = .large
+        }
+    }
+
+    /// Moves the sheet to `step`'s stage, in the push's (or the pop's)
+    /// animation.
+    private func moveSheet(to step: UIViewController) {
+        let next = self.stage(for: step)
+        guard next != shownStage, let sheet else { return }
+        shownStage = next
+        sheet.animateChanges { applyDetents(for: next, to: sheet) }
     }
 
     /// The detent's answer: the step's height, or the fallback while it has
@@ -86,6 +147,56 @@ public final class ContentFittingNavigationController: UINavigationController, U
     /// a sheet capped there. Pure, for tests.
     static func detentHeight(fitted: CGFloat?, fallback: CGFloat, maximum: CGFloat) -> CGFloat {
         min(fitted ?? fallback, maximum)
+    }
+
+    // MARK: - Leaving (#1811)
+
+    /// What a swipe asks: nothing to lose, the sheet closes; something
+    /// typed, it stays and asks (`presentationControllerDidAttemptToDismiss`).
+    /// The sheet's own presented controller forwards to this.
+    public override var isModalInPresentation: Bool {
+        get { topViewController.map { protectsInput?($0) ?? false } ?? false }
+        set {}
+    }
+
+    public func presentationControllerDidAttemptToDismiss(_ presentationController: UIPresentationController) {
+        confirmLeaving()
+    }
+
+    /// VoiceOver's escape, the only non-visual way out with no close button:
+    /// the same rule as the swipe.
+    public override func accessibilityPerformEscape() -> Bool {
+        guard presentingViewController != nil else { return false }
+        if isModalInPresentation {
+            confirmLeaving()
+        } else {
+            leave()
+        }
+        return true
+    }
+
+    /// The confirmation's words (the owner, 2026-10-28): neutral — leaving
+    /// keeps nothing typed, and deletes nothing that exists.
+    static let leaveTitle = "Leave now?"
+    static let leaveMessage = "What you\u{2019}ve entered won\u{2019}t be kept."
+    static let keepGoingTitle = "Keep going"
+    static let stopTitle = "Stop"
+
+    /// Asks once: Keep going leaves the sheet and the step as they were;
+    /// Stop closes the sheet.
+    func confirmLeaving() {
+        let host = topViewController ?? self
+        guard host.presentedViewController == nil else { return }
+        let alert = UIAlertController(title: Self.leaveTitle, message: Self.leaveMessage, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: Self.keepGoingTitle, style: .cancel))
+        alert.addAction(UIAlertAction(title: Self.stopTitle, style: .destructive) { [weak self] _ in self?.leave() })
+        host.present(alert, animated: true)
+    }
+
+    /// Closes the sheet: whatever presented it answers the exit (the shell's
+    /// gate hears it from the sheet's own disappearance).
+    private func leave() {
+        (parent ?? self).dismiss(animated: true)
     }
 
     // MARK: - UINavigationControllerDelegate
@@ -96,6 +207,7 @@ public final class ContentFittingNavigationController: UINavigationController, U
         animated: Bool
     ) {
         observeContent(of: viewController)
+        moveSheet(to: viewController)
         // A step already laid out (a pop) reports at once, alongside the
         // transition; a new one reports when its first layout sizes it.
         reportIfChanged()
@@ -113,7 +225,7 @@ public final class ContentFittingNavigationController: UINavigationController, U
     }
 
     private func reportIfChanged() {
-        guard let height = fittedHeight, height != lastReportedHeight else { return }
+        guard shownStage == .fitted, let height = fittedHeight, height != lastReportedHeight else { return }
         lastReportedHeight = height
         onFittedHeightChange?()
     }

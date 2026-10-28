@@ -134,8 +134,12 @@ struct AuthBusyStateTests {
     // MARK: Resending
 
     /// The code step, reached by an email code the gate let through.
-    private func codeStep(_ signUp: GatedSignUp) async throws -> VerificationCodeViewController {
-        try await codeFlow(signUp).code
+    /// The code step, with its stack: the stack holds the flow (its root's
+    /// closures do), which the app's presented sheet keeps alive — a test
+    /// that kept only the step had its flow released under it.
+    private func codeStep(_ signUp: GatedSignUp) async throws -> (code: VerificationCodeViewController, stack: UINavigationController) {
+        let flow = try await codeFlow(signUp)
+        return (flow.code, flow.navigation)
     }
 
     /// The stack, its email step, and the code step on top.
@@ -159,7 +163,8 @@ struct AuthBusyStateTests {
 
     @Test func aSecondResendWhileOneIsOutSendsNothingMore() async throws {
         let signUp = GatedSignUp()
-        let code = try await codeStep(signUp)
+        let (code, stack) = try await codeStep(signUp)
+        defer { withExtendedLifetime(stack) {} }
 
         code.onResend?()
         code.onResend?()
@@ -175,7 +180,8 @@ struct AuthBusyStateTests {
 
     @Test func aRefusedResendClearsTheLink() async throws {
         let signUp = GatedSignUp()
-        let code = try await codeStep(signUp)
+        let (code, stack) = try await codeStep(signUp)
+        defer { withExtendedLifetime(stack) {} }
 
         code.onResend?()
         try #require(await settle { await signUp.held == 1 })

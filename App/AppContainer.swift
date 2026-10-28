@@ -336,7 +336,13 @@ final class AppContainer {
             await self?.currentCountry.currentCountry ?? Locale.current.region?.identifier ?? ""
         },
         federated: federatedSignIn(),
-        passkeys: { [environment] in Self.makePasskeyAuthorizer(for: environment) }
+        passkeys: { [environment] in Self.makePasskeyAuthorizer(for: environment) },
+        // The sign-in sheet's legal line (#1811): Settings → Support and
+        // Legal's own pages, nil (plain text) while they have no address.
+        legalLinks: AuthLegalLinks(
+            termsOfService: SettingsLinks.current.termsOfService,
+            privacyPolicy: SettingsLinks.current.privacyPolicy
+        )
     )
 
     /// The device's passkeys (#551): the system sheet on the fleet. The mock's

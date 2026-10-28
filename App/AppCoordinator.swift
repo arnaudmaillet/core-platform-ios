@@ -388,22 +388,21 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             finishSignUp(signedIn: false)
             return
         }
-        let flow = container.authFeature.makeSignInViewController(prompt: signUpPrompt(for: action)) { [weak self] in
-            self?.presentedSignIn?.dismiss(animated: true)
-        }
+        let flow = container.authFeature.makeSignInViewController(prompt: signUpPrompt(for: action))
         // ⚠️ EVERY way the sheet leaves must answer the gate, or the action
         // that opened it waits forever and the gate never opens a sheet again:
-        // the close button, a swipe, and a dismissal from elsewhere (a route
-        // selecting a tab dismisses whatever is presented). Only the sheet's
-        // own disappearance sees all three. A sign-in answers true first, so
-        // the false here is then a no-op.
+        // a swipe, a confirmed Stop once a code was sent (#1811 — there is no
+        // close button), VoiceOver's escape, and a dismissal from elsewhere (a
+        // route selecting a tab dismisses whatever is presented). Only the
+        // sheet's own disappearance sees them all. A sign-in answers true
+        // first, so the false here is then a no-op.
         let signIn = SignInSheetContainer(content: flow) { [weak self] in
             self?.finishSignUp(signedIn: false)
         }
-        // A sheet over what the guest was doing, not a screen instead of it,
-        // exactly as tall as the step it shows (#563): one content-sized
-        // detent, capped at the screen, never draggable taller than its
-        // content. A push or a pop animates it to the next step's height.
+        // A sheet over what the guest was doing, not a screen instead of it:
+        // the method list exactly as tall as its content (#563), the form at
+        // full height (#1811). The flow owns the detents and the swipe's
+        // confirmation (`ContentFittingNavigationController.fit`).
         if let sheet = signIn.sheetPresentationController {
             if let fitting = flow as? ContentFittingNavigationController {
                 fitting.fit(sheet, fallback: Self.signUpFallbackHeight)
@@ -785,5 +784,12 @@ private final class SignInSheetContainer: UIViewController {
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         if isBeingDismissed { onDismissed() }
+    }
+
+    /// The flow decides whether a swipe may close the sheet (#1811): once a
+    /// code was sent, it asks first.
+    override var isModalInPresentation: Bool {
+        get { content.isModalInPresentation }
+        set {}
     }
 }
