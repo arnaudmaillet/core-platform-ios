@@ -2465,6 +2465,23 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
                 ))
             }
 
+        case .seeded(let seed):
+            // The person as the origin showed them (#1859): the header draws
+            // their identity, its counters wait; the gallery is on its bones,
+            // as on a first load.
+            statusView.isHidden = true
+            galleryPager.isHidden = false
+            if currentHandle == nil { currentHandle = seed.handle ?? seed.displayName }
+            headerView.render(phase, profileKnown: false, switching: false, animated: false)
+            if viewModel.hasGallery {
+                skeletonViewportFill?.isActive = true
+                galleryPager.render(ProfileViewModel.GallerySnapshot(
+                    activity: .loading, media: .loading, isComplete: false,
+                    reposts: .loading, tagged: .loading,
+                    repostsComplete: false, taggedComplete: false
+                ))
+            }
+
         case .content(let model):
             pullIndicator.endRefreshing()
             statusView.isHidden = true
@@ -2552,7 +2569,7 @@ extension ProfileViewController {
     /// The cards' own media are NOT waited for: those are per item, P13.
     var isSettled: Bool {
         switch renderedPhase {
-        case .loading: return false
+        case .loading, .seeded: return false
         case .failed, .notFound: return true
         case .content:
             let relationshipKnown = followButtonState != .hidden || viewModel.isRelationshipSettled
@@ -2601,6 +2618,7 @@ extension ProfileViewController {
         guard ProcessInfo.processInfo.arguments.contains("-profile-first-frame-log") else { return }
         let phase: String = switch renderedPhase {
         case .loading: "loading"
+        case .seeded: "seeded"
         case .content: "content"
         case .failed: "failed"
         case .notFound: "notFound"

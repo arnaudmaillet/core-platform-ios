@@ -122,6 +122,12 @@ struct ProfileDiskRecord: Codable, Equatable {
         /// The avatar frame (#943); optional, so a header stored before it
         /// decodes with none.
         var avatarFrameID: String?
+        /// The banner's still and its loop (#1859). ⚠️ They were left out, so a
+        /// profile read back after a cold start had no banner until the
+        /// network answered: the header collapsed, then grew again. Optional,
+        /// so a header stored before them decodes with none.
+        var bannerURL: URL?
+        var bannerVideoURL: URL?
 
         struct Link: Codable, Equatable {
             var label: String
@@ -208,6 +214,8 @@ extension ProfileDiskRecord.Header {
         }
         businessCategory = profile.businessCategory
         avatarFrameID = profile.avatarFrameID
+        bannerURL = profile.bannerURL
+        bannerVideoURL = profile.bannerVideoURL
     }
 
     var userProfile: UserProfile {
@@ -228,6 +236,8 @@ extension ProfileDiskRecord.Header {
             displayName: displayName,
             bio: bio,
             avatarURL: avatarURL,
+            bannerURL: bannerURL,
+            bannerVideoURL: bannerVideoURL,
             websiteURL: websiteURL,
             customLinks: links.map { ProfileLink(label: $0.label, url: $0.url) },
             isVerified: isVerified,
