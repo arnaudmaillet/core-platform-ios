@@ -391,8 +391,9 @@ public final class ShopStorefrontViewController: UIViewController {
     @discardableResult
     func buyItem(_ item: ProfileItem) async -> ProfileItemPurchase? {
         guard let profileItems, !access.purchasesRestricted else { return nil }
+        let pending = ShopPurchaseFeedback.pending(item.shopTitle, from: self)
         let outcome = await profileItems.buy(item)
-        ShopPurchaseFeedback.show(outcome, title: item.shopTitle, from: self)
+        ShopPurchaseFeedback.show(outcome, title: item.shopTitle, pending: pending)
         return outcome
     }
 
@@ -456,9 +457,10 @@ public final class ShopStorefrontViewController: UIViewController {
     func buyTheme(_ offer: ThemeOffer) async -> ProfileItemPurchase? {
         guard let themes, !access.purchasesRestricted else { return nil }
         let theme = offer.theme
+        let pending = ShopPurchaseFeedback.pending(theme.title, from: self)
         let outcome = await themes.buy(theme)
         ShopPurchaseFeedback.show(
-            outcome, title: theme.title, from: self,
+            outcome, title: theme.title, pending: pending,
             action: ToastView.Action("Apply") { [weak self] in self?.applyTheme(theme) }
         )
         return outcome

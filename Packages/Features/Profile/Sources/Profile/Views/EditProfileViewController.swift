@@ -618,23 +618,24 @@ extension EditProfileViewController {
     }
 
     private func buyVideoBanner() async {
+        // Under way (#1775): "Buying…" past the loader's grace, the answer
+        // in its place.
+        let pending = PendingFeedback("Buying the video banner…", from: self)
         switch await viewModel.buyVideoBanner() {
         case .bought, .alreadyOwned:
             HapticNotification().notificationOccurred(.success)
-            Feedback.success("Video banner unlocked", from: self)
+            pending.succeed("Video banner unlocked")
             pushVideoBannerPicker()
         case .insufficientGems(let needed, let have):
             HapticNotification().notificationOccurred(.error)
-            Feedback.warning("\(needed - have) more gems needed", from: self)
+            pending.warn("\(needed - have) more gems needed")
         case .unavailable:
-            Feedback.warning("Not available on this account", from: self)
+            pending.warn("Not available on this account")
         // The server's answers (#1475): nothing was charged.
         case .priceChanged(let price):
-            Feedback.warning(
-                price.map { "The price changed: now \($0) gems" } ?? "The price changed", from: self
-            )
+            pending.warn(price.map { "The price changed: now \($0) gems" } ?? "The price changed")
         case .failed:
-            Feedback.warning("Couldn't reach the Shop. Nothing was charged — try again.", from: self)
+            pending.warn("Couldn't reach the Shop. Nothing was charged — try again.")
         }
     }
 
