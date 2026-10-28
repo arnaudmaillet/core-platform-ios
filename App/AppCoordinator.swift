@@ -40,6 +40,22 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     /// A link that arrived before the shell existed (a cold launch from a
     /// link), opened once it does.
     private var pendingDeepLink: AppRoute?
+    /// The launch screen held over the shell (#1812).
+    private var launchCurtain: LaunchCurtain?
+
+    /// Whether the launch opens somewhere other than Shots (#1812): a deep
+    /// link or a tapped notification waiting for the shell, or a QA route —
+    /// the curtain then lifts as soon as the shell is in.
+    private var launchOpensElsewhere: Bool {
+        if pendingDeepLink != nil || container.pushNotifications.hasPending { return true }
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains(where: { $0.hasPrefix("-open-") }) { return true }
+        if let index = arguments.firstIndex(where: { $0 == "-switch-tab" || $0 == "-select-tab" }),
+           index + 1 < arguments.count, arguments[index + 1] != "1" { return true }
+        #endif
+        return false
+    }
     /// The sign-in flow a guest opened, presented over the shell; dismissed
     /// when the session lands.
     private weak var presentedSignIn: UIViewController?
@@ -685,6 +701,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
 
     private func setRoot(_ viewController: UIViewController) {
         guard window.rootViewController != nil, !(window.rootViewController is LaunchViewController) else {
+            let launch = window.rootViewController as? LaunchViewController
             // Laid out at once, as the dissolve below does: a launch route
             // (`applyLaunchArguments`, a tapped notification) pushes right
             // after this, and a shell still at 0×0 hands the pushed screen a
@@ -693,6 +710,13 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             UIView.performWithoutAnimation {
                 window.rootViewController = viewController
                 window.layoutIfNeeded()
+            }
+            // The launch screen stays OVER the shell until the first post's
+            // media is on screen, then fades out (#1812).
+            if let launch, viewController === mainTabCoordinator?.rootViewController {
+                let curtain = LaunchCurtain(curtain: launch.view, owner: launch)
+                curtain.hold(over: window, opensElsewhere: launchOpensElsewhere)
+                launchCurtain = curtain
             }
             return
         }
@@ -717,7 +741,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
 /// state emission (a local keychain read) — or, under `-mock-auto-login`, for
 /// the fixture login round trip, which it covers rather than flashing the login
 /// form on the way past.
-private final class LaunchViewController: UIViewController {
+final class LaunchViewController: UIViewController {
     /// ⚠️ THE LAUNCH SCREEN'S TWIN (`LaunchScreen.storyboard`, the owner,
     /// 2026-10-27): the same logo, the same 120 pt, at the centre of the same
     /// ground — the pages' own (`Surface.page`) — so iOS's static screen hands
