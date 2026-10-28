@@ -315,7 +315,7 @@ final class InboxSearchViewModel {
             if let existing = person.existingConversationID ?? catalog.directConversationID(with: id) {
                 onOpenConversation?(.existing(existing))
             } else {
-                onOpenConversation?(.draft(peer: id, displayName: person.displayName))
+                onOpenConversation?(.draft(peer: id, displayName: person.displayName, handle: person.handle))
             }
         case .recentQuery(let text):
             // A history row is not a destination — it is the query again.

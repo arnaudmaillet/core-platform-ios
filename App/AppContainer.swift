@@ -1153,8 +1153,8 @@ final class AppContainer {
         openProfile: { [unowned self] id, stub in
             self.router.route(to: .profile(id, stub: stub))
         },
-        openConversation: { [unowned self] id in
-            self.router.route(to: .messageUser(id, stub: nil))
+        openConversation: { [unowned self] id, stub in
+            self.router.route(to: .messageUser(id, stub: stub))
         },
         // Mock mode only: fleet pins are real posts and must never wear the
         // stand-in place catalog, however the flag reads.

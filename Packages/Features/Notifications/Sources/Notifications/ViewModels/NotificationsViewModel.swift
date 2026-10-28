@@ -329,9 +329,10 @@ public final class NotificationsViewModel {
         } else if let postID = item.postSubjectID {
             if opensPost?(id, postID) != true { router?.route(to: .post(postID)) }
         } else {
-            // Notification rows render an aggregated sentence, not the raw
-            // handle, so there is no identity slice to attach.
-            router?.route(to: .profile(item.senderID, stub: nil))
+            // The row shows the sender's name and face, not the raw handle
+            // (#1860): the stub carries what it shows, never an invented
+            // handle; the app's store completes the rest.
+            router?.route(to: .profile(item.senderID, stub: Self.senderStub(of: item)))
         }
     }
 
@@ -507,4 +508,12 @@ final class ViewerObserver: @unchecked Sendable {
     }
 
     deinit { center.removeObserver(token) }
+}
+
+extension NotificationsViewModel {
+    /// What a row shows of its sender (#1860). Pure, for tests.
+    nonisolated static func senderStub(of item: NotificationItem) -> ProfileIdentityStub? {
+        guard !item.senderName.isEmpty else { return nil }
+        return ProfileIdentityStub(handle: nil, displayName: item.senderName, avatarURL: item.senderAvatarURL)
+    }
 }

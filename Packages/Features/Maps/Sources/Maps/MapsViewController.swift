@@ -127,7 +127,7 @@ final class MapsViewController: UIViewController {
     /// Starts (or resumes) a thread with someone the map surfaces — the pill
     /// menu's Send Message. Injected for the same reason as `openProfile`:
     /// Maps stays ignorant of routes and of the Messages feature.
-    private let openConversation: (ProfileID) -> Void
+    private let openConversation: (ProfileID, ProfileIdentityStub?) -> Void
     /// The current viewport's prefetch, cancelled when the map settles elsewhere.
     private var prewarmTask: Task<Void, Never>?
     /// Starts a post's page player at touch-down on its marker (#646).
@@ -431,7 +431,7 @@ final class MapsViewController: UIViewController {
         warmPlayback: @escaping (PostID, TimeInterval?) -> (any FeedPlaybackWarm)? = { _, _ in nil },
         prerollPlayback: @escaping (PostID, TimeInterval?) -> (any FeedPlaybackWarm)? = { _, _ in nil },
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
-        openConversation: @escaping (ProfileID) -> Void,
+        openConversation: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
         countryAccess: (any CountryAccess)? = nil,
         stakePacks: (any StakePackSelling)? = nil,
         profileItems: (any ProfileItemSelling)? = nil,
@@ -1406,8 +1406,10 @@ final class MapsViewController: UIViewController {
         subFilterBar.onViewProfile = { [weak self] favorite in
             self?.openProfile(favorite)
         }
+        // The thread opens titled with the favourite (#1860), as its profile
+        // does with its stub.
         subFilterBar.onSendMessage = { [weak self] favorite in
-            self?.openConversation(favorite.profileID)
+            self?.openConversation(favorite.profileID, Self.stub(of: favorite))
         }
         subFilterBar.isMuted = { [weak self] profileID in
             self?.subFilterMemory.isMuted(profileID) ?? false
@@ -1647,11 +1649,14 @@ final class MapsViewController: UIViewController {
     /// identity it already has on screen — the destination renders its header
     /// from the stub instead of flashing empty while the profile loads.
     private func openProfile(_ favorite: MapFavorite) {
-        openProfile(
-            favorite.profileID,
-            favorite.handle.map {
-                ProfileIdentityStub(handle: $0, displayName: favorite.title, isFollowing: true)
-            }
+        openProfile(favorite.profileID, Self.stub(of: favorite))
+    }
+
+    /// What the pill shows of a favourite — a person the viewer follows —
+    /// for the destination it opens (#1860): its name, handle and face.
+    static func stub(of favorite: MapFavorite) -> ProfileIdentityStub {
+        ProfileIdentityStub(
+            handle: favorite.handle, displayName: favorite.title, isFollowing: true, avatarURL: favorite.avatarURL
         )
     }
 

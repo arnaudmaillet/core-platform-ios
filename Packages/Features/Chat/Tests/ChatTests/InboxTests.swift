@@ -1355,7 +1355,8 @@ struct SuggestionsViewModelTests {
         // render from until the find-or-create lands.
         #expect(router.routes == [
             .messageUser(ProfileID("p1"), stub: ProfileIdentityStub(handle: "p1", displayName: "Name p1")),
-            .profile(ProfileID("p1"), stub: nil)
+            // The row's identity on the profile route too (#1860).
+            .profile(ProfileID("p1"), stub: ProfileIdentityStub(handle: "p1", displayName: "Name p1"))
         ])
     }
 }

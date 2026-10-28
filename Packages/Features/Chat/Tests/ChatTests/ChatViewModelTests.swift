@@ -243,7 +243,10 @@ struct ChatViewModelTests {
         viewModel.viewDidLoad()
 
         viewModel.didTapIdentity()
-        #expect(router.routes == [.profile(ProfileID("peer-9"), stub: nil)])
+        // The header's name rides along, never an invented handle (#1860).
+        #expect(router.routes == [.profile(ProfileID("peer-9"), stub: viewModel.peerStub)])
+        #expect(viewModel.peerStub?.handle == nil)
+        #expect(viewModel.peerStub?.displayName.isEmpty == false, "the header's name did not ride along")
     }
 
     /// The toolbar's peer pill opens the peer's profile CARD (#1524); the
@@ -261,7 +264,7 @@ struct ChatViewModelTests {
         viewModel.viewDidLoad()
 
         viewModel.didTapIdentityPill()
-        #expect(router.routes == [.profileCard(ProfileID("peer-9"), stub: nil)])
+        #expect(router.routes == [.profileCard(ProfileID("peer-9"), stub: viewModel.peerStub)])
     }
 
     @Test func identityTapResolvesThePeerOnColdEntry() async {
@@ -277,7 +280,7 @@ struct ChatViewModelTests {
         #expect(await settle { peer == ProfileID("peer-9") })
 
         viewModel.didTapIdentity()
-        #expect(router.routes == [.profile(ProfileID("peer-9"), stub: nil)])
+        #expect(router.routes == [.profile(ProfileID("peer-9"), stub: viewModel.peerStub)])
     }
 
     @Test func identityTapIsANoOpWithoutASinglePeer() {

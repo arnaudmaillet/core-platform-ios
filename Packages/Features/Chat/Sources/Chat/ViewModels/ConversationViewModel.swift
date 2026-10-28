@@ -17,7 +17,8 @@ public enum ConversationTarget: Equatable, Sendable {
     /// A conversation with `peer`, to be found-or-created. `displayName` is
     /// whatever the origin already knew; empty means "look it up once there is
     /// a conversation to look it up from".
-    case draft(peer: ProfileID, displayName: String)
+    /// `handle`: the person's raw handle when the origin knew it (#1860).
+    case draft(peer: ProfileID, displayName: String, handle: String? = nil)
 }
 
 @MainActor
@@ -267,7 +268,7 @@ public final class ConversationViewModel {
         if let resolution { return resolution }
         let task = Task<ConversationID?, Never> { [weak self] in
             guard let self else { return nil }
-            guard case .draft(let peer, _) = self.target else { return self.conversationID }
+            guard case .draft(let peer, _, _) = self.target else { return self.conversationID }
             guard let id = try? await self.repository.directConversation(with: peer) else {
                 // Drop the cached task so a later send can try again rather
                 // than inheriting this failure forever, and let the viewer type
@@ -645,10 +646,15 @@ public final class ConversationViewModel {
     /// no-op until the peer resolves, or for group shapes with no single peer.
     public func didTapIdentity() {
         guard let peerProfileID else { return }
-        // No identity stub: the thread knows the peer's display name but not
-        // their raw @handle, and the stub must not fabricate one (it becomes
-        // the profile screen's title). Same semantics as notification rows.
-        router?.route(to: .profile(peerProfileID, stub: nil))
+        router?.route(to: .profile(peerProfileID, stub: peerStub))
+    }
+
+    /// What the header shows of the correspondent (#1860): their name, with
+    /// no handle — the thread knows the name, not the raw @handle, and the
+    /// stub never invents one (it would title the profile). The app's store
+    /// completes the rest (`knownIdentity`). Nil until the name resolves.
+    var peerStub: ProfileIdentityStub? {
+        peerName.isEmpty ? nil : ProfileIdentityStub(handle: nil, displayName: peerName)
     }
 
     /// The toolbar's peer pill (#1524): the correspondent's profile CARD. The
@@ -656,7 +662,7 @@ public final class ConversationViewModel {
     /// avatar) still push it (`didTapIdentity`).
     public func didTapIdentityPill() {
         guard let peerProfileID else { return }
-        router?.route(to: .profileCard(peerProfileID, stub: nil))
+        router?.route(to: .profileCard(peerProfileID, stub: peerStub))
     }
 
     /// The correspondent's profile, made but NOT pushed — a leftward swipe's
@@ -664,7 +670,7 @@ public final class ConversationViewModel {
     /// shapes with no single peer.
     public func peerProfileDestination() -> UIViewController? {
         guard let peerProfileID else { return nil }
-        return router?.destination(for: .profile(peerProfileID, stub: nil))
+        return router?.destination(for: .profile(peerProfileID, stub: peerStub))
     }
 
     private func loadTitle() {
@@ -672,7 +678,7 @@ public final class ConversationViewModel {
         // the picker row, the suggestion, the map pin — so the header is right
         // at frame zero without consulting anything. This is what lets the
         // whole screen open instantly rather than assembling itself on screen.
-        if case .draft(let peer, let displayName) = target, !displayName.isEmpty {
+        if case .draft(let peer, let displayName, _) = target, !displayName.isEmpty {
             peerProfileID = peer
             peerName = displayName
             onTitleChange?(displayName)

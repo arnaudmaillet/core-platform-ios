@@ -478,7 +478,9 @@ struct InboxSearchViewModelTests {
         _ = await settle(box) { if case .content = $0 { true } else { false } }
         viewModel.didSelect(.person(ProfileID("p-9")))
 
-        #expect(box.opened == [.draft(peer: ProfileID("p-9"), displayName: "Sofia")])
+        // The result's handle rides along (#1860): the thread's header and its
+        // profile no longer start with an empty one.
+        #expect(box.opened == [.draft(peer: ProfileID("p-9"), displayName: "Sofia", handle: "sofia")])
     }
 }
 
