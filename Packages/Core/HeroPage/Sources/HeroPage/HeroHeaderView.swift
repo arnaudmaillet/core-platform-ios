@@ -725,6 +725,8 @@ open class HeroHeaderView: UIView {
     public var debugBannerRampFrame: CGRect { bannerView.convert(bannerView.debugRampFrame, to: self) }
     public var debugBannerFrame: CGRect { bannerView.convert(bannerView.bounds, to: self) }
     public var debugAvatarFrame: CGRect { avatarView.convert(avatarView.bounds, to: self) }
+    /// The avatar ring's colour as drawn (#1792).
+    public var debugAvatarRingColor: CGColor? { avatarView.layer.borderColor }
     public var debugTrayFrame: CGRect { actionRowForDebug?.convert(actionRowForDebug!.bounds, to: self) ?? .zero }
     public var debugStatsFrame: CGRect { statsRow.convert(statsRow.bounds, to: self) }
     /// The counter row's cells, leading to trailing (#687).
@@ -1290,11 +1292,15 @@ open class HeroHeaderView: UIView {
         avatarView.backgroundColor = Surface.mediaGround
         avatarView.clipsToBounds = true
         avatarView.layer.borderWidth = Metrics.avatarRingWidth
-        // The ring is the page's tone, so the avatar reads as cut from the
-        // page it floats over rather than wearing a whiter halo.
-        avatarView.layer.borderColor = Surface.page.resolvedColor(with: traitCollection).cgColor
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: HeroHeaderView, _) in
-            self.avatarView.layer.borderColor = Surface.page.resolvedColor(with: self.traitCollection).cgColor
+        // ⚠️ ONE QUIET GREY (#1792, the owner 2026-10-27), not the page's
+        // tone: over raw banner media the page's white or black read as a
+        // halo that flipped with the theme. A `CGColor`, so re-resolved on a
+        // style or contrast change.
+        avatarView.layer.borderColor = Surface.avatarRim.resolvedColor(with: traitCollection).cgColor
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]
+        ) { (self: HeroHeaderView, _) in
+            self.avatarView.layer.borderColor = Surface.avatarRim.resolvedColor(with: self.traitCollection).cgColor
         }
 
         if let avatar {

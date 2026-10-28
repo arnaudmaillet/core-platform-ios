@@ -36,6 +36,14 @@ public enum Surface {
     /// What a screen of cards lies on.
     public static let page: UIColor = .systemGroupedBackground
 
+    /// The ring around a profile's avatar where it floats over the banner
+    /// (#1792): one quiet grey that barely changes with the theme. The page's
+    /// tone it used to wear read as a white halo in the light and a black one
+    /// in the dark over raw banner media; the system grey (#8E8E93 in both
+    /// styles) stays the same quiet edge on any picture. Dynamic all the
+    /// same — a contrast setting darkens it — so a holder re-resolves it.
+    public static let avatarRim: UIColor = .systemGray
+
     /// A card, one step up from the page. Also the ground a media carousel's
     /// gutter shows and the floor a skeleton shimmers on, because they are
     /// the card.
