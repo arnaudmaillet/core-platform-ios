@@ -1123,8 +1123,6 @@ final class CommentSkeletonRowView: UIView {
     private enum Metrics {
         static let headerHeight: CGFloat = 11
         static let bodyHeight: CGFloat = 13
-        static let headerFractions: [CGFloat] = [0.38, 0.52, 0.33, 0.45]
-        static let bodyFractions: [CGFloat] = [0.86, 0.58, 0.72, 0.94]
     }
 
     /// The trailing band the real row's like control (count + ♥) occupies.
@@ -1133,15 +1131,26 @@ final class CommentSkeletonRowView: UIView {
     /// structural heart will stand.
     static let likeColumnReservation: CGFloat = 28
 
-    init(index: Int) {
+    /// The media bone of a message row: the thread's picture card, at its
+    /// resting size.
+    static let mediaBoneSize = CGSize(width: 180, height: 132)
+
+    /// - Parameters:
+    ///   - reservesLikeColumn: a comment's row keeps the like column clear; a
+    ///     message row has none (#1774).
+    ///   - showsMedia: a media bone under the body — a message row whose
+    ///     conversation had pictures last time (#1774).
+    init(index: Int, reservesLikeColumn: Bool = true, showsMedia: Bool = false) {
         super.init(frame: .zero)
         isUserInteractionEnabled = false
 
         let avatar = SkeletonBoneView(rounding: .capsule)
         let header = SkeletonBoneView(rounding: .capsule)
         let body = SkeletonBoneView(rounding: .capsule)
+        let media = SkeletonBoneView(rounding: .fixed(Surface.cardCornerRadius))
+        media.isHidden = !showsMedia
 
-        let textColumn = UIStackView(arrangedSubviews: [header, body])
+        let textColumn = UIStackView(arrangedSubviews: [header, body, media])
         textColumn.axis = .vertical
         textColumn.spacing = 6
         textColumn.alignment = .leading
@@ -1152,12 +1161,15 @@ final class CommentSkeletonRowView: UIView {
         addSubview(row)
         row.translatesAutoresizingMaskIntoConstraints = false
 
-        let headerFraction = Metrics.headerFractions[index % Metrics.headerFractions.count]
-        let bodyFraction = Metrics.bodyFractions[index % Metrics.bodyFractions.count]
+        // The shared width rule (#1774).
+        let headerFraction = SkeletonLineWidths.fraction(SkeletonLineWidths.title, at: index)
+        let bodyFraction = SkeletonLineWidths.fraction(SkeletonLineWidths.body, at: index)
         NSLayoutConstraint.activate([
             row.topAnchor.constraint(equalTo: topAnchor),
             row.leadingAnchor.constraint(equalTo: leadingAnchor),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.likeColumnReservation),
+            row.trailingAnchor.constraint(
+                equalTo: trailingAnchor, constant: reservesLikeColumn ? -Self.likeColumnReservation : 0
+            ),
             row.bottomAnchor.constraint(equalTo: bottomAnchor),
             // The real row's disc, whatever the type size makes it.
             avatar.widthAnchor.constraint(equalToConstant: CommentRowView.avatarSize),
@@ -1166,6 +1178,8 @@ final class CommentSkeletonRowView: UIView {
             header.widthAnchor.constraint(equalTo: textColumn.widthAnchor, multiplier: headerFraction),
             body.heightAnchor.constraint(equalToConstant: Metrics.bodyHeight),
             body.widthAnchor.constraint(equalTo: textColumn.widthAnchor, multiplier: bodyFraction),
+            media.widthAnchor.constraint(equalToConstant: Self.mediaBoneSize.width),
+            media.heightAnchor.constraint(equalToConstant: Self.mediaBoneSize.height),
         ])
     }
 

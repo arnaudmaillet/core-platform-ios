@@ -210,6 +210,10 @@ public protocol ConversationThreadDriving: AnyObject {
     /// swipe on the thread pushes following the finger (#1525). Nil while
     /// the peer is unresolved, or for a conversation with no single peer.
     func peerProfileDestination() -> UIViewController?
+    /// Where the thread remembers its last-known shape (#1774) — how many
+    /// messages, whether any had media — so its cold skeleton is that shape.
+    /// Nil keeps no memory.
+    var presenceKey: String? { get }
 }
 
 public extension ConversationThreadDriving {
@@ -237,6 +241,8 @@ public extension ConversationThreadDriving {
     func peerProfileDestination() -> UIViewController? { nil }
     /// Drivers with no card: the profile, as the other ways to it.
     func didTapIdentityPill() { didTapIdentity() }
+    /// Drivers with no conversation to remember.
+    var presenceKey: String? { nil }
 }
 
 @MainActor

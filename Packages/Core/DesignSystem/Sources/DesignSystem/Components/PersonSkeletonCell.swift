@@ -22,10 +22,6 @@ public final class PersonSkeletonCell: UICollectionViewListCell {
         static let avatarSize: CGFloat = 48
         static let nameHeight: CGFloat = 13
         static let handleHeight: CGFloat = 11
-        /// Bone widths cycle these so a screenful reads as a list of different
-        /// people rather than one row stamped repeatedly.
-        static let nameFractions: [CGFloat] = [0.44, 0.34, 0.52, 0.38]
-        static let handleFractions: [CGFloat] = [0.30, 0.38, 0.26, 0.34]
         /// What one row occupies, used to work out how many it takes to reach
         /// the bottom of the screen.
         static let rowHeight: CGFloat = avatarSize + Spacing.sm * 2
@@ -67,10 +63,10 @@ public final class PersonSkeletonCell: UICollectionViewListCell {
         ))
 
         nameWidth = name.widthAnchor.constraint(
-            equalTo: textColumn.widthAnchor, multiplier: Metrics.nameFractions[0]
+            equalTo: textColumn.widthAnchor, multiplier: SkeletonLineWidths.fraction(SkeletonLineWidths.title, at: 0)
         )
         handleWidth = handle.widthAnchor.constraint(
-            equalTo: textColumn.widthAnchor, multiplier: Metrics.handleFractions[0]
+            equalTo: textColumn.widthAnchor, multiplier: SkeletonLineWidths.fraction(SkeletonLineWidths.detail, at: 0)
         )
         NSLayoutConstraint.activate([
             avatar.widthAnchor.constraint(equalToConstant: Metrics.avatarSize),
@@ -109,11 +105,12 @@ public final class PersonSkeletonCell: UICollectionViewListCell {
         guard let textColumn = name.superview else { return }
         nameWidth = name.widthAnchor.constraint(
             equalTo: textColumn.widthAnchor,
-            multiplier: Metrics.nameFractions[index % Metrics.nameFractions.count]
+            // The shared width rule (#1774).
+            multiplier: SkeletonLineWidths.fraction(SkeletonLineWidths.title, at: index)
         )
         handleWidth = handle.widthAnchor.constraint(
             equalTo: textColumn.widthAnchor,
-            multiplier: Metrics.handleFractions[index % Metrics.handleFractions.count]
+            multiplier: SkeletonLineWidths.fraction(SkeletonLineWidths.detail, at: index)
         )
         NSLayoutConstraint.activate([nameWidth, handleWidth])
     }

@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import DesignSystem
 import FeedInterface
 import MediaCore
@@ -26,6 +27,8 @@ struct ConversationThreadViewControllerTests {
         private(set) var replies: [String] = []
         /// What the inbox would say about the pin; nil is a draft.
         var pinned: Bool? = false
+        /// Where the thread remembers its shape; nil keeps none.
+        var presenceKey: String?
 
         init(initial: ConversationThreadPhase) { self.initial = initial }
 
@@ -79,9 +82,12 @@ struct ConversationThreadViewControllerTests {
         prefill: String = "",
         phase: ConversationThreadPhase = .content(transcript),
         now: Date? = nil,
-        skeletonClock: LoadingClock? = nil
+        skeletonClock: LoadingClock? = nil,
+        presence: SectionPresenceStore? = nil,
+        presenceKey: String? = nil
     ) -> (ConversationThreadViewController, FakeDriver, FakeAccessory, UIWindow) {
         let driver = FakeDriver(initial: phase)
+        driver.presenceKey = presenceKey
         let accessory = FakeAccessory()
         let screen = ConversationThreadViewController(
             driver: driver, mode: mode, prefill: prefill,
@@ -91,6 +97,7 @@ struct ConversationThreadViewControllerTests {
         // read the clock on either side of it.
         if let now { screen.dayClock = { now } }
         if let skeletonClock { screen.skeletonClock = skeletonClock }
+        if let presence { screen.presence = presence }
         let navigation = UINavigationController(rootViewController: screen)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = navigation
@@ -142,6 +149,32 @@ struct ConversationThreadViewControllerTests {
         status.debugTapAction()
         #expect(driver.refreshes == 1)
         #expect(status.isHidden, "Try Again keeps the status up")
+    }
+
+    /// The cold skeleton is the thread's last-known shape (#1774): as many
+    /// message rows as it had (up to the fold), the day chip's bone over
+    /// them, a picture's bone where it had pictures — and nothing at all for
+    /// a thread that was empty.
+    @Test func theSkeletonIsTheThreadsLastKnownShape() throws {
+        let presence = SectionPresenceStore(defaults: try #require(UserDefaults(suiteName: "thread-\(UUID().uuidString)")))
+        presence.remember(2, screen: "thread.c1", section: "messages")
+        presence.remember(1, screen: "thread.c1", section: "media")
+        let time = ManualLoadingClock()
+        let (screen, _, _, window) = makeScreen(
+            phase: .loading, skeletonClock: time.clock, presence: presence, presenceKey: "thread.c1"
+        )
+        defer { window.isHidden = true }
+        time.advance(LoadingTiming.skeletonDelay)
+        #expect(screen.debugSkeletonRowCount == 2)
+        #expect(screen.debugShowsSkeletonDay)
+
+        presence.remember(0, screen: "thread.c2", section: "messages")
+        let (empty, _, _, emptyWindow) = makeScreen(
+            phase: .loading, skeletonClock: time.clock, presence: presence, presenceKey: "thread.c2"
+        )
+        defer { emptyWindow.isHidden = true }
+        time.advance(LoadingTiming.skeletonDelay)
+        #expect(empty.debugSkeletonRowCount == 0, "bones for a thread that was empty")
     }
 
     @Test func messagesAreGroupedByDayOldestFirst() throws {

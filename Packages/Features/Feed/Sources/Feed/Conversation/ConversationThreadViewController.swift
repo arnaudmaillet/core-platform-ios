@@ -30,6 +30,8 @@ final class ConversationThreadViewController: UIViewController {
 
     private enum Item: Hashable {
         case skeleton(Int)
+        /// The day chip's bone over the skeleton rows (#1774).
+        case skeletonDay
         case empty
         case message(String)
     }
@@ -149,6 +151,22 @@ final class ConversationThreadViewController: UIViewController {
     private var relationGeneration = 0
     private var viewer = ConversationThreadPerson(id: nil, name: "You", avatarURL: nil)
     private var hasRenderedContent = false
+
+    /// The day chip's size, for its bone.
+    static let dayBoneSize = CGSize(width: 96, height: 26)
+    /// Where the thread's last-known shape is kept (#1774). Injectable for
+    /// tests.
+    var presence: SectionPresenceStore = .shared
+    /// How many messages the thread had last time; nil never seen.
+    private var rememberedMessageCount: Int? {
+        driver.presenceKey.flatMap { presence.count(screen: $0, section: "messages") }
+    }
+    /// Whether its newest messages had a picture last time.
+    private var rememberedMedia: Bool {
+        (driver.presenceKey.flatMap { presence.count(screen: $0, section: "media") } ?? 0) > 0
+    }
+    /// The skeleton's rows as last applied.
+    private var skeletonRowCount = 0
 
     /// The first load's skeleton on the kit's timing (#1770): no bones for a
     /// thread that answers at once, held their minimum once up, and "taking
@@ -505,9 +523,13 @@ final class ConversationThreadViewController: UIViewController {
         let messageCell = UICollectionView.CellRegistration<ThreadRowCell, String> { [weak self] cell, _, id in
             self?.configure(cell, messageID: id)
         }
-        let skeletonCell = UICollectionView.CellRegistration<UICollectionViewCell, Int> { cell, _, index in
+        let skeletonCell = UICollectionView.CellRegistration<UICollectionViewCell, Int> { [weak self] cell, _, index in
             cell.contentView.subviews.forEach { $0.removeFromSuperview() }
-            let row = CommentSkeletonRowView(index: index)
+            // A message row's shape (#1774): no like column, and a picture
+            // where the conversation had pictures last time — on the newest
+            // bone row, the one nearest the tail.
+            let showsMedia = self?.rememberedMedia == true && index == (self?.skeletonRowCount ?? 0) - 1
+            let row = CommentSkeletonRowView(index: index, reservesLikeColumn: false, showsMedia: showsMedia)
             row.translatesAutoresizingMaskIntoConstraints = false
             cell.contentView.addSubview(row)
             NSLayoutConstraint.activate([
@@ -515,6 +537,20 @@ final class ConversationThreadViewController: UIViewController {
                 row.leadingAnchor.constraint(equalTo: cell.contentView.leadingAnchor),
                 row.trailingAnchor.constraint(equalTo: cell.contentView.trailingAnchor),
                 row.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -Spacing.lg),
+            ])
+        }
+        // The day chip's bone, centred where the chip will stand (#1774).
+        let skeletonDayCell = UICollectionView.CellRegistration<UICollectionViewCell, Int> { cell, _, _ in
+            cell.contentView.subviews.forEach { $0.removeFromSuperview() }
+            let bone = SkeletonBoneView(rounding: .capsule)
+            bone.translatesAutoresizingMaskIntoConstraints = false
+            cell.contentView.addSubview(bone)
+            NSLayoutConstraint.activate([
+                bone.topAnchor.constraint(equalTo: cell.contentView.topAnchor, constant: Spacing.xs),
+                bone.bottomAnchor.constraint(equalTo: cell.contentView.bottomAnchor, constant: -Spacing.md),
+                bone.centerXAnchor.constraint(equalTo: cell.contentView.centerXAnchor),
+                bone.widthAnchor.constraint(equalToConstant: Self.dayBoneSize.width),
+                bone.heightAnchor.constraint(equalToConstant: Self.dayBoneSize.height),
             ])
         }
         let emptyCell = UICollectionView.CellRegistration<CommentsEmptyPageCell, Item> { [weak self] cell, _, _ in
@@ -542,6 +578,8 @@ final class ConversationThreadViewController: UIViewController {
                 collectionView.dequeueConfiguredReusableCell(using: messageCell, for: indexPath, item: id)
             case .skeleton(let index):
                 collectionView.dequeueConfiguredReusableCell(using: skeletonCell, for: indexPath, item: index)
+            case .skeletonDay:
+                collectionView.dequeueConfiguredReusableCell(using: skeletonDayCell, for: indexPath, item: 0)
             case .empty:
                 collectionView.dequeueConfiguredReusableCell(using: emptyCell, for: indexPath, item: item)
             }
@@ -1007,6 +1045,13 @@ final class ConversationThreadViewController: UIViewController {
             statusView.isHidden = hasRenderedContent
         case .content(let messages):
             statusView.isHidden = true
+            // The shape the next cold load's skeleton takes (#1774).
+            if let key = driver.presenceKey {
+                presence.remember(messages.count, screen: key, section: "messages")
+                let pictures = messages.suffix(SnapCommentsLayout.skeletonPlaceholderCount(viewportHeight: view.bounds.height))
+                    .contains { $0.media != nil }
+                presence.remember(pictures ? 1 : 0, screen: key, section: "media")
+            }
             let before = messagesByID
             messagesByID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             noteSendTransitions(from: before, to: messages)
@@ -1051,9 +1096,16 @@ final class ConversationThreadViewController: UIViewController {
             // The gate's timing (#1770): no bones before its delay, none
             // once the wait ran past 10 s.
             guard skeletonGate.showsSkeleton else { break }
+            // The last-known shape (#1774): as many rows as the thread had,
+            // up to the fold (none for a thread that was empty), the day's
+            // chip over them.
             let viewport = collectionView.bounds.height > 0 ? collectionView.bounds.height : view.bounds.height
-            let count = SnapCommentsLayout.skeletonPlaceholderCount(viewportHeight: viewport)
-            snapshot.appendItems((0..<count).map(Item.skeleton))
+            let count = SnapCommentsLayout.skeletonPlaceholderCount(
+                viewportHeight: viewport, knownComments: rememberedMessageCount.map(Int64.init)
+            )
+            skeletonRowCount = count
+            guard count > 0 else { break }
+            snapshot.appendItems([.skeletonDay] + (0..<count).map(Item.skeleton))
         case .failed:
             headerPolicy.daySections = false
             snapshot.appendSections([.main])
@@ -1090,10 +1142,17 @@ final class ConversationThreadViewController: UIViewController {
         }
         debugLastApplyAnimated = animated
         dataSource.apply(snapshot, animatingDifferences: animated)
+        // The skeleton sits where the messages will: at the tail (#1774).
+        if case .loading = phase, !hasRenderedContent,
+           snapshot.itemIdentifiers.contains(where: { if case .skeleton = $0 { true } else { false } }) {
+            pinToTail()
+        }
     }
 
     /// Whether the last render animated its differences. Tests.
     private(set) var debugLastApplyAnimated: Bool?
+    /// Whether the day chip's bone leads the skeleton.
+    var debugShowsSkeletonDay: Bool { dataSource.snapshot().itemIdentifiers.contains(.skeletonDay) }
     /// The skeleton rows in the list now.
     var debugSkeletonRowCount: Int {
         dataSource.snapshot().itemIdentifiers.filter { if case .skeleton = $0 { true } else { false } }.count

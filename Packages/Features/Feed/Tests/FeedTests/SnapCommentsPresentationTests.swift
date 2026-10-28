@@ -2675,14 +2675,14 @@ struct SnapCommentsPresentationTests {
     /// band where the real row's like control stands is reserved empty,
     /// so no bone (not even the widest body pill) crosses into it.
     @Test func commentSkeletonRowMimicsOrganicContentOnly() {
-        let row = CommentSkeletonRowView(index: 3) // widest body fraction (0.94)
+        let row = CommentSkeletonRowView(index: 2) // widest body fraction (SkeletonLineWidths.body)
         var bones: [UIView] = []
         var stack: [UIView] = [row]
         while let view = stack.popLast() {
-            if view is SkeletonBoneView { bones.append(view) }
+            if view is SkeletonBoneView, !view.isHidden { bones.append(view) }
             stack.append(contentsOf: view.subviews)
         }
-        #expect(bones.count == 3)
+        #expect(bones.count == 3, "a comment row has no media bone")
         #expect(row.isUserInteractionEnabled == false)
 
         row.frame = CGRect(x: 0, y: 0, width: 320, height: 44)

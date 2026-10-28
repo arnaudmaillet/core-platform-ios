@@ -81,9 +81,14 @@ public final class PostGridSkeletonCard: UIView {
             firstLine.heightAnchor.constraint(equalToConstant: 14),
             firstLine.widthAnchor.constraint(equalTo: column.widthAnchor),
             secondLine.heightAnchor.constraint(equalToConstant: 14),
-            secondLine.widthAnchor.constraint(equalTo: column.widthAnchor, multiplier: 0.62),
+            // The shared width rule (#1774): a body line, then a short one.
+            secondLine.widthAnchor.constraint(
+                equalTo: column.widthAnchor, multiplier: SkeletonLineWidths.fraction(SkeletonLineWidths.body, at: 1)
+            ),
             thirdLine.heightAnchor.constraint(equalToConstant: 14),
-            thirdLine.widthAnchor.constraint(equalTo: column.widthAnchor, multiplier: 0.38),
+            thirdLine.widthAnchor.constraint(
+                equalTo: column.widthAnchor, multiplier: SkeletonLineWidths.fraction(SkeletonLineWidths.title, at: 1)
+            ),
             metaWrap.widthAnchor.constraint(equalTo: column.widthAnchor),
             cluster.heightAnchor.constraint(equalToConstant: 10),
             cluster.widthAnchor.constraint(equalToConstant: 76),
