@@ -327,8 +327,11 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // very first layout pass, so the push animation carries a finished
         // toolbar. The async load only confirms or corrects this — it never
         // *introduces* the chrome.
+        // A stub with no handle (a thread, a notification row, #1858) titles
+        // the profile with the name until the profile brings the handle.
         if let identityStub {
-            currentHandle = "@" + identityStub.handle
+            currentHandle = identityStub.handle.map { "@" + $0 }
+                ?? (identityStub.displayName.isEmpty ? nil : identityStub.displayName)
         }
         // Frame-1 state for the relationship capsule. "Edit Profile" on
         // surfaces that are the viewer's own by construction; the origin's

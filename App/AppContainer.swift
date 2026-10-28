@@ -920,7 +920,8 @@ final class AppContainer {
             profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
             authSession: sessionManager,
             viewer: viewerSession,
-            localStore: localStore
+            localStore: localStore,
+            people: entityStore
         )
         // The shared viewer already carries the switch; this only drops the
         // composer's cached face the moment a switch is announced, without
@@ -1341,7 +1342,8 @@ final class AppContainer {
         socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: authenticatedRPCClient),
         authSession: sessionManager,
         viewer: viewerSession,
-        followEvents: followGraphEvents
+        followEvents: followGraphEvents,
+        people: entityStore
     )
 
     /// Files reports through `moderation.v1.SubmitReport` (the "..." menus)
@@ -1474,7 +1476,8 @@ final class AppContainer {
         profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
         viewer: profileRepository,
         supportsFollowerRemoval: true,
-        followEvents: followGraphEvents
+        followEvents: followGraphEvents,
+        people: entityStore
     )
 
     private(set) lazy var profileFeature: any ProfileFeatureBuilding = {
@@ -1593,7 +1596,8 @@ final class AppContainer {
             // The relation is asked from the VIEWER's side, so it needs whose
             // side that is; nil before sign-in simply means no context on the
             // rows rather than a wrong one.
-            viewerID: { await profiles.viewerProfileID() }
+            viewerID: { await profiles.viewerProfileID() },
+            people: entityStore
         )
         // A follow accepted on any screen reaches the search rows' session
         // cache (#896), as it reaches the profile header and the feed's "+".
@@ -1639,7 +1643,8 @@ final class AppContainer {
         postClient: Post_V1_PostServiceClient(client: authenticatedRPCClient),
         authSession: sessionManager,
         viewer: viewerSession,
-        clear: notificationsClear
+        clear: notificationsClear,
+        people: entityStore
     )
 
     /// The server's clear of the drawer (#1574): the mock's, reached
@@ -1772,7 +1777,8 @@ final class AppContainer {
         profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
         viewer: chatRepository,
         pageSize: 200,
-        followEvents: followGraphEvents
+        followEvents: followGraphEvents,
+        people: entityStore
     )
 
     /// The compose picker's people lookup. Its own repository rather than the

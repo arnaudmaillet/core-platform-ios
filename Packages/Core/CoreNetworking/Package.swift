@@ -12,6 +12,7 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../../Kit/CoreContracts"),
+        .package(path: "../../Kit/CoreModels"),
         .package(path: "../MediaCore"),
         .package(url: "https://github.com/connectrpc/connect-swift.git", from: "1.0.0"),
         .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.28.0")
@@ -27,6 +28,9 @@ let package = Package(
                 // module is visible to the whole graph long after the target
                 // that declared it stopped being the only one using it.
                 "CoreContracts",
+                // `AuthorSummary(profileView:)` (#1858): a profile view as the
+                // person every screen shows.
+                .product(name: "CoreModels", package: "CoreModels"),
                 // `MediaAssetUploader` hands bytes to a `MediaUploadTransport`.
                 .product(name: "MediaCore", package: "MediaCore"),
                 .product(name: "Connect", package: "connect-swift")

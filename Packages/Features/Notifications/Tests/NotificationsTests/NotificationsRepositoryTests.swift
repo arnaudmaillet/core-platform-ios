@@ -159,6 +159,31 @@ struct NotificationsRepositoryTests {
     /// notifications are about the viewer's own posts, which their author
     /// always reads, so `GetPost` is made to answer as it does for a post
     /// taken down under someone else.
+    /// ⚠️ A SENDER IS KNOWN THE NEXT TIME THEY ARE OPENED (#1858): every
+    /// sender the page hydrated is reported, with the handle the row drops.
+    @Test func theSendersAreReported() async throws {
+        let dataset = MockSocialDataset()
+        let bff = MockBFF()
+        MockSocialServices(dataset: dataset).register(on: bff)
+        MockNotificationService(dataset: dataset).register(on: bff)
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let people = RecordedNotificationPeople()
+        let repository = NotificationsRepository(
+            notificationClient: Notification_V1_NotificationServiceClient(client: client),
+            profileClient: Profile_V1_ProfileServiceClient(client: client),
+            authSession: AuthenticatedSessionStub(),
+            people: people
+        )
+        let items = try await repository.loadNotifications(limit: 20)
+        try #require(!items.isEmpty)
+        for item in items where !item.senderID.rawValue.isEmpty {
+            let person = try #require(people.seen.first { $0.id == item.senderID }, "\(item.senderID) not reported")
+            #expect(person.displayName == item.senderName)
+            #expect(person.avatarURL == item.senderAvatarURL)
+            #expect(!person.handle.isEmpty, "the handle the row drops")
+        }
+    }
+
     @Test func aSubjectTheServerNoLongerShowsKeepsItsRowWithoutAPreview() async throws {
         let dataset = MockSocialDataset()
         let bff = MockBFF()
@@ -276,4 +301,13 @@ struct NotificationsRepositoryTests {
 
         #expect(error?.networkFailure == .offline)
     }
+}
+
+/// What a writer reported (#1858).
+private final class RecordedNotificationPeople: PeopleSightings, @unchecked Sendable {
+    private let lock = NSLock()
+    private var sightings: [AuthorSummary] = []
+    func saw(_ people: [AuthorSummary]) { lock.withLock { sightings += people } }
+    func loaded(_ person: AuthorSummary) { lock.withLock { sightings.append(person) } }
+    var seen: [AuthorSummary] { lock.withLock { sightings } }
 }

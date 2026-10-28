@@ -248,6 +248,9 @@ public actor CommentsRepository: CommentsProviding {
     /// repository (`ViewerSession`), so a switch or a sign-out reaches all of them.
     private let viewer: any ViewerProviding
     private var authorCache: [ProfileID: (name: String, handle: String, avatarURL: URL?, frameID: String?)] = [:]
+    /// Where the comments' authors are reported, so a person seen in a thread
+    /// is known when opened from anywhere (#1858).
+    private let people: (any PeopleSightings)?
     /// The prefetched first pages, OUTSIDE this actor's isolation so the panel
     /// can read one synchronously while it mounts. Locked rather than
     /// isolated for exactly that reason — an `await` here would put a
@@ -264,8 +267,10 @@ public actor CommentsRepository: CommentsProviding {
         viewer: (any ViewerProviding)? = nil,
         pageSize: Int32 = 50,
         replyPageSize: Int32 = 20,
-        localStore: LocalStore? = nil
+        localStore: LocalStore? = nil,
+        people: (any PeopleSightings)? = nil
     ) {
+        self.people = people
         self.topPages = TopCommentsCache(disk: localStore.map(CommentsDiskTier.init(store:)))
         self.commentClient = commentClient
         self.profileClient = profileClient
@@ -492,24 +497,25 @@ public actor CommentsRepository: CommentsProviding {
         let missing = Set(ids).filter { authorCache[$0] == nil && !$0.rawValue.isEmpty }
         guard !missing.isEmpty else { return }
         let client = profileClient
-        let fetched = await withTaskGroup(of: (ProfileID, String, String, URL?, String?)?.self) { group in
+        let fetched = await withTaskGroup(of: (ProfileID, Profile_V1_ProfileView)?.self) { group in
             for id in missing {
                 group.addTask {
                     var request = Profile_V1_GetProfileByIdRequest()
                     request.profileID = id.rawValue
                     let response = await client.getProfileByID(request: request, headers: [:])
                     guard let view = response.message else { return nil }
-                    let frame: String? = view.avatarFrameID.isEmpty ? nil : view.avatarFrameID
-                    return (id, view.displayName, view.handle, URL(string: view.avatarURL), frame)
+                    return (id, view)
                 }
             }
-            return await group.reduce(into: [(ProfileID, String, String, URL?, String?)]()) { partial, tuple in
-                if let tuple { partial.append(tuple) }
+            return await group.reduce(into: [(ProfileID, Profile_V1_ProfileView)]()) { partial, pair in
+                if let pair { partial.append(pair) }
             }
         }
-        for (id, name, handle, avatarURL, frameID) in fetched {
-            authorCache[id] = (name, handle, avatarURL, frameID)
+        for (id, view) in fetched {
+            let frame: String? = view.avatarFrameID.isEmpty ? nil : view.avatarFrameID
+            authorCache[id] = (view.displayName, view.handle, URL(string: view.avatarURL), frame)
         }
+        people?.saw(fetched.map { AuthorSummary(profileView: $0.1) })
     }
 
     private func makeEntry(from view: Comment_V1_CommentView) -> CommentEntry {

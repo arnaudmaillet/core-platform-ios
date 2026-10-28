@@ -254,6 +254,9 @@ public actor NotificationsRepository: NotificationsProviding, ViewerScoped {
     /// row, with room for the ellipsis the label adds.
     static let excerptLimit = 140
 
+    /// Where every sender this repository hydrates is reported (#1858).
+    private let people: (any PeopleSightings)?
+
     public init(
         notificationClient: any Notification_V1_NotificationServiceClientInterface,
         profileClient: any Profile_V1_ProfileServiceClientInterface,
@@ -262,8 +265,10 @@ public actor NotificationsRepository: NotificationsProviding, ViewerScoped {
         viewer: (any ViewerProviding)? = nil,
         lookupCapacity: Int = NotificationsRepository.lookupCapacity,
         clear: NotificationsClearing? = nil,
+        people: (any PeopleSightings)? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
+        self.people = people
         self.clear = clear
         self.actorCache = LookupCache(capacity: lookupCapacity, failureLifetime: Self.failedLookupLifetime)
         self.previewCache = LookupCache(capacity: lookupCapacity, failureLifetime: Self.failedLookupLifetime)
@@ -407,27 +412,30 @@ public actor NotificationsRepository: NotificationsProviding, ViewerScoped {
         guard !missing.isEmpty else { return }
 
         let client = profileClient
-        let fetched = await withTaskGroup(of: (ProfileID, NotificationActor?).self) { group in
+        let fetched = await withTaskGroup(of: (ProfileID, Profile_V1_ProfileView?).self) { group in
             for id in missing {
                 group.addTask {
                     var request = Profile_V1_GetProfileByIdRequest()
                     request.profileID = id.rawValue
                     let response = await client.getProfileByID(request: request, headers: [:])
-                    guard let view = response.message else { return (id, nil) }
-                    return (id, NotificationActor(
-                        id: id,
-                        name: view.displayName,
-                        avatarURL: view.avatarURL.isEmpty ? nil : URL(string: view.avatarURL)
-                    ))
+                    return (id, response.message)
                 }
             }
-            return await group.reduce(into: [(ProfileID, NotificationActor?)]()) { $0.append($1) }
+            return await group.reduce(into: [(ProfileID, Profile_V1_ProfileView?)]()) { $0.append($1) }
         }
         let answered = now()
         guard generation == viewerGeneration else { return }
-        for (id, actor) in fetched {
+        for (id, view) in fetched {
+            let actor = view.map { view in
+                NotificationActor(
+                    id: id,
+                    name: view.displayName,
+                    avatarURL: view.avatarURL.isEmpty ? nil : URL(string: view.avatarURL)
+                )
+            }
             actorCache.record(actor, for: id, now: answered)
         }
+        people?.saw(fetched.compactMap { $0.1.map(AuthorSummary.init(profileView:)) })
     }
 
     /// The subject post's first still, or its text when it has no picture.
