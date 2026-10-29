@@ -135,6 +135,54 @@ final class RouteResolver: Router {
         navigation.setViewControllers(stack, animated: animated)
     }
 
+    /// A second tap on the author whose profile is the top screen, or whose
+    /// push is waiting (#778, #800).
+    private func isRepeatProfile(_ route: AppRoute, using navigator: AppNavigating) -> Bool {
+        guard let key = route.profileRouteKey else { return false }
+        return repeatProfiles.isRepeat(
+            key, topScreen: navigator.activeNavigationController?.topViewController,
+            screenKeys: { ($0 as? ProfileRouteAnswering)?.profileRouteKeys ?? [] }
+        )
+    }
+
+    /// A profile opened as a window out of `source` (#1874, `ProfileWindow`).
+    /// The rules of `route(to:)` that a profile meets apply — the repeat
+    /// filter, the overlays closing, the transient pickers — and anything this
+    /// path cannot open as a window takes the plain push.
+    func route(to route: AppRoute, throughWindowOf source: any ProfileWindowSource) {
+        open(route, throughWindowOf: source, launch: nil)
+    }
+
+    private func open(_ route: AppRoute, throughWindowOf source: any ProfileWindowSource, launch: RevealLaunch?) {
+        guard case .profile(let profileID, let stub) = route, let navigator else { return self.route(to: route) }
+        if isRepeatProfile(route, using: navigator) {
+            navigator.closeOverlays()
+            return
+        }
+        navigator.closeOverlays()
+        let profile = makeProfile(profileID, stub: stub)
+        // ⚠️ THE STACK'S OWN TRANSITION, not any coordinator: the card's sheet
+        // has just left (unanimated) in this same turn, and a coordinator for
+        // that dismissal is not a push running (`isTransitioningItsStack`).
+        guard let nav = navigator.activeNavigationController, !nav.isTransitioningItsStack,
+              !nav.viewControllers.contains(where: { $0 is TransientDestinationPicking }),
+              let opening = source.profileWindowGeometry(for: profileID, launch: launch)
+        else { return pushProfile(profile, for: route, using: navigator) }
+        if let key = route.profileRouteKey {
+            repeatProfiles.willPush(key, screen: profile, isTransitioning: false)
+        }
+        repeatProfiles.stoppedWaiting(profile)
+        nav.layOutWindowIfUnsized()
+        let slide = ProfileWindow.attach(
+            to: profile, opening: opening,
+            closing: { [weak source] in source?.profileWindowGeometry(for: profileID, launch: nil) },
+            releaseSource: { [weak source] in source?.releaseProfileWindowSource() }
+        )
+        // BEFORE the push, so the push asks this driver for its animator.
+        slide.install(on: nav)
+        nav.pushViewController(profile, animated: true)
+    }
+
     func route(to route: AppRoute) {
         guard let navigator else {
             logger.debug("No navigator; dropping route: \(String(describing: route))")
@@ -146,11 +194,7 @@ final class RouteResolver: Router {
         // while the profile it pushed is still resolving it.
         // Either way round: the top profile answers to the id a handle
         // resolved to, and to the handle a profile opened by id loaded.
-        if let key = route.profileRouteKey,
-           repeatProfiles.isRepeat(
-               key, topScreen: navigator.activeNavigationController?.topViewController,
-               screenKeys: { ($0 as? ProfileRouteAnswering)?.profileRouteKeys ?? [] }
-           ) {
+        if isRepeatProfile(route, using: navigator) {
             // Still the viewer's tap: a drawer it came from slides shut.
             navigator.closeOverlays()
             return
@@ -414,7 +458,24 @@ extension RouteResolver {
                 push(screen, using: navigator)
             }
         )
+        // `-profile-window` (#1874): the profile opens as a window out of the
+        // sheet, onto the post screen's pill, when the screen under the card
+        // is one a window can close onto.
+        if let source = navigation.topViewController as? any ProfileWindowSource,
+           source.opensProfileWindows,
+           let launching = Self.windowLaunching(in: card) {
+            launching.opensProfileThroughWindow = { [weak self, weak source] launch in
+                guard let self, let source else { return }
+                open(.profile(profileID, stub: stub), throughWindowOf: source, launch: launch)
+            }
+        }
         presenter.present(card, animated: true)
+    }
+
+    /// The card inside its sheet's wrapper, when it can open a window.
+    private static func windowLaunching(in card: UIViewController) -> (any ProfileWindowLaunching)? {
+        (card as? any ProfileWindowLaunching)
+            ?? ((card as? UINavigationController)?.viewControllers.first as? any ProfileWindowLaunching)
     }
 
     /// The screen a route would push, for a caller that pushes it itself —

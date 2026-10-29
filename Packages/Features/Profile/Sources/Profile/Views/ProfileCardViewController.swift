@@ -33,7 +33,7 @@ import UIKit
 ///   `Actions.openProfile` pushes it on the presenter's stack. The counters
 ///   push their lists the same way (`Actions.push`).
 @MainActor
-final class ProfileCardViewController: UIViewController {
+final class ProfileCardViewController: UIViewController, ProfileWindowLaunching {
     struct Actions {
         /// Pushes the full profile; called once the card has closed.
         var openProfile: () -> Void
@@ -43,6 +43,10 @@ final class ProfileCardViewController: UIViewController {
     }
 
     static let detent = UISheetPresentationController.Detent.Identifier("profile.card")
+
+    /// Set by the router under `-profile-window` (#1874): a tap on the
+    /// profile info opens the profile as a window out of this sheet.
+    var opensProfileThroughWindow: ((RevealLaunch) -> Void)?
 
     let viewModel: ProfileViewModel
     private let imagePipeline: ImagePipeline
@@ -666,8 +670,33 @@ final class ProfileCardViewController: UIViewController {
     #endif
 
     @objc private func infoTapped() {
+        // `-profile-window` (#1874): the sheet leaves WITHOUT ANIMATION and the
+        // profile opens as a window out of its rect, in the same turn — no
+        // slide-down before the opening. Measured before the dismissal.
+        if let throughWindow = opensProfileThroughWindow, let launch = windowLaunch() {
+            (navigationController ?? self).dismiss(animated: false)
+            throughWindow(launch)
+            return
+        }
         let open = actions.openProfile
         closeThen(open)
+    }
+
+    /// The sheet as the window's opening: its rect and rounding on screen
+    /// now, and a still of what it shows (its glass included).
+    private func windowLaunch() -> RevealLaunch? {
+        let sheet: UIView = (navigationController ?? self).view
+        guard let window = sheet.window else { return nil }
+        let rect = sheet.convert(sheet.bounds, to: window)
+        guard let picture = ProfileWindow.picture(of: rect, in: window) else { return nil }
+        let radius = sheet.layer.cornerRadius > 0
+            ? sheet.layer.cornerRadius : ScreenGeometry.cornerRadius(behind: sheet)
+        return RevealLaunch(
+            frame: { [weak window] space in window.map { $0.convert(rect, to: space) } },
+            cornerRadius: radius,
+            pageFit: .covering,
+            makeStandIn: { ProfileWindow.standIn(wearing: picture) }
+        )
     }
 
     private func openRelationships(_ direction: RelationshipDirection) {

@@ -351,6 +351,12 @@ public final class FeedViewModel {
         router?.route(to: .profile(id, stub: identity(of: id)))
     }
 
+    /// The author's profile opened as a window out of `source`'s author pill
+    /// (#1874, `-profile-window`).
+    public func didTapAuthor(_ id: ProfileID, throughWindowOf source: any ProfileWindowSource) {
+        router?.route(to: .profile(id, stub: identity(of: id)), throughWindowOf: source)
+    }
+
     /// What the feed knows of `id` as it opens them (#1858): the pill's stub,
     /// with the viewer's follow state from the store — the badge the pill
     /// shows — and what the store holds for anything the stub lacks.

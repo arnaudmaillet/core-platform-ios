@@ -2191,7 +2191,15 @@ final class SnapFeedViewController: UIViewController {
         }
         // A hold pushes the profile itself (#1669), as the leftward swipe
         // does; the tap keeps the card.
-        pill.onAuthorLongPressed = { [weak self] id in self?.viewModel.didTapAuthor(id) }
+        pill.onAuthorLongPressed = { [weak self] id in
+            guard let self else { return }
+            // `-profile-window` (#1874): the profile opens out of the pill.
+            if opensProfileWindows {
+                viewModel.didTapAuthor(id, throughWindowOf: self)
+            } else {
+                viewModel.didTapAuthor(id)
+            }
+        }
         // The "+" follows, in place (`followAuthor`). The followed and friends
         // marks take no tap of their own — a tap on them is a tap on the pill,
         // which opens the profile — so there is no unfollow here: that is the
@@ -2211,6 +2219,13 @@ final class SnapFeedViewController: UIViewController {
     /// ground it floats over (`updateBarChrome`): kept, so a fresh pill
     /// (#1791) is told them too.
     private var authorWidthBudget: CGFloat?
+    /// The author pill as a profile window opened out of it (#1874): its
+    /// rect and picture, kept for the close — the bar may not be back yet
+    /// when the close measures its landing, and it does not move while the
+    /// profile is up.
+    var profileWindowPill: (author: ProfileID, rect: CGRect, picture: UIImage)?
+    /// `-profile-window` (#1874), settable for tests.
+    var profileWindowFlag = ProfileWindow.isFlagOn
     private var authorOverMedia = true
 
     /// Puts `model`'s author in the bar (#1791).
@@ -8250,4 +8265,75 @@ extension SnapFeedViewController: HeaderAccessoryHosting {
     /// The feed wears its own points badge (`walletBadgeItem`): the shell's
     /// is not installed here.
     public func setTrailingAccessoryItem(_ item: UIBarButtonItem?) {}
+}
+
+// MARK: - The profile as a window (#1874)
+
+extension SnapFeedViewController: ProfileWindowSource {
+    var opensProfileWindows: Bool {
+        ProfileWindow.opens(
+            flag: profileWindowFlag, reducesMotion: HeroMotionPolicy.prefersNativePush, isShotsRoot: isForYouRoot
+        )
+    }
+
+    /// The window on the author pill: measured live when the pill is on
+    /// screen and shows `profileID`, else the rect kept from the opening,
+    /// else nil — the plain push or slide, never a window onto nothing.
+    func profileWindowGeometry(for profileID: ProfileID, launch: RevealLaunch?) -> RevealGeometry? {
+        // The STACK's window: when a close stages, this screen's view is not
+        // back in the hierarchy yet.
+        guard opensProfileWindows, let window = view.window ?? navigationController?.view.window,
+              let pill = livePill(for: profileID, in: window) ?? keptPill(for: profileID)
+        else { return nil }
+        profileWindowPill = pill
+        let rect = pill.rect
+        let picture = pill.picture
+        return RevealGeometry(
+            sourceFrame: { [weak window] space in window.map { $0.convert(rect, to: space) } },
+            sourceCornerRadius: rect.height / 2,
+            sourceCornerCurve: .circular,
+            makeDismissStandIn: { ProfileWindow.standIn(wearing: picture) },
+            makePresentStandIn: { ProfileWindow.standIn(wearing: picture) },
+            setSourceConcealed: { [weak self] hidden in self?.authorIdentityView.alpha = hidden ? 0 : 1 },
+            matchesAnchor: false,
+            pageFit: .covering,
+            launch: { launch }
+        )
+    }
+
+    func releaseProfileWindowSource() {
+        authorIdentityView.alpha = 1
+        // Nothing left to land on with it: the next opening measures afresh.
+        profileWindowPill = nil
+    }
+
+    #if DEBUG
+    /// The author pill's alpha — what the window's concealment drives.
+    var debugAuthorPillAlpha: CGFloat {
+        get { authorIdentityView.alpha }
+        set { authorIdentityView.alpha = newValue }
+    }
+    #endif
+
+    /// The pill on screen now, showing `profileID`, under a toolbar that is up.
+    private func livePill(
+        for profileID: ProfileID, in window: UIWindow
+    ) -> (author: ProfileID, rect: CGRect, picture: UIImage)? {
+        let pill = authorIdentityView
+        guard let nav = navigationController, !nav.isToolbarHidden,
+              pill.window === window, !pill.isHidden, pill.alpha > 0.5,
+              pill.shownAuthor?.authorID == profileID
+        else { return nil }
+        let rect = pill.convert(pill.bounds, to: window)
+        guard let picture = ProfileWindow.picture(of: rect, in: window) else { return nil }
+        return (profileID, rect, picture)
+    }
+
+    /// The pill as the opening measured it, if it was this author's.
+    private func keptPill(for profileID: ProfileID) -> (author: ProfileID, rect: CGRect, picture: UIImage)? {
+        guard let kept = profileWindowPill, kept.author == profileID,
+              authorIdentityView.shownAuthor?.authorID == profileID
+        else { return nil }
+        return kept
+    }
 }

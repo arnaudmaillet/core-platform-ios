@@ -539,6 +539,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         let isTabRoot = navigationController?.viewControllers.first === self
         galleryPager.leadingPullTarget = isTabRoot ? DrawerPull.shared : nil
         galleryPager.reservesLeadingEdge = !isTabRoot
+        // Opened as a window (#1874): its close stays the window's after a
+        // screen pushed above it took the stack's delegate.
+        ProfileWindow.reassert(on: self)
         Task { [weak self] in await self?.viewModel.refreshShareToken() }
         // ⚠️ **AS EARLY AS THE TRANSITION ALLOWS, AND `viewDidAppear` IS NOT
         // EARLY.** Measured on a tab switch, headless: `viewWillAppear` at

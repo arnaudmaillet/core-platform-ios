@@ -10,8 +10,15 @@ public protocol Router: AnyObject {
     /// #1525). Nil: the route has no such screen (it presents, switches tabs,
     /// or is gated).
     func destination(for route: AppRoute) -> UIViewController?
+    /// `route` with its push opened as a window out of `source` (#1874,
+    /// `ProfileWindow`): a profile only, every push rule of `route(to:)`
+    /// applying; any other route, or no window to measure, is `route(to:)`.
+    func route(to route: AppRoute, throughWindowOf source: any ProfileWindowSource)
 }
 
 public extension Router {
     func destination(for route: AppRoute) -> UIViewController? { nil }
+    func route(to route: AppRoute, throughWindowOf source: any ProfileWindowSource) {
+        self.route(to: route)
+    }
 }
