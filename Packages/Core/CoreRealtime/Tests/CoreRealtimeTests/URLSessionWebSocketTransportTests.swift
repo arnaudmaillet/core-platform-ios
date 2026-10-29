@@ -49,13 +49,35 @@ private final class LoopbackWebSocketServer: @unchecked Sendable {
         }
     }
 
+    /// Why the listener never gave a port.
+    enum ListenerError: Error, CustomStringConvertible {
+        case failed(NWError)
+        case noPortAfter(seconds: Double)
+
+        var description: String {
+            switch self {
+            case .failed(let error): "the loopback listener failed: \(error)"
+            case .noPortAfter(let seconds): "the loopback listener had no port after \(seconds) s"
+            }
+        }
+    }
+
     /// The bound port, once the listener is up (time-bounded).
-    func port() async throws -> UInt16 {
-        for _ in 0..<400 {
+    ///
+    /// ⚠️ **A SLOW LISTENER IS NOT A REFUSED SOCKET (#1846).** This gave up
+    /// after 2 s and threw `URLError(.cannotConnectToHost)`. On a loaded CI
+    /// runner the listener took longer, and the test failed with a `-1004`
+    /// that read as the transport's, though `connect` never throws. It now
+    /// waits as long as the runner needs, and its error says it is the
+    /// server's, never the transport's.
+    func port(within seconds: Double = 30) async throws -> UInt16 {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if case .failed(let error) = listener.state { throw ListenerError.failed(error) }
             if let port = listener.port, port.rawValue != 0 { return port.rawValue }
             try await Task.sleep(nanoseconds: 5_000_000)
         }
-        throw URLError(.cannotConnectToHost)
+        throw ListenerError.noPortAfter(seconds: seconds)
     }
 
     func stop() {
@@ -108,6 +130,11 @@ private func makeTransport(port: UInt16) throws -> URLSessionWebSocketTransport 
 
 /// ⚠️ CONNECTED MEANS THE SOCKET ANSWERED (#792): the production transport
 /// yields `.connected` only once a ping came back — never on `resume()` alone.
+///
+/// THE CONTRACT (#1846): `connect` returns the stream and does not throw; a
+/// refused, hung-up or silent socket is a `.disconnected` that ends it. An
+/// error thrown before `connect` is the test server's (`ListenerError`),
+/// never the transport's.
 struct URLSessionWebSocketTransportTests {
     @Test func aServerThatAnswersThePingIsConnected() async throws {
         let server = try LoopbackWebSocketServer(behavior: .answersPings)
