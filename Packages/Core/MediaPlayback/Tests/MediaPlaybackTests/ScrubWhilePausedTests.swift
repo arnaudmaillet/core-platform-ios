@@ -88,15 +88,26 @@ struct ScrubWhilePausedTests {
     /// alone. With the stale anchor in place this came back at ~0, because the
     /// drift between "where the finger went down" and "where it let go" is the
     /// whole length of the scrub.
+    ///
+    /// ⚠️ **A STRETCH THAT CROSSES THE LOOP'S END MEASURES THE RESTART, NOT
+    /// THE SCRUB (#1873).** On the 3 s fixture, a scrub to 0.75 left 0.75 s
+    /// before the end; a starved "300 ms" ran 1.26 s, crossed it, and the
+    /// head came back 0.35 s late: the item holds at its end until the
+    /// loop's seek to zero runs on the main queue (#1405), and that hold is
+    /// lost time. So this test plays a longer clip and scrubs to its middle,
+    /// with 6 s of playback before any loop: the
+    /// drag-back it guards is the scrub's whole length, 4 s.
     @Test func resumingAfterAScrubCarriesOnFromTheScrubbedPosition() async throws {
-        let (controller, surface) = try await bound(try await clip())
+        let duration = Self.longClip
+        let scrubTo = 0.4
+        let (controller, surface) = try await bound(try await clip(seconds: duration))
         _ = try #require(controller.playhead(in: surface), "guard: the item reported a length")
 
         controller.setPaused(true, in: surface)
-        controller.seek(toFraction: 0.75, in: surface)
+        controller.seek(toFraction: scrubTo, in: surface)
         await seeksSettled(controller, in: surface)
         let scrubbed = try #require(controller.playhead(in: surface)).fraction
-        #expect(abs(scrubbed - 0.75) < 0.12, "guard: the scrub landed before we resumed")
+        #expect(abs(scrubbed - scrubTo) < 0.12, "guard: the scrub landed before we resumed")
 
         controller.setPaused(false, in: surface)
         // ⚠️ THE CLOCK STARTS WHEN THE PLAYER PLAYS, NOT AT THE CALL (#1405,
@@ -123,7 +134,7 @@ struct ScrubWhilePausedTests {
             try await Task.sleep(for: .milliseconds(10))
         }
         let (start, startedAt) = try #require(resumed, "the player never played after the resume")
-        #expect(abs(start - scrubbed) * Self.duration < 1,
+        #expect(abs(start - scrubbed) * duration < 1,
                 "resuming dragged the clip back to where the scrub started: \(start) after a scrub to \(scrubbed)")
         // Not a wait for something to happen: a stretch of playback, read back
         // against the time it actually took (below), however long that was.
@@ -145,10 +156,9 @@ struct ScrubWhilePausedTests {
         let (head, readFrom, readBy) = reading
 
         // ⚠️ AGAINST THE TIME THE TEST ACTUALLY SPENT, not `fraction > 0.6`
-        // (#599): a starved "300 ms" ran ~2.4 s on CI and wrapped the 3 s loop
-        // back to 0.56. Dragged back to where the scrub started, the clip is
-        // off by the scrub's length whatever the elapsed time.
-        let duration = Self.duration
+        // (#599): a starved "300 ms" ran ~2.4 s on CI. Dragged back to where
+        // the scrub started, the clip is off by the scrub's length whatever
+        // the elapsed time.
         #expect(TimingTolerance.isOnLoop(
             head.fraction * duration, start: start * duration,
             elapsed: Self.seconds(readFrom)...Self.seconds(readBy), period: duration, slack: 0.25
@@ -157,6 +167,11 @@ struct ScrubWhilePausedTests {
 
     /// The fixture's length (`clip()`'s default).
     private static let duration = 3.0
+
+    /// The scrub-and-resume test's clip: long enough that a scrub to 0.4
+    /// leaves 6 s of playback before the loop's end, past the slowest
+    /// "300 ms" CI has measured (2.4 s, #599).
+    private static let longClip = 10.0
 
     /// A playhead this close to 1 is the item held at its end, waiting for
     /// the loop's seek to zero: closer than half a frame of the 30 fps fixture.
