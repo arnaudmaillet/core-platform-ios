@@ -1752,6 +1752,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // it never dismisses, so it's the right gesture on a text post's
         // permanent resting interface too.
         cardSwipeRecognizer.isEnabled = engaged
+        // A media page's column folds into its sound bubble while the
+        // comments are up, and is revealed from it as they close (#1872). A
+        // text page's engagement is its resting layout: nothing moves.
+        chrome.setColumnCollapsed(engaged && mediaURL != nil, animated: window != nil)
 
         if engaged {
             if mediaCard.showsPausedMark {

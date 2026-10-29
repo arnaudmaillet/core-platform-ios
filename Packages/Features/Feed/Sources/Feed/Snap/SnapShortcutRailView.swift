@@ -779,9 +779,13 @@ final class SnapRailBoostButton: StakeMenuButton {
         refreshEnabled()
     }
 
+    /// Whether the pill wears its own glass — off in the page's action
+    /// column (#1872), which is one glass for all its bubbles.
+    var drawsGlass = true
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        if window != nil, !hasGlass {
+        if drawsGlass, window != nil, !hasGlass {
             hasGlass = true
             applyFace()
         }

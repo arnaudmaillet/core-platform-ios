@@ -66,14 +66,14 @@ struct SnapLikePillLayoutTests {
     @Test func thePillIsTheSameSizeOnATextPage() {
         let media = Self.chrome(Self.model())
         let text = Self.chrome(Self.model(media: false))
-        #expect(text.debugBoostButton.frame == media.debugBoostButton.frame)
+        #expect(text.debugFrame(of: text.debugBoostButton) == media.debugFrame(of: media.debugBoostButton))
     }
 
     /// ⚠️ EVEN GAPS (#680): top → heart, heart → count, count → bottom —
     /// measured on what the pill DRAWS, its image and its title (#692).
     @Test func theGapsInsideThePillAreEven() {
         let chrome = Self.chrome(Self.model())
-        let pill = chrome.debugBoostButton.frame
+        let pill = chrome.debugFrame(of: chrome.debugBoostButton)
         let count = chrome.debugLikeBadgeFrame
         let heart = chrome.debugLikeHeartFrame
         #expect(SnapActionColumn.pillGap > 4, "the pill has no room for its gaps")

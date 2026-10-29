@@ -33,6 +33,9 @@ struct SnapDeviceRound2Tests {
         let chrome = SnapChromeView(frame: Layout.screen)
         window.addSubview(chrome)
         chrome.configure(with: Self.media())
+        // Every media page wears a sound face: it stands the sound bubble in
+        // the column's glass (#1872).
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
         chrome.layoutIfNeeded()
         #expect(chrome.overrideUserInterfaceStyle == .dark)
         #expect(chrome.debugBoostButton.traitCollection.userInterfaceStyle == .dark, "the like pill flew light")

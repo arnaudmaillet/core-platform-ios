@@ -18,10 +18,11 @@ import UIKit
 ///   band's top down to `gap` above the lower bubble — the heart on top and
 ///   the post's like count under it — and the SOUND bubble
 ///   (`SnapSoundBubbleButton`, #671) on the composer's field line.
-/// - Comments layout: the composer's stake pill stands on the like pill's
-///   frame, and its trailing rail slot — the sound's cover — on the sound
-///   bubble's. Same size, same place: switching layouts is an alpha crossfade
-///   between two bubbles that never move. The voice note is a waveform INSIDE
+/// - Comments layout of a MEDIA page (#1872, the owner): the column is ONE
+///   glass (`SnapGlassColumn`), and the like and the post's actions fold
+///   into the sound bubble, which stays in place; closing the comments
+///   reveals them from it. A text page's composer draws its own stake pill
+///   and rail slot on the same frames, as before. The voice note is a waveform INSIDE
 ///   the field, beside the emote button, and it becomes the SEND arrow while
 ///   there is text (a symbol replace).
 /// - The Messages thread: no stake (a conversation has nothing to like), and

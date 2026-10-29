@@ -34,14 +34,15 @@ struct SnapCommentZoneLayoutTests {
 
     /// A part of the chrome, its own or its action column's (#695).
     private static func part<T: UIView>(_ chrome: SnapChromeView, _ type: T.Type) throws -> T {
-        func find(_ view: UIView) -> T? {
+        // The column's items stand deep in its glass (#1872).
+        func find(_ view: UIView, deep: Bool) -> T? {
             for sub in view.subviews {
                 if let match = sub as? T { return match }
-                if sub is SnapActionColumnLayer, let match = find(sub) { return match }
+                if deep || sub is SnapActionColumnLayer, let match = find(sub, deep: true) { return match }
             }
             return nil
         }
-        return try #require(find(chrome))
+        return try #require(find(chrome, deep: false))
     }
 
     private static func cues(_ count: Int) -> [SubtitleCue] {

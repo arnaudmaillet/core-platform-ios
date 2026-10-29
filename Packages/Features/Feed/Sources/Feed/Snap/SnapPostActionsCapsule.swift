@@ -59,10 +59,14 @@ final class SnapPostActionsCapsule: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// Whether the capsule wears its own glass — off in the page's action
+    /// column (#1872), which is one glass for all its bubbles.
+    var drawsGlass = true
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         // The glass materializes on window attach, like the like pill's.
-        if window != nil, glass.effect == nil {
+        if drawsGlass, window != nil, glass.effect == nil {
             let effect = UIGlassEffect()
             effect.isInteractive = true
             glass.effect = effect

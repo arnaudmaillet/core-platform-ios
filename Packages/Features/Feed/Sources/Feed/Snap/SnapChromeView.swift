@@ -169,6 +169,13 @@ final class SnapChromeView: UIView {
         }
     }
     private let columnLayer = SnapActionColumnLayer()
+    /// The column's bubbles as ONE glass (#1872): the like, the post's
+    /// actions and the sound fuse, split and fold into the sound — the
+    /// buttons are its items, on their stations.
+    private let glassColumn = SnapGlassColumn()
+    /// The comments layout of a media page (#1872): everything folds into
+    /// the sound bubble, which stays in place.
+    private(set) var isColumnCollapsed = false
     /// Where `columnLayer` is mounted: this chrome, or the cell's content.
     private weak var columnHost: UIView?
 
@@ -727,10 +734,23 @@ final class SnapChromeView: UIView {
             postActionsStation.bottomAnchor.constraint(equalTo: soundStation.topAnchor, constant: -SnapActionColumn.gap)
         }
         postActions.isHidden = true
-        // The buttons, in the column's own layer, on their stations.
-        columnLayer.addSubview(boostButton)
-        columnLayer.addSubview(soundBubble)
-        columnLayer.addSubview(postActions)
+        // The buttons are the glass column's items (#1872): the column is
+        // their one glass, standing them on their stations.
+        boostButton.drawsGlass = false
+        soundBubble.drawsGlass = false
+        postActions.drawsGlass = false
+        for (id, button) in [
+            (ColumnItem.like, boostButton as UIView), (ColumnItem.actions, postActions), (ColumnItem.sound, soundBubble),
+        ] {
+            button.translatesAutoresizingMaskIntoConstraints = true
+            glassColumn.register(button, for: id)
+        }
+        glassColumn.anchorID = ColumnItem.sound
+        glassColumn.gap = SnapActionColumn.gap
+        glassColumn.layout = { [weak self] in self?.columnSlots() ?? [] }
+        glassColumn.frame = columnLayer.bounds
+        glassColumn.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        columnLayer.addSubview(glassColumn)
         mountColumn(in: self)
         soundBubble.onTap = { [weak self] in self?.onSoundSheetRequested?() }
         soundBubble.onLongPress = { [weak self] in self?.onSoundToggleRequested?() }
@@ -780,6 +800,8 @@ final class SnapChromeView: UIView {
         // The post's actions (#1681) are media chrome too: a text page's
         // composer holds them.
         postActions.isHidden = !showsPostActions || soundFace == nil
+        // The glass column stands what shows (#1872).
+        setNeedsLayout()
     }
 
     /// The sound bubble's face for the represented post (#671): its cover, the
@@ -810,6 +832,10 @@ final class SnapChromeView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         hasLaidOut = true
+        // The stations are resolved: the glass column stands its bubbles on
+        // them in the same pass (#1872).
+        glassColumn.setNeedsLayout()
+        glassColumn.layoutIfNeeded()
         shortcutRail.bottomReservedInset = bandSeat.layoutFrame.height
 
         // The caption's two-line/timestamp composition is width-dependent —
@@ -1328,6 +1354,15 @@ final class SnapChromeView: UIView {
     /// holds them still across the media and comments layouts.
     var debugBoostButton: UIButton { boostButton }
     var debugSoundBubble: SnapSoundBubbleButton { soundBubble }
+    /// The glass column's items, shape by shape, as the column stands them
+    /// now (#1872).
+    var debugColumnItems: [[String]] { columnSlots().map { $0.map(\.id) } }
+    var debugGlassColumn: SnapGlassColumn { glassColumn }
+    /// `view`'s frame in this chrome's space — a column item stands in its
+    /// bubble's glass, not in the chrome (#1872).
+    func debugFrame(of view: UIView) -> CGRect { view.convert(view.bounds, to: self) }
+    /// The sound's station, shown or not — where its bubble stands.
+    var debugSoundStationFrame: CGRect { soundStation.convert(soundStation.bounds, to: self) }
     /// The comment band, in the chrome's space.
     var debugTickerFrame: CGRect { commentTicker.frame }
     var debugCaptionFrame: CGRect { captionLabel.frame }
@@ -1508,8 +1543,9 @@ final class SnapChromeView: UIView {
     /// bubble, its neighbours in the column (#1847): left standing, it was the
     /// only piece of the post beside the filmstrip.
     private var scrubFadedViews: [UIView] {
-        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, boostButton, soundBubble,
-         postActions, authorRow]
+        // The column fades as one glass (#1872): its bubbles' glass would
+        // stay behind the buttons' faded faces.
+        [captionLabel, commentTicker, subtitleView, commentEmptyState, shortcutRail, glassColumn, authorRow]
     }
 
     /// What each faded view was worth before the scrub took it, so the fade
@@ -1694,24 +1730,46 @@ final class SnapChromeView: UIView {
         columnHost = host
         columnLayer.translatesAutoresizingMaskIntoConstraints = false
         host.addSubview(columnLayer)
-        var constraints = [
+        let constraints = [
             columnLayer.leadingAnchor.constraint(equalTo: leadingAnchor),
             columnLayer.trailingAnchor.constraint(equalTo: trailingAnchor),
             columnLayer.topAnchor.constraint(equalTo: topAnchor),
             columnLayer.bottomAnchor.constraint(equalTo: bottomAnchor),
         ]
-        for (button, station) in [
-            (boostButton as UIView, boostStation), (soundBubble, soundStation), (postActions, postActionsStation),
-        ] {
-            button.translatesAutoresizingMaskIntoConstraints = false
-            constraints += [
-                button.leadingAnchor.constraint(equalTo: station.leadingAnchor),
-                button.trailingAnchor.constraint(equalTo: station.trailingAnchor),
-                button.topAnchor.constraint(equalTo: station.topAnchor),
-                button.bottomAnchor.constraint(equalTo: station.bottomAnchor),
-            ]
-        }
         NSLayoutConstraint.activate(constraints)
+    }
+
+    /// The glass column's items (#1872).
+    enum ColumnItem {
+        static let like = "like"
+        static let actions = "actions"
+        static let sound = "sound"
+    }
+
+    /// Where the column's items stand: on their stations, each a bubble of
+    /// its own; collapsed, the sound alone.
+    private func columnSlots() -> [[SnapGlassColumn.Slot]] {
+        func slot(_ id: String, _ item: UIView, _ station: UIView) -> SnapGlassColumn.Slot? {
+            guard !item.isHidden, station.bounds.width > 0 else { return nil }
+            return SnapGlassColumn.Slot(id: id, frame: station.convert(station.bounds, to: glassColumn))
+        }
+        let sound = slot(ColumnItem.sound, soundBubble, soundStation)
+        if isColumnCollapsed, let sound { return [[sound]] }
+        return [
+            slot(ColumnItem.like, boostButton, boostStation),
+            slot(ColumnItem.actions, postActions, postActionsStation),
+            sound,
+        ].compactMap { $0.map { [$0] } }
+    }
+
+    /// The comments layout of a MEDIA page (#1872, the owner): the like and
+    /// the post's actions fold into the sound bubble, which stays in place;
+    /// closing the comments reveals them from it — one capsule, then the
+    /// split. A text page's engagement is permanent and changes nothing.
+    func setColumnCollapsed(_ collapsed: Bool, animated: Bool) {
+        guard collapsed != isColumnCollapsed else { return }
+        isColumnCollapsed = collapsed
+        glassColumn.refresh(animated: animated)
     }
 
     /// Shows or hides the column — the like (boost) pill and the sound
@@ -1733,7 +1791,14 @@ final class SnapChromeView: UIView {
     /// BOTH layouts, the comments' included (the owner, on a device: the
     /// column stays dark) — and a text page's own theme.
     private func applyColumnStyle() {
-        columnLayer.overrideUserInterfaceStyle = hasMedia ? .dark : .unspecified
+        let style: UIUserInterfaceStyle = hasMedia ? .dark : .unspecified
+        columnLayer.overrideUserInterfaceStyle = style
+        // ⚠️ AND ON EACH ITEM (#1872): a glass's content takes the ink the
+        // glass picks over what is behind it, and the column's ink is the
+        // page's choice — white over media, whatever the picture.
+        for item in [boostButton as UIView, soundBubble, postActions] {
+            item.overrideUserInterfaceStyle = style
+        }
     }
 
     /// Cycles while the owning cell is on screen — the band's visibility
@@ -1759,6 +1824,9 @@ final class SnapChromeView: UIView {
         // trap as the line below, one gesture further in. Unanimated: there is
         // nothing on screen to dissolve, and the next configure is immediate.
         setScrubFocus(false, animated: false)
+        // The next post opens on its media layout (#1872).
+        isColumnCollapsed = false
+        glassColumn.refresh(animated: false)
         // …and a browse in flight takes its previews with it (#1734).
         browseStrip.hide(animated: false)
         // A scaffold handed the next post while still faded would keep that
@@ -1832,10 +1900,18 @@ final class SnapChromeView: UIView {
     /// The count under the pill's heart — nil while the pill is not showing.
     var debugLikeBadgeText: String? { boostButton.isHidden ? nil : boostButton.configuration?.title }
     /// Where the heart is drawn, in the chrome's space.
+    ///
+    /// ⚠️ THE GLYPH, centred in its image view, which stands taller than the
+    /// picture it shows (~2 pt above and below the heart). Read off the
+    /// view, the gaps looked even only while the button was measured half
+    /// laid out — at its title's width, the heart off centre; fully laid out
+    /// in the column's glass (#1872), the view's padding showed.
     var debugLikeHeartFrame: CGRect {
         boostButton.layoutIfNeeded()
         guard let image = boostButton.imageView else { return .zero }
-        return image.convert(image.bounds, to: self)
+        let frame = image.convert(image.bounds, to: self)
+        guard let drawn = image.image?.size, drawn.height > 0, drawn.height < frame.height else { return frame }
+        return frame.insetBy(dx: 0, dy: (frame.height - drawn.height) / 2)
     }
     /// Where the count is drawn, in the chrome's space.
     var debugLikeBadgeFrame: CGRect {

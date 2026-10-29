@@ -104,6 +104,12 @@ final class SnapSoundBubbleButton: UIButton {
     var onLongPress: (() -> Void)?
 
     private let record = SoundRecordGlass()
+    /// Whether the bubble wears its own glass — off in the page's action
+    /// column (#1872), which is one glass for all its bubbles.
+    var drawsGlass: Bool {
+        get { record.drawsGlass }
+        set { record.drawsGlass = newValue }
+    }
     private var coverView: UIImageView { record.cover }
     private(set) var face: SnapSoundFace?
     /// The record's cover on the media slot (#1772): a bone on the dark
