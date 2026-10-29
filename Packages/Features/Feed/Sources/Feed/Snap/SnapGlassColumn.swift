@@ -57,15 +57,15 @@ final class SnapGlassColumn: UIView {
     }
 
     // The lab's measured constants.
-    static let springK: Double = 260
-    static let springZeta: Double = 0.75
-    static let bulgeK: Double = 250
-    static let bulgeZeta: Double = 0.5
-    static let bulgeFraction: CGFloat = 0.125
-    static let bulgeHold: Double = 0.1
-    static let bornScale: CGFloat = 0.2
-    static let maxBlur: CGFloat = 10
-    static let startDelay: Double = 0.03
+    nonisolated static let springK: Double = 260
+    nonisolated static let springZeta: Double = 0.75
+    nonisolated static let bulgeK: Double = 250
+    nonisolated static let bulgeZeta: Double = 0.5
+    nonisolated static let bulgeFraction: CGFloat = 0.125
+    nonisolated static let bulgeHold: Double = 0.1
+    nonisolated static let bornScale: CGFloat = 0.2
+    nonisolated static let maxBlur: CGFloat = 10
+    nonisolated static let startDelay: Double = 0.03
 
     private let container = UIVisualEffectView(effect: nil)
     /// The pictures of the items that come and go, over the glass.
@@ -386,6 +386,15 @@ final class SnapGlassColumn: UIView {
             content.bounds = CGRect(origin: .zero, size: side)
             content.layoutIfNeeded()
         }
+        return Self.blurLevels(of: content, size: side)
+    }
+
+    /// `view` drawn at `size`, blurred at six levels (sharp → `maxBlur`), each
+    /// padded by 1.5 × the blur so it can spread: what an item — or an emote
+    /// of the wheel (#1872) — fades through, blur = 10 pt × (1 − opacity).
+    static func blurLevels(of view: UIView, size side: CGSize) -> [UIImage] {
+        guard side.width > 0, side.height > 0 else { return [] }
+        let content = view
         let pad = Self.maxBlur * 1.5
         let format = UIGraphicsImageRendererFormat.preferred()
         let canvas = CGSize(width: side.width + 2 * pad, height: side.height + 2 * pad)
@@ -485,6 +494,17 @@ final class SnapGlassColumn: UIView {
         } else {
             face.renderPicture()
         }
+    }
+
+    // MARK: - The items as drawn
+
+    /// An item as it is drawn now — its centre in this view's bounds, its
+    /// scale and opacity — or nil while it does not exist (not born yet, or
+    /// gone). What the wheel hangs on to follow the like through its folds
+    /// (#1872, the lab's `presentedIcon(of:)`).
+    func presentedFace(of id: String) -> (centre: CGPoint, scale: CGFloat, alpha: CGFloat)? {
+        guard let face = faces[id] else { return nil }
+        return (face.centreNow, face.scale.x, max(0, min(1, face.alpha.x)))
     }
 
     // MARK: - Tests

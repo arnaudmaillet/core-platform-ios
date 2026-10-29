@@ -121,8 +121,8 @@ final class SnapShortcutRailView: UIScrollView {
     }
 
     /// One button per shortcut, each hosting its emote's tile.
-    private var icons: [UIButton] = []
-    private var tiles: [EmoteTileView] = []
+    private(set) var icons: [UIButton] = []
+    private(set) var tiles: [EmoteTileView] = []
     private(set) var emotes: [Emote] = []
     /// Which tiles are dressed: the ones inside the visible window.
     private var dressed: [Bool] = []
@@ -146,6 +146,13 @@ final class SnapShortcutRailView: UIScrollView {
     /// The wheel's glass capsule (#1872, part 2), live once its host lays it
     /// in the action column's glass.
     private(set) lazy var capsule = SnapWheelCapsule(rail: self)
+    /// The wheel's fold with the like (#1872): its emotes fold into the like
+    /// and come out of it, hanging on the like as drawn (`follow`).
+    let fold = SnapWheelFold()
+    /// The like as drawn — centre in the wheel's superview, scale, opacity —
+    /// nil while it does not exist (the wheel then hides). Without it the
+    /// wheel stays in place.
+    var follow: (() -> (centre: CGPoint, scale: CGFloat, alpha: CGFloat)?)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -476,6 +483,9 @@ final class SnapShortcutRailView: UIScrollView {
             0, NSNumber(value: 1 - bottomFadeStart), NSNumber(value: 1 - reserved),
         ]
         CATransaction.commit()
+        // A fold takes the mask off: the emotes reach the like's centre
+        // instead of being cut at its edge (#1872).
+        layer.mask = fold.isFolding ? nil : edgeFade
 
         // Top exit on the DETENT GRID: an emote leaving through the top
         // fades and dezooms as a pure function of its window position —
@@ -485,6 +495,11 @@ final class SnapShortcutRailView: UIScrollView {
         // detent lands the exiting emote at exactly t == 0 (gone) or
         // t == 1 (at rest) — a half-faded straddler cannot exist at rest.
         for icon in icons {
+            // Folded, or in a fold (drawn as their pictures): hidden.
+            if fold.isCollapsed || fold.isFolding {
+                icon.alpha = 0
+                continue
+            }
             // Center, not frame: frame is the TRANSFORMED bounding box, and
             // reading it under last pass's scale feeds back into t.
             let viewTop = icon.center.y - Self.iconDiameter / 2 - bounds.origin.y
@@ -494,6 +509,7 @@ final class SnapShortcutRailView: UIScrollView {
             icon.transform = t >= 1 ? .identity : CGAffineTransform(scaleX: scale, y: scale)
         }
         updateDressing()
+        layoutFoldPictures()
         capsule.layout()
     }
 
@@ -511,6 +527,9 @@ final class SnapShortcutRailView: UIScrollView {
     /// chrome that never shows (a unit test, a cell laid out off screen)
     /// starts no bake.
     private func updateDressing() {
+        // A fold hides the emotes without them leaving: their art stays,
+        // for the reveal to draw them from (#1872).
+        if fold.isCollapsed || fold.isFolding { return }
         let window = self.window == nil ? .null : visibleWindow
         for index in tiles.indices {
             let icon = icons[index]
@@ -530,6 +549,13 @@ final class SnapShortcutRailView: UIScrollView {
                 tiles[index].clear()
             }
         }
+    }
+
+    /// Dresses shortcut `index` for a fold's picture, still (#1872).
+    func dressForFold(_ index: Int) {
+        guard index < tiles.count, !dressed[index] else { return }
+        dressed[index] = true
+        tiles[index].configure(emotes[index], engine: engine, prefersAnimation: true, playing: false)
     }
 
     /// The dressed tiles, top to bottom.
@@ -829,8 +855,16 @@ final class SnapRailBoostButton: StakeMenuButton {
     /// wrong face (the configuration is rebuilt whole each time).
     private func applyFace() {
         var face = Self.makeConfiguration(glass: hasGlass, spentTotal: spentTotal, likeCount: likeCount)
-        // The native symbol replace between the heart and the chevron.
-        face.symbolContentTransition = UISymbolContentTransition(.replace)
+        // The native symbol replace between the heart and the chevron —
+        // ⚠️ BUT NONE INTO A STAKED HEART (the owner, on a device: its pink
+        // has to be there at once): the replace draws its incoming symbol in
+        // the button's ink, whatever the picture's own colour (filmed with
+        // the image's `.alwaysOriginal` pink, an `imageColorTransformer` and
+        // a palette alike: white for a quarter of a second, then pink). The
+        // staked heart swaps in, pink; the outline keeps the replace, in the
+        // chevron's ink.
+        let stakedHeart = spentTotal > 0 && !showsReturn
+        face.symbolContentTransition = stakedHeart ? nil : UISymbolContentTransition(.replace)
         if showsReturn {
             face.image = UIImage(systemName: "chevron.down", withConfiguration: SnapActionColumn.heartConfiguration)?
                 .withRenderingMode(.alwaysTemplate)

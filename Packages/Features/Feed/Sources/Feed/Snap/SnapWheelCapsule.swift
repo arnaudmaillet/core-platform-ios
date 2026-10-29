@@ -42,9 +42,6 @@ final class SnapWheelCapsule: NSObject {
     static let dropHidden: CGFloat = 8
     /// The drop takes the like's width once sin(πu) passes this.
     static let dropPlateau: CGFloat = 0.7
-    /// The part of the bridge where the capsule's bottom reaches the like's;
-    /// past it, the like's glass retracts inside.
-    static let bridgeReach: CGFloat = 0.75
     /// How long the capsule stays after the wheel stops.
     static let linger: Double = 3
     /// UIKit's default spring (0.5 s, no bounce): k = (2π / 0.5)².
@@ -142,11 +139,39 @@ final class SnapWheelCapsule: NSObject {
         return t * t * (3 - 2 * t)
     }
 
-    /// The like retracting into the capsule: the last quarter of the bridge.
+    /// The bridge as it stands: the scroll's, scaled by the capsule's
+    /// presence — so the capsule comes off the like (the bridge played
+    /// backwards) before it goes, instead of dematerializing over it.
+    var standingBridge: CGFloat { bridge * max(0, min(1, presence.x)) }
+
+    /// The like retracting into the capsule as the capsule covers it.
+    ///
+    /// ⚠️ AS IT COVERS IT, not on the bridge's last quarter as in the lab:
+    /// the lab's like is a disc the capsule crosses in an instant, ours a
+    /// PILL it runs down for its whole height — and where two contours of
+    /// one width coincide, the smooth union steps (the lab's finding 5): the
+    /// capsule read as drawn OVER the like (the owner, on a device). Fully
+    /// retracted once the capsule covers half the pill.
     var likeCover: CGFloat {
-        guard !isDismissed else { return 0 }
-        let t = max(0, min(1, (bridge - Self.bridgeReach) / (1 - Self.bridgeReach)))
+        guard !isDismissed, let rail else { return 0 }
+        let likeTop = rail.bounds.maxY - rail.bottomReservedInset
+        let span = max(likeHeight, rail.bottomReservedInset)
+        let t = max(0, min(1, (capsuleBottom - likeTop) / (span / 2)))
         return t * t * (3 - 2 * t)
+    }
+
+    /// The capsule's bottom in the wheel's bounds, before the circle it
+    /// becomes when shorter than wide: over the fade above the like at rest,
+    /// down to the like PILL's bottom bridged.
+    private var capsuleBottom: CGFloat {
+        guard let rail else { return 0 }
+        let likeTop = rail.bounds.maxY - rail.bottomReservedInset
+        let restTop = likeTop - SnapShortcutRailView.edgeFadeLength - SnapShortcutRailView.restingWindowHeight - Self.pad
+        let lastBottom = restTop - travel + CGFloat(rail.emotes.count) * SnapShortcutRailView.step
+            - SnapShortcutRailView.iconSpacing + 2 * Self.pad
+        let restBottom = min(likeTop - SnapShortcutRailView.edgeFadeLength + Self.pad, lastBottom)
+        let bridgedBottom = likeTop + max(likeHeight, rail.bottomReservedInset)
+        return restBottom + (bridgedBottom - restBottom) * standingBridge
     }
 
     /// The capsule's frame in the wheel's bounds: the like's width, from the
@@ -158,15 +183,10 @@ final class SnapWheelCapsule: NSObject {
     var frameInRail: CGRect {
         guard let rail else { return .zero }
         let bounds = rail.bounds
-        let step = SnapShortcutRailView.step
         let likeTop = bounds.maxY - rail.bottomReservedInset
         let restTop = likeTop - SnapShortcutRailView.edgeFadeLength - SnapShortcutRailView.restingWindowHeight - Self.pad
         let top = max(restTop - travel, bounds.minY)
-        let lastBottom = restTop - travel + CGFloat(rail.emotes.count) * step
-            - SnapShortcutRailView.iconSpacing + 2 * Self.pad
-        let restBottom = min(likeTop - SnapShortcutRailView.edgeFadeLength + Self.pad, lastBottom)
-        let bridgedBottom = likeTop + max(likeHeight, rail.bottomReservedInset)
-        let bottom = restBottom + (bridgedBottom - restBottom) * min(1, bridge / Self.bridgeReach)
+        let bottom = capsuleBottom
         let width = bounds.width
         let height = bottom - top
         guard height < width else { return CGRect(x: 0, y: top, width: width, height: height) }
@@ -192,7 +212,15 @@ final class SnapWheelCapsule: NSObject {
         glass.bounds = CGRect(origin: .zero, size: frame.size)
         glass.center = CGPoint(x: frame.midX, y: frame.midY)
         layoutDrop(in: superview)
-        let cover = likeCover * max(0, min(1, presence.x))
+        // The lab's rule, on every pass: past `settleTravel` an appearance
+        // still running is finished — a materializing glass is drawn
+        // outside the union.
+        if isWanted, travel >= Self.settleTravel, let run {
+            self.run = nil
+            run.stopAnimation(false)
+            run.finishAnimation(at: .end)
+        }
+        let cover = likeCover
         if cover != lastCover {
             lastCover = cover
             onLikeCover?(cover)
@@ -236,7 +264,7 @@ final class SnapWheelCapsule: NSObject {
             let k = min(1, sin(.pi * u) / Self.dropPlateau)
             side = Self.dropHidden + (full - Self.dropHidden) * k * k * (3 - 2 * k)
         } else {
-            side = full - (full - Self.dropHidden) * bridge
+            side = full - (full - Self.dropHidden) * standingBridge
         }
         let emoteY = start - SnapShortcutRailView.step * u
         let centre = CGPoint(x: bounds.midX, y: emoteY + (heart - start) * (1 - u) * (1 - u))
@@ -348,6 +376,11 @@ final class SnapWheelCapsule: NSObject {
     private func setPresence(_ on: Bool) {
         let target: CGFloat = on ? 1 : 0
         guard presence.target != target else { return }
+        // Off a window there is nothing to ease: it is at once.
+        guard glass.window != nil else {
+            presence = Spring(target)
+            return
+        }
         presence.target = target
         startLink()
     }
@@ -369,9 +402,10 @@ final class SnapWheelCapsule: NSObject {
     private func hide(animated: Bool) {
         if hiding { return }
         guard run != nil || glass.effect != nil else { return }
-        // Bridged: the like re-inflates first, hidden under the capsule,
-        // which only leaves once it has (`tick` asks again).
-        if animated, likeCover * presence.x > 0.01 { return }
+        // Bridged: the capsule comes off the like first — the bridge played
+        // backwards, the like re-inflating as it is uncovered — and only
+        // then leaves, over nothing (`tick` asks again).
+        if animated, standingBridge > 0.01 { return }
         if let run {
             run.stopAnimation(true)
             self.run = nil
