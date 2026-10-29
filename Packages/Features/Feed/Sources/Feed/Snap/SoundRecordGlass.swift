@@ -89,9 +89,13 @@ final class SoundRecordGlass: UIView {
 
     private var mutedGlyphPointSize: CGFloat = 0
 
+    /// Whether the record wears its own glass. Off in the page's action
+    /// column (#1872), whose bubble is the column's one glass.
+    var drawsGlass = true
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        guard window != nil, glass.effect == nil else { return }
+        guard drawsGlass, window != nil, glass.effect == nil else { return }
         glass.effect = UIGlassEffect(style: .regular)
     }
 

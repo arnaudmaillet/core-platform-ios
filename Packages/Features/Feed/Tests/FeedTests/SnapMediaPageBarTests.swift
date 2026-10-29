@@ -1300,7 +1300,8 @@ struct SnapMediaPageBarTests {
         bar.debugScrub(.began, atX: 100)
         bar.debugScrub(.changed, atX: 140)
         #expect(view.debugScrubFadedAlphas.allSatisfy { $0 == 0 })
-        #expect(view.postActions.alpha == 0, "the save and share capsule stayed beside the scrub (#1847)")
+        // The column fades as one glass (#1872).
+        #expect(view.debugGlassColumn.alpha == 0, "the save and share capsule stayed beside the scrub (#1847)")
 
         bar.debugScrub(.ended, atX: 140)
         #expect(view.debugScrubFadedAlphas == resting)
@@ -1359,7 +1360,7 @@ struct SnapMediaPageBarTests {
         #expect(without.debugPageBar.isHidden)
         let drop = without.debugCaptionFrame.maxY - withStrip.debugCaptionFrame.maxY
         #expect(abs(drop - (Spacing.xl - SnapActionColumn.inputRestingGap)) < 0.5, "the caption dropped \(drop)")
-        #expect(without.debugBoostButton.frame == withStrip.debugBoostButton.frame)
+        #expect(without.debugFrame(of: without.debugBoostButton) == withStrip.debugFrame(of: withStrip.debugBoostButton))
     }
 }
 
@@ -1475,7 +1476,8 @@ struct SnapStripBrowseTests {
         bar.debugScrub(.began, atX: slot * 0.5)
         bar.debugScrub(.changed, atX: slot * 2.5)
         #expect(view.debugScrubFadedAlphas.allSatisfy { $0 == 0 })
-        #expect(view.postActions.alpha == 0, "the save and share capsule stayed beside the filmstrip (#1847)")
+        // The column fades as one glass (#1872).
+        #expect(view.debugGlassColumn.alpha == 0, "the save and share capsule stayed beside the filmstrip (#1847)")
         // A tap where the capsule stood no longer reaches it.
         let hit = view.hitTest(capsuleCentre, with: nil)
         #expect(hit.map { !$0.isDescendant(of: view.postActions) } ?? true, "a tap there would still save or share")

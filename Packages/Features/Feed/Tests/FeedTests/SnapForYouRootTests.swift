@@ -323,15 +323,15 @@ struct SnapForYouRootTests {
     /// capsule — the pill risen by exactly the capsule's room.
     @Test func theCapsuleStandsBetweenTheLikePillAndTheSound() {
         let before = SnapActionColumnLayoutTests.chrome()
-        let pillBefore = before.debugBoostButton.frame
+        let pillBefore = before.debugFrame(of: before.debugBoostButton)
 
         let chrome = SnapActionColumnLayoutTests.chrome()
         chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
         chrome.showsPostActions = true
         chrome.layoutIfNeeded()
-        let like = chrome.debugBoostButton.frame
-        let capsule = chrome.postActions.frame
-        let sound = chrome.debugSoundBubble.frame
+        let like = chrome.debugFrame(of: chrome.debugBoostButton)
+        let capsule = chrome.debugFrame(of: chrome.postActions)
+        let sound = chrome.debugFrame(of: chrome.debugSoundBubble)
         #expect(!chrome.postActions.isHidden, "no capsule on a media page")
         #expect(abs(capsule.height - SnapPostActionsCapsule.height) < 0.5)
         #expect(abs(sound.minY - capsule.maxY - SnapActionColumn.gap) < 0.5, "the capsule is not gap over the sound")

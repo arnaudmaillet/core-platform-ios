@@ -57,9 +57,17 @@ struct SnapActionColumnLayoutTests {
 
     /// The media layout's two bubbles, in screen coordinates: the like pill
     /// and the sound bubble (laid out on its station, shown or not).
+    ///
+    /// Read in the chrome's space: the buttons are the glass column's items
+    /// (#1872), each in its bubble's glass. Every media post wears a sound
+    /// face (greyed when it has none), which stands the sound in the column.
     static func mediaColumn(insets: UIEdgeInsets = insets) -> (like: CGRect, sound: CGRect) {
         let chrome = chrome(insets: insets)
-        return (chrome.debugBoostButton.frame, chrome.debugSoundBubble.frame)
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        chrome.layoutIfNeeded()
+        let like = chrome.debugBoostButton
+        let sound = chrome.debugSoundBubble
+        return (like.convert(like.bounds, to: chrome), sound.convert(sound.bounds, to: chrome))
     }
 
     /// Equal to the float: the pill's height is a sum of font-derived terms
@@ -237,8 +245,8 @@ struct SnapActionColumnLayoutTests {
         let chrome = Self.chrome()
         chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
         chrome.layoutIfNeeded()
-        let like = chrome.debugBoostButton.frame
-        let sound = chrome.debugSoundBubble.frame
+        let like = chrome.debugFrame(of: chrome.debugBoostButton)
+        let sound = chrome.debugFrame(of: chrome.debugSoundBubble)
 
         #expect(chrome.debugSoundBubble.isHidden == false)
         #expect(chrome.debugSoundBubble.accessibilityLabel == "Sound")

@@ -81,8 +81,8 @@ struct SnapSharedColumnTests {
         let replica = Layout.chrome()
         replica.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
         replica.layoutIfNeeded()
-        #expect(Layout.same(mounted.debugBoostButton.frame, replica.debugBoostButton.frame))
-        #expect(Layout.same(mounted.debugSoundBubble.frame, replica.debugSoundBubble.frame))
+        #expect(Layout.same(mounted.debugFrame(of: mounted.debugBoostButton), replica.debugFrame(of: replica.debugBoostButton)))
+        #expect(Layout.same(mounted.debugFrame(of: mounted.debugSoundBubble), replica.debugFrame(of: replica.debugSoundBubble)))
     }
 
     /// A flight holds the column with the page — engaged or not — and
@@ -137,8 +137,9 @@ struct SnapSharedColumnTests {
         let column = try #require(subviews.firstIndex { $0 is SnapActionColumnLayer }, "no column in the cell")
         let chrome = try #require(subviews.firstIndex { $0 is SnapChromeView })
         #expect(chrome < column, "the column is under the chrome that fades")
-        #expect(subviews[column].subviews.contains { $0 is SnapRailBoostButton })
-        #expect(subviews[column].subviews.contains { $0 is SnapSoundBubbleButton })
+        // The buttons are the items of the column's glass (#1872), which the
+        // layer holds; each stands in it once its page shows it.
+        #expect(cell.debugChrome.debugGlassColumn.isDescendant(of: subviews[column]))
     }
 
     // MARK: - The composer's reserved room

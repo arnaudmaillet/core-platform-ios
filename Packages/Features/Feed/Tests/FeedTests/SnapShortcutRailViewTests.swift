@@ -364,7 +364,7 @@ struct SnapShortcutRailViewTests {
         #expect(rail.frame.minY - Spacing.sm < SnapShortcutRailView.step)
         // …to the band's SEAT (2026-10-16), the like pill's square: the band
         // itself rides the stream.
-        #expect(abs(rail.frame.maxY - (chrome.debugBoostButton.frame.minY + ticker.frame.height)) < 0.5)
+        #expect(abs(rail.frame.maxY - (chrome.debugFrame(of: chrome.debugBoostButton).minY + ticker.frame.height)) < 0.5)
         // The subtitle zone stops short of the rail — the width reduction.
         #expect(subtitle.frame.maxX == rail.frame.minX - Spacing.md)
         // A media post shows its wheel.
@@ -388,15 +388,16 @@ struct SnapShortcutRailViewTests {
         // The like PILL (#669): the band's width, its top on the band's, as
         // tall as the column above the sound bubble lets it be.
         #expect(abs(compose.frame.height - SnapActionColumn.likePillHeight) < 0.34, "a pixel of snapping at most")
-        #expect(abs(compose.frame.maxX - rail.frame.maxX) < 0.01)
+        #expect(abs(chrome.debugFrame(of: compose).maxX - rail.frame.maxX) < 0.01)
         #expect(abs(compose.frame.width - ticker.frame.height) < 0.01)
         #expect(compose.configuration?.cornerStyle == .capsule)
         let order = chrome.subviews
         #expect(order.firstIndex(of: ticker)! < order.firstIndex(of: rail)!)
         // The anchor is the action column's, in its own layer ABOVE every
-        // part of the chrome (#695).
-        let column = try #require(compose.superview)
-        #expect(column is SnapActionColumnLayer)
+        // part of the chrome (#695) — inside the column's glass (#1872).
+        let column = try #require(
+            sequence(first: compose as UIView, next: \.superview).first { $0 is SnapActionColumnLayer }
+        )
         #expect(order.firstIndex(of: rail)! < order.firstIndex(of: column)!)
         #expect(rail.bottomReservedInset == ticker.frame.height)
 
@@ -436,7 +437,9 @@ struct SnapShortcutRailViewTests {
             chrome.layoutIfNeeded()
             let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
             let compose = try #require((chrome.debugBoostButton as? SnapRailBoostButton))
-            return (rail.frame, compose.frame, chrome.debugSoundBubble.frame)
+            // The sound's STATION: a page with no sound face stands no
+            // bubble there (#1872), and the pill clears the station either way.
+            return (rail.frame, chrome.debugFrame(of: compose), chrome.debugSoundStationFrame)
         }
         let media = try corner(mediaURL: URL(string: "mock://media/1"))
         let text = try corner(mediaURL: nil)
