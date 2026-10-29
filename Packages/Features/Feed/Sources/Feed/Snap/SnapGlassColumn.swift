@@ -105,11 +105,47 @@ final class SnapGlassColumn: UIView {
 
     // MARK: - Touches
 
-    /// Only the bubbles take a touch: between them, the page under the
-    /// column gets it.
+    /// Only the bubbles and the accessories take a touch: between them, the
+    /// page under the column gets it.
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard let hit = super.hitTest(point, with: event) else { return nil }
+        if accessories.allObjects.contains(where: { hit.isDescendant(of: $0) }) { return hit }
         return blobs.contains(where: { !$0.dying && hit.isDescendant(of: $0.view) }) ? hit : nil
+    }
+
+    // MARK: - Accessories (#1872, the wheel's capsule)
+
+    private let accessories = NSHashTable<UIView>.weakObjects()
+
+    /// Glass the caller lays in the SAME container as the bubbles, under the
+    /// items: it fuses with them (the smooth union, bridges included). The
+    /// caller frames it in this view's bounds and takes it away.
+    func insertAccessory(_ view: UIView) {
+        accessories.add(view)
+        container.contentView.insertSubview(view, belowSubview: pictureLayer)
+    }
+
+    /// While an accessory covers an item's bubble whole, that bubble
+    /// retracts towards its centre (`amount` 0 … 1, down to a point), well
+    /// inside the accessory: the smooth union swells by about spacing / 4
+    /// wherever two contours coincide, so a doubled bubble would step the
+    /// accessory's outline (the lab's finding 5). The item does not move.
+    func setCover(_ id: String?, amount: CGFloat) {
+        let clamped = id == nil ? 0 : max(0, min(1, amount))
+        guard id != coverID || clamped != coverAmount else { return }
+        coverID = id
+        coverAmount = clamped
+        for blob in blobs { blob.render(inset: coverInset(for: blob)) }
+        // The items stay put: each is placed against its bubble's new frame.
+        for face in faces.values { render(face) }
+    }
+
+    private var coverID: String?
+    private var coverAmount: CGFloat = 0
+
+    private func coverInset(for blob: Blob) -> CGFloat {
+        guard let id = coverID, coverAmount > 0, !blob.dying, blob.ids.contains(id) else { return 0 }
+        return coverAmount * max(0, min(blob.renderedRect.width, blob.renderedRect.height) / 2 - 0.5)
     }
 
     // MARK: - Layout
@@ -174,7 +210,7 @@ final class SnapGlassColumn: UIView {
         blobs = shapes.map { slots in
             let view = pool.isEmpty ? makeGlassView() : pool.removeFirst()
             let blob = Blob(view: view, ids: Set(slots.map(\.id)), rect: Self.union(slots))
-            blob.render()
+            blob.render(inset: coverInset(for: blob))
             return blob
         }
         pool.forEach { $0.removeFromSuperview() }
@@ -393,7 +429,7 @@ final class SnapGlassColumn: UIView {
             for blob in blobs where blob.step(h) { active = true }
             for face in faces.values where face.step(h) { active = true }
         }
-        for blob in blobs { blob.render() }
+        for blob in blobs { blob.render(inset: coverInset(for: blob)) }
         let alive = blobs.filter { !$0.dying }.map(\.renderedRect)
         blobs.removeAll { blob in
             guard blob.dying else { return false }
@@ -553,8 +589,8 @@ final class SnapGlassColumn: UIView {
             )
         }
 
-        func render() {
-            view.frame = renderedRect
+        func render(inset: CGFloat = 0) {
+            view.frame = renderedRect.insetBy(dx: inset, dy: inset)
         }
     }
 

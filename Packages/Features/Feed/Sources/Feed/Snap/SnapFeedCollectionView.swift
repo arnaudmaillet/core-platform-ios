@@ -87,7 +87,7 @@ final class SnapFeedCollectionView: UICollectionView {
     static func claimsTouches(_ view: UIView) -> Bool {
         for current in sequence(first: view, next: { $0.superview }) {
             if current is CommentsInputBar { return false }
-            if current is SnapShortcutRailView || current is SnapRailBoostButton
+            if current is SnapShortcutRailView || current is SnapWheelGlassView || current is SnapRailBoostButton
                 || current is SnapCommentsContainerView {
                 return true
             }

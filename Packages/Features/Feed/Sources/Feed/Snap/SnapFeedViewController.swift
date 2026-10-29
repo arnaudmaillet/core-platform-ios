@@ -7458,7 +7458,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         let point = collectionView.convert(origin, from: view)
         if let hit = collectionView.hitTest(point, with: nil) {
             for current in sequence(first: hit, next: { $0.superview }) {
-                if current is SnapShortcutRailView || current is SnapRailBoostButton || current is CommentsInputBar {
+                if current is SnapShortcutRailView || current is SnapWheelGlassView || current is SnapRailBoostButton || current is CommentsInputBar {
                     return false
                 }
             }
@@ -7485,7 +7485,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         return sequence(first: hit, next: { $0.superview }).contains {
             // …and save / share between them (#1710, the owner): a drag born
             // there opened the side list.
-            $0 is SnapShortcutRailView || $0 is SnapRailBoostButton || $0 is SnapSoundBubbleButton
+            $0 is SnapShortcutRailView || $0 is SnapWheelGlassView || $0 is SnapRailBoostButton || $0 is SnapSoundBubbleButton
                 || $0 is SnapPostActionsCapsule
         }
     }
@@ -7963,7 +7963,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         let point = collectionView.convert(location, from: view)
         guard let hit = collectionView.hitTest(point, with: nil) else { return true }
         for current in sequence(first: hit, next: { $0.superview }) {
-            if current is SnapShortcutRailView || current is SnapRailBoostButton
+            if current is SnapShortcutRailView || current is SnapWheelGlassView || current is SnapRailBoostButton
                 || current is CommentsInputBar {
                 return false
             }
@@ -8055,7 +8055,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// at its bottom — the downward grab's rule, mirrored.
     static func upwardCloseTerritory(from hit: UIView, inPageDriveBand: Bool) -> UpwardCloseTerritory {
         for current in sequence(first: hit, next: { $0.superview }) {
-            if current is SnapShortcutRailView || current is SnapRailBoostButton { return .refuses }
+            if current is SnapShortcutRailView || current is SnapWheelGlassView || current is SnapRailBoostButton { return .refuses }
             if current is CommentsInputBar { return .closes }
             if current is SnapCommentsContainerView { return inPageDriveBand ? .closes : .streamDecides }
         }

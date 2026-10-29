@@ -94,6 +94,13 @@ final class SnapChromeView: UIView {
     /// populated from `configure` with a per-post deterministic payload, so
     /// the flight replica draws the identical wheel.
     private let shortcutRail = SnapShortcutRailView()
+    /// Where the wheel stands (#1872): an invisible view holding its
+    /// constraints in the chrome, while the wheel itself rides the column's
+    /// layer, above its glass.
+    private let railSeat = UIView()
+    /// The wheel's own layer in the column's, faded with the chrome through
+    /// the comments' engagement — the fade it had as the chrome's child.
+    private let railLayer = SnapActionColumnLayer()
     /// The fixed boost affordance: a Liquid Glass circle filling the
     /// square where the rail overlaps the ticker band (diameter == the
     /// band's height), the zone's ONLY layer — the old frosted backdrop
@@ -220,7 +227,9 @@ final class SnapChromeView: UIView {
     /// engagement's entry points; hidden views receive no touches, so each
     /// claims taps only while shown).
     var interactionRoots: [UIView] {
-        [shortcutRail, boostButton, commentEmptyState, subtitleView, commentTicker, soundBubble, authorRow, captionLabel]
+        // The wheel's capsule (#1872): the wheel lets its touches through to it.
+        [shortcutRail, shortcutRail.capsule.glass, boostButton, commentEmptyState, subtitleView, commentTicker,
+         soundBubble, authorRow, captionLabel]
     }
 
     // MARK: - The author row (#1699)
@@ -285,7 +294,7 @@ final class SnapChromeView: UIView {
         authorRow.constrain(in: self) { parent in
             // The face on the caption's text axis.
             authorRow.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg - 2)
-            authorRow.trailingAnchor.constraint(lessThanOrEqualTo: shortcutRail.leadingAnchor, constant: -Spacing.md)
+            authorRow.trailingAnchor.constraint(lessThanOrEqualTo: railSeat.leadingAnchor, constant: -Spacing.md)
             authorRow.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.xs)
         }
         authorLane.isHidden = true
@@ -294,7 +303,7 @@ final class SnapChromeView: UIView {
         NSLayoutConstraint.activate([
             authorLane.leadingAnchor.constraint(equalTo: authorRow.leadingAnchor),
             // The pill's own ceiling, the band's and the subtitle zone's stop.
-            authorLane.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md),
+            authorLane.trailingAnchor.constraint(equalTo: railSeat.leadingAnchor, constant: -Spacing.md),
             authorLane.topAnchor.constraint(equalTo: authorRow.topAnchor),
             // Over the seam between the pill and the caption too.
             authorLane.bottomAnchor.constraint(equalTo: captionLabel.topAnchor),
@@ -590,15 +599,21 @@ final class SnapChromeView: UIView {
         // while it is a plausible settled value (`layoutMarginsDidChange`
         // below), freezing through the flight so the rail rides like the
         // rest of the chrome.
-        let railTop = shortcutRail.topAnchor.constraint(
+        let railTop = railSeat.topAnchor.constraint(
             equalTo: topAnchor, constant: layoutMargins.top + Spacing.sm
         )
         railTopConstraint = railTop
-        shortcutRail.constrain(in: self) { parent in
-            shortcutRail.trailingAnchor.constraint(
+        // ⚠️ THE SEAT, NOT THE WHEEL (#1872): the wheel draws ABOVE the
+        // action column's glass — its capsule is that glass's, and the emotes
+        // pass over it — so it lives in the column's layer, framed on this
+        // invisible seat, which keeps every constraint the wheel had.
+        railSeat.isHidden = true
+        railSeat.isUserInteractionEnabled = false
+        railSeat.constrain(in: self) { parent in
+            railSeat.trailingAnchor.constraint(
                 equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -SnapActionColumn.trailingInset
             )
-            shortcutRail.widthAnchor.constraint(equalTo: bandSeat.heightAnchor)
+            railSeat.widthAnchor.constraint(equalTo: bandSeat.heightAnchor)
             railTop
             railBottomConstraint()
         }
@@ -645,7 +660,7 @@ final class SnapChromeView: UIView {
         // rail's clearance.
         subtitleView.constrain(in: self) { parent in
             subtitleView.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
-            subtitleView.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md)
+            subtitleView.trailingAnchor.constraint(equalTo: railSeat.leadingAnchor, constant: -Spacing.md)
         }
         // The zone holds the band's seat, one md above the caption floor —
         // the slot the empty-state pill occupies too, so every comment
@@ -662,7 +677,7 @@ final class SnapChromeView: UIView {
         NSLayoutConstraint.activate([
             subtitleOverCaption,
             tickerOverStream,
-            commentTicker.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md),
+            commentTicker.trailingAnchor.constraint(equalTo: railSeat.leadingAnchor, constant: -Spacing.md),
         ])
         commentTicker.fadesTrailingEdge = true
 
@@ -751,13 +766,24 @@ final class SnapChromeView: UIView {
         glassColumn.frame = columnLayer.bounds
         glassColumn.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         columnLayer.addSubview(glassColumn)
+        // The wheel over the glass (#1872), its capsule in it.
+        railLayer.frame = columnLayer.bounds
+        railLayer.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        railLayer.addSubview(shortcutRail)
+        columnLayer.addSubview(railLayer)
+        let capsule = shortcutRail.capsule
+        capsule.likeHeight = SnapActionColumn.likePillHeight
+        capsule.onLikeCover = { [weak self] cover in self?.glassColumn.setCover(ColumnItem.like, amount: cover) }
+        capsule.onReturnShown = { [weak self] shown in self?.boostButton.setShowsReturn(shown) }
+        boostButton.onReturn = { [weak capsule] in capsule?.returnToRest() }
+        capsule.host = { [weak self] glass in self?.glassColumn.insertAccessory(glass) }
         mountColumn(in: self)
         soundBubble.onTap = { [weak self] in self?.onSoundSheetRequested?() }
         soundBubble.onLongPress = { [weak self] in self?.onSoundToggleRequested?() }
     }
 
     private func railBottomConstraint() -> NSLayoutConstraint {
-        let constraint = shortcutRail.bottomAnchor.constraint(equalTo: bandSeat.bottomAnchor)
+        let constraint = railSeat.bottomAnchor.constraint(equalTo: bandSeat.bottomAnchor)
         railBottom = constraint
         return constraint
     }
@@ -836,6 +862,9 @@ final class SnapChromeView: UIView {
         // them in the same pass (#1872).
         glassColumn.setNeedsLayout()
         glassColumn.layoutIfNeeded()
+        // The wheel on its seat (#1872).
+        let wheelFrame = railSeat.convert(railSeat.bounds, to: railLayer)
+        if shortcutRail.frame != wheelFrame { shortcutRail.frame = wheelFrame }
         shortcutRail.bottomReservedInset = bandSeat.layoutFrame.height
 
         // The caption's two-line/timestamp composition is width-dependent —
@@ -1247,6 +1276,8 @@ final class SnapChromeView: UIView {
     }
     var debugStreamFrame: CGRect { subtitleView.frame }
     var debugRailFrame: CGRect { shortcutRail.frame }
+    /// The wheel, which rides the column's layer (#1872).
+    var debugShortcutRail: SnapShortcutRailView { shortcutRail }
     #endif
 
     #if DEBUG
@@ -1699,6 +1730,8 @@ final class SnapChromeView: UIView {
         let returnedToRest = resolved >= 1 && lastEngagedProgress < 1
         lastEngagedProgress = resolved
         alpha = resolved
+        railLayer.alpha = resolved
+        shortcutRail.capsule.layout()
         if returnedToRest { commentEmptyState.restartLabelDwell() }
     }
 
@@ -1769,6 +1802,8 @@ final class SnapChromeView: UIView {
     func setColumnCollapsed(_ collapsed: Bool, animated: Bool) {
         guard collapsed != isColumnCollapsed else { return }
         isColumnCollapsed = collapsed
+        // The comments take the page: the wheel's capsule goes at once.
+        shortcutRail.capsule.setDismissed(collapsed)
         glassColumn.refresh(animated: animated)
     }
 
@@ -1832,6 +1867,7 @@ final class SnapChromeView: UIView {
         // A scaffold handed the next post while still faded would keep that
         // post's chrome invisible.
         alpha = 1
+        railLayer.alpha = 1
         lastEngagedProgress = 1
         caption = nil
         applyCaptionVisibility()

@@ -267,7 +267,7 @@ struct SnapCommentsPresentationTests {
         // owns, which is what makes the engagement one animation instead of
         // seven (see `setCommentsEngagedProgress`).
         #expect(chrome.alpha == 0)
-        let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
+        let rail = chrome.debugShortcutRail
         let ticker = try #require(chrome.subviews.compactMap { $0 as? SnapCommentTickerView }.first)
         let subtitle = try #require(chrome.subviews.compactMap { $0 as? SnapSubtitleView }.first)
         // The members keep their own alpha and inherit the container's.
@@ -350,12 +350,14 @@ struct SnapCommentsPresentationTests {
             audioText: nil
         ))
         cell.layoutIfNeeded()
-        let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
-        let railPoint = CGPoint(x: rail.frame.midX, y: rail.frame.midY)
+        // The wheel's touches are its capsule's (#1872): over the resting
+        // window.
+        let capsule = chrome.debugShortcutRail.capsule.glass
+        let railPoint = capsule.convert(CGPoint(x: capsule.bounds.midX, y: capsule.bounds.midY), to: cell)
 
         // At rest the column owns its touches.
         let restingHit = try #require(cell.hitTest(railPoint, with: nil))
-        #expect(sequence(first: restingHit, next: { $0.superview }).contains { $0 is SnapShortcutRailView })
+        #expect(sequence(first: restingHit, next: { $0.superview }).contains { $0 is SnapWheelGlassView })
 
         let hosted = UIView()
         cell.installComments(hosted)
@@ -364,7 +366,7 @@ struct SnapCommentsPresentationTests {
 
         // Engaged, the same point falls through to the comments host.
         let engagedHit = try #require(cell.hitTest(railPoint, with: nil))
-        #expect(!sequence(first: engagedHit, next: { $0.superview }).contains { $0 is SnapShortcutRailView })
+        #expect(!sequence(first: engagedHit, next: { $0.superview }).contains { $0 is SnapWheelGlassView })
         #expect(engagedHit === hosted)
     }
 
@@ -771,7 +773,7 @@ struct SnapCommentsPresentationTests {
         // A point inside the shortcut rail still resolves to rail territory
         // (frame-based: the rail is a scroll view, so its bounds origin is
         // parked at the resting inset and doesn't map 1:1 to chrome space).
-        let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
+        let rail = chrome.debugShortcutRail
         let hit = chrome.hitTest(CGPoint(x: rail.frame.midX, y: rail.frame.maxY - 20), with: nil)
         #expect(hit != nil)
         #expect(hit.map { SnapFeedCollectionView.claimsTouches($0) } == true)
@@ -1016,10 +1018,8 @@ struct SnapCommentsPresentationTests {
             let chrome = try #require(
                 cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first
             )
-            let rail = try #require(
-                chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first
-            )
-            #expect(rail.superview?.alpha == 0) // the chrome carries the fade
+            let rail = chrome.debugShortcutRail
+            #expect(rail.superview?.alpha == 0) // the wheel's layer carries the chrome's fade (#1872)
         }
     }
 
@@ -2658,7 +2658,7 @@ struct SnapCommentsPresentationTests {
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
         cell.layoutIfNeeded()
         let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
-        let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
+        let rail = chrome.debugShortcutRail
 
         #expect(rail.alpha == 1) // at rest
 
