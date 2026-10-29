@@ -280,6 +280,13 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         return post
     }
 
+    /// Every post, or none: a place's corpus drawn from what is held only
+    /// when it is whole (#1863). Pure.
+    nonisolated static func allHeld(_ posts: [GalleryPost?]) -> [GalleryPost] {
+        let held = posts.compactMap { $0 }
+        return held.count == posts.count ? held : []
+    }
+
     /// `ids`' posts, loaded together and returned in `ids`' order; a post
     /// that cannot be loaded is left out (#1863).
     nonisolated static func loadConcurrently(_ ids: [PostID], from repository: any FeedProviding) async -> [FeedEntry] {
@@ -858,6 +865,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             makeWalletSheet: makeWalletSheet,
             showsBalance: showsBalance(),
             entities: entities,
+            // Every member the app already holds, drawn before the hydration
+            // (#1863) — all of them or none (`PlaceProfileViewController`).
+            heldMembers: Self.allHeld(postIDs.map { heldGalleryPost($0) }),
             loadPosts: { [counterClient] in
                 // One hydration over the same provider shape the feed above
                 // uses, so every member is a cache hit. Unranked: the
