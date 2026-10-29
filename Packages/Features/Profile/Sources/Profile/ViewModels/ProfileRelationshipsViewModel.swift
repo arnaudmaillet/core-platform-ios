@@ -383,12 +383,21 @@ public final class ProfileRelationshipsViewModel {
     /// private profile's answer turns the row into Requested — which a tap
     /// withdraws — and a refusal takes the row's Follow away for good,
     /// quietly: it is an answer, not a failure to retry.
-    public func toggleFollow(_ profileID: ProfileID) {
-        guard let relation = relation(for: profileID), !relation.isViewer, relation.canFollow else { return }
-        guard !mutating.contains(profileID) else { return }
+    /// Answers whether the tap turned the follow ON (a request counts): the
+    /// view plays `toggleOn` then (#1886).
+    @discardableResult
+    public func toggleFollow(_ profileID: ProfileID) -> Bool {
+        guard let relation = relation(for: profileID), !relation.isViewer, relation.canFollow else { return false }
+        guard !mutating.contains(profileID) else { return false }
         if let requests = repository as? any FollowRequestSending {
-            if relation.viewerRequested { return withdrawRequest(to: profileID, through: requests) }
-            if !relation.viewerFollows { return follow(profileID, through: requests) }
+            if relation.viewerRequested {
+                withdrawRequest(to: profileID, through: requests)
+                return false
+            }
+            if !relation.viewerFollows {
+                follow(profileID, through: requests)
+                return true
+            }
         }
 
         let target = !relation.viewerFollows
@@ -407,6 +416,7 @@ public final class ProfileRelationshipsViewModel {
             }
             self.mutating.remove(profileID)
         }
+        return target
     }
 
     /// Drop someone from the viewer's own follower list, with Undo (#957).

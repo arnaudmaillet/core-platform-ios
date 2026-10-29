@@ -1835,6 +1835,8 @@ extension ConversationThreadViewController {
         followInFlight = true
         relationGeneration += 1
         setPeerRelation(before.settingFollow(true), tapped: true)
+        // On at the optimistic flip (#1886).
+        Haptics.play(.toggleOn)
         // Named now: the peer can change before the graph answers.
         let name = peer.handle.map { "@" + $0 } ?? (peer.name.isEmpty ? nil : peer.name)
         Task { [weak self] in

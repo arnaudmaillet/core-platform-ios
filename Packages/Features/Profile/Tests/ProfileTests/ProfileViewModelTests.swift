@@ -379,7 +379,7 @@ struct ProfileViewModelTests {
         viewModel.viewDidLoad()
         await settle(until: { follow().last == .follow })
 
-        viewModel.toggleFollow()
+        #expect(viewModel.toggleFollow(), "a follow is on: the view plays toggleOn (#1886)")
         #expect(results().isEmpty, "the failure was said before the server answered")
         await settle(until: { !results().isEmpty })
 
@@ -400,7 +400,7 @@ struct ProfileViewModelTests {
         viewModel.viewDidLoad()
         await settle(until: { follow().last == .following })
 
-        viewModel.toggleFollow()
+        #expect(!viewModel.toggleFollow(), "an unfollow is silent (#1886)")
         await settle(until: { !results().isEmpty })
 
         #expect(results() == [.followFailed(message: "Couldn't unfollow @ada")])

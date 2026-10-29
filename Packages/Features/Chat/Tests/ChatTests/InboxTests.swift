@@ -1246,8 +1246,8 @@ struct SuggestionsViewModelTests {
         viewModel.loadIfNeeded()
         await settle()
 
-        viewModel.toggleFollow(ProfileID("p1"))
-        viewModel.toggleFollow(ProfileID("p1"))
+        #expect(viewModel.toggleFollow(ProfileID("p1")), "a follow is on (#1886)")
+        #expect(!viewModel.toggleFollow(ProfileID("p1")), "an ignored tap plays nothing")
         // Asserted before any await: the second tap changed nothing.
         #expect(viewModel.isFollowing(ProfileID("p1")), "the second tap undid the follow")
 
@@ -1299,10 +1299,12 @@ struct SuggestionsViewModelTests {
         let viewModel = SuggestionsViewModel(repository: repository)
         viewModel.loadIfNeeded()
         await settle()
-        viewModel.toggleFollow(ProfileID("p1"))
+        // A request turns the follow on (`toggleOn`, #1886); its withdrawal
+        // is silent.
+        #expect(viewModel.toggleFollow(ProfileID("p1")))
         await settle()
 
-        viewModel.toggleFollow(ProfileID("p1"))
+        #expect(!viewModel.toggleFollow(ProfileID("p1")))
         #expect(!viewModel.isRequested(ProfileID("p1")), "the withdrawal waited on the network")
         await settle()
         #expect(await repository.withdrawn == [ProfileID("p1")])

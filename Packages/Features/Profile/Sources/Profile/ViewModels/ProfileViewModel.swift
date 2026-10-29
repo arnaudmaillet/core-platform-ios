@@ -890,13 +890,21 @@ public final class ProfileViewModel {
     /// into Requested (no follower count moves), and Requested withdraws the
     /// request. The server has the last word: a profile that turned public
     /// meanwhile is followed, one that turned private is asked.
-    public func toggleFollow() {
-        guard let profile, !followInFlight else { return }
-        guard followButton.isOtherProfile, followButton != .unavailable else { return }
+    ///
+    /// Answers whether the tap turned the follow ON (a request counts): the
+    /// view plays `toggleOn` then (#1886), and nothing for turning it off.
+    @discardableResult
+    public func toggleFollow() -> Bool {
+        guard let profile, !followInFlight else { return false }
+        guard followButton.isOtherProfile, followButton != .unavailable else { return false }
         if let requests = repository as? any FollowRequestSending {
             switch followButton {
-            case .requested: return withdrawRequest(on: profile, through: requests)
-            case .follow: return follow(profile, through: requests)
+            case .requested:
+                withdrawRequest(on: profile, through: requests)
+                return false
+            case .follow:
+                follow(profile, through: requests)
+                return true
             default: break
             }
         }
@@ -922,6 +930,7 @@ public final class ProfileViewModel {
             }
             self.followInFlight = false
         }
+        return target
     }
 
     private func follow(_ profile: UserProfile, through requests: any FollowRequestSending) {

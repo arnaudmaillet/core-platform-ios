@@ -117,7 +117,10 @@ final class ContactFriendsViewController: UIViewController {
                 isViewer: false
             ), imagePipeline: imagePipeline)
             cell.loadAvatar(row.avatarURL)
-            cell.onAction = { [weak self] in self?.viewModel.toggleFollow(id) }
+            // On at the tap; off is silent (#1886).
+            cell.onAction = { [weak self] in
+                if self?.viewModel.toggleFollow(id) == true { Haptics.play(.toggleOn) }
+            }
         }
         dataSource = UICollectionViewDiffableDataSource<Int, ProfileID>(collectionView: collectionView) { collectionView, indexPath, id in
             collectionView.dequeueConfiguredReusableCell(using: rowRegistration, for: indexPath, item: id)

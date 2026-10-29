@@ -373,6 +373,8 @@ final class LoginFlowCoordinator {
     }
 
     private func presentSecondStepExpired() {
+        // An error the viewer's own attempt met, as its alert appears (#1886).
+        Haptics.play(.error)
         let alert = UIAlertController(
             title: "Sign In Again", message: AuthMessages.message(for: .secondStepExpired), preferredStyle: .alert
         )
@@ -466,6 +468,7 @@ final class LoginFlowCoordinator {
         case .phoneCode: "Continue with your phone"
         case .unknown: "Sign in"
         }
+        Haptics.play(.error)
         let alert = UIAlertController(
             title: "You Already Have an Account",
             message: "This address is already used by an account. \(how) to get back to it.",
@@ -478,6 +481,7 @@ final class LoginFlowCoordinator {
     }
 
     private func presentUnderMinimumAge() {
+        Haptics.play(.error)
         let alert = UIAlertController(
             title: "You Can\u{2019}t Create an Account",
             message: "You need to be old enough to use this app. You can keep browsing without an account.",
@@ -490,10 +494,12 @@ final class LoginFlowCoordinator {
     }
 
     private func presentFlowError(_ error: Error, on step: SignUpStepViewController?) {
+        // The step plays it when one is up; here, the alert does.
         if let step {
             step.present(error: error)
             return
         }
+        Haptics.play(.error)
         let message = (error as? AuthError).map(AuthMessages.message(for:)) ?? "Something went wrong. Try again."
         let alert = UIAlertController(title: "Couldn\u{2019}t Continue", message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
@@ -635,3 +641,20 @@ final class PlaceholderViewController: UIViewController {
         navigationController?.setNavigationBarHidden(false, animated: animated)
     }
 }
+
+#if DEBUG
+extension LoginFlowCoordinator {
+    /// The alerts an attempt of the viewer's can meet, without the attempt.
+    /// Tests.
+    enum DebugAlert: CaseIterable { case secondStepExpired, existingAccount, underMinimumAge, flowError }
+
+    func debugPresent(_ alert: DebugAlert) {
+        switch alert {
+        case .secondStepExpired: presentSecondStepExpired()
+        case .existingAccount: presentExistingAccount(.emailCode)
+        case .underMinimumAge: presentUnderMinimumAge()
+        case .flowError: presentFlowError(AuthError.invalidCredentials, on: nil)
+        }
+    }
+}
+#endif

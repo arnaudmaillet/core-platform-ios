@@ -649,7 +649,8 @@ final class ProfileCardViewController: UIViewController {
 
     private func followTapped() {
         MemberGates.perform(.follow(handle: viewModel.profile?.handle), from: gateSource) { [weak self] in
-            self?.viewModel.toggleFollow()
+            // On at the optimistic flip; off is silent (#1886).
+            if self?.viewModel.toggleFollow() == true { Haptics.play(.toggleOn) }
         }
     }
 

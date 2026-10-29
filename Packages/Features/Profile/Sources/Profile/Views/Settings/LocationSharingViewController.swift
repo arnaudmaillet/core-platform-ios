@@ -266,6 +266,14 @@ final class LocationSharingViewController: UIViewController {
 
     /// Saves one setting over the record the saves before it left — the
     /// server takes the whole record.
+    /// A choice in the list (#1886): `tick` when it changes; the ghost's
+    /// switch plays its own.
+    private func chooseCityLevel(_ value: Bool) {
+        guard case .loaded(let current) = phase, shown(.cityLevel, in: current) != value else { return }
+        Haptics.play(.tick)
+        set(.cityLevel, to: value)
+    }
+
     private func set(_ setting: Setting, to value: Bool) {
         guard case .loaded(let current) = phase, shown(setting, in: current) != value else { return }
         saves.save(value, for: setting, { [weak self] value in
@@ -295,8 +303,8 @@ extension LocationSharingViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .precise: set(.cityLevel, to: false)
-        case .city: set(.cityLevel, to: true)
+        case .precise: chooseCityLevel(false)
+        case .city: chooseCityLevel(true)
         case .failed: load()
         case .takingLonger:
             loadingGate.retry()
@@ -312,5 +320,12 @@ extension LocationSharingViewController {
     var debugShownSettings: LocationSharingSettings? {
         if case .loaded(let settings) = phase { settings } else { nil }
     }
+}
+#endif
+
+#if DEBUG
+extension LocationSharingViewController {
+    /// The city-level row's tap (true) or the precise one's (false). Tests.
+    func debugChooseCityLevel(_ value: Bool) { chooseCityLevel(value) }
 }
 #endif

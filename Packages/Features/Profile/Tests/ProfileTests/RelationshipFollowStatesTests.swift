@@ -166,9 +166,9 @@ struct RelationshipFollowStatesTests {
         }
         viewModel.viewDidLoad()
         #expect(await settle { rows.first?.action == .followBack })
-        viewModel.toggleFollow(ProfileID("xio"))
+        #expect(viewModel.toggleFollow(ProfileID("xio")), "a request is on (#1886)")
         #expect(await settle { rows.first?.action == .requested }, "a request read as Following")
-        viewModel.toggleFollow(ProfileID("xio"))
+        #expect(!viewModel.toggleFollow(ProfileID("xio")), "a withdrawal is silent (#1886)")
         #expect(await settle { rows.first?.action == .followBack }, "Requested did not withdraw")
         var cancels: [ProfileID] = []
         for _ in 0..<200 where cancels.isEmpty {
