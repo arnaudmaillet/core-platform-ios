@@ -117,7 +117,6 @@ final class MediaValueRulerView: UIView {
 
     private let readout = UILabel()
     private let ruler = Strip()
-    private let click = HapticSelection()
     private var lastDetent = 0
     private lazy var pan = UIPanGestureRecognizer(target: self, action: #selector(dragged))
     /// The strip growing while a finger is on the ruler — `StraightenDialView`
@@ -219,7 +218,7 @@ final class MediaValueRulerView: UIView {
     }
 
     private func beginDrag() {
-        click.prepare()
+        Haptics.prepare(.tick)
         lastDetent = ValueRuler.detentIndex(for: value)
         setTracking(true)
     }
@@ -256,7 +255,7 @@ final class MediaValueRulerView: UIView {
         if detent != lastDetent {
             lastDetent = detent
             clicks += 1
-            click.selectionChanged()
+            Haptics.play(.tick)
         }
         redraw()
         onChange?(value, isTracking)

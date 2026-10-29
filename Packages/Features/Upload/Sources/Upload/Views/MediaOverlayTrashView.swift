@@ -17,7 +17,6 @@ final class MediaOverlayTrashView: UIView {
 
     private let glass = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterialDark))
     private let icon = UIImageView(image: UIImage(systemName: "trash"))
-    private let feedback = HapticImpact(style: .medium)
 
     /// Whether a finger holding an overlay is over the bin.
     private(set) var isArmed = false
@@ -47,7 +46,7 @@ final class MediaOverlayTrashView: UIView {
     func setShowing(_ isShowing: Bool) {
         setArmed(false)
         if isShowing {
-            feedback.prepare()
+            Haptics.prepare(.armed)
             isHidden = false
         }
         let reduce = MotionPreference.reducesMotion
@@ -63,12 +62,12 @@ final class MediaOverlayTrashView: UIView {
         !isHidden && frame.insetBy(dx: -Self.reach, dy: -Self.reach).contains(point)
     }
 
-    /// Lights the bin while a finger is over it, with a tap of the engine the
-    /// moment it is reached.
+    /// Lights the bin while a finger is over it, `armed` the moment it is
+    /// reached (once per crossing; leaving it is silent).
     func setArmed(_ armed: Bool) {
         guard armed != isArmed else { return }
         isArmed = armed
-        if armed { feedback.impactOccurred() }
+        if armed { Haptics.play(.armed) }
         glass.backgroundColor = armed ? UIColor.systemRed.withAlphaComponent(0.8) : .clear
         let scale: CGFloat = armed && !MotionPreference.reducesMotion ? 1.2 : 1
         UIView.animate(withDuration: 0.15, delay: 0, options: [.beginFromCurrentState]) {

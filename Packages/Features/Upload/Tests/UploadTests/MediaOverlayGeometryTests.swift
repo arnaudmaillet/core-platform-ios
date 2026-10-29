@@ -1,3 +1,4 @@
+import DesignSystem
 import MediaPlayback
 import Testing
 import UIKit
@@ -147,6 +148,29 @@ struct MediaOverlayGeometryTests {
         layer.item(item, panned: .ended, by: .zero, at: bin)
 
         #expect(recorder.events.last == .delete(id: "hello"), "\(recorder.events)")
+    }
+
+    /// The bin is `armed` once per crossing, and a drop in it `commit`s:
+    /// a deletion the viewer asked for (#1884).
+    @Test func theTrashIsArmedOncePerCrossingAndADropCommits() throws {
+        let (layer, _) = layer(fit: .fit, overlays: [Self.hello])
+        let item = try #require(layer.item(for: "hello"))
+        let bin = layer.trash.center
+        let away = CGPoint(x: bin.x, y: bin.y - 120)
+        let haptics = HapticRecorder()
+        var now: TimeInterval = 0
+        haptics.clock = { now }
+        Haptics.$recorder.withValue(haptics) {
+            layer.item(item, panned: .began, by: .zero, at: item.center)
+            for point in [bin, bin, away, bin] {
+                now += 1
+                layer.item(item, panned: .changed, by: .zero, at: point)
+            }
+            now += 1
+            layer.item(item, panned: .ended, by: .zero, at: bin)
+        }
+        // The snap guides' ticks aside.
+        #expect(haptics.played.filter { $0 != .tick } == [.armed, .armed, .commit])
     }
 
     /// The witness: the same drag, let go away from the bin, only moves.

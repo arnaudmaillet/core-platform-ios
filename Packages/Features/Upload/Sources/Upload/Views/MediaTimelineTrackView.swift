@@ -316,7 +316,6 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     /// a piece crossing another is; an impact is for a collision. One tick when
     /// the piece lifts and one per crossing — never on every beat of the drag,
     /// which the HIG calls decorative noise.
-    private let carryTicks = HapticSelection()
     /// One stamp per piece that is not playing as shot.
     private var rateStamps: [UILabel] = []
     /// What each stamp last said, so a scroll re-sets nothing.
@@ -2678,8 +2677,8 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         // Warm first, so the crossings that follow tick without the engine
         // waking up under them. ⚠️ A SIMULATOR FEELS NOTHING — this pair is
         // convention, checked by reading, not by a test or a screenshot.
-        carryTicks.prepare()
-        carryTicks.selectionChanged()
+        Haptics.prepare(.tick)
+        Haptics.play(.tick)
         onScrubbing?(true)
         // ⚠️ **THE TRACK FADES OUT AS THE LIST FADES AND GROWS IN, EACH CHIP FROM
         // ITS OWN CENTRE.**
@@ -2759,7 +2758,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         // The frame stays around the piece being carried; the screen hears about
         // the new order once, on release, through `onChange`.
         selected = to
-        carryTicks.selectionChanged()
+        Haptics.play(.tick)
         // ⚠️ **THE RE-FLOW IS THE FEEDBACK, SO IT HAS TO BE SEEN HAPPENING.** An
         // instant swap reads as the list glitching rather than as two pieces
         // changing places. A fifth of a second is enough to follow and too short

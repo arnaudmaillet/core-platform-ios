@@ -321,7 +321,7 @@ final class AccountTypeViewController: UIViewController {
             do {
                 try await manager.setAccountType(type, contact: contact)
                 phase = .loaded(type, type == .business ? contact : nil)
-                HapticSelection().selectionChanged()
+                Haptics.play(.tick)
             } catch {
                 let message: String = switch error as? AccountTypeError {
                 case .invalidContact: "Check your contact card: the category is required, and the email and phone must be valid."

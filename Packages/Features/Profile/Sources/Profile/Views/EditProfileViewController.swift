@@ -317,6 +317,8 @@ final class EditProfileViewController: UIViewController {
     }()
 
     #if DEBUG
+    /// The video banner's Buy, as the confirmation sheet's button.
+    func debugBuyVideoBanner() async { await buyVideoBanner() }
     /// Whether the first load's failure block shows.
     var debugShowsLoadFailure: Bool { !loadFailure.isHidden }
     /// The form's rows by kind, as applied: "hero", "heroSkeleton",
@@ -622,12 +624,11 @@ extension EditProfileViewController {
         // in its place.
         let pending = PendingFeedback("Buying the video banner…", from: self)
         switch await viewModel.buyVideoBanner() {
+        // One haptic per outcome: the toast's (#1884).
         case .bought, .alreadyOwned:
-            HapticNotification().notificationOccurred(.success)
             pending.succeed("Video banner unlocked")
             pushVideoBannerPicker()
         case .insufficientGems(let needed, let have):
-            HapticNotification().notificationOccurred(.error)
             pending.warn("\(needed - have) more gems needed")
         case .unavailable:
             pending.warn("Not available on this account")

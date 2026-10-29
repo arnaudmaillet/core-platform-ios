@@ -16,23 +16,28 @@ struct HapticsTests {
         #expect(!HapticPreference.isOn)
     }
 
-    /// Off, every wrapper call is a no-op (no crash, nothing fires).
-    @Test func offIsSilentForEveryKind() {
+    /// Off, every role is silent: nothing prepared, nothing played.
+    @Test func offIsSilentForEveryRole() {
         let previous = HapticPreference.defaults
         defer { HapticPreference.defaults = previous }
         HapticPreference.defaults = UserDefaults(suiteName: "haptics-\(UUID().uuidString)")!
         HapticPreference.isOn = false
-        HapticImpact(style: .light).prepare()
-        HapticImpact(style: .rigid).impactOccurred()
-        HapticImpact().impactOccurred(intensity: 0.5)
-        HapticSelection().selectionChanged()
-        HapticNotification().notificationOccurred(.success)
+        let recorder = HapticRecorder()
+        Haptics.$recorder.withValue(recorder) {
+            for role in Haptic.allCases {
+                Haptics.prepare(role)
+                Haptics.play(role)
+            }
+        }
+        #expect(recorder.played.isEmpty)
+        #expect(recorder.prepared.isEmpty)
     }
 
-    /// ⚠️ The switch only works if NOTHING bypasses it. Scans the app's and
-    /// the packages' sources for a direct UIKit feedback generator anywhere
-    /// but `Haptics.swift`.
-    @Test func noFeedbackGeneratorBypassesTheWrappers() throws {
+    /// ⚠️ A ROLE, NEVER A STYLE (#1884). The switch only works if NOTHING
+    /// bypasses it, and a feel is tuned in one table only. Scans the app's
+    /// and the packages' sources for a UIKit feedback generator, or one of
+    /// the wrappers, named anywhere but `Haptics.swift`.
+    @Test func noCallSiteNamesAGeneratorOrAStyle() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // DesignSystemTests
             .deletingLastPathComponent() // Tests
@@ -40,7 +45,7 @@ struct HapticsTests {
             .deletingLastPathComponent() // Core
             .deletingLastPathComponent() // Packages
             .deletingLastPathComponent() // repository root
-        let pattern = try Regex(#"\bUI(Impact|Selection|Notification)FeedbackGenerator\s*\("#)
+        let pattern = try Regex(#"\b(UI(Impact|Selection|Notification)FeedbackGenerator|Haptic(Impact|Selection|Notification))\b"#)
         var offenders: [String] = []
         for folder in ["App", "Packages"] {
             let enumerator = FileManager.default.enumerator(at: root.appendingPathComponent(folder), includingPropertiesForKeys: nil)
@@ -52,6 +57,6 @@ struct HapticsTests {
                 if text.contains(pattern) { offenders.append(url.lastPathComponent) }
             }
         }
-        #expect(offenders.isEmpty, "direct feedback generators in: \(offenders)")
+        #expect(offenders.isEmpty, "a role, never a style: `Haptics.play(.role)` instead of a generator or a wrapper in \(offenders)")
     }
 }

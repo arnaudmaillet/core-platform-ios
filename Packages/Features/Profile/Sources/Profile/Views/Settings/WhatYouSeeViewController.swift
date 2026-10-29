@@ -471,7 +471,7 @@ final class WhatYouSeeViewController: UIViewController {
             try await preferences.setSensitiveContent(level)
             guard let self, case .loaded(_, let personalized) = phase else { return }
             phase = .loaded(level, personalized: personalized)
-            HapticSelection().selectionChanged()
+            Haptics.play(.tick)
         }, failed: { [weak self] _ in self?.alert("Couldn't change this setting. Try again.") })
     }
 

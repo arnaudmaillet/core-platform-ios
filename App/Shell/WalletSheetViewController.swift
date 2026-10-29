@@ -750,7 +750,7 @@ final class WalletSheetViewController: UIViewController {
         // A Try Again that failed too: the sheet's own warning, and the failed
         // row's message says it (`WalletStakesFailedCell`). No toast.
         if retryFailed, viewIfLoaded?.window != nil {
-            HapticNotification().notificationOccurred(.warning)
+            Haptics.play(.warning)
         }
         // Visible rows are drawn HERE, outside the apply, so their bones can
         // cross-fade to the post; the apply redraws the others.

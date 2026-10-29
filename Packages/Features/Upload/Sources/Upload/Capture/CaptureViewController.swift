@@ -205,7 +205,7 @@ final class CaptureViewController: UIViewController {
     }
 
     private func cycleFlash() {
-        HapticSelection().selectionChanged()
+        Haptics.play(.tick)
         setFlash(settings.flash.next)
     }
 
@@ -1011,7 +1011,7 @@ final class CaptureViewController: UIViewController {
             lensChips.setZoom(source.zoom)
         }
         if shutterLogic.moveHold(by: translation) == .lock {
-            HapticImpact(style: .rigid).impactOccurred()
+            Haptics.play(.armed)
             lockView.setLocked(true)
             shutter.setLook(.locked, animated: true)
             UIView.animate(withDuration: 0.25, delay: 0.35, options: [.beginFromCurrentState]) {
@@ -1097,6 +1097,8 @@ final class CaptureViewController: UIViewController {
             body()
             return
         }
+        // One `tick` a second: warmed now, not woken under the first.
+        Haptics.prepare(.tick)
         countdownTask = Task { [weak self] in
             for remaining in stride(from: seconds, through: 1, by: -1) {
                 guard let self, !Task.isCancelled else { return }
@@ -1113,7 +1115,7 @@ final class CaptureViewController: UIViewController {
 
     private func tickCountdown(_ remaining: Int) {
         countdownLabel.text = "\(remaining)"
-        HapticImpact(style: .light).impactOccurred()
+        Haptics.play(.tick)
         guard !reducesMotion() else {
             countdownLabel.alpha = 1
             return
@@ -1298,9 +1300,10 @@ final class CaptureViewController: UIViewController {
         case .nothing:
             break
         case .armed:
-            HapticImpact(style: .light).impactOccurred()
+            Haptics.play(.armed)
         case .deleted(let clip):
-            HapticNotification().notificationOccurred(.warning)
+            // A deletion the viewer asked for: weighty, not a warning.
+            Haptics.play(.commit)
             // A one-clip take was handed over as this very clip.
             release(clip.url)
             dropStitch()
@@ -1619,7 +1622,7 @@ final class CaptureViewController: UIViewController {
     private func pickLens(_ lens: CaptureLens) {
         source.setZoom(lens.factor, smoothly: true)
         lensChips.setZoom(source.zoom)
-        HapticSelection().selectionChanged()
+        Haptics.play(.tick)
     }
 
     @objc private func pinched(_ pinch: UIPinchGestureRecognizer) {
@@ -1736,7 +1739,7 @@ final class CaptureViewController: UIViewController {
     /// in with the other camera — and its own mask turns with it.
     private func flip() {
         guard !isRecording, !isBusy else { return }
-        HapticSelection().selectionChanged()
+        Haptics.play(.tick)
         if !reducesMotion() { turnThePictures() }
         Task { [weak self] in
             guard let self else { return }

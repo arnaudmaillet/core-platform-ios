@@ -22,8 +22,8 @@ enum ShopPurchaseFeedback {
         action: ToastView.Action? = nil
     ) {
         switch outcome {
+        // One haptic per outcome: the toast's (#1884).
         case .bought:
-            HapticNotification().notificationOccurred(.success)
             pending.succeed("\(title) unlocked", action: action)
         case .alreadyOwned:
             pending.end()

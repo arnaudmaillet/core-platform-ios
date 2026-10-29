@@ -121,10 +121,6 @@ final class StraightenDialView: UIView {
     private let readout = UILabel()
     private let ruler = RulerStrip()
 
-    /// ⚠️ STORED, NOT MADE PER CLICK — the inbox's settle haptic is the precedent
-    /// (`private let selectionFeedback = HapticSelection()`), and a
-    /// generator made inside the handler arrives cold and clicks late.
-    private let click = HapticSelection()
     private var lastDetent = 0
 
     /// The strip growing while a finger is on the dial — asked for as *"scale
@@ -205,7 +201,8 @@ final class StraightenDialView: UIView {
     @objc private func dragged(_ pan: UIPanGestureRecognizer) {
         switch pan.state {
         case .began:
-            click.prepare()
+            // Warmed as the finger lands: a cold engine clicks late.
+            Haptics.prepare(.tick)
             lastDetent = StraightenDial.detentIndex(for: angle)
         case .changed:
             let travel = pan.translation(in: self).x
@@ -247,7 +244,7 @@ final class StraightenDialView: UIView {
         let detent = StraightenDial.detentIndex(for: angle)
         if detent != lastDetent {
             lastDetent = detent
-            click.selectionChanged()
+            Haptics.play(.tick)
         }
         redraw()
         onTurn?(angle)

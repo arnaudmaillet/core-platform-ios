@@ -225,7 +225,7 @@ final class ListPrivacyViewController: UIViewController {
                     following: section == .following ? audience : nil
                 )
                 phase = .loaded(saved)
-                HapticSelection().selectionChanged()
+                Haptics.play(.tick)
             } catch {
                 let alert = UIAlertController(title: nil, message: "Couldn't change who can see this list. Try again.", preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "OK", style: .default))

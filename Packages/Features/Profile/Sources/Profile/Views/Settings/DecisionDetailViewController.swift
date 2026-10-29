@@ -502,11 +502,11 @@ final class AppealComposerViewController: UIViewController, UITextViewDelegate {
             guard let self else { return }
             do {
                 let filedAt = try await file(statement)
-                HapticNotification().notificationOccurred(.success)
+                Haptics.play(.success)
                 onFiled?(filedAt)
                 dismiss(animated: true)
             } catch {
-                HapticNotification().notificationOccurred(.error)
+                Haptics.play(.error)
                 isSending = false
                 textView.isEditable = true
                 setOwnTrailingBarItems([sendItem()], animated: view.window != nil)

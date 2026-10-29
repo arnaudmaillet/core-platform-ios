@@ -144,7 +144,7 @@ final class VideoBannerPickerViewController: UIViewController {
     }
 
     private func pick(_ post: GalleryPost?) {
-        HapticSelection().selectionChanged()
+        Haptics.play(.tick)
         onPick(post)
         navigationController?.popViewController(animated: true)
     }

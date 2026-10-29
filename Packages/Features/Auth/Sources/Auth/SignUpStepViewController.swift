@@ -23,8 +23,6 @@ class SignUpStepViewController: BottomAnchoredTableViewController {
     var trailingRows: [UITableViewCell] = []
     var onTrailingRowSelected: ((Int) -> Void)?
 
-    private let feedback = HapticNotification()
-
     lazy var primaryButton: UIButton = {
         var configuration = UIButton.Configuration.prominentGlass()
         configuration.buttonSize = .large
@@ -67,7 +65,7 @@ class SignUpStepViewController: BottomAnchoredTableViewController {
         navigationItem.hidesBackButton = working
         view.isUserInteractionEnabled = !working
         if working {
-            feedback.prepare()
+            Haptics.prepare(.error)
             view.endEditing(true)
         }
     }
@@ -99,7 +97,7 @@ class SignUpStepViewController: BottomAnchoredTableViewController {
     }
 
     func present(error: Error) {
-        feedback.notificationOccurred(.error)
+        Haptics.play(.error)
         let message = (error as? AuthError).map(AuthMessages.message(for:)) ?? "Something went wrong. Try again."
         let alert = UIAlertController(title: "Couldn\u{2019}t Continue", message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
