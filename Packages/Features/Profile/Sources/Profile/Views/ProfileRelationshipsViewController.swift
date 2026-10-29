@@ -65,12 +65,16 @@ final class ProfileRelationshipsViewController: UIViewController {
         controller.obscuresBackgroundDuringPresentation = false
         let bar = controller.searchBar
         bar.delegate = self
-        bar.placeholder = "Search..."
+        bar.placeholder = Self.searchPlaceholder
         bar.autocapitalizationType = .none
         bar.autocorrectionType = .no
         bar.returnKeyType = .search
         return controller
     }()
+    /// What the empty field says.
+    static let searchPlaceholder = "Search..."
+    /// What the field says, while it exists. Tests.
+    var searchPlaceholderShown: String? { searchController.searchBar.placeholder }
     /// From the search's `willPresent` to its `willDismiss`.
     private var isSearching = false
 
@@ -583,11 +587,17 @@ extension ProfileRelationshipsViewController: UISearchResultsUpdating, UISearchC
     }
 
     func willPresentSearchController(_ searchController: UISearchController) {
+        // Back before the field opens: the close left it empty (#1901).
+        searchController.searchBar.placeholder = Self.searchPlaceholder
         isSearching = true
         if ownsAppTabBar { tabBarController?.setTabBarHidden(true, animated: true) }
     }
 
+    /// ⚠️ The field collapses EMPTY, no words sliding back into the
+    /// magnifier across the bar (#1901, the inbox's rule).
     func willDismissSearchController(_ searchController: UISearchController) {
+        searchController.searchBar.text = ""
+        searchController.searchBar.placeholder = ""
         isSearching = false
         applyQuery("")
         if ownsAppTabBar { tabBarController?.setTabBarHidden(false, animated: true) }

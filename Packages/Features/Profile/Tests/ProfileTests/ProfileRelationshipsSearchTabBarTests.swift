@@ -63,6 +63,23 @@ struct ProfileRelationshipsSearchTabBarTests {
         return tabs
     }
 
+    /// ⚠️ THE FIELD COLLAPSES EMPTY (#1901): no typed text and no
+    /// placeholder ride the close into the magnifier; the placeholder is
+    /// back before the next opening.
+    @Test func theFieldCollapsesEmptyAndOpensWithItsWords() {
+        let list = makeList(isSelf: false)
+        list.loadViewIfNeeded()
+        list.willPresentSearchController(list.searchController)
+        list.searchController.searchBar.text = "ava"
+
+        list.willDismissSearchController(list.searchController)
+        #expect(list.searchController.searchBar.text?.isEmpty != false, "the typed text travels with the close")
+        #expect(list.searchPlaceholderShown?.isEmpty != false, "the placeholder travels with the close")
+
+        list.willPresentSearchController(list.searchController)
+        #expect(list.searchPlaceholderShown == ProfileRelationshipsViewController.searchPlaceholder)
+    }
+
     @Test func cancellingSearchOnAPushedListLeavesTheTabBarHidden() throws {
         let list = makeList(isSelf: false)
         let tabs = makeTabs(stack: [UIViewController(), list])
