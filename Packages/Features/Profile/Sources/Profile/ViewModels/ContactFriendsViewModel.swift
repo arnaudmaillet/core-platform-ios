@@ -224,13 +224,16 @@ public final class ContactFriendsViewModel {
     /// button changes once, to the server's answer — Following, or Requested
     /// for a private profile. Unfollow and withdraw are, and come back on a
     /// failure.
-    public func toggleFollow(_ profileID: ProfileID) {
-        guard let row = currentRow(profileID), !busy.contains(profileID) else { return }
+    /// Answers whether the tap turned the follow ON (a request counts): the
+    /// view plays `toggleOn` then (#1886).
+    @discardableResult
+    public func toggleFollow(_ profileID: ProfileID) -> Bool {
+        guard let row = currentRow(profileID), !busy.contains(profileID) else { return false }
         let handle = "@" + row.handle
         let relation = row.relation
         switch relation {
         case .viewer, .blocked:
-            return
+            return false
         case .notFollowing, .followedBy:
             busy.insert(profileID)
             onChange?()
@@ -246,6 +249,7 @@ public final class ContactFriendsViewModel {
                     onActionFailed?("Couldn't follow \(handle)")
                 }
             }
+            return true
         case .following, .mutual:
             busy.insert(profileID)
             update(profileID) { $0.relation = relation.settingFollow(false) }
@@ -260,6 +264,7 @@ public final class ContactFriendsViewModel {
                     onChange?()
                 }
             }
+            return false
         case .requested:
             busy.insert(profileID)
             update(profileID) { $0.relation = .notFollowing }
@@ -274,6 +279,7 @@ public final class ContactFriendsViewModel {
                     onChange?()
                 }
             }
+            return false
         }
     }
 

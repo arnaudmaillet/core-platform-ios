@@ -716,6 +716,8 @@ final class MapSubFilterBarView: UIView {
     private func didTap(_ subFilter: MapSubFilter) {
         // Every tap toggles its own pill; the rest hold their state.
         let next = selectedSubFilters.symmetricDifference([subFilter])
+        // A choice (#1886): every tap changes the set.
+        Haptics.play(.tick)
         setSelectedSubFilters(next, reveal: subFilter)
         onSubFiltersChanged?(next)
     }

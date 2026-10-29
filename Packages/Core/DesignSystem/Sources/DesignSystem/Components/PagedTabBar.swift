@@ -1745,6 +1745,11 @@ public final class PagedTabBar: UIControl {
     /// Beginning that early is also what makes the rule above enforceable: the
     /// question "did this touch land on the pill" has an answer at touch-down
     /// and only a guess ten points later.
+    /// One `tick` each time the dragged pill's centre crosses into another
+    /// segment (#1886) — paced. A tap on a segment and a pager settling after
+    /// a swipe play nothing (#1881).
+    private let pillDetent = DetentFeedback(role: .tick)
+
     @objc private func handlePillGrab(_ grab: UILongPressGestureRecognizer) {
         switch grab.state {
         case .began:
@@ -1789,6 +1794,8 @@ public final class PagedTabBar: UIControl {
         startEdgeScroll()
         // Native: a press on the selected segment lifts the pill into the lens.
         pillLens.beginHold()
+        pillDetent.reset(to: Int(progress.rounded()))
+        pillDetent.prepare()
     }
 
     /// Puts the pill where the finger is, and tells the pages.
@@ -1846,6 +1853,7 @@ public final class PagedTabBar: UIControl {
 
         guard target != progress else { return }
         progress = target
+        pillDetent.update(index: Int(target.rounded()), in: 0...(segments.count - 1), isDriven: true)
         // ⚠️ Directly, not through `setNeedsLayout()`. The rule this looks
         // like it breaks — "a geometry change must reach the lens through a
         // layout pass, never by calling `applyProgress` directly" — is about

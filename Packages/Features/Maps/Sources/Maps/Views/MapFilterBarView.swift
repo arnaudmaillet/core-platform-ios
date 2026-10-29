@@ -326,6 +326,11 @@ final class MapFilterBarView: UIView {
 
     // MARK: - Selection
 
+    #if DEBUG
+    /// A pill's tap, through the handler a finger reaches. Tests.
+    func debugTap(_ filter: MapFilter?) { didTap(filter) }
+    #endif
+
     private func didTap(_ filter: MapFilter?) {
         // "All" is absolute; the others toggle back to All on a second tap.
         let next: MapFilter?
@@ -335,6 +340,9 @@ final class MapFilterBarView: UIView {
             next = nil
         }
         guard next != selectedFilter else { return }
+        // A choice, as in a settings list (#1886); the same pill again —
+        // no change — plays nothing.
+        Haptics.play(.tick)
         setSelectedFilter(next, animated: true)
         onFilterChanged?(next)
     }

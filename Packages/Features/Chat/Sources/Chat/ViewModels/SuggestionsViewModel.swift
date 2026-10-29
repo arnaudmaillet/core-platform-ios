@@ -304,8 +304,12 @@ public final class SuggestionsViewModel {
     /// Requested — at once when the suggestion says it is private, else once
     /// the server answers that it asked (a request already pending too) —
     /// and a tap on Requested withdraws it, as the profile's button does.
-    public func toggleFollow(_ id: ProfileID) {
-        guard !followsInFlight.contains(id) else { return }
+    ///
+    /// Answers whether the tap turned the follow ON (a request counts): the
+    /// view plays `toggleOn` then (#1886).
+    @discardableResult
+    public func toggleFollow(_ id: ProfileID) -> Bool {
+        guard !followsInFlight.contains(id) else { return false }
         followsInFlight.insert(id)
         let account = accounts.first { $0.id == id }
         let before = (following: following.contains(id), requested: requested.contains(id))
@@ -347,6 +351,7 @@ public final class SuggestionsViewModel {
             }
             self.followsInFlight.remove(id)
         }
+        return !before.following && !before.requested
     }
 
     /// A refused withdrawal, already put back on the row (#1454).

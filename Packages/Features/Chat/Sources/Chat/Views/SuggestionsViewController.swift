@@ -84,6 +84,11 @@ final class SuggestionsViewController: UIViewController {
         render(viewModel.phase)
     }
 
+    /// Follow or unfollow `id`: `toggleOn` when it turns on (#1886).
+    private func toggleFollow(_ id: ProfileID) {
+        if viewModel.toggleFollow(id) { Haptics.play(.toggleOn) }
+    }
+
     private func configureTableView() {
         tableView.register(SuggestionCell.self, forCellReuseIdentifier: SuggestionCell.reuseIdentifier)
         // No indicators on the inbox's pages either — the tabs sit above them
@@ -115,7 +120,7 @@ final class SuggestionsViewController: UIViewController {
             if let model = self?.modelsByID[id] {
                 cell.configure(with: model, imagePipeline: self?.imagePipeline)
             }
-            cell.onToggleFollow = { [weak self] in self?.viewModel.toggleFollow(id) }
+            cell.onToggleFollow = { [weak self] in self?.toggleFollow(id) }
             cell.onDismiss = { [weak self] in self?.dismiss(id) }
             return cell
         }
@@ -281,7 +286,7 @@ extension SuggestionsViewController: UITableViewDelegate {
             let follow = UIAction(
                 title: isRequested ? "Withdraw Request" : isFollowing ? "Unfollow" : "Follow",
                 image: UIImage(systemName: isRequested || isFollowing ? "person.badge.minus" : "person.badge.plus")
-            ) { [weak self] _ in self?.viewModel.toggleFollow(id) }
+            ) { [weak self] _ in self?.toggleFollow(id) }
             let hide = UIAction(
                 title: "Not interested",
                 image: UIImage(systemName: "hand.thumbsdown"),

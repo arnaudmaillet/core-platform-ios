@@ -429,7 +429,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         headerView.onFollowTapped = { [weak self] in
             guard let self else { return }
             MemberGates.perform(.follow(handle: viewModel.profile?.handle), from: self) { [weak self] in
-                self?.viewModel.toggleFollow()
+                // On at the optimistic flip; off is silent (#1886).
+                if self?.viewModel.toggleFollow() == true { Haptics.play(.toggleOn) }
             }
         }
         headerView.onMessageTapped = { [weak self] in

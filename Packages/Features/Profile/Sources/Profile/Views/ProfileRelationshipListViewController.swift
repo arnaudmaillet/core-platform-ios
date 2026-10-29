@@ -121,7 +121,8 @@ final class ProfileRelationshipListViewController: UIViewController {
                 case .following, .requested: self.viewModel.toggleFollow(id)
                 case .follow, .followBack:
                     MemberGates.perform(.follow(handle: nil), from: self) { [weak self] in
-                        self?.viewModel.toggleFollow(id)
+                        // On at the tap; off is silent (#1886).
+                        if self?.viewModel.toggleFollow(id) == true { Haptics.play(.toggleOn) }
                     }
                 case .inert: break
                 }

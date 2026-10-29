@@ -347,6 +347,8 @@ final class LimitInteractionsViewController: UIViewController {
 
     private func setAudience(_ audience: InteractionLimitAudience) {
         guard case .loaded(let saved) = phase, var limit = shown(saved)?.limit, limit.audience != audience else { return }
+        // A choice in the list (#1886).
+        Haptics.play(.tick)
         limit.audience = audience
         save(limit)
     }
@@ -389,3 +391,12 @@ extension LimitInteractionsViewController: UICollectionViewDelegate {
         }
     }
 }
+
+#if DEBUG
+extension LimitInteractionsViewController {
+    /// An audience row's tap. Tests.
+    func debugChooseAudience(_ audience: InteractionLimitAudience) { setAudience(audience) }
+    /// Whether the limit has loaded. Tests.
+    var debugIsLoaded: Bool { if case .loaded = phase { true } else { false } }
+}
+#endif

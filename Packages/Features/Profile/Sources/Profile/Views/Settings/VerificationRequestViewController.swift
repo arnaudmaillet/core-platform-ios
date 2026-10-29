@@ -166,6 +166,9 @@ final class VerificationRequestViewController: UIViewController {
     // MARK: - Changes
 
     private func choose(_ option: VerificationCategory) {
+        guard option != category else { return }
+        // A choice in the list (#1886).
+        Haptics.play(.tick)
         category = option
         applySnapshot()
         updateSubmit()
@@ -241,3 +244,10 @@ extension VerificationRequestViewController: UICollectionViewDelegate {
         }
     }
 }
+
+#if DEBUG
+extension VerificationRequestViewController {
+    /// A category row's tap. Tests.
+    func debugChoose(_ option: VerificationCategory) { choose(option) }
+}
+#endif

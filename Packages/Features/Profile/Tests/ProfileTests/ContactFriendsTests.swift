@@ -355,10 +355,10 @@ struct ContactFriendsTests {
         let fixture = makeFixture()
         let rows = try await loadedRows(fixture)
         let kate = try #require(rows.first { $0.id.rawValue == "prof-30" })
-        fixture.viewModel.toggleFollow(kate.id)
+        #expect(fixture.viewModel.toggleFollow(kate.id), "a request is on (#1886)")
         #expect(await settle { self.rows(fixture.viewModel)?.first { $0.id == kate.id }?.relation == .requested })
         #expect(ContactFriendsViewController.action(for: try #require(self.rows(fixture.viewModel)?.first { $0.id == kate.id })) == .requested)
-        fixture.viewModel.toggleFollow(kate.id)
+        #expect(!fixture.viewModel.toggleFollow(kate.id), "a withdrawal is silent (#1886)")
         #expect(await settle {
             self.rows(fixture.viewModel)?.first { $0.id == kate.id }?.relation == .notFollowing && !fixture.viewModel.isBusy(kate.id)
         })

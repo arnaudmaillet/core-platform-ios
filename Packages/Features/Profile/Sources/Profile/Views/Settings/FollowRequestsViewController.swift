@@ -210,6 +210,8 @@ final class FollowRequestsViewController: UIViewController {
                 }
                 Haptics.play(.success)
             } catch {
+                // The viewer's own action refused, as its alert appears (#1886).
+                Haptics.play(.error)
                 let verb = confirm ? "confirm" : "delete"
                 let alert = UIAlertController(title: nil, message: "Couldn't \(verb) @\(request.handle)'s request. Try again.", preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "OK", style: .default))
