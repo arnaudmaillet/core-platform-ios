@@ -855,8 +855,16 @@ final class SnapRailBoostButton: StakeMenuButton {
     /// wrong face (the configuration is rebuilt whole each time).
     private func applyFace() {
         var face = Self.makeConfiguration(glass: hasGlass, spentTotal: spentTotal, likeCount: likeCount)
-        // The native symbol replace between the heart and the chevron.
-        face.symbolContentTransition = UISymbolContentTransition(.replace)
+        // The native symbol replace between the heart and the chevron —
+        // ⚠️ BUT NONE INTO A STAKED HEART (the owner, on a device: its pink
+        // has to be there at once): the replace draws its incoming symbol in
+        // the button's ink, whatever the picture's own colour (filmed with
+        // the image's `.alwaysOriginal` pink, an `imageColorTransformer` and
+        // a palette alike: white for a quarter of a second, then pink). The
+        // staked heart swaps in, pink; the outline keeps the replace, in the
+        // chevron's ink.
+        let stakedHeart = spentTotal > 0 && !showsReturn
+        face.symbolContentTransition = stakedHeart ? nil : UISymbolContentTransition(.replace)
         if showsReturn {
             face.image = UIImage(systemName: "chevron.down", withConfiguration: SnapActionColumn.heartConfiguration)?
                 .withRenderingMode(.alwaysTemplate)

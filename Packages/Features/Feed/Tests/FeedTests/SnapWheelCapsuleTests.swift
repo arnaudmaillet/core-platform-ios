@@ -147,4 +147,19 @@ struct SnapWheelCapsuleTests {
         #expect(returns == 1 && boosts == 1)
         #expect(like.accessibilityLabel == "Like")
     }
+
+    /// A staked heart swaps in, pink at once — no symbol replace, which
+    /// would draw it in the button's ink first (the owner, on a device: it
+    /// came back white, then pink); the outline keeps the replace.
+    @Test func aStakedHeartIsPinkAtOnce() {
+        let like = SnapRailBoostButton()
+        like.setSpentTotal(3)
+        #expect(like.configuration?.symbolContentTransition == nil)
+        like.setShowsReturn(true)
+        #expect(like.configuration?.symbolContentTransition != nil, "the chevron lost its replace")
+        like.setShowsReturn(false)
+        #expect(like.configuration?.symbolContentTransition == nil, "the pink heart came back through the replace")
+        like.setSpentTotal(0)
+        #expect(like.configuration?.symbolContentTransition != nil, "the outline lost its replace")
+    }
 }
