@@ -1353,17 +1353,7 @@ extension PostShelfSection: UICollectionViewDelegate {
     ) {
         guard case .card(let id)? = RowMenuTarget(configuration.identifier) else { return }
         // From the lift, not back through the card (#1543).
-        if let preview = animator.previewViewController as? ForYouPostPreviewViewController,
-           preview.post.id == id, let launch = PreviewLaunch(preview) {
-            previewLaunch = launch
-            animator.preferredCommitStyle = .dismiss
-            DispatchQueue.main.async { [weak self] in self?.open(id) }
-            return
-        }
-        animator.preferredCommitStyle = .dismiss
-        animator.addCompletion { [weak self] in
-            DispatchQueue.main.async { self?.open(id) }
-        }
+        previewLaunch = PreviewLaunch.commit(animator, opening: id) { [weak self] in self?.open(id) }
     }
 
     func collectionView(

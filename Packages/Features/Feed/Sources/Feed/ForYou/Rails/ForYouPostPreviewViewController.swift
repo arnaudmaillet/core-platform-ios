@@ -389,7 +389,8 @@ final class TextCardPreview {
 /// draws it through a portal in the context menu's platter, which a later
 /// sibling of that container holds — at (16, 78) for the same lift. The
 /// platter is the first view of the lift's own size in the containers added
-/// after the lift's; nothing private is named.
+/// after the lift's (or of its shape, shrunk — `drawing(of:in:)`);
+/// nothing private is named.
 ///
 /// ⚠️ AND IT STAYS ON SCREEN UNTIL THE CARD IS. Opening the feed costs about
 /// 250 ms before the flight's first frame (`-zoom-profile`: the screen's
@@ -434,10 +435,23 @@ final class PreviewLaunch {
     /// found — the tile is then the honest origin.
     init?(_ preview: ForYouPostPreviewViewController, now: CFTimeInterval = CACurrentMediaTime()) {
         guard let lift = preview.viewIfLoaded, let window = lift.window,
-              let drawing = Self.drawing(of: lift, in: window) else { return nil }
+              let found = Self.drawing(of: lift, in: window) else {
+            #if DEBUG
+            Self.logMiss(preview)
+            #endif
+            return nil
+        }
+        #if DEBUG
+        // `-preview-launch-miss`: the card's path, to film it.
+        if ProcessInfo.processInfo.arguments.contains("-preview-launch-miss") { return nil }
+        #endif
+        let drawing = found.view
         postID = preview.post.id
         isText = preview.post.kind == .text
         frameInWindow = drawing.convert(drawing.bounds, to: window)
+        #if DEBUG
+        if Self.logs { print("[preview-launch] capture (\(found.match)) at \(frameInWindow), lift \(lift.bounds.size)") }
+        #endif
         self.window = window
         self.lift = lift
         self.drawing = drawing
@@ -455,6 +469,34 @@ final class PreviewLaunch {
             }
         }
         Self.latest = self
+    }
+
+    /// The commit of a tap on a lift (#1543): the post opens out of it when
+    /// UIKit's drawing of it is found, and otherwise goes back into its card
+    /// and opens from there — on the run loop's next turn either way. The
+    /// host keeps what this answers, for the menu's dismissal and the
+    /// flight's origin. `postID` nil takes the lift whatever its post (a
+    /// friend's face lifts their latest).
+    ///
+    /// ⚠️ NEVER ON THE ANIMATOR'S COMPLETION (#1888): filmed on a device,
+    /// the lift was back in its card at once, then the page stood at rest
+    /// ~0.9 s before the open. The card's path waited on UIKit's completion,
+    /// which came 1055 ms after the commit (simulator, `-preview-launch-log`).
+    static func commit(
+        _ animator: UIContextMenuInteractionCommitAnimating, opening postID: PostID?,
+        open: @escaping @MainActor () -> Void
+    ) -> PreviewLaunch? {
+        let preview = animator.previewViewController as? ForYouPostPreviewViewController
+        let launch = preview.flatMap { postID == nil || $0.post.id == postID ? PreviewLaunch($0) : nil }
+        animator.preferredCommitStyle = .dismiss
+        #if DEBUG
+        if logs, launch == nil {
+            let committed = CACurrentMediaTime()
+            animator.addCompletion { print(String(format: "[preview-launch] card's path: UIKit's completion at +%.0f ms", (CACurrentMediaTime() - committed) * 1000)) }
+        }
+        #endif
+        DispatchQueue.main.async { open() }
+        return launch
     }
 
     /// Where the lift was, in `space` — nil once the capture has expired.
@@ -519,23 +561,78 @@ final class PreviewLaunch {
     var debugIsHolding: Bool { hold?.window != nil }
     #endif
 
-    /// The view UIKit draws `lift` in.
-    private static func drawing(of lift: UIView, in window: UIWindow) -> UIView? {
+    #if DEBUG
+    static let logs = ProcessInfo.processInfo.arguments.contains("-preview-launch-log")
+
+    /// `-preview-launch-log` (#1888): why no capture — no window, or no
+    /// view of the lift's size after its container (with the sizes met).
+    private static func logMiss(_ preview: ForYouPostPreviewViewController) {
+        guard logs else { return }
+        guard let lift = preview.viewIfLoaded else { return print("[preview-launch] miss: no view") }
+        guard let window = lift.window else { return print("[preview-launch] miss: no window") }
+        let held = window.subviews.firstIndex { lift.isDescendant(of: $0) }
+        var lines: [String] = ["[preview-launch] miss: lift \(lift.bounds.size) held at \(held.map(String.init) ?? "nil") of \(window.subviews.count)"]
+        func walk(_ view: UIView, depth: Int) {
+            guard depth < 6 else { return }
+            lines.append(String(repeating: "  ", count: depth)
+                + "\(type(of: view)) \(view.bounds.size) alpha \(view.alpha) hidden \(view.isHidden)")
+            view.subviews.forEach { walk($0, depth: depth + 1) }
+        }
+        for (index, view) in window.subviews.enumerated() where index >= (held ?? 0) { walk(view, depth: 1) }
+        print(lines.joined(separator: "\n"))
+    }
+    #endif
+
+    /// How UIKit's drawing of a lift was told apart (`drawing(of:in:)`).
+    enum Match: Equatable {
+        /// At the lift's own size, after the lift's container.
+        case exact
+        /// At the lift's shape but smaller: a platter UIKit shrank to fit
+        /// the menu.
+        case scaled
+    }
+
+    /// The view UIKit draws `lift` in, and how it was told apart.
+    ///
+    /// ⚠️ NOT ONLY AT THE LIFT'S EXACT SIZE (#1888): on a device (iOS
+    /// 27.0.1, filmed 2026-10-29) a Following card's lift took the card's
+    /// path where the simulator finds its drawing; why is not known yet
+    /// (`-preview-launch-log` prints it). Breadth first, the platter before
+    /// a piece inside it, and only after the lift's container: its own size,
+    /// then its shape at a smaller size. Nothing private is named.
+    ///
+    /// ⚠️ NEVER THE SCENE'S OTHER WINDOWS: tried, a view of the lift's shape
+    /// elsewhere was taken for it — a wrong origin is worse than the card.
+    static func drawing(of lift: UIView, in window: UIWindow) -> (view: UIView, match: Match)? {
         let size = lift.bounds.size
         guard size.width > 0, size.height > 0,
               let held = window.subviews.firstIndex(where: { lift.isDescendant(of: $0) })
         else { return nil }
-        // Breadth first: the platter, not a same-sized piece inside it.
-        var queue = Array(window.subviews[(held + 1)...])
-        while !queue.isEmpty {
-            let view = queue.removeFirst()
-            if !view.isHidden, view.alpha > 0.01,
-               abs(view.bounds.width - size.width) < 0.5, abs(view.bounds.height - size.height) < 0.5 {
-                return view
-            }
+        let after = Array(window.subviews[(held + 1)...])
+        if let view = firstDrawn(in: after, where: { isSized($0, as: size) }) { return (view, .exact) }
+        if let view = firstDrawn(in: after, where: { isShaped($0, as: size) }) { return (view, .scaled) }
+        return nil
+    }
+
+    private static func firstDrawn(in roots: [UIView], where matches: (UIView) -> Bool) -> UIView? {
+        var queue = roots[...]
+        while let view = queue.popFirst() {
+            if !view.isHidden, view.alpha > 0.01, matches(view) { return view }
             queue.append(contentsOf: view.subviews)
         }
         return nil
+    }
+
+    private static func isSized(_ view: UIView, as size: CGSize) -> Bool {
+        abs(view.bounds.width - size.width) < 0.5 && abs(view.bounds.height - size.height) < 0.5
+    }
+
+    /// The lift's proportions within a point, at 40 to 100 % of its width:
+    /// never a container wider than the lift, never a small icon.
+    private static func isShaped(_ view: UIView, as size: CGSize) -> Bool {
+        let scale = view.bounds.width / size.width
+        guard scale >= 0.4, scale <= 1 else { return false }
+        return abs(view.bounds.height - size.height * scale) < 1
     }
 }
 

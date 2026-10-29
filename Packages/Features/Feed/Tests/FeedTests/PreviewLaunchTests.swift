@@ -79,4 +79,153 @@ struct PreviewLaunchTests {
         launch.conceal()
         #expect(still.superview === standIn)
     }
+
+    // MARK: - Finding UIKit's drawing (#1888)
+
+    private func makePreview(_ id: String = "p", kind: GalleryPost.Kind = .photo) -> ForYouPostPreviewViewController {
+        ForYouPostPreviewViewController(
+            post: post(id, kind: kind), imagePipeline: ImagePipeline(fetcher: SilentFetcher()), width: 361
+        )
+    }
+
+    /// The lift's controller held off screen at alpha 0, as UIKit holds it.
+    private func holdLift(_ preview: UIViewController, size: CGSize, in window: UIWindow) {
+        let held = UIView(frame: window.bounds)
+        held.alpha = 0
+        preview.view.frame = CGRect(origin: CGPoint(x: -window.bounds.width, y: 0), size: size)
+        held.addSubview(preview.view)
+        window.addSubview(held)
+    }
+
+    /// ⚠️ A PLATTER UIKIT SHRANK (#1888): a preview taller than the room the
+    /// menu leaves is drawn smaller than the lift. It is found by its shape,
+    /// and the flight leaves from where it is drawn.
+    @Test func aPlatterUIKitShrankIsFoundByItsShape() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 874))
+        window.isHidden = true
+        let preview = makePreview()
+        holdLift(preview, size: Self.drawnAt.size, in: window)
+        let menu = UIView(frame: window.bounds)
+        let shrunk = CGRect(x: 40, y: 120, width: Self.drawnAt.width * 0.8, height: Self.drawnAt.height * 0.8)
+        let drawn = UIView(frame: shrunk)
+        menu.addSubview(drawn)
+        window.addSubview(menu)
+
+        let found = try #require(PreviewLaunch.drawing(of: preview.view, in: window))
+        #expect(found.view === drawn)
+        #expect(found.match == .scaled)
+        let launch = try #require(PreviewLaunch(preview))
+        #expect(launch.frame(in: window) == shrunk)
+    }
+
+    /// The exact size first; a container wider than the lift, or a small
+    /// piece of its shape, is never taken for it.
+    @Test func onlyTheLiftsSizeOrAShrunkCopyOfItsShapeIsTaken() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 874))
+        window.isHidden = true
+        let preview = makePreview()
+        holdLift(preview, size: Self.drawnAt.size, in: window)
+        let menu = UIView(frame: window.bounds)
+        window.addSubview(menu)
+        let size = Self.drawnAt.size
+        // Wider, at the lift's shape; tiny, at the lift's shape; and hidden.
+        menu.addSubview(UIView(frame: CGRect(x: 0, y: 0, width: size.width * 1.1, height: size.height * 1.1)))
+        menu.addSubview(UIView(frame: CGRect(x: 0, y: 0, width: size.width * 0.2, height: size.height * 0.2)))
+        let hidden = UIView(frame: Self.drawnAt)
+        hidden.isHidden = true
+        menu.addSubview(hidden)
+        #expect(PreviewLaunch.drawing(of: preview.view, in: window) == nil)
+
+        // A shrunk copy first in the tree, the exact one deeper: exact wins.
+        let shrunk = UIView(frame: CGRect(x: 0, y: 0, width: size.width * 0.9, height: size.height * 0.9))
+        menu.addSubview(shrunk)
+        let wrapper = UIView(frame: window.bounds)
+        let exact = UIView(frame: Self.drawnAt)
+        wrapper.addSubview(exact)
+        menu.addSubview(wrapper)
+        let found = try #require(PreviewLaunch.drawing(of: preview.view, in: window))
+        #expect(found.view === exact)
+        #expect(found.match == .exact)
+    }
+
+    // MARK: - The commit (#1888)
+
+    @MainActor
+    private final class CommitAnimator: NSObject, UIContextMenuInteractionCommitAnimating {
+        var preferredCommitStyle: UIContextMenuInteractionCommitStyle = .pop
+        let previewViewController: UIViewController?
+        init(_ preview: UIViewController?) { previewViewController = preview }
+        func addAnimations(_ animations: @escaping () -> Void) {}
+        func addCompletion(_ completion: @escaping () -> Void) {}
+    }
+
+    /// The run loop's next turn.
+    private func nextTurn() async {
+        await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
+    }
+
+    /// ⚠️ THE OPEN NEVER WAITS ON UIKIT (#1888): with the drawing found or
+    /// not, the post opens on the next turn — never on the animator's
+    /// completion, which this animator never runs — and the lift is
+    /// dismissed rather than popped.
+    @Test(arguments: [true, false])
+    func aCommitOpensOnTheNextTurn(drawn: Bool) async throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 874))
+        window.isHidden = true
+        let preview = makePreview()
+        if drawn {
+            _ = TileHeroOriginTests.mountLift(preview, drawnAt: Self.drawnAt, in: window)
+        } else {
+            holdLift(preview, size: Self.drawnAt.size, in: window)
+        }
+        let animator = CommitAnimator(preview)
+        var opened = 0
+        let launch = PreviewLaunch.commit(animator, opening: PostID("p")) { opened += 1 }
+
+        #expect((launch != nil) == drawn)
+        #expect(animator.preferredCommitStyle == .dismiss)
+        #expect(opened == 0, "the post opened inside UIKit's commit")
+        await nextTurn()
+        #expect(opened == 1, "the post waited on UIKit's completion")
+    }
+
+    /// Another post's lift is no origin: the card is.
+    @Test func anotherPostsLiftIsNoOrigin() async {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 874))
+        window.isHidden = true
+        let preview = makePreview("other")
+        _ = TileHeroOriginTests.mountLift(preview, drawnAt: Self.drawnAt, in: window)
+        #expect(PreviewLaunch.commit(CommitAnimator(preview), opening: PostID("p")) {} == nil)
+        #expect(PreviewLaunch.commit(CommitAnimator(preview), opening: nil) {} != nil, "a face's lift, whatever its post")
+        await nextTurn()
+    }
+
+    /// In the shelf: the capture when there is one — the menu's dismissal
+    /// leaves the lift in place — and the card only without one.
+    @Test(arguments: [true, false])
+    func theShelfsCommitUsesTheCaptureWhenThereIsOne(drawn: Bool) async throws {
+        let shelf = PostShelfSection(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), videoPlayback: nil)
+        shelf.frame = CGRect(x: 0, y: 0, width: 393, height: 800)
+        _ = shelf.render([post("p", kind: .photo)])
+        var tapped: [Int] = []
+        shelf.onCardTapped = { tapped.append($0) }
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 874))
+        window.isHidden = true
+        let preview = makePreview()
+        if drawn {
+            _ = TileHeroOriginTests.mountLift(preview, drawnAt: Self.drawnAt, in: window)
+        } else {
+            holdLift(preview, size: Self.drawnAt.size, in: window)
+        }
+        let configuration = UIContextMenuConfiguration(identifier: RowMenuTarget.card(PostID("p")).identifier, previewProvider: nil)
+        shelf.collectionView(shelf.mediaView, willPerformPreviewActionForMenuWith: configuration, animator: CommitAnimator(preview))
+
+        #expect((shelf.previewLaunch != nil) == drawn)
+        if drawn {
+            let target = try #require(shelf.previewLaunch?.dismissalTarget())
+            #expect(target.target.center == CGPoint(x: Self.drawnAt.midX, y: Self.drawnAt.midY))
+        }
+        await nextTurn()
+        #expect(tapped == [0], "the card did not open")
+    }
 }

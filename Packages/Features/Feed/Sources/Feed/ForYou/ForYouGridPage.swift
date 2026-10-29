@@ -3925,18 +3925,9 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // (`hero(for:in:)`), its clip playing on: the lift is already a
         // surface of the tile's own player. Words open through their window,
         // which leaves from it too (`TextRevealInstaller`).
-        if let preview = animator.previewViewController as? ForYouPostPreviewViewController,
-           preview.post.id.rawValue == raw, let launch = PreviewLaunch(preview) {
-            previewLaunch = launch
-            animator.preferredCommitStyle = .dismiss
-            DispatchQueue.main.async { [weak self] in self?.openPost(rawID: raw) }
-            return
-        }
-        // A lift UIKit's drawing of could not be found: back into its card,
-        // then the tap's own open.
-        animator.preferredCommitStyle = .dismiss
-        animator.addCompletion { [weak self] in
-            DispatchQueue.main.async { self?.openPost(rawID: raw) }
+        // Without it, back into its tile, then the tap's own open.
+        previewLaunch = PreviewLaunch.commit(animator, opening: PostID(raw)) { [weak self] in
+            self?.openPost(rawID: raw)
         }
     }
 
