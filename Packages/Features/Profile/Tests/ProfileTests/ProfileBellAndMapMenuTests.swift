@@ -128,6 +128,78 @@ struct ProfileBellAndMapMenuTests {
         #expect(screen.debugMuteBellItem?.accessibilityLabel == "Notifications")
     }
 
+    // MARK: - The bell leaves the way it came (#1903)
+
+    /// The screen at the root of a stack in a visible window, so the bar is
+    /// on screen and its writes can animate.
+    private func hostedOnScreen(
+        relationship: ProfileRelationship
+    ) -> (ProfileViewController, ProfileViewModel, StubProfiles, UINavigationController, UIWindow) {
+        let (screen, viewModel, repository) = makeScreen(relationship: relationship)
+        let navigation = UINavigationController(rootViewController: screen)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = navigation
+        window.makeKeyAndVisible()
+        window.isHidden = false
+        window.layoutIfNeeded()
+        return (screen, viewModel, repository, navigation, window)
+    }
+
+    /// An unfollow on a bar at rest takes the bell out ANIMATED, through the
+    /// path it arrived by, so UIKit morphs it back into the balance pill. It
+    /// went through `performWithoutAnimation`, and the owner filmed it
+    /// vanishing between two frames.
+    @Test func anUnfollowAtRestTakesTheBellOutAnimated() async throws {
+        let (screen, viewModel, _, _, window) = hostedOnScreen(
+            relationship: .other(isFollowing: true, isBlocked: false)
+        )
+        defer { window.isHidden = true }
+        try #require(await settle { screen.debugMuteBellItem != nil && screen.transitionCoordinator == nil })
+        let before = screen.debugBarWrites.count
+
+        viewModel.toggleFollow()
+
+        #expect(screen.debugMuteBellItem == nil, "the bell stayed after the unfollow")
+        #expect(screen.debugBarWrites.count > before, "the bar was never written")
+        #expect(screen.debugBarWrites.last == true, "the bell left unanimated")
+    }
+
+    /// A refused unfollow rolls the optimistic flip back, and the bell comes
+    /// back, animated as on a follow.
+    @Test func aRefusedUnfollowBringsTheBellBack() async throws {
+        let (screen, viewModel, repository, _, window) = hostedOnScreen(
+            relationship: .other(isFollowing: true, isBlocked: false)
+        )
+        defer { window.isHidden = true }
+        try #require(await settle { screen.debugMuteBellItem != nil && screen.transitionCoordinator == nil })
+        repository.refusesFollowChange = true
+
+        viewModel.toggleFollow()
+        #expect(screen.debugMuteBellItem == nil, "guard: the flip is optimistic")
+
+        #expect(await settle { screen.debugMuteBellItem != nil }, "the bell never came back")
+        #expect(screen.debugBarWrites.last == true, "the bell came back unanimated")
+    }
+
+    /// ⚠️ A REMOVAL MID-TRANSITION STILL WAITS FOR REST, UNANIMATED (#756):
+    /// an item removed while a push runs pops at its end on device. Here the
+    /// unfollow lands while a child is being pushed over the profile.
+    @Test func aBellLeavingMidPushWaitsForRestUnanimated() async throws {
+        let (screen, viewModel, _, navigation, window) = hostedOnScreen(
+            relationship: .other(isFollowing: true, isBlocked: false)
+        )
+        defer { window.isHidden = true }
+        try #require(await settle { screen.debugMuteBellItem != nil && screen.transitionCoordinator == nil })
+
+        navigation.pushViewController(UIViewController(), animated: true)
+        try #require(screen.transitionCoordinator != nil, "guard: the push is running")
+        viewModel.toggleFollow()
+        #expect(screen.debugMuteBellItem != nil, "the bell left mid-push")
+
+        try #require(await settle { screen.debugMuteBellItem == nil }, "the bell never left")
+        #expect(screen.debugBarWrites.last == false, "a removal mid-push was animated")
+    }
+
     /// The glyph follows the scopes: `bell.slash` once one is muted, `bell`
     /// again when none is — and the menu's checkmarks with it. A new glyph
     /// is a NEW item under the same identifier (#1679, R3): the bar morphs
@@ -491,7 +563,16 @@ private final class StubProfiles: ProfileProviding, ProfileMuting, @unchecked Se
     func currentUserProfile() async throws -> UserProfile { subject }
     func profile(id: ProfileID) async throws -> UserProfile { subject }
     func relationship(for profileID: ProfileID) async throws -> ProfileRelationship { relationshipValue }
-    func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {}
+    /// Whether the server refuses a follow or an unfollow.
+    var refusesFollowChange: Bool {
+        get { lock.withLock { refuses } }
+        set { lock.withLock { refuses = newValue } }
+    }
+    private var refuses = false
+
+    func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {
+        if refusesFollowChange { throw URLError(.badServerResponse) }
+    }
     func setBlocked(_ blocked: Bool, for profileID: ProfileID) async throws {}
     func blockAccount(behind profileID: ProfileID) async throws -> [ProfileID] { [] }
     func updateCurrentUserProfile(
