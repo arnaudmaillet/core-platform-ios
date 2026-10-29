@@ -783,6 +783,9 @@ extension MessagesInboxViewController: UISearchResultsUpdating, UISearchControll
     /// controller's view — over the results (`.regular`'s documented
     /// behaviour).
     func willPresentSearchController(_ searchController: UISearchController) {
+        // The words come back before the field opens (#1901): the close left
+        // it empty.
+        searchController.searchBar.placeholder = Self.searchPlaceholder
         isSearching = true
         updatePullToSearchAvailability()
         searchResults?.applyQuery("")
@@ -798,7 +801,16 @@ extension MessagesInboxViewController: UISearchResultsUpdating, UISearchControll
 
     /// The band comes back with the bar it left with. `minimizesOnScroll` is
     /// re-armed for the same reason it is armed on appearing.
+    ///
+    /// ⚠️ **THE FIELD COLLAPSES EMPTY (#1901).** UIKit slides the open field
+    /// back into the magnifier with whatever it holds, and the owner filmed
+    /// "Search people and chats" running across the bar and over the balance
+    /// pill on the way. Emptied first (the typed text and the placeholder),
+    /// it shrinks as a bare capsule. A submitted query is in the history
+    /// already (`searchBarSearchButtonClicked`).
     func willDismissSearchController(_ searchController: UISearchController) {
+        searchController.searchBar.text = ""
+        searchController.searchBar.placeholder = ""
         isSearching = false
         updatePullToSearchAvailability()
         tabBarController?.setTabBarHidden(false, animated: true)

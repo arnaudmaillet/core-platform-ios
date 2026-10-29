@@ -535,4 +535,23 @@ struct InboxSystemSearchTests {
         screen.loadViewIfNeeded()
         #expect(screen.searchPlaceholderShown == "Search people and chats")
     }
+
+    /// ⚠️ THE FIELD COLLAPSES EMPTY (#1901, the owner's film): closed, it
+    /// slid back into the magnifier with its words, across the bar and over
+    /// the balance pill. From `willDismiss` it holds no text and no
+    /// placeholder; the placeholder is back before the next opening.
+    @Test func theFieldCollapsesEmptyAndOpensWithItsWords() throws {
+        let screen = searchableInbox()
+        screen.loadViewIfNeeded()
+        let search = try #require(screen.navigationItem.searchController)
+        screen.willPresentSearchController(search)
+        search.searchBar.text = "ava"
+
+        screen.willDismissSearchController(search)
+        #expect(search.searchBar.text?.isEmpty != false, "the typed text travels with the close")
+        #expect(screen.searchPlaceholderShown?.isEmpty != false, "the placeholder travels with the close")
+
+        screen.willPresentSearchController(search)
+        #expect(screen.searchPlaceholderShown == "Search people and chats", "the next opening has no words")
+    }
 }
