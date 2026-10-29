@@ -393,6 +393,9 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
 
     /// Which piece is being carried to a new place, if any.
     private var reordering: Int?
+    /// Where the piece in hand was lifted from: a drop elsewhere plays
+    /// `drop`, a return to it nothing (#1887).
+    private var liftedFrom: Int?
 
     /// Extra room at the head of the track, for the length of a head trim.
     ///
@@ -2665,6 +2668,7 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
         isPuttingDown = false
         carryX = nil
         reordering = index
+        liftedFrom = index
         select(index)
         stopTheFilmMovingUnderTheFinger()
         raiseTheShots(placed, stripY: stripY)
@@ -2674,11 +2678,10 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
             underTrackX: finger ?? x - scroller.contentOffset.x,
             listWidth: listWidth(of: list), trackWidth: bounds.width
         )
-        // Warm first, so the crossings that follow tick without the engine
-        // waking up under them. ⚠️ A SIMULATOR FEELS NOTHING — this pair is
-        // convention, checked by reading, not by a test or a screenshot.
+        // The piece lifts (`grab`, #1887); the crossings that follow tick,
+        // warmed now so the engine is not woken under them.
+        Haptics.play(.grab)
         Haptics.prepare(.tick)
-        Haptics.play(.tick)
         onScrubbing?(true)
         // ⚠️ **THE TRACK FADES OUT AS THE LIST FADES AND GROWS IN, EACH CHIP FROM
         // ITS OWN CENTRE.**
@@ -2773,7 +2776,10 @@ final class MediaTimelineTrackView: UIView, UIScrollViewDelegate, UIGestureRecog
     }
 
     private func drop() {
-        guard reordering != nil else { return }
+        guard let landedAt = reordering else { return }
+        // Landed in a new place: `drop`; back where it was: nothing (#1887).
+        if landedAt != liftedFrom { Haptics.play(.drop) }
+        liftedFrom = nil
         reordering = nil
         carryX = nil
         stopTheListScrolling()

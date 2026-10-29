@@ -126,6 +126,7 @@ final class SelectedMediaTrayView: UIView {
         dataSource.reorderingHandlers.canReorderItem = { _ in true }
         dataSource.reorderingHandlers.didReorder = { [weak self] transaction in
             MainActor.assumeIsolated {
+                self?.landed(moved: !transaction.difference.isEmpty)
                 self?.onReorder?(transaction.finalSnapshot.itemIdentifiers)
             }
         }
@@ -164,6 +165,8 @@ final class SelectedMediaTrayView: UIView {
             // centre of the snapshot at the point it is given, so a press near
             // a thumbnail's top edge would otherwise carry it above its
             // neighbours — which is exactly what was filmed.
+            // The thumbnail lifts (#1887).
+            Haptics.play(.grab)
             let cell = collectionView.cellForItem(at: indexPath) as? TrayCell
             cell?.setCarried(true)
             cell?.liftForCarry { [weak self] in
@@ -195,6 +198,17 @@ final class SelectedMediaTrayView: UIView {
             clearCarried()
         }
     }
+
+    /// The carried thumbnail landed: `drop` in a new place, nothing back
+    /// where it was (#1887).
+    private func landed(moved: Bool) {
+        if moved { Haptics.play(.drop) }
+    }
+
+    #if DEBUG
+    /// A carry landing, moved or not. Tests.
+    func debugLanded(moved: Bool) { landed(moved: moved) }
+    #endif
 
     /// Starts the move once the lift has settled — see `TrayCell.liftForCarry`.
     ///

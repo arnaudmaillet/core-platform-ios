@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import UIKit
 @testable import DesignSystem
@@ -299,6 +300,43 @@ struct IconSelectorBarTests {
         let onPill = CGPoint(x: bar.debugLensFrame.midX, y: bar.debugLensFrame.midY)
 
         #expect(bar.debugAcceptsGrab(at: onPill) == false, "there is nowhere to slide to")
+    }
+
+    // MARK: - Haptics (#1887)
+
+    /// The component ticks, so every host does: one `tick` per changed choice
+    /// by tap, none for the icon already chosen.
+    @Test func aTapOnANewIconTicksAndTheSameOneDoesNot() {
+        let bar = bar()
+        bar.debugTap(1)
+        let recorder = HapticRecorder()
+        var now: TimeInterval = 0
+        recorder.clock = { now }
+        Haptics.$recorder.withValue(recorder) {
+            bar.debugTap(1)
+            now += 1
+            bar.debugTap(2)
+        }
+        #expect(recorder.played == [.tick], "\(recorder.played)")
+    }
+
+    /// One `tick` per icon the dragged pill crosses.
+    @Test func aDragTicksOncePerIconCrossed() {
+        let bar = bar(width: 400)
+        let stride = IconBarMetrics.segmentSide + IconBarMetrics.interSegmentSpacing
+        let start = lensCentre(bar)
+        let recorder = HapticRecorder()
+        var now: TimeInterval = 0
+        recorder.clock = { now }
+        Haptics.$recorder.withValue(recorder) {
+            bar.debugBeginDrag(atX: start)
+            for step in [0.3, 1, 1.2, 2, 3] {
+                now += 1
+                bar.debugDrag(toX: start + stride * step, after: 0.05)
+            }
+            bar.debugEndDrag()
+        }
+        #expect(recorder.played == [.tick, .tick, .tick], "\(recorder.played)")
     }
 
     // MARK: - The strip

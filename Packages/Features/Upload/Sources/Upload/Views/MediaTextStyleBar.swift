@@ -347,6 +347,8 @@ final class MediaTextStyleBar: UIView {
     private func announce(_ mutate: (inout TextOverlay) -> Void) {
         var next = style
         mutate(&next)
+        // A changed style (#1887); the font or colour already on, nothing.
+        if next != style { Haptics.play(.tick) }
         show(next)
         onChange?(next)
     }

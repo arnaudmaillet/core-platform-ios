@@ -290,6 +290,8 @@ final class BandChoiceRowView<Choice: Equatable>: UIView {
     }
 
     private func pick(_ kind: Choice) {
+        // A changed choice (#1887); the one already chosen, nothing.
+        if kind != chosen { Haptics.play(.tick) }
         show(kind: kind)
         onPick?(kind)
     }

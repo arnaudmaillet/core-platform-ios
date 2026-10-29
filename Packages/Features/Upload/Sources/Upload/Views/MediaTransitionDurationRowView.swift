@@ -83,7 +83,7 @@ final class MediaTransitionDurationRowView: UIView {
             chip.layer.cornerRadius = Metrics.chip / 2
             chip.layer.cornerCurve = .continuous
             chip.addAction(
-                UIAction { [weak self] _ in self?.onPick?(seconds) }, for: .primaryActionTriggered
+                UIAction { [weak self] _ in self?.pick(seconds) }, for: .primaryActionTriggered
             )
             // Gives under the finger and ticks on a tap, as every button of
             // the editing tools does (`PressFeedback`).
@@ -103,6 +103,12 @@ final class MediaTransitionDurationRowView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// A chip's tap: a changed length ticks (#1887), the one shown does not.
+    private func pick(_ seconds: Double) {
+        if abs(seconds - showing) > 0.0005 { Haptics.play(.tick) }
+        onPick?(seconds)
+    }
 
     /// States how long the cut's transition runs, and the longest its two
     /// pieces can give — without announcing anything.
