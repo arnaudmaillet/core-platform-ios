@@ -81,15 +81,38 @@ struct SnapWheelCapsuleTests {
         #expect(rail.capsule.likeCover == 0)
     }
 
-    /// One step up, the bridge is whole: the capsule runs down to the like
-    /// PILL's bottom and the like's glass has retracted inside it.
+    /// One step up with the capsule there, the bridge is whole: the capsule
+    /// runs down to the like PILL's bottom and the like's glass has retracted
+    /// inside it.
     @Test func oneStepUpTheBridgeReachesThePillsBottom() {
         let (rail, _) = makeWheel()
+        rail.capsule.debugTouch(down: true)
         scroll(rail, steps: 1)
         let likeTop = rail.bounds.maxY - rail.bottomReservedInset
         #expect(abs(rail.capsule.frameInRail.maxY - (likeTop + Self.like)) < 0.5)
         #expect(rail.capsule.likeCover == 1)
         #expect(rail.capsule.bridge == 1)
+    }
+
+    /// The like retracts AS the capsule covers it — never a capsule running
+    /// down a like of its own width (the union steps there, the lab's
+    /// finding 5) — and the capsule comes off the like before it goes.
+    @Test func theLikeRetractsAsTheCapsuleCoversIt() {
+        let (rail, _) = makeWheel()
+        rail.capsule.debugTouch(down: true)
+        var covers: [CGFloat] = []
+        for quarter in 0...4 {
+            scroll(rail, steps: 0.5 + CGFloat(quarter) / 8)
+            covers.append(rail.capsule.likeCover)
+        }
+        #expect(covers.first == 0)
+        #expect(covers == covers.sorted(), "the like re-inflated while the capsule came down: \(covers)")
+        #expect((covers.last ?? 0) == 1)
+        // Gone: the capsule's presence takes the bridge with it.
+        rail.capsule.debugTouch(down: false)
+        rail.capsule.debugExpireLinger()
+        #expect(rail.capsule.standingBridge == 0)
+        #expect(rail.capsule.likeCover == 0)
     }
 
     /// The chevron: the first next emote whole AND the capsule there.
