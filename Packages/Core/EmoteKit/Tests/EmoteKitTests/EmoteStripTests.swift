@@ -1,5 +1,5 @@
 import Foundation
-import MediaCore
+@testable import MediaCore
 import Testing
 import UIKit
 @testable import EmoteKit
@@ -270,13 +270,23 @@ struct EmoteStripTests {
 
         strip.scrollViewWillBeginDragging(grid)
         try #require(await settle { (1...frames / 2).contains(tile.player.displayedFrame ?? 0) })
+        // ⚠️ ONE INSTANT FOR BOTH READS (#1896). The frame is worked out from
+        // the media clock, so "the same frame or the next" failed on a runner
+        // slow enough for two frames (60 ms) to pass between the reads. With
+        // the clock held, a carry-on reads the very same frame, and only a
+        // restart (a rest, a new art, a shifted clock) can move it.
+        // Synchronous from here to the restore: no other test runs meanwhile.
+        let previousClock = AnimatedIconView.mediaTime
+        let instant = previousClock()
+        AnimatedIconView.mediaTime = { instant }
+        defer { AnimatedIconView.mediaTime = previousClock }
         strip.scrollViewDidEndDecelerating(grid)
         let before = try #require(tile.player.displayedFrame)
         strip.scrollViewWillBeginDragging(grid)
         #expect(!tile.player.isFinishingLoop, "the finish is dropped")
         #expect(tile.isAnimating, "still playing")
         let after = try #require(tile.player.displayedFrame)
-        #expect(after == before || after == (before + 1) % frames, "no restart: \(before) → \(after)")
+        #expect(after == before, "no restart: \(before) → \(after)")
         strip.scrollViewDidEndDecelerating(grid)
     }
 
