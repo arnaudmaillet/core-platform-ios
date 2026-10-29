@@ -189,6 +189,36 @@ struct CardStakeTests {
         #expect(loaded.canShoot)
     }
 
+    /// A stake is a weighty action (`commit`), a refusal the viewer's
+    /// error (`error`), and taking it back is silent (#1883).
+    @Test func aStakeCommitsARefusalErrsAndAnUndoIsSilent() throws {
+        let wallet = WalletStore(defaults: Self.defaults())
+        let staking = PostCardStaking(wallet: wallet)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let screen = UIViewController()
+        window.rootViewController = screen
+        window.isHidden = false
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+        let cell = row()
+        screen.view.addSubview(cell)
+        staking.bind(cell, to: PostID("post-1"))
+
+        let staked = HapticRecorder.recording { #expect(cell.debugTapLikesChip()) }
+        #expect(staked == [.commit])
+        // No pack: a shot is refused.
+        let refused = HapticRecorder.recording { staking.stake(.shot, on: "post-1", cell: cell, source: cell) }
+        #expect(refused == [.error])
+
+        let toast = try #require(screen.view.subviews.compactMap { $0 as? ToastView }.first)
+        let undo = try #require(toast.accessibilityCustomActions?.first { $0.name == "Undo" })
+        let undone = HapticRecorder.recording { _ = undo.actionHandler?(undo) }
+        #expect(undone.isEmpty, "an undo played \(undone)")
+        #expect(staking.debugUndoable(on: PostID("post-1")) == 0)
+    }
+
     /// A shot from a card: a hundred points in one gesture, one shot off the
     /// pack, and the "+100" receipt's amount is what the wallet spent.
     @Test func aShotFromACardStakesAHundredAndUsesOneShot() {

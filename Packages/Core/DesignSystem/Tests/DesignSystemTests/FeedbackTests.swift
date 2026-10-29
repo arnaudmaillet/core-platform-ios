@@ -218,13 +218,15 @@ struct FeedbackTests {
         }
     }
 
-    /// A toggle that shows on its control (a bookmark) plays the light tap
-    /// and draws nothing (#803).
-    @Test func aToggledStatePlaysALightTapAndNoToast() {
+    /// A toggle that shows on its control (a bookmark) plays `toggleOn`
+    /// turning on, nothing turning off, and draws nothing (#803, #1881).
+    @Test func aToggledStatePlaysOnlyTurningOnAndNoToast() {
         let (root, screen) = shell()
         hosting(root) {
-            let played = recordingHaptics { Feedback.toggled() }
-            #expect(played == [.toggleOn], "a toggle played \(played)")
+            let on = recordingHaptics { Feedback.toggled(on: true) }
+            #expect(on == [.toggleOn], "turning on played \(on)")
+            let off = recordingHaptics { Feedback.toggled(on: false) }
+            #expect(off.isEmpty, "turning off played \(off)")
             #expect(!screen.view.subviews.contains { $0 is ToastView })
         }
     }

@@ -37,8 +37,7 @@ struct PostMenuRows {
             rows.append(.save(isOn: bookmarks.isSaved(id.rawValue)) { [weak anchor] in
                 guard let anchor else { return }
                 MemberGates.perform(.save, from: anchor) {
-                    _ = bookmarks.toggle(id.rawValue)
-                    Feedback.toggled()
+                    Feedback.toggled(on: bookmarks.toggle(id.rawValue))
                     savedDidChange?(bookmarks.isSaved(id.rawValue))
                 }
             })

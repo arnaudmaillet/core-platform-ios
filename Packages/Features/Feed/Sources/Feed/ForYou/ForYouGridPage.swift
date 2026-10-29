@@ -3590,9 +3590,8 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
                 cell.onBookmarkTapped = { [weak cell] in
                     guard let cell else { return }
                     MemberGates.perform(.save, from: cell) { [weak cell] in
-                        _ = bookmarks.toggle(post.id.rawValue)
-                        // The fill says it; the hand feels it (#803).
-                        Feedback.toggled()
+                        // The fill says it; the hand feels it, saving only (#803, #1881).
+                        Feedback.toggled(on: bookmarks.toggle(post.id.rawValue))
                         cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
                     }
                 }
