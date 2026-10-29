@@ -188,6 +188,27 @@ struct SnapSoundState {
         return sound(for: model)?.previewURL
     }
 
+    /// Whether `model` carries a track the song player plays when heard — a
+    /// carousel's sound, a photograph's or a text post's song. A single
+    /// clip's sound is its own player's (#1875).
+    func hasTrack(for model: FeedItemDisplayModel) -> Bool {
+        guard sound(for: model)?.previewURL != nil else { return false }
+        return Self.isCarousel(model) || model.mediaKind != .video
+    }
+
+    /// Whether the post PLAYS — what the sound's record turns for (#1148:
+    /// muted too; the mute is the badge). A clip running, the track heard,
+    /// or — muted (#1875) — the track that would be heard: on screen, not
+    /// paused, not held. A muted carousel no longer turns on its clip pages
+    /// only, and a muted photograph turns as a heard one does. Pure, for tests.
+    static func postPlays(
+        onScreen: Bool, clipAdvancing: Bool, songPlaying: Bool,
+        soundOn: Bool, trackMayRun: Bool, hasTrack: Bool
+    ) -> Bool {
+        guard onScreen else { return false }
+        return clipAdvancing || songPlaying || (!soundOn && trackMayRun && hasTrack)
+    }
+
     /// Whether a page's song may be heard at all: the feed's sound on, and
     /// Low Power Mode not followed (#580, #1808).
     static func pageSongPlays(soundOn: Bool, lowPowerMode: Bool) -> Bool {

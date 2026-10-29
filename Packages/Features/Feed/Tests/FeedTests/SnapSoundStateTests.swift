@@ -229,6 +229,44 @@ struct SnapSoundStateTests {
         #expect(sound.song(for: Self.clip()) == nil, "a clip page has no song")
     }
 
+    // MARK: - The record turns while the post plays, muted too (#1875)
+
+    /// A track is a carousel's sound or a page's song; a single clip's sound
+    /// is its own player's, and a post with no sound has none.
+    @Test func whatCarriesATrack() {
+        let sound = Self.state(Switches(), provider: FixedSoundProvider(sound: Self.song))
+        #expect(sound.hasTrack(for: Self.carousel()))
+        #expect(sound.hasTrack(for: Self.carousel(clipPage: false)))
+        #expect(sound.hasTrack(for: Self.photo()))
+        #expect(!sound.hasTrack(for: Self.clip()), "a single clip's sound is its own player's")
+        #expect(!Self.state(Switches()).hasTrack(for: Self.carousel()), "a carousel with no sound has a track")
+    }
+
+    /// Muted, a post with a track plays on, silently: its record turns on a
+    /// carousel's picture pages and on a photograph — and stops when the
+    /// viewer pauses or holds it, or it leaves the screen.
+    @Test func aMutedPostWithATrackStillPlays() {
+        func plays(onScreen: Bool = true, clip: Bool = false, song: Bool = false, soundOn: Bool,
+                   mayRun: Bool = true, track: Bool = true) -> Bool {
+            SnapSoundState.postPlays(
+                onScreen: onScreen, clipAdvancing: clip, songPlaying: song,
+                soundOn: soundOn, trackMayRun: mayRun, hasTrack: track
+            )
+        }
+        // The bug: muted, a picture page's song player is idle.
+        #expect(plays(soundOn: false), "a muted carousel's picture page stood still")
+        // …and a muted clip page turns on its clip, as before.
+        #expect(plays(clip: true, soundOn: false))
+        // Paused or held, gone, or with no track: still.
+        #expect(!plays(soundOn: false, mayRun: false))
+        #expect(!plays(onScreen: false, soundOn: false))
+        #expect(!plays(soundOn: false, track: false), "a post with no track turned")
+        // Heard, the song player is the truth: a song that does not play
+        // (Low Power Mode on a photograph) does not turn the record.
+        #expect(plays(song: true, soundOn: true))
+        #expect(!plays(soundOn: true))
+    }
+
     // MARK: - The sound sheet
 
     @Test func aClipsOwnSoundOpensTheSheetAsItsOwnOriginal() {
