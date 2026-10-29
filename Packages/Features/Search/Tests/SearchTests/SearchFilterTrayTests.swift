@@ -156,11 +156,15 @@ struct SearchFilterTrayTests {
         /// returns as soon as the screen exists, which is before the search has
         /// come back — a test that asserted on the phase straight after it read
         /// `.loading` and called a working screen broken.
+        ///
+        /// ⚠️ A LOOK BUDGET, NOT 80 YIELDS (#1866). Yields cost no time, so a
+        /// search slower than 80 turns of the main actor (150 ms did it) ran
+        /// the budget out and returned on `.loading`, without a word.
         func settleAnswer() async {
-            for _ in 0..<80 {
+            for _ in 0..<3_000 {
                 if case .results = viewModel.currentPhase { return }
                 if case .empty = viewModel.currentPhase { return }
-                await Task.yield()
+                try? await Task.sleep(for: .milliseconds(10))
             }
         }
 
@@ -170,11 +174,28 @@ struct SearchFilterTrayTests {
         /// reads the first answer and believes it waited. This waits for the
         /// words to change.
         func settleAnswer(showing handle: String) async {
-            for _ in 0..<200 {
+            for _ in 0..<3_000 {
                 if case .results(let models) = viewModel.currentPhase,
                    models.first?.handle == handle { return }
-                await Task.yield()
+                try? await Task.sleep(for: .milliseconds(10))
             }
+        }
+
+        /// Waits, on a look budget, until the Users tab SHOWS `handles`;
+        /// returns whether it did. Assert it.
+        ///
+        /// ⚠️ `settleAnswer` WAITS ON THE VIEW MODEL, NOT THE SCREEN (#1866).
+        /// It returns on the phase, after at most 80 yields and without a
+        /// word, while the page renders its answer later: through the bones'
+        /// gate (#1770), which holds a first answer out their minimum once
+        /// they are up. With a search answering in 150 ms this test read an
+        /// empty Users tab every time; CI, starved, read it once.
+        func settleShown(_ handles: [String]) async -> Bool {
+            for _ in 0..<3_000 {
+                if results?.peoplePageForTesting.displayedHandlesForTesting == handles { return true }
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            return results?.peoplePageForTesting.displayedHandlesForTesting == handles
         }
 
         /// The groups the sheet would be built from on each tab. They live on
@@ -436,6 +457,7 @@ struct SearchFilterTrayTests {
         await host.showResults("haddad")
         await host.settleAnswer()
         let results = try? #require(host.results)
+        #expect(await host.settleShown(["@haddad"]), "the first answer never reached the Users tab")
         #expect(results?.peoplePageForTesting.rowCountForTesting == 1)
 
         // A refine screen loads and takes the callback.
@@ -462,7 +484,7 @@ struct SearchFilterTrayTests {
         // results header used to be where a test could read it.
         host.viewModel.submitQuery("nobody")
         await host.settleAnswer(showing: "@nobody")
-        #expect(results?.peoplePageForTesting.displayedHandlesForTesting == ["@nobody"])
+        #expect(await host.settleShown(["@nobody"]), "the new answer never reached the Users tab")
     }
 
     /// ⚠️ CANCEL PUTS THE ANSWER BACK. Typing on the refine screen drives the
