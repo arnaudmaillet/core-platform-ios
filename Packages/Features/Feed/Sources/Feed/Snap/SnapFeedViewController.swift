@@ -5199,14 +5199,36 @@ final class SnapFeedViewController: UIViewController {
             isSongHeld = false
         }
         var song: URL?
-        // Nothing heard under the launch screen (#1812): the song waits for it
-        // to lift (`curtainDidLift`).
-        if isOnScreen, isForeground, !isAudioYielded, !LaunchTimeline.curtainIsUp, !isSongHeld,
-           let model = ownerModel {
-            song = model.id == songPausedFor || unavailablePostIDs.contains(model.id)
-                ? nil : soundState.song(for: model)
+        if let model = ownerModel, trackMayRun(model) {
+            song = soundState.song(for: model)
         }
         songPlayer.play(song)
+    }
+
+    /// Whether `model`'s track may run now, heard or muted: the post owns
+    /// the screen in the foreground, nothing took the audio, the launch
+    /// screen is gone (#1812: the song waits for it to lift,
+    /// `curtainDidLift`), and the viewer has neither paused nor held it. The
+    /// song's rule, and the muted record's (#1875).
+    private func trackMayRun(_ model: FeedItemDisplayModel) -> Bool {
+        isOnScreen && isForeground && !isAudioYielded && !LaunchTimeline.curtainIsUp && !isSongHeld
+            && model.id != songPausedFor && !unavailablePostIDs.contains(model.id)
+    }
+
+    /// Whether the post on screen PLAYS — what every record of its sound
+    /// turns for (#1148: muted too). Muted, its track runs on silently
+    /// (#1875): the record turns on a carousel's picture pages, a
+    /// photograph, a text page, as it would heard.
+    private var postIsPlaying: Bool {
+        let owner = ownerModel
+        return SnapSoundState.postPlays(
+            onScreen: isOnScreen,
+            clipAdvancing: activeSnapCell?.isClipAdvancing ?? false,
+            songPlaying: songPlayer.isPlaying,
+            soundOn: soundState.isOn,
+            trackMayRun: owner.map(trackMayRun) ?? false,
+            hasTrack: owner.map(soundState.hasTrack) ?? false
+        )
     }
 
     /// The post that owns the screen.
@@ -5248,7 +5270,7 @@ final class SnapFeedViewController: UIViewController {
     /// viewer's tap, a hold, a sheet, a flight, a stall), and a quarter-second
     /// look at the player is one rule where wiring every door would be six.
     private func refreshCoverSpin() {
-        let playing = isOnScreen && ((activeSnapCell?.isClipAdvancing ?? false) || songPlayer.isPlaying)
+        let playing = postIsPlaying
         // The sound bubble's record turns while the post PLAYS — muted too
         // (#1148, reversing #683's audible-only turn; the mute is the badge)
         // — and so does the panel's slot, where a TEXT page's sound lives
@@ -5346,7 +5368,7 @@ final class SnapFeedViewController: UIViewController {
         weak var covered = activeSnapCell
         // The record is the post's (#1148): it mirrors the page, and its tap
         // plays or pauses the page.
-        let playing = isOnScreen && ((activeSnapCell?.isClipAdvancing ?? false) || songPlayer.isPlaying)
+        let playing = postIsPlaying
         sheet.setPostPlayback(postPlayback(of: model, playing: playing))
         sheet.onTogglePlayback = { [weak self] in self?.togglePagePlayback() }
         // The record's hold mutes or unmutes, as the post's bubble does.
