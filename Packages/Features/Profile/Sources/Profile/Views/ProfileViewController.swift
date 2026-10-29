@@ -388,11 +388,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
                 // profile the rows gain Edit and Delete, drawn now rather
                 // than once each row is configured again.
                 self.galleryPager.refreshAuthorMenus()
-                // A bell that has to GO (a handle that turned out to be the
-                // viewer, #800) leaves at rest and unanimated: removing a bar
-                // item mid-push pops it on device (#756).
+                // A bell that has to go leaves the way it came (#1903).
                 if self.isShowingMuteBell, !self.showsMuteBell {
-                    self.applyNavigationStateAtRest()
+                    self.removeMuteBell()
                 } else {
                     // The relationship usually resolves while the push/present
                     // is still animating; bind the bar inside the transition so
@@ -407,7 +405,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             // The button moves before the read counts as settled, so the
             // bar it recomposed could still presume someone else: a bell the
             // answer rules out (the viewer's own handle, #800) goes now.
-            if self.isShowingMuteBell, !self.showsMuteBell { self.applyNavigationStateAtRest() }
+            if self.isShowingMuteBell, !self.showsMuteBell { self.removeMuteBell() }
             self.noteLandingMilestone()
         }
         headerView.onPicturesSettled = { [weak self] in self?.noteLandingMilestone() }
@@ -1344,6 +1342,10 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         (navigationItem.leftBarButtonItems ?? []).first { $0 === barIdentityItem }
     }
     var debugBarIdentityPill: (any PersonBarItem)? { barIdentityPill }
+    /// Every write of the bar's trailing group, in order: whether it was
+    /// animated, so UIKit could morph it (#1903). A test reads how the bell
+    /// left.
+    var debugBarWrites: [Bool] = []
     /// The bell, if the bar shows it.
     var debugMuteBellItem: UIBarButtonItem? {
         ownTrailingBarItems.first { $0 === muteBellItem }
@@ -1921,8 +1923,27 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         ownTrailingBarItems.contains { $0 === muteBellItem }
     }
 
+    /// The bell leaves (#1903).
+    ///
+    /// ⚠️ **WHAT THE AT-REST PATH GUARDS IS A REMOVAL MID-TRANSITION, NOT A
+    /// BELL THAT HAS TO GO.** A bar item removed while a push runs pops
+    /// unanimated at its end on device (#756). That is #800's case: a handle
+    /// route whose read lands mid-push and names the viewer. But the bell
+    /// also goes on every unfollow (#1398: no bell unless followed), and that
+    /// went at rest too, through `performWithoutAnimation`. The owner filmed
+    /// it vanishing between two frames while the balance pill jumped to the
+    /// corner. On a bar at rest it now leaves animated, through the path it
+    /// arrived by, so UIKit morphs it back into the balance pill.
+    private func removeMuteBell() {
+        if transitionCoordinator != nil {
+            applyNavigationStateAtRest()
+        } else {
+            applyNavigationState(animated: view.window != nil)
+        }
+    }
+
     /// Recomposes the bar once no transition runs, without animation — for an
-    /// item that has to leave (#800, #756).
+    /// item that leaves mid-transition (#800, #756).
     private func applyNavigationStateAtRest() {
         let apply: @MainActor () -> Void = { [weak self] in
             UIView.performWithoutAnimation { self?.applyNavigationState() }
@@ -2106,6 +2127,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // Written now, so they ride a push they arrive in; the contract
         // composes the group with the day and writes it through the toasts'
         // door — under bar toasts, the ones that come back (#1420, #1447).
+        #if DEBUG
+        debugBarWrites.append(animated && UIView.areAnimationsEnabled)
+        #endif
         if dayLeads {
             // The day is leading here (#1642): the trailing group is all ours.
             setOwnTrailingBarItems(items, animated: animated)
