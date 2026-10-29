@@ -318,12 +318,12 @@ final class CountryUnlockSheetViewController: UIViewController {
         }
         switch outcome {
         case .unlocked, .alreadyUnlocked:
-            HapticNotification().notificationOccurred(.success)
+            Haptics.play(.success)
             let code = country.code
             let unlocked = onUnlocked
             dismiss(animated: true) { unlocked?(code) }
         case .insufficientGems(let needed, _):
-            HapticNotification().notificationOccurred(.error)
+            Haptics.play(.error)
             refreshBalance(price: needed)
         case .priceChanged(let price):
             // The new price, to confirm again (#1475): nothing was charged.

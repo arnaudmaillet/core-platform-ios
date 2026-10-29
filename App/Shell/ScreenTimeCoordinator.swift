@@ -206,7 +206,7 @@ final class ScreenTimeCoordinator {
         window.rootViewController = controller
         window.makeKeyAndVisible()
         reminderWindow = window
-        HapticNotification().notificationOccurred(.warning)
+        Haptics.play(.warning)
     }
 
     private func resolveDailyLimit(_ choice: ScreenTimeReminderViewController.LimitChoice) {

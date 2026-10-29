@@ -46,7 +46,7 @@ final class AppearancePickerView: UIControl {
 
     private func choose(_ option: AppearancePreference) {
         guard option != selection else { return }
-        HapticSelection().selectionChanged()
+        Haptics.play(.tick)
         selection = option
         sendActions(for: .valueChanged)
     }

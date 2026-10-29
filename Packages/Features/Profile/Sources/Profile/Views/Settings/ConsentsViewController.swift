@@ -114,7 +114,7 @@ final class ConsentsViewController: UIViewController {
             guard let self else { return }
             switch await viewModel.set(consent, to: isGiven) {
             case .saved:
-                HapticSelection().selectionChanged()
+                Haptics.play(.tick)
             case .ignored:
                 // A switch flipped in the instant before it was disabled.
                 syncSwitches()

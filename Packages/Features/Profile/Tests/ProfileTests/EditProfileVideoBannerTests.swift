@@ -1,8 +1,11 @@
 import CoreModels
 import CoreStorage
+import DesignSystem
+import MediaCore
 import Foundation
 import PostGrid
 import Testing
+import UIKit
 @testable import Profile
 
 /// Edit Profile → Video Banner (#944): the shop item at 500 gems until the
@@ -94,6 +97,29 @@ struct EditProfileVideoBannerTests {
         #expect(model.videoBannerRow == .off)
         #expect(await model.buyVideoBanner() == .alreadyOwned, "bought once, for good")
         #expect(items.gems == 150)
+    }
+
+    /// ONE HAPTIC PER OUTCOME (#1884): the toast's — `success` bought,
+    /// `warning` short of gems — never a second one before it.
+    @Test(arguments: [650, 82])
+    func buyingTheBannerPlaysOneRole(gems: Int) async {
+        let controller = EditProfileViewController(
+            viewModel: makeModel(items: Items(gems: gems)),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = UINavigationController(rootViewController: controller)
+        window.isHidden = false
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+        controller.loadViewIfNeeded()
+        let recorder = HapticRecorder()
+        await Haptics.$recorder.withValue(recorder) {
+            await controller.debugBuyVideoBanner()
+        }
+        #expect(recorder.played == (gems >= 500 ? [.success] : [.warning]), "\(recorder.played)")
     }
 
     @Test func notEnoughGemsBuysNothing() async {

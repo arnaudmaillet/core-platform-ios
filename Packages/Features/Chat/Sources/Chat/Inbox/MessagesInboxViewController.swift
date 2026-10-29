@@ -45,7 +45,6 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// vocabulary, not the bar's, so every call site maps one to the other
     /// through `surfaces`.
     private let categoryBar: PagedTabBar
-    private let selectionFeedback = HapticSelection()
 
     /// Built in `viewDidLoad`, once the surfaces are children — reading a
     /// child's `view` before containment would load it outside its parent.
@@ -555,6 +554,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     /// What a tap on the section item does. Tests.
     func debugTapSectionItem() { activeSurface?.scrollToPinnedSection() }
+    /// The pager coming to rest on `index`, as a swipe that ended there.
+    func debugSettle(on index: Int) { didSettle(on: index) }
     #endif
 
     /// Opens search — the magnifier's tap, a pull — focused.
@@ -710,8 +711,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         pagerView.setActivePage(index, animated: animated)
     }
 
+    /// A pager settle: silent (#1881) — the tab bar's own drag ticks.
     private func didSettle(on index: Int) {
-        selectionFeedback.selectionChanged()
         categoryBar.setProgress(CGFloat(index))
         guard let surface = activeSurface else { return }
         // ⚠️ Paging between tabs does NOT resign anything. A badge is how the

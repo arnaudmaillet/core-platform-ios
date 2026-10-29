@@ -268,7 +268,7 @@ final class StorageSettingsViewController: UIViewController {
 
     private func choose(_ limit: CacheStorageLimit) {
         guard limit != model.limit else { return }
-        HapticSelection().selectionChanged()
+        Haptics.play(.tick)
         Task { await model.choose(limit) }
     }
 }

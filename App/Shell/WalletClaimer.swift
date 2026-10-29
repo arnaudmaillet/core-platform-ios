@@ -50,18 +50,18 @@ final class WalletClaimer {
                 if let host {
                     Feedback.success(Self.toastText(awarded: awarded), from: host)
                 } else {
-                    HapticNotification().notificationOccurred(.success)
+                    Haptics.play(.success)
                 }
                 changed()
                 NotificationCenter.default.post(name: Self.didClaimNotification, object: self)
             case .tooEarly, .dailyCapReached, .balanceFull:
                 pendingKey = nil
-                HapticNotification().notificationOccurred(.warning)
+                Haptics.play(.warning)
                 changed()
             case .unavailable:
                 // Not answered: the same key goes again with the retry, so a
                 // claim whose answer was lost is never paid twice.
-                HapticNotification().notificationOccurred(.error)
+                Haptics.play(.error)
                 guard let host else {
                     pendingKey = nil
                     changed()

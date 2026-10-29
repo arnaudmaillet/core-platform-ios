@@ -208,7 +208,7 @@ final class FollowRequestsViewController: UIViewController {
                 } else {
                     try await viewModel.delete(request)
                 }
-                HapticNotification().notificationOccurred(.success)
+                Haptics.play(.success)
             } catch {
                 let verb = confirm ? "confirm" : "delete"
                 let alert = UIAlertController(title: nil, message: "Couldn't \(verb) @\(request.handle)'s request. Try again.", preferredStyle: .alert)

@@ -30,7 +30,7 @@ import UIKit
 /// opens under the bar, growing and fading in with the distance while a ring
 /// around its magnifier fills toward the line. Crossing the line ARMS it — the
 /// ink floods the capsule from the glyph, its words become "Release to
-/// search", and a light haptic marks the moment — and letting go while armed
+/// search", and `armed` marks the moment — and letting go while armed
 /// opens search. Pulling back above the line before letting go disarms it,
 /// silently, the flood draining back: the gesture can always be abandoned.
 /// The motion itself is `PullToSearchIndicatorView`'s.
@@ -64,7 +64,6 @@ final class InboxPullToSearch: NSObject {
     private weak var scrollView: UIScrollView?
     private var offsetObservation: NSKeyValueObservation?
     private(set) var isArmed = false
-    private let haptic = HapticImpact(style: .light)
 
     #if DEBUG
     /// Stands in for `isTracking` while the QA hook drives the offset — a
@@ -128,11 +127,13 @@ final class InboxPullToSearch: NSObject {
         // Arming follows the FINGER only: a list bouncing back through the
         // line after a release must not arm on its way past.
         guard isEnabled, isTracking else { return }
-        if distance > 0 { haptic.prepare() }
+        // The role straight, not `PullThresholdFeedback`: this pull keeps
+        // its disarm margin, which that one has not.
+        if distance > 0 { Haptics.prepare(.armed) }
         if !isArmed, distance >= Self.threshold {
             isArmed = true
             indicator.setArmed(true)
-            haptic.impactOccurred()
+            Haptics.play(.armed)
         } else if isArmed, distance < Self.threshold - Self.disarmMargin {
             disarm()
         }

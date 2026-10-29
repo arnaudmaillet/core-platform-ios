@@ -531,8 +531,9 @@ public final class CountryShopViewController: UIViewController {
             pending.fail(refusal)
         } else {
             // Bought: the row turns "Active — N left" on the spot.
+            // No toast to play it: the success is this one.
             pending.end()
-            HapticNotification().notificationOccurred(.success)
+            Haptics.play(.success)
         }
         return outcome
     }

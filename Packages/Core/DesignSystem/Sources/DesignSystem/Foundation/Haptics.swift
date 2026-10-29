@@ -14,36 +14,36 @@ public enum HapticPreference {
     }
 }
 
-// The app's ONLY feedback generators. Each one wraps UIKit's and has exactly
-// its API, so a call site keeps its style, its intensity and — for a stored
-// generator — its `prepare()` warm-up (a generator built inside the handler
-// arrives cold and fires late; see `StraightenDialView`). What they add is
-// the one check: nothing fires, and nothing warms, while Haptics is off.
+// The app's ONLY feedback generators, PRIVATE to this file (#1884): the
+// player (`Haptics`) is their one user. Each wraps UIKit's and adds the one
+// check: nothing fires, and nothing warms, while Haptics is off.
 //
-// ⚠️ NEVER USE A `UI…FeedbackGenerator` DIRECTLY. `HapticsCallSiteTests`
-// fails the build of the suite if one appears outside this file, because a
-// switch honoured by 40 call sites and ignored by the 41st is a broken switch.
+// ⚠️ A ROLE, NEVER A STYLE. A call site names the moment (`Haptics.play`),
+// never a generator or a style. `HapticsTests` fails if a UIKit feedback
+// generator or one of these names appears outside this file: a switch
+// honoured by 40 call sites and ignored by the 41st is a broken switch, and
+// a style named at a call site is a feel tuned in two places.
 
 /// `UIImpactFeedbackGenerator`, behind the Haptics switch.
 @MainActor
-public final class HapticImpact {
+private final class HapticImpact {
     private let generator: UIImpactFeedbackGenerator
 
-    public init(style: UIImpactFeedbackGenerator.FeedbackStyle = .medium) {
+    init(style: UIImpactFeedbackGenerator.FeedbackStyle = .medium) {
         generator = UIImpactFeedbackGenerator(style: style)
     }
 
-    public func prepare() {
+    func prepare() {
         guard HapticPreference.isOn else { return }
         generator.prepare()
     }
 
-    public func impactOccurred() {
+    func impactOccurred() {
         guard HapticPreference.isOn else { return }
         generator.impactOccurred()
     }
 
-    public func impactOccurred(intensity: CGFloat) {
+    func impactOccurred(intensity: CGFloat) {
         guard HapticPreference.isOn else { return }
         generator.impactOccurred(intensity: intensity)
     }
@@ -51,17 +51,17 @@ public final class HapticImpact {
 
 /// `UISelectionFeedbackGenerator`, behind the Haptics switch.
 @MainActor
-public final class HapticSelection {
+private final class HapticSelection {
     private let generator = UISelectionFeedbackGenerator()
 
-    public init() {}
+    init() {}
 
-    public func prepare() {
+    func prepare() {
         guard HapticPreference.isOn else { return }
         generator.prepare()
     }
 
-    public func selectionChanged() {
+    func selectionChanged() {
         guard HapticPreference.isOn else { return }
         generator.selectionChanged()
     }
@@ -69,17 +69,17 @@ public final class HapticSelection {
 
 /// `UINotificationFeedbackGenerator`, behind the Haptics switch.
 @MainActor
-public final class HapticNotification {
+private final class HapticNotification {
     private let generator = UINotificationFeedbackGenerator()
 
-    public init() {}
+    init() {}
 
-    public func prepare() {
+    func prepare() {
         guard HapticPreference.isOn else { return }
         generator.prepare()
     }
 
-    public func notificationOccurred(_ type: UINotificationFeedbackGenerator.FeedbackType) {
+    func notificationOccurred(_ type: UINotificationFeedbackGenerator.FeedbackType) {
         guard HapticPreference.isOn else { return }
         generator.notificationOccurred(type)
     }

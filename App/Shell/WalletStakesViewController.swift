@@ -359,7 +359,7 @@ final class WalletStakesViewController: UIViewController {
         entries.merge(found) { _, new in new }
         let retryFailed = postLoads.finish(requested: requested, found: Set(found.keys.map(\.rawValue)))
         if retryFailed, viewIfLoaded?.window != nil {
-            HapticNotification().notificationOccurred(.warning)
+            Haptics.play(.warning)
         }
         var offscreen: Set<String> = []
         for id in requested {

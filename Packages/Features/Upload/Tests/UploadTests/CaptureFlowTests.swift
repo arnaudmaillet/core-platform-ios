@@ -553,6 +553,22 @@ struct CaptureFlowTests {
         #expect(screen.source.photoFlashes.isEmpty, "a cancelled countdown takes nothing")
     }
 
+    /// One `tick` a second, warmed when the countdown starts (#1884). The
+    /// countdown's task inherits the recorder.
+    @Test func theCountdownTicksOncePerSecond() async throws {
+        let screen = try await open()
+        screen.camera.debugSelector.debugTap(CaptureOption.timer.rawValue)
+        screen.camera.debugTimerRow.debugPick(.three)
+        let recorder = HapticRecorder()
+        await Haptics.$recorder.withValue(recorder) {
+            screen.camera.debugTapShutter()
+            try? await Task.sleep(for: .milliseconds(2_500))
+        }
+        #expect(recorder.prepared.contains(.tick))
+        #expect(recorder.played.filter { $0 == .tick }.count == 3, "\(recorder.played)")
+        screen.camera.debugTapShutter()
+    }
+
     /// The countdown ends in the photograph it counted down to. A countdown
     /// can only run LONG on a loaded machine, so "not before 2.5s" is safe.
     @Test func theTimerTakesThePhotoWhenItsCountdownEnds() async throws {

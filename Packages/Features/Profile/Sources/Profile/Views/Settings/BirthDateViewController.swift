@@ -133,7 +133,7 @@ final class BirthDateViewController: UIViewController {
             guard let self else { return }
             do {
                 _ = try await setter.setDateOfBirth(birthDate)
-                HapticNotification().notificationOccurred(.success)
+                Haptics.play(.success)
                 onSaved()
                 // This screen only, if it is still here (#1144): the viewer
                 // may have gone back while the save was out.

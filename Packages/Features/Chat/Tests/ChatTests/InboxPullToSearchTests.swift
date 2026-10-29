@@ -1,3 +1,5 @@
+import CoreNavigation
+import DesignSystem
 import Testing
 import UIKit
 @testable import Chat
@@ -36,6 +38,37 @@ struct InboxPullToSearchTests {
         pull.release()
         #expect(opened.count == 1)
         #expect(!pull.isArmed, "the gesture did not stand down after firing")
+    }
+
+    /// Crossing the line under the finger is `armed`, once per crossing
+    /// (#1884): not again while held past it, again after a real disarm.
+    @Test func crossingTheLinePlaysArmedOncePerCrossing() {
+        let (pull, list, _) = rig()
+        pull.debugIsTracking = true
+        let recorder = HapticRecorder()
+        var now: TimeInterval = 0
+        recorder.clock = { now }
+        Haptics.$recorder.withValue(recorder) {
+            for offset in [
+                InboxPullToSearch.threshold + 4, InboxPullToSearch.threshold + 20,
+                InboxPullToSearch.threshold - InboxPullToSearch.disarmMargin - 1, InboxPullToSearch.threshold + 4,
+            ] {
+                list.contentOffset.y = -offset
+                now += 1
+            }
+        }
+        #expect(recorder.played == [.armed, .armed])
+    }
+
+    /// A page settle in Messages is silent (#1881): the tab bar's drag says it.
+    @Test func aPageSettleInMessagesPlaysNothing() {
+        let screen = MessagesInboxViewController(surfaces: [InboxBlankSurface(.all), InboxBlankSurface(.requests)])
+        screen.loadViewIfNeeded()
+        let played = HapticRecorder.recording {
+            screen.debugSettle(on: 1)
+            screen.debugSettle(on: 0)
+        }
+        #expect(played.isEmpty, "a settle played \(played)")
     }
 
     @Test func aPullShortOfTheLineOpensNothing() {
@@ -228,4 +261,18 @@ struct PullToSearchIndicatorTests {
         #expect(early < view.transform.a)
         #expect(view.transform.a == 1)
     }
+}
+
+/// A page with nothing on it, of `category`.
+private final class InboxBlankSurface: UIViewController, InboxSurface {
+    let category: MessagesCategory
+    let chrome = InboxSurfaceChrome()
+    var onChromeChange: ((InboxSurfaceChrome) -> Void)?
+    func surfaceDidBecomeActive() {}
+    init(_ category: MessagesCategory) {
+        self.category = category
+        super.init(nibName: nil, bundle: nil)
+    }
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
 }

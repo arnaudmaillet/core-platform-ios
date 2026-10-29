@@ -110,10 +110,6 @@ final class MediaOverlayLayerView: UIView {
     /// than once per frame.
     private var lastMarks: MediaOverlayGeometry.OverlaySnapMarks = []
 
-    /// ⚠️ STORED, NOT MADE PER CLICK — `StraightenDialView` records why: a
-    /// generator built inside the handler "arrives cold and clicks late".
-    /// `prepare()` runs when the fingers land.
-    private let click = HapticSelection()
     private var ticks = 0
 
     /// The picture's middle lines, drawn only while an overlay is resting on
@@ -258,7 +254,8 @@ final class MediaOverlayLayerView: UIView {
             // pan's own verdict and the overlay is gone either way; only the
             // placement is held back until the gesture is over.
             if drop {
-                HapticNotification().notificationOccurred(.success)
+                // A deletion the viewer asked for: weighty, not a success.
+                Haptics.play(.commit)
                 onEvent?(.delete(id: item.id))
             } else {
                 item.setPlacement(item.overlay.placement, redraw: true)
@@ -309,7 +306,8 @@ final class MediaOverlayLayerView: UIView {
         // overlay resting on the middle has not just fallen into anything.
         lastMarks = MediaOverlayGeometry
             .snapped(item.overlay.placement, in: mediaRect, visible: visibleFractions).marks
-        click.prepare()
+        // Warmed when the fingers land: a cold engine clicks late.
+        Haptics.prepare(.tick)
     }
 
     /// A recogniser ended. Answers whether it was the LAST of them — the only
@@ -366,7 +364,7 @@ final class MediaOverlayLayerView: UIView {
     /// counting ticks at the call sites instead would pass while this routine
     /// clicked twice, or clicked not at all.
     private func tick() {
-        click.selectionChanged()
+        Haptics.play(.tick)
         ticks += 1
     }
 

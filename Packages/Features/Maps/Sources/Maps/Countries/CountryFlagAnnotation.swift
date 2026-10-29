@@ -174,8 +174,8 @@ final class CountryFlagAnnotationView: MKAnnotationView {
     var debugVeilAlpha: CGFloat { veil.isHidden ? 0 : veil.backgroundColor?.cgColor.alpha ?? 0 }
     #endif
 
+    /// A map tap: silent (#1881).
     @objc private func tapped() {
-        HapticImpact(style: .light).impactOccurred()
         onSelect?()
     }
 

@@ -89,8 +89,6 @@ final class CreateHoldShortcut: NSObject {
     private var hold = HoldToArm(firesWhenFull: true)
     private var disc: HoldRingDiscView?
     private var displayLink: CADisplayLink?
-    private let revealHaptic = HapticImpact(style: .light)
-    private let armHaptic = HapticImpact(style: .medium)
     private var lockoutWork: DispatchWorkItem?
 
     /// Set when a hold is recognised: the one selection of the "+" the bar
@@ -196,19 +194,20 @@ final class CreateHoldShortcut: NSObject {
         switch transition {
         case .revealed:
             showDisc()
-            revealHaptic.impactOccurred()
-            armHaptic.prepare()
+            // A custom long press recognised; the ring's fill is armed next.
+            Haptics.play(.held)
+            Haptics.prepare(.armed)
             startClock()
         case .armed:
             stopClock()
             disc?.setArmed(true)
-            armHaptic.impactOccurred()
+            Haptics.play(.armed)
         case .fired:
             stopClock()
             // The ready beat and the launch in one: the ring just filled
             // under a finger that is still down, so this is the "armed"
             // haptic as much as the "go".
-            armHaptic.impactOccurred()
+            Haptics.play(.armed)
             disc?.dismiss(.launch)
             disc = nil
             fire()

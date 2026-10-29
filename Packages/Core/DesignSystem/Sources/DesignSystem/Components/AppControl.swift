@@ -720,10 +720,10 @@ open class AppControl: UIButton {
         }
     }
 
-    /// The success or error notification.
-    func notify(_ type: UINotificationFeedbackGenerator.FeedbackType) {
-        Haptics.play(type == .success ? .success : type == .warning ? .warning : .error)
-        record(.notification(success: type == .success))
+    /// The outcome's role: `success` or `error`.
+    func notify(_ outcome: Haptic) {
+        Haptics.play(outcome)
+        record(.notification(success: outcome == .success))
     }
 
     // MARK: - Tests
