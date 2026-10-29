@@ -44,19 +44,25 @@ struct PreviewLaunchTests {
         return (try #require(PreviewLaunch(preview, now: now)), window)
     }
 
+    // ⚠️ EVERY READ AT A STATED TIME, never the clock's (#1888): a starved
+    // runner can stall the main thread past the capture's one-second
+    // lifetime between the capture and the read (CI run 40860820962).
+
     @Test func aLiftAnswersForItsOwnPostWhileItsCaptureLasts() throws {
-        let (launch, _) = try launch(post("words", kind: .text))
-        #expect(PreviewLaunch.pending(for: PostID("words")) === launch)
-        #expect(PreviewLaunch.pending(for: PostID("other")) == nil, "another post opened out of the lift")
-        let later = CACurrentMediaTime() + PreviewLaunch.lifetime + 0.1
+        let now = CACurrentMediaTime()
+        let (launch, _) = try launch(post("words", kind: .text), now: now)
+        #expect(PreviewLaunch.pending(for: PostID("words"), now: now) === launch)
+        #expect(PreviewLaunch.pending(for: PostID("other"), now: now) == nil, "another post opened out of the lift")
+        let later = now + PreviewLaunch.lifetime + 0.1
         #expect(PreviewLaunch.pending(for: PostID("words"), now: later) == nil, "a later open left from the lift")
         #expect(launch.revealLaunch(now: later) == nil)
     }
 
     @Test(arguments: [GalleryPost.Kind.text, .photo])
     func aWindowOpensOutOfTheLift(kind: GalleryPost.Kind) throws {
-        let (launch, window) = try launch(post("p", kind: kind))
-        let reveal = try #require(launch.revealLaunch())
+        // Captured a minute ahead: the window's frame reads the clock.
+        let (launch, window) = try launch(post("p", kind: kind), now: CACurrentMediaTime() + 60)
+        let reveal = try #require(launch.revealLaunch(now: CACurrentMediaTime() + 60))
         #expect(reveal.frame(window) == Self.drawnAt)
         #expect(reveal.cornerRadius == PreviewLaunch.cornerRadius)
         #expect(reveal.cornerCurve == .continuous)
@@ -114,8 +120,9 @@ struct PreviewLaunchTests {
         let found = try #require(PreviewLaunch.drawing(of: preview.view, in: window))
         #expect(found.view === drawn)
         #expect(found.match == .scaled)
-        let launch = try #require(PreviewLaunch(preview))
-        #expect(launch.frame(in: window) == shrunk)
+        let now = CACurrentMediaTime()
+        let launch = try #require(PreviewLaunch(preview, now: now))
+        #expect(launch.frame(in: window, now: now) == shrunk)
     }
 
     /// The exact size first; a container wider than the lift, or a small
@@ -218,11 +225,13 @@ struct PreviewLaunchTests {
             holdLift(preview, size: Self.drawnAt.size, in: window)
         }
         let configuration = UIContextMenuConfiguration(identifier: RowMenuTarget.card(PostID("p")).identifier, previewProvider: nil)
+        // The capture answers from at least here, for a second.
+        let committed = CACurrentMediaTime()
         shelf.collectionView(shelf.mediaView, willPerformPreviewActionForMenuWith: configuration, animator: CommitAnimator(preview))
 
         #expect((shelf.previewLaunch != nil) == drawn)
         if drawn {
-            let target = try #require(shelf.previewLaunch?.dismissalTarget())
+            let target = try #require(shelf.previewLaunch?.dismissalTarget(now: committed))
             #expect(target.target.center == CGPoint(x: Self.drawnAt.midX, y: Self.drawnAt.midY))
         }
         await nextTurn()

@@ -534,7 +534,9 @@ struct SoundSheetTests {
         )
         let lift = CGRect(x: 24, y: 180, width: 345, height: 460)
         let (held, drawn) = TileHeroOriginTests.mountLift(preview, drawnAt: lift, in: window)
-        controller.previewLaunch = try #require(PreviewLaunch(preview))
+        // A minute ahead: the origin reads the clock, and a starved runner
+        // can stall past the capture's second (#1888).
+        controller.previewLaunch = try #require(PreviewLaunch(preview, now: CACurrentMediaTime() + 60))
         held.removeFromSuperview()
         #expect(origin.frame(window) == lift, "the flight did not leave from the lift")
         origin.setConcealed(true)
