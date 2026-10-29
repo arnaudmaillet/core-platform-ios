@@ -810,6 +810,9 @@ final class SelectorLiquidLens {
         // the glass and the titles are, frame by frame.
         let shown = Self.presentationConvert(lens, from: space, to: glass)
         let inGlass = shown.rect
+        #if DEBUG
+        if Self.traces { trace(lens: lens, shown: inGlass, in: space) }
+        #endif
         // The lens may stand past the capsule (that is the lift), not past
         // the grown capsule.
         let capsule = capsuleFrame().insetBy(dx: -(inGlass.width / 2 + 2), dy: -(Tuning.pastCapsule + 12))
@@ -919,6 +922,45 @@ final class SelectorLiquidLens {
         u.quadMaxY = Float(min(glass.bounds.height * scale, inGlass.maxY * scale + margin))
         glass.render(uniforms: u, overlay: overlay, scale: scale)
     }
+
+    #if DEBUG
+    /// `-lens-trace` (#1905): a line per frame drawn while the lens is held,
+    /// to read on a DEVICE what lifts it above the row under an upward pull
+    /// (the simulator's injected touches never drive UIKit's interactive
+    /// glass, so it cannot reproduce it). All in the glass's space, which is
+    /// the window's grown by `glassMargin`:
+    /// - `model`/`shown`: the lens's centre through the model and through
+    ///   the presentation tree (`shown` is what is drawn);
+    /// - `titles`: each title's shown centre, the lens's own among them;
+    /// - `lean`: every ancestor of the strip whose presentation transform is
+    ///   not the identity, with its scale and shift.
+    static let traces = ProcessInfo.processInfo.arguments.contains("-lens-trace")
+
+    private func trace(lens: CGRect, shown: CGRect, in space: UIView) {
+        let model = space.convert(lens, to: glass)
+        func f(_ value: CGFloat) -> String { String(format: "%.1f", Double(value)) }
+        var titleCentres: [String] = []
+        if let titles {
+            for title in titles.subviews where !title.isHidden {
+                let rect = Self.presentationConvert(title.bounds, from: title, to: glass).rect
+                titleCentres.append("(\(f(rect.midX)),\(f(rect.midY)))")
+            }
+        }
+        var leans: [String] = []
+        var view: UIView? = space
+        while let current = view, current !== glass.superview {
+            if let layer = current.layer.presentation(), !CATransform3DIsIdentity(layer.transform) {
+                let t = layer.transform
+                leans.append("\(type(of: current)) s=(\(f(t.m11)),\(f(t.m22))) t=(\(f(t.m41)),\(f(t.m42)))")
+            }
+            view = current.superview
+        }
+        print(String(format: "[lens] %.3f", CACurrentMediaTime())
+            + " press=\(f(press)) model=(\(f(model.midX)),\(f(model.midY))) shown=(\(f(shown.midX)),\(f(shown.midY)))"
+            + " size=\(f(shown.width))x\(f(shown.height)) titles=\(titleCentres.joined(separator: " "))"
+            + " lean=[\(leans.joined(separator: "; "))]")
+    }
+    #endif
 
     /// `rect` in `from`'s space → `to`'s, through the presentation layers
     /// when there are any (an in-flight transform on an ancestor counts).
