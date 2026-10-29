@@ -143,6 +143,9 @@ final class SnapShortcutRailView: UIScrollView {
     /// The mask doing the soft clip (`layer.mask`); repositioned every
     /// layout pass because a scroll view's layer bounds ride its offset.
     private let edgeFade = CAGradientLayer()
+    /// The wheel's glass capsule (#1872, part 2), live once its host lays it
+    /// in the action column's glass.
+    private(set) lazy var capsule = SnapWheelCapsule(rail: self)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -253,6 +256,19 @@ final class SnapShortcutRailView: UIScrollView {
     /// touch and paralyze the wheel until the finger lifts. A swipe must
     /// win from anywhere, including directly on an icon; the press it
     /// cancels was a scroll, not a tap (taps never move enough to drag).
+    /// With its capsule installed (#1872), the wheel lets every touch
+    /// through: its pan lives on the capsule, and the like under it is
+    /// touched directly — an interactive glass reacts only to touches that
+    /// reach it.
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        capsule.isInstalled ? false : super.point(inside: point, with: event)
+    }
+
+    /// Back to the resting window, animated: the chevron's tap (#1872).
+    func scrollToRest() {
+        setContentOffset(CGPoint(x: 0, y: -contentInset.top), animated: true)
+    }
+
     override func touchesShouldCancel(in view: UIView) -> Bool {
         if view is UIControl { return true }
         return super.touchesShouldCancel(in: view)
@@ -478,6 +494,7 @@ final class SnapShortcutRailView: UIScrollView {
             icon.transform = t >= 1 ? .identity : CGAffineTransform(scaleX: scale, y: scale)
         }
         updateDressing()
+        capsule.layout()
     }
 
     /// The window a shortcut can be seen in: the rail's bounds above the
@@ -667,6 +684,17 @@ final class SnapRailBoostButton: StakeMenuButton {
     var onUndo: (() -> Void)?
 
     private var hasGlass = false
+    /// The wheel's return (#1872): the heart becomes `chevron.down` while the
+    /// first next shortcut is whole and the wheel's capsule is up; a tap
+    /// then scrolls the wheel back to rest.
+    private(set) var showsReturn = false
+    var onReturn: (() -> Void)?
+
+    func setShowsReturn(_ shows: Bool) {
+        guard shows != showsReturn else { return }
+        showsReturn = shows
+        applyFace()
+    }
     /// The viewer's cumulative spend on the represented post. It turns the
     /// heart red — a like button's liked state — and nothing more (#668): the
     /// heart is never replaced by a number. The receipt it used to be ("what
@@ -690,7 +718,12 @@ final class SnapRailBoostButton: StakeMenuButton {
         super.init(frame: .zero)
         applyFace()
         addAction(
-            UIAction { [weak self] _ in self?.onBoost?(.likes(WalletStore.Policy.defaultStakeAmount)) },
+            UIAction { [weak self] _ in
+                guard let self else { return }
+                // The chevron's tap scrolls the wheel back (#1872), it stakes nothing.
+                if showsReturn { return onReturn?() ?? () }
+                onBoost?(.likes(WalletStore.Policy.defaultStakeAmount))
+            },
             for: .primaryActionTriggered
         )
         // DEFERRED and uncached: the menu is built at present time from the
@@ -795,12 +828,19 @@ final class SnapRailBoostButton: StakeMenuButton {
     /// funnel here, so a glass materialization can never resurrect the
     /// wrong face (the configuration is rebuilt whole each time).
     private func applyFace() {
-        configuration = Self.makeConfiguration(glass: hasGlass, spentTotal: spentTotal, likeCount: likeCount)
+        var face = Self.makeConfiguration(glass: hasGlass, spentTotal: spentTotal, likeCount: likeCount)
+        // The native symbol replace between the heart and the chevron.
+        face.symbolContentTransition = UISymbolContentTransition(.replace)
+        if showsReturn {
+            face.image = UIImage(systemName: "chevron.down", withConfiguration: SnapActionColumn.heartConfiguration)?
+                .withRenderingMode(.alwaysTemplate)
+        }
+        configuration = face
         applyAccessibility()
     }
 
     private func applyAccessibility() {
-        accessibilityLabel = "Like"
+        accessibilityLabel = showsReturn ? "Back to the first shortcuts" : "Like"
         accessibilityValue = Self.accessibilityValue(likeCount: likeCount, staked: spentTotal)
     }
 
@@ -838,11 +878,16 @@ extension SnapShortcutRailView: UIScrollViewDelegate {
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         setAncestorScrollingSuspended(true)
         playback.willBeginDragging()
+        // A drag takes over the return scroll, whose end will not be told.
+        capsule.endAutoScroll()
+        capsule.update()
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if !decelerate { setAncestorScrollingSuspended(false) }
         playback.didEndDragging(willDecelerate: decelerate)
+        // The wheel may have stopped: its states read on the next turn.
+        if !decelerate { DispatchQueue.main.async { [weak self] in self?.capsule.update() } }
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
@@ -852,10 +897,13 @@ extension SnapShortcutRailView: UIScrollViewDelegate {
         guard !isTracking, !isDragging else { return }
         setAncestorScrollingSuspended(false)
         playback.didEndScrolling()
+        DispatchQueue.main.async { [weak self] in self?.capsule.update() }
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         playback.didEndScrolling()
+        capsule.endAutoScroll()
+        DispatchQueue.main.async { [weak self] in self?.capsule.update() }
     }
 
     // MARK: Detent snapping (in-range only)

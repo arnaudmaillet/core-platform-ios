@@ -346,7 +346,7 @@ struct SnapShortcutRailViewTests {
         ))
         chrome.layoutIfNeeded()
 
-        let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
+        let rail = chrome.debugShortcutRail
         let subtitle = try #require(chrome.subviews.compactMap { $0 as? SnapSubtitleView }.first)
         let ticker = try #require(chrome.subviews.compactMap { $0 as? SnapCommentTickerView }.first)
 
@@ -392,13 +392,17 @@ struct SnapShortcutRailViewTests {
         #expect(abs(compose.frame.width - ticker.frame.height) < 0.01)
         #expect(compose.configuration?.cornerStyle == .capsule)
         let order = chrome.subviews
-        #expect(order.firstIndex(of: ticker)! < order.firstIndex(of: rail)!)
         // The anchor is the action column's, in its own layer ABOVE every
         // part of the chrome (#695) — inside the column's glass (#1872).
         let column = try #require(
-            sequence(first: compose as UIView, next: \.superview).first { $0 is SnapActionColumnLayer }
+            sequence(first: compose as UIView, next: \.superview).first { $0 is SnapActionColumnLayer && $0.superview === chrome }
         )
-        #expect(order.firstIndex(of: rail)! < order.firstIndex(of: column)!)
+        #expect(try #require(order.firstIndex(of: ticker)) < #require(order.firstIndex(of: column)))
+        // The wheel rides that layer, ABOVE the column's glass (#1872): its
+        // emotes pass over the capsule, which is the glass's.
+        let layers = column.subviews
+        #expect(try #require(layers.firstIndex { $0 === chrome.debugGlassColumn })
+            < #require(layers.firstIndex { rail.isDescendant(of: $0) }))
         #expect(rail.bottomReservedInset == ticker.frame.height)
 
         // The band stops md short of the rail, like the stream, and its
@@ -435,7 +439,7 @@ struct SnapShortcutRailViewTests {
                 mediaURL: mediaURL, mediaKind: .image, thumbnailURL: nil, audioText: nil
             ))
             chrome.layoutIfNeeded()
-            let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
+            let rail = chrome.debugShortcutRail
             let compose = try #require((chrome.debugBoostButton as? SnapRailBoostButton))
             // The sound's STATION: a page with no sound face stands no
             // bubble there (#1872), and the pill clears the station either way.
@@ -616,7 +620,7 @@ struct SnapShortcutRailViewTests {
 
     @Test func railTopTracksSettledMarginsButFreezesThroughFlightChurn() throws {
         let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
-        let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
+        let rail = chrome.debugShortcutRail
 
         // A settled top margin (status bar + nav bar) flows into the rail's
         // cell-relative top (plus the sub-step grid-alignment excess)…
@@ -670,7 +674,7 @@ struct SnapShortcutRailViewTests {
             audioText: nil
         ))
         chrome.layoutIfNeeded()
-        let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
+        let rail = chrome.debugShortcutRail
         #expect(rail.isHidden == false)
     }
 
@@ -693,7 +697,7 @@ struct SnapShortcutRailViewTests {
             audioText: nil
         ))
         chrome.layoutIfNeeded()
-        let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
+        let rail = chrome.debugShortcutRail
         let anchor = try #require((chrome.debugBoostButton as? SnapRailBoostButton))
 
         // ONE FADED LAYER: the chrome's own alpha carries every surface it
@@ -718,7 +722,7 @@ struct SnapShortcutRailViewTests {
     @Test func railFadesProportionallyWithPullDownProgress() throws {
         let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         chrome.layoutIfNeeded()
-        let rail = try #require(chrome.subviews.compactMap { $0 as? SnapShortcutRailView }.first)
+        let rail = chrome.debugShortcutRail
 
         chrome.setCommentsEngagedProgress(0.5)
         #expect(abs(chrome.alpha - 0.5) < 0.001)

@@ -51,7 +51,9 @@ struct SnapTapArbitrationTests {
         // author opens their card, never toggles playback.
         // …and the caption (#1720): a tap on it opens the comments.
         let chrome = SnapChromeView()
-        #expect(chrome.interactionRoots.count == 8)
+        // …and the wheel's capsule (#1872), which takes the wheel's touches.
+        #expect(chrome.interactionRoots.count == 9)
+        #expect(chrome.interactionRoots.contains(where: { $0 is SnapWheelGlassView }))
         #expect(chrome.interactionRoots.contains(where: { $0 === chrome.authorRow }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapShortcutRailView }))
         #expect(chrome.interactionRoots.contains(where: { $0 is SnapRailBoostButton }))

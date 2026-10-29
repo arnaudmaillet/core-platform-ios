@@ -29,7 +29,7 @@ struct SnapChromeCareModeTests {
     }
 
     private static func rail(_ chrome: SnapChromeView) throws -> UIView {
-        try #require(chrome.subviews.first { $0.accessibilityIdentifier == "shortcut-rail" })
+        chrome.debugShortcutRail
     }
 
     @Test func theRailShowsWithoutCareMode() throws {
