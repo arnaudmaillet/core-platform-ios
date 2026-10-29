@@ -2772,7 +2772,8 @@ final class PostDetailViewController: UIViewController {
         row.onLikeTap = { [weak self] in
             guard let self else { return }
             MemberGates.perform(.comment, from: self) { [weak self] in
-                self?.viewModel.likeComment(commentID: model.id)
+                // Turned on at the optimistic flip (#1885).
+                if self?.viewModel.likeComment(commentID: model.id) == true { Haptics.play(.toggleOn) }
             }
         }
     }

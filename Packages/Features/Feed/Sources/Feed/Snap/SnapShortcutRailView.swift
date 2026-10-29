@@ -137,6 +137,15 @@ final class SnapShortcutRailView: UIScrollView {
     /// Fresh payloads park at rest; mere size churn must NOT — geometry
     /// rebuilds preserve the user's reveal progress instead.
     private var needsRestReset = false
+    #if DEBUG
+    /// Stands in for a finger (or its glide) moving the wheel. Tests.
+    var debugIsDriven: Bool?
+    #endif
+    /// One `step` per emote crossing the detent line (#1885), under the
+    /// finger or in the glide it threw — paced, so a fast flick plays fewer
+    /// than it crosses. Silent past either end, and when the wheel moves
+    /// without the viewer: the chevron's return, a reset, a re-layout.
+    private let detents = DetentFeedback(role: .step)
     /// Ancestor scroll views suspended for the duration of a rail gesture
     /// (weakly held: a mid-gesture teardown must not retain the feed).
     private let suspendedAncestors = NSHashTable<UIScrollView>.weakObjects()
@@ -307,6 +316,7 @@ final class SnapShortcutRailView: UIScrollView {
     /// empty-hides-the-surface doctrine as the ticker and subtitle zone.
     /// Always returns the wheel to its resting window, still.
     func setEmotes(_ emotes: [Emote]) {
+        detents.reset(to: nil)
         playback.stop()
         for tile in tiles { tile.clear() }
         for icon in icons { icon.removeFromSuperview() }
@@ -910,11 +920,16 @@ extension SnapShortcutRailView: UIScrollViewDelegate {
     // old gesture's end callback could thaw (UIKit orders willBeginDragging
     // first), so the pager stays frozen across catch-and-throw scrubbing.
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        detents.prepare()
         setAncestorScrollingSuspended(true)
         playback.willBeginDragging()
         // A drag takes over the return scroll, whose end will not be told.
         capsule.endAutoScroll()
         capsule.update()
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        followDetent()
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
@@ -938,6 +953,22 @@ extension SnapShortcutRailView: UIScrollViewDelegate {
         playback.didEndScrolling()
         capsule.endAutoScroll()
         DispatchQueue.main.async { [weak self] in self?.capsule.update() }
+    }
+
+    /// Re-reads the detent the wheel stands on. Driven by the viewer while a
+    /// finger holds it or its throw glides — never the chevron's return.
+    private func followDetent() {
+        let restOffset = -contentInset.top
+        let maxOffset = max(contentSize.height - bounds.height + contentInset.bottom, restOffset)
+        let last = Int(((maxOffset - restOffset) / Self.step).rounded())
+        var driven = (isTracking || isDecelerating) && !capsule.autoScrolling
+        #if DEBUG
+        if let debugIsDriven { driven = debugIsDriven }
+        #endif
+        detents.update(
+            position: contentOffset.y, spacing: Self.step, origin: restOffset,
+            count: last + 1, isDriven: driven
+        )
     }
 
     // MARK: Detent snapping (in-range only)

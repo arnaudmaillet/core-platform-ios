@@ -1027,8 +1027,10 @@ public final class PostDetailViewModel {
     /// taken back if it does not land — final, like a post's. One in flight
     /// per comment. Re-emits so the row shows it, but Trending does not
     /// re-rank on a tap (`likedForRanking`).
-    public func likeComment(commentID: String) {
-        guard let commentLiking, !commentLikesInFlight.contains(commentID), !isUnavailable else { return }
+    /// Whether the like was taken: the point added, its call on its way.
+    @discardableResult
+    public func likeComment(commentID: String) -> Bool {
+        guard let commentLiking, !commentLikesInFlight.contains(commentID), !isUnavailable else { return false }
         let before = commentLikes[commentID] ?? CommentLikes(count: 0, mine: 0)
         commentLikes[commentID] = CommentLikes(count: before.count + 1, mine: before.mine + 1)
         commentLikesInFlight.insert(commentID)
@@ -1041,6 +1043,7 @@ public final class PostDetailViewModel {
             self.commentLikes[commentID] = CommentLikes(count: max(0, now.count - 1), mine: max(0, now.mine - 1))
             self.emitComments()
         }
+        return true
     }
 
     /// Whether the viewer has a point on the comment.

@@ -263,6 +263,21 @@ struct SnapAuthorFollowTests {
         return (feed, pill, window)
     }
 
+    /// The "+" turning on plays `toggleOn` at the optimistic flip (#1885);
+    /// a follow already under way plays nothing.
+    @Test func followingFromThePlusPlaysToggleOnOnce() async throws {
+        let graph = GatedFollowGraph()
+        let (feed, _, window) = try await Self.onScreenFeed(graph: graph, relation: .notFollowing)
+        defer { window.isHidden = true }
+        let first = HapticRecorder.recording { feed.followAuthor(ProfileID("prof-2")) }
+        #expect(first == [.toggleOn])
+        let again = HapticRecorder.recording { feed.followAuthor(ProfileID("prof-2")) }
+        #expect(again.isEmpty, "a follow under way played \(again)")
+        await Self.settle { graph.pendingFollows == 1 }
+        graph.answerFollow(accepting: true)
+        await Self.settle { feed.followStore.followsInFlight.isEmpty }
+    }
+
     /// ⚠️ A FOLLOW ON A PRIVATE ACCOUNT ENDS ON THE PENDING MARK, BY SYMBOL
     /// REPLACES ONLY (#968). The pill cannot know the account is private
     /// before the graph answers, so the "+" is replaced by the optimistic

@@ -319,11 +319,19 @@ final class SnapChromeView: UIView {
 
     #if DEBUG
     var debugAuthorLane: UIView { authorLane }
+    /// A hold on the author row, as a finger's would land.
+    func debugHoldAuthorRow() { authorRowLongPressed() }
     #endif
 
     @objc private func authorRowHeld(_ gesture: UILongPressGestureRecognizer) {
         guard gesture.state == .began else { return }
-        onAuthorLongPressed?()
+        authorRowLongPressed()
+    }
+
+    /// The row's hold opens the profile, felt as the pill's is (`PersonHold`).
+    private func authorRowLongPressed() {
+        guard let onAuthorLongPressed else { return }
+        PersonHold.recognised { onAuthorLongPressed() }
     }
 
     /// The stream stands on the author row while it shows, on the caption

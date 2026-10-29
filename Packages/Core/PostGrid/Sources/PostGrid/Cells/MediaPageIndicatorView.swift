@@ -254,13 +254,20 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
     /// The arithmetic itself, shared with the post screen's full-width bar —
     /// see `PageScrubber`, which carries the reasoning that used to live here.
     private var scrubber = PageScrubber(pointsPerPage: MediaPageIndicatorView.pointsPerPage)
+    /// One `step` per page the finger crosses (#1885), as on the post
+    /// screen's bar (`SnapMediaPageBarView`) — paced, and never for a page
+    /// the host moves to (`setCurrent`).
+    private let scrubDetent = DetentFeedback(role: .step)
 
     private func anchor(at x: CGFloat) {
         scrubber.begin(atX: x, page: currentPage)
+        scrubDetent.reset(to: currentPage)
+        scrubDetent.prepare()
     }
 
     private func requestPage(draggedTo x: CGFloat) {
         guard let page = scrubber.page(draggedTo: x, pageCount: pageCount) else { return }
+        scrubDetent.update(index: page, in: 0...(pageCount - 1), isDriven: true)
         onPageRequested?(page)
     }
 

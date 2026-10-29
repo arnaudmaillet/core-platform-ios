@@ -138,11 +138,13 @@ struct CommentLikesTests {
         #expect(await settle { shown.model("a")?.likeCount == 4 })
         likes.hold()
 
-        viewModel.likeComment(commentID: "a")
+        // Taken: the screen plays `toggleOn` on this answer (#1885).
+        #expect(viewModel.likeComment(commentID: "a"))
         #expect(shown.model("a")?.likeCount == 5)
         #expect(shown.model("a")?.isLiked == true)
-        // One in flight per comment: a second tap meanwhile asks nothing.
-        viewModel.likeComment(commentID: "a")
+        // One in flight per comment: a second tap meanwhile asks nothing,
+        // and plays nothing.
+        #expect(!viewModel.likeComment(commentID: "a"))
         likes.release()
         #expect(await settle { likes.calls.count == 1 })
         try? await Task.sleep(for: .milliseconds(50))
