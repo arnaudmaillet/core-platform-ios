@@ -133,6 +133,8 @@ final class MediaFilterRowView: UIView {
     }
 
     private func pick(_ filter: MediaFilter) {
+        // A changed choice (#1887); the one already chosen, nothing.
+        if filter != selected { Haptics.play(.tick) }
         setSelected(filter)
         onPick?(filter)
     }

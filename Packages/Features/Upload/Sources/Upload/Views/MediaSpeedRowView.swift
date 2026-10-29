@@ -62,7 +62,7 @@ final class MediaSpeedRowView: UIView {
             chip.layer.cornerRadius = Metrics.chip / 2
             chip.layer.cornerCurve = .continuous
             chip.addAction(
-                UIAction { [weak self] _ in self?.onPick?(rate) }, for: .primaryActionTriggered
+                UIAction { [weak self] _ in self?.pick(rate) }, for: .primaryActionTriggered
             )
             // Gives under the finger and ticks on a tap, as every button of
             // the editing tools does (`PressFeedback`).
@@ -82,6 +82,12 @@ final class MediaSpeedRowView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// A chip's tap: a changed rate ticks (#1887), the one playing does not.
+    private func pick(_ rate: Double) {
+        if abs(rate - showing) > 0.001 { Haptics.play(.tick) }
+        onPick?(rate)
+    }
 
     /// States which rate the piece under the needle is playing at.
     func show(rate: Double) {

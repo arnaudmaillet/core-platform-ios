@@ -457,9 +457,14 @@ struct MediaPickerTests {
 
     @Test func theCapSaysSoRatherThanSwallowingTheTap() async throws {
         let screen = try await open(Self.library(photos: MediaPickerSelection.limit + 4))
-        for index in 0..<MediaPickerSelection.limit { screen.picker.debugTapItem(at: index) }
+        // Selecting is silent, as in Photos; the refusal is a `warning` (#1887).
+        let selecting = HapticRecorder.recording {
+            for index in 0..<MediaPickerSelection.limit { screen.picker.debugTapItem(at: index) }
+        }
+        #expect(selecting.isEmpty, "selecting played \(selecting)")
 
-        screen.picker.debugTapItem(at: MediaPickerSelection.limit)
+        let refused = HapticRecorder.recording { screen.picker.debugTapItem(at: MediaPickerSelection.limit) }
+        #expect(refused == [.warning])
 
         #expect(screen.picker.debugSelection.count == MediaPickerSelection.limit)
         #expect(

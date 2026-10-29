@@ -484,11 +484,16 @@ public final class IconSelectorBar: UIView {
         if notify { onSelectNothing?() }
     }
 
+    /// One `tick` per item the dragged pill crosses (#1887) — paced.
+    private let dragDetent = DetentFeedback(role: .tick)
+
     private func tapped(_ index: Int) {
         guard index != selection else {
             onReselect?(index)
             return
         }
+        // A changed choice, felt in the component so every host gets it (#1887).
+        Haptics.play(.tick)
         let wasNeutral = isNeutral
         isNeutral = false
         UIView.animate(withDuration: Metrics.settle, delay: 0, options: [.curveEaseOut]) {
@@ -689,6 +694,8 @@ extension IconSelectorBar: UIGestureRecognizerDelegate {
     }
 
     private func beginDrag(at x: CGFloat) {
+        dragDetent.reset(to: Int(progress.rounded()))
+        dragDetent.prepare()
         lastTouchX = x
         drag = Drag(
             grip: x + scroller.contentOffset.x - lens.frame.midX,
@@ -747,6 +754,7 @@ extension IconSelectorBar: UIGestureRecognizerDelegate {
         drag = current
 
         progress = clamped
+        dragDetent.update(index: Int(clamped.rounded()), in: 0...(items.count - 1), isDriven: true)
         applyProgress()
         keepLensVisible(animated: false)
     }

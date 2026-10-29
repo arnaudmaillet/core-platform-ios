@@ -775,6 +775,36 @@ struct MediaEditorTrackToolsTests {
         #expect(screen.preview.pauses.last == false, "the landing left the clip stopped")
     }
 
+    /// A carry lifts (`grab`) and lands in a new place (`drop`); the
+    /// crossings between tick (#1887).
+    @Test func aCarryToANewPlaceGrabsThenDrops() async throws {
+        let screen = open(Self.items(1, videosAt: [0]))
+        choose(Mode.trim, on: screen)
+        try await landed(screen, beyond: 0)
+        let track = try splitInTwo(on: screen)
+        let played = HapticRecorder.recording {
+            track.debugLift(atContentX: track.debugPieceFrames[0].lowerBound + 10)
+            screen.window.layoutIfNeeded()
+            track.debugCarry(toTrackX: track.debugShotFrames[1].midX)
+            track.debugDrop()
+        }
+        #expect(played.filter { $0 != .tick } == [.grab, .drop], "\(played)")
+    }
+
+    /// Put back where it was lifted from: `grab` alone (#1887).
+    @Test func aCarryBackToItsPlaceOnlyGrabs() async throws {
+        let screen = open(Self.items(1, videosAt: [0]))
+        choose(Mode.trim, on: screen)
+        try await landed(screen, beyond: 0)
+        let track = try splitInTwo(on: screen)
+        let played = HapticRecorder.recording {
+            track.debugLift(atContentX: track.debugPieceFrames[0].lowerBound + 10)
+            screen.window.layoutIfNeeded()
+            track.debugDrop()
+        }
+        #expect(played.filter { $0 != .tick } == [.grab], "\(played)")
+    }
+
     /// ⚠️ **NOTHING LOOPS A STRETCH UNTIL A TRANSITION IS BEING CHOSEN.** Every
     /// other way in — opening, a carry, a released handle, a rate — plays the
     /// whole arrangement, and asks the landing exactly once per load.

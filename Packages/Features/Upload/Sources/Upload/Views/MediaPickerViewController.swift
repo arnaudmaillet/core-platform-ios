@@ -862,6 +862,9 @@ private extension MediaPickerViewController {
     /// The cap, said once and briefly. A selection that cannot grow is not an
     /// error the viewer made.
     func refuse() {
+        // Past the limit: `warning` as the alert appears (#1887). Selecting
+        // and deselecting stay silent, as in Photos.
+        Haptics.play(.warning)
         let alert = UIAlertController(
             title: "That's the limit",
             message: "You can post up to \(MediaPickerSelection.limit) photos and videos at a time.",

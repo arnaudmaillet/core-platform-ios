@@ -795,11 +795,41 @@ final class ShopShelfView: UIView, UIScrollViewDelegate {
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         drag = RowEdgeDragTracker(offset: scrollView.contentOffset.x)
+        detents.prepare()
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         drag?.track(scrollView.contentOffset.x)
+        followDetent()
         armQuiet()
+    }
+
+    // MARK: The steps under the finger (#1887)
+
+    /// One `step` per item the row crosses under the finger or in its glide —
+    /// the preview changing with it, like a picker. Paced; silent past the
+    /// ends and for a scroll the viewer did not make.
+    private let detents = DetentFeedback(role: .step)
+    #if DEBUG
+    /// Stands in for a finger (or its glide) moving the row. Tests.
+    var debugIsDriven: Bool?
+    #endif
+
+    /// The item whose leading edge is nearest the margin.
+    private func followDetent() {
+        guard stack.axis == .horizontal, !items.isEmpty else { return }
+        let margin = ShopStorefrontViewController.Metrics.margin
+        let offset = row.contentOffset.x
+        let leading = items.map { item in
+            stack.frame.minX + item.convert(item.bounds, to: stack).minX - margin
+        }
+        guard let nearest = leading.indices.min(by: { abs(leading[$0] - offset) < abs(leading[$1] - offset) })
+        else { return }
+        var driven = row.isTracking || row.isDecelerating
+        #if DEBUG
+        if let debugIsDriven { driven = debugIsDriven }
+        #endif
+        detents.update(index: nearest, in: 0...(items.count - 1), isDriven: driven)
     }
 
     func scrollViewWillEndDragging(
