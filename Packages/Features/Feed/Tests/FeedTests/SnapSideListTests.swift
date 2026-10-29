@@ -420,7 +420,7 @@ struct SnapSideListTests {
     /// A feed of `ids`, the side list installed, its "similar posts" `others`.
     private func openableFeed(
         _ ids: [String], others: [String], text: Set<String> = [], carousels: Set<String> = [],
-        router: (any Router)? = nil
+        router: (any Router)? = nil, comments: (any CommentsProviding)? = nil
     ) async throws -> SnapFeedViewController {
         let controller = SnapFeedViewController(
             // Its first page IS the feed: a seed alone is replaced by the
@@ -428,7 +428,7 @@ struct SnapSideListTests {
             viewModel: FeedViewModel(
                 repository: PostsProvider(entries: ids.map {
                     carousels.contains($0) ? Self.carouselEntry($0) : Self.entry($0, media: !text.contains($0))
-                }), router: router
+                }), commentsProvider: comments, router: router
             ),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             reporting: SideListReporter()
@@ -655,6 +655,62 @@ struct SnapSideListTests {
         try #require(await settle { feed.isSideListSessionActive })
         #expect(feed.activePostID == picked)
         #expect(feed.debugActivations.isEmpty, "the list re-activated: \(feed.debugActivations.map(\.rawValue))")
+    }
+
+    /// ⚠️ THE BAND KEEPS CONVEYING THROUGH THE LIST (#1798, the owner's
+    /// recording): opening and closing the side list cut the post on show's
+    /// reaction band, held it dark a beat and faded a new train in. The list
+    /// only scales the pager; nothing about the band changes, so nothing may
+    /// lay its train again.
+    @Test func openingAndClosingTheListNeverRelaysTheBand() async throws {
+        // Reactions for the band, sentences for the pill.
+        let bodies = (0..<10).map { "GG 🔥 \($0)" }
+            + (0..<3).map { "This is a longer thought number \($0) worth reading." }
+        let comments = bodies.enumerated().map { index, body in
+            CommentEntry(
+                id: "c\(index)", authorID: ProfileID("prof-1"), authorName: "Ava", authorHandle: "ava",
+                body: body, createdAt: Date(timeIntervalSince1970: 1000)
+            )
+        }
+        let feed = try await openableFeed(
+            ["p1", "p2", "p3"], others: ["m1", "m2"], comments: SideListComments(entries: comments)
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = feed
+        window.makeKeyAndVisible()
+        window.isHidden = false
+        defer { window.isHidden = true }
+        feed.beginAppearanceTransition(true, animated: false)
+        feed.endAppearanceTransition()
+        window.layoutIfNeeded()
+        // Mid-feed, as on the device: opening moves the post on show to the
+        // session's head and closing puts it back (#1580's reorder).
+        feed.settlePager(onIndex: 1)
+        try #require(await settle { feed.activePostID == PostID("p2") }, "guard: the second post on show")
+        window.layoutIfNeeded()
+        let band = try #require(feed.debugSettledSnapCell?.debugChrome.debugCommentTicker)
+        let pill = try #require(feed.debugSettledSnapCell?.debugChrome.debugSubtitleView)
+        try #require(await settle { band.debugIsConveying && pill.debugIsCycling },
+                     "guard: the band conveys and the pill cycles before the list opens")
+        let laid = band.debugTrainsLaid
+        let cycle = pill.debugGeneration
+
+        let sideList = try await open(feed)
+        window.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        window.layoutIfNeeded()
+        #expect(feed.debugSettledSnapCell?.debugChrome.debugCommentTicker === band, "guard: the post on show kept its cell")
+        #expect(band.debugIsConveying, "opening the list stopped the band")
+        #expect(band.debugTrainsLaid == laid, "opening the list laid the band's train again")
+        #expect(pill.debugIsCycling && pill.debugGeneration == cycle, "opening the list restarted the pill")
+
+        sideList.settle(open: false, animated: false)
+        window.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        window.layoutIfNeeded()
+        #expect(band.debugIsConveying, "closing the list stopped the band")
+        #expect(band.debugTrainsLaid == laid, "closing the list laid the band's train again")
+        #expect(pill.debugIsCycling && pill.debugGeneration == cycle, "closing the list restarted the pill")
     }
 
     /// ⚠️ DISMISSED, THE LIST CLOSES (#1580, the owner's recording): the
@@ -1045,4 +1101,18 @@ private final class SideListProvider: FeedProviding, @unchecked Sendable {
         FeedPage(entries: [], nextPageToken: nil, isCold: false)
     }
     func loadPost(_ id: PostID) async throws -> FeedEntry { Self.entry(id.rawValue) }
+}
+
+/// The same comments for every post: a band dense enough to convey.
+private final class SideListComments: CommentsProviding, @unchecked Sendable {
+    private let entries: [CommentEntry]
+    init(entries: [CommentEntry]) { self.entries = entries }
+
+    func loadComments(for postID: PostID) async throws -> [CommentEntry] { entries }
+
+    func addComment(
+        _ body: String, to postID: PostID, parentID: String?, commentID: String
+    ) async throws -> CommentEntry {
+        throw CommentsError.transport(message: "unused")
+    }
 }

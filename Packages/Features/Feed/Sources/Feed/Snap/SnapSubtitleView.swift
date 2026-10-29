@@ -340,6 +340,14 @@ final class SnapSubtitleView: UIView {
         countBadge.isHidden = true
     }
 
+    #if DEBUG
+    /// Bumped by every stop of the cycle: a page whose pill kept its cue
+    /// reads the same value before and after (#1798).
+    var debugGeneration: Int { generation }
+    /// Whether the pill cycles its cues now.
+    var debugIsCycling: Bool { isCycling }
+    #endif
+
     private func startIfNeeded(fadingIn: Bool) {
         guard isActive, !cues.isEmpty, !isCycling else { return }
         isCycling = true

@@ -216,6 +216,9 @@ final class SnapFeedViewController: UIViewController {
     /// The post on show and the surface its clip drew on as the items were
     /// swapped — for the page that shows it next to adopt (#1580).
     private var reorderHeld: (id: PostID, surface: VideoRenderView?)?
+    /// The cell that showed the post on show as the items were swapped: it
+    /// kept its comment surfaces running for it (#1798).
+    private weak var reorderHeldCell: SnapFeedCell?
     /// The clip time a presenting flight's picture showed, for the entry page
     /// (#625) — see `zoomTransitionWillStartMedia(at:)`. A nil post is the
     /// entry page of a feed that had no posts yet when the flight took off.
@@ -6162,12 +6165,14 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         if isReplacingItems, let snapCell = cell as? SnapFeedCell, let held = reorderHeld,
            snapCell.representedPostID == held.id {
             snapCell.resignKeepingPlayback()
+            // Its band and pill keep running through the swap (#1798).
+            reorderHeldCell = snapCell
         } else {
             (cell as? SnapCellLifecycle)?.didResignActive(releasingPlayback: true)
+            // The resign above no-ops for a cell that was displayed but never
+            // became active (a swiped-past page); its ticker must still stop.
+            (cell as? SnapFeedCell)?.setTickerStreaming(false)
         }
-        // The resign above no-ops for a cell that was displayed but never
-        // became active (a swiped-past page); its ticker must still stop.
-        (cell as? SnapFeedCell)?.setTickerStreaming(false)
         // Free the resting engagement's slot when its pre-rendered cell
         // leaves WITHOUT settling — a text page scrolled in (pre-rendered
         // on visibility) then scrolled back out never activates, so the
@@ -7702,7 +7707,16 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// arriving one takes the same player over — bound alongside, then
     /// adopted — so the clip never stops.
     private func handOverReorderedPlayback() {
-        defer { reorderHeld = nil }
+        let keptSurfaces = reorderHeldCell
+        defer {
+            reorderHeld = nil
+            reorderHeldCell = nil
+        }
+        // The cell that kept the band and the pill running for the post on
+        // show stands them down unless it shows that post still (#1798).
+        if let keptSurfaces, keptSurfaces !== settledSnapCell || activePostID != reorderHeld?.id {
+            keptSurfaces.standDownCommentSurfaces()
+        }
         guard let held = reorderHeld, activePostID == held.id, let cell = settledSnapCell else { return }
         if let old = held.surface, let surface = cell.liveVideoSurface, surface !== old,
            let videoPlayback, videoPlayback.hasPlayer(in: old) {

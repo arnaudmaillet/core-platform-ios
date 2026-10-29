@@ -409,6 +409,13 @@ final class SnapCommentTickerView: UIView {
     }
 
     #if DEBUG
+    /// How many trains this band has laid: one per start, so a second one
+    /// on a page that never left is a re-lay, the cut and the fade-in the
+    /// viewer sees (#1798).
+    private(set) var debugTrainsLaid = 0
+    /// Whether the band conveys now.
+    var debugIsConveying: Bool { mode == .conveying }
+
     /// The band's trailing end: its corner radius, and the fade mask's
     /// stops (nil without one).
     var debugTrailingEnd: (cornerRadius: CGFloat, fadeLocations: [NSNumber]?) {
@@ -505,6 +512,9 @@ final class SnapCommentTickerView: UIView {
               window != nil, !MotionPreference.reducesMotion else { return }
         mode = .conveying
         laidWidth = bounds.width
+        #if DEBUG
+        debugTrainsLaid += 1
+        #endif
         for lane in 0..<Self.laneCount {
             prefillLane(lane)
         }
