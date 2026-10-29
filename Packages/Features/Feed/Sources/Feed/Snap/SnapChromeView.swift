@@ -1410,6 +1410,9 @@ final class SnapChromeView: UIView {
     var debugSoundStationFrame: CGRect { soundStation.convert(soundStation.bounds, to: self) }
     /// The comment band, in the chrome's space.
     var debugTickerFrame: CGRect { commentTicker.frame }
+    /// The comment band and the subtitle pill themselves (#1798).
+    var debugCommentTicker: SnapCommentTickerView { commentTicker }
+    var debugSubtitleView: SnapSubtitleView { subtitleView }
     var debugCaptionFrame: CGRect { captionLabel.frame }
     var debugPageBar: SnapMediaPageBarView { mediaPageBar }
     var debugScrubPreview: SnapScrubPreviewView { scrubPreview }

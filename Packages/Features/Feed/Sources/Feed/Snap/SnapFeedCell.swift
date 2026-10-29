@@ -3155,13 +3155,26 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// items are being swapped under the post on show, and the page that
     /// shows it next adopts this very player (`SnapFeedViewController
     /// .handOverReorderedPlayback`) — stopped here, it restarted.
+    ///
+    /// ⚠️ **NOR ITS COMMENT SURFACES (#1798).** They stood down here, and the
+    /// swap usually hands the post back to THIS cell: its band stopped and
+    /// laid a new train, a cut, a dark beat and a fade-in, and its subtitle
+    /// pill moved to another cue in the same frame, at every opening and
+    /// closing of the side list (the owner's recording). They keep running;
+    /// the hand-over stands them down only when another cell shows the post
+    /// (`standDownCommentSurfaces`).
     func resignKeepingPlayback() {
         guard isActive else { return }
         isActive = false
         updatePlayheadFeed()
+        cancelPrewarming()
+    }
+
+    /// The band and the subtitle pill stop: this cell no longer shows the
+    /// post it kept them running for through a swap (#1798).
+    func standDownCommentSurfaces() {
         chrome.setTickerActive(false)
         chrome.setSubtitlesActive(false)
-        cancelPrewarming()
     }
 
     func didResignActive(releasingPlayback: Bool) {
