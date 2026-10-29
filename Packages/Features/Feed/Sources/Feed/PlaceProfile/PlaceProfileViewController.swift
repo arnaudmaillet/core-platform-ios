@@ -670,6 +670,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         showsBalance: Bool = true,
         entities: EntityStore? = nil,
+        heldMembers: [GalleryPost] = [],
         loadPosts: @escaping () async throws -> [GalleryPost],
         loadMore: ((String?) async throws -> PlacePostsPage)? = nil,
         presence: SectionPresenceStore = .shared,
@@ -677,6 +678,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     ) {
         self.presence = presence
         self.loadMore = loadMore
+        self.heldMembers = heldMembers
         self.postIDs = postIDs
         self.placeName = placeName
         self.rank = rank
@@ -1196,8 +1198,24 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     func beginLoading() {
         guard loadTask == nil else { return }
         loadViewIfNeeded()
+        // What the app already holds of every member is drawn now (#1863):
+        // the posts, Popular, Recent and the banner, before the hydration —
+        // which then lands as a revalidation (an identical corpus publishes
+        // nothing).
+        if !heldMembers.isEmpty, renderedMembers == nil {
+            isShowingHeld = true
+            render(heldMembers)
+        }
         load()
     }
+
+    /// Every member, as the app held them when the page was made (#1863);
+    /// empty unless ALL were held — a partial corpus would draw a partial
+    /// Likes total that then jumps.
+    private let heldMembers: [GalleryPost]
+    /// The page shows `heldMembers`, not yet the hydration: its later pages
+    /// wait for the real corpus, and a Likes total it cannot know is a dash.
+    private var isShowingHeld = false
 
     /// Pull-to-refresh, and the failed state's "Try Again" — the profile's
     /// rule (`ProfileViewModel.refresh`): the page REVALIDATES IN PLACE.
@@ -1235,7 +1253,12 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
             do {
                 let members = try await loadPosts()
                 guard !Task.isCancelled else { return }
+                let wasHeld = isShowingHeld
+                isShowingHeld = false
                 render(members)
+                // Identical to what was held: nothing re-rendered, but the
+                // counters and the pages it held back are due now.
+                if wasHeld, members == renderedMembers { renderCorpus(reset: false) }
             } catch {
                 guard !Task.isCancelled else { return }
                 // A revalidation that failed leaves the place it already
@@ -1338,7 +1361,10 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         // as are loaded: the pins, and the pages read so far.
         let corpus = self.corpus
         likesTotal = Self.aggregatedLikes(of: corpus)
-        headerContent.counterValues = [rank?.positionText, CountFormatter.compactString(for: likesTotal)]
+        // A held corpus with a count the app does not know says a dash rather
+        // than a total that would then jump (#1863).
+        let likesKnown = !isShowingHeld || corpus.allSatisfy { $0.reactionCount != nil }
+        headerContent.counterValues = [rank?.positionText, likesKnown ? CountFormatter.compactString(for: likesTotal) : "—"]
         applyHeaderContent()
     }
 
@@ -1346,7 +1372,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     /// new posts appended in place, a failure retried on the next approach.
     /// Internal, not private, for the tests that page a place.
     func loadMorePosts() {
-        guard let loadMore, moreLoad == nil, renderedMembers != nil else { return }
+        guard let loadMore, moreLoad == nil, renderedMembers != nil, !isShowingHeld else { return }
         let token: String?
         switch moreCursor {
         case .exhausted: return
