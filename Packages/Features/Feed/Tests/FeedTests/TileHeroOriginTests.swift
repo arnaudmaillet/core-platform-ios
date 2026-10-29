@@ -89,7 +89,11 @@ struct TileHeroOriginTests {
             post: tapped, imagePipeline: ImagePipeline(fetcher: SilentFetcher()), width: 361
         )
         let (held, drawn) = Self.mountLift(preview, drawnAt: CGRect(x: 24, y: 180, width: 345, height: 460), in: window)
-        grid.previewLaunch = try #require(PreviewLaunch(preview), "UIKit's drawing of the lift was not found")
+        // A minute ahead: the origin reads the clock, and a starved runner
+        // can stall past the capture's second (#1888).
+        grid.previewLaunch = try #require(
+            PreviewLaunch(preview, now: CACurrentMediaTime() + 60), "UIKit's drawing of the lift was not found"
+        )
         // UIKit takes the lift down before the post opens: the capture holds.
         held.removeFromSuperview()
         #expect(grid.hero(for: tapped.id, in: window)?.frame == drawn.frame, "the flight did not leave from the lift")
