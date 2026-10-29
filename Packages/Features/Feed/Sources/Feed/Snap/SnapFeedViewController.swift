@@ -5238,9 +5238,11 @@ final class SnapFeedViewController: UIViewController {
         refreshCoverSpin()
     }
 
-    /// Turns the attribution's cover while the page's media plays — a clip
-    /// running, or a song — and stops it when it does not: a tap-to-pause, a
-    /// hold, the sound sheet covering the page, the screen leaving.
+    /// Turns the records while the page's media plays — a clip running, or a
+    /// song — AND THE POST HAS A SOUND, and stops them when it does not: a
+    /// tap-to-pause, a hold, the sound sheet covering the page, the screen
+    /// leaving. The sound half is each record's own guard (#1871): a "No
+    /// audio" face never turns, so this keeps asking one question for all.
     ///
     /// ASKED rather than told: a clip pauses through half a dozen doors (the
     /// viewer's tap, a hold, a sheet, a flight, a stall), and a quarter-second

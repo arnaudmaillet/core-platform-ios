@@ -82,6 +82,39 @@ struct SnapDeviceRound2Tests {
         #expect(bubble.debugIsSpinning, "the record did not turn again")
     }
 
+    /// "No audio" never turns (#1871): a carousel's clips play muted, and a
+    /// clip advancing asked the greyed record to spin.
+    @Test func aBubbleWithNoSoundNeverTurns() {
+        guard !MotionPreference.reducesMotion else { return }
+        let bubble = SnapSoundBubbleButton()
+        bubble.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
+        bubble.setFace(SnapSoundFace(coverURL: nil, isAvailable: false, isMuted: false), pipeline: nil)
+        bubble.layoutIfNeeded()
+        bubble.setSpinning(true)
+        #expect(!bubble.debugIsSpinning, "the greyed record turned")
+        bubble.setFace(nil, pipeline: nil)
+        bubble.setSpinning(true)
+        #expect(!bubble.debugIsSpinning, "a bubble with no face turned")
+    }
+
+    /// Swiping onto a post with no sound stops a turning record at once, and
+    /// back onto one with a sound turns it again (#1871).
+    @Test func aFaceThatLosesItsSoundStopsTheRecord() {
+        guard !MotionPreference.reducesMotion else { return }
+        let bubble = SnapSoundBubbleButton()
+        bubble.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
+        let sound = SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false)
+        bubble.setFace(sound, pipeline: nil)
+        bubble.layoutIfNeeded()
+        bubble.setSpinning(true)
+        #expect(bubble.debugIsSpinning)
+        bubble.setFace(SnapSoundFace(coverURL: nil, isAvailable: false, isMuted: false), pipeline: nil)
+        #expect(!bubble.debugIsSpinning, "the record kept turning on a post with no sound")
+        bubble.setFace(sound, pipeline: nil)
+        bubble.setSpinning(true)
+        #expect(bubble.debugIsSpinning, "the record did not turn again on the post with a sound")
+    }
+
     /// ONE LINE, CENTRED: the caret's middle is the field's, within a point,
     /// and the placeholder rides the same centre.
     @Test func oneLineIsCentredInTheField() throws {

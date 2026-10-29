@@ -169,13 +169,19 @@ final class SnapSoundBubbleButton: UIButton {
         isEnabled = face?.isAvailable ?? false
         alpha = face?.isAvailable == false ? 0.45 : 1
         accessibilityValue = face.map { !$0.isAvailable ? "No audio" : ($0.isMuted ? "Muted" : "On") }
+        // A face that loses its sound always counts as a cover change, so the
+        // record stops here at once, not at the host's next look (#1871).
         guard coverChanged else { return }
         coverView.layer.removeAllAnimations()
         if let face { face.draw(into: coverSlot) } else { coverSlot.reset() }
     }
 
-    /// Turns the cover like a record while the post plays audibly.
+    /// Turns the cover like a record while the post plays — only for a sound
+    /// (#1871). A "No audio" face never turns, whatever the page's clip does:
+    /// a carousel's clips are muted (#1849), and a record that turns says a
+    /// sound is playing. The rail's rule (`CommentsInputBar.setRailSpinning`).
     func setSpinning(_ spinning: Bool) {
+        guard let face, face.isAvailable else { return record.setSpinning(false) }
         record.setSpinning(spinning)
     }
 
