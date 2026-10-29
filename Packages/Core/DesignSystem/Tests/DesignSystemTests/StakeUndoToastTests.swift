@@ -8,9 +8,10 @@ import UIKit
 @MainActor
 @Suite(.serialized)
 struct StakeUndoToastTests {
-    private final class Ledger {
+    @MainActor private final class Ledger {
         var undos = 0
-        var haptics = 0
+        let recorder = HapticRecorder()
+        var haptics: Int { recorder.played.count }
         var commits = 0
         var advance: (TimeInterval) -> Void = { _ in }
     }
@@ -25,17 +26,14 @@ struct StakeUndoToastTests {
         let (clock, advance) = ToastClock.manual()
         ledger.advance = advance
         let previousClock = ToastClock.current
-        let previousHaptic = Feedback.playHaptic
         ToastClock.current = clock
-        Feedback.playHaptic = { _ in ledger.haptics += 1 }
         defer {
             ToastClock.current = previousClock
-            Feedback.playHaptic = previousHaptic
             window.rootViewController = nil
             window.isHidden = true
             window.layoutIfNeeded()
         }
-        try body(screen, ledger)
+        try Haptics.$recorder.withValue(ledger.recorder) { try body(screen, ledger) }
     }
 
     /// Tap after tap on one post: one toast, saying the burst so far.

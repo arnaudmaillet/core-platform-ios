@@ -56,15 +56,6 @@ open class AppControl: UIButton {
         case material
     }
 
-    /// The haptic a tap plays, through the `Haptics` wrappers.
-    public enum Haptic: Equatable, Sendable {
-        case none
-        /// A toggle.
-        case selection
-        case lightImpact
-        case mediumImpact
-    }
-
     public enum Metrics {
         /// The smallest region a finger can hit, whatever is drawn (HIG).
         public static let minimumHitSide: CGFloat = 44
@@ -97,8 +88,10 @@ open class AppControl: UIButton {
 
     // MARK: - State
 
-    /// Played on a tap. Off by default.
-    public var haptic: Haptic = .none
+    /// The role a tap plays (#1881) — `tick` for a choice, `toggleOn` for a
+    /// state added, `commit` for a weighty action. Nil, the default: a
+    /// plain button plays nothing.
+    public var haptic: Haptic?
     /// `succeed` / `fail` play the success or error notification. Off by
     /// default.
     public var notifiesCompletion = false
@@ -158,9 +151,6 @@ open class AppControl: UIButton {
     private lazy var holdDelegate = HoldDelegate(control: self)
     /// The stand-in that scales out in the button's place (`disappear`).
     private weak var ghost: UIView?
-    private var impact: HapticImpact?
-    private var selection: HapticSelection?
-    private var notification: HapticNotification?
 
     // MARK: - Init
 
@@ -393,27 +383,14 @@ open class AppControl: UIButton {
     }
 
     private func prepareHaptic() {
-        switch haptic {
-        case .none: return
-        case .selection:
-            if selection == nil { selection = HapticSelection() }
-            selection?.prepare()
-        case .lightImpact, .mediumImpact:
-            if impact == nil { impact = HapticImpact(style: haptic == .lightImpact ? .light : .medium) }
-            impact?.prepare()
-        }
+        if let haptic { Haptics.prepare(haptic) }
+        // The hold's own (`held`), ahead of it.
+        if holdFreezesScrolling, menuProvider == nil { Haptics.prepare(.held) }
     }
 
     private func tapped() {
-        switch haptic {
-        case .none: break
-        case .selection:
-            if selection == nil { selection = HapticSelection() }
-            selection?.selectionChanged()
-            record(.haptic(.selection))
-        case .lightImpact, .mediumImpact:
-            if impact == nil { impact = HapticImpact(style: haptic == .lightImpact ? .light : .medium) }
-            impact?.impactOccurred()
+        if let haptic {
+            Haptics.play(haptic)
             record(.haptic(haptic))
         }
         didTap()
@@ -447,16 +424,23 @@ open class AppControl: UIButton {
         }
     }
 
+    /// The hold recognised: the held wash, and `held` — "the screen is
+    /// yours" (#1881). A button with a menu is about to get the menu's own;
+    /// two in half a second is one too many.
+    private func beginHold() {
+        isHolding = true
+        isHeldInside = true
+        applyWash()
+        if menuProvider == nil {
+            Haptics.play(.held)
+            record(.haptic(.held))
+        }
+    }
+
     @objc private func holdChanged(_ recognizer: UILongPressGestureRecognizer) {
         switch recognizer.state {
         case .began:
-            isHolding = true
-            isHeldInside = true
-            applyWash()
-            // The tick that says "held — the screen is yours". A button with
-            // a menu is about to get the menu's own; two in half a second is
-            // one too many.
-            if menuProvider == nil { HapticImpact(style: .soft).impactOccurred() }
+            beginHold()
         case .changed:
             let inside = point(inside: recognizer.location(in: self), with: nil)
             guard inside != isHeldInside else { return }
@@ -738,8 +722,7 @@ open class AppControl: UIButton {
 
     /// The success or error notification.
     func notify(_ type: UINotificationFeedbackGenerator.FeedbackType) {
-        if notification == nil { notification = HapticNotification() }
-        notification?.notificationOccurred(type)
+        Haptics.play(type == .success ? .success : type == .warning ? .warning : .error)
         record(.notification(success: type == .success))
     }
 
@@ -773,9 +756,7 @@ open class AppControl: UIButton {
     /// A hold beginning, then lifting inside or outside — the action fires
     /// on a lift inside, as a finger's would.
     public func debugHold(liftInside inside: Bool) {
-        isHolding = true
-        isHeldInside = true
-        applyWash()
+        beginHold()
         isHolding = false
         isHeldInside = false
         applyWash()

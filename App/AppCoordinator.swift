@@ -379,6 +379,17 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
                 shell.present(catalog, animated: false)
             }
         }
+        // `-haptic-catalog`: every haptic role, to feel and tune on a device
+        // (#1882) — see `HapticCatalogViewController`.
+        if ProcessInfo.processInfo.arguments.contains("-haptic-catalog") {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                guard let shell = self?.mainTabCoordinator?.rootViewController else { return }
+                let catalog = UINavigationController(rootViewController: HapticCatalogViewController())
+                catalog.modalPresentationStyle = .fullScreen
+                shell.present(catalog, animated: false)
+            }
+        }
         // `-button-gallery`: every AppButton aspect, size and state, and its
         // motions on demand (#931), over the app.
         if ProcessInfo.processInfo.arguments.contains("-button-gallery") {

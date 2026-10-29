@@ -165,13 +165,13 @@ public final class AppButtonGalleryViewController: UIViewController {
         header("Motion")
         let demo = make(.pill(.prominent), .row, .title("Follow"))
         demo.isToggle = true
-        demo.haptic = .selection
+        demo.haptic = .tick
         demo.addAction(UIAction { [weak self] _ in self?.cycleFollow() }, for: .primaryActionTriggered)
         self.demo = demo
         let counter = makeIcon(.glyph, AppIconButton.Content(symbol: AppSymbol.like.rawValue, count: 99))
         counter.selectedTint = Palette.tint
         counter.bouncesSymbolOnTap = true
-        counter.haptic = .lightImpact
+        counter.haptic = .toggleOn
         counter.holdFreezesScrolling = true
         counter.addAction(UIAction { [weak self] _ in self?.like() }, for: .primaryActionTriggered)
         self.counter = counter

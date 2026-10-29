@@ -172,19 +172,20 @@ struct ToastStackTests {
         let screen = UIViewController()
         window.rootViewController = screen
         window.isHidden = false
-        let previous = Feedback.playHaptic
-        var played: [UINotificationFeedbackGenerator.FeedbackType] = []
-        Feedback.playHaptic = { played.append($0) }
         defer {
-            Feedback.playHaptic = previous
             window.rootViewController = nil
             window.isHidden = true
             window.layoutIfNeeded()
         }
-        let loading = Feedback.loading("Posting…", id: "post-1", from: screen)
-        #expect(played.isEmpty, "loading plays no haptic")
-        let posted = Feedback.success("Posted", from: screen, id: "post-1")
-        #expect(posted === loading)
+        var loading: ToastView?
+        let whileLoading = HapticRecorder.recording {
+            loading = Feedback.loading("Posting…", id: "post-1", from: screen)
+        }
+        #expect(whileLoading.isEmpty, "loading plays no haptic")
+        let played = HapticRecorder.recording {
+            let posted = Feedback.success("Posted", from: screen, id: "post-1")
+            #expect(posted === loading)
+        }
         #expect(played == [.success])
     }
 }

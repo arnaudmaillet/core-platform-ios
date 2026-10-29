@@ -25,17 +25,15 @@ struct PinnedSectionBarBindingTests {
         window.layoutIfNeeded()
         let (clock, _) = ToastClock.manual()
         let previousClock = ToastClock.current
-        let previousHaptic = Feedback.playHaptic
         ToastClock.current = clock
-        Feedback.playHaptic = { _ in }
         defer {
             ToastClock.current = previousClock
-            Feedback.playHaptic = previousHaptic
             window.rootViewController = nil
             window.isHidden = true
             window.layoutIfNeeded()
         }
-        try body(screen)
+        // The toasts' haptics are recorded, never played.
+        _ = try HapticRecorder.recording { try body(screen) }
     }
 
     /// The pinned section follows the headers against the pin line, and
