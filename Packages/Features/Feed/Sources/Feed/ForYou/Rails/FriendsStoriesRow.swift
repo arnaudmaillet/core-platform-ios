@@ -553,15 +553,6 @@ extension FriendsStoriesRow: UICollectionViewDelegate {
         animator: UIContextMenuInteractionCommitAnimating
     ) {
         guard case .story(let id)? = RowMenuTarget(configuration.identifier) else { return }
-        animator.preferredCommitStyle = .dismiss
-        if let preview = animator.previewViewController as? ForYouPostPreviewViewController,
-           let launch = PreviewLaunch(preview) {
-            previewLaunch = launch
-            DispatchQueue.main.async { [weak self] in self?.open(id) }
-            return
-        }
-        animator.addCompletion { [weak self] in
-            DispatchQueue.main.async { self?.open(id) }
-        }
+        previewLaunch = PreviewLaunch.commit(animator, opening: nil) { [weak self] in self?.open(id) }
     }
 }

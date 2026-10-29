@@ -2106,16 +2106,8 @@ extension SoundSheetViewController: UICollectionViewDelegate {
         guard let kind = sections.first(where: { $0.ids.contains(id) || $0.all.contains(id) })?.kind else { return }
         // From the lift, not back through the tile (#1543), captured now
         // (`heroOrigin`'s frame, or its window's).
-        if let preview = animator.previewViewController as? ForYouPostPreviewViewController,
-           preview.post.id == id, let launch = PreviewLaunch(preview) {
-            previewLaunch = launch
-            animator.preferredCommitStyle = .dismiss
-            DispatchQueue.main.async { [weak self] in self?.openFromPreview(id, kind: kind) }
-            return
-        }
-        animator.preferredCommitStyle = .dismiss
-        animator.addCompletion { [weak self] in
-            DispatchQueue.main.async { self?.openFromPreview(id, kind: kind) }
+        previewLaunch = PreviewLaunch.commit(animator, opening: id) { [weak self] in
+            self?.openFromPreview(id, kind: kind)
         }
     }
 
