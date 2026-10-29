@@ -50,12 +50,12 @@ struct SettingsCatalogTests {
         }
     }
 
-    /// Follow Low Power Mode sits on its own under App and Device and says
+    /// Save Battery in Low Power Mode sits on its own under App and Device and says
     /// what Low Power Mode changes, and that the viewer's own settings come
     /// back (#1808).
-    @Test func followLowPowerModeSaysWhatItChanges() {
-        #expect(SettingsViewController.followLowPowerModeTitle == "Follow Low Power Mode")
-        let footer = SettingsViewController.followLowPowerModeFooter
+    @Test func saveBatterySaysWhatItChanges() {
+        #expect(SettingsViewController.saveBatteryTitle == "Save Battery in Low Power Mode")
+        let footer = SettingsViewController.saveBatteryFooter
         #expect(footer.contains("Low Power Mode"))
         #expect(footer.contains("emojis stay still"))
         #expect(footer.contains("Reduce Motion"))

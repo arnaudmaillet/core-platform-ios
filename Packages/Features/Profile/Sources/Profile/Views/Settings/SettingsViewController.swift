@@ -20,15 +20,16 @@ import UIKit
 final class SettingsViewController: UIViewController {
     private enum Section: Hashable {
         case scope(SettingsScope)
-        /// Follow Low Power Mode (#1808), on its own right under App and
-        /// Device: a switch that acts here, with no page behind it.
-        case followLowPowerMode
+        /// Save Battery in Low Power Mode (#1808; "Follow Low Power Mode"
+        /// until #1906), on its own right under App and Device: a switch that
+        /// acts here, with no page behind it.
+        case saveBattery
         case session
     }
 
     private enum Item: Hashable {
         case section(SettingsSection)
-        case followLowPowerMode
+        case saveBattery
         case switchProfile
         case logOut
         case signIn
@@ -80,6 +81,14 @@ final class SettingsViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Settings"
+        // ⚠️ LARGE, AND COLLAPSING INTO THE BAR ON SCROLL (#1906, the owner
+        // 2026-10-29): UIKit's own large title, as the notifications drawer
+        // wears "Notifications". It draws only because the Profile tab's stack
+        // turns `prefersLargeTitles` on (`ProfileTabCoordinator`), the one tab
+        // stack that does. Every screen this one pushes states `.never`
+        // (`SettingsLargeTitleTests` guards it): left `.automatic`, it would
+        // inherit this large title.
+        navigationItem.largeTitleDisplayMode = .always
         configureCollectionView()
         configureDataSource()
         applySnapshot()
@@ -118,13 +127,13 @@ final class SettingsViewController: UIViewController {
         }
         let lowPowerModeRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, _ in
             var content = UIListContentConfiguration.cell()
-            content.text = Self.followLowPowerModeTitle
+            content.text = Self.saveBatteryTitle
             content.image = UIImage(systemName: "battery.50")
             content.imageProperties.tintColor = .label
             cell.contentConfiguration = content
             let toggle = UISwitch()
             toggle.isOn = LowPowerMode.isFollowed
-            toggle.accessibilityLabel = Self.followLowPowerModeTitle
+            toggle.accessibilityLabel = Self.saveBatteryTitle
             toggle.addAction(UIAction { action in
                 guard let toggle = action.sender as? UISwitch else { return }
                 LowPowerMode.isFollowed = toggle.isOn
@@ -153,7 +162,7 @@ final class SettingsViewController: UIViewController {
             switch item {
             case .section(let section):
                 collectionView.dequeueConfiguredReusableCell(using: sectionRegistration, for: indexPath, item: section)
-            case .followLowPowerMode:
+            case .saveBattery:
                 collectionView.dequeueConfiguredReusableCell(using: lowPowerModeRegistration, for: indexPath, item: item)
             case .switchProfile:
                 collectionView.dequeueConfiguredReusableCell(using: switchRegistration, for: indexPath, item: item)
@@ -194,8 +203,8 @@ final class SettingsViewController: UIViewController {
             snapshot.appendSections([.scope(scope)])
             snapshot.appendItems(SettingsSection.sections(in: scope).map(Item.section), toSection: .scope(scope))
             if scope == .device {
-                snapshot.appendSections([.followLowPowerMode])
-                snapshot.appendItems([.followLowPowerMode], toSection: .followLowPowerMode)
+                snapshot.appendSections([.saveBattery])
+                snapshot.appendItems([.saveBattery], toSection: .saveBattery)
             }
         }
         snapshot.appendSections([.session])
@@ -216,13 +225,13 @@ final class SettingsViewController: UIViewController {
     }
 
     private func footerText(at index: Int) -> String? {
-        if dataSource.sectionIdentifier(for: index) == .followLowPowerMode { return Self.followLowPowerModeFooter }
+        if dataSource.sectionIdentifier(for: index) == .saveBattery { return Self.saveBatteryFooter }
         guard case .scope(let scope) = dataSource.sectionIdentifier(for: index) else { return nil }
         return Self.footerText(for: scope, activeHandle: activeHandle, isGuest: onSignIn != nil)
     }
 
-    static let followLowPowerModeTitle = "Follow Low Power Mode"
-    static let followLowPowerModeFooter = "While your iPhone is in Low Power Mode, emojis stay still, Reduce Motion is on, videos in grids and previews don't play on their own and a photograph's song is off. A post you open full screen still plays. Your own settings come back when Low Power Mode ends."
+    static let saveBatteryTitle = "Save Battery in Low Power Mode"
+    static let saveBatteryFooter = "While your iPhone is in Low Power Mode, emojis stay still, Reduce Motion is on, videos in grids and previews don't play on their own and a photograph's song is off. A post you open full screen still plays. Your own settings come back when Low Power Mode ends."
 
     /// What Settings shows. A guest has no account and no profile, so only
     /// what works without one: this device's settings, and help and the
@@ -328,7 +337,7 @@ extension SettingsViewController: UICollectionViewDelegate {
     /// Low Power Mode neither: its switch is the whole row.
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         let item = dataSource.itemIdentifier(for: indexPath)
-        return item != .switchProfile && item != .followLowPowerMode
+        return item != .switchProfile && item != .saveBattery
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -340,7 +349,7 @@ extension SettingsViewController: UICollectionViewDelegate {
             confirmLogout()
         case .signIn:
             onSignIn?()
-        case .switchProfile, .followLowPowerMode, nil:
+        case .switchProfile, .saveBattery, nil:
             // The row's own button opens the menu; selection never reaches here.
             break
         }
