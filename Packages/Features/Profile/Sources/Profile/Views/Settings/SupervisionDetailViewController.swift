@@ -386,7 +386,10 @@ extension SupervisionDetailViewController: UICollectionViewDelegate {
         collectionView.deselectItem(at: indexPath, animated: true)
         switch dataSource.itemIdentifier(for: indexPath) {
         case .profile(let profile):
-            router?.route(to: .profile(ProfileID(profile.profileID), stub: nil))
+            // What the row shows (#1860).
+            router?.route(to: .profile(ProfileID(profile.profileID), stub: ProfileIdentityStub(
+                handle: profile.handle, displayName: profile.name, avatarURL: profile.avatarURL
+            )))
         case .overviewFailed:
             loadOverview()
         case .overviewTakingLonger:

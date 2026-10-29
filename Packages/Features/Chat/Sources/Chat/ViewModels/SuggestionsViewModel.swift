@@ -272,7 +272,14 @@ public final class SuggestionsViewModel {
     // MARK: - Actions
 
     public func didSelect(_ id: ProfileID) {
-        router?.route(to: .profile(id, stub: nil))
+        router?.route(to: .profile(id, stub: stub(of: id)))
+    }
+
+    /// What the row shows (#1860): name, handle and face.
+    private func stub(of id: ProfileID) -> ProfileIdentityStub? {
+        accounts.first { $0.id == id }.map {
+            ProfileIdentityStub(handle: $0.handle, displayName: $0.displayName, avatarURL: $0.avatarURL)
+        }
     }
 
     /// The Messages-tab-native quick action: skip the profile and open a DM.
@@ -280,10 +287,7 @@ public final class SuggestionsViewModel {
     /// The row's identity rides along, so the thread opens already titled
     /// rather than resolving its header after the push has finished.
     public func message(_ id: ProfileID) {
-        let account = accounts.first { $0.id == id }
-        router?.route(to: .messageUser(id, stub: account.map {
-            ProfileIdentityStub(handle: $0.handle, displayName: $0.displayName)
-        }))
+        router?.route(to: .messageUser(id, stub: stub(of: id)))
     }
 
     /// Optimistic follow/unfollow: the row flips immediately and rolls back if

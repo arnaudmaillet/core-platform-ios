@@ -160,9 +160,9 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             switch target {
             case .existing(let conversationID):
                 router?.route(to: .conversation(conversationID))
-            case .draft(let peer, let displayName):
+            case .draft(let peer, let displayName, let handle):
                 router?.route(to: .messageUser(peer, stub: ProfileIdentityStub(
-                    handle: "", displayName: displayName
+                    handle: handle, displayName: displayName
                 )))
             }
         }

@@ -199,7 +199,8 @@ struct NotificationsViewModelTests {
         await settle()
 
         viewModel.didSelect("n1")
-        #expect(router.routes == [.profile(ProfileID("prof-42"), stub: nil)])
+        // The row's name rides along, never an invented handle (#1860).
+        #expect(router.routes == [.profile(ProfileID("prof-42"), stub: ProfileIdentityStub(handle: nil, displayName: "Ava"))])
     }
 
     @Test func showMoreRevealsTheRestOfTheNewRows() async {

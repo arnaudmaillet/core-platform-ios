@@ -18,7 +18,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     private let videoPlayback: VideoPlaybackController
     private let feedFeature: () -> any FeedFeatureBuilding
     private let openProfile: (ProfileID, ProfileIdentityStub?) -> Void
-    private let openConversation: (ProfileID) -> Void
+    private let openConversation: (ProfileID, ProfileIdentityStub?) -> Void
     /// Curating the people rail, shared with whatever else pins a profile —
     /// today the profile screen's pin button. Built here (not injected)
     /// because the state it owns is the map's own: no service vends a
@@ -78,7 +78,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         videoPlayback: VideoPlaybackController,
         feedFeature: @escaping () -> any FeedFeatureBuilding,
         openProfile: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
-        openConversation: @escaping (ProfileID) -> Void,
+        openConversation: @escaping (ProfileID, ProfileIdentityStub?) -> Void,
         seedsMockPlaces: Bool = false,
         mockAuthorAvatars: [PostID: URL] = [:],
         /// Baked animated icons, keyed by post id — text-only posts only.
