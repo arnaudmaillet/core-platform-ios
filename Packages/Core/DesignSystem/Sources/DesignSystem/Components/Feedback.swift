@@ -225,10 +225,13 @@ public enum Feedback {
     }
 
     /// A state that shows on the control itself — a bookmark filling — was
-    /// toggled: `toggleOn` and NO toast (#803). The glyph already says what
-    /// happened; a toast would repeat it over the content, but the hand still
-    /// deserves to feel that the press landed.
-    public static func toggled() {
+    /// toggled: NO toast (#803), and `toggleOn` when it turned ON only —
+    /// turning off is silent (#1881). The glyph already says what happened;
+    /// a toast would repeat it over the content, but the hand still deserves
+    /// to feel that the press landed. The caller says which: this does not
+    /// guess.
+    public static func toggled(on isOn: Bool) {
+        guard isOn else { return }
         Haptics.play(.toggleOn)
     }
 

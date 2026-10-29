@@ -783,8 +783,8 @@ final class SoundSheetViewController: UIViewController {
         MemberGates.perform(.saveSound, from: self) { [weak self] in
             guard let self else { return }
             let saved = savedSounds.toggle(sound.id)
-            // The fill says it; the hand feels it (#803).
-            Feedback.toggled()
+            // The fill says it; the hand feels it, saving only (#803, #1881).
+            Feedback.toggled(on: saved)
             refreshBookmark()
             trace("saved \(sound.id): \(saved)")
         }
@@ -1081,8 +1081,8 @@ final class SoundSheetViewController: UIViewController {
         )
         apply(postPlayback, to: header)
         header.onTogglePlayback = { [weak self] in
+            // A transport control: silent (#1881).
             guard let self, postPlayback.available else { return }
-            HapticImpact(style: .light).impactOccurred()
             onTogglePlayback?()
         }
         if let url = sound.artworkURL ?? fallbackArtworkURL {

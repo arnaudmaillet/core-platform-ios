@@ -2611,10 +2611,10 @@ final class SnapFeedViewController: UIViewController {
     private func toggleBookmark(for id: PostID) {
         guard !unavailablePostIDs.contains(id) else { return }
         MemberGates.perform(.save, from: self) { [weak self] in
-            self?.bookmarks.toggle(id.rawValue)
-            // The fill says it; the hand feels it (#803).
-            Feedback.toggled()
-            self?.refreshBookmarkGlyph(for: id)
+            guard let self else { return }
+            // The fill says it; the hand feels it, saving only (#803, #1881).
+            Feedback.toggled(on: bookmarks.toggle(id.rawValue))
+            refreshBookmarkGlyph(for: id)
         }
     }
 
@@ -3075,9 +3075,9 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Boost
 
-    /// One boost spend, wallet-first (`SnapBoostController.stake`). Haptics
-    /// here with the verdict — constructed inline, the codebase's idiom —
-    /// visuals on the cell that asked. A nil wallet (unwired host) drops the
+    /// One boost spend, wallet-first (`SnapBoostController.stake`). The
+    /// verdict's role here (`commit`, `error`), visuals on the cell that
+    /// asked. A nil wallet (unwired host) drops the
     /// tap silently; the mock store is always wired in the app itself.
     private func performBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?) {
         MemberGates.perform(.like, from: self) { [weak self, weak feedbackCell] in
@@ -3091,7 +3091,7 @@ final class SnapFeedViewController: UIViewController {
         guard !unavailablePostIDs.contains(id), let verdict = boost.stake(spend, on: id) else { return }
         switch verdict {
         case .boosted(let targetTotal, let spent):
-            HapticImpact(style: .medium).impactOccurred()
+            Haptics.play(.commit)
             // Receipt before theatre: the anchor flips to (or grows) its
             // number face, then the "+N" float rises off it.
             feedbackCell?.setBoostTotal(targetTotal, animated: true)
@@ -3142,7 +3142,8 @@ final class SnapFeedViewController: UIViewController {
             }
             #endif
         case .refused(let refusal):
-            HapticNotification().notificationOccurred(.error)
+            // The refusal is drawn on the rail: no toast to say it twice.
+            Haptics.play(.error)
             feedbackCell?.playBoostDenied()
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-wallet-log"), let wallet {
@@ -3175,9 +3176,9 @@ final class SnapFeedViewController: UIViewController {
     private var stakeToastPostID: PostID?
 
     /// Takes back the session's spend on `id` and settles its toast — the
-    /// menu's Undo (`withFeedback`: the haptic, the refund's float) and a
-    /// post that turned unavailable (#1409), quietly. Nil when there was
-    /// nothing to take back.
+    /// menu's Undo (`withFeedback`: the refund's float, and no haptic:
+    /// turning off is silent, #1881) and a post that turned unavailable
+    /// (#1409), quietly. Nil when there was nothing to take back.
     @discardableResult
     private func takeBackSessionStake(
         on id: PostID, feedbackCell: SnapFeedCell?, withFeedback: Bool
@@ -3186,7 +3187,6 @@ final class SnapFeedViewController: UIViewController {
         // Taken back: the toast closing must not send it.
         _ = stakeBursts.removeValue(forKey: id)?.next()
         if boost.toastHolds == id { boost.toastHolds = nil }
-        if withFeedback { HapticImpact(style: .light).impactOccurred() }
         feedbackCell?.setBoostTotal(refund.targetTotal, animated: withFeedback)
         if withFeedback { feedbackCell?.playBoostRefund(amount: refund.refunded) }
         refreshVisibleBoostControls()
@@ -3268,6 +3268,9 @@ final class SnapFeedViewController: UIViewController {
     func debugTapBoost(on id: PostID, spend: WalletStakeSpend) {
         snapCell(for: id)?.onRequestBoost?(id, spend)
     }
+
+    /// A hold on the sound (the bubble's, the record's, the rail's).
+    func debugToggleSound() { toggleSound() }
     #endif
 
     private func snapCell(for id: PostID) -> SnapFeedCell? {
@@ -5317,9 +5320,9 @@ final class SnapFeedViewController: UIViewController {
 
     private func toggleSound() {
         // Every mute and unmute — the cover's hold, the bubble's, the sound
-        // sheet's record — is felt (the owner, 2026-10-25): a crisp click,
-        // unlike the carousel browse's tick.
-        HapticImpact(style: .rigid).impactOccurred()
+        // sheet's record — is felt (the owner, 2026-10-25): a hold
+        // recognised (#1883).
+        Haptics.play(.held)
         soundState.toggle()
         refreshAudibleSurface()
         // The page's sound bubble and the panel's slot wear the new state.

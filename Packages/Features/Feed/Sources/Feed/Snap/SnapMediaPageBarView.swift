@@ -180,11 +180,10 @@ final class SnapMediaPageBarView: UIView {
     var onBrowse: ((Int) -> Void)?
     var onBrowseEnded: ((Int) -> Void)?
 
-    /// One tick per page crossed while browsing, behind the Haptics setting
-    /// (`Haptics.swift`). A LIGHT IMPACT (the owner on the device,
-    /// 2026-10-25): the selection tick was too faint, the medium impact too
-    /// strong.
-    private let browseTick = HapticImpact(style: .light)
+    /// One `step` per page crossed while browsing (`Haptics.swift`: a light
+    /// impact, the owner on the device, 2026-10-25), paced, and only under
+    /// the finger.
+    private let browseDetent = DetentFeedback(role: .step)
 
     /// The viewer asked to move the playhead of the clip the strip is drawing.
     /// The HOST owns playback, for the reason it owns the carousel.
@@ -1146,13 +1145,13 @@ final class SnapMediaPageBarView: UIView {
             // The segments step aside for the filmstrip (Kuaishou's browse,
             // the owner): out of sight, still holding the touch.
             setBrowseHidden(true)
-            browseTick.prepare()
+            browseDetent.reset(to: browsedPage)
+            browseDetent.prepare()
             onBrowseBegan?(browsedPage)
         }
         guard page != browsedPage else { return }
         browsedPage = page
-        browseTick.impactOccurred()
-        browseTick.prepare()
+        browseDetent.update(index: page, in: 0...(pageCount - 1), isDriven: true)
         browseTicks += 1
         onBrowse?(page)
     }

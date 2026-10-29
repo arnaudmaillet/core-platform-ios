@@ -480,9 +480,8 @@ final class PostShelfSection: UIView {
             guard let self, let cell else { return }
             MemberGates.perform(.save, from: cell) { [weak self, weak cell] in
                 guard let self else { return }
-                _ = bookmarks.toggle(post.id.rawValue)
-                // The fill says it; the hand feels it (#803).
-                Feedback.toggled()
+                // The fill says it; the hand feels it, saving only (#803, #1881).
+                Feedback.toggled(on: bookmarks.toggle(post.id.rawValue))
                 cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
             }
         }
@@ -1058,24 +1057,22 @@ final class PostShelfSection: UIView {
         return row.contentOffset.x - end
     }
 
-    private let pullHaptic = HapticSelection()
-    /// The rows past the threshold right now, each announced once.
-    private var armedRows: Set<ObjectIdentifier> = []
+    /// Each row's pull, felt once per crossing (`armed`).
+    private let mediaPull = PullThresholdFeedback()
+    private let textPull = PullThresholdFeedback()
+
+    private func pullFeedback(for row: UIScrollView) -> PullThresholdFeedback {
+        row === mediaView ? mediaPull : textPull
+    }
 
     /// The chevron card follows the pull; crossing the threshold under the
-    /// finger is felt once.
-    private func followEndPull(_ row: UICollectionView) {
+    /// finger (`isTracking`) is felt once.
+    func followEndPull(_ row: UICollectionView, isTracking: Bool) {
         guard drawsViewAll(in: row) else { return }
         let pull = max(0, Self.endPull(of: row))
         let armed = pull >= Self.endPullThreshold
         row.visibleCells.lazy.compactMap { $0 as? ShelfViewAllCell }.first?.setPull(pull, armed: armed)
-        let id = ObjectIdentifier(row)
-        if armed, row.isTracking, !armedRows.contains(id) {
-            armedRows.insert(id)
-            pullHaptic.selectionChanged()
-        } else if !armed {
-            armedRows.remove(id)
-        }
+        pullFeedback(for: row).update(pulled: pull, threshold: Self.endPullThreshold, isTracking: isTracking)
     }
 
     func owns(_ scrollView: UIScrollView) -> Bool {
@@ -1254,7 +1251,7 @@ extension PostShelfSection: UICollectionViewDelegate {
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         snapper.didScroll(scrollView)
-        if let row = scrollView as? UICollectionView, owns(row) { followEndPull(row) }
+        if let row = scrollView as? UICollectionView, owns(row) { followEndPull(row, isTracking: row.isTracking) }
         guard scrollView === mediaView else { return }
         cardLookahead.scrollViewDidScroll()
         // Only the media row plays; the text row scrolls past nothing to
@@ -1272,7 +1269,7 @@ extension PostShelfSection: UICollectionViewDelegate {
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         guard let row = scrollView as? UICollectionView, owns(row) else { return }
         snapper.willBeginDragging(row)
-        if drawsViewAll(in: row) { pullHaptic.prepare() }
+        if drawsViewAll(in: row) { pullFeedback(for: row).prepare() }
     }
 
     /// The row comes to rest on an item's edge — the text row ONE card per

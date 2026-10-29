@@ -297,7 +297,7 @@ final class PostDetailViewController: UIViewController {
         sessionBoostAmount = 0
         // Taken back: the toast closing must not send it.
         _ = stakeBurst.next()
-        HapticImpact(style: .light).impactOccurred()
+        // Turning off is silent (#1881).
         composeBar.setBoostTotal(result.targetTotal, animated: true)
         composeBar.playBoostRefund(amount: refunded)
         refreshComposeBarBoostState()
@@ -763,7 +763,7 @@ final class PostDetailViewController: UIViewController {
                 case .boosted(_, let targetTotal, let spent):
                     // `spent`, never the request — a near-cap boost is clamped.
                     self.sessionBoostAmount += spent
-                    HapticImpact(style: .medium).impactOccurred()
+                    Haptics.play(.commit)
                     // Receipt before theatre — the button flips to (or grows)
                     // its number face, then the "+N" float rises off it.
                     self.composeBar.setBoostTotal(targetTotal, animated: true)
@@ -791,7 +791,7 @@ final class PostDetailViewController: UIViewController {
                         }
                     )
                 case .insufficientBalance, .targetCapReached, .noShotsLeft, .shotDoesNotFit:
-                    HapticNotification().notificationOccurred(.error)
+                    Haptics.play(.error)
                     self.composeBar.playBoostDenied()
                 }
                 self.refreshComposeBarBoostState()

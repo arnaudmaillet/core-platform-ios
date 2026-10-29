@@ -686,9 +686,8 @@ final class TextPostComposerViewController: UIViewController {
 
     private func toggleBookmark() {
         guard let id = publishedModel?.id else { return }
-        bookmarks.toggle(id.rawValue)
-        // The fill says it; the hand feels it (#803).
-        Feedback.toggled()
+        // The fill says it; the hand feels it, saving only (#803, #1881).
+        Feedback.toggled(on: bookmarks.toggle(id.rawValue))
         refreshBookmarkGlyph()
     }
 
