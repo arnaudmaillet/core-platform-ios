@@ -204,7 +204,7 @@ final class AppPreferencesViewController: UIViewController {
         }
     }
 
-    static let lowPowerModeNote = "Low Power Mode is on, so this is set for you. Your own choice comes back when Low Power Mode ends, or when Follow Low Power Mode is off in Settings → App and Device."
+    static let lowPowerModeNote = "Low Power Mode is on, so this is set for you. Your own choice comes back when Low Power Mode ends, or when Save Battery in Low Power Mode is off in Settings → App and Device."
 
     static func appearanceTitle(_ appearance: AppearancePreference) -> String {
         appearance.title

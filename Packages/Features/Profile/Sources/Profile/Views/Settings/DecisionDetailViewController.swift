@@ -409,6 +409,9 @@ final class AppealComposerViewController: UIViewController, UITextViewDelegate {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // Presented in its own stack, which wants no large title; stated so
+        // the Settings guard reads every screen here the same (#1906).
+        navigationItem.largeTitleDisplayMode = .never
         view.backgroundColor = .systemGroupedBackground
         navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .cancel, primaryAction: UIAction { [weak self] _ in
             self?.dismiss(animated: true)

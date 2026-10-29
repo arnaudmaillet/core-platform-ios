@@ -35,8 +35,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // Before any cache fills: every release signal reaches the one
         // device cache from the first frame (#890).
         LaunchTimeline.mark("app.didFinishLaunching")
-        // Follow Low Power Mode (#1808): Power Saving's old switch forgotten
-        // once, and iOS's Low Power Mode followed live from here on.
+        // Save Battery in Low Power Mode (#1808): Power Saving's old switch
+        // forgotten once, and iOS's Low Power Mode followed live from here on.
         LowPowerMode.forgetPowerSaving()
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments

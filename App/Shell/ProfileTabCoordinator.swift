@@ -27,7 +27,16 @@ import UIKit
 @MainActor
 final class ProfileTabCoordinator: TabCoordinator {
     var childCoordinators: [Coordinator] = []
-    let navigationController: UINavigationController = ChevronBackNavigationController()
+    /// ⚠️ THE ONE TAB STACK THAT PREFERS LARGE TITLES (#1906), so Settings
+    /// can wear its large "Settings". A screen on it shows one if it states
+    /// `.always` (only Settings does) or inherits it, left `.automatic`, from
+    /// the screen it was pushed from. The own profile states `.never`, and so
+    /// does every screen Settings pushes.
+    let navigationController: UINavigationController = {
+        let navigation = ChevronBackNavigationController()
+        navigation.navigationBar.prefersLargeTitles = true
+        return navigation
+    }()
 
     private let container: AppContainer
     /// The shell's bell, minted into this header's leading edge — the ROOT's
