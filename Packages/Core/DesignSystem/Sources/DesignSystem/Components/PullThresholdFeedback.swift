@@ -8,9 +8,10 @@ import UIKit
 /// past it says nothing more. A pull that only DRIFTS over the line — a
 /// bounce-back, a refresh already running — says nothing either: the caller
 /// tells it whether a finger is on the list.
+///
+/// It plays `armed` (#1881): a drag crossing its commit point.
 @MainActor
 public final class PullThresholdFeedback {
-    private let haptic = HapticSelection()
     /// Past the threshold right now, and already said so.
     public private(set) var isArmed = false
 
@@ -18,7 +19,7 @@ public final class PullThresholdFeedback {
 
     /// Warms the generator when a pull begins, so the tick is not late.
     public func prepare() {
-        haptic.prepare()
+        Haptics.prepare(.armed)
     }
 
     /// Re-reads the pull. Returns whether this call ticked.
@@ -30,7 +31,7 @@ public final class PullThresholdFeedback {
         }
         guard !isArmed, isTracking else { return false }
         isArmed = true
-        haptic.selectionChanged()
+        Haptics.play(.armed)
         return true
     }
 }

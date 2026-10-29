@@ -13,8 +13,9 @@ import UIKit
 ///   different glyph the eye does not read. `failure` tints its glyph red.
 /// - **No haptic.** A toast is for results that are off-screen or easy to
 ///   miss, which is exactly when the hand should feel the answer too. Each
-///   kind pairs its notification haptic, through `HapticNotification`, so the
-///   Haptics switch (#470) is honoured.
+///   kind pairs its outcome role (`Haptic.success`, `.warning`, `.error`,
+///   #1881), played through `Haptics`, so the Haptics switch (#470) is
+///   honoured.
 ///
 /// Wording (the toast's own rule): short, past tense for a result, no
 /// trailing period — "Copied", "Report sent", "Couldn't follow @ava".
@@ -64,8 +65,8 @@ public enum Feedback {
             }
         }
 
-        /// The notification haptic the toast arrives with, if any.
-        public var haptic: UINotificationFeedbackGenerator.FeedbackType? {
+        /// The outcome role the toast arrives with, if any (#1881).
+        public var haptic: Haptic? {
             switch self {
             case .success: .success
             case .failure: .error
@@ -224,30 +225,12 @@ public enum Feedback {
     }
 
     /// A state that shows on the control itself — a bookmark filling — was
-    /// toggled: a light tap and NO toast (#803). The glyph already says what
+    /// toggled: `toggleOn` and NO toast (#803). The glyph already says what
     /// happened; a toast would repeat it over the content, but the hand still
     /// deserves to feel that the press landed.
     public static func toggled() {
-        playToggleHaptic()
+        Haptics.play(.toggleOn)
     }
-
-    /// Plays the toggle's light impact. Swappable for tests, like
-    /// `playHaptic`.
-    static var playToggleHaptic: () -> Void = {
-        toggleImpact.impactOccurred()
-    }
-
-    private static let toggleImpact = HapticImpact(style: .light)
-
-    /// Plays a kind's haptic. Swappable so a test can see which one played
-    /// without a device; always restored by the test that swaps it.
-    static var playHaptic: (UINotificationFeedbackGenerator.FeedbackType) -> Void = { type in
-        notifier.notificationOccurred(type)
-    }
-
-    /// One generator for the app's lifetime: built once, so it is not cold
-    /// every time (see `HapticNotification`).
-    private static let notifier = HapticNotification()
 
     private static func show(
         _ kind: Kind,
@@ -275,7 +258,7 @@ public enum Feedback {
             from: host,
             revealing: revealing
         ) {
-            if playsHaptic, let haptic = kind.haptic { playHaptic(haptic) }
+            if playsHaptic, let haptic = kind.haptic { Haptics.play(haptic) }
             return toast
         }
         let floor = host === source && floor?.window != nil ? floor : nil
@@ -299,7 +282,7 @@ public enum Feedback {
         }
         // Over the content, the control changes as its toast appears.
         revealing?()
-        if playsHaptic, let haptic = kind.haptic { playHaptic(haptic) }
+        if playsHaptic, let haptic = kind.haptic { Haptics.play(haptic) }
         return toast
     }
 

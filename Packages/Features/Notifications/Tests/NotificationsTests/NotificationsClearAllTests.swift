@@ -188,16 +188,14 @@ struct NotificationsClearItemTests {
         window.layoutIfNeeded()
         let (clock, _) = ToastClock.manual()
         let previousClock = ToastClock.current
-        let previousHaptic = Feedback.playHaptic
         ToastClock.current = clock
-        Feedback.playHaptic = { _ in }
         defer {
             ToastClock.current = previousClock
-            Feedback.playHaptic = previousHaptic
             window.rootViewController = nil
             window.isHidden = true
         }
-        try await body(controller, viewModel)
+        // The toasts' haptics are recorded, never played.
+        try await Haptics.$recorder.withValue(HapticRecorder()) { try await body(controller, viewModel) }
     }
 
     private func settle(looks: Int = 2_000, until condition: () -> Bool) async {

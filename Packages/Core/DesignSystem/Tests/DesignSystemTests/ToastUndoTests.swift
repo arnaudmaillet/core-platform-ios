@@ -181,16 +181,17 @@ struct ToastUndoTests {
         let screen = UIViewController()
         window.rootViewController = screen
         window.isHidden = false
-        let previous = Feedback.playHaptic
-        Feedback.playHaptic = { _ in }
         defer {
-            Feedback.playHaptic = previous
             window.rootViewController = nil
             window.isHidden = true
             window.layoutIfNeeded()
         }
         var undone = false
-        let toast = Feedback.undoable("Unfollowed @ava", from: screen, commit: {}, undo: { undone = true })
+        var made: ToastView?
+        _ = HapticRecorder.recording {
+            made = Feedback.undoable("Unfollowed @ava", from: screen, commit: {}, undo: { undone = true })
+        }
+        guard let toast = made else { return }
         toast.undoButton?.sendActions(for: .primaryActionTriggered)
         #expect(undone)
     }

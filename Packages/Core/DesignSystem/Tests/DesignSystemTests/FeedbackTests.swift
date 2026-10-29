@@ -25,13 +25,8 @@ struct FeedbackTests {
 
     /// Records the haptics played instead of playing them; synchronous, and
     /// restored before the test returns (never held across an `await`).
-    private func recordingHaptics(_ body: () throws -> Void) rethrows -> [UINotificationFeedbackGenerator.FeedbackType] {
-        let previous = Feedback.playHaptic
-        var played: [UINotificationFeedbackGenerator.FeedbackType] = []
-        Feedback.playHaptic = { played.append($0) }
-        defer { Feedback.playHaptic = previous }
-        try body()
-        return played
+    private func recordingHaptics(_ body: () throws -> Void) rethrows -> [Haptic] {
+        try HapticRecorder.recording(body)
     }
 
     /// A screen in a shell: the source a call site would pass.
@@ -204,18 +199,32 @@ struct FeedbackTests {
         }
     }
 
+    /// An action that played its own haptic asks its toast for none; with no
+    /// such ask, the toast plays its outcome role once (#1882).
+    @Test func playsHapticFalsePlaysNoneAndTheDefaultPlaysOnce() {
+        do {
+            let (root, screen) = shell()
+            hosting(root) {
+                let silent = recordingHaptics {
+                    Feedback.undoable("Staked", from: screen, playsHaptic: false, commit: {}, undo: {})
+                }
+                #expect(silent.isEmpty, "a toast doubled its action's own haptic: \(silent)")
+            }
+        }
+        let (root, screen) = shell()
+        hosting(root) {
+            let played = recordingHaptics { Feedback.undoable("Staked", from: screen, commit: {}, undo: {}) }
+            #expect(played == [.success])
+        }
+    }
+
     /// A toggle that shows on its control (a bookmark) plays the light tap
     /// and draws nothing (#803).
     @Test func aToggledStatePlaysALightTapAndNoToast() {
         let (root, screen) = shell()
         hosting(root) {
-            let previous = Feedback.playToggleHaptic
-            var taps = 0
-            Feedback.playToggleHaptic = { taps += 1 }
-            defer { Feedback.playToggleHaptic = previous }
-            let notifications = recordingHaptics { Feedback.toggled() }
-            #expect(taps == 1)
-            #expect(notifications.isEmpty, "a toggle played a notification haptic")
+            let played = recordingHaptics { Feedback.toggled() }
+            #expect(played == [.toggleOn], "a toggle played \(played)")
             #expect(!screen.view.subviews.contains { $0 is ToastView })
         }
     }

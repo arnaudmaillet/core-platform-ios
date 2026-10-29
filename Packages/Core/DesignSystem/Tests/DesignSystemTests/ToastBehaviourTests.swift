@@ -288,17 +288,15 @@ struct ToastBehaviourTests {
         let screen = UIViewController()
         window.rootViewController = screen
         window.isHidden = false
-        let previous = Feedback.playHaptic
-        var played: [UINotificationFeedbackGenerator.FeedbackType] = []
-        Feedback.playHaptic = { played.append($0) }
         defer {
-            Feedback.playHaptic = previous
             window.rootViewController = nil
             window.isHidden = true
             window.layoutIfNeeded()
         }
-        let shown = Feedback.warning("Saved without its sound", from: screen)
-        #expect(shown.style == .warning)
+        let played = HapticRecorder.recording {
+            let shown = Feedback.warning("Saved without its sound", from: screen)
+            #expect(shown.style == .warning)
+        }
         #expect(played == [.warning])
     }
 }

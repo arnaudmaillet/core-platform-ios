@@ -27,17 +27,14 @@ struct ToastOverlayTests {
         window.layoutIfNeeded()
         let overlay = ToastOverlay(window: ToastOverlayWindow(frame: bounds), appWindow: window)
         let previousMake = ToastOverlay.makeForTests
-        let previousHaptic = Feedback.playHaptic
         // The overlay's own suite: a screen with a bar would take its toast
         // into the bar (#1058, `NavigationBarToastsTests`).
         let previousBar = NavigationBarToasts.isEnabled
         NavigationBarToasts.isEnabled = false
         ToastOverlay.makeForTests = { _ in overlay }
-        Feedback.playHaptic = { _ in }
         defer {
             NavigationBarToasts.isEnabled = previousBar
             ToastOverlay.makeForTests = previousMake
-            Feedback.playHaptic = previousHaptic
             overlay.toasts.forEach { $0.dismiss(animated: false) }
             overlay.window.isHidden = true
             overlay.window.layoutIfNeeded()
@@ -45,7 +42,8 @@ struct ToastOverlayTests {
             window.isHidden = true
             window.layoutIfNeeded()
         }
-        try body(window, overlay)
+        // The toasts' haptics are recorded, never played.
+        _ = try HapticRecorder.recording { try body(window, overlay) }
     }
 
     // MARK: - The band

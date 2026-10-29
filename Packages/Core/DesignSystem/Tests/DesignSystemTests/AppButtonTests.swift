@@ -108,7 +108,7 @@ struct AppButtonTests {
 
     @Test func disabledIsGreyedInertAndSilent() {
         let button = follow()
-        button.haptic = .selection
+        button.haptic = .tick
         var tapped = 0
         button.addAction(UIAction { _ in tapped += 1 }, for: .primaryActionTriggered)
         button.isEnabled = false
@@ -117,7 +117,7 @@ struct AppButtonTests {
         #expect(!button.acceptsTaps)
         button.sendActions(for: .primaryActionTriggered)
         #expect(tapped == 0)
-        #expect(!button.events.contains(.haptic(.selection)), "a disabled button plays nothing")
+        #expect(!button.events.contains(.haptic(.tick)), "a disabled button plays nothing")
         #expect(button.accessibilityTraits.contains(.notEnabled), "VoiceOver reads it as dimmed")
         // A touch inside is still the button's, so it never reaches the row.
         let (window, host) = hosted(button)
@@ -445,8 +445,8 @@ struct AppButtonTests {
         #expect(tap, "a tap with a sound asked for did not tick")
     }
 
-    @Test(arguments: [AppButton.Haptic.selection, .lightImpact, .mediumImpact])
-    func theHapticPlaysOnATap(_ haptic: AppButton.Haptic) {
+    @Test(arguments: [Haptic.tick, .toggleOn, .commit])
+    func theHapticPlaysOnATap(_ haptic: Haptic) {
         let button = follow()
         button.haptic = haptic
         button.debugTap()

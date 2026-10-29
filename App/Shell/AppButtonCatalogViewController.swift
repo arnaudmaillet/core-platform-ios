@@ -318,7 +318,7 @@ final class AppButtonCatalogViewController: UIViewController {
         let like = track(AppIconButton(style: .glyph, content: AppIconButton.Content(symbol: LikesSymbol.outlineGlyph, count: likeCount)))
         like.selectedTint = LikesSymbol.tint
         like.bouncesSymbolOnTap = true
-        like.haptic = .lightImpact
+        like.haptic = .toggleOn
         like.addAction(UIAction { [weak like] _ in
             guard let like else { return }
             let liked = !like.isSelected
