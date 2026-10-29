@@ -690,6 +690,21 @@ final class AVCaptureEngine: NSObject, @unchecked Sendable {
             audioInput = input
         }
         session.commitConfiguration()
+        allowHapticsWhileRecording()
+    }
+
+    /// ⚠️ **iOS MUTES HAPTICS WHILE THE MICROPHONE RECORDS** (#1887 §6, felt
+    /// on the owner's phone 2026-10-29: the lock's `armed` never came
+    /// through), unless the app's audio session allows them. The capture
+    /// session configures that audio session itself when the microphone
+    /// joins, so this is asked AFTER it, for each clip, rather than once: a
+    /// player setting its category in between must not undo it. The cost the
+    /// default avoids — the actuator's faint click heard by the microphone —
+    /// is one haptic at the lock, and the owner chose it. On `queue`.
+    private func allowHapticsWhileRecording() {
+        let audio = AVAudioSession.sharedInstance()
+        guard !audio.allowHapticsAndSystemSoundsDuringRecording else { return }
+        try? audio.setAllowHapticsAndSystemSoundsDuringRecording(true)
     }
 
     /// On `queue`.
