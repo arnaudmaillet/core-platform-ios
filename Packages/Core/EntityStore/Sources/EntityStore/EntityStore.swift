@@ -131,7 +131,9 @@ public final class EntityStore: Sendable {
                 if changed { changedPosts.insert(entry.post.id) }
                 if writeProfile(entry.author.id, tier: tier, { current in
                     var next = current ?? ProfileEntity(id: entry.author.id)
-                    if freshness == .fresh || next.summary == nil { next.summary = entry.author }
+                    if freshness == .fresh || next.summary == nil {
+                        next.summary = Self.merge(entry.author, over: next.summary, .fresh)
+                    }
                     return next
                 }) {
                     changedProfiles.insert(entry.author.id)
@@ -247,13 +249,24 @@ public final class EntityStore: Sendable {
     /// `summary` over what the store holds: all of it when fresh; field by
     /// field, only where the store knows nothing, when a copy.
     static func merge(_ summary: AuthorSummary, over current: AuthorSummary?, _ freshness: CountFreshness) -> AuthorSummary {
-        guard freshness == .ifUnknown, let current else { return summary }
+        guard let current else { return summary }
+        guard freshness == .ifUnknown else {
+            // ⚠️ A fresh write that does not know the banner keeps what is
+            // known (#1859): a feed page's author never says, and would wipe
+            // what the person's profile taught.
+            guard summary.hasBanner == nil, let known = current.hasBanner else { return summary }
+            return AuthorSummary(
+                id: summary.id, handle: summary.handle, displayName: summary.displayName,
+                avatarURL: summary.avatarURL, avatarFrameID: summary.avatarFrameID, hasBanner: known
+            )
+        }
         return AuthorSummary(
             id: current.id,
             handle: current.handle.isEmpty ? summary.handle : current.handle,
             displayName: current.displayName.isEmpty ? summary.displayName : current.displayName,
             avatarURL: current.avatarURL ?? summary.avatarURL,
-            avatarFrameID: current.avatarFrameID ?? summary.avatarFrameID
+            avatarFrameID: current.avatarFrameID ?? summary.avatarFrameID,
+            hasBanner: current.hasBanner ?? summary.hasBanner
         )
     }
 
@@ -284,7 +297,7 @@ public final class EntityStore: Sendable {
             isSelf: (stub?.isSelf ?? false) || relation == .viewer,
             avatarURL: stub?.avatarURL ?? summary?.avatarURL,
             avatarFrameID: stub?.avatarFrameID ?? summary?.avatarFrameID,
-            hasBanner: stub?.hasBanner
+            hasBanner: stub?.hasBanner ?? summary?.hasBanner
         )
     }
 

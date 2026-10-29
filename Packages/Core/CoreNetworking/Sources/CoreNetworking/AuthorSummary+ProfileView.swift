@@ -12,7 +12,9 @@ public extension AuthorSummary {
             handle: view.handle,
             displayName: view.displayName,
             avatarURL: view.avatarURL.isEmpty ? nil : URL(string: view.avatarURL),
-            avatarFrameID: view.avatarFrameID.isEmpty ? nil : view.avatarFrameID
+            avatarFrameID: view.avatarFrameID.isEmpty ? nil : view.avatarFrameID,
+            // `banner_url`, or a banner media (#944): either is a banner.
+            hasBanner: !view.bannerURL.isEmpty || !view.banner.renditions.isEmpty
         )
     }
 }

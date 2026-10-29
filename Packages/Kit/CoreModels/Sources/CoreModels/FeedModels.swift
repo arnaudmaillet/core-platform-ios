@@ -75,13 +75,21 @@ public struct AuthorSummary: Sendable, Equatable, Codable {
     /// catalogue item id, nil for none. Optional, so a snapshot stored
     /// before it decodes with none.
     public let avatarFrameID: String?
+    /// Whether the person has a banner (#1859), when the view that showed them
+    /// said: nil unknown. Optional, so a snapshot stored before it decodes
+    /// as unknown. It only shapes a profile's skeleton.
+    public let hasBanner: Bool?
 
-    public init(id: ProfileID, handle: String, displayName: String, avatarURL: URL?, avatarFrameID: String? = nil) {
+    public init(
+        id: ProfileID, handle: String, displayName: String, avatarURL: URL?, avatarFrameID: String? = nil,
+        hasBanner: Bool? = nil
+    ) {
         self.id = id
         self.handle = handle
         self.displayName = displayName
         self.avatarURL = avatarURL
         self.avatarFrameID = avatarFrameID
+        self.hasBanner = hasBanner
     }
 }
 

@@ -13,6 +13,9 @@ import ShareSheet
 public final class ProfileViewModel {
     public nonisolated enum Phase: Equatable, Sendable {
         case loading
+        /// Not loaded yet, but the person is known from where they were
+        /// opened (#1859): their identity is drawn, their counters wait.
+        case seeded(ProfileSeedModel)
         case content(ProfileDisplayModel)
         case failed(message: String)
         /// The handle or link named no one (#800). An answer, not a failure:
@@ -669,9 +672,16 @@ public final class ProfileViewModel {
         if seedFromCache() {
             revalidateRelationshipOnly()
         } else {
+            // Nothing cached: what the origin knew of the person, at once.
+            if profile == nil, let identity { phase = .seeded(ProfileSeedModel(identity)) }
             reload()
         }
     }
+
+    /// What the screen this profile was opened from knew of the person
+    /// (#1859): the route's stub, resolved against the app's store. Nil for
+    /// one's own profile and a lookup, which know nothing yet.
+    public var identity: ProfileIdentityStub?
 
     /// A screen opened again inside its freshness window (#893): the header
     /// and the grid are the ones fetched moments ago, so neither is asked

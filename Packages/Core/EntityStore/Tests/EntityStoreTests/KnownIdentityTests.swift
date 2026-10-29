@@ -88,4 +88,19 @@ struct KnownIdentityTests {
         #expect(store.profile(Self.id)?.summary?.handle == "ava.m")
         #expect(store.profile(Self.id)?.summary?.avatarURL == nil, "a fresh profile with no picture keeps one")
     }
+
+    /// The banner a profile taught (#1859) reaches the next opening, and a
+    /// feed page's author — which never says — does not erase it.
+    @Test func theBannerAProfileTaughtIsKept() {
+        let store = EntityStore()
+        store.loaded(AuthorSummary(id: Self.id, handle: "ava", displayName: "Ava", avatarURL: nil, hasBanner: true))
+        #expect(store.knownIdentity(of: Self.id, stub: nil)?.hasBanner == true)
+        let post = Post(id: PostID("p1"), authorID: Self.id, caption: "", attachments: [], publishedAt: Date())
+        store.upsert([FeedEntry(post: post, author: Self.full())])
+        #expect(store.knownIdentity(of: Self.id, stub: nil)?.hasBanner == true, "a feed page erased the banner hint")
+        #expect(store.knownIdentity(of: Self.id, stub: nil)?.avatarFrameID == "frame.gold", "the fresh author not applied")
+        // The origin's own answer wins.
+        let origin = ProfileIdentityStub(handle: "ava", displayName: "Ava", hasBanner: false)
+        #expect(store.knownIdentity(of: Self.id, stub: origin)?.hasBanner == false)
+    }
 }

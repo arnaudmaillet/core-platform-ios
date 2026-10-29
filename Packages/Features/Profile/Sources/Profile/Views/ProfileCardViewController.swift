@@ -331,7 +331,7 @@ final class ProfileCardViewController: UIViewController {
         case .notFound(let message, let detail):
             statusView.configure(symbolName: "person.crop.circle.badge.questionmark", title: message, subtitle: detail)
             statusView.isHidden = false
-        case .loading, .content:
+        case .loading, .seeded, .content:
             statusView.isHidden = true
         }
     }

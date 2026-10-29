@@ -534,6 +534,16 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// (#896): a like in the feed shows on the profile's cards. Nil: the
     /// cards stake from `wallet` and keep the counts they loaded.
     public var makeCardStaking: (@MainActor () -> PostCardStaking?)?
+    /// What the app knows of a person about to be opened (#1859): the route's
+    /// stub, completed from the app's store (`EntityStore.knownIdentity`).
+    /// Nil: the stub alone.
+    public var knownIdentity: (@MainActor (ProfileID, ProfileIdentityStub?) -> ProfileIdentityStub?)?
+
+    /// The identity a routed profile opens with: the stub, completed.
+    private func identity(of source: ProfileViewModel.Source, stub: ProfileIdentityStub?) -> ProfileIdentityStub? {
+        guard case .profile(let id) = source, let knownIdentity else { return stub }
+        return knownIdentity(id, stub)
+    }
     /// The app's one follow-change channel: the header's Follow button and
     /// the followers lists keep agreeing with a follow made anywhere else.
     /// Nil leaves each screen with the answer it loaded.
@@ -608,28 +618,31 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         // Idempotent: the cache hears the follow channel from the first
         // routed profile on (the channel is set after this builder is made).
         cache.observe(followEvents)
+        let known = identity(of: source, stub: identityStub)
+        let viewModel = ProfileViewModel(
+            repository: repository,
+            mapPinning: mapPinning,
+            reporting: reporting,
+            gallery: gallery,
+            galleryPreferences: galleryPreferences,
+            source: source,
+            router: router,
+            cache: cache,
+            followEvents: followEvents,
+            lookup: lookup,
+            // A routed profile can be the viewer's own (a link to it).
+            postDeleted: onPostDeleted
+        )
+        viewModel.identity = known
         let controller = ProfileViewController(
-            viewModel: ProfileViewModel(
-                repository: repository,
-                mapPinning: mapPinning,
-                reporting: reporting,
-                gallery: gallery,
-                galleryPreferences: galleryPreferences,
-                source: source,
-                router: router,
-                cache: cache,
-                followEvents: followEvents,
-                lookup: lookup,
-                // A routed profile can be the viewer's own (a link to it).
-                postDeleted: onPostDeleted
-            ),
+            viewModel: viewModel,
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
             makeGridPage: gridPageFactory,
             shareTargeting: shareTargeting,
             onLogout: nil,
             makeRelationshipsViewController: makeRelationshipsFactory(),
-            identityStub: identityStub
+            identityStub: known
         )
         controller.feedHero = openFeedHero
         controller.makePersonBarItem = makePersonBarItem
@@ -644,24 +657,27 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         push: @escaping (UIViewController) -> Void
     ) -> UIViewController {
         cache.observe(followEvents)
+        let known = identity(of: .profile(profileID), stub: identityStub)
+        let viewModel = ProfileViewModel(
+            repository: repository,
+            mapPinning: mapPinning,
+            reporting: reporting,
+            gallery: gallery,
+            galleryPreferences: galleryPreferences,
+            source: .profile(profileID),
+            router: router,
+            cache: cache,
+            followEvents: followEvents,
+            lookup: nil,
+            postDeleted: onPostDeleted
+        )
+        viewModel.identity = known
         let card = ProfileCardViewController(
-            viewModel: ProfileViewModel(
-                repository: repository,
-                mapPinning: mapPinning,
-                reporting: reporting,
-                gallery: gallery,
-                galleryPreferences: galleryPreferences,
-                source: .profile(profileID),
-                router: router,
-                cache: cache,
-                followEvents: followEvents,
-                lookup: nil,
-                postDeleted: onPostDeleted
-            ),
+            viewModel: viewModel,
             imagePipeline: imagePipeline,
             shareTargeting: shareTargeting,
             makeRelationshipsViewController: makeRelationshipsFactory(),
-            identityStub: identityStub,
+            identityStub: known,
             actions: .init(openProfile: openProfile, push: push),
             videoPlayback: videoPlayback
         )

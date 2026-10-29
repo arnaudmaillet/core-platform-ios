@@ -1513,6 +1513,10 @@ final class AppContainer {
             WalletHistoryViewController(wallet: self.walletStore, deviceCache: self.walletHistoryCache)
         }
         // …and draw their posts' live counts (#896).
+        // A person opens with what the app already knows of them (#1859).
+        builder.knownIdentity = { [unowned self] id, stub in
+            self.entityStore.knownIdentity(of: id, stub: stub)
+        }
         builder.makeCardStaking = { [unowned self] in
             PostCardStaking(wallet: self.walletStore, entities: self.entityStore)
         }

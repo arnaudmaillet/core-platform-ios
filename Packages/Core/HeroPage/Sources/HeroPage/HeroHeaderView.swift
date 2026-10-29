@@ -1124,6 +1124,8 @@ open class HeroHeaderView: UIView {
     // MARK: - Redaction
 
     private var isRedacted = false
+    /// The counters alone are bones (`setCountersRedacted`, #1859).
+    private var areCountersRedacted = false
     private var redactionBones: [SkeletonBoneView] = []
 
     /// Structural skeleton state: the redacted header IS the real header. The
@@ -1136,6 +1138,21 @@ open class HeroHeaderView: UIView {
     /// stay real. Reveal (`redacted: false`, called after `configure(with:)`
     /// has swapped real text in under the invisible labels) trades only
     /// alphas, so hydration cannot shift a single pixel of structure.
+    /// The counters alone as bones, the rest of the header real (#1859): a
+    /// person opened from a surface that showed them wears their name, handle
+    /// and avatar at once, and only their counts — which every person has —
+    /// wait. Revealed through the kit's skeleton exit, as `setRedacted`.
+    public func setCountersRedacted(_ redacted: Bool, animated: Bool = false) {
+        guard redacted != areCountersRedacted, !isRedacted else { return }
+        areCountersRedacted = redacted
+        let apply = { for stat in self.counters { stat.setRedacted(redacted) } }
+        guard animated, !redacted else { return apply() }
+        UIView.revealRedacted { apply() }
+    }
+
+    /// Whether the counters are bones — tests.
+    public var debugAreCountersRedacted: Bool { areCountersRedacted }
+
     public func setRedacted(_ redacted: Bool, animated: Bool = false) {
         guard redacted != isRedacted else { return }
         isRedacted = redacted
@@ -1175,9 +1192,11 @@ open class HeroHeaderView: UIView {
             for stat in counters {
                 stat.setRedacted(true)
             }
+            areCountersRedacted = true
             bannerView.setRedacted(true)
             return
         }
+        areCountersRedacted = false
 
         // Alpha-only choreography: `configure(with:)` has already committed
         // the real content (and any structural truth like a hidden website

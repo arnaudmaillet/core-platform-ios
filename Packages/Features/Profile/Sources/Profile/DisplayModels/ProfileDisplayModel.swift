@@ -107,3 +107,36 @@ public struct ProfileDisplayModel: Equatable, Sendable {
         PostGridCount.abbreviate(value)
     }
 }
+
+/// What a profile shows before it loads (#1859): the identity the origin
+/// knew — its name, handle, avatar and frame — drawn for real, the counters
+/// as bones, and nothing reserved that may not exist.
+public struct ProfileSeedModel: Equatable, Sendable {
+    public let displayName: String
+    /// "@handle"; nil while the origin knew only the name.
+    public let handle: String?
+    public let avatarURL: URL?
+    public let avatarMonogram: String
+    public let avatarFrameID: String?
+    /// Whether the header reserves a banner (with its bone) from the start.
+    public let reservesBanner: Bool
+
+    public init(_ stub: ProfileIdentityStub) {
+        displayName = stub.displayName
+        handle = stub.handle.map { "@" + $0 }
+        avatarURL = stub.avatarURL
+        avatarMonogram = MonogramAvatarView.monogram(name: stub.displayName, handle: stub.handle ?? "")
+        avatarFrameID = stub.avatarFrameID
+        reservesBanner = Self.reservesBanner(avatarURL: stub.avatarURL, hasBanner: stub.hasBanner)
+    }
+
+    /// ⚠️ THE BANNER IS RESERVED ONLY WHEN IT IS CERTAIN. A photo avatar is
+    /// the banner of a profile without one (`ProfileDisplayModel.bannerImageURL`),
+    /// so with one the band is there either way; without, only a profile known
+    /// to have a banner reserves it. Unknown reserves nothing: a banner that
+    /// turns out to exist grows in, rather than a bone that collapses.
+    static func reservesBanner(avatarURL: URL?, hasBanner: Bool?) -> Bool {
+        if let avatarURL, !AnimatedAvatars.isSheet(avatarURL) { return true }
+        return hasBanner == true
+    }
+}

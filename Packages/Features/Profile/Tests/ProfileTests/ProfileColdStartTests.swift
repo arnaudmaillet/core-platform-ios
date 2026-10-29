@@ -279,6 +279,36 @@ final class ProfileColdStartTests {
         #expect(header.userProfile.avatarFrameID == "frame.neon")
     }
 
+    /// ⚠️ THE BANNER SURVIVES A COLD START (#1859): it was left out of the
+    /// disk header, so a profile read back from disk had none until the
+    /// network answered — the header collapsed, then grew again.
+    @Test func theBannerRoundTripsThroughTheDisk() throws {
+        let base = person("prof-1")
+        let banner = URL(string: "https://example.test/banner.jpg")!
+        let loop = URL(string: "https://example.test/banner.m3u8")!
+        let profile = UserProfile(
+            id: base.id, handle: base.handle, displayName: base.displayName, bio: base.bio,
+            avatarURL: base.avatarURL, bannerURL: banner, bannerVideoURL: loop, websiteURL: base.websiteURL,
+            isVerified: base.isVerified, followerCount: base.followerCount,
+            followingCount: base.followingCount, reactionCount: base.reactionCount
+        )
+        let decoded = try JSONDecoder().decode(
+            ProfileDiskRecord.Header.self, from: JSONEncoder().encode(ProfileDiskRecord.Header(profile))
+        )
+        #expect(decoded.userProfile.bannerURL == banner)
+        #expect(decoded.userProfile.bannerVideoURL == loop)
+
+        // A header stored before the banner decodes with none.
+        var json = try #require(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(ProfileDiskRecord.Header(profile))) as? [String: Any]
+        )
+        json.removeValue(forKey: "bannerURL")
+        json.removeValue(forKey: "bannerVideoURL")
+        let old = try JSONDecoder().decode(ProfileDiskRecord.Header.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(old.userProfile.bannerURL == nil)
+        #expect(old.userProfile.handle == base.handle)
+    }
+
     @Test func aVisitedProfileOpensOnItsLastContentAfterAColdStart() async throws {
         try await previousSession(.profile(ProfileID("prof-1")))
 

@@ -105,12 +105,23 @@ final class ProfileHeaderView: HeroHeaderView {
         case .loading:
             isHidden = false
             if !switching { setRedacted(true) }
+        case .seeded(let seed):
+            // The person as the origin showed them, for real (#1859): only
+            // the counters are bones, and nothing is reserved that may not
+            // exist — no bio, no link, a banner only when certain.
+            isHidden = false
+            setRedacted(false)
+            super.configure(with: HeroHeaderContent(seed))
+            setCountersRedacted(true)
         case .content(let model):
             isHidden = false
             // Content first — the labels adopt their text while still
-            // invisible under the bones — then the alpha-only reveal.
+            // invisible under the bones — then the alpha-only reveal. Over a
+            // seed it replaces field by field: an equal name or avatar does
+            // not move (`HeroHeaderView.configure` diffs).
             configure(with: model, staggered: switching)
             setRedacted(false, animated: animated)
+            setCountersRedacted(false, animated: animated)
         case .failed:
             setRedacted(false)
             // Nothing ever loaded: an empty badge, counters and buttons would
@@ -305,6 +316,20 @@ final class ProfileHeaderView: HeroHeaderView {
 }
 
 extension HeroHeaderContent {
+    /// A person known from where they were opened (#1859): the counters'
+    /// cells hold a blank figure under their bones.
+    init(_ seed: ProfileSeedModel) {
+        self.init(
+            title: seed.displayName,
+            subtitle: seed.handle ?? "",
+            counterValues: [" ", " ", " "],
+            avatarURL: seed.avatarURL,
+            avatarMonogram: seed.avatarMonogram,
+            avatarFrameID: seed.avatarFrameID,
+            bannerPending: seed.reservesBanner
+        )
+    }
+
     /// A profile, as the hero header shows it.
     init(_ model: ProfileDisplayModel) {
         self.init(
