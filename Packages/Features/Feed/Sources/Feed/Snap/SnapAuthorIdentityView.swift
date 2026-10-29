@@ -145,11 +145,11 @@ final class SnapAuthorIdentityView: UIView {
         authorLongPressed()
     }
 
-    /// The hold's answer: a tick, then the callback with the shown author.
+    /// The hold's answer: `held`, then the callback with the shown author
+    /// (`PersonHold`).
     private func authorLongPressed() {
         guard let authorID, let onAuthorLongPressed else { return }
-        Haptics.play(.held)
-        onAuthorLongPressed(authorID)
+        PersonHold.recognised { onAuthorLongPressed(authorID) }
     }
 
     #if DEBUG

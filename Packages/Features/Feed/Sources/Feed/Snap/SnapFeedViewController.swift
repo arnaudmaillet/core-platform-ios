@@ -2388,12 +2388,14 @@ final class SnapFeedViewController: UIViewController {
         // the viewer may have swiped to someone else.
         let name = authorIdentityView.shownAuthor.flatMap { $0.authorID == author ? Self.followName(of: $0) : nil }
             ?? (isForYouRoot ? modelsByID.values.first { $0.authorID == author }.map(Self.followName(of:)) : nil)
-        followStore.follow(author) { [weak self] in
+        let followed = followStore.follow(author) { [weak self] in
             guard let self else { return }
             // The "+" comes back — and says why (#802): a mark that undoes
             // itself without a word reads as a glitch, or is missed entirely.
             Feedback.failure(name.map { "Couldn't follow \($0)" } ?? "Couldn't follow", from: self)
         }
+        // Turned on at the optimistic flip (#1885), not when the graph answers.
+        if followed { Haptics.play(.toggleOn) }
     }
 
     /// How a follow failure names the author: their `@handle` from the
