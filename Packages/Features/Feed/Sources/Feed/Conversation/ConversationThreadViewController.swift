@@ -70,9 +70,71 @@ final class ConversationThreadViewController: UIViewController {
 
     private func renderPinned(_ pinned: Bool?) {
         isPinned = pinned
-        composeBar.railFace = .pin(isPinned: pinned == true)
         composeBar.isRailFaceEnabled = pinned != nil
+        renderRailFace()
     }
+
+    /// Scrolled away from the newest message, the pin becomes the way back
+    /// (#1929): a tap scrolls to the bottom, a hold arms the pin.
+    private var scrollAway = ScrollAwayPolicy()
+
+    /// The slot as it stands: the way back while scrolled away, the pin
+    /// otherwise — a symbol replace on the slot's own glyph, never a blink.
+    private func renderRailFace() {
+        composeBar.railFace = scrollAway.showsReturn ? .returnTo(down: true) : .pin(isPinned: isPinned == true)
+        pinHold?.isEnabled = scrollAway.showsReturn && isPinned != nil
+        // The pin stays reachable with the chevron up: VoiceOver's road.
+        composeBar.railHoldTarget.accessibilityCustomActions = scrollAway.showsReturn && isPinned != nil ? [
+            UIAccessibilityCustomAction(name: isPinned == true ? "Unpin conversation" : "Pin conversation") { [weak self] _ in
+                self?.driver.togglePinned()
+                return true
+            },
+        ] : nil
+    }
+
+    /// The chevron's hold: the disc rises with the pin, and once full the
+    /// pin toggles — the disc says the new state before it retreats.
+    private var pinHold: HoldToArmPresenter?
+
+    private func installPinHold() {
+        let hold = HoldToArmPresenter(view: composeBar.railHoldTarget) { [weak self] in
+            .symbol(self?.isPinned == true ? "pin.fill" : "pin")
+        }
+        hold.firedFace = { [weak self] in .symbol(self?.isPinned == true ? "pin.fill" : "pin") }
+        hold.onFire = { [weak self] in self?.driver.togglePinned() }
+        hold.isEnabled = false
+        pinHold = hold
+    }
+
+    /// Feeds the way-back policy: the distance from the newest message.
+    private func syncScrollAway(userScroll: Bool) {
+        let insets = collectionView.adjustedContentInset
+        let bottom = collectionView.contentSize.height + insets.bottom - collectionView.bounds.height
+        let distance = max(0, bottom - collectionView.contentOffset.y)
+        let viewport = collectionView.bounds.height - insets.top - insets.bottom
+        let before = scrollAway.showsReturn
+        scrollAway.update(distance: distance, viewport: viewport, isUserScroll: userScroll)
+        if scrollAway.showsReturn != before { renderRailFace() }
+    }
+
+    /// The way back's state, for tests.
+    var debugShowsReturn: Bool { scrollAway.showsReturn }
+    var debugPinHold: HoldToArmPresenter? { pinHold }
+    var debugRailFace: CommentsInputBar.RailFace { composeBar.railFace }
+    /// A tap on the slot, through its own action.
+    func debugTapRail() { composeBar.onRailAction?() }
+    /// The stream moved to `offset` — by the reader, or not — as a scroll
+    /// callback reports it.
+    func debugScroll(to offset: CGFloat, userScroll: Bool) {
+        collectionView.contentOffset.y = offset
+        syncScrollAway(userScroll: userScroll)
+    }
+    /// The stream's offset at its newest message.
+    var debugBottomOffset: CGFloat {
+        let insets = collectionView.adjustedContentInset
+        return collectionView.contentSize.height + insets.bottom - collectionView.bounds.height
+    }
+    var debugStreamOffset: CGFloat { collectionView.contentOffset.y }
     /// No band of its own at the top (asked 2026-10-02): the window's
     /// status-bar blur (`StatusBarBlurView`) is the only material up there,
     /// and the nav capsules are glass of their own. A header frost under that
@@ -618,8 +680,14 @@ final class ConversationThreadViewController: UIViewController {
         composeBar.showsStake = false
         // The slot's pin, the inbox's own (the driver's). Disabled until the
         // driver reports one (`renderPinned`): a draft has nothing to pin.
+        installPinHold()
         renderPinned(isPinned)
-        composeBar.onRailAction = { [weak self] in self?.driver.togglePinned() }
+        composeBar.onRailAction = { [weak self] in
+            guard let self else { return }
+            // Scrolled away: the way back to the newest message (#1929).
+            if scrollAway.showsReturn { return scrollToBottom(animated: true) }
+            driver.togglePinned()
+        }
 
         composerBackdrop.setVeilOpacity(SnapCommentsLayout.frostVeilOpacity(hasMedia: false))
         composerBackdrop.translatesAutoresizingMaskIntoConstraints = false
@@ -1725,6 +1793,9 @@ extension ConversationThreadViewController: UICollectionViewDelegate {
     /// and never in a peek.
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         syncDayItem()
+        // Only the reader's own scroll shows the way back; any move hides it
+        // once the newest message is near again (#1929).
+        syncScrollAway(userScroll: scrollView.isTracking || scrollView.isDecelerating)
         guard mode == .full, hasRenderedContent, scrollView.isTracking || scrollView.isDecelerating,
               scrollView.contentOffset.y + scrollView.adjustedContentInset.top < scrollView.bounds.height
         else { return }
