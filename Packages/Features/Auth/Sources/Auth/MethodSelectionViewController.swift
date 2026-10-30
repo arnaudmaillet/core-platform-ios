@@ -10,22 +10,6 @@ import UIKit
 /// coordinator decides where to go.
 final class MethodSelectionViewController: AuthStepTableViewController {
     var onMethodSelected: ((SignInMethod) -> Void)?
-    /// One quiet line over the methods saying why the flow opened, when a
-    /// guest's gated action did ("Log in or sign up to like this post"); nil,
-    /// none. No title otherwise (#1908, the owner): the methods say what they
-    /// do.
-    var prompt: String?
-
-    /// Whether a gated opening shows its reason line (#1908): the owner
-    /// judges the sheet with and without it — DEBUG `-signin-reason-line`
-    /// turns it on; off, a gated sheet is the bare list too.
-    static var showsReasonLine: Bool {
-        #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-signin-reason-line")
-        #else
-        false
-        #endif
-    }
     /// The legal line's pages (#1811); a nil one shows its name as plain text.
     var legalLinks = AuthLegalLinks()
     /// A legal link was tapped: the flow opens the page in place.
@@ -59,6 +43,27 @@ final class MethodSelectionViewController: AuthStepTableViewController {
     /// The list shows no bar (#1811): no close, no globe, and the headline is
     /// the table's.
     override var hidesNavigationBar: Bool { true }
+
+    /// ⚠️ NO SCROLL WHILE THE LIST FITS (#1908, the owner 2026-10-30: the
+    /// sheet scrolled though nothing was hidden). The table's content runs
+    /// past what the sheet shows — the grouped table's trailing padding and
+    /// the bottom inset the sheet stands clear of (`fittedHeight`) — so a
+    /// drag moved a list that was all on screen. It scrolls only when the
+    /// last section's end is past the sheet's: the largest text, a small
+    /// phone, where the sheet is capped at the screen.
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        tableView.isScrollEnabled = Self.needsScroll(
+            contentEnd: tableView.rectForFooter(inSection: sections.count - 1).maxY,
+            topInset: tableView.adjustedContentInset.top, visibleHeight: tableView.bounds.height
+        )
+    }
+
+    /// Whether content ending at `contentEnd` overflows a table showing
+    /// `visibleHeight` under `topInset`. Pure, for tests.
+    static func needsScroll(contentEnd: CGFloat, topInset: CGFloat, visibleHeight: CGFloat) -> Bool {
+        topInset + contentEnd > visibleHeight + 1
+    }
 
     // MARK: - Table
 
@@ -129,11 +134,9 @@ final class MethodSelectionViewController: AuthStepTableViewController {
         }
     }
 
-    /// The headline over the first method; the legal line under the last.
+    /// The legal line under the last method; nothing over the first.
     override func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
         switch sections[section] {
-        case .method(let method) where method == methods.first:
-            return prompt.map(makePromptHeader)
         case .method:
             return nil
         case .legal:
@@ -144,9 +147,9 @@ final class MethodSelectionViewController: AuthStepTableViewController {
     override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
         switch sections[section] {
         case .method(let method):
-            // The reason line; without one, the list opens one side margin
-            // under the sheet's top, as the rows sit from its sides.
-            if method == methods.first { return prompt == nil ? Spacing.lg : UITableView.automaticDimension }
+            // The list opens one side margin under the sheet's top, as the
+            // rows sit from its sides.
+            if method == methods.first { return Spacing.lg }
             return Spacing.sm - Self.collapsedFooterHeight // tight cohesive menu
         case .legal:
             return UITableView.automaticDimension
@@ -222,27 +225,6 @@ private extension MethodSelectionViewController {
             // The sheet's bottom margin (#1908): the side margin, nothing more
             // (`ContentFittingNavigationController.fittedHeight`).
             text.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.lg)
-        }
-        return header
-    }
-
-    /// The reason the flow opened, one quiet line over the methods (#1908).
-    func makePromptHeader(_ prompt: String) -> UITableViewHeaderFooterView {
-        let label = UILabel()
-        label.text = prompt
-        label.font = .appFont(forTextStyle: .subheadline)
-        label.adjustsFontForContentSizeCategory = true
-        label.textColor = .secondaryLabel
-        label.textAlignment = .center
-        label.numberOfLines = 0
-        label.accessibilityTraits = .header
-
-        let header = UITableViewHeaderFooterView()
-        label.constrain(in: header.contentView) { parent in
-            label.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            label.widthAnchor.constraint(lessThanOrEqualTo: parent.widthAnchor)
-            label.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.lg)
-            label.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.md)
         }
         return header
     }

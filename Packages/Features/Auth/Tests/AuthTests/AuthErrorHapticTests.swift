@@ -10,7 +10,7 @@ struct AuthErrorHapticTests {
     @Test(arguments: LoginFlowCoordinator.DebugAlert.allCases)
     func eachAlertPlaysErrorOnce(alert: LoginFlowCoordinator.DebugAlert) {
         let flow = LoginFlowCoordinator()
-        _ = flow.start(prompt: nil)
+        _ = flow.start()
         let played = HapticRecorder.recording { flow.debugPresent(alert) }
         #expect(played == [.error], "\(alert) played \(played)")
     }

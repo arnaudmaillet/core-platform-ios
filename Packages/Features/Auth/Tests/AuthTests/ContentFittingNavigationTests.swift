@@ -30,7 +30,7 @@ private final class FixedRowsStep: UITableViewController {
 struct ContentFittingNavigationTests {
     /// The flow's stack is the fitting one, so the app can size its sheet.
     @Test func theFlowIsAContentFittingStack() {
-        let flow = LoginFlowCoordinator().start(prompt: nil)
+        let flow = LoginFlowCoordinator().start()
         #expect(flow is ContentFittingNavigationController)
     }
 
@@ -113,41 +113,39 @@ struct ContentFittingNavigationTests {
 
     // MARK: - #1811: two stages, a protected swipe
 
-    /// The method list is fitted; every step pushed over it is the form, at
-    /// full height.
+    /// The list's stack is fitted whatever is on top; the form's own stack is
+    /// at full height from its first step (#1908).
     @Test func theListIsFittedAndTheFormIsLarge() {
         let root = FixedRowsStep()
-        let navigation = ContentFittingNavigationController(rootViewController: root)
-        let form = FixedRowsStep()
-        navigation.pushViewController(form, animated: false)
+        let list = ContentFittingNavigationController(rootViewController: root)
+        let form = ContentFittingNavigationController(rootViewController: FixedRowsStep(), isForm: true)
 
-        #expect(navigation.stage(for: root) == .fitted)
-        #expect(navigation.stage(for: form) == .large)
+        #expect(list.stage(for: root) == .fitted)
+        #expect(form.stage(for: form.viewControllers[0]) == .large)
     }
 
-    /// The sheet's ONE detent follows the stage of the step on top: the form
-    /// has `.large()` alone, so it can never be dragged down to the list's
-    /// height, and back on the list the fitted detent returns.
-    @Test func theDetentFollowsTheStage() throws {
-        let navigation = ContentFittingNavigationController(rootViewController: FixedRowsStep())
-        navigation.modalPresentationStyle = .pageSheet
-        let sheet = try #require(navigation.sheetPresentationController)
-        navigation.fit(sheet, fallback: 540)
-        #expect(sheet.selectedDetentIdentifier?.rawValue == "fittedContent")
-        // What the stack tells its delegate as a step comes on top (the app's
-        // presented sheet sees it; this test host's unpresented stack does
-        // not call it).
-        let form = FixedRowsStep()
-        navigation.pushViewController(form, animated: false)
-        navigation.navigationController(navigation, willShow: form, animated: false)
-        #expect(navigation.shownStage == .large)
-        #expect(sheet.detents.count == 1)
-        #expect(sheet.selectedDetentIdentifier == .large)
+    /// The list's ONE detent is its fitted height and stays so whatever is
+    /// pushed; the form's own sheet has `.large()` alone, so it can never be
+    /// dragged down to the list's height (#1908).
+    @Test func eachSheetKeepsItsOneDetent() throws {
+        let list = ContentFittingNavigationController(rootViewController: FixedRowsStep())
+        list.modalPresentationStyle = .pageSheet
+        let listSheet = try #require(list.sheetPresentationController)
+        list.fit(listSheet, fallback: 540)
+        list.navigationController(list, willShow: list.viewControllers[0], animated: false)
+        #expect(list.shownStage == .fitted)
+        #expect(listSheet.selectedDetentIdentifier?.rawValue == "fittedContent")
 
-        navigation.popViewController(animated: false)
-        navigation.navigationController(navigation, willShow: navigation.viewControllers[0], animated: false)
-        #expect(navigation.shownStage == .fitted)
-        #expect(sheet.selectedDetentIdentifier?.rawValue == "fittedContent")
+        let form = ContentFittingNavigationController(rootViewController: FixedRowsStep(), isForm: true)
+        form.modalPresentationStyle = .pageSheet
+        let formSheet = try #require(form.sheetPresentationController)
+        form.fit(formSheet, fallback: 0)
+        let next = FixedRowsStep()
+        form.pushViewController(next, animated: false)
+        form.navigationController(form, willShow: next, animated: false)
+        #expect(form.shownStage == .large)
+        #expect(formSheet.detents.count == 1)
+        #expect(formSheet.selectedDetentIdentifier == .large)
     }
 
     /// A swipe closes the sheet at once until the flow protects the step on

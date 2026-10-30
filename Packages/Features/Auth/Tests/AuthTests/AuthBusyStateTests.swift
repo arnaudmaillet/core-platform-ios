@@ -97,7 +97,7 @@ struct AuthBusyStateTests {
     @Test func aSecondContinueWhileTheSMSIsOutSendsNothingMore() async throws {
         let signUp = GatedSignUp()
         let navigation = try start(signUp, picking: .phone)
-        let phone = try #require(navigation.topViewController as? PhoneAuthViewController)
+        let phone = try #require(navigation.flowTop as? PhoneAuthViewController)
 
         phone.onSendCode?("+33612345678", "+33 6 12 34 56 78")
         phone.onSendCode?("+33612345678", "+33 6 12 34 56 78")
@@ -108,14 +108,14 @@ struct AuthBusyStateTests {
         #expect(phone.isWorking, "Continue shows the code is being sent")
 
         await signUp.open()
-        try #require(await settle { navigation.topViewController is VerificationCodeViewController })
+        try #require(await settle { navigation.flowTop is VerificationCodeViewController })
         #expect(!phone.isWorking, "the busy state clears once the code is sent")
     }
 
     @Test func aRefusedSMSClearsTheBusyStateAndLetsTheNextTapSend() async throws {
         let signUp = GatedSignUp()
         let navigation = try start(signUp, picking: .phone)
-        let phone = try #require(navigation.topViewController as? PhoneAuthViewController)
+        let phone = try #require(navigation.flowTop as? PhoneAuthViewController)
 
         phone.onSendCode?("+33612345678", "+33 6 12 34 56 78")
         try #require(await settle { await signUp.held == 1 })
@@ -123,7 +123,7 @@ struct AuthBusyStateTests {
 
         await signUp.open(failing: true)
         try #require(await settle { !phone.isWorking }, "the busy state never cleared after a failure")
-        #expect(navigation.topViewController === phone)
+        #expect(navigation.flowTop === phone)
 
         phone.onSendCode?("+33612345678", "+33 6 12 34 56 78")
         try #require(await settle { await signUp.held == 1 })
@@ -147,12 +147,12 @@ struct AuthBusyStateTests {
         navigation: UINavigationController, email: EmailEntryViewController, code: VerificationCodeViewController
     ) {
         let navigation = try start(signUp, picking: .email)
-        let email = try #require(navigation.topViewController as? EmailEntryViewController)
+        let email = try #require(navigation.flowTop as? EmailEntryViewController)
         email.onContinue?("nina@example.com")
         try #require(await settle { await signUp.held == 1 })
         await signUp.open()
-        try #require(await settle { navigation.topViewController is VerificationCodeViewController })
-        let code = try #require(navigation.topViewController as? VerificationCodeViewController)
+        try #require(await settle { navigation.flowTop is VerificationCodeViewController })
+        let code = try #require(navigation.flowTop as? VerificationCodeViewController)
         code.loadViewIfNeeded()
         return (navigation, email, code)
     }
@@ -206,9 +206,9 @@ struct AuthBusyStateTests {
 
         await signUp.openLatest()
         try #require(await settle {
-            (navigation.topViewController as? VerificationCodeViewController).map { $0 !== code } ?? false
+            (navigation.flowTop as? VerificationCodeViewController).map { $0 !== code } ?? false
         }, "the new code step never arrived")
-        let newer = try #require(navigation.topViewController as? VerificationCodeViewController)
+        let newer = try #require(navigation.flowTop as? VerificationCodeViewController)
         await signUp.open() // the stale resend lands now
         try #require(await settle { await signUp.held == 0 })
         await letStrayCallsLand()

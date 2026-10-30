@@ -1,8 +1,8 @@
 import UIKit
 
-/// The sign-in flow's navigation stack, and the sheet it is presented in
-/// (#563, #1811): a short sheet for the method choice, a full-height one for
-/// the form.
+/// The sign-in flow's navigation stacks, and the sheets they are presented
+/// in (#563, #1811, #1908): a short sheet for the method choice, and the form
+/// in a full-height sheet of its own over it.
 ///
 /// - THE METHOD LIST is a content-fitted sheet over what the guest was doing
 ///   (#563): every step is a table, and a table knows its content's height
@@ -10,12 +10,13 @@ import UIKit
 ///   content — through one custom detent, so it is exactly as tall as the
 ///   list and can never be dragged taller. Sign in with Apple and passkeys
 ///   finish here, through the system's own sheets.
-/// - THE FORM (email or phone, then the code and the steps after it) is the
-///   same sheet at `.large()` (#1811, the owner 2026-10-28): up to six steps,
-///   most with the keyboard up, had no room in a short sheet and jumped at
-///   every push. Picking a method grows the sheet with the push; every later
-///   step stays at full height; back to the list brings the fitted detent
-///   back (`stage(for:)`).
+/// - THE FORM (email or phone, then the code and the steps after it) is a
+///   SECOND SHEET at `.large()`, presented over the list (#1908, the owner
+///   2026-10-30): up to six steps, most with the keyboard up, need the full
+///   height (#1811) — and the list's own sheet, grown with a push, resized
+///   oddly under the viewer's finger. Picking a method presents the form;
+///   its steps push inside it; a swipe down takes it away, back to the list
+///   (`isForm`).
 ///
 /// ⚠️ THE HEIGHT IS READ, NEVER PUSHED FROM LAYOUT. The share sheet crashed
 /// measuring in `viewDidLayoutSubviews` and invalidating from there: dragging
@@ -28,7 +29,7 @@ import UIKit
 /// THE SWIPE IS THE WAY OUT (#1811): no close button. Before a code is sent a
 /// swipe closes the sheet at once; once one has (`protectsInput`), a swipe —
 /// or VoiceOver's escape — asks one confirmation first, so what was typed is
-/// never thrown away by accident.
+/// never thrown away by accident. The form's way out is back to the list.
 public final class ContentFittingNavigationController: UINavigationController, UINavigationControllerDelegate,
     UISheetPresentationControllerDelegate {
     /// The top step's height changed: the sheet should ask `fittedHeight`
@@ -47,9 +48,19 @@ public final class ContentFittingNavigationController: UINavigationController, U
         case large
     }
 
-    /// The method list is the root; every step pushed over it is the form.
+    /// Whether this stack is the form's, in its own full-height sheet over
+    /// the list's (#1908).
+    let isForm: Bool
+
+    /// The form's stack, presented over this list's sheet; nil while none is.
+    weak var formStack: ContentFittingNavigationController?
+
+    /// The form's sheet went away by itself (a swipe): the flow forgets it.
+    var onDismissed: (() -> Void)?
+
+    /// The list is fitted; the form is large, whatever step is on top.
     func stage(for step: UIViewController) -> Stage {
-        step === viewControllers.first ? .fitted : .large
+        isForm ? .large : .fitted
     }
 
     private var contentObservation: NSKeyValueObservation?
@@ -59,7 +70,12 @@ public final class ContentFittingNavigationController: UINavigationController, U
     /// The stage the sheet's detents were last set to.
     private(set) var shownStage: Stage = .fitted
 
-    public override init(rootViewController: UIViewController) {
+    public override convenience init(rootViewController: UIViewController) {
+        self.init(rootViewController: rootViewController, isForm: false)
+    }
+
+    init(rootViewController: UIViewController, isForm: Bool) {
+        self.isForm = isForm
         super.init(rootViewController: rootViewController)
         delegate = self
     }
@@ -173,6 +189,10 @@ public final class ContentFittingNavigationController: UINavigationController, U
         confirmLeaving()
     }
 
+    public func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        onDismissed?()
+    }
+
     /// VoiceOver's escape, the only non-visual way out with no close button:
     /// the same rule as the swipe.
     public override func accessibilityPerformEscape() -> Bool {
@@ -204,9 +224,15 @@ public final class ContentFittingNavigationController: UINavigationController, U
     }
 
     /// Closes the sheet: whatever presented it answers the exit (the shell's
-    /// gate hears it from the sheet's own disappearance).
+    /// gate hears it from the sheet's own disappearance). The form's sheet
+    /// closes back to the list.
     private func leave() {
-        (parent ?? self).dismiss(animated: true)
+        if isForm {
+            dismiss(animated: true)
+            onDismissed?()
+        } else {
+            (parent ?? self).dismiss(animated: true)
+        }
     }
 
     // MARK: - UINavigationControllerDelegate
