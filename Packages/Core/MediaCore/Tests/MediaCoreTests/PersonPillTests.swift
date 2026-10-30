@@ -205,6 +205,25 @@ struct PersonPillTests {
         #expect(path.contains(CGPoint(x: 20, y: 2.5)), "the band does not run under the face's edge")
     }
 
+    /// ⚠️ THE WHOLE FACE SHOWS, BUT THE CUTOUT (the owner's device,
+    /// 2026-10-30): a mask cut from the face's bounds before its row had laid
+    /// it out showed a corner of the face and nothing else.
+    @Test func theWholeFaceShowsButTheCutout() {
+        let pill = PersonPill(carriesBadge: true)
+        pill.setName("Ada Lovelace", handle: "@ada")
+        pill.setBadge(.following, animated: false)
+        pill.frame.size = pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        pill.layoutIfNeeded()
+        let side = AvatarImageView.bubbleDiameter
+        for point in [CGPoint(x: side / 2, y: side / 2), CGPoint(x: side * 0.8, y: side * 0.2),
+                      CGPoint(x: side * 0.2, y: side * 0.8)] {
+            #expect(pill.faceShows(at: point), "the face is masked at \(point)")
+        }
+        let badge = pill.debugGeometry.badge!
+        let centre = pill.convert(CGPoint(x: badge.midX, y: badge.midY), to: pill.avatar)
+        #expect(!pill.faceShows(at: centre), "no cutout under the badge")
+    }
+
     /// The face's mask reaches its skeleton: the bone's ground is a layer,
     /// never a background the glass would paint outside the mask.
     @Test func theLoadingFaceKeepsTheCutout() {

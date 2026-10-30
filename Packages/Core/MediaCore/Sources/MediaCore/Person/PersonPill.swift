@@ -196,6 +196,7 @@ public final class PersonPill: UIView {
         labelsStack.setContentCompressionResistancePriority(UILayoutPriority(749), for: .horizontal)
 
         let row = UIStackView(arrangedSubviews: [avatar, labelsStack])
+        faceRow = row
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = Spacing.sm
@@ -436,9 +437,16 @@ public final class PersonPill: UIView {
     /// is glass over moving video.
     public static let cutoutGap: CGFloat = 1.5
     private let faceCutout = CAShapeLayer()
+    /// The row holding the face, laid out before the cutout is measured.
+    private weak var faceRow: UIStackView?
 
     public override func layoutSubviews() {
         super.layoutSubviews()
+        // ⚠️ THE FACE IS THE ROW'S, laid out in the ROW's pass, which runs
+        // after this one returns: read now, its bounds can still be zero
+        // (the owner's device, 2026-10-30 — a mask cut from them showed a
+        // corner of the face and nothing else, until some later pass).
+        faceRow?.layoutIfNeeded()
         applyBadgeCutout()
         drawRing()
     }
@@ -460,8 +468,9 @@ public final class PersonPill: UIView {
             avatar.layer.mask = nil
             return
         }
-        let radius = PersonPillBadgeView.diameter / 2 + Self.cutoutGap
-        let path = UIBezierPath(rect: avatar.bounds.insetBy(dx: -radius, dy: -radius))
+        // Everything but the badge's disc, whatever the face's size: the mask
+        // never depends on bounds that might not be final.
+        let path = UIBezierPath(rect: Self.faceMaskReach)
         path.append(circle)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -501,6 +510,16 @@ public final class PersonPill: UIView {
         guard let path = ringShape.path, let circle = cutoutCircle(in: ring) else { return false }
         let centre = CGPoint(x: circle.bounds.midX, y: circle.bounds.midY)
         return ring.bounds.contains(centre) && !path.contains(centre)
+    }
+
+    /// The face's mask reaches far past any face: only the cutout is out.
+    static let faceMaskReach = CGRect(x: -500, y: -500, width: 1000, height: 1000)
+
+    /// Whether the face's mask lets `point` (in the face's space) show.
+    /// Tests.
+    public func faceShows(at point: CGPoint) -> Bool {
+        guard avatar.layer.mask === faceCutout, let path = faceCutout.path else { return true }
+        return path.contains(point, using: .evenOdd)
     }
 
     /// The badge's cutout as drawn on the face: its radius, nil without one.
