@@ -34,7 +34,7 @@ struct SnapSharedColumnTests {
         host.addSubview(chrome)
         chrome.installActionColumn(in: host)
         chrome.configure(with: model)
-        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         host.layoutIfNeeded()
         return (chrome, host, window)
     }
@@ -79,7 +79,7 @@ struct SnapSharedColumnTests {
         let (mounted, _, window) = Self.mounted()
         defer { window.isHidden = true }
         let replica = Layout.chrome()
-        replica.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        replica.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         replica.layoutIfNeeded()
         #expect(Layout.same(mounted.debugFrame(of: mounted.debugBoostButton), replica.debugFrame(of: replica.debugBoostButton)))
         #expect(Layout.same(mounted.debugFrame(of: mounted.debugSoundBubble), replica.debugFrame(of: replica.debugSoundBubble)))

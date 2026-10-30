@@ -14,10 +14,9 @@ import Testing
 /// test here touches them.
 @MainActor
 struct SnapSoundStateTests {
-    /// A mute and a Low Power Mode of the test's own.
+    /// A Low Power Mode of the test's own.
     @MainActor
     private final class Switches {
-        var soundOn = true
         var lowPowerMode = false
     }
 
@@ -26,8 +25,6 @@ struct SnapSoundStateTests {
     ) -> SnapSoundState {
         SnapSoundState(
             provider: provider,
-            isOn: { switches.soundOn },
-            toggle: { switches.soundOn.toggle() },
             lowPowerMode: { switches.lowPowerMode }
         )
     }
@@ -54,19 +51,15 @@ struct SnapSoundStateTests {
         )
     }
 
-    // MARK: - Mute
+    // MARK: - No mute (#1931)
 
-    @Test func theToggleMutesAndUnmutesAndTheFaceFollows() {
-        let switches = Switches()
-        let sound = Self.state(switches)
-        #expect(sound.isOn)
-        #expect(sound.face(for: Self.clip())?.isMuted == false)
-        sound.toggle()
-        #expect(!sound.isOn)
-        #expect(sound.face(for: Self.clip())?.isMuted == true)
-        sound.toggle()
-        #expect(sound.isOn)
-        #expect(sound.face(for: Self.clip())?.isMuted == false)
+    /// The face says the sound and whether there is one — nothing about a
+    /// mute: the sound follows the device.
+    @Test func theFaceHasNoMutedState() {
+        let sound = Self.state(Switches())
+        let face = sound.face(for: Self.clip())
+        #expect(face?.isAvailable == true)
+        #expect(face == SnapSoundFace(coverURL: face?.coverURL, isAvailable: true))
     }
 
     // MARK: - A page without audio
@@ -199,7 +192,7 @@ struct SnapSoundStateTests {
 
     /// ⚠️ LOW POWER MODE, FOLLOWED, DOES NOT SILENCE A CAROUSEL (the owner,
     /// 2026-10-28): its track is the post's sound, as a clip's own is. A
-    /// single photograph's song stays silent (#580). The mute silences both.
+    /// single photograph's song stays silent (#580).
     @Test func lowPowerModeSilencesAPhotographNotACarousel() {
         let switches = Switches()
         let sound = Self.state(switches, provider: FixedSoundProvider(sound: Self.song))
@@ -207,14 +200,11 @@ struct SnapSoundStateTests {
         #expect(sound.song(for: Self.carousel()) == Self.songFile, "a mixed carousel went quiet")
         #expect(sound.song(for: Self.carousel(clipPage: false)) == Self.songFile, "a collection of pictures went quiet")
         #expect(sound.song(for: Self.photo()) == nil, "a photograph's song in Low Power Mode")
-        sound.toggle()
-        #expect(sound.song(for: Self.carousel()) == nil, "a carousel's track while muted")
-        #expect(sound.song(for: Self.photo()) == nil)
     }
 
     // MARK: - What is heard
 
-    @Test func aPhotosSongPlaysOnlyWithTheSoundOnAndNoLowPowerMode() {
+    @Test func aPhotosSongPlaysOutsideLowPowerMode() {
         let provider = FixedSoundProvider(sound: PostSound(
             id: "song-1", title: "Song", artist: nil, previewURL: Self.songFile, artworkURL: nil, duration: 30
         ))
@@ -224,8 +214,6 @@ struct SnapSoundStateTests {
         switches.lowPowerMode = true
         #expect(sound.song(for: Self.photo()) == nil, "a song in Low Power Mode, followed")
         switches.lowPowerMode = false
-        sound.toggle()
-        #expect(sound.song(for: Self.photo()) == nil, "a song while muted")
         #expect(sound.song(for: Self.clip()) == nil, "a clip page has no song")
     }
 
@@ -242,29 +230,14 @@ struct SnapSoundStateTests {
         #expect(!Self.state(Switches()).hasTrack(for: Self.carousel()), "a carousel with no sound has a track")
     }
 
-    /// Muted, a post with a track plays on, silently: its record turns on a
-    /// carousel's picture pages and on a photograph — and stops when the
-    /// viewer pauses or holds it, or it leaves the screen.
-    @Test func aMutedPostWithATrackStillPlays() {
-        func plays(onScreen: Bool = true, clip: Bool = false, song: Bool = false, soundOn: Bool,
-                   mayRun: Bool = true, track: Bool = true) -> Bool {
-            SnapSoundState.postPlays(
-                onScreen: onScreen, clipAdvancing: clip, songPlaying: song,
-                soundOn: soundOn, trackMayRun: mayRun, hasTrack: track
-            )
-        }
-        // The bug: muted, a picture page's song player is idle.
-        #expect(plays(soundOn: false), "a muted carousel's picture page stood still")
-        // …and a muted clip page turns on its clip, as before.
-        #expect(plays(clip: true, soundOn: false))
-        // Paused or held, gone, or with no track: still.
-        #expect(!plays(soundOn: false, mayRun: false))
-        #expect(!plays(onScreen: false, soundOn: false))
-        #expect(!plays(soundOn: false, track: false), "a post with no track turned")
-        // Heard, the song player is the truth: a song that does not play
-        // (Low Power Mode on a photograph) does not turn the record.
-        #expect(plays(song: true, soundOn: true))
-        #expect(!plays(soundOn: true))
+    /// The record turns while the post plays — a clip running or its track
+    /// playing — on screen, on silent too (#1931: the device decides what is
+    /// heard, not the record).
+    @Test func thePostPlaysWhileItsClipOrTrackRuns() {
+        #expect(SnapSoundState.postPlays(onScreen: true, clipAdvancing: true, songPlaying: false))
+        #expect(SnapSoundState.postPlays(onScreen: true, clipAdvancing: false, songPlaying: true))
+        #expect(!SnapSoundState.postPlays(onScreen: true, clipAdvancing: false, songPlaying: false))
+        #expect(!SnapSoundState.postPlays(onScreen: false, clipAdvancing: true, songPlaying: true))
     }
 
     // MARK: - The sound sheet

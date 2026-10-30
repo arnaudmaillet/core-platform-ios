@@ -7,10 +7,11 @@ import Foundation
 /// its attribution and its sound bubble draw, whether its song may be heard,
 /// whether the record turns, and what the sound sheet opens with.
 ///
-/// The session's mute is `FeedSound`'s and Low Power Mode, followed, is
-/// `LowPowerMode`'s — both process-wide, so both are READ through
-/// injected closures: the screen passes the real ones (the defaults), tests
-/// their own, and no test ever forces the shared answer.
+/// No mute since #1931: the sound follows the device until a volume key
+/// turns it on (`FeedSoundSession`). Low Power Mode, followed, is
+/// `LowPowerMode`'s — process-wide, so READ through an injected closure: the
+/// screen passes the real one (the default), tests their own, and no test
+/// ever forces the shared answer.
 ///
 /// The screen keeps the audible surface and Picture in Picture (the playback
 /// pool's wiring), the song player, the spin timer, the sheet's presentation
@@ -41,29 +42,15 @@ struct SnapSoundState {
 
     /// See `FeedFeatureBuilder.soundProvider`.
     let provider: (any PostSoundProviding)?
-    private let readsSoundOn: @MainActor () -> Bool
-    private let flipsSound: @MainActor () -> Void
     private let readsLowPowerMode: @MainActor () -> Bool
 
     init(
         provider: (any PostSoundProviding)?,
-        isOn: @escaping @MainActor () -> Bool = { FeedSound.isOn },
-        toggle: @escaping @MainActor () -> Void = { FeedSound.toggle() },
         lowPowerMode: @escaping @MainActor () -> Bool = { LowPowerMode.savesBattery }
     ) {
         self.provider = provider
-        self.readsSoundOn = isOn
-        self.flipsSound = toggle
         self.readsLowPowerMode = lowPowerMode
     }
-
-    // MARK: - Mute
-
-    /// Whether the feed is heard (`FeedSound`).
-    var isOn: Bool { readsSoundOn() }
-
-    /// The bubble's hold, and the composer slot's: mutes, or unmutes.
-    func toggle() { flipsSound() }
 
     // MARK: - Which sound
 
@@ -139,7 +126,7 @@ struct SnapSoundState {
     }
 
     /// What the sound bubble and the composer's rail slot draw for `model`
-    /// (#671): the sound's cover and the mute state — and for a MEDIA post
+    /// (#671): the sound's cover — and for a MEDIA post
     /// with no sound, a greyed `music.note.slash` that keeps the slot (#683).
     ///
     /// ⚠️ NIL FOR A TEXT POST WITH NO SOUND (#1790, the owner 2026-10-27):
@@ -150,8 +137,7 @@ struct SnapSoundState {
         guard Self.hasSoundSlot(isText: Self.isText(model), sound: postSound) else { return nil }
         return SnapSoundFace(
             coverURL: SnapMediaAttributionView.coverURL(for: model, cover: Self.cover(for: postSound)),
-            isAvailable: postSound != nil,
-            isMuted: !isOn
+            isAvailable: postSound != nil
         )
     }
 
@@ -171,18 +157,17 @@ struct SnapSoundState {
     /// The track the feed's song player plays for `model` — the post's sound
     /// heard OUTSIDE a clip's own player — or nil.
     /// - **A carousel** (#1849): the post's sound, on every page, pictures and
-    ///   clips alike, whenever the feed is heard. ⚠️ Low Power Mode, followed,
-    ///   does NOT silence it (the owner, 2026-10-28): it is the post's sound,
-    ///   as a clip's own is, and only the feed's mute stops it.
+    ///   clips alike. ⚠️ Low Power Mode, followed, does NOT silence it (the
+    ///   owner, 2026-10-28): it is the post's sound, as a clip's own is.
     /// - **A single clip**: nil. Its sound is its own player's.
     /// - **A photograph, a text post**: its song, and ⚠️ NOTHING IN LOW POWER
     ///   MODE, FOLLOWED (#580, #1808): a clip there does not start on its own,
     ///   and a photograph's song is the same thing without a picture.
     func song(for model: FeedItemDisplayModel) -> URL? {
         if Self.isCarousel(model) {
-            return isOn ? sound(for: model)?.previewURL : nil
+            return sound(for: model)?.previewURL
         }
-        guard Self.pageSongPlays(soundOn: isOn, lowPowerMode: readsLowPowerMode()),
+        guard Self.pageSongPlays(lowPowerMode: readsLowPowerMode()),
               model.mediaKind != .video
         else { return nil }
         return sound(for: model)?.previewURL
@@ -196,23 +181,18 @@ struct SnapSoundState {
         return Self.isCarousel(model) || model.mediaKind != .video
     }
 
-    /// Whether the post PLAYS — what the sound's record turns for (#1148:
-    /// muted too; the mute is the badge). A clip running, the track heard,
-    /// or — muted (#1875) — the track that would be heard: on screen, not
-    /// paused, not held. A muted carousel no longer turns on its clip pages
-    /// only, and a muted photograph turns as a heard one does. Pure, for tests.
-    static func postPlays(
-        onScreen: Bool, clipAdvancing: Bool, songPlaying: Bool,
-        soundOn: Bool, trackMayRun: Bool, hasTrack: Bool
-    ) -> Bool {
-        guard onScreen else { return false }
-        return clipAdvancing || songPlaying || (!soundOn && trackMayRun && hasTrack)
+    /// Whether the post PLAYS — what the sound's record turns for (#1148): a
+    /// clip running or the track playing, on screen. Whether the device lets
+    /// it be heard is the session's (#1931): the record turns on silent too.
+    /// Pure, for tests.
+    static func postPlays(onScreen: Bool, clipAdvancing: Bool, songPlaying: Bool) -> Bool {
+        onScreen && (clipAdvancing || songPlaying)
     }
 
-    /// Whether a page's song may be heard at all: the feed's sound on, and
-    /// Low Power Mode not followed (#580, #1808).
-    static func pageSongPlays(soundOn: Bool, lowPowerMode: Bool) -> Bool {
-        soundOn && !lowPowerMode
+    /// Whether a page's song may play at all: Low Power Mode not followed
+    /// (#580, #1808).
+    static func pageSongPlays(lowPowerMode: Bool) -> Bool {
+        !lowPowerMode
     }
 
     // MARK: - The sound sheet

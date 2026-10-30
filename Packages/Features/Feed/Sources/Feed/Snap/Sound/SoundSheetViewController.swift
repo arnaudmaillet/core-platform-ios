@@ -222,16 +222,11 @@ final class SoundSheetViewController: UIViewController {
     var onCoverChanged: ((Bool) -> Void)?
     /// The record's tap: play or pause the post the sheet opened over.
     var onTogglePlayback: (() -> Void)?
-    /// The record's long press: mute or unmute the post — the hold the
-    /// post's own sound bubble answers (the owner, 2026-10-16).
-    var onToggleMute: (() -> Void)?
-
     /// The post's playback, as the record shows it (#1148).
     struct PostPlayback: Equatable {
-        /// The post plays — muted or not: the record turns, the glyph is ❚❚.
+        /// The post plays: the record turns, the glyph is ❚❚. No muted state
+        /// since #1931 — the sound follows the device.
         var playing = false
-        /// The feed's sound is off: the record wears the mute badge.
-        var muted = false
         /// The post has something to hear; false shows the record with no
         /// glyph, refusing taps (the bubble greyed).
         var available = true
@@ -251,7 +246,6 @@ final class SoundSheetViewController: UIViewController {
 
     private func apply(_ playback: PostPlayback, to header: SoundSheetHeaderView) {
         header.setPlaying(playback.available && playback.playing)
-        header.setMuted(playback.available && playback.muted)
     }
     /// A tile was chosen; the sheet is already on its way out.
     var onSelectPost: ((PostID) -> Void)?
@@ -600,8 +594,6 @@ final class SoundSheetViewController: UIViewController {
     /// sees every touch in the sheet whichever view is hit, and begins only
     /// inside the record — the WHOLE disc, not the glyph (#1162).
     private var recordTap: UITapGestureRecognizer?
-    /// The record's hold: mute or unmute, as the post's bubble does.
-    private var recordHold: UILongPressGestureRecognizer?
 
     private func installRecordTap() {
         guard recordTap == nil, let host = navigationController?.view else { return }
@@ -610,33 +602,10 @@ final class SoundSheetViewController: UIViewController {
         tap.cancelsTouchesInView = true
         host.addGestureRecognizer(tap)
         recordTap = tap
-        let hold = UILongPressGestureRecognizer(target: self, action: #selector(recordHeld(_:)))
-        hold.minimumPressDuration = 0.4
-        hold.delegate = self
-        hold.cancelsTouchesInView = true
-        host.addGestureRecognizer(hold)
-        recordHold = hold
     }
 
     @objc private func recordTapped() {
         onTogglePlayback?()
-    }
-
-    #if DEBUG
-    /// The record's hold, as the sheet answers it.
-    func debugHoldRecord() { onToggleMute?() }
-    var debugHasRecordHold: Bool { recordHold != nil }
-    #endif
-
-    @objc private func recordHeld(_ hold: UILongPressGestureRecognizer) {
-        guard hold.state == .began else { return }
-        // ⚠️ ONE GESTURE, ONE TOGGLE: the tap runs alongside (see the
-        // delegate) and would also fire on the lift. Toggling it off and on
-        // cancels the touch it is tracking, without delaying every tap
-        // behind the hold (`require(toFail:)` would).
-        recordTap?.isEnabled = false
-        recordTap?.isEnabled = true
-        onToggleMute?()
     }
 
     /// Whether `point`, in `view`'s space, is on the record (and the record
@@ -2161,7 +2130,7 @@ extension SoundSheetViewController {
 
 extension SoundSheetViewController: UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        guard gestureRecognizer === recordTap || gestureRecognizer === recordHold,
+        guard gestureRecognizer === recordTap,
               let view = gestureRecognizer.view else { return true }
         return recordTakesTap(at: touch.location(in: view), in: view)
     }
@@ -2171,6 +2140,6 @@ extension SoundSheetViewController: UIGestureRecognizerDelegate {
         _ gestureRecognizer: UIGestureRecognizer,
         shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
     ) -> Bool {
-        gestureRecognizer === recordTap || gestureRecognizer === recordHold
+        gestureRecognizer === recordTap
     }
 }

@@ -666,9 +666,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func setSoundFace(_ face: SnapSoundFace?) { chrome.setSoundFace(face) }
     /// Turns the sound bubble's cover while the post plays (#671).
     func setSoundSpinning(_ spinning: Bool) { chrome.setSoundSpinning(spinning) }
-    /// The sound bubble was tapped: the screen toggles the sound (#671).
-    var onRequestSoundToggle: (() -> Void)?
-    /// The sound bubble was held: the screen opens the sound sheet (#671).
+    /// The sound bubble was tapped: the screen opens the sound sheet (#671).
     var onRequestSoundSheet: (() -> Void)?
 
     /// (#1681, the For You root): save and repost upright in
@@ -1838,7 +1836,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             guard let self, let id = self.representedID else { return }
             self.onRequestBoostUndo?(id)
         }
-        chrome.onSoundToggleRequested = { [weak self] in self?.onRequestSoundToggle?() }
         chrome.onSoundSheetRequested = { [weak self] in self?.onRequestSoundSheet?() }
         chrome.postActions.onSave = { [weak self] in self?.onRequestSave?() }
         chrome.postActions.onShare = { [weak self] in self?.onRequestShare?() }

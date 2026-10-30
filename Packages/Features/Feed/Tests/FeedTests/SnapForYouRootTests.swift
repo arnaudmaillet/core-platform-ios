@@ -272,7 +272,7 @@ struct SnapForYouRootTests {
     @Test func everyFeedStandsOneBreathOverItsBar() {
         func laidOut(pages: Int, shots: Bool) -> SnapChromeView {
             let chrome = SnapActionColumnLayoutTests.chrome()
-            chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+            chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
             chrome.showsPostActions = shots
             chrome.sitsOverTabBar = shots
             chrome.setMediaPageCount(pages, current: 0)
@@ -308,7 +308,7 @@ struct SnapForYouRootTests {
     /// #1718 trial, made the default).
     @Test func everyFeedsCaptionSitsOnTheCoversLineWithNoStrip() {
         let chrome = SnapActionColumnLayoutTests.chrome()
-        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         chrome.setMediaPageCount(1, current: 0)
         chrome.setNeedsLayout()
         chrome.layoutIfNeeded()
@@ -326,7 +326,7 @@ struct SnapForYouRootTests {
         let pillBefore = before.debugFrame(of: before.debugBoostButton)
 
         let chrome = SnapActionColumnLayoutTests.chrome()
-        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         chrome.showsPostActions = true
         chrome.layoutIfNeeded()
         let like = chrome.debugFrame(of: chrome.debugBoostButton)
@@ -344,7 +344,7 @@ struct SnapForYouRootTests {
     /// Off, nothing moves and no capsule shows.
     @Test func withoutTheExperimentTheColumnIsUnchanged() {
         let chrome = SnapActionColumnLayoutTests.chrome()
-        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         chrome.layoutIfNeeded()
         #expect(chrome.postActions.isHidden)
     }

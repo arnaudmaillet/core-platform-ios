@@ -35,6 +35,12 @@ struct PlayerPoolSettingsTests {
         #expect(picked == [.less])
     }
 
+    /// No "Start with Sound" since #1931: the feed's sound follows the
+    /// device until a volume key turns it on.
+    @Test func playbackListsAutoplayBackgroundPlayAndPictureInPictureOnly() {
+        #expect(AppPreferencesViewController.items(in: .playback) == [.autoplay, .backgroundPlay, .pictureInPicture])
+    }
+
     /// The playback footer says a post opened full screen always plays.
     @Test func thePlaybackFooterSaysTheFullScreenPostAlwaysPlays() {
         #expect(AppPreferencesViewController.footer(.playback).contains("full screen always plays"))

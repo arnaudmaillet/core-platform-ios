@@ -43,7 +43,9 @@ struct MediaPlaybackPolicyTests {
         let saved = #"{"autoplay":"never","startsWithSound":false,"dataSaver":true}"#
         defaults.set(Data(saved.utf8), forKey: "mediaPlaybackPreferences")
         let store = MediaPlaybackPreferencesStore(defaults: defaults)
-        #expect(store.preferences == MediaPlaybackPreferences(autoplay: .never, startsWithSound: false, dataSaver: true))
+        // "Start with Sound" is gone (#1931): its saved key is ignored, and the
+        // other choices are kept.
+        #expect(store.preferences == MediaPlaybackPreferences(autoplay: .never, dataSaver: true))
 
         store.update { $0.backgroundPlay = true }
         #expect(MediaPlaybackPreferencesStore(defaults: defaults).preferences.backgroundPlay)
@@ -104,25 +106,4 @@ struct MediaPlaybackPolicyTests {
         #expect(MediaPlaybackPolicy.peakBitRate == 0)
     }
 
-    /// The session starts where the preference says, the mute button
-    /// overrides it for the session, and a new preference wins again.
-    @Test func feedSoundStartsFromThePreference() async {
-        let previousStore = MediaPlaybackPolicy.store
-        defer {
-            MediaPlaybackPolicy.store = previousStore
-            FeedSound.reset()
-        }
-        let quiet = store { $0.startsWithSound = false }
-        MediaPlaybackPolicy.store = quiet
-        FeedSound.reset()
-        #expect(!FeedSound.isOn)
-        FeedSound.toggle()
-        #expect(FeedSound.isOn)
-        quiet.update { $0.startsWithSound = true }
-        quiet.update { $0.startsWithSound = false }
-        // The observer hops to the main queue.
-        await Task.yield()
-        try? await Task.sleep(for: .milliseconds(50))
-        #expect(!FeedSound.isOn, "a new preference drops the session's choice")
-    }
 }

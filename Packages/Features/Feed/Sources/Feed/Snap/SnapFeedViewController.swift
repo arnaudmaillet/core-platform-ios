@@ -1764,9 +1764,9 @@ final class SnapFeedViewController: UIViewController {
                 cell.onRequestCommentsPageDrive = { [weak self] phase, translation, velocity in
                     self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
                 }
-                // The sound bubble (#671): its face, and its two gestures.
+                // The sound bubble (#671): its face, and its tap. No hold since
+                // #1931: the sound follows the device.
                 cell.setSoundFace(self.soundFace(for: model))
-                cell.onRequestSoundToggle = { [weak self] in self?.toggleSound() }
                 cell.onRequestSoundSheet = { [weak self] in self?.presentSoundSheet() }
                 // The For You root's save and repost (#1681), in the column.
                 cell.setPostActions(shown: self.isForYouRoot, saved: self.bookmarks.isSaved(id.rawValue))
@@ -2917,10 +2917,10 @@ final class SnapFeedViewController: UIViewController {
     }
 
     /// Background Play (#483): keeps the clip this screen is being heard
-    /// through playing off screen — only when the viewer turned it on, the
-    /// feed's sound is on, and this screen (not one under it) owns the sound.
+    /// through playing off screen — only when the viewer turned it on, and
+    /// this screen (not one under it) owns the sound.
     private func continueInBackground() -> Bool {
-        guard MediaPlaybackPolicy.playsInBackground, soundState.isOn, isOnScreen, !isAudioYielded,
+        guard MediaPlaybackPolicy.playsInBackground, isOnScreen, !isAudioYielded,
               let videoPlayback, let surface = ownAudibleSurface,
               surface === videoPlayback.currentAudibleSurface
         else { return false }
@@ -3370,8 +3370,6 @@ final class SnapFeedViewController: UIViewController {
         snapCell(for: id)?.onRequestBoost?(id, spend)
     }
 
-    /// A hold on the sound (the bubble's, the record's, the rail's).
-    func debugToggleSound() { toggleSound() }
     #endif
 
     private func snapCell(for id: PostID) -> SnapFeedCell? {
@@ -3460,11 +3458,9 @@ final class SnapFeedViewController: UIViewController {
         // …and the composer on the page's breath over the bar (#1716, #1722).
         detail.setComposerLift(isForYouRoot ? SnapActionColumn.shotsBottomBreath : SnapActionColumn.bottomBreath)
         // A remote cover loads in the rail's own slot (#1772).
-        // A tap opens the sound sheet, a hold mutes — the bubble's (#683).
-        detail.setRailSoundActions(
-            tap: { [weak self] in self?.presentSoundSheet() },
-            hold: { [weak self] in self?.toggleSound() }
-        )
+        // A tap opens the sound sheet — the bubble's (#683). No hold since
+        // #1931: no in-app mute.
+        detail.setRailSoundActions(tap: { [weak self] in self?.presentSoundSheet() }, hold: nil)
     }
 
     /// Re-draws the like count of the visible page showing `id`.
@@ -5254,7 +5250,11 @@ final class SnapFeedViewController: UIViewController {
         var surface: VideoRenderView?
         // A carousel's clips are never heard: the post's track is its sound
         // (#1849, `refreshSong`).
-        if soundState.isOn, isOnScreen, isForeground, !isAudioYielded, !LaunchTimeline.curtainIsUp,
+        // A volume key turns the sound on while this screen owns it (#1931).
+        videoPlayback.feedSound.setWatching(
+            isOnScreen && isForeground && !isAudioYielded && !LaunchTimeline.curtainIsUp, by: self
+        )
+        if isOnScreen, isForeground, !isAudioYielded, !LaunchTimeline.curtainIsUp,
            let owner = playbackOwner, ownerModel.map(SnapSoundState.clipIsHeard(in:)) ?? true,
            let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
             surface = cell.audibleSurface
@@ -5330,18 +5330,12 @@ final class SnapFeedViewController: UIViewController {
     }
 
     /// Whether the post on screen PLAYS — what every record of its sound
-    /// turns for (#1148: muted too). Muted, its track runs on silently
-    /// (#1875): the record turns on a carousel's picture pages, a
-    /// photograph, a text page, as it would heard.
+    /// turns for (#1148), on silent too (#1931).
     private var postIsPlaying: Bool {
-        let owner = ownerModel
-        return SnapSoundState.postPlays(
+        SnapSoundState.postPlays(
             onScreen: isOnScreen,
             clipAdvancing: activeSnapCell?.isClipAdvancing ?? false,
-            songPlaying: songPlayer.isPlaying,
-            soundOn: soundState.isOn,
-            trackMayRun: owner.map(trackMayRun) ?? false,
-            hasTrack: owner.map(soundState.hasTrack) ?? false
+            songPlaying: songPlayer.isPlaying
         )
     }
 
@@ -5400,7 +5394,7 @@ final class SnapFeedViewController: UIViewController {
     /// What the sound sheet's record shows of `model`'s page (#1148).
     private func postPlayback(of model: FeedItemDisplayModel, playing: Bool) -> SoundSheetViewController.PostPlayback {
         SoundSheetViewController.PostPlayback(
-            playing: playing, muted: !soundState.isOn, available: soundFace(for: model)?.isAvailable ?? false
+            playing: playing, available: soundFace(for: model)?.isAvailable ?? false
         )
     }
 
@@ -5426,18 +5420,6 @@ final class SnapFeedViewController: UIViewController {
                 MainActor.assumeIsolated { self?.refreshCoverSpin() }
             }
         }
-        refreshCoverSpin()
-    }
-
-    private func toggleSound() {
-        // Every mute and unmute — the cover's hold, the bubble's, the sound
-        // sheet's record — is felt (the owner, 2026-10-25): a hold
-        // recognised (#1883).
-        Haptics.play(.held)
-        soundState.toggle()
-        refreshAudibleSurface()
-        // The page's sound bubble and the panel's slot wear the new state.
-        refreshVisibleSoundFaces()
         refreshCoverSpin()
     }
 
@@ -5485,8 +5467,6 @@ final class SnapFeedViewController: UIViewController {
         let playing = postIsPlaying
         sheet.setPostPlayback(postPlayback(of: model, playing: playing))
         sheet.onTogglePlayback = { [weak self] in self?.togglePagePlayback() }
-        // The record's hold mutes or unmutes, as the post's bubble does.
-        sheet.onToggleMute = { [weak self] in self?.toggleSound() }
         soundSheet = sheet
         sheet.onCoverChanged = { [weak self] covering in
             covered?.setCoveredBySheet(covering)

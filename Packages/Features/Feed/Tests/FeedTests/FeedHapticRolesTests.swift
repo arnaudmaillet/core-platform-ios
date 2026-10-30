@@ -47,21 +47,6 @@ struct FeedHapticRolesTests {
         func loadPost(_ id: PostID) async throws -> FeedEntry { throw URLError(.fileDoesNotExist) }
     }
 
-    /// Every mute and unmute by a hold is a hold recognised.
-    @Test func theSoundHoldIsHeld() {
-        let feed = SnapFeedViewController(
-            viewModel: FeedViewModel(repository: EmptyFeed()),
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
-        )
-        feed.loadViewIfNeeded()
-        let played = recorded(spaced: true) { tick in
-            feed.debugToggleSound()
-            tick()
-            feed.debugToggleSound()
-        }
-        #expect(played == [.held, .held])
-    }
-
     // MARK: - The page bar
 
     private func pageBar(pages: Int) -> SnapMediaPageBarView {
