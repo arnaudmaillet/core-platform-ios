@@ -16,7 +16,7 @@ struct SkeletonGroundGuardTests {
     @Test func aBoneWearsTheOpaqueGreyByDefault() {
         let bone = SkeletonBoneView()
         #expect(bone.fill == Surface.skeleton)
-        #expect(bone.backgroundColor == Surface.skeleton)
+        #expect(bone.drawnGround == Surface.skeleton.resolvedColor(with: bone.traitCollection).cgColor)
         for style in [UIUserInterfaceStyle.light, .dark] {
             let resolved = Surface.skeleton.resolvedColor(with: UITraitCollection(userInterfaceStyle: style))
             var alpha: CGFloat = 0
@@ -27,9 +27,18 @@ struct SkeletonGroundGuardTests {
 
     @Test func aHostOverridesTheGroundThroughFill() {
         let bone = SkeletonBoneView(rounding: .fixed(0), fill: .clear)
-        #expect(bone.backgroundColor == .clear)
+        #expect(bone.drawnGround?.alpha == 0)
         bone.fill = .systemGray3
-        #expect(bone.backgroundColor == .systemGray3)
+        #expect(bone.drawnGround == UIColor.systemGray3.resolvedColor(with: bone.traitCollection).cgColor)
+    }
+
+    /// ⚠️ THE GROUND IS A LAYER, never the view's background (#1912): in a
+    /// glass bar item UIKit paints a view's background itself, outside its
+    /// masks — the author pill's loading face lost its badge's cutout.
+    @Test func theGroundIsALayerNotTheViewsBackground() {
+        let bone = SkeletonBoneView()
+        #expect(bone.backgroundColor == nil)
+        #expect(bone.drawnGround != nil)
     }
 
     private static var root: URL {

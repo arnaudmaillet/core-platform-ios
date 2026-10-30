@@ -179,4 +179,27 @@ struct PersonPillTests {
         pill.layoutIfNeeded()
         #expect(pill.drawnCutoutRadius == nil, "a cutout with no badge")
     }
+
+    /// ⚠️ THE RING IS CUT OUT TOO, in its own path (the owner's device,
+    /// 2026-10-30): a ring painted as the view's background is drawn by the
+    /// bar's glass outside the mask, and the friends' pink filled the cutout.
+    @Test(arguments: [PersonPill.Badge.following, .friends])
+    func theRingLosesTheBadgesCutout(_ relation: PersonPill.Badge) {
+        let pill = Self.laidOut(PersonPill(carriesBadge: true))
+        pill.setBadge(relation, animated: false)
+        pill.layoutIfNeeded()
+        #expect(pill.ringIsBackingDisc)
+        #expect(pill.ringIsCutOut, "the ring fills the badge's cutout")
+    }
+
+    /// The face's mask reaches its skeleton: the bone's ground is a layer,
+    /// never a background the glass would paint outside the mask.
+    @Test func theLoadingFaceKeepsTheCutout() {
+        let pill = Self.laidOut(PersonPill(carriesBadge: true))
+        pill.setBadge(.following, animated: false)
+        pill.layoutIfNeeded()
+        #expect(pill.drawnCutoutRadius != nil)
+        #expect(pill.avatar.skeleton.subviews.allSatisfy { $0.backgroundColor == nil },
+                "the bone paints its ground as the view's background")
+    }
 }
