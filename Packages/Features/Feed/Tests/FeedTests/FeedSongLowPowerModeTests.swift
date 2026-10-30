@@ -6,9 +6,7 @@ import Testing
 @MainActor
 struct FeedSongLowPowerModeTests {
     @Test func aPagesSongPlaysOnlyWithTheSoundOnAndLowPowerModeNotFollowed() {
-        #expect(SnapSoundState.pageSongPlays(soundOn: true, lowPowerMode: false))
-        #expect(!SnapSoundState.pageSongPlays(soundOn: true, lowPowerMode: true), "a song in Low Power Mode, followed")
-        #expect(!SnapSoundState.pageSongPlays(soundOn: false, lowPowerMode: false))
-        #expect(!SnapSoundState.pageSongPlays(soundOn: false, lowPowerMode: true))
+        #expect(SnapSoundState.pageSongPlays(lowPowerMode: false))
+        #expect(!SnapSoundState.pageSongPlays(lowPowerMode: true), "a song in Low Power Mode, followed")
     }
 }

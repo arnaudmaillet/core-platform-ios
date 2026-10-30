@@ -101,31 +101,24 @@ struct SnapPillFooterTests {
             #expect(bubble.isHidden, "a bubble with no face")
 
             var sheets = 0
-            var mutes = 0
             chrome.onSoundSheetRequested = { sheets += 1 }
-            chrome.onSoundToggleRequested = { mutes += 1 }
-            chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+            chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
             chrome.layoutIfNeeded()
             #expect(!bubble.isHidden)
             #expect(bubble.debugCoverImage != nil, "the note did not draw")
-            #expect(!bubble.debugIsMutedBadgeShown)
 
             bubble.sendActions(for: .primaryActionTriggered)
             #expect(sheets == 1, "a tap did not open the sheet")
-            #expect(mutes == 0)
-            bubble.onLongPress?()
-            #expect(mutes == 1, "a hold did not mute")
-            #expect(sheets == 1)
+            // No hold since #1931: there is no in-app mute.
+            #expect(bubble.onLongPress == nil, "a hold still does something")
+            #expect(bubble.accessibilityValue == nil, "the bubble still says a sound state")
 
-            chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: true))
-            #expect(bubble.debugIsMutedBadgeShown)
-
-            chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: false, isMuted: true))
-            #expect(!bubble.isEnabled, "a post with no audio took the mute")
+            chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: false))
+            #expect(!bubble.isEnabled, "a post with no audio took a tap")
             #expect(bubble.alpha < 1)
             #expect(!bubble.isHidden, "a post with no sound lost its bubble")
             #expect(bubble.debugCoverImage === SnapSoundFace.noSoundImage, "no struck-through note")
-            #expect(!bubble.debugIsMutedBadgeShown, "a post with no sound says it is muted")
+            #expect(bubble.accessibilityValue == "No audio")
         }
     }
 
@@ -134,7 +127,7 @@ struct SnapPillFooterTests {
     @Test func aTextPageWearsTheBubbleOnThePage() {
         do {
             let chrome = Layout.chrome(mediaURL: nil)
-            chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+            chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
             #expect(!chrome.debugSoundBubble.isHidden)
         }
     }
@@ -147,7 +140,7 @@ struct SnapPillFooterTests {
         do {
             let media = Layout.mediaColumn()
             let (controller, window) = Layout.engagedPanel()
-            controller.setRailSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+            controller.setRailSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
             controller.view.layoutIfNeeded()
             let composer = try Layout.composerColumn(in: controller.view, space: window)
             #expect(composer.bar.debugRailSymbol == CommentsInputBar.soundRailSymbol)

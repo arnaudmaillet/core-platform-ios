@@ -25,9 +25,6 @@ public struct MediaPlaybackPreferences: Codable, Equatable, Sendable {
     }
 
     public var autoplay: Autoplay
-    /// Whether a full-screen video starts with its sound. The in-feed mute
-    /// button still toggles it for the session.
-    public var startsWithSound: Bool
     /// On cellular: cap the stream quality and don't preload upcoming videos.
     public var dataSaver: Bool
     /// Background Play (#483): a video being heard keeps playing when the app
@@ -40,19 +37,21 @@ public struct MediaPlaybackPreferences: Codable, Equatable, Sendable {
     public var playerPool: PlayerPool
 
     public init(
-        autoplay: Autoplay = .always, startsWithSound: Bool = true, dataSaver: Bool = false,
+        autoplay: Autoplay = .always, dataSaver: Bool = false,
         backgroundPlay: Bool = false, pictureInPicture: Bool = false, playerPool: PlayerPool = .normal
     ) {
         self.autoplay = autoplay
-        self.startsWithSound = startsWithSound
         self.dataSaver = dataSaver
         self.backgroundPlay = backgroundPlay
         self.pictureInPicture = pictureInPicture
         self.playerPool = playerPool
     }
 
+    /// No "Start with Sound" since #1931: the feed's sound follows the
+    /// device. Its key, in preferences saved before, is ignored on decode,
+    /// never a failed decode that would reset the viewer's other choices.
     private enum CodingKeys: String, CodingKey {
-        case autoplay, startsWithSound, dataSaver, backgroundPlay, pictureInPicture, playerPool
+        case autoplay, dataSaver, backgroundPlay, pictureInPicture, playerPool
     }
 
     /// Field by field, each with its default: preferences saved before a
@@ -61,7 +60,6 @@ public struct MediaPlaybackPreferences: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = MediaPlaybackPreferences()
         autoplay = try container.decodeIfPresent(Autoplay.self, forKey: .autoplay) ?? defaults.autoplay
-        startsWithSound = try container.decodeIfPresent(Bool.self, forKey: .startsWithSound) ?? defaults.startsWithSound
         dataSaver = try container.decodeIfPresent(Bool.self, forKey: .dataSaver) ?? defaults.dataSaver
         backgroundPlay = try container.decodeIfPresent(Bool.self, forKey: .backgroundPlay) ?? defaults.backgroundPlay
         pictureInPicture = try container.decodeIfPresent(Bool.self, forKey: .pictureInPicture) ?? defaults.pictureInPicture

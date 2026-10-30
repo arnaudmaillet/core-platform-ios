@@ -41,12 +41,12 @@ struct SnapScrubPreviewShapeTests {
     @Test func aReplicaTakesTheCaptionSeatAtConfigure() {
         let replica = SnapChromeView(frame: SnapActionColumnLayoutTests.screen)
         replica.setFixedInsets(SnapActionColumnLayoutTests.insets)
-        replica.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        replica.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         replica.configure(with: SnapActionColumnLayoutTests.mediaModel(mediaURL: URL(string: "mock://media/1")))
         replica.layoutIfNeeded()
 
         let page = SnapActionColumnLayoutTests.chrome()
-        page.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        page.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         page.setMediaPageCount(1, current: 0)
         page.layoutIfNeeded()
         #expect(abs(replica.debugCaptionFrame.maxY - page.debugCaptionFrame.maxY) < 0.5,

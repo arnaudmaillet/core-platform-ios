@@ -35,7 +35,7 @@ struct SnapDeviceRound2Tests {
         chrome.configure(with: Self.media())
         // Every media page wears a sound face: it stands the sound bubble in
         // the column's glass (#1872).
-        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         chrome.layoutIfNeeded()
         #expect(chrome.overrideUserInterfaceStyle == .dark)
         #expect(chrome.debugBoostButton.traitCollection.userInterfaceStyle == .dark, "the like pill flew light")
@@ -75,7 +75,7 @@ struct SnapDeviceRound2Tests {
         guard !MotionPreference.reducesMotion else { return }
         let bubble = SnapSoundBubbleButton()
         bubble.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
-        bubble.setFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false), pipeline: nil)
+        bubble.setFace(SnapSoundFace(coverURL: nil, isAvailable: true), pipeline: nil)
         bubble.layoutIfNeeded()
         bubble.setSpinning(true)
         #expect(bubble.debugIsSpinning)
@@ -91,7 +91,7 @@ struct SnapDeviceRound2Tests {
         guard !MotionPreference.reducesMotion else { return }
         let bubble = SnapSoundBubbleButton()
         bubble.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
-        bubble.setFace(SnapSoundFace(coverURL: nil, isAvailable: false, isMuted: false), pipeline: nil)
+        bubble.setFace(SnapSoundFace(coverURL: nil, isAvailable: false), pipeline: nil)
         bubble.layoutIfNeeded()
         bubble.setSpinning(true)
         #expect(!bubble.debugIsSpinning, "the greyed record turned")
@@ -106,12 +106,12 @@ struct SnapDeviceRound2Tests {
         guard !MotionPreference.reducesMotion else { return }
         let bubble = SnapSoundBubbleButton()
         bubble.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
-        let sound = SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false)
+        let sound = SnapSoundFace(coverURL: nil, isAvailable: true)
         bubble.setFace(sound, pipeline: nil)
         bubble.layoutIfNeeded()
         bubble.setSpinning(true)
         #expect(bubble.debugIsSpinning)
-        bubble.setFace(SnapSoundFace(coverURL: nil, isAvailable: false, isMuted: false), pipeline: nil)
+        bubble.setFace(SnapSoundFace(coverURL: nil, isAvailable: false), pipeline: nil)
         #expect(!bubble.debugIsSpinning, "the record kept turning on a post with no sound")
         bubble.setFace(sound, pipeline: nil)
         bubble.setSpinning(true)

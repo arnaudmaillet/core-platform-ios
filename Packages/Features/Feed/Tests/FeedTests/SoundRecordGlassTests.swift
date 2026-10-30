@@ -33,40 +33,6 @@ struct SoundRecordGlassTests {
         #expect(!record.isUserInteractionEnabled, "the host button keeps the touches")
     }
 
-    /// ⚠️ MUTED IS SAID IN THE MIDDLE (the owner, 2026-10-16): a large
-    /// speaker-slash centred on the record, half its side, with no plate —
-    /// the only glass is the record's own.
-    @Test func theMutedGlyphIsCentredLargeAndBare() {
-        let record = SoundRecordGlass()
-        record.coverSide = nil
-        let window = hosted(record, side: 96)
-        defer { window.isHidden = true }
-        record.showsMutedBadge = true
-        record.layoutIfNeeded()
-        let glyph = record.debugMutedGlyph
-        #expect(glyph.frame.midX == record.cover.frame.midX && glyph.frame.midY == record.cover.frame.midY)
-        #expect(glyph.pointSize == SoundRecordGlass.mutedGlyphPointSize(forRecordSide: record.cover.bounds.width))
-        #expect(glyph.pointSize >= record.cover.bounds.width * 0.45, "the muted glyph is not large")
-        #expect(effectViews(in: record).count == 1, "the muted glyph sits on a plate of its own")
-    }
-
-    /// On a window the muted glyph bounces in and out (the owner,
-    /// 2026-10-16), and the cover darkens behind it while it shows.
-    @Test func theMutedGlyphComesAndGoesAnimatedOverADimmedCover() {
-        let record = SoundRecordGlass()
-        let window = hosted(record, side: 96)
-        defer { window.isHidden = true }
-        #expect(!record.debugCoverDimmed)
-        record.showsMutedBadge = true
-        #expect(record.showsMutedBadge)
-        #expect(record.debugCoverDimmed, "the cover did not darken behind 🔇")
-        #expect(record.debugMutedGlyphAnimating, "the glyph appeared without its bounce")
-        record.showsMutedBadge = false
-        #expect(!record.showsMutedBadge)
-        #expect(!record.debugCoverDimmed)
-        #expect(record.debugMutedGlyphAnimating, "the glyph left without its bounce out")
-    }
-
     @Test func thePressMovesTheGlassAndTheRecordTogether() {
         let bubble = SnapSoundBubbleButton()
         let window = hosted(bubble)

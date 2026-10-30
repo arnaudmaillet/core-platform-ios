@@ -63,7 +63,7 @@ struct SnapActionColumnLayoutTests {
     /// face (greyed when it has none), which stands the sound in the column.
     static func mediaColumn(insets: UIEdgeInsets = insets) -> (like: CGRect, sound: CGRect) {
         let chrome = chrome(insets: insets)
-        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         chrome.layoutIfNeeded()
         let like = chrome.debugBoostButton
         let sound = chrome.debugSoundBubble
@@ -243,7 +243,7 @@ struct SnapActionColumnLayoutTests {
     /// and the caption and the page strip stop md short of it.
     @Test func theSoundBubbleStandsUnderTheLikePillBesideTheCaption() {
         let chrome = Self.chrome()
-        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         chrome.layoutIfNeeded()
         let like = chrome.debugFrame(of: chrome.debugBoostButton)
         let sound = chrome.debugFrame(of: chrome.debugSoundBubble)
@@ -262,7 +262,7 @@ struct SnapActionColumnLayoutTests {
     /// Every page's column, a text page's included (#695).
     @Test func aTextPageWearsTheSoundBubble() {
         let chrome = Self.chrome(mediaURL: nil)
-        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         // One column for every page (#695): the text page's composer only
         // reserves its room, on the same frames.
         #expect(!chrome.debugSoundBubble.isHidden)
@@ -277,7 +277,7 @@ struct SnapActionColumnLayoutTests {
     @Test func theComposerBubblesStandExactlyOnTheMediaLayoutsBubbles() throws {
         let media = Self.mediaColumn()
         let (controller, window) = Self.engagedPanel()
-        controller.setRailSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        controller.setRailSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         controller.view.layoutIfNeeded()
         let composer = try Self.composerColumn(in: controller.view, space: window)
 
@@ -678,7 +678,7 @@ struct SnapActionColumnLayoutTests {
     @Test func theColumnHoldsTheMediaLayoutsBubblesWithTheKeyboardUp() throws {
         let media = Self.mediaColumn()
         let (controller, window) = Self.engagedPanel()
-        controller.setRailSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        controller.setRailSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         controller.view.layoutIfNeeded()
         let rest = try Self.composerColumn(in: controller.view, space: window)
         let keyboard = Self.fakeKeyboard(in: controller.view, for: rest.bar, top: Self.screen.height)

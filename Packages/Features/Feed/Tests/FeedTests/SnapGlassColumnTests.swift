@@ -8,7 +8,7 @@ import UIKit
 /// its bubble's glass, on its station.
 @MainActor
 struct SnapGlassColumnTests {
-    private static let face = SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false)
+    private static let face = SnapSoundFace(coverURL: nil, isAvailable: true)
 
     private func mediaChrome(postActions: Bool) -> SnapChromeView {
         let chrome = SnapChromeView(frame: SnapActionColumnLayoutTests.screen)

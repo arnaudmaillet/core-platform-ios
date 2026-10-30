@@ -187,7 +187,7 @@ struct SnapPillImagesOnPipelineTests {
 
         let pill = SnapMediaAttributionView()
         pill.setPost(model, pipeline: pipeline, animated: false)
-        let face = SnapSoundFace(coverURL: coverURL, isAvailable: true, isMuted: false, pipeline: pipeline)
+        let face = SnapSoundFace(coverURL: coverURL, isAvailable: true, pipeline: pipeline)
         let bubble = SnapSoundBubbleButton()
         bubble.setFace(face, pipeline: pipeline)
 
@@ -202,7 +202,7 @@ struct SnapPillImagesOnPipelineTests {
     @Test func theSoundBubblesRemoteCoverComesFromThePipeline() async {
         let pipeline = Self.pipeline()
         let url = Self.url("bubble-remote")
-        let face = SnapSoundFace(coverURL: url, isAvailable: true, isMuted: false, pipeline: pipeline)
+        let face = SnapSoundFace(coverURL: url, isAvailable: true, pipeline: pipeline)
         #expect(face.localCover == nil, "a remote cover is not a local one")
 
         let bubble = SnapSoundBubbleButton()
@@ -213,7 +213,7 @@ struct SnapPillImagesOnPipelineTests {
         #expect(bubble.debugCoverImage != nil, "the remote cover never landed")
 
         let orphan = SnapSoundBubbleButton()
-        orphan.setFace(SnapSoundFace(coverURL: url, isAvailable: true, isMuted: false), pipeline: nil)
+        orphan.setFace(SnapSoundFace(coverURL: url, isAvailable: true), pipeline: nil)
         try? await Task.sleep(for: .milliseconds(50))
         #expect(orphan.debugCoverImage == nil, "a face with no pipeline found a remote cover somewhere else")
     }
@@ -230,9 +230,9 @@ struct SnapPillImagesOnPipelineTests {
         try png.write(to: file)
         defer { try? FileManager.default.removeItem(at: file) }
 
-        let first = SnapSoundFace(coverURL: file, isAvailable: true, isMuted: false, pipeline: pipeline).localCover
+        let first = SnapSoundFace(coverURL: file, isAvailable: true, pipeline: pipeline).localCover
         try FileManager.default.removeItem(at: file)
-        let second = SnapSoundFace(coverURL: file, isAvailable: true, isMuted: false, pipeline: pipeline).localCover
+        let second = SnapSoundFace(coverURL: file, isAvailable: true, pipeline: pipeline).localCover
 
         #expect(first != nil, "the file cover was not read")
         #expect(second === first, "the second face read the disk again instead of the pipeline")
@@ -242,7 +242,7 @@ struct SnapPillImagesOnPipelineTests {
     /// same cover are equal, so a host never redraws for a pipeline alone.
     @Test func aFacesPipelineIsNotPartOfItsEquality() {
         let url = Self.url("equal")
-        #expect(SnapSoundFace(coverURL: url, isAvailable: true, isMuted: false, pipeline: Self.pipeline())
-            == SnapSoundFace(coverURL: url, isAvailable: true, isMuted: false))
+        #expect(SnapSoundFace(coverURL: url, isAvailable: true, pipeline: Self.pipeline())
+            == SnapSoundFace(coverURL: url, isAvailable: true))
     }
 }

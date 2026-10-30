@@ -8,25 +8,22 @@ struct SnapSoundFace: Equatable {
     /// draws the note (a named song with no artwork).
     var coverURL: URL?
     /// The post plays a sound. False — a media post with no audio — draws
-    /// the bubble greyed and refuses the mute.
+    /// the bubble greyed.
     var isAvailable: Bool
-    /// The feed's sound is off (`FeedSound`).
-    var isMuted: Bool
     /// Where a remote cover is read from on this turn (#894): the feed's
     /// pipeline, whose memory the attribution pill fills too. Nil reads files
     /// only. Not part of what the face IS: two faces that draw the same
     /// cover are equal whoever holds the pipeline.
     var pipeline: ImagePipeline?
 
-    init(coverURL: URL?, isAvailable: Bool, isMuted: Bool, pipeline: ImagePipeline? = nil) {
+    init(coverURL: URL?, isAvailable: Bool, pipeline: ImagePipeline? = nil) {
         self.coverURL = coverURL
         self.isAvailable = isAvailable
-        self.isMuted = isMuted
         self.pipeline = pipeline
     }
 
     static func == (lhs: SnapSoundFace, rhs: SnapSoundFace) -> Bool {
-        lhs.coverURL == rhs.coverURL && lhs.isAvailable == rhs.isAvailable && lhs.isMuted == rhs.isMuted
+        lhs.coverURL == rhs.coverURL && lhs.isAvailable == rhs.isAvailable
     }
 
     /// The cover drawn without a fetch: the struck note, the note, or a FILE
@@ -171,10 +168,9 @@ final class SnapSoundBubbleButton: UIButton {
         let coverChanged = face?.coverURL != self.face?.coverURL || self.face == nil
             || face?.isAvailable != self.face?.isAvailable
         self.face = face
-        record.showsMutedBadge = (face?.isMuted ?? false) && (face?.isAvailable ?? false)
         isEnabled = face?.isAvailable ?? false
         alpha = face?.isAvailable == false ? 0.45 : 1
-        accessibilityValue = face.map { !$0.isAvailable ? "No audio" : ($0.isMuted ? "Muted" : "On") }
+        accessibilityValue = face.map { $0.isAvailable ? nil : "No audio" } ?? nil
         // A face that loses its sound always counts as a cover change, so the
         // record stops here at once, not at the host's next look (#1871).
         guard coverChanged else { return }
@@ -197,7 +193,6 @@ final class SnapSoundBubbleButton: UIButton {
     #endif
 
     #if DEBUG
-    var debugIsMutedBadgeShown: Bool { record.showsMutedBadge }
     var debugRecord: SoundRecordGlass { record }
     var debugCoverImage: UIImage? { coverView.image }
     #endif
