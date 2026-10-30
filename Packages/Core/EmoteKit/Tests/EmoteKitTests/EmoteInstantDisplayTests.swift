@@ -32,7 +32,11 @@ struct EmoteInstantDisplayTests {
             asked.count += 1
             return nil
         })
-        engine.bakeDelay = .seconds(30)
+        // ⚠️ A DELAY NO RUN OUTLASTS (#1948). At 30 s, a starved CI runner
+        // took 59 s over this test: the lazy request, kept alive to the end,
+        // baked too, and `asked` counted 2. An hour keeps it waiting however
+        // slow the run, so the count below is the urgent request's alone.
+        engine.bakeDelay = .seconds(3600)
         let cold = try #require(catalog.emote(id: "noto:1f976"))
 
         let lazy = engine.requestArt(for: cold, pixelSide: 96, motion: .loop) { _ in }
