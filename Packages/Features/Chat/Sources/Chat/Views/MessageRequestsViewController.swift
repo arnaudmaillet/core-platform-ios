@@ -125,6 +125,19 @@ final class MessageRequestsViewController: UIViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    private let refreshControl = AppRefreshControl()
+
+    /// A pull: the page reloads, and the loader ends with the answer
+    /// (`render`) once it has turned its minimum (`AppRefreshControl`). A
+    /// reload that changes nothing may publish nothing, so it also ends on
+    /// its own after a beat.
+    private func pullToRefresh() {
+        viewModel.refresh()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            self?.refreshControl.endRefreshing()
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
@@ -137,6 +150,10 @@ final class MessageRequestsViewController: UIViewController {
         hiddenRequestsRow.addTarget(self, action: #selector(openHiddenRequests), for: .touchUpInside)
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        // Pull to refresh, with the app's loader (#1901, the owner 2026-10-30):
+        // the pull came back when search moved into the stacked field.
+        refreshControl.addAction(UIAction { [weak self] _ in self?.pullToRefresh() }, for: .valueChanged)
+        tableView.refreshControl = refreshControl
         viewModel.onHasMoreChange = { [weak self] _ in self?.updatePagingFooter() }
         viewModel.onShowsHiddenRequestsRowChange = { [weak self] _ in self?.updatePagingFooter() }
         updatePagingFooter()
@@ -208,11 +225,6 @@ final class MessageRequestsViewController: UIViewController {
         tableView.estimatedRowHeight = 84
         tableView.pin(to: view)
 
-        // ⚠️ NO REFRESH CONTROL. Pulling this list down opens search now —
-        // see `InboxPullToSearch`. The requests come from the same catalog as
-        // All, which reloads whenever the inbox appears, and this page asks
-        // for a refresh every time it becomes active.
-
         dataSource = SectionedConversationDataSource(tableView: tableView) {
             [weak self] tableView, indexPath, id in
             let cell = tableView.dequeueReusableCell(
@@ -242,6 +254,7 @@ final class MessageRequestsViewController: UIViewController {
     }
 
     private func render(_ phase: MessageRequestsViewModel.Phase) {
+        if case .loading = phase {} else { refreshControl.endRefreshing() }
         switch phase {
         case .loading:
             loading.load()

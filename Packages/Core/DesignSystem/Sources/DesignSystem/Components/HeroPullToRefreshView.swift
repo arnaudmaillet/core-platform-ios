@@ -94,9 +94,17 @@ public final class HeroPullToRefreshView: UIView {
     public func beginRefreshing() {
         guard !isRefreshing else { return }
         isRefreshing = true
+        generation += 1
+        startedAt = CACurrentMediaTime()
         // From the frame the pull reached: no jump on release.
         loader.startAnimating()
     }
+
+    /// How long the loader turns at least once a refresh starts
+    /// (`PullRefreshTiming`). Tests set 0.
+    public var minimumShown = PullRefreshTiming.minimumShown
+    private var startedAt: CFTimeInterval?
+    private var generation = 0
 
     #if DEBUG
     public var debugIsRefreshing: Bool { isRefreshing }
@@ -106,6 +114,19 @@ public final class HeroPullToRefreshView: UIView {
     /// refreshed or not, so this is called far more often than it acts.
     public func endRefreshing() {
         guard isRefreshing else { return }
+        // Not before it has turned `minimumShown` (#1901).
+        if let startedAt {
+            let left = minimumShown - (CACurrentMediaTime() - startedAt)
+            if left > 0 {
+                let asked = generation
+                DispatchQueue.main.asyncAfter(deadline: .now() + left) { [weak self] in
+                    guard let self, self.generation == asked else { return }
+                    self.endRefreshing()
+                }
+                return
+            }
+        }
+        startedAt = nil
         isRefreshing = false
         isSettling = true
         // The mark fades where it is.

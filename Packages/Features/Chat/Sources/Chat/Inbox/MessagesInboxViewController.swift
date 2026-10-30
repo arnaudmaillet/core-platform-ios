@@ -26,7 +26,7 @@ import UIKit
 /// is the only reset there is — see `InboxTabWatermark`.
 ///
 /// **The bar is written once and never again.** The tab's name in the centre
-/// and the search magnifier trailing — the selector moved to the accessory and
+/// and the search field stacked under it — the selector moved to the accessory and
 /// compose went with the leading group. Both belong to the inbox as a whole
 /// rather than to any page, which was always the point: a page publishing its
 /// own word up there would re-measure the bar on every tab change. What a page
@@ -34,7 +34,7 @@ import UIKit
 /// The one exception is search, which takes the title slot for its field —
 /// a `titleView` outranks a `title`, so the name hides and returns by itself.
 /// The shell adds two items of its own through `HeaderAccessoryHosting` — the
-/// notifications bell leading and the balance beside the magnifier — which
+/// notifications bell leading and the balance trailing — which
 /// are the app's rather than the inbox's, and so page with nothing either.
 final class MessagesInboxViewController: UIViewController, MessagesInboxCategorySelecting,
     HeaderAccessoryHosting {
@@ -72,21 +72,13 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     private var newCountsByCategory: [MessagesCategory: Int] = [:]
 
     /// Global search across every category, or `nil` in a composition without
-    /// it (the surfaces still page, and no magnifier appears).
+    /// it (the surfaces still page, and no search field appears).
     ///
     /// It belongs to the container for the same reason the bar items do: a
     /// paged child has no navigation bar, so the only `navigationItem` on
     /// screen is this one. Scoping the query to a page would be the wrong
     /// answer anyway — see `InboxSearchViewModel`.
     private let searchResults: InboxSearchResultsViewController?
-
-    /// Pull-down-to-search, following whichever page is in front: pulling any
-    /// page past a line and letting go opens search — see `InboxPullToSearch`.
-    /// It replaced the pages' pull-to-refresh, and goes through
-    /// `presentSearch`, the magnifier's own path, so the two entrances cannot
-    /// drift apart. Exists only in a composition WITH search: a pull that
-    /// armed and then did nothing would be a lie.
-    private lazy var pullToSearch: InboxPullToSearch? = searchResults == nil ? nil : InboxPullToSearch()
 
     init(
         surfaces: [any InboxSurface],
@@ -153,8 +145,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         configureSearchAffordance()
         // ⚠️ Loaded NOW, not on the first tap. This controller builds a
         // compositional layout, four cell registrations and a diffable source in
-        // `viewDidLoad`, and doing that inside the field's expansion is the pause between the
-        // magnifier and the field. Loading the view is all it takes; it stays out
+        // `viewDidLoad`, and doing that as the field activates is a pause between
+        // the tap and the results. Loading the view is all it takes; it stays out
         // of the hierarchy until search opens.
         searchResults?.loadViewIfNeeded()
 
@@ -185,10 +177,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
         for surface in surfaces { surface.didMove(toParent: self) }
 
-        configurePullToSearch()
-
         // ⚠️ **The selector has the leading group to ITSELF; compose rides
-        // trailing beside the magnifier.**
+        // trailing.**
         //
         // Two leading items collapse on a narrow bar and one survives — the same
         // rule the profile hit, where moving its switcher trailing is what finally
@@ -232,19 +222,14 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         pagerView.onProgress = { [weak self] progress in
             guard let self else { return }
             categoryBar.setProgress(progress)
-            // Mid-page the two pages share the screen and neither list is
-            // "the" list; a pull only counts on a settled page.
-            isBetweenPages = abs(progress - progress.rounded()) > 0.01
-            updatePullToSearchAvailability()
         }
         pagerView.onSettled = { [weak self] index in self?.didSettle(on: index) }
         // The band's minimize rides whichever page is in front. The pager is
         // what knows, and it is what says so — see `onActiveScrollViewChanged`.
         pagerView.onActiveScrollViewChanged = { [weak self] scroller in
             self?.setContentScrollView(scroller, for: .bottom)
-            // The pull follows the same list the band's minimize does, for the
-            // same reason: only the pager knows which page is in front.
-            self?.pullToSearch?.attach(to: scroller)
+            // The stacked field collapses into the bar as this list scrolls.
+            self?.setContentScrollView(scroller, for: .top)
         }
 
 
@@ -345,7 +330,6 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
                 self?.select(index: target, animated: true)
             }
         }
-        runPullToSearchDemo(arguments)
         // `-inbox-search-open`: the same, on the inbox.
         if arguments.contains("-inbox-search-open") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
@@ -378,7 +362,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// `-inbox-search-cancel` collapses it again two seconds later.
     ///
     /// Driven through `isActive` plus the real updater rather than by poking the
-    /// view model, so it exercises the same path a tap on the magnifier takes —
+    /// view model, so it exercises the same path a tap on the field takes —
     /// the presentation over the pager, the covered category bar, and the
     /// sectioned results are the whole point of the seam and all three are
     /// unreachable from a view-model call. The simulator's keyboard is not
@@ -387,7 +371,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         guard let index = arguments.firstIndex(of: "-inbox-search-query"),
               let text = arguments.dropFirst(index + 1).first, !text.hasPrefix("-")
         else { return }
-        // Drives the same path the magnifier does: present, type, filter.
+        // Drives the same path a tap on the field does: present, type, filter.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self else { return }
             // Requirement checks, both invisible in a screenshot: the results
@@ -425,13 +409,25 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     // MARK: - Search
 
-    /// THE SYSTEM'S SEARCH (#1679, the owner 2026-10-24): a `UISearchController`
-    /// whose bar rests as the magnifier and expands into the field in place —
-    /// UIKit's own animation, its own Close — with the results presented over
-    /// the inbox. It replaced a `UISearchTextField` swapped into the title slot
-    /// under a hand-made cross-dissolve of the whole bar (R3).
+    /// THE SYSTEM'S SEARCH (#1679, the owner 2026-10-24): a `UISearchController`,
+    /// its results presented over the inbox.
     ///
-    /// Nil in a composition without results: no magnifier then.
+    /// ⚠️ **STACKED UNDER THE BAR, NOT A BUTTON IN IT (#1901, the owner
+    /// 2026-10-30).** It rested as a magnifier (`.integratedButton`) whose
+    /// close kept the field at nearly its open width as it slid back, then
+    /// shrank at the very end: a wide empty capsule across the bar at every
+    /// close, filmed on the owner's device. A long bench ruled out the
+    /// placeholder, the magnifier's place, the bar's items, the tab bar and
+    /// the band; UIKit's collapse could not be tamed with public API, and the
+    /// ✕ of an integrated search calls no delegate before it plays. The
+    /// stacked field never collapses into a button: it rests under the bar
+    /// with its placeholder, collapses into the bar as the list scrolls
+    /// (`hidesSearchBarWhenScrolling`, on the page in front, see
+    /// `onActiveScrollViewChanged`), and wears UIKit's own Cancel. The pull
+    /// that opened search went with the magnifier: the pages' pull refreshes
+    /// again (`AppRefreshControl`).
+    ///
+    /// Nil in a composition without results: no search field then.
     private lazy var searchController: UISearchController? = searchResults.map { results in
         let controller = UISearchController(searchResultsController: results)
         controller.searchResultsUpdater = self
@@ -470,14 +466,14 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
             // The results cover the inbox, not the tab bar controller.
             definesPresentationContext = true
             navigationItem.searchController = searchController
-            navigationItem.preferredSearchBarPlacement = .integratedButton
-            navigationItem.hidesSearchBarWhenScrolling = false
+            navigationItem.preferredSearchBarPlacement = .stacked
+            navigationItem.hidesSearchBarWhenScrolling = true
         }
         applyRestingBar()
     }
 
     /// The shell's items: the notifications bell at the head of the leading
-    /// group, the balance inboard of the magnifier.
+    /// group, the balance trailing.
     private var leadingAccessoryItem: UIBarButtonItem?
     private var trailingAccessoryItem: UIBarButtonItem?
 
@@ -499,8 +495,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     ///
     /// What the shell hands in — the bell leading, the balance trailing —
     /// and, after the bell, the section the page in front has scrolled into
-    /// (`applyPinnedSection`, #1301). The magnifier is NOT among the items:
-    /// `.integratedButton` places it, at the corner.
+    /// (`applyPinnedSection`, #1301). The search is not among the items: it
+    /// is stacked under the bar (`searchController`).
     ///
     /// ⚠️ NEVER `searchBarPlacementBarButtonItem` IN THE NAVIGATION BAR: iOS 26
     /// throws ("only supported in UIToolbar") — iOS 27 accepts it, which is
@@ -523,7 +519,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     ///
     /// ⚠️ ONLY THE LEADING GROUP. Toasts own the trailing one while they show
     /// (`NavigationBarToasts`, #1066); rewriting the whole resting bar on every
-    /// change would put the magnifier back over a toast.
+    /// change would put the balance back over a toast.
     private lazy var sectionBinding: PinnedSectionBarBinding = {
         let binding = PinnedSectionBarBinding(
             viewController: self, placement: .leading, scope: "inbox", countNoun: "unread"
@@ -558,7 +554,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     func debugSettle(on index: Int) { didSettle(on: index) }
     #endif
 
-    /// Opens search — the magnifier's tap, a pull — focused.
+    /// Opens search, focused — what `-inbox-search-query` drives.
     private func presentSearch() {
         guard let searchController, !searchController.isActive else { return }
         searchController.isActive = true
@@ -566,125 +562,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         DispatchQueue.main.async { searchController.searchBar.searchTextField.becomeFirstResponder() }
     }
 
-    /// Closes search: the field folds back into the magnifier.
+    /// Closes search: the field rests under the bar again.
     private func dismissSearch() {
         searchController?.isActive = false
     }
-
-    // MARK: - Pull to search
-
-    /// Whether the pager is between two pages right now.
-    private var isBetweenPages = false
-
-    /// Places the capsule and points the gesture at `presentSearch`.
-    ///
-    /// The capsule is the CONTAINER's view, laid over the pager just under the
-    /// bar: every page's pull reveals the same one, and it stays put while a
-    /// page change slides the lists beneath it. It is added AFTER the pager so
-    /// it draws above the lists; search results, added later still, cover it.
-    private func configurePullToSearch() {
-        guard let pullToSearch else { return }
-        let indicator = pullToSearch.indicator
-        indicator.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(indicator)
-        NSLayoutConstraint.activate([
-            indicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            indicator.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor)
-        ])
-        // The magnifier's own path — the field out of the magnifier, the
-        // hidden tab bar, the focus — so a pull and a tap cannot open two
-        // different searches.
-        pullToSearch.onTrigger = { [weak self] in self?.presentSearch() }
-    }
-
-    private func updatePullToSearchAvailability() {
-        pullToSearch?.isEnabled = !isSearching && !isBetweenPages
-    }
-
-    #if DEBUG
-    /// `-messages-pull-demo [short|peek|hold|sweep]` drives the pull the way a
-    /// finger would — the active list's offset, frame by frame, with the
-    /// gesture marked as tracking — and then lets go, through the same release
-    /// path a lifted finger takes. The simulator injects no pans, so this is
-    /// the only headless way to see the capsule arrive, arm and open search.
-    ///
-    /// - default: pulls past the line and releases → search must open.
-    /// - `short`: stops short of the line and releases → nothing must open.
-    /// - `peek`: stops short of the line and STAYS there (for a screenshot of
-    ///   the in-between capsule, its meter part-filled); nothing is released.
-    /// - `hold`: pulls past the line and STAYS there (for a screenshot of the
-    ///   armed capsule); nothing is released.
-    /// - `sweep`: slowly past the line, back above it (past the hysteresis),
-    ///   past it again, then releases → search must open. For a screen
-    ///   recording of the arming AND the disarming motion, both directions.
-    ///
-    /// Waits for a settled, on-screen, populated list rather than a clock, and
-    /// prints `[qa] GAVE UP` if that never comes.
-    private func runPullToSearchDemo(_ arguments: [String]) {
-        guard let index = arguments.firstIndex(of: "-messages-pull-demo") else { return }
-        let mode = arguments.dropFirst(index + 1).first.flatMap { $0.hasPrefix("-") ? nil : $0 } ?? "full"
-        let label = "-messages-pull-demo \(mode)"
-        QAWait.until(label, { [weak self] in
-            guard let self, let pull = pullToSearch, let list = pull.debugScrollView else { return self == nil }
-            return view.window != nil && !isSearching && !isBetweenPages
-                && transitionCoordinator == nil && !list.isHidden && list.window != nil
-                && list.contentSize.height > 0
-        }) { [weak self] in
-            guard let self, let pull = pullToSearch else { return }
-            if let list = pull.debugScrollView {
-                print("[pull-search] before: offsetY=\(Int(list.contentOffset.y)) "
-                    + "restY=\(Int(-list.adjustedContentInset.top))")
-            }
-            let line = InboxPullToSearch.threshold
-            let short = mode == "short" || mode == "peek"
-            let target = short ? line * 0.6 : line + 24
-            // Each leg reports what the capsule shows once it lands, so a run
-            // is judged on the arming state, not on a screenshot alone.
-            let report: @MainActor (String) -> Void = { [weak self] leg in
-                guard let pull = self?.pullToSearch else { return }
-                print("[pull-search] \(leg): pulled=\(Int(pull.pullDistance)) armed=\(pull.isArmed) "
-                    + "ring=\(String(format: "%.2f", pull.indicator.debugRingProgress)) "
-                    + "label=\(pull.indicator.debugLabelText ?? "-")")
-            }
-            // `sweep` goes out, back and out again before the common release;
-            // every other mode goes straight out.
-            let legs: [(name: String, distance: CGFloat, duration: TimeInterval)] = mode == "sweep"
-                ? [("out", line + 24, 1.2), ("back", line * 0.55, 1.2), ("again", line + 24, 1.2)]
-                : [("pulled", target, 0.6)]
-            @MainActor func run(_ index: Int, then finish: @escaping @MainActor () -> Void) {
-                guard index < legs.count, let pull = pullToSearch else { return finish() }
-                let leg = legs[index]
-                pull.debugPull(to: leg.distance, duration: leg.duration) {
-                    report(leg.name)
-                    run(index + 1, then: finish)
-                }
-            }
-            run(0) { [weak self] in
-                guard let self, let pull = pullToSearch else { return }
-                guard mode != "hold", mode != "peek" else { return }
-                pull.debugRelease()
-                if mode == "short" {
-                    // Nothing may open — an absence, which no wait can detect,
-                    // so the verdict is read once the bounce-back is over.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-                        let list = self?.pullToSearch?.debugScrollView
-                        // The list must also be back at REST, not left hanging
-                        // where the pull let go of it.
-                        print("[pull-search] short pull: searching=\(self?.isSearching == true) "
-                            + "offsetY=\(list.map { Int($0.contentOffset.y) } ?? 0) "
-                            + "restY=\(list.map { Int(-$0.adjustedContentInset.top) } ?? 0)")
-                    }
-                } else {
-                    QAWait.until("\(label): search opening", timeout: 3, { [weak self] in
-                        self?.isSearching ?? true
-                    }) { [weak self] in
-                        print("[pull-search] searching=\(self?.isSearching == true)")
-                    }
-                }
-            }
-        }
-    }
-    #endif
 
     // MARK: - Category selection
 
@@ -783,11 +664,7 @@ extension MessagesInboxViewController: UISearchResultsUpdating, UISearchControll
     /// controller's view — over the results (`.regular`'s documented
     /// behaviour).
     func willPresentSearchController(_ searchController: UISearchController) {
-        // The words come back before the field opens (#1901): the close left
-        // it empty.
-        searchController.searchBar.placeholder = Self.searchPlaceholder
         isSearching = true
-        updatePullToSearchAvailability()
         searchResults?.applyQuery("")
         selectorAccessory?.remove(from: tabBarController)
         tabBarController?.setTabBarHidden(true, animated: true)
@@ -801,18 +678,8 @@ extension MessagesInboxViewController: UISearchResultsUpdating, UISearchControll
 
     /// The band comes back with the bar it left with. `minimizesOnScroll` is
     /// re-armed for the same reason it is armed on appearing.
-    ///
-    /// ⚠️ **THE FIELD COLLAPSES EMPTY (#1901).** UIKit slides the open field
-    /// back into the magnifier with whatever it holds, and the owner filmed
-    /// "Search people and chats" running across the bar and over the balance
-    /// pill on the way. Emptied first (the typed text and the placeholder),
-    /// it shrinks as a bare capsule. A submitted query is in the history
-    /// already (`searchBarSearchButtonClicked`).
     func willDismissSearchController(_ searchController: UISearchController) {
-        searchController.searchBar.text = ""
-        searchController.searchBar.placeholder = ""
         isSearching = false
-        updatePullToSearchAvailability()
         tabBarController?.setTabBarHidden(false, animated: true)
         selectorAccessory?.install(into: tabBarController, owner: self, minimizesOnScroll: true)
     }

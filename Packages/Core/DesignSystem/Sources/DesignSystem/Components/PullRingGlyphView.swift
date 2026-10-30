@@ -1,8 +1,8 @@
 import UIKit
 
-/// A glyph that a pull rings, then floods (the owner, 2026-10-18): the
-/// Messages inbox's pull-to-search meter (`PullToSearchIndicatorView`) on a
-/// glyph alone — for the shelves' pull past a row's end, which pushes "View
+/// A glyph that a pull rings, then floods (the owner, 2026-10-18), born as
+/// the Messages inbox's pull-to-search meter (gone with that pull, #1901) on
+/// a glyph alone — for the shelves' pull past a row's end, which pushes "View
 /// all" (`ShelfViewAllCell`).
 ///
 /// - **Pulling:** a ring draws itself around the glyph as the pull grows

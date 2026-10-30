@@ -70,12 +70,29 @@ final class SuggestionsViewController: UIViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    private let refreshControl = AppRefreshControl()
+
+    /// A pull: the page reloads, and the loader ends with the answer
+    /// (`render`) once it has turned its minimum (`AppRefreshControl`). A
+    /// reload that changes nothing may publish nothing, so it also ends on
+    /// its own after a beat.
+    private func pullToRefresh() {
+        viewModel.refresh()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            self?.refreshControl.endRefreshing()
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         configureTableView()
         configureStatusViews()
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        // Pull to refresh, with the app's loader (#1901, the owner 2026-10-30):
+        // the pull came back when search moved into the stacked field.
+        refreshControl.addAction(UIAction { [weak self] _ in self?.pullToRefresh() }, for: .valueChanged)
+        tableView.refreshControl = refreshControl
         // The row has already flipped back; the toast says why (#802).
         viewModel.onFollowFailure = { [weak self] message in
             guard let self else { return }
@@ -106,11 +123,6 @@ final class SuggestionsViewController: UIViewController {
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 76
         tableView.pin(to: view)
-
-        // ⚠️ NO REFRESH CONTROL. Pulling this list down opens search now —
-        // see `InboxPullToSearch`. The pull was this page's ONLY refresh, so
-        // `surfaceDidBecomeActive` refreshes it instead, every time the page
-        // comes to the front.
 
         dataSource = UITableViewDiffableDataSource(tableView: tableView) {
             [weak self] tableView, indexPath, id in
@@ -151,6 +163,7 @@ final class SuggestionsViewController: UIViewController {
     }
 
     private func render(_ phase: SuggestionsViewModel.Phase) {
+        if case .loading = phase {} else { refreshControl.endRefreshing() }
         switch phase {
         case .loading:
             loading.load()

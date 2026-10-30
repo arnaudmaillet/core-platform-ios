@@ -130,6 +130,19 @@ final class ConversationListViewController: UIViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    private let refreshControl = AppRefreshControl()
+
+    /// A pull: the page reloads, and the loader ends with the answer
+    /// (`render`) once it has turned its minimum (`AppRefreshControl`). A
+    /// reload that changes nothing may publish nothing, so it also ends on
+    /// its own after a beat.
+    private func pullToRefresh() {
+        viewModel.refresh()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            self?.refreshControl.endRefreshing()
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
@@ -137,6 +150,10 @@ final class ConversationListViewController: UIViewController {
         configureStatusViews()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        // Pull to refresh, with the app's loader (#1901, the owner 2026-10-30):
+        // the pull came back when search moved into the stacked field.
+        refreshControl.addAction(UIAction { [weak self] _ in self?.pullToRefresh() }, for: .valueChanged)
+        tableView.refreshControl = refreshControl
         viewModel.onHasMoreChange = { [weak self] _ in self?.updatePagingFooter() }
         // A row's mute, once the server has answered (#803).
         viewModel.onMuteAnswered = { [weak self] message, muting, confirmed in
@@ -267,12 +284,6 @@ final class ConversationListViewController: UIViewController {
         tableView.estimatedRowHeight = 72
         tableView.pin(to: view)
 
-        // ⚠️ NO REFRESH CONTROL. Pulling this list down opens search now —
-        // see `InboxPullToSearch`, which the inbox container attaches to
-        // whichever page is in front. Freshness does not depend on a pull:
-        // the list reloads on every appearance (`viewWillAppear`) and every
-        // time this page becomes active (`surfaceDidBecomeActive`).
-
         adapter = ConversationListTableAdapter(tableView: tableView) {
             [weak self] tableView, indexPath, id in
             let cell = tableView.dequeueReusableCell(
@@ -310,6 +321,7 @@ final class ConversationListViewController: UIViewController {
     }
 
     private func render(_ phase: ConversationListViewModel.Phase) {
+        if case .loading = phase {} else { refreshControl.endRefreshing() }
         switch phase {
         case .loading:
             loading.load()
