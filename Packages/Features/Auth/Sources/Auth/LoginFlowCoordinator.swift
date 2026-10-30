@@ -185,7 +185,11 @@ final class LoginFlowCoordinator {
                     channel, to: destination, locale: Locale.current.identifier(.bcp47)
                 )
                 step?.setWorking(false)
-                self?.showCode(challenge, display: display)
+                // The form swiped away while the code was on its way: the
+                // viewer went back to the list, and no form comes back
+                // unasked (#1908).
+                guard let self, self.isInForm(step) else { return }
+                showCode(challenge, display: display)
             } catch {
                 step?.setWorking(false)
                 self?.presentFlowError(error, on: step as? SignUpStepViewController)
@@ -551,6 +555,12 @@ final class LoginFlowCoordinator {
         formNavigation = form
         list.formStack = form
         list.present(form, animated: true)
+    }
+
+    /// Whether `step` is still in the form's sheet.
+    private func isInForm(_ step: AnyObject?) -> Bool {
+        guard let step else { return true }
+        return formNavigation?.viewControllers.contains { $0 === step } ?? false
     }
 
     /// Back to the method list: the form's sheet goes.

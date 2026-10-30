@@ -520,7 +520,10 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             // Signed in from the sheet: say so once it is gone, over the
             // screen the guest was on — where the action they started has
             // just landed.
-            sheet.dismiss(animated: true) { [weak self] in
+            // From what presented it: the sheet may itself be presenting the
+            // form's own sheet (#1908), and `dismiss` on a presenter closes
+            // only what it presented.
+            (sheet.presentingViewController ?? sheet).dismiss(animated: true) { [weak self] in
                 // The screen on top of the active tab: its safe area clears the
                 // tab bar, which the shell's own view does not.
                 guard let screen = self?.mainTabCoordinator?.activeNavigationController?.topViewController
