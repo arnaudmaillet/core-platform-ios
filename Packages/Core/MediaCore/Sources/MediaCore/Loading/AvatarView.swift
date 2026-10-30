@@ -89,6 +89,9 @@ public final class AvatarView: UIView {
             // the initials stay opaque behind it while it fades (the fade law).
             monogram.isCovered = (ladder.rung == .content && picture.image != nil)
                 || (ladder.rung == .preview && standIn.image != nil)
+            // The initials as the face, not the floor a picture loads on
+            // (#1912): their own grey.
+            monogram.showsFinalInitials = ladder.rung == .placeholder
         }
         ladder.show(.placeholder, token: slot.begin(nil), warm: true)
     }
@@ -156,8 +159,10 @@ public final class AvatarView: UIView {
         picture.image = nil
         standIn.image = nil
         monogram.isCovered = false
-        // No picture: the initials, now. A picture: nothing yet — the
-        // ladder brings the skeleton in if it is late.
+        // No picture: the initials, now — the face's final state (#1912). A
+        // picture: nothing yet — the ladder brings the skeleton in if it is
+        // late, over the media ground.
+        monogram.showsFinalInitials = url == nil
         if url == nil { ladder.show(.placeholder, token: token, warm: true) }
         // After the new item has begun: a sheet already resolved hands its
         // still over now, as the picture (`adoptStill`). At the rung the
@@ -178,6 +183,7 @@ public final class AvatarView: UIView {
             guard let self else { return }
             // The picture is not coming: the initials, without animation.
             ladder.show(.placeholder, token: token, warm: true)
+            monogram.showsFinalInitials = true
             if url != nil { onSettledAfterLoad?() }
         }
         // Missed at its size: a smaller decode already at hand stands in.

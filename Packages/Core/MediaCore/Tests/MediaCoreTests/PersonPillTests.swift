@@ -1,3 +1,4 @@
+import DesignSystem
 import Testing
 import UIKit
 @testable import MediaCore
@@ -136,5 +137,46 @@ struct PersonPillTests {
         pill.setRing(.friends, animated: false)
         #expect(pill.ringRelation == .none)
         #expect(pill.drawnRingColor.cgColor.alpha == 0)
+    }
+
+    // MARK: - #1912: the ring behind the face, the initials' grey, the cutout
+
+    /// The ring is a disc BEHIND the face, never a border meeting it: two
+    /// anti-aliased edges on one circle left a hairline seam on screen.
+    @Test func theRingIsADiscBehindTheFace() {
+        let pill = Self.laidOut(PersonPill(carriesBadge: true))
+        pill.setBadge(.following, animated: false)
+        #expect(pill.ringIsBackingDisc, "the ring is a border, or in front of the face")
+    }
+
+    /// The final initials wear their own grey, apart from the badge's quiet
+    /// disc and the following ring, in both appearances.
+    @Test(arguments: [UIUserInterfaceStyle.light, .dark])
+    func theInitialsGreyIsNotTheQuietDisc(_ style: UIUserInterfaceStyle) {
+        let traits = UITraitCollection(userInterfaceStyle: style)
+        let plate = MonogramAvatarView.initialsPlateColor.resolvedColor(with: traits)
+        let quiet = PersonPillBadgeInks.quietDisc.resolvedColor(with: traits)
+        #expect(plate.cgColor != quiet.cgColor, "the initials' grey is the ring's in \(style.rawValue)")
+    }
+
+    /// A loading face keeps the media ground; only final initials change.
+    @Test func onlyFinalInitialsWearTheirGrey() {
+        let monogram = MonogramAvatarView(diameter: 36)
+        let ground = monogram.drawnPlateColor.cgColor
+        monogram.showsFinalInitials = true
+        #expect(monogram.drawnPlateColor.cgColor != ground)
+        monogram.showsFinalInitials = false
+        #expect(monogram.drawnPlateColor.cgColor == ground)
+    }
+
+    /// The badge is cut out of the face it overlaps: its radius plus 1.5 pt.
+    @Test func theBadgeIsCutOutOfTheFace() {
+        let pill = Self.laidOut(PersonPill(carriesBadge: true))
+        pill.setBadge(.follow, animated: false)
+        pill.layoutIfNeeded()
+        #expect(pill.drawnCutoutRadius == 10 + PersonPill.cutoutGap)
+        pill.setBadge(.none, animated: false)
+        pill.layoutIfNeeded()
+        #expect(pill.drawnCutoutRadius == nil, "a cutout with no badge")
     }
 }

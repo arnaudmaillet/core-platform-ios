@@ -65,9 +65,46 @@ public final class MonogramAvatarView: UIView {
         CATransaction.setDisableActions(true)
         plate.frame = rect
         plate.path = shape.path(in: CGRect(origin: .zero, size: rect.size)).cgPath
-        plate.fillColor = Self.plateColor.resolvedColor(with: traitCollection).cgColor
+        plate.fillColor = currentPlateColor.resolvedColor(with: traitCollection).cgColor
         CATransaction.commit()
     }
+
+    private var currentPlateColor: UIColor { showsFinalInitials ? Self.initialsPlateColor : Self.plateColor }
+
+    /// Whether the initials are the face's FINAL state — no picture, or one
+    /// that failed — rather than the floor a picture is loading on (#1912).
+    /// Final, the plate wears its own grey (`initialsPlateColor`), so the
+    /// face stands apart from the following ring and the badge's disc, which
+    /// are the media ground's grey too; loading, it stays the media ground
+    /// (#1771). The change is a cross-fade, never a flash.
+    public var showsFinalInitials = false {
+        didSet {
+            guard showsFinalInitials != oldValue else { return }
+            let target = currentPlateColor.resolvedColor(with: traitCollection).cgColor
+            if window != nil {
+                let fade = CABasicAnimation(keyPath: "fillColor")
+                fade.fromValue = plate.presentation()?.fillColor ?? plate.fillColor
+                fade.toValue = target
+                fade.duration = 0.2
+                plate.add(fade, forKey: "fillColor")
+            }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            plate.fillColor = target
+            CATransaction.commit()
+        }
+    }
+
+    /// The final initials' grey (#1912): a step darker than the media ground
+    /// in light mode, a step lighter in dark — apart from the badge's quiet
+    /// disc and the following ring in both. The candidates the owner compared
+    /// are on the PR.
+    public static let initialsPlateColor = UIColor { traits in
+        traits.userInterfaceStyle == .dark ? .systemGray3 : .systemGray4
+    }
+
+    /// The plate's colour as drawn now. Tests.
+    public var drawnPlateColor: UIColor { UIColor(cgColor: plate.fillColor ?? UIColor.clear.cgColor) }
 
     /// ⚠️ ROUND FROM BIRTH, not from the first layout pass. The diameter is
     /// known here, and a disc whose radius waits for `layoutSubviews` is a
