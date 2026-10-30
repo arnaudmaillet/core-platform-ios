@@ -216,16 +216,17 @@ public final class PersonPill: UIView {
             row.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
         }
 
-        // ⚠️ THE RING IS A DISC BEHIND THE FACE (#1912), never a border round
-        // it. A 2 pt border whose inner edge met the face's edge left a
-        // hairline seam on screen: two anti-aliased edges on the same circle,
-        // each letting the backdrop through its uncovered part of a pixel.
-        // Drawn behind, the face's edge blends over the ring's colour, and
-        // no seam can form. The friends' ring is the accent (#1379): a view's
-        // background re-resolves a dynamic colour itself.
+        // ⚠️ THE RING IS A BAND THAT RUNS UNDER THE FACE'S EDGE (#1912), never
+        // a border meeting it. A 2 pt border whose inner edge met the face's
+        // edge left a hairline seam on screen: two anti-aliased edges on the
+        // same circle, each letting the backdrop through its uncovered part
+        // of a pixel. Running `ringTuck` under the face, its inner edge is
+        // hidden, and no seam can form. ⚠️ AND NOT A FULL DISC (the owner's
+        // device, 2026-10-30): behind a face still loading — transparent, or
+        // a picture half drawn — a disc showed as a grey plate, with a piece
+        // of the picture over it. The friends' ring is the accent (#1379).
         ring.isUserInteractionEnabled = false
         ring.layer.addSublayer(ringShape)
-        ringShape.fillRule = .evenOdd
         // A shape layer fills black until told otherwise.
         ringShape.fillColor = UIColor.clear.cgColor
         ring.constrain(in: self) { _ in
@@ -473,21 +474,33 @@ public final class PersonPill: UIView {
 
     /// The ring's disc, less the badge's cutout, in its resolved ink.
     private func drawRing() {
-        let path = UIBezierPath(ovalIn: ring.bounds)
-        if let circle = cutoutCircle(in: ring) { path.append(circle) }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         ringShape.frame = ring.bounds
-        ringShape.path = path.cgPath
+        ringShape.path = Self.ringPath(in: ring.bounds, cutout: cutoutCircle(in: ring)?.cgPath)
         ringShape.fillColor = ringInk.resolvedColor(with: traitCollection).cgColor
         CATransaction.commit()
+    }
+
+    /// How far the ring's band runs under the face's edge, hiding its inner
+    /// edge.
+    static let ringTuck: CGFloat = 1
+
+    /// The ring's band in `bounds` — from its outer edge to `ringTuck` under
+    /// the face — less the badge's `cutout`. Pure, for tests.
+    static func ringPath(in bounds: CGRect, cutout: CGPath?) -> CGPath {
+        guard bounds.width > 0, bounds.height > 0 else { return CGPath(rect: .zero, transform: nil) }
+        let inset = PersonPillRing.width + ringTuck
+        let band = CGPath(ellipseIn: bounds, transform: nil)
+            .subtracting(CGPath(ellipseIn: bounds.insetBy(dx: inset, dy: inset), transform: nil))
+        return cutout.map { band.subtracting($0) } ?? band
     }
 
     /// Whether the ring's disc has the badge's cutout taken out. Tests.
     public var ringIsCutOut: Bool {
         guard let path = ringShape.path, let circle = cutoutCircle(in: ring) else { return false }
         let centre = CGPoint(x: circle.bounds.midX, y: circle.bounds.midY)
-        return ring.bounds.contains(centre) && !path.contains(centre, using: .evenOdd)
+        return ring.bounds.contains(centre) && !path.contains(centre)
     }
 
     /// The badge's cutout as drawn on the face: its radius, nil without one.

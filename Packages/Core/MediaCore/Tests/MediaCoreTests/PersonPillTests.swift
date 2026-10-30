@@ -192,6 +192,19 @@ struct PersonPillTests {
         #expect(pill.ringIsCutOut, "the ring fills the badge's cutout")
     }
 
+    /// ⚠️ A BAND, NOT A DISC (the owner's device, 2026-10-30): behind a face
+    /// still loading, a disc showed as a grey plate with a piece of the
+    /// picture over it. The band covers the face's centre nowhere, runs under
+    /// its edge, and stops at the ring's outer edge.
+    @Test func theRingIsABandUnderTheFacesEdge() {
+        let bounds = CGRect(x: 0, y: 0, width: 40, height: 40)
+        let path = PersonPill.ringPath(in: bounds, cutout: nil)
+        #expect(!path.contains(CGPoint(x: 20, y: 20)), "the ring fills the face")
+        #expect(!path.contains(CGPoint(x: 20, y: 5)), "the band reaches past the tuck")
+        #expect(path.contains(CGPoint(x: 20, y: 1)), "no band outside the face")
+        #expect(path.contains(CGPoint(x: 20, y: 2.5)), "the band does not run under the face's edge")
+    }
+
     /// The face's mask reaches its skeleton: the bone's ground is a layer,
     /// never a background the glass would paint outside the mask.
     @Test func theLoadingFaceKeepsTheCutout() {
