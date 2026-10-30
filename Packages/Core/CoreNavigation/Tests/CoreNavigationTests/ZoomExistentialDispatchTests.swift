@@ -56,6 +56,7 @@ struct ZoomExistentialDispatchTests {
         #expect(destination.zoomDismissalKind == .card)
         #expect(destination.zoomDestinationContentIsReady == false)
         #expect(destination.zoomOwnsInteractiveDismissal == false)
+        #expect(destination.zoomGrabCarriesLiveInterface)
         #expect(destination.concealsAppTabBar == false)
         #expect(destination.zoomDestinationMediaIsRendering == false)
         #expect(destination.zoomVerticalDismissalPermitted(at: .zero, in: probe) == false)
@@ -75,7 +76,7 @@ struct ZoomExistentialDispatchTests {
         #expect(destination.zoomPageFraming(sourcePicture: nil)?.mediaAspect == spy.framingAspect)
 
         #expect(spy.calls == [
-            "kind", "contentReady", "ownsDismissal", "concealsTabBar", "mediaRendering",
+            "kind", "contentReady", "ownsDismissal", "carriesLiveInterface", "concealsTabBar", "mediaRendering",
             "verticalPermitted", "horizontalPermitted", "mirror", "donate",
             "reclaim", "adopt", "willBegin", "startMedia", "willDepart", "prepareForPresentation", "dismissState", "park",
             "framing",
@@ -156,6 +157,7 @@ private final class SpyDestination: NSObject, ZoomTransitionDestination {
     var zoomDismissalKind: ZoomDismissalKind { calls.append("kind"); return .card }
     var zoomDestinationContentIsReady: Bool { calls.append("contentReady"); return false }
     var zoomOwnsInteractiveDismissal: Bool { calls.append("ownsDismissal"); return false }
+    var zoomGrabCarriesLiveInterface: Bool { calls.append("carriesLiveInterface"); return true }
     var concealsAppTabBar: Bool { calls.append("concealsTabBar"); return false }
     var zoomDestinationMediaIsRendering: Bool { calls.append("mediaRendering"); return false }
     func zoomVerticalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool {

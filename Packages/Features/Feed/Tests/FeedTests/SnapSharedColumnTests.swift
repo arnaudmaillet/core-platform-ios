@@ -130,12 +130,13 @@ struct SnapSharedColumnTests {
 
     /// The cell mounts the column in its own content, ABOVE its chrome and
     /// its comments: it rides the page when the viewer swipes between posts,
-    /// and the panel never covers it.
+    /// and the panel never covers it. The chrome sits in the page's stage
+    /// (#1915), which the column stands over.
     @Test func theCellMountsTheColumnAboveItsChrome() throws {
         let cell = SnapFeedCell(frame: Layout.screen)
         let subviews = cell.contentView.subviews
         let column = try #require(subviews.firstIndex { $0 is SnapActionColumnLayer }, "no column in the cell")
-        let chrome = try #require(subviews.firstIndex { $0 is SnapChromeView })
+        let chrome = try #require(subviews.firstIndex { cell.debugChrome.isDescendant(of: $0) })
         #expect(chrome < column, "the column is under the chrome that fades")
         // The buttons are the items of the column's glass (#1872), which the
         // layer holds; each stands in it once its page shows it.

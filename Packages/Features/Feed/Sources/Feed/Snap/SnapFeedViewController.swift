@@ -7219,10 +7219,15 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     }
     #endif
 
+    /// ⚠️ EVERY GRAB MOVES THE LIVE PAGE (#1915, the owner 2026-10-29, after
+    /// filming Instagram, TikTok and Douyin): the page itself follows the
+    /// card, its whole interface on it and alive — the streams, the ticker,
+    /// the wheel, the disc. No replica stands in for it, so nothing on the
+    /// page is stilled for the grab (`FlightActivity`).
+    public var zoomGrabCarriesLiveInterface: Bool { activeSnapCell != nil }
+
     public func setZoomDismissState(_ state: ZoomDismissState) {
-        guard commentsEngagedID != nil, !commentsEngagementIsResting,
-              let cell = activeSnapCell
-        else { return }
+        guard let cell = activeSnapCell else { return }
         if !isEngagedDismissalActive {
             isEngagedDismissalActive = true
             view.alpha = 1
@@ -7231,7 +7236,14 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             // the flight, not this screen's black.
             view.backgroundColor = .clear
             collectionView.backgroundColor = .clear
-            cell.beginEngagedDismissal()
+            if commentsEngagedID != nil, !commentsEngagementIsResting {
+                cell.beginEngagedDismissal()
+            } else {
+                cell.beginLiveGrab()
+                // The card's replica of the interface would draw it a second
+                // time under the live page: the page is the one copy.
+                flightChrome?.isHidden = true
+            }
         }
         // Re-asserted every event, not just at arming: anything that hides the
         // page mid-grab is undone on the next frame the finger produces, so a
