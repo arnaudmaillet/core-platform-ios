@@ -104,6 +104,10 @@ final class CommentsInputBar: UIView {
         /// No slot at all (#1790): a text post with no sound. Unlike `.empty`,
         /// the field widens into the slot's place.
         case noSlot
+        /// The way back to the stream's start (#1929): scrolled away from the
+        /// newest message (`down`), or from a post's text. The slot's own
+        /// action moves to a hold (`HoldToArmPresenter`).
+        case returnTo(down: Bool)
     }
 
     /// Whether the slot has a place in the row: the field stops short of it.
@@ -145,6 +149,10 @@ final class CommentsInputBar: UIView {
         guard case .sound(let face) = railFace, face.isAvailable else { return }
         onRailLongPress?()
     }
+
+    /// The slot's button, for a host that hangs its own hold on it (#1929,
+    /// `HoldToArmPresenter`).
+    var railHoldTarget: UIView { railButton }
 
     /// A recognised hold on the slot, for tests (`railHeld`'s `.began`).
     func debugHoldRail() { holdRail() }
@@ -1837,6 +1845,9 @@ final class CommentsInputBar: UIView {
         case .pin(let isPinned):
             symbol = isPinned ? "pin.fill" : "pin"
             railButton.accessibilityLabel = isPinned ? "Unpin conversation" : "Pin conversation"
+        case .returnTo(let down):
+            symbol = down ? "chevron.down" : "chevron.up"
+            railButton.accessibilityLabel = down ? "Scroll to latest message" : "Back to top"
         case .sound(let face):
             // The cover as a disc, the bubble's size less the sound bubble's
             // inset, so the two read as one (#671). Not a symbol: no replace.
@@ -1873,6 +1884,13 @@ final class CommentsInputBar: UIView {
             railButton.configuration?.image = UIImage.symbol(named: symbol, configuration: Self.glyphConfiguration)
         }
         railFaceSymbol = symbol
+        // The way back always answers, even on a draft with nothing to pin
+        // (#1929); the hold is what a draft refuses.
+        if case .returnTo = railFace {
+            railButton.isEnabled = true
+            applyReservedColumn()
+            return
+        }
         railButton.isEnabled = isRailFaceEnabled
         applyReservedColumn()
     }

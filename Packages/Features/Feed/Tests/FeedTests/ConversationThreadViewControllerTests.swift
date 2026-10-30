@@ -782,4 +782,61 @@ struct ConversationThreadViewControllerTests {
         #expect(screen.toolbarItems?.isEmpty ?? true)
         #expect(!stream.interactions.contains { $0 is UIContextMenuInteraction })
     }
+
+    // MARK: - #1929: scrolled away, the pin becomes the way back
+
+    private static let longTranscript = (0..<80).map { index in
+        message("long\(index)", daysBack: 0, minutes: Double(index), mine: index.isMultiple(of: 2))
+    }
+
+    /// The reader scrolls more than a screen up: the pin becomes a chevron in
+    /// place; a tap goes back to the newest message, and the pin is back.
+    @Test func scrolledAwayThePinBecomesTheWayBack() async throws {
+        let (screen, _, _, window) = makeScreen(phase: .content(Self.longTranscript))
+        defer { window.isHidden = true }
+        window.layoutIfNeeded()
+        let bottom = screen.debugBottomOffset
+        try #require(bottom > 1500, "the premise: a transcript several screens long")
+        #expect(screen.debugRailFace == .pin(isPinned: false))
+
+        // A programmatic move (a quote jump) never shows it.
+        screen.debugScroll(to: bottom - 1200, userScroll: false)
+        #expect(!screen.debugShowsReturn)
+        // The reader's own scroll does.
+        screen.debugScroll(to: bottom - 1200, userScroll: true)
+        #expect(screen.debugShowsReturn)
+        #expect(screen.debugRailFace == .returnTo(down: true))
+
+        let away = screen.debugStreamOffset
+        screen.debugTapRail()
+        for _ in 0..<100 where screen.debugStreamOffset <= away { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(screen.debugStreamOffset > away, "the tap did not head for the newest message")
+        // Arriving there — as the animation's scroll callbacks report it.
+        screen.debugScroll(to: bottom, userScroll: false)
+        #expect(!screen.debugShowsReturn, "back at the newest message, the chevron stayed")
+        #expect(screen.debugRailFace == .pin(isPinned: false))
+    }
+
+    /// The chevron's hold arms the pin through the driver; a draft's hold
+    /// arms nothing.
+    @Test func theChevronsHoldArmsThePinAndADraftsNothing() throws {
+        let (screen, driver, _, window) = makeScreen(phase: .content(Self.longTranscript))
+        defer { window.isHidden = true }
+        window.layoutIfNeeded()
+        screen.debugScroll(to: screen.debugBottomOffset - 1200, userScroll: true)
+        let hold = try #require(screen.debugPinHold)
+        #expect(hold.isEnabled, "the chevron's hold is off")
+        hold.onFire?()
+        #expect(driver.pinned == true, "the hold did not pin the conversation")
+
+        let (draft, draftDriver, _, draftWindow) = makeScreen(phase: .content(Self.longTranscript))
+        defer { draftWindow.isHidden = true }
+        draftDriver.pinned = nil
+        draftDriver.onPinnedChange?(nil)
+        draftWindow.layoutIfNeeded()
+        draft.debugScroll(to: draft.debugBottomOffset - 1200, userScroll: true)
+        #expect(draft.debugShowsReturn, "a draft's chevron is missing")
+        #expect(draft.debugPinHold?.isEnabled == false, "a draft's hold arms something")
+    }
+
 }

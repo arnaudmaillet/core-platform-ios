@@ -140,6 +140,7 @@ public final class HoldRingDiscView: UIView {
 
         glyph.image = UIImage(systemName: symbolName)
         glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
+        glyph.layer.masksToBounds = true
         glyph.contentMode = .center
         glyph.tintColor = .label
         face.addSubview(glyph)
@@ -158,7 +159,15 @@ public final class HoldRingDiscView: UIView {
         let side = bounds.width * glassScale
         glass.bounds = CGRect(x: 0, y: 0, width: side, height: side)
         glass.center = CGPoint(x: bounds.midX, y: bounds.midY + glassDrop)
-        glyph.frame = face.bounds
+        if showsPicture {
+            // Inside the ring, as a disc.
+            let inset = Metrics.ringInset + Metrics.ringWidth + 2
+            glyph.frame = face.bounds.insetBy(dx: inset, dy: inset)
+            glyph.layer.cornerRadius = glyph.bounds.width / 2
+        } else {
+            glyph.frame = face.bounds
+            glyph.layer.cornerRadius = 0
+        }
         fill.frame = face.bounds
         fill.layer.cornerRadius = face.bounds.width / 2
         let circle = UIBezierPath(
@@ -180,6 +189,30 @@ public final class HoldRingDiscView: UIView {
 
     /// Fills the ring to `value` (clamped to 0...1), with no implicit
     /// animation: the owner calls this every frame from its own clock.
+    /// The glyph becomes `symbolName` — a disc that says the new state
+    /// before it retreats (#1929: the pin turned `pin.fill`).
+    public func setSymbol(_ symbolName: String) {
+        glyph.image = UIImage(systemName: symbolName)
+        glyph.contentMode = .center
+        showsPicture = false
+        setNeedsLayout()
+    }
+
+    private var showsPicture = false
+
+    /// The glyph becomes a picture, drawn as a disc — a sound's cover
+    /// (#1929). Nil keeps the glyph.
+    public func setPicture(_ image: UIImage?) {
+        guard let image else { return }
+        glyph.image = image
+        glyph.contentMode = .scaleAspectFill
+        showsPicture = true
+        setNeedsLayout()
+    }
+
+    /// The glyph as drawn now. Tests.
+    public var debugGlyphImage: UIImage? { glyph.image }
+
     public func setProgress(_ value: CGFloat) {
         progress = min(max(value, 0), 1)
         CATransaction.begin()
