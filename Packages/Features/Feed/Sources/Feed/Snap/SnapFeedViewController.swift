@@ -3344,7 +3344,9 @@ final class SnapFeedViewController: UIViewController {
         guard let id = detail.postID, let model = modelsByID[id] else { return }
         // A panel inside a page sits under that page's action column (#695);
         // the loading page has no page above it and keeps its own.
-        detail.setActionColumnHostedByPage(hostedByPage)
+        // A media page folds its column into the sound while its comments
+        // are up (#1872): the composer keeps the slot alone (#1923).
+        detail.setActionColumnHostedByPage(hostedByPage, foldsIntoSlot: model.mediaURL != nil)
         let face = soundFace(for: model)
         // No face on a text post with no sound (#1790): no slot either.
         detail.setRailSoundFace(face, keepsSlot: face != nil || !SnapSoundState.isText(model))

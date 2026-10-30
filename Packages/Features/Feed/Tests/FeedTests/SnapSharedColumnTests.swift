@@ -167,6 +167,34 @@ struct SnapSharedColumnTests {
         #expect(!bar.point(inside: inStake, with: nil), "the reserved stake still takes touches")
     }
 
+    /// ⚠️ A MEDIA PAGE FOLDS ITS COLUMN into the sound while the comments are
+    /// up (#1872): the composer keeps the slot alone — the bar no taller than
+    /// its input row, the field across the stake's room, and the stream's
+    /// bottom inset short by the same height, so a short stream anchored to
+    /// the bottom rests on the composer (#1923).
+    @Test func aFoldedColumnLeavesTheComposerItsSlotAlone() throws {
+        let (reserved, reservedWindow) = Layout.engagedPanel()
+        defer { reservedWindow.isHidden = true }
+        reserved.setActionColumnHostedByPage(true)
+        reserved.view.layoutIfNeeded()
+        let kept = try Layout.composerColumn(in: reserved.view, space: reservedWindow)
+        let keptInset = try #require(Layout.firstView(UICollectionView.self, in: reserved.view)).contentInset.bottom
+
+        let (folded, foldedWindow) = Layout.engagedPanel()
+        defer { foldedWindow.isHidden = true }
+        folded.setActionColumnHostedByPage(true, foldsIntoSlot: true)
+        folded.view.layoutIfNeeded()
+        let slot = try Layout.composerColumn(in: folded.view, space: foldedWindow)
+        let slotInset = try #require(Layout.firstView(UICollectionView.self, in: folded.view)).contentInset.bottom
+
+        #expect(slot.stake == nil, "the folded composer still stands a stake")
+        #expect(abs(slot.bar.bounds.height - CommentsInputBar.restingHeight(for: .large, showsStake: false)) < 0.5)
+        #expect(slot.bar.bounds.height < kept.bar.bounds.height - 40, "the stake's room is still reserved")
+        #expect(Layout.same(slot.rail, kept.rail), "the slot left its station")
+        #expect(abs((keptInset - slotInset) - (kept.bar.bounds.height - slot.bar.bounds.height)) < 0.5,
+                "the stream still clears the folded column")
+    }
+
     /// The snap feed's panels reserve; the loading page, which has no page
     /// above it, keeps its own.
     @Test func theFeedsPanelsReserveTheColumn() throws {

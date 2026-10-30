@@ -129,14 +129,17 @@ struct PostDetailStreamShapeTests {
 
     @Test func theEngagedFooterCapsTheViewAndInsetsTheStream() async throws {
         let (controller, stream, _) = try await makeStream(Self.spreadAcrossDays)
+        // The engaged top alone: the bottom anchor's slack is its own test.
+        controller.anchorsShortStream = false
         controller.setEngagedInsets(top: 120, bottomInset: 34)
         // Within half a point: fractional-scale CGFloats do not compare
         // exactly (the value read back printed as 96.0 and still failed `==`).
         #expect(abs(stream.contentInset.top - 120) < 0.5)
         // The bar's rest gap above the footer line, the resting bar (its
-        // two-bubble column over the input row), and the 16pt breath above it.
+        // two-bubble column over the input row), and a conversation's 8pt
+        // breath above it, less the section's own 16pt bottom (#1923).
         let clearance = SnapActionColumn.inputRestingGap + SnapActionColumn.bottomBreath
-            + CommentsInputBar.restingHeight(for: .large) + 16
+            + CommentsInputBar.restingHeight(for: .large) + Spacing.sm - Spacing.lg
         #expect(abs(stream.contentInset.bottom - (34 + clearance)) < 0.5)
         let topTwo = controller.view.subviews.suffix(2)
         #expect(topTwo.first is ProgressiveFrostView, "the footer's frost sits under the composer")
@@ -173,6 +176,35 @@ struct PostDetailStreamShapeTests {
         #expect(controller.streamIsAtTop, "the pull-down dismissal would not arm")
         let edges = Self.contentBottomAndRoomBottom(stream)
         #expect(abs(edges.content - edges.room) < 1, "the block ends at \(edges.content), the room at \(edges.room)")
+    }
+
+    /// The keyboard lifts the input row, and a short stream rises with it:
+    /// the slack gives up what the keys take, so the block stays on the row
+    /// rather than going behind the keyboard (#1799, the default since #1923).
+    @Test func aShortStreamRisesWithTheKeyboard() async throws {
+        let (controller, stream, window) = try await makeStream(Self.spreadAcrossDays)
+        defer { window.isHidden = true }
+        engage(controller, stream, anchored: true)
+        let resting = controller.bottomAnchorSlack
+        #expect(resting > 100)
+
+        let covered: CGFloat = 300
+        let screen = window.screen.bounds
+        NotificationCenter.default.post(
+            name: UIResponder.keyboardWillShowNotification,
+            object: nil,
+            userInfo: [
+                UIResponder.keyboardFrameEndUserInfoKey:
+                    NSValue(cgRect: CGRect(x: 0, y: screen.maxY - covered, width: screen.width, height: covered)),
+            ]
+        )
+        controller.view.layoutIfNeeded()
+        #expect(controller.bottomAnchorSlack < resting - 100, "the stream stayed down: \(resting) → \(controller.bottomAnchorSlack)")
+        #expect(abs(stream.contentInset.top - (120 + controller.bottomAnchorSlack)) < 0.5)
+
+        NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)
+        controller.view.layoutIfNeeded()
+        #expect(abs(controller.bottomAnchorSlack - resting) < 1, "the stream did not settle back")
     }
 
     /// The experiment off: the engaged top alone, as before.
