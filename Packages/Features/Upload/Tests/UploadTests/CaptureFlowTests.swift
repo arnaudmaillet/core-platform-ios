@@ -1316,16 +1316,13 @@ struct CaptureFlowTests {
         func makeTextPostScreen(publisher: any TextPostPublishing) -> UIViewController { UIViewController() }
     }
 
-    /// "+" → Camera: a full-height sheet with Cancel at the top left; a
-    /// photograph goes to the editor, Next to the finalisation screen, and Post
-    /// publishes the picture.
-    @Test func theCameraSheetPublishesAPhotographThroughTheEditorAndFinalisation() async throws {
+    /// "+" → Camera: full screen (#1904); a photograph goes to the editor,
+    /// Next to the finalisation screen, and Post publishes the picture.
+    @Test func theCameraPublishesAPhotographThroughTheEditorAndFinalisation() async throws {
         let composer = RecordingComposer()
         let builder = UploadFeatureBuilder(composer: composer, textPostScreens: { NoTextPosts() })
         let navigation = try #require(builder.makeCameraViewController() as? UINavigationController)
-        #expect(navigation.modalPresentationStyle == .pageSheet)
-        #expect(navigation.sheetPresentationController?.detents.count == 1)
-        #expect(navigation.sheetPresentationController?.selectedDetentIdentifier == .large)
+        #expect(navigation.modalPresentationStyle == .fullScreen)
         let camera = try #require(navigation.viewControllers.first as? CaptureViewController)
         #expect(camera.navigationItem.leftBarButtonItems?.map(\.identifier) == [CaptureViewController.flipItemID, CaptureViewController.flashItemID],
                 "the flip and the flash, ready before the stack reads the header")

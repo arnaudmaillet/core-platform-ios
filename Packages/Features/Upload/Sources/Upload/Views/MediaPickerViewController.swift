@@ -341,9 +341,33 @@ final class MediaPickerViewController: UIViewController {
 
     // MARK: - Bars
 
+    /// Cancel (#1904): nothing picked, the flow closes at once; a selection
+    /// is confirmed before it goes — full screen, there is no drag to stop
+    /// at, and Cancel is the only way out.
+    func cancel() {
+        guard !selection.isEmpty else { return dismiss(animated: true) }
+        let count = selection.count
+        let alert = UIAlertController(
+            title: count == 1 ? "Discard 1 item?" : "Discard \(count) items?",
+            message: nil, preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Keep Editing", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Discard", style: .destructive) { [weak self] _ in
+            self?.dismiss(animated: true)
+        })
+        present(alert, animated: true)
+    }
+
+    /// Escape (two-finger Z) is Cancel's.
+    override func accessibilityPerformEscape() -> Bool {
+        guard navigationItem.leftBarButtonItems?.isEmpty == false else { return false }
+        cancel()
+        return true
+    }
+
     private func configureBars() {
         navigationItem.leftBarButtonItems = [
-            BarItems.title(id: ItemID.cancel, title: "Cancel") { [weak self] in self?.dismiss(animated: true) }
+            BarItems.title(id: ItemID.cancel, title: "Cancel") { [weak self] in self?.cancel() }
         ]
         // The chevron the EDITOR wears. This screen has no title to lend it, so
         // it already draws bare — `.minimal` keeps it that way if one is ever

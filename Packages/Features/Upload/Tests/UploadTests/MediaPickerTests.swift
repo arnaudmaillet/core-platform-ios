@@ -430,6 +430,27 @@ struct MediaPickerTests {
         #expect(screen.picker.debugTrayIsShowing == false, "and giving it back puts it away")
     }
 
+    /// Cancel with a selection asks before dropping it (#1904): full screen,
+    /// Cancel is the only way out, and up to 20 picked items rode on it.
+    @Test func cancelWithASelectionAsksFirst() async throws {
+        let screen = try await open(Self.library(photos: 6))
+        screen.picker.debugTapItem(at: 0)
+        screen.picker.debugTapItem(at: 2)
+        screen.picker.cancel()
+        let alert = try #require(screen.picker.presentedViewController as? UIAlertController, "no confirmation")
+        #expect(alert.title == "Discard 2 items?")
+        #expect(alert.actions.contains { $0.style == .destructive && $0.title == "Discard" })
+        #expect(alert.actions.contains { $0.style == .cancel })
+        alert.dismiss(animated: false)
+    }
+
+    /// With nothing picked, Cancel asks nothing.
+    @Test func cancelWithNothingPickedAsksNothing() async throws {
+        let screen = try await open(Self.library(photos: 6))
+        screen.picker.cancel()
+        #expect(!(screen.picker.presentedViewController is UIAlertController))
+    }
+
     @Test func nextCountsWhatItWillCarryAndRefusesToGoEmptyHanded() async throws {
         let screen = try await open(Self.library(photos: 6))
         let next = try #require(screen.picker.navigationItem.rightBarButtonItems?.first)

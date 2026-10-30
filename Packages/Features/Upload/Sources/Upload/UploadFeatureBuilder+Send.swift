@@ -60,11 +60,18 @@ extension UploadFeatureBuilder {
             root = camera
         }
         let navigation = UploadNavigationController(rootViewController: root)
-        navigation.modalPresentationStyle = .pageSheet
-        if let sheet = navigation.sheetPresentationController {
-            sheet.detents = [.large()]
-            sheet.selectedDetentIdentifier = .large
-            sheet.prefersGrabberVisible = true
+        // Attaching to a thread is a task scoped to it: the picker stays a
+        // sheet over the thread. Its camera is the camera, and opens full
+        // screen as it does everywhere (#1904, the owner 2026-10-30).
+        if root is CaptureViewController {
+            navigation.modalPresentationStyle = .fullScreen
+        } else {
+            navigation.modalPresentationStyle = .pageSheet
+            if let sheet = navigation.sheetPresentationController {
+                sheet.detents = [.large()]
+                sheet.selectedDetentIdentifier = .large
+                sheet.prefersGrabberVisible = true
+            }
         }
         return navigation
     }
