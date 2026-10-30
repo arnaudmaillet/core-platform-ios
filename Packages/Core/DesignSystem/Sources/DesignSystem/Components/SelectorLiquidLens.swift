@@ -808,8 +808,22 @@ final class SelectorLiquidLens {
         // prototype never met this: its track is a plain view. Converted
         // through the presentation layers, the lens is transformed exactly as
         // the glass and the titles are, frame by frame.
+        //
+        // ⚠️ BUT ACROSS ONLY, never up and down (#1905, the owner's device,
+        // 2026-10-30). Pulled upward, the presentation tree reports the whole
+        // row risen ~5.5 pt — titles and lens alike, no transform on any
+        // ancestor — yet the render server draws the real titles ~3.6 pt up,
+        // and a lens placed from those layers came out ~13 pt up, its title
+        // with it: well above the row. The native `UISegmentedControl` keeps
+        // its lens and its title on the row's line whatever the finger does
+        // vertically. So the lens takes the model's vertical centre, and its
+        // title the model's vertical mapping (below); the presentation tree
+        // keeps the horizontal and the scale, which the 2026-10-26 fix needs.
         let shown = Self.presentationConvert(lens, from: space, to: glass)
-        let inGlass = shown.rect
+        let inGlass = Self.onTheRow(shown: shown.rect, model: space.convert(lens, to: glass))
+        #if DEBUG
+        if Self.traces { trace(lens: lens, shown: inGlass, in: space) }
+        #endif
         // The lens may stand past the capsule (that is the lift), not past
         // the grown capsule.
         let capsule = capsuleFrame().insetBy(dx: -(inGlass.width / 2 + 2), dy: -(Tuning.pastCapsule + 12))
@@ -847,8 +861,17 @@ final class SelectorLiquidLens {
         if let overlay, let titles {
             // Glass point → titles point, through the host's live transform:
             // an origin and a scale (the transform is a scale and a shift).
-            let mapped = Self.presentationConvert(CGRect(x: 0, y: 0, width: 100, height: 100), from: glass, to: titles).rect
-            let origin = mapped.origin
+            let unit = CGRect(x: 0, y: 0, width: 100, height: 100)
+            let mapped = Self.presentationConvert(unit, from: glass, to: titles).rect
+            // The title's vertical, like the lens's, is the row's (#1905): at
+            // the lens's centre, the model's mapping.
+            let origin = CGPoint(
+                x: mapped.minX,
+                y: Self.overlayOriginY(
+                    lensCentreY: inGlass.midY, scale: mapped.width / 100,
+                    modelOffsetY: glass.convert(unit, to: titles).minY
+                )
+            )
             u.overlayScale = Float(mapped.width / 100)
             u.overlayEnabled = 1
             u.overlayWidth = Float(overlay.width)
@@ -920,8 +943,61 @@ final class SelectorLiquidLens {
         glass.render(uniforms: u, overlay: overlay, scale: scale)
     }
 
+    #if DEBUG
+    /// `-lens-trace` (#1905): a line per frame drawn while the lens is held,
+    /// to read on a DEVICE what lifts it above the row under an upward pull
+    /// (the simulator's injected touches never drive UIKit's interactive
+    /// glass, so it cannot reproduce it). All in the glass's space, which is
+    /// the window's grown by `glassMargin`:
+    /// - `model`/`shown`: the lens's centre through the model and through
+    ///   the presentation tree (`shown` is what is drawn);
+    /// - `titles`: each title's shown centre, the lens's own among them;
+    /// - `lean`: every ancestor of the strip whose presentation transform is
+    ///   not the identity, with its scale and shift.
+    static let traces = ProcessInfo.processInfo.arguments.contains("-lens-trace")
+
+    private func trace(lens: CGRect, shown: CGRect, in space: UIView) {
+        let model = space.convert(lens, to: glass)
+        func f(_ value: CGFloat) -> String { String(format: "%.1f", Double(value)) }
+        var titleCentres: [String] = []
+        if let titles {
+            for title in titles.subviews where !title.isHidden {
+                let rect = Self.presentationConvert(title.bounds, from: title, to: glass).rect
+                titleCentres.append("(\(f(rect.midX)),\(f(rect.midY)))")
+            }
+        }
+        var leans: [String] = []
+        var view: UIView? = space
+        while let current = view, current !== glass.superview {
+            if let layer = current.layer.presentation(), !CATransform3DIsIdentity(layer.transform) {
+                let t = layer.transform
+                leans.append("\(type(of: current)) s=(\(f(t.m11)),\(f(t.m22))) t=(\(f(t.m41)),\(f(t.m42)))")
+            }
+            view = current.superview
+        }
+        print(String(format: "[lens] %.3f", CACurrentMediaTime())
+            + " press=\(f(press)) model=(\(f(model.midX)),\(f(model.midY))) shown=(\(f(shown.midX)),\(f(shown.midY)))"
+            + " size=\(f(shown.width))x\(f(shown.height)) titles=\(titleCentres.joined(separator: " "))"
+            + " lean=[\(leans.joined(separator: "; "))]")
+    }
+    #endif
+
     /// `rect` in `from`'s space → `to`'s, through the presentation layers
     /// when there are any (an in-flight transform on an ancestor counts).
+    /// `shown`'s horizontal and size, centred on `model`'s vertical centre:
+    /// the lens on the row's line, wherever the finger pulls it (#1905).
+    /// Pure, for tests.
+    static func onTheRow(shown: CGRect, model: CGRect) -> CGRect {
+        CGRect(x: shown.minX, y: model.midY - shown.height / 2, width: shown.width, height: shown.height)
+    }
+
+    /// The overlay's vertical origin that draws, at the lens's centre, the
+    /// title the MODEL puts there: the shader samples `glass·scale + origin`,
+    /// and the model maps a glass point by `+ modelOffsetY`. Pure, for tests.
+    static func overlayOriginY(lensCentreY: CGFloat, scale: CGFloat, modelOffsetY: CGFloat) -> CGFloat {
+        modelOffsetY + lensCentreY * (1 - scale)
+    }
+
     private static func presentationConvert(_ rect: CGRect, from: UIView, to: UIView) -> (rect: CGRect, live: Bool) {
         guard let source = from.layer.presentation(), let target = to.layer.presentation() else {
             return (from.convert(rect, to: to), false)

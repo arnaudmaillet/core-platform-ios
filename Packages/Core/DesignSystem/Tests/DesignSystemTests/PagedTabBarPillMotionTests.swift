@@ -212,3 +212,34 @@ struct LiquidLensRendererTests {
         #expect(rim.a > 0 && rim.r < pixel(60, 30).r, "a darker hairline at the rim: \(rim)")
     }
 }
+
+/// The lens on the row's line (#1905, the owner's device, 2026-10-30): pulled
+/// upward, the host's presentation leans and the lens followed it ~13 pt up,
+/// its title with it. The native control keeps both level with the row.
+@MainActor
+struct SelectorLensOnTheRowTests {
+    /// The lens keeps the presentation's horizontal and size, and the row's
+    /// vertical centre, whatever the lean.
+    @Test func theLensTakesTheRowsLineAndTheLeansHorizontal() {
+        let model = CGRect(x: 100, y: 44, width: 120, height: 40)
+        // A lean: scaled about a point above the bar, so shifted up and across.
+        let shown = CGRect(x: 104, y: 36, width: 126, height: 42)
+        let placed = SelectorLiquidLens.onTheRow(shown: shown, model: model)
+        #expect(placed.midY == model.midY, "the lens left the row's line")
+        #expect(placed.minX == shown.minX && placed.width == shown.width && placed.height == shown.height)
+    }
+
+    /// Its title: at the lens's centre, the shader samples what the model
+    /// puts there, whatever the presentation's scale.
+    @Test(arguments: [CGFloat(1), 1.04, 0.97])
+    func theTitleUnderTheLensIsTheRowsTitle(_ scale: CGFloat) {
+        let lensCentreY: CGFloat = 104
+        let modelOffsetY: CGFloat = -40
+        let origin = SelectorLiquidLens.overlayOriginY(
+            lensCentreY: lensCentreY, scale: scale, modelOffsetY: modelOffsetY
+        )
+        // What the shader samples at the lens's centre (`glass·scale + origin`)
+        // against what the model maps there (`glass + offset`).
+        #expect(abs((lensCentreY * scale + origin) - (lensCentreY + modelOffsetY)) < 0.001)
+    }
+}
