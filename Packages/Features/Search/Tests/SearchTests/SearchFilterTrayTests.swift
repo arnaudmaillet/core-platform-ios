@@ -452,6 +452,18 @@ struct SearchFilterTrayTests {
     /// and never hands it back. Without the results screen re-subscribing on
     /// the way back in, its Users tab keeps the OLD answer while its post tabs
     /// — driven by a different callback — show the new one.
+    /// The field names what the search finds (#1901, after the inbox's
+    /// "Search people and chats"): posts and people, the results' two tabs,
+    /// on the search screen and on the results' refine header alike. Pinned
+    /// as a literal so a revert to a bare "Search..." fails.
+    @Test func bothHeadersSayWhatTheSearchFinds() async {
+        let host = Host()
+        #expect(host.screen.debugSearchPlaceholder == "Search people and posts")
+        await host.showResults("haddad")
+        let results = try? #require(host.results)
+        #expect(results?.debugSearchPlaceholder == "Search people and posts")
+    }
+
     @Test func theAnswerHearsAgainAfterARefineScreenHasBeenOverIt() async {
         let host = Host()
         await host.showResults("haddad")

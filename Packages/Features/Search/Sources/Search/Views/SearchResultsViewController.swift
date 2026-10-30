@@ -89,6 +89,10 @@ final class SearchResultsViewController: UIViewController {
     /// the arithmetic is no longer tight: 402 − 32 margins − 44 back − 24
     /// inter-group − 8 padding = 294pt for a field that needs nothing like it.
     private let searchField = UISearchTextField()
+    #if DEBUG
+    /// What the empty field says. Tests.
+    var debugSearchPlaceholder: String? { searchField.placeholder }
+    #endif
 
     /// The viewer's spendable points, beside the query.
     ///
@@ -223,7 +227,7 @@ final class SearchResultsViewController: UIViewController {
 
     private func configureHeader() {
         searchField.text = viewModel.submittedQueryText
-        searchField.placeholder = "Search..."
+        searchField.placeholder = SearchViewController.searchPlaceholder
         searchField.autocapitalizationType = .none
         searchField.autocorrectionType = .no
         searchField.returnKeyType = .search

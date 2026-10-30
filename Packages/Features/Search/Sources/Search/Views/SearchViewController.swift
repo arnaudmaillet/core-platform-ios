@@ -24,11 +24,14 @@ final class SearchViewController: UIViewController {
     /// Where this screen was reached from, which decides what submitting and
     /// cancelling do. The header is the same in both: `[field][Cancel]`.
     ///
-    /// ⚠️ ONE HEADER FOR EVERY SEARCH IN THE APP. The inbox and the relationship
-    /// lists morph their bar into `[ field ][ Cancel ]`; this screen, pushed
-    /// rather than morphed, wears the same arrangement so that "searching" reads
-    /// the same wherever it happens. `.origin` used to be `[back][field]`, and
-    /// that was the one search header with a chevron.
+    /// ⚠️ TWO MECHANISMS, ONE HEADER VOCABULARY (#1901). The inbox searches in
+    /// place, with UIKit's stacked field and its Cancel; the relationship lists
+    /// morph a magnifier into the field. This screen, a search PLACE pushed
+    /// from Explore and For You, wears the same `[ field ][ Cancel ]`, and its
+    /// placeholder names what it finds as the inbox's does
+    /// (`searchPlaceholder`), so "searching" reads the same wherever it
+    /// happens. `.origin` used to be `[back][field]`, and that was the one
+    /// search header with a chevron.
     ///
     /// ⚠️ Cancel is the only way out. Hiding the back button is what gives the
     /// field the full width, and `ProfileRelationshipsViewController` records
@@ -73,6 +76,10 @@ final class SearchViewController: UIViewController {
     /// bars never had the hole. The results screen keeps its field as an item
     /// because it has a credit badge to sit beside; this one has nothing.
     private let searchField = UISearchTextField()
+    #if DEBUG
+    /// What the empty field says. Tests.
+    var debugSearchPlaceholder: String? { searchField.placeholder }
+    #endif
 
     private var collectionView: UICollectionView!
     private let spinner = AppLoaderView(size: .medium)
@@ -396,6 +403,13 @@ final class SearchViewController: UIViewController {
 
     // MARK: - Setup
 
+    /// What the empty field says it searches (#1901, after the inbox's
+    /// "Search people and chats", #918): the two kinds of results this search
+    /// returns, the results' Posts and Users tabs. Never a bare "Search...",
+    /// which promised nothing; never a kind it does not return. The refine
+    /// header (`SearchResultsViewController`) says the same.
+    static let searchPlaceholder = "Search people and posts"
+
     /// The bar, which has ONE state: `[ field ————————————————— ][ Cancel ]`.
     ///
     /// ⚠️ NO `UISearchController`, AND NOW NO SWAP EITHER.
@@ -420,7 +434,7 @@ final class SearchViewController: UIViewController {
     /// not exist here any more. There is nothing to close: the way out is
     /// Cancel, which pops.
     private func configureSearchAffordance() {
-        searchField.placeholder = "Search..."
+        searchField.placeholder = Self.searchPlaceholder
         searchField.autocapitalizationType = .none
         searchField.autocorrectionType = .no
         searchField.returnKeyType = .search
