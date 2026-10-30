@@ -14,14 +14,19 @@ extension ForYouGridPage: PostGridPage {
             render(ForYouViewModel.PageState.loading)
         case .content(let posts):
             render(ForYouViewModel.PageState.content(posts))
+        // Through the cold load's gate, as `render`'s states (#1900): a lock
+        // shown before the delay had the bones land under it, and "taking
+        // longer" replace it at 10 s.
         case .sections(let groups):
-            applyGroups(groups)
+            settle { [weak self] in self?.applyGroups(groups) }
         case .status(let status):
-            showStatus(
-                symbolName: status.symbolName, title: status.title, subtitle: status.subtitle,
-                actionTitle: status.actionTitle,
-                action: status.actionTitle == nil ? nil : { [weak self] in self?.onRefresh?() }
-            )
+            settle { [weak self] in
+                self?.showStatus(
+                    symbolName: status.symbolName, title: status.title, subtitle: status.subtitle,
+                    actionTitle: status.actionTitle,
+                    action: status.actionTitle == nil ? nil : { [weak self] in self?.retry() }
+                )
+            }
         }
     }
 

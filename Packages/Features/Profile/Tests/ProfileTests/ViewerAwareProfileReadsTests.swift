@@ -171,6 +171,56 @@ struct ViewerAwareProfileReadsTests {
         #expect(viewModel.isPrivateToViewer)
     }
 
+    /// A gallery that has not answered yet.
+    private actor HangingGallery: ProfileGalleryProviding {
+        func authoredPage(for profileID: ProfileID, after pageToken: String?) async throws -> GalleryPage {
+            try await Task.sleep(for: .seconds(3600))
+            return GalleryPage(posts: [], nextPageToken: nil)
+        }
+        func taggedPage(for profileID: ProfileID, handle: String, after pageToken: String?) async throws -> GalleryPage {
+            try await Task.sleep(for: .seconds(3600))
+            return GalleryPage(posts: [], nextPageToken: nil)
+        }
+        func authoredPosts(for profileID: ProfileID) async throws -> [GalleryPost] { [] }
+        func taggedPosts(for profileID: ProfileID, handle: String) async throws -> [GalleryPost] { [] }
+        func posts(ids: [String]) async throws -> [GalleryPost] { [] }
+    }
+
+    /// #1900: known private and not followed, the pages the server withholds
+    /// lock at once — before the gallery answers, with no bones in between.
+    /// Tagged, which may hold other people's posts, keeps loading.
+    @Test func aPrivateProfileLocksItsAuthoredPagesBeforeTheGalleryAnswers() async throws {
+        let profiles = Profiles(person(.private), relationship: .other(isFollowing: false, isBlocked: false))
+        let viewModel = ProfileViewModel(repository: profiles, gallery: HangingGallery(), source: .profile(id))
+        let seen = Seen()
+        viewModel.onGalleryChange = { seen.gallery = $0 }
+        viewModel.viewDidLoad()
+        let locked = ProfileViewModel.GalleryPageState.restricted(
+            title: ProfileViewModel.restrictedTitle, message: ProfileViewModel.restrictedMessage
+        )
+        #expect(await settle { seen.gallery?.activity == locked }, "Posts waited on the gallery")
+        #expect(seen.gallery?.media == locked)
+        #expect(seen.gallery?.tagged == .loading, "Tagged no longer loads")
+        #expect(viewModel.isGalleryLoading, "the premise: the gallery has not answered")
+    }
+
+    /// #1900: Try Again over pages that answered long ago republishes them —
+    /// the page went back to loading on the tap and must hear back, even the
+    /// same answer.
+    @Test func tryAgainRepublishesTheSameAnswer() async throws {
+        let profiles = Profiles(person(.private), relationship: .other(isFollowing: false, isBlocked: false))
+        let viewModel = ProfileViewModel(repository: profiles, gallery: Gallery([]), source: .profile(id))
+        var publications = 0
+        viewModel.onGalleryChange = { _ in publications += 1 }
+        viewModel.viewDidLoad()
+        try #require(await settle { !viewModel.isGalleryLoading && publications > 0 })
+        let before = publications
+        let shown = viewModel.publishedGallery
+        viewModel.retryGallery()
+        #expect(publications > before, "Try Again published nothing")
+        #expect(viewModel.publishedGallery == shown)
+    }
+
     /// Every guest: the relationship a guest reads is "not following"
     /// (`ProfileRepositoryTests.aGuestFollowsNoOne`), so the same locked pages.
     @Test func aGuestSeesAPrivateProfileLocked() async throws {

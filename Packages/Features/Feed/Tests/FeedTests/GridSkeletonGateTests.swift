@@ -1,4 +1,5 @@
 import DesignSystem
+import FeedInterface
 import Foundation
 import MediaCore
 import Testing
@@ -81,5 +82,86 @@ struct GridSkeletonGateTests {
         }
         button(in: page)?.sendActions(for: .primaryActionTriggered)
         #expect(retries == 1)
+    }
+
+    // MARK: - A host's answers end the load too (#1900)
+
+    private static let lock = PostGridPageStatus(
+        symbolName: "lock", title: "This Account Is Private", subtitle: "Follow this account to see their posts."
+    )
+
+    private func tryAgain(in view: UIView) -> UIButton? {
+        for subview in view.subviews {
+            if let button = subview as? UIButton, !button.isHidden, button.configuration?.title == "Try Again" { return button }
+            if let found = tryAgain(in: subview) { return found }
+        }
+        return nil
+    }
+
+    /// A private profile's lock answering before the delay: no bone lands
+    /// under it, and no "taking longer" replaces it.
+    @Test func aHostStatusBeforeTheDelayEndsTheLoad() {
+        let time = ManualClock()
+        let page = page(time)
+        page.show(.loading)
+        page.show(.status(Self.lock))
+        time.advance(LoadingTiming.skeletonDelay)
+        #expect(!page.debugBonesVisible, "bones under the lock")
+        time.advance(LoadingTiming.takingLonger)
+        #expect(label("Taking longer than usual", in: page) == nil, "taking longer over an answer")
+        #expect(label(Self.lock.title, in: page) != nil, "the lock went")
+    }
+
+    /// The lock answering once the bones are up: they go after their
+    /// minimum, and the lock stays past the long wait.
+    @Test func aHostStatusAfterTheBonesEndsTheLoad() {
+        let time = ManualClock()
+        let page = page(time)
+        page.show(.loading)
+        time.advance(LoadingTiming.skeletonDelay)
+        #expect(page.debugBonesVisible)
+        page.show(.status(Self.lock))
+        time.advance(1)
+        #expect(!page.debugBonesVisible)
+        #expect(label(Self.lock.title, in: page) != nil)
+        time.advance(LoadingTiming.takingLonger)
+        #expect(label("Taking longer than usual", in: page) == nil)
+        #expect(label(Self.lock.title, in: page) != nil)
+    }
+
+    /// History's titled groups end the load too.
+    @Test func hostSectionsEndTheLoad() {
+        let time = ManualClock()
+        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .discover, videoPlayback: nil)
+        page.skeletonClock = time.clock
+        page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        page.layoutIfNeeded()
+        page.show(.loading)
+        page.show(.sections([]))
+        time.advance(LoadingTiming.skeletonDelay)
+        #expect(!page.debugBonesVisible)
+        time.advance(LoadingTiming.takingLonger)
+        #expect(label("Taking longer than usual", in: page) == nil)
+    }
+
+    /// Try Again over a page that had its answer: the page goes back to
+    /// loading, and the host's answer — the very same — lands again.
+    @Test func tryAgainHearsTheSameAnswerAgain() {
+        let time = ManualClock()
+        let page = page(time)
+        page.show(.loading)
+        time.advance(LoadingTiming.skeletonDelay)
+        time.advance(LoadingTiming.takingLonger)
+        #expect(label("Taking longer than usual", in: page) != nil)
+        var retries = 0
+        page.onRefresh = {
+            retries += 1
+            page.show(.status(Self.lock))
+        }
+        tryAgain(in: page)?.sendActions(for: .primaryActionTriggered)
+        #expect(retries == 1)
+        time.advance(1)
+        #expect(label("Taking longer than usual", in: page) == nil, "Try Again left taking longer on screen")
+        #expect(label(Self.lock.title, in: page) != nil, "the answer did not land again")
     }
 }

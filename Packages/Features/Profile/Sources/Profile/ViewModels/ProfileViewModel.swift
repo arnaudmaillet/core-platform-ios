@@ -144,6 +144,21 @@ public final class ProfileViewModel {
         /// that HAS posts (Tagged — other people's) shows them plainly: the
         /// lock appears only when there is nothing to show (#1445, the
         /// owner's 2026-10-19 call, replacing #1422's lock line).
+        /// A private profile known not to be followed (#1900): the pages
+        /// the server withholds — every one but Tagged, which holds other
+        /// people's posts (#1445) — are locked while they are still on their
+        /// way, with no bones and no wait. Tagged locks only when empty.
+        mutating func restrictWithheldPages() {
+            let locked = GalleryPageState.restricted(title: ProfileViewModel.restrictedTitle, message: ProfileViewModel.restrictedMessage)
+            for page in [\GallerySnapshot.activity, \.media, \.saved, \.reactions, \.reposts, \.history] {
+                switch self[keyPath: page] {
+                case .loading, .empty: self[keyPath: page] = locked
+                default: break
+                }
+            }
+            if case .empty = tagged { tagged = locked }
+        }
+
         mutating func restrictEmptyPages() {
             let locked = GalleryPageState.restricted(title: ProfileViewModel.restrictedTitle, message: ProfileViewModel.restrictedMessage)
             for page in [\GallerySnapshot.activity, \.media, \.saved, \.reactions, \.reposts, \.tagged, \.history] {
@@ -417,6 +432,8 @@ public final class ProfileViewModel {
         didSet {
             guard isRelationshipSettled, !oldValue else { return }
             onRelationshipSettled?()
+            // A private profile not followed locks its pages now (#1900).
+            if isPrivateToViewer { renderGallery() }
         }
     }
 
@@ -1457,7 +1474,14 @@ public final class ProfileViewModel {
     /// would wait on that same read (`loadGallery` keeps one in flight):
     /// the hung read is dropped and asked again.
     public func retryGallery() {
-        guard let profile, galleryLoad != nil else { return refresh() }
+        // The page went back to loading on the tap (#1900): it hears an
+        // answer even when it equals the one it had — a page that had
+        // answered long ago was left on "taking longer", its Try Again dead.
+        publishedGallery = nil
+        guard let profile, galleryLoad != nil else {
+            renderGallery()
+            return refresh()
+        }
         galleryLoad?.cancel()
         galleryLoad = nil
         loadGallery(for: profile, reset: false)
@@ -1617,7 +1641,12 @@ public final class ProfileViewModel {
     private func renderGallery() {
         guard gallery != nil else { return }
         var snapshot = galleryStore.snapshot(isOwnProfile: isOwnProfile)
-        if isPrivateToViewer { snapshot.restrictEmptyPages() }
+        // Known private and not followed: locked from the first frame
+        // (#1900). While the relationship is a wait, only what came back
+        // empty locks.
+        if isPrivateToViewer {
+            if isRelationshipSettled { snapshot.restrictWithheldPages() } else { snapshot.restrictEmptyPages() }
+        }
         fillEmptyGalleryTab()
         // The same pages again is no news: a revalidation that agrees with
         // the screen must cost the screen nothing.
