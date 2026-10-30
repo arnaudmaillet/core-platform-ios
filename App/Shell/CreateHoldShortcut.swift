@@ -7,6 +7,12 @@ import UIKit
 /// screen, by the same road, as the Create menu's Camera row. Letting go
 /// before it is full, or sliding away, puts the disc back and does nothing.
 ///
+/// THE HOLD ITSELF IS DESIGNSYSTEM'S `HoldToArmPresenter` (#1929), the one
+/// the composer's slot uses: the timing, the ticks, the disc and its clock
+/// live there once, so the two holds cannot drift apart. What stays here is
+/// the "+"'s own: which touches are its, where its disc goes, and the lock
+/// that keeps a hold from also opening the menu.
+///
 /// ```
 ///   touch ─ 0.22s ─▶ disc rises (light tick) ─ 0.6s fill ─▶ camera opens (medium tick)
 ///     │                   │
@@ -54,22 +60,6 @@ import UIKit
 @MainActor
 final class CreateHoldShortcut: NSObject {
     enum Metrics {
-        /// How long a finger must stay on the "+" before the disc appears.
-        ///
-        /// ⚠️ **LONGER THAN A TAP, SHORTER THAN A HESITATION.** Measured taps
-        /// in this app lift 32-98 ms after they land (`PressFeedback`), so
-        /// 0.22 s is more than twice the slowest; any less and a deliberate
-        /// tap that lingers would flash a disc on its way to the menu. Much
-        /// more and the hold stops feeling like it answers.
-        static let recognitionDelay: TimeInterval = 0.22
-        /// How far the finger may roll before the hold is recognised, in
-        /// points — the recogniser's own pre-recognition gate. The default
-        /// 10 pt; after recognition `HoldToArm.abandonDistance` takes over.
-        static let preRecognitionSlop: CGFloat = 10
-        /// Gap between the disc and the top of whatever it floats over.
-        static let gap: CGFloat = 12
-        /// The disc never comes closer than this to the screen's edge.
-        static let edgeMargin: CGFloat = 8
         /// How long after a hold ends a selection of the "+" is still refused.
         /// A cancelled touch that the bar nonetheless turned into a selection
         /// would arrive within the same gesture's last turns; half a second
@@ -84,11 +74,10 @@ final class CreateHoldShortcut: NSObject {
     private let tab: UITab
     private weak var tabBarController: UITabBarController?
     private let fire: @MainActor () -> Void
-    private let recognizer = UILongPressGestureRecognizer()
-    /// Fires the moment the ring fills — see `HoldToArm.firesWhenFull`.
-    private var hold = HoldToArm(firesWhenFull: true)
-    private var disc: HoldRingDiscView?
-    private var displayLink: CADisplayLink?
+    /// The hold, hung on the bar by `install`.
+    private var presenter: HoldToArmPresenter?
+    /// Whether a hold may arm, kept for a presenter not yet installed.
+    private var wantsEnabled = true
     private var lockoutWork: DispatchWorkItem?
 
     /// Set when a hold is recognised: the one selection of the "+" the bar
@@ -103,24 +92,34 @@ final class CreateHoldShortcut: NSObject {
         self.tabBarController = tabBarController
         self.fire = fire
         super.init()
-        recognizer.addTarget(self, action: #selector(handle(_:)))
-        recognizer.minimumPressDuration = Metrics.recognitionDelay
-        recognizer.allowableMovement = Metrics.preRecognitionSlop
-        recognizer.delegate = self
-        recognizer.name = "CreateHoldShortcut"
     }
 
     /// Whether a hold may arm the camera at all. Off for a guest (#626): their
     /// bubble is "Sign in", and a hold on it does nothing special.
     var isEnabled: Bool {
-        get { recognizer.isEnabled }
-        set { recognizer.isEnabled = newValue }
+        get { presenter?.isEnabled ?? wantsEnabled }
+        set {
+            wantsEnabled = newValue
+            presenter?.isEnabled = newValue
+        }
     }
 
-    /// Hangs the recogniser on the bar. Idempotent.
+    /// Hangs the hold on the bar. Idempotent.
     func install() {
-        guard let bar = tabBarController?.tabBar, recognizer.view !== bar else { return }
-        bar.addGestureRecognizer(recognizer)
+        guard presenter == nil, let bar = tabBarController?.tabBar else { return }
+        let presenter = HoldToArmPresenter(view: bar) { .symbol("camera.fill") }
+        presenter.host = { [weak self] in self?.tabBarController?.view }
+        presenter.discFrame = { [weak self] host in self?.discFrame(in: host) }
+        presenter.onPressBegan = { [weak self] in
+            self?.lockoutWork?.cancel()
+            self?.consumesSelection = true
+        }
+        presenter.onPressFinished = { [weak self] in self?.releaseSelectionLockSoon() }
+        presenter.onFire = { [weak self] in self?.fire() }
+        presenter.gestureRecognizer.delegate = self
+        presenter.gestureRecognizer.name = "CreateHoldShortcut"
+        presenter.isEnabled = wantsEnabled
+        self.presenter = presenter
     }
 
     /// Whether a selection of the "+" should be refused, consuming the lock.
@@ -134,50 +133,6 @@ final class CreateHoldShortcut: NSObject {
         return true
     }
 
-    // MARK: - The gesture
-
-    @objc private func handle(_ recognizer: UILongPressGestureRecognizer) {
-        let location = recognizer.location(in: recognizer.view)
-        switch recognizer.state {
-        case .began:
-            pressBegan(at: location)
-        case .changed:
-            pressMoved(to: location)
-        case .ended:
-            pressEnded()
-        case .cancelled, .failed:
-            pressCancelled()
-        default:
-            break
-        }
-    }
-
-    /// The four inputs, shared by the recogniser and the QA hook so a
-    /// scripted hold runs exactly the production path.
-    private func pressBegan(at location: CGPoint) {
-        lockoutWork?.cancel()
-        consumesSelection = true
-        guard let transition = hold.begin(at: CACurrentMediaTime(), location: location) else { return }
-        apply(transition)
-    }
-
-    private func pressMoved(to location: CGPoint) {
-        guard let transition = hold.move(to: location, at: CACurrentMediaTime()) else { return }
-        apply(transition)
-    }
-
-    private func pressEnded() {
-        let transition = hold.end(at: CACurrentMediaTime())
-        releaseSelectionLockSoon()
-        if let transition { apply(transition) }
-    }
-
-    private func pressCancelled() {
-        let transition = hold.cancel()
-        releaseSelectionLockSoon()
-        if let transition { apply(transition) }
-    }
-
     private func releaseSelectionLockSoon() {
         lockoutWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.consumesSelection = false }
@@ -185,66 +140,22 @@ final class CreateHoldShortcut: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.selectionLockout, execute: work)
     }
 
-    // MARK: - Showing it
-
-    private func apply(_ transition: HoldToArm.Transition) {
-        #if DEBUG
-        debugLog("transition \(transition)")
-        #endif
-        switch transition {
-        case .revealed:
-            showDisc()
-            // A custom long press recognised; the ring's fill is armed next.
-            Haptics.play(.held)
-            Haptics.prepare(.armed)
-            startClock()
-        case .armed:
-            stopClock()
-            disc?.setArmed(true)
-            Haptics.play(.armed)
-        case .fired:
-            stopClock()
-            // The ready beat and the launch in one: the ring just filled
-            // under a finger that is still down, so this is the "armed"
-            // haptic as much as the "go".
-            Haptics.play(.armed)
-            disc?.dismiss(.launch)
-            disc = nil
-            fire()
-        case .retracted, .abandoned:
-            stopClock()
-            disc?.dismiss(.retract)
-            disc = nil
-        }
-    }
-
-    private func showDisc() {
-        guard let host = tabBarController?.view, let frame = discFrame(in: host) else { return }
-        disc?.removeFromSuperview()
-        let disc = HoldRingDiscView(symbolName: "camera.fill")
-        disc.frame = frame
-        host.addSubview(disc)
-        disc.appear()
-        self.disc = disc
-    }
+    // MARK: - Where the disc goes
 
     /// Centred over the "+", clear of the screen's edges, above the bubble —
     /// and above the tab accessory too, when one is showing over the "+"'s
     /// side of the bar, so the disc never sits glass-on-glass over it.
     private func discFrame(in host: UIView) -> CGRect? {
         guard let bubble = plusFrame(in: host) else { return nil }
-        let side = HoldRingDiscView.Metrics.diameter
-        let bounds = host.bounds
-        let margin = Metrics.edgeMargin + side / 2
-        let midX = min(max(bubble.midX, bounds.minX + margin), bounds.maxX - margin)
+        let unclipped = HoldToArmPresenter.frame(over: bubble, in: host.bounds)
         var ceiling = bubble.minY
         if let accessory = tabBarController?.bottomAccessory?.contentView, accessory.window != nil,
            !accessory.isHidden {
             let frame = accessory.convert(accessory.bounds, to: host)
-            let footprint = CGRect(x: midX - side / 2, y: frame.minY, width: side, height: frame.height)
+            let footprint = CGRect(x: unclipped.minX, y: frame.minY, width: unclipped.width, height: frame.height)
             if frame.intersects(footprint), frame.minY < ceiling { ceiling = frame.minY }
         }
-        return CGRect(x: midX - side / 2, y: ceiling - Metrics.gap - side, width: side, height: side)
+        return HoldToArmPresenter.frame(over: bubble, ceiling: ceiling, in: host.bounds)
     }
 
     /// Where the "+" is, in `space`.
@@ -277,26 +188,6 @@ final class CreateHoldShortcut: NSObject {
         }
         return bar.convert(frame, to: space)
     }
-
-    // MARK: - The clock
-
-    private func startClock() {
-        stopClock()
-        let link = CADisplayLink(target: self, selector: #selector(clockTicked))
-        link.add(to: .main, forMode: .common)
-        displayLink = link
-    }
-
-    private func stopClock() {
-        displayLink?.invalidate()
-        displayLink = nil
-    }
-
-    @objc private func clockTicked() {
-        let now = CACurrentMediaTime()
-        disc?.setProgress(hold.progress(at: now))
-        if let transition = hold.tick(at: now) { apply(transition) }
-    }
 }
 
 // MARK: - UIGestureRecognizerDelegate
@@ -307,7 +198,7 @@ extension CreateHoldShortcut: UIGestureRecognizerDelegate {
     /// where an old hold's selection lock is dropped: a new touch is a new
     /// decision.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        guard !hold.isEngaged else { return false }
+        guard presenter?.isHolding != true else { return false }
         lockoutWork?.cancel()
         consumesSelection = false
         guard let bar = gestureRecognizer.view, let controller = tabBarController,
@@ -322,9 +213,9 @@ extension CreateHoldShortcut: UIGestureRecognizerDelegate {
 
 extension CreateHoldShortcut {
     /// Where a hold stands, for the QA hook's waits.
-    var debugPhase: HoldToArm.Phase { hold.phase }
-    var debugProgress: CGFloat { hold.progress(at: CACurrentMediaTime()) }
-    var debugDisc: HoldRingDiscView? { disc }
+    var debugPhase: HoldToArm.Phase { presenter?.debugPhase ?? .idle }
+    var debugProgress: CGFloat { presenter?.debugProgress ?? 0 }
+    var debugDisc: HoldRingDiscView? { presenter?.debugDisc }
 
     /// The "+"'s centre in the bar, when the bar has placed it.
     var debugBubbleCentre: CGPoint? {
@@ -333,23 +224,23 @@ extension CreateHoldShortcut {
     }
 
     /// A finger landing on the "+" and held past the recognition delay — the
-    /// recogniser's `.began`, through the same `pressBegan`.
+    /// presenter's `.began`, through its own press path.
     func debugPress() {
         guard let centre = debugBubbleCentre else {
             QAWait.fail("-plus-hold-demo", "the + has no frame")
             return
         }
-        pressBegan(at: centre)
+        presenter?.debugPress(at: centre)
     }
 
     /// The finger sliding by `offset` from the "+"'s centre (`.changed`).
     func debugDrag(by offset: CGVector) {
         guard let centre = debugBubbleCentre else { return }
-        pressMoved(to: CGPoint(x: centre.x + offset.dx, y: centre.y + offset.dy))
+        presenter?.debugMove(to: CGPoint(x: centre.x + offset.dx, y: centre.y + offset.dy))
     }
 
     /// The finger lifting (`.ended`).
-    func debugRelease() { pressEnded() }
+    func debugRelease() { presenter?.debugRelease() }
 
     func debugLog(_ line: String) {
         FileHandle.standardError.write(Data(String(

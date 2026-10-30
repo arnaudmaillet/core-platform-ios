@@ -11,10 +11,13 @@ import UIKit
 ///   touch ─ 0.22s ─▶ disc rises (held tick) ─ 0.6s fill ─▶ fires (armed tick)
 /// ```
 ///
-/// The timing and its rules are `HoldToArm`'s, the disc `HoldRingDiscView`'s
-/// — the "+"'s own parts (`CreateHoldShortcut`), so the holds cannot drift
-/// apart. A SHORTCUT, never the only road: the host keeps the action as an
-/// accessibility custom action.
+/// ONE PRESENTER FOR EVERY HOLD, the tab bar's "+" included
+/// (`CreateHoldShortcut`): the timing, the ticks, the disc and its clock live
+/// here once, so the holds cannot drift apart. A host with a placement of its
+/// own (the "+" is one bubble of a bar) says where the disc goes
+/// (`discFrame`, `host`) and hears the press come and go (`onPressBegan`,
+/// `onPressFinished`). A SHORTCUT, never the only road: the host keeps the
+/// action as an accessibility custom action, or a menu row.
 @MainActor
 public final class HoldToArmPresenter: NSObject {
     /// What the disc carries.
@@ -40,6 +43,16 @@ public final class HoldToArmPresenter: NSObject {
     public var firedFace: (@MainActor () -> Face)?
     /// The action, at the ring's fill.
     public var onFire: (@MainActor () -> Void)?
+    /// The view the disc is added to. Nil: the window's root view.
+    public var host: (@MainActor () -> UIView?)?
+    /// Where the disc goes, in `host`'s space — for a hold whose view is not
+    /// the thing it floats over (the "+" hangs on the whole bar). Nil:
+    /// centred over the view, `Metrics.gap` above it, clear of the edges.
+    public var discFrame: (@MainActor (_ host: UIView) -> CGRect?)?
+    /// A press was recognised, before anything shows.
+    public var onPressBegan: (@MainActor () -> Void)?
+    /// The press ended — lifted, slid off or cancelled — whatever it did.
+    public var onPressFinished: (@MainActor () -> Void)?
 
     private weak var target: UIView?
     private let recognizer = UILongPressGestureRecognizer()
@@ -68,6 +81,9 @@ public final class HoldToArmPresenter: NSObject {
         }
     }
 
+    /// Whether a hold is under way: a press recognised and not yet over.
+    public var isHolding: Bool { hold.isEngaged }
+
     /// The recogniser, for a host that must let other gestures wait on it.
     public var gestureRecognizer: UILongPressGestureRecognizer { recognizer }
 
@@ -83,6 +99,7 @@ public final class HoldToArmPresenter: NSObject {
     }
 
     private func pressBegan(at location: CGPoint) {
+        onPressBegan?()
         guard let transition = hold.begin(at: CACurrentMediaTime(), location: location) else { return }
         apply(transition)
     }
@@ -93,11 +110,15 @@ public final class HoldToArmPresenter: NSObject {
     }
 
     private func pressEnded() {
-        if let transition = hold.end(at: CACurrentMediaTime()) { apply(transition) }
+        let transition = hold.end(at: CACurrentMediaTime())
+        onPressFinished?()
+        if let transition { apply(transition) }
     }
 
     private func pressCancelled() {
-        if let transition = hold.cancel() { apply(transition) }
+        let transition = hold.cancel()
+        onPressFinished?()
+        if let transition { apply(transition) }
     }
 
     private func apply(_ transition: HoldToArm.Transition) {
@@ -133,12 +154,18 @@ public final class HoldToArmPresenter: NSObject {
     }
 
     private func showDisc() {
-        guard let target, let host = target.window?.rootViewController?.view ?? target.window else { return }
+        guard let target, let host = host?() ?? target.window?.rootViewController?.view ?? target.window
+        else { return }
+        // A host's placement may have none to give (its anchor not laid out):
+        // then no disc, rather than one in the wrong place.
+        let frame: CGRect
+        if let discFrame {
+            guard let placed = discFrame(host) else { return }
+            frame = placed
+        } else {
+            frame = Self.frame(over: target.convert(target.bounds, to: host), in: host.bounds)
+        }
         disc?.removeFromSuperview()
-        let side = HoldRingDiscView.Metrics.diameter
-        let anchor = target.convert(target.bounds, to: host)
-        let margin = Metrics.edgeMargin + side / 2
-        let midX = min(max(anchor.midX, host.bounds.minX + margin), host.bounds.maxX - margin)
         let disc: HoldRingDiscView
         switch face() {
         case .symbol(let name):
@@ -147,10 +174,20 @@ public final class HoldToArmPresenter: NSObject {
             disc = HoldRingDiscView(symbolName: "music.note")
             disc.setPicture(image)
         }
-        disc.frame = CGRect(x: midX - side / 2, y: anchor.minY - Metrics.gap - side, width: side, height: side)
+        disc.frame = frame
         host.addSubview(disc)
         disc.appear()
         self.disc = disc
+    }
+
+    /// The disc's frame over `anchor`: centred on it, `Metrics.gap` above
+    /// `ceiling` (its top by default), never nearer than `Metrics.edgeMargin`
+    /// to `bounds`' sides. Pure, for hosts and tests.
+    public static func frame(over anchor: CGRect, ceiling: CGFloat? = nil, in bounds: CGRect) -> CGRect {
+        let side = HoldRingDiscView.Metrics.diameter
+        let margin = Metrics.edgeMargin + side / 2
+        let midX = min(max(anchor.midX, bounds.minX + margin), bounds.maxX - margin)
+        return CGRect(x: midX - side / 2, y: (ceiling ?? anchor.minY) - Metrics.gap - side, width: side, height: side)
     }
 
     private func startClock() {
@@ -185,8 +222,14 @@ public final class HoldToArmPresenter: NSObject {
     /// Where a hold stands, and the disc up — tests.
     public var debugPhase: HoldToArm.Phase { hold.phase }
     public var debugDisc: HoldRingDiscView? { disc }
-    /// A finger held on the view past the recognition delay (`.began`).
-    public func debugPress() { pressBegan(at: CGPoint(x: target?.bounds.midX ?? 0, y: target?.bounds.midY ?? 0)) }
+    public var debugProgress: CGFloat { hold.progress(at: CACurrentMediaTime()) }
+    /// A finger held on the view past the recognition delay (`.began`) — at
+    /// its centre, or at `location` in its space.
+    public func debugPress(at location: CGPoint? = nil) {
+        pressBegan(at: location ?? CGPoint(x: target?.bounds.midX ?? 0, y: target?.bounds.midY ?? 0))
+    }
+    /// The finger sliding to `location`, in the view's space (`.changed`).
+    public func debugMove(to location: CGPoint) { pressMoved(to: location) }
     /// The finger lifting (`.ended`).
     public func debugRelease() { pressEnded() }
     #endif
