@@ -55,6 +55,7 @@ final class FeedSongPlayer {
             ) { [weak player] _ in
                 MainActor.assumeIsolated { player?.seek(to: .zero) }
             }
+            player.volume = volume
             self.player = player
             playingURL = url
         }
@@ -71,6 +72,11 @@ final class FeedSongPlayer {
     }
 
     var isPlaying: Bool { (player?.rate ?? 0) > 0 }
+
+    /// The song's level, 0…1 (#1914): its screen's share of the viewport.
+    var volume: Float = 1 {
+        didSet { player?.volume = volume }
+    }
 
     /// The song's item, for the tests.
     var currentItem: AVPlayerItem? { player?.currentItem }

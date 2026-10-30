@@ -208,6 +208,8 @@ public final class VideoPlaybackController {
     /// PLAYER and emptied by `retire` like every other per-player table here.
     var soundBindings: [ObjectIdentifier: SoundBinding] = [:]
     var audiblePlayers: Set<ObjectIdentifier> = []
+    /// The heard clip's level (`setAudibleVolume`, #1914).
+    var audibleVolume: Float = 1
     /// The feed's sound (#1931): turned on by a volume key, it keeps the
     /// session `.playback`. The app's one session; tests pass their own.
     public var feedSound: FeedSoundSession = .shared {

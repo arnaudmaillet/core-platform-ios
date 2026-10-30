@@ -989,6 +989,16 @@ final class SnapFeedViewController: UIViewController {
         // Mirrored in viewDidAppear: during willAppear the floating-bar
         // containers may not have re-attached to the window yet.
         syncEngagementAfterAppearance()
+        // Coming back from under a screen popped off it (#1914): the share
+        // rises with the pop, and the clip resumes at half. Arriving on its
+        // own (a push, a presentation, a flight), it owns the whole screen.
+        if let coordinator = transitionCoordinator, !isMovingToParent, !isBeingPresented,
+           navigationController?.isBeingPresented != true, !isAwaitingAnyFlight,
+           let cover = coordinator.view(forKey: .from) {
+            viewportShare.track(coordinator, cover: cover, coversAtEnd: false)
+        } else {
+            viewportShare.report(1)
+        }
         isOnScreen = true
         refreshVisibility()
         authorPillAwaitsLandingInstall = true
@@ -1472,10 +1482,43 @@ final class SnapFeedViewController: UIViewController {
         // that should still be playing. Resign via viewDidDisappear instead —
         // it only fires for *completed* disappearances. Instant paths (tab
         // switch) have no transition coordinator and resign immediately.
-        guard transitionCoordinator == nil else { return }
-        isOnScreen = false
+        guard let coordinator = transitionCoordinator else {
+            isOnScreen = false
+            refreshVisibility()
+            return
+        }
+        // A screen pushed OVER this one (#1914): the clip's sound fades as it
+        // slides in, and the clip pauses — never stops — past half. Never this
+        // screen's own pop or dismissal: the screen under it is no cover, and
+        // a grab carries this very player to its tile.
+        if !isMovingFromParent, !isBeingDismissed, navigationController?.isBeingDismissed != true,
+           !isAwaitingAnyFlight, let cover = coordinator.view(forKey: .to) {
+            viewportShare.track(coordinator, cover: cover, coversAtEnd: true)
+        }
+    }
+
+    /// The share of this screen still on screen (#1914): what its clip's gate
+    /// reads — it plays at half and above, and its sound follows the share.
+    private lazy var viewportShare: ViewportShare = {
+        let share = ViewportShare(host: view)
+        share.onChange = { [weak self] value in self?.viewportShareDidChange(value) }
+        return share
+    }()
+
+    private var viewportSharePlays = true
+
+    private func viewportShareDidChange(_ share: CGFloat) {
+        let volume = ViewportShare.volume(at: share)
+        videoPlayback?.setAudibleVolume(volume)
+        songPlayer.volume = volume
+        let plays = ViewportShare.plays(at: share)
+        guard plays != viewportSharePlays else { return }
+        viewportSharePlays = plays
         refreshVisibility()
     }
+
+    /// The share now, for tests.
+    var debugViewportShare: ViewportShare { viewportShare }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
@@ -4931,7 +4974,9 @@ final class SnapFeedViewController: UIViewController {
     // MARK: - Active-item lifecycle
 
     private func refreshVisibility() {
-        let isWatched = isOnScreen && isForeground && !isSetAside
+        // A screen pushed over this one past half the viewport pauses it, and
+        // its pop gives it back at half (#1914, `viewportShare`).
+        let isWatched = isOnScreen && isForeground && !isSetAside && ViewportShare.plays(at: viewportShare.share)
         // Off screen, nothing is planned ahead: the warmed and kept players go
         // back and every head preload is cancelled. The next activation plans
         // again (`warmSettledWindow`).
