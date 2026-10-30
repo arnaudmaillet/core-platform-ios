@@ -1,3 +1,6 @@
+import UIKit
+@testable import Auth
+
 /// Waits on STATE, not time: polls until `condition` holds and returns at once
 /// when it does, giving up after `looks` looks (2,000 is about 10 s on a free
 /// main actor). The same helper EmoteKit's suites use.
@@ -10,6 +13,15 @@
 ///
 /// The waits that matter are `#require`d: one that gives up silently makes
 /// the next step a no-op.
+@MainActor
+extension UINavigationController {
+    /// The step on top of the sign-in flow: the form's, in its own sheet over
+    /// the list's while it is up (#1908), else this stack's.
+    var flowTop: UIViewController? {
+        ((self as? ContentFittingNavigationController)?.formStack ?? self).topViewController
+    }
+}
+
 @MainActor
 @discardableResult
 func settle(looks: Int = 2_000, until condition: () async -> Bool) async -> Bool {

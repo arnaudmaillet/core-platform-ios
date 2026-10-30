@@ -28,32 +28,33 @@ struct LoginFlowCoordinatorTests {
         let flow = LoginFlowCoordinator().start()
 
         let methods = try #require(try firstScreen(of: flow) as? MethodSelectionViewController)
-        #expect(methods.prompt == nil)
         methods.loadViewIfNeeded()
         #expect(methods.tableView(methods.tableView, viewForHeaderInSection: 0) == nil, "a headline over the methods")
     }
 
-    /// A gated opening shows its reason only behind `-signin-reason-line`
-    /// (#1908): the owner judges both. Off in a test run, so the bare list.
-    @Test func aGatedActionsReasonWaitsForItsFlag() throws {
-        let flow = LoginFlowCoordinator().start(prompt: GatedAction.like.signUpPrompt)
+    /// ⚠️ THE FORM IS ITS OWN SHEET (#1908, the owner 2026-10-30): picking
+    /// a method presents a full-height stack over the list's, which never
+    /// grows with a push — the resize under the finger looked broken.
+    @Test func pickingAMethodOpensTheFormInItsOwnStack() throws {
+        let flow = LoginFlowCoordinator(signUp: FakeSignUp()).start()
+        let list = try #require(flow as? ContentFittingNavigationController)
+        let methods = try #require(list.viewControllers.first as? MethodSelectionViewController)
+        methods.onMethodSelected?(.email)
 
-        let methods = try #require(try firstScreen(of: flow) as? MethodSelectionViewController)
-        #expect(MethodSelectionViewController.showsReasonLine == false)
-        #expect(methods.prompt == nil)
-        // With the line, it is the gated reason, one quiet line.
-        methods.prompt = GatedAction.like.signUpPrompt
-        methods.loadViewIfNeeded()
-        let header = methods.tableView(methods.tableView, viewForHeaderInSection: 0)
-        let label = header.flatMap { firstLabel(in: $0) }
-        #expect(label?.text == "Log in or sign up to like this post")
-        #expect(label?.textColor == .secondaryLabel)
+        #expect(list.viewControllers.count == 1, "the form was pushed on the list's sheet")
+        let form = try #require(list.formStack)
+        #expect(form.isForm)
+        #expect(form.viewControllers.first is EmailEntryViewController)
+        #expect(form.stage(for: form.viewControllers[0]) == .large)
+        #expect(list.stage(for: methods) == .fitted)
     }
 
-    private func firstLabel(in view: UIView) -> UILabel? {
-        if let label = view as? UILabel { return label }
-        for subview in view.subviews { if let found = firstLabel(in: subview) { return found } }
-        return nil
+    /// The list scrolls only when it does not fit (#1908): the sheet showed
+    /// all of it, and a drag still moved it.
+    @Test func theListScrollsOnlyWhenItOverflows() {
+        #expect(!MethodSelectionViewController.needsScroll(contentEnd: 400, topInset: 0, visibleHeight: 400))
+        #expect(!MethodSelectionViewController.needsScroll(contentEnd: 380, topInset: 20, visibleHeight: 400))
+        #expect(MethodSelectionViewController.needsScroll(contentEnd: 420, topInset: 0, visibleHeight: 400))
     }
 
     /// No "Already have an account? Log in" row and no "or" (#1811): one
@@ -204,15 +205,15 @@ struct SignUpFlowTests {
         _ signUp: FakeSignUp, profileSetup: FakeProfileSetup? = nil
     ) throws -> (UINavigationController, EmailEntryViewController) {
         let navigation = try pick(.email, signUp, profileSetup: profileSetup)
-        return (navigation, try #require(navigation.topViewController as? EmailEntryViewController))
+        return (navigation, try #require(navigation.flowTop as? EmailEntryViewController))
     }
 
     /// Waits (on a look budget) for a call to land a step of `type` on top.
     private func top<T: UIViewController>(
         _ navigation: UINavigationController, is type: T.Type
     ) async throws -> T {
-        try #require(await settle { navigation.topViewController is T }, "\(T.self) never reached the top")
-        return try #require(navigation.topViewController as? T)
+        try #require(await settle { navigation.flowTop is T }, "\(T.self) never reached the top")
+        return try #require(navigation.flowTop as? T)
     }
 
     /// With codes, "email" asks for an address rather than a password, and
@@ -249,7 +250,7 @@ struct SignUpFlowTests {
         try #require(await settle { await signUp.signedInAccount == pendingAccount },
                      "the account becomes the session")
 
-        #expect(navigation.topViewController === code)
+        #expect(navigation.flowTop === code)
     }
 
     /// Two-step sign-in on (#383): the emailed code leads to the app's code,
@@ -329,7 +330,7 @@ struct SignUpFlowTests {
 
         #expect(apple.nonce == "nonce-1")
         #expect(await signUp.signedInWith == .idToken(.apple, token: "apple-token", nonce: "nonce-1"))
-        #expect(navigation.topViewController is MethodSelectionViewController)
+        #expect(navigation.flowTop is MethodSelectionViewController)
     }
 
     /// A new Apple ID goes through the same steps, signs up with its token,
@@ -364,7 +365,7 @@ struct SignUpFlowTests {
         await settle(looks: 40) { false }
 
         #expect(await signUp.signedInWith == nil)
-        #expect(navigation.topViewController is MethodSelectionViewController)
+        #expect(navigation.flowTop is MethodSelectionViewController)
         #expect(navigation.presentedViewController == nil)
     }
 }

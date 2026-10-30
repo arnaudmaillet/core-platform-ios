@@ -51,7 +51,9 @@ public struct AuthFeatureBuilder: AuthFeatureBuilding {
         makeFlow().start()
     }
 
+    /// The gated action's `prompt` is not shown (#1908, the owner): the
+    /// sheet has no title and no reason line.
     public func makeSignInViewController(prompt: String?) -> UIViewController {
-        makeFlow().start(prompt: prompt)
+        makeFlow().start()
     }
 }

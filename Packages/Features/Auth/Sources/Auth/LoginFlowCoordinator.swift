@@ -18,7 +18,16 @@ final class LoginFlowCoordinator {
     /// pushes it; until then the flow lands on a native placeholder.
     var makeRegistrationViewController: (@MainActor () -> UIViewController)?
 
-    private weak var navigationController: UINavigationController?
+    /// The method list's stack: the sheet the shell presents.
+    private weak var navigationController: ContentFittingNavigationController?
+    /// The form's stack, in its own full-height sheet over the list's
+    /// (#1908); nil while none is up. Held here, so a step can be pushed
+    /// while its sheet is still arriving.
+    private var formNavigation: ContentFittingNavigationController?
+    /// The step on top of the flow: the form's while it is up, else the list.
+    private var topScreen: UIViewController? {
+        (formNavigation ?? navigationController)?.topViewController
+    }
 
     /// Sign-up and sign-in by code (guest mode B4, #449) — the only way in
     /// since passwords went (#840). Nil (tests of the shell alone): the
@@ -72,21 +81,19 @@ final class LoginFlowCoordinator {
     /// The flow's stack, with the method list on it. Presented as a sheet
     /// over the app (`ContentFittingNavigationController.fit`) it has no close
     /// button (#1811): the swipe is the way out, protected once a code was
-    /// sent. `prompt` is the gated action's reason, shown as one quiet line
-    /// behind `-signin-reason-line` (#1908); nil, none.
-    func start(prompt: String? = nil) -> UIViewController {
+    /// sent. No title and no reason line (#1908, the owner): the methods say
+    /// what they do.
+    func start() -> UIViewController {
         let methodSelection = MethodSelectionViewController(
             methods: SignInMethod.offered(passkeys: passkeys != nil && signUp != nil)
         )
-        methodSelection.prompt = MethodSelectionViewController.showsReasonLine ? prompt : nil
         methodSelection.legalLinks = legalLinks
         methodSelection.onOpenLink = { [weak self] url in self?.openPage(url) }
         methodSelection.onMethodSelected = { [self] method in
             select(method)
         }
 
-        // A short sheet for the list, a full-height one for the form (#563,
-        // #1811).
+        // A short sheet for the list (#563); the form gets its own (#1908).
         let navigation = ContentFittingNavigationController(rootViewController: methodSelection)
         navigation.protectsInput = Self.protectsInput(at:)
         navigationController = navigation
@@ -113,7 +120,8 @@ final class LoginFlowCoordinator {
 
     private func showPhoneAuth() {
         let phone = PhoneAuthViewController()
-        phone.onSendCode = { [self, weak phone] e164, display in
+        phone.onSendCode = { [weak self, weak phone] e164, display in
+            guard let self else { return }
             if signUp != nil {
                 sendCode(.sms, to: e164, display: display, from: phone)
             } else {
@@ -128,12 +136,12 @@ final class LoginFlowCoordinator {
     /// exists, the dispatch call goes here, and `onVerify` exchanges the code
     /// for a session (the app's session observer then swaps the root). Until
     /// then verification lands on an honest unavailable alert. PUSHED like
-    /// every other step (#1811): never a second sheet over the sign-in sheet.
+    /// every other step, inside the form's sheet (#1811, #1908).
     private func beginOTPVerification(e164: String, display: String) {
         _ = e164 // The dispatch payload, unused until the backend exists.
         let verification = OTPVerificationViewController(phoneDisplay: display)
-        verification.onVerify = { [self] _ in
-            presentPhoneSignInUnavailable()
+        verification.onVerify = { [weak self] _ in
+            self?.presentPhoneSignInUnavailable()
         }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-login-demo-phone") {
@@ -150,7 +158,7 @@ final class LoginFlowCoordinator {
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "OK", style: .default))
-        navigationController?.topViewController?.present(alert, animated: true)
+        topScreen?.present(alert, animated: true)
     }
 
     // MARK: - Codes and sign-up (guest mode B4, #449)
@@ -379,12 +387,14 @@ final class LoginFlowCoordinator {
             title: "Sign In Again", message: AuthMessages.message(for: .secondStepExpired), preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
-            guard let navigation = self?.navigationController,
-                  let index = navigation.viewControllers.lastIndex(where: { $0 is SecondStepViewController }),
-                  index > 0 else { return }
+            guard let self, let navigation = formNavigation,
+                  let index = navigation.viewControllers.lastIndex(where: { $0 is SecondStepViewController }) else { return }
+            // The second step opened the form (Sign in with Apple): back to
+            // the list.
+            guard index > 0 else { return closeForm() }
             navigation.popToViewController(navigation.viewControllers[index - 1], animated: true)
         })
-        navigationController?.topViewController?.present(alert, animated: true)
+        topScreen?.present(alert, animated: true)
     }
 
     private func showBirthday() {
@@ -475,9 +485,9 @@ final class LoginFlowCoordinator {
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
-            self?.navigationController?.popToRootViewController(animated: true)
+            self?.closeForm()
         })
-        navigationController?.topViewController?.present(alert, animated: true)
+        topScreen?.present(alert, animated: true)
     }
 
     private func presentUnderMinimumAge() {
@@ -488,9 +498,9 @@ final class LoginFlowCoordinator {
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
-            self?.navigationController?.popToRootViewController(animated: true)
+            self?.closeForm()
         })
-        navigationController?.topViewController?.present(alert, animated: true)
+        topScreen?.present(alert, animated: true)
     }
 
     private func presentFlowError(_ error: Error, on step: SignUpStepViewController?) {
@@ -503,7 +513,7 @@ final class LoginFlowCoordinator {
         let message = (error as? AuthError).map(AuthMessages.message(for:)) ?? "Something went wrong. Try again."
         let alert = UIAlertController(title: "Couldn\u{2019}t Continue", message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
-        navigationController?.topViewController?.present(alert, animated: true)
+        topScreen?.present(alert, animated: true)
     }
 
     /// No signing-up seam (tests of the shell alone): nothing proves an
@@ -515,14 +525,44 @@ final class LoginFlowCoordinator {
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "OK", style: .default))
-        navigationController?.topViewController?.present(alert, animated: true)
+        topScreen?.present(alert, animated: true)
     }
 
-    /// Pushes a step of the flow. The sheet grows to full height with the
-    /// first push off the method list, and stays there (#1811,
-    /// `ContentFittingNavigationController.stage(for:)`).
+    /// Shows a step of the flow: pushed in the form's sheet while it is up;
+    /// the first one PRESENTS that sheet, at full height over the list's
+    /// (#1908, the owner): the list's own sheet never resizes under the
+    /// viewer, and a swipe down on the form is the way back to it.
     private func push(_ screen: UIViewController) {
-        navigationController?.pushViewController(screen, animated: true)
+        if let form = formNavigation {
+            form.pushViewController(screen, animated: true)
+            return
+        }
+        guard let list = navigationController else { return }
+        let form = ContentFittingNavigationController(rootViewController: screen, isForm: true)
+        form.protectsInput = Self.protectsInput(at:)
+        form.modalPresentationStyle = .pageSheet
+        if let sheet = form.sheetPresentationController {
+            form.fit(sheet, fallback: 0)
+        }
+        form.onDismissed = { [weak self, weak form] in
+            guard let self, formNavigation === form else { return }
+            forgetForm()
+        }
+        formNavigation = form
+        list.formStack = form
+        list.present(form, animated: true)
+    }
+
+    /// Back to the method list: the form's sheet goes.
+    private func closeForm() {
+        guard let form = formNavigation else { return }
+        form.dismiss(animated: true)
+        forgetForm()
+    }
+
+    private func forgetForm() {
+        formNavigation = nil
+        navigationController?.formStack = nil
     }
 
     /// Whether leaving at `step` would lose what was typed (#1811): the code
@@ -536,7 +576,7 @@ final class LoginFlowCoordinator {
     /// A legal page, in place over the sheet (#1811).
     private func openPage(_ url: URL) {
         let page = SFSafariViewController(url: url)
-        navigationController?.topViewController?.present(page, animated: true)
+        topScreen?.present(page, animated: true)
     }
 
     /// The account-creation steps (code, date of birth, handle) land here once
@@ -577,7 +617,7 @@ final class LoginFlowCoordinator {
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "OK", style: .default))
-        navigationController?.topViewController?.present(alert, animated: true)
+        topScreen?.present(alert, animated: true)
     }
 
     #if DEBUG
@@ -598,7 +638,7 @@ final class LoginFlowCoordinator {
         if arguments.contains("-login-demo-phone") {
             qaWhenSettled("login-demo-phone", on: MethodSelectionViewController.self) { [self] in
                 showPhoneAuth()
-                guard let top = navigationController?.topViewController as? PhoneAuthViewController else {
+                guard let top = topScreen as? PhoneAuthViewController else {
                     QAWait.fail("login-demo-phone", "the phone screen is not on top after the push")
                     return
                 }
