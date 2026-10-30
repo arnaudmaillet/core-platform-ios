@@ -4074,6 +4074,9 @@ final class SnapFeedViewController: UIViewController {
             detail?.setPullDismissDriveHandler { [weak self] phase, translation, velocity in
                 self?.drivePullDismiss(phase, translation: translation, velocity: velocity)
             }
+            // …and a tap in the empty room above a short list does the
+            // same: back to the media, as the ✕ (#1926, the owner).
+            detail?.setEmptyRoomTapHandler { [weak self] in self?.dismissComments() }
         }
         detail?.setEngagedPageSwipeHandler { [weak self] phase, translation, velocity in
             self?.drivePageSwipe(phase, translation: translation, velocity: velocity)

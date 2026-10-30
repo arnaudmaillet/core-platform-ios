@@ -207,6 +207,45 @@ struct PostDetailStreamShapeTests {
         #expect(abs(controller.bottomAnchorSlack - resting) < 1, "the stream did not settle back")
     }
 
+    /// A tap in the empty room above a short stream closes the comments
+    /// (#1926); a tap on the caption does not, and a stream that fills its
+    /// room has no such room.
+    @Test func aTapInTheEmptyRoomAboveAShortStreamCloses() async throws {
+        let (controller, stream, window) = try await makeStream(Self.spreadAcrossDays)
+        defer { window.isHidden = true }
+        engage(controller, stream, anchored: true)
+        try #require(controller.bottomAnchorSlack > 100)
+        var closes = 0
+        controller.setEmptyRoomTapHandler { closes += 1 }
+
+        // The caption is the content's first row, at the top of the content.
+        let caption = try #require(stream.cellForItem(at: IndexPath(item: 0, section: 0)))
+        controller.debugTapStream(at: CGPoint(x: caption.frame.midX, y: caption.frame.midY))
+        #expect(closes == 0, "a tap on the caption closed the comments")
+
+        // Above it: the room the anchor leaves, on screen under the top bar.
+        let room = CGPoint(x: stream.bounds.midX, y: -controller.bottomAnchorSlack / 2)
+        #expect(stream.convert(room, to: controller.view).y > 120, "the point is not below the engaged top")
+        controller.debugTapStream(at: room)
+        #expect(closes == 1, "a tap in the empty room did not close the comments")
+
+        // Unwired (a text page), nothing.
+        controller.setEmptyRoomTapHandler(nil)
+        controller.debugTapStream(at: room)
+        #expect(closes == 1)
+    }
+
+    @Test func aStreamThatFillsItsRoomHasNoEmptyRoomToTap() async throws {
+        let many = (0..<30).map { Self.entry("c\($0)", ageInDays: 0) }
+        let (controller, stream, window) = try await makeStream(many)
+        defer { window.isHidden = true }
+        engage(controller, stream, anchored: true)
+        var closes = 0
+        controller.setEmptyRoomTapHandler { closes += 1 }
+        controller.debugTapStream(at: CGPoint(x: stream.bounds.midX, y: -10))
+        #expect(closes == 0, "a full stream closed on a tap under the bar")
+    }
+
     /// The experiment off: the engaged top alone, as before.
     @Test func withoutTheExperimentTheStreamHangsFromTheEngagedTop() async throws {
         let (controller, stream, window) = try await makeStream(Self.spreadAcrossDays)
