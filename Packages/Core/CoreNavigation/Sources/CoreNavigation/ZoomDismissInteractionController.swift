@@ -267,9 +267,14 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // The grab takes the screen — see `ZoomAnimator.dismiss`.
         ZoomLandingLeftovers.clear(over: fromView)
         ZoomLandingLeftovers.clear(over: container)
-        // Rotation waits for the grab (`FlightOrientationLock`).
+        // Rotation waits for the grab (`FlightOrientationLock`). Its emotes
+        // sit it out — unless the grab moves the live page (#1915): nothing
+        // is drawn twice then, and the page's interface stays alive in the
+        // viewer's hand, its emote wheel included.
         orientationLease?.release()
-        orientationLease = FlightOrientationLock.acquire(in: container.window)
+        orientationLease = FlightOrientationLock.acquire(
+            in: destination?.zoomGrabCarriesLiveInterface == true ? nil : container.window
+        )
         // Reinstall the map behind the grabbed card — a navigation controller
         // removes non-top views, so it isn't in the hierarchy yet.
         if let toView = context.view(forKey: .to) {

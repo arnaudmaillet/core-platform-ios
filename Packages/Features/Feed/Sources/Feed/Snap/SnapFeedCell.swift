@@ -754,6 +754,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// ground stored, so the dismissal that followed it declined to run and
     /// the thread stopped receding on exactly the pages that opened with one.
     private var isEngagedDismissing = false
+    /// Whether the grab moving the page is a live grab (#1915): the page's
+    /// whole interface rides it, untouched until the release commits — not
+    /// the engaged thread, which recedes with the finger.
+    private(set) var isLiveGrab = false
     /// Everything the page draws, in one frame-managed view — see
     /// `buildLayout`. A transition moves this and nothing inside it.
     private let pageStage = UIView()
@@ -1064,7 +1068,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         pageStage.addSubview(commentsContainer)
         pageStage.addSubview(headerFrost)
 
-        chrome.pin(to: contentView)
+        // ⚠️ ON THE STAGE (#1915): a grab moves the live page, its interface
+        // included — the streams, the ticker, the wheel, the caption. Pinned to
+        // `contentView` it stood still while the stage left.
+        chrome.pin(to: pageStage)
         // The action column rides ABOVE the chrome (#695): the comments'
         // fade takes the chrome, never the like pill and the sound bubble.
         // In the stage's twin, so it moves with the page (#1917).
@@ -1368,6 +1375,31 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         restingAlphas = dismissalTravellers.map(\.alpha)
     }
 
+    /// **THE LIVE GRAB (#1915)**: the page follows the card as the engaged
+    /// dismissal's does — one stage transform, under a window shaped like the
+    /// card — with its whole interface on it, alive. Only the media leaves the
+    /// page: the card carries it (the donated surface, still playing).
+    ///
+    /// - Nothing fades while the finger is down. On the release, a commit
+    ///   fades the interface inside the release's spring, and a cancel
+    ///   leaves it as it was (`setEngagedDismissal`).
+    /// - The page takes no touch while held: the grab owns the finger.
+    /// - The interface does not reflow under its transform: its insets are
+    ///   the frozen ones (`applyChromeInsets`), never the stage's safe area.
+    func beginLiveGrab() {
+        guard !isEngagedDismissing else { return }
+        isEngagedDismissing = true
+        isLiveGrab = true
+        // Alpha, never `isHidden`: a hidden surface stops feeding the card's
+        // sibling surface (`beginEngagedDismissal`).
+        alphaForMaskedReveal = mediaCard.alpha
+        mediaCard.alpha = 0
+        groundForMaskedReveal = contentView.backgroundColor
+        contentView.backgroundColor = .clear
+        restingAlphas = dismissalTravellers.map(\.alpha)
+        stages.forEach { $0.isUserInteractionEnabled = false }
+    }
+
     /// ⚠️ A PURE FUNCTION OF THE FINGER, never an animation.
     ///
     /// The grab can be pushed forward, dragged back and abandoned; anything
@@ -1384,8 +1416,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // The thread and its wash recede together, on one value — each from
         // where it already was. The photograph is the card's and is not this
         // method's business at all — see `beginEngagedDismissal`.
+        //
+        // A live grab's interface does not recede under the finger (#1915):
+        // it is the page, held. It fades only on the release's way home, in
+        // its spring — `t` is 1 there, and 0 on a cancel's.
+        let fade = isLiveGrab ? (settling ? t : 0) : t
         for (view, resting) in zip(dismissalTravellers, restingAlphas) {
-            view.alpha = resting * (1 - t)
+            view.alpha = resting * (1 - fade)
         }
         guard state.card.width > 0, state.card.height > 0 else { return }
         // ⚠️ THE PAGE OVERHANGS THE CARD BY A HAIR, and this is the answer to a
@@ -1546,8 +1583,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     ///
     /// The column's stage is one too (#1917): the folded record fades with
     /// the thread it sits beside, from its own resting alpha.
+    ///
+    /// A live grab's are the two stages themselves (#1915): the whole page,
+    /// its media already handed to the card.
     private var dismissalTravellers: [UIView] {
-        [commentsContainer, headerFrost, mediaBackdrop, columnStage]
+        isLiveGrab ? stages : [commentsContainer, headerFrost, mediaBackdrop, columnStage]
     }
 
     /// How far the page overhangs the card it covers. Small enough to be
@@ -1581,6 +1621,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             view.alpha = resting
         }
         restingAlphas = []
+        if isLiveGrab {
+            isLiveGrab = false
+            stages.forEach { $0.isUserInteractionEnabled = true }
+        }
         // The wash comes back with everything else: an abandoned grab returns
         // to a page that has to be readable again.
         contentView.mask = nil
@@ -2038,6 +2082,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// insets — one chrome scaffold, one inset authority.
     #if DEBUG
     var debugChrome: SnapChromeView { chrome }
+    /// The two stages' opacities, and whether they take touches (#1915).
+    var debugStageAlphas: [CGFloat] { stages.map(\.alpha) }
+    var debugStagesTakeTouches: Bool { stages.allSatisfy(\.isUserInteractionEnabled) }
     var debugChromeInsets: UIEdgeInsets { frozenInsets }
     #endif
 

@@ -454,6 +454,17 @@ public protocol ZoomTransitionDestination: AnyObject {
     /// the grab is released. Default is nothing.
     func setZoomDismissState(_ state: ZoomDismissState)
 
+    /// Whether a grab moves this destination's LIVE page, its whole interface
+    /// on it, following the card (`setZoomDismissState`) — rather than flying
+    /// a replica (#1915, as Instagram, TikTok and Douyin do). Then the grab
+    /// stills nothing on the page: its emotes keep animating and nothing is
+    /// drawn twice, since no replica shows. Default false.
+    ///
+    /// A requirement, not only a default: an existential reads a default-only
+    /// member from the extension, never the conformer's answer
+    /// (`ZoomExistentialDispatchTests`).
+    var zoomGrabCarriesLiveInterface: Bool { get }
+
     /// Detaches the destination's live player and parks it for whoever plays
     /// the same asset next — the source it is flying home to. Called on the
     /// DISMISS leg once the card has taken over rendering.
@@ -565,6 +576,7 @@ public extension ZoomTransitionDestination {
     var zoomDismissalKind: ZoomDismissalKind { .hero }
     var zoomDestinationContentIsReady: Bool { true }
     var zoomOwnsInteractiveDismissal: Bool { true }
+    var zoomGrabCarriesLiveInterface: Bool { false }
     var concealsAppTabBar: Bool { true }
     var zoomDestinationMediaIsRendering: Bool { true }
     func zoomPageFraming(sourcePicture: UIImage?) -> ZoomPageFraming? { nil }
