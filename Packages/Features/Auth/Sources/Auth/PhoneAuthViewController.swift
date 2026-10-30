@@ -7,7 +7,7 @@ import UIKit
 /// zero-pattern placeholder), and a full-width Continue button. No
 /// password: Continue initiates the SMS dispatch and hands off to the
 /// verification sheet via the coordinator.
-final class PhoneAuthViewController: BottomAnchoredTableViewController {
+final class PhoneAuthViewController: AuthStepTableViewController {
     /// Fired with the E.164 token and the human-readable display form.
     var onSendCode: ((_ e164: String, _ display: String) -> Void)?
 
@@ -88,6 +88,11 @@ final class PhoneAuthViewController: BottomAnchoredTableViewController {
         prefixLabel.adjustsFontForContentSizeCategory = true
 
         applyCountry(country)
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        if !hasAutofocused { focusAlongTransition(phoneCell.textField) }
     }
 
     override func viewDidAppear(_ animated: Bool) {

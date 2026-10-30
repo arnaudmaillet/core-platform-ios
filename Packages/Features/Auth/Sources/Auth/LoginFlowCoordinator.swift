@@ -72,13 +72,13 @@ final class LoginFlowCoordinator {
     /// The flow's stack, with the method list on it. Presented as a sheet
     /// over the app (`ContentFittingNavigationController.fit`) it has no close
     /// button (#1811): the swipe is the way out, protected once a code was
-    /// sent. `prompt` is the gated action's headline; nil says "Log in or sign
-    /// up".
+    /// sent. `prompt` is the gated action's reason, shown as one quiet line
+    /// behind `-signin-reason-line` (#1908); nil, none.
     func start(prompt: String? = nil) -> UIViewController {
         let methodSelection = MethodSelectionViewController(
             methods: SignInMethod.offered(passkeys: passkeys != nil && signUp != nil)
         )
-        methodSelection.prompt = prompt ?? MethodSelectionViewController.defaultPrompt
+        methodSelection.prompt = MethodSelectionViewController.showsReasonLine ? prompt : nil
         methodSelection.legalLinks = legalLinks
         methodSelection.onOpenLink = { [weak self] url in self?.openPage(url) }
         methodSelection.onMethodSelected = { [self] method in

@@ -73,7 +73,7 @@ public final class ContentFittingNavigationController: UINavigationController, U
     }
 
     /// The sheet height the top step needs, excluding the bottom safe area
-    /// (the sheet adds it). Nil while the step is not a table, is not on
+    /// the sheet adds back. Nil while the step is not a table, is not on
     /// screen (off-window, the bar adds no safe area yet and the answer would
     /// be short by its band), or has not been laid out.
     public var fittedHeight: CGFloat? {
@@ -92,7 +92,17 @@ public final class ContentFittingNavigationController: UINavigationController, U
                 + "inset=\(table.contentInset.top) step=\(type(of: topViewController!))")
         }
         #endif
-        return (bar + table.contentSize.height).rounded(.up)
+        // ⚠️ THE CONTENT'S END, AND NO SECOND BOTTOM MARGIN (#1908, the
+        // owner: ~60 pt under the legal line against ~20 at the sides). The
+        // grouped table's `contentSize` carries ~20 pt of trailing padding
+        // past its last section, and the floating sheet adds the bottom
+        // safe area on top of the answer, though it already stands clear of
+        // the home indicator. So: the last section's end, less the inset the
+        // sheet will add back — the legal line's own padding is the gap.
+        let sections = table.numberOfSections
+        let end = sections > 0 ? table.rectForFooter(inSection: sections - 1).maxY : table.contentSize.height
+        let added = view.window?.safeAreaInsets.bottom ?? 0
+        return max(0, bar + end - added).rounded(.up)
     }
 
     private static let fittedIdentifier = UISheetPresentationController.Detent.Identifier("fittedContent")

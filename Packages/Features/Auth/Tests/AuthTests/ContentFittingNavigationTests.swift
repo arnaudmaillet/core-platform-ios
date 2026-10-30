@@ -72,6 +72,38 @@ struct ContentFittingNavigationTests {
         #expect(ContentFittingNavigationController.detentHeight(fitted: nil, fallback: 540, maximum: 500) == 500)
     }
 
+    /// The fitted height ends where the step's last section does — not at
+    /// the grouped table's `contentSize`, whose trailing padding was a second
+    /// bottom margin under the legal line (#1908) — less the bottom inset the
+    /// sheet adds back (none in a test window).
+    @Test func theFittedHeightEndsAtTheLastSection() throws {
+        let methods = MethodSelectionViewController(methods: SignInMethod.offered(passkeys: false))
+        let navigation = ContentFittingNavigationController(rootViewController: methods)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = navigation
+        window.isHidden = false
+        defer { window.isHidden = true }
+        navigation.view.layoutIfNeeded()
+        methods.tableView.layoutIfNeeded()
+        let table = methods.tableView!
+        let end = table.rectForFooter(inSection: table.numberOfSections - 1).maxY
+        let fitted = try #require(navigation.fittedHeight)
+        #expect(abs(fitted - (end - window.safeAreaInsets.bottom).rounded(.up)) < 1)
+        #expect(fitted <= table.contentSize.height, "the trailing padding is still counted")
+    }
+
+    /// The steps lay their content from the TOP (#1908): no inset pushes it
+    /// down to the bottom, so the keyboard's arrival moves nothing.
+    @Test func aStepLaysItsContentFromTheTop() {
+        let methods = MethodSelectionViewController(methods: SignInMethod.offered(passkeys: false))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = methods
+        window.isHidden = false
+        defer { window.isHidden = true }
+        methods.view.layoutIfNeeded()
+        #expect(methods.tableView.contentInset.top == 0, "the content was pushed to the bottom")
+    }
+
     /// A step that is not a table (a placeholder page) has no content height
     /// to report either.
     @Test func aStepThatIsNotATableHasNoHeight() {

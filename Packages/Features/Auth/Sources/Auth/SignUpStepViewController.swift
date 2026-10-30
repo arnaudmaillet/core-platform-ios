@@ -12,7 +12,7 @@ protocol WorkingIndicating: AnyObject {
 /// header, the step's own rows, and one full-width primary button — on the
 /// bottom-anchored table the credential screens use, so a step sits above
 /// the keyboard like the rest of the flow.
-class SignUpStepViewController: BottomAnchoredTableViewController {
+class SignUpStepViewController: AuthStepTableViewController {
     private let emoji: String
     private let heading: String
     private let subtitle: String

@@ -2,21 +2,30 @@ import DesignSystem
 import UIKit
 
 /// Screen 1 of the sign-in flow: an explicit method menu — the federated
-/// providers plus the email and phone credential flows — under ONE headline
-/// that says both (#1811): every method logs an account in and signs a new
-/// one up (a code proves the address, and an address with an account signs
+/// providers plus the email and phone credential flows — with no title
+/// (#1908): every method logs an account in and signs a new one up (a code proves the address, and an address with an account signs
 /// straight in, #840), so there is no separate "Log in" link. It ends on the
 /// legal line. No input, no keyboard, no navigation bar: a pure branch point
 /// in a content-fitted sheet. Dumb view: reports selections upward; the flow
 /// coordinator decides where to go.
-final class MethodSelectionViewController: BottomAnchoredTableViewController {
+final class MethodSelectionViewController: AuthStepTableViewController {
     var onMethodSelected: ((SignInMethod) -> Void)?
-    /// The headline over the methods: "Log in or sign up", or why the flow
-    /// opened when a guest's gated action did ("Log in or sign up to like this
-    /// post").
-    var prompt: String = MethodSelectionViewController.defaultPrompt
-    /// The headline when nothing gated opened the flow.
-    static let defaultPrompt = "Log in or sign up"
+    /// One quiet line over the methods saying why the flow opened, when a
+    /// guest's gated action did ("Log in or sign up to like this post"); nil,
+    /// none. No title otherwise (#1908, the owner): the methods say what they
+    /// do.
+    var prompt: String?
+
+    /// Whether a gated opening shows its reason line (#1908): the owner
+    /// judges the sheet with and without it — DEBUG `-signin-reason-line`
+    /// turns it on; off, a gated sheet is the bare list too.
+    static var showsReasonLine: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-signin-reason-line")
+        #else
+        false
+        #endif
+    }
     /// The legal line's pages (#1811); a nil one shows its name as plain text.
     var legalLinks = AuthLegalLinks()
     /// A legal link was tapped: the flow opens the page in place.
@@ -124,7 +133,7 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
     override func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
         switch sections[section] {
         case .method(let method) where method == methods.first:
-            return makePromptHeader(prompt)
+            return prompt.map(makePromptHeader)
         case .method:
             return nil
         case .legal:
@@ -135,7 +144,9 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
     override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
         switch sections[section] {
         case .method(let method):
-            if method == methods.first { return UITableView.automaticDimension } // the headline
+            // The reason line; without one, the list opens one side margin
+            // under the sheet's top, as the rows sit from its sides.
+            if method == methods.first { return prompt == nil ? Spacing.lg : UITableView.automaticDimension }
             return Spacing.sm - Self.collapsedFooterHeight // tight cohesive menu
         case .legal:
             return UITableView.automaticDimension
@@ -208,19 +219,20 @@ private extension MethodSelectionViewController {
             text.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Spacing.lg)
             text.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Spacing.lg)
             text.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.lg)
-            text.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.md)
+            // The sheet's bottom margin (#1908): the side margin, nothing more
+            // (`ContentFittingNavigationController.fittedHeight`).
+            text.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.lg)
         }
         return header
     }
 
-    /// The reason the flow opened, as the headline over the methods.
+    /// The reason the flow opened, one quiet line over the methods (#1908).
     func makePromptHeader(_ prompt: String) -> UITableViewHeaderFooterView {
         let label = UILabel()
         label.text = prompt
-        let descriptor = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .title2)
-        label.font = UIFont(descriptor: descriptor.withSymbolicTraits(.traitBold) ?? descriptor, size: 0)
+        label.font = .appFont(forTextStyle: .subheadline)
         label.adjustsFontForContentSizeCategory = true
-        label.textColor = .label
+        label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0
         label.accessibilityTraits = .header
@@ -229,8 +241,8 @@ private extension MethodSelectionViewController {
         label.constrain(in: header.contentView) { parent in
             label.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
             label.widthAnchor.constraint(lessThanOrEqualTo: parent.widthAnchor)
-            label.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.xl)
-            label.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.lg)
+            label.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.lg)
+            label.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.md)
         }
         return header
     }

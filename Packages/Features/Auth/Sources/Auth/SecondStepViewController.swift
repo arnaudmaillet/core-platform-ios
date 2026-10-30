@@ -38,6 +38,11 @@ final class SecondStepViewController: SignUpStepViewController {
         super.viewDidLoad()
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        focusAlongTransition(codeCell.textField)
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         codeCell.textField.becomeFirstResponder()
