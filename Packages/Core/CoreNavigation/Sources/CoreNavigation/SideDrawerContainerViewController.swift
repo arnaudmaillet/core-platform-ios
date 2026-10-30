@@ -111,6 +111,12 @@ public final class SideDrawerContainerViewController: UIViewController {
     public var onDidOpen: (() -> Void)?
     /// The drawer settled closed.
     public var onDidClose: (() -> Void)?
+    /// The share of the main screen still on screen, 0…1, as the drawer
+    /// moves (#1914): told on every frame the viewer sees — a drag, each
+    /// frame of a settle (read from the presentation), and the landing. What
+    /// a clip under the drawer reads to fade and pause at half.
+    public var onMainShareChange: ((CGFloat) -> Void)?
+    private var lastMainShare: CGFloat = 1
 
     /// VoiceOver's name for the dimmed sliver, which is a button that closes.
     public var dimmingAccessibilityLabel = "Close" {
@@ -489,6 +495,7 @@ public final class SideDrawerContainerViewController: UIViewController {
             guard let self, generation == settleGeneration else { return }
             stopBlurLink()
             blurView.setStrength(Self.blurStrength(forProgress: target))
+            reportMainShare(slide: target * drawerWidth)
             finish()
         }
         if MotionPreference.reducesMotion {
@@ -538,7 +545,23 @@ public final class SideDrawerContainerViewController: UIViewController {
     /// One frame of a settle: the blur at the slide the screen shows.
     fileprivate func blurFrame() {
         guard drawerWidth > 0, let presentation = mainHost.layer.presentation() else { return }
-        blurView.setStrength(Self.blurStrength(forProgress: presentation.affineTransform().tx / drawerWidth))
+        let slide = presentation.affineTransform().tx
+        blurView.setStrength(Self.blurStrength(forProgress: slide / drawerWidth))
+        reportMainShare(slide: slide)
+    }
+
+    /// The share of the main screen that a slide of `slide` points leaves
+    /// on a screen `width` wide. Pure, for tests.
+    public static func mainShare(slide: CGFloat, width: CGFloat) -> CGFloat {
+        guard width > 0 else { return 1 }
+        return min(1, max(0, 1 - slide / width))
+    }
+
+    private func reportMainShare(slide: CGFloat) {
+        let share = Self.mainShare(slide: slide, width: view.bounds.width)
+        guard abs(share - lastMainShare) > 0.001 else { return }
+        lastMainShare = share
+        onMainShareChange?(share)
     }
 
     @objc private func reduceTransparencyChanged() {
@@ -590,6 +613,10 @@ public final class SideDrawerContainerViewController: UIViewController {
         let width = drawerWidth
         let slide = CGAffineTransform(translationX: progress * width, y: 0)
         mainHost.transform = slide
+        // Placed for a frame (a drag, a layout, a landing): told now. Inside
+        // a settle's animation this is its target, not what shows; the blur
+        // link tells each shown frame instead (`blurFrame`).
+        if drivesBlur { reportMainShare(slide: progress * width) }
         blurView.transform = slide
         dimView.transform = slide
         if drivesBlur { blurView.setStrength(Self.blurStrength(forProgress: progress)) }

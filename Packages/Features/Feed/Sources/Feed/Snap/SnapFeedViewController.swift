@@ -384,6 +384,13 @@ final class SnapFeedViewController: UIViewController {
         refreshVisibility()
     }
 
+    /// The share of this screen the shell's drawer leaves showing (#1914):
+    /// one more source of `viewportShare`, so the clip's sound follows it and
+    /// the clip pauses below half, as under a pushed screen.
+    func setVisibleShare(_ share: CGFloat) {
+        viewportShare.report(share)
+    }
+
     /// Whether the pages' lifecycle counts the screen as watched — what lets
     /// the post on show play. Internal for tests.
     var debugIsWatchedByLifecycle: Bool { lifecycle.isVisible }

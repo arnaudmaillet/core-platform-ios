@@ -87,6 +87,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
             list: container.notificationsFeature.makeNotificationsViewController()
         )
         drawer.onSetAsideChange = { [weak self] setAside in self?.forYouTab?.setSetAside(setAside) }
+        drawer.onMainShareChange = { [weak self] share in self?.forYouTab?.setVisibleShare(share) }
         return drawer
     }()
     /// What the window shows: the drawer container, holding the tab bar
