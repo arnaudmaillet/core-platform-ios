@@ -304,10 +304,12 @@ final class MapsViewController: UIViewController {
 
     // MARK: Guest location lock (#564)
 
-    /// A guest without location sees a locked showcase: the whole world under
-    /// a dark veil, nothing to pan, zoom or tap — only the "See posts around
-    /// you" card above it. See `guestLocationLocked(isMember:permission:)`.
+    /// A guest without location roams the world at country level (#1907,
+    /// `MapDepthClamp`), with the bar's "Allow location" as the way out
+    /// (`GuestLocationOffering`). See `guestLocationLocked(isMember:permission:)`.
     private(set) var isGuestLocked = false
+    /// Told when the guest's location offer comes or goes (#1907).
+    var onGuestLocationOfferChange: ((Bool) -> Void)?
     /// The dark veil over the locked map, above the map and below the bars, so
     /// the location card stays on top of it.
     /// The deepest band the viewer may reach (#1907): the country band for
@@ -1133,24 +1135,20 @@ final class MapsViewController: UIViewController {
     /// The card while nothing is open and location isn't allowed — the one
     /// thing that would open a country; the locate button otherwise.
     private func updateLocationControls() {
-        guard let locator else {
-            locationControls.apply(.none)
-            return
-        }
-        let permission = locator.permission
-        // The locked guest map's one way out, with or without country access
-        // (the fleet has none yet) — #564.
-        if isGuestLocked {
-            locationControls.apply(.card(permission))
-            return
-        }
-        guard let countryAccess else {
-            locationControls.apply(.none)
-            return
-        }
-        locationControls.apply(
-            countryAccess.hasNoOpenCountry && permission != .allowed ? .card(permission) : .button(permission)
-        )
+        locationControls.apply(Self.locationControlsFace(
+            permission: locator?.permission, guestLocked: isGuestLocked,
+            hasNoOpenCountry: countryAccess?.hasNoOpenCountry
+        ))
+    }
+
+    /// The controls' face. The guest without location's way out is the bar's
+    /// "Allow location" now (#1907, `GuestLocationOffering`): no card for
+    /// them; a member with no open country keeps it. Pure, for tests.
+    static func locationControlsFace(
+        permission: LocationPermission?, guestLocked: Bool, hasNoOpenCountry: Bool?
+    ) -> MapLocationControlsView.Face {
+        guard let permission, !guestLocked, let hasNoOpenCountry else { return .none }
+        return hasNoOpenCountry && permission != .allowed ? .card(permission) : .button(permission)
     }
 
     /// Asks in context — the only place location is ever asked for — or, once
@@ -1215,6 +1213,7 @@ final class MapsViewController: UIViewController {
             frameWorldIfNeeded()
         }
         updateLocationControls()
+        onGuestLocationOfferChange?(locked)
         guard wasLocked, !locked else { return }
         // Unlocked: to the viewer's country, as the card promised.
         if let code = locator?.currentCountry {
@@ -3800,6 +3799,15 @@ extension MapsViewController {
     func debugGateAppearedAtRoot() { openGate.appearedAtRoot() }
 }
 #endif
+
+extension MapsViewController: GuestLocationOffering {
+    var offersGuestLocation: Bool { isGuestLocked }
+
+    func allowGuestLocation() {
+        guard let permission = locator?.permission else { return }
+        locationControlTapped(permission)
+    }
+}
 
 extension MapsViewController: MapViewerRefreshing {
     /// Signed in or out: the dock and the people rows were someone else's.
