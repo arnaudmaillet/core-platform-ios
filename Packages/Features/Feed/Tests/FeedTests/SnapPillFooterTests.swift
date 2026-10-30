@@ -109,8 +109,9 @@ struct SnapPillFooterTests {
 
             bubble.sendActions(for: .primaryActionTriggered)
             #expect(sheets == 1, "a tap did not open the sheet")
-            // No hold since #1931: there is no in-app mute.
-            #expect(bubble.onLongPress == nil, "a hold still does something")
+            // No hold on the record since #1931 (no in-app mute): only the way
+            // back's, off while the record shows (#1929).
+            #expect(chrome.debugSoundHold?.isEnabled == false, "a hold still does something")
             #expect(bubble.accessibilityValue == nil, "the bubble still says a sound state")
 
             chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: false))

@@ -153,6 +153,9 @@ final class CommentsInputBar: UIView {
     /// The slot's button, for a host that hangs its own hold on it (#1929,
     /// `HoldToArmPresenter`).
     var railHoldTarget: UIView { railButton }
+    /// The sound face's cover as drawn now — the way back's hold carries it
+    /// on its disc (#1929).
+    var railCoverImage: UIImage? { railCoverView.image }
 
     /// A recognised hold on the slot, for tests (`railHeld`'s `.began`).
     func debugHoldRail() { holdRail() }

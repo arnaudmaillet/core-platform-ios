@@ -1811,6 +1811,11 @@ final class SnapFeedViewController: UIViewController {
                 // #1931: the sound follows the device.
                 cell.setSoundFace(self.soundFace(for: model))
                 cell.onRequestSoundSheet = { [weak self] in self?.presentSoundSheet() }
+                // Its way back, while the comments are scrolled away (#1929).
+                cell.onRequestSoundReturn = { [weak self, weak cell] in
+                    guard let id = cell?.representedPostID else { return }
+                    self?.commentsPanel(for: id)?.scrollToStart(animated: true)
+                }
                 // The For You root's save and repost (#1681), in the column.
                 cell.setPostActions(shown: self.isForYouRoot, saved: self.bookmarks.isSaved(id.rawValue))
                 // A text page's like, in the footer when there is one (#1924).
@@ -3504,6 +3509,27 @@ final class SnapFeedViewController: UIViewController {
         // A tap opens the sound sheet — the bubble's (#683). No hold since
         // #1931: no in-app mute.
         detail.setRailSoundActions(tap: { [weak self] in self?.presentSoundSheet() }, hold: nil)
+        // Scrolled away from the text, the page's sound bubble offers the way
+        // back (#1929) — the composer's own slot does, on the loading page.
+        detail.onScrollAwayChange = hostedByPage ? { [weak self] shows in
+            self?.setSoundShowsReturn(shows, for: id)
+        } : nil
+        if hostedByPage { setSoundShowsReturn(detail.showsScrollAwayReturn, for: id) }
+    }
+
+    /// The open comments panel showing `id`: the engagement's, or the
+    /// incoming page's preview.
+    private func commentsPanel(for id: PostID) -> PostDetailViewController? {
+        [commentsContentVC, previewRestingVC].lazy
+            .compactMap { $0 as? PostDetailViewController }
+            .first { $0.postID == id }
+    }
+
+    /// The way back on every visible page showing `id` (#1929).
+    private func setSoundShowsReturn(_ shows: Bool, for id: PostID) {
+        for case let cell as SnapFeedCell in collectionView.visibleCells where cell.representedPostID == id {
+            cell.setSoundShowsReturn(shows)
+        }
     }
 
     /// Re-draws the like count of the visible page showing `id`.

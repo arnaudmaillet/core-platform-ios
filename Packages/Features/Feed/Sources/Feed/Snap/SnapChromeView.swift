@@ -210,6 +210,12 @@ final class SnapChromeView: UIView {
     private var imagePipeline: ImagePipeline?
     /// The sound bubble was tapped: open the sound sheet (#683).
     var onSoundSheetRequested: (() -> Void)?
+    /// The sound bubble's way back was tapped (#1929): the stream goes back
+    /// to its start.
+    var onSoundReturnRequested: (() -> Void)?
+    /// The way back's hold (#1929): the disc rises with the cover, and once
+    /// full the sound sheet opens — the bubble's own tap action.
+    private var soundHold: HoldToArmPresenter?
     /// The rail's top edge as a cell-relative constant (see `buildLayout`).
     /// Optional: margins change during `init` before the layout exists.
     private var railTopConstraint: NSLayoutConstraint?
@@ -805,8 +811,38 @@ final class SnapChromeView: UIView {
         // The column and the wheel's layer share one space.
         shortcutRail.follow = { [weak self] in self?.glassColumn.presentedFace(of: ColumnItem.like) }
         mountColumn(in: self)
-        soundBubble.onTap = { [weak self] in self?.onSoundSheetRequested?() }
-        // No hold since #1931: there is no in-app mute to toggle.
+        soundBubble.onTap = { [weak self] in
+            guard let self else { return }
+            if soundBubble.showsReturn { onSoundReturnRequested?() } else { onSoundSheetRequested?() }
+        }
+        // No hold of its own since #1931 (no in-app mute): only the way back
+        // has one, arming the sheet (#1929).
+        let hold = HoldToArmPresenter(view: soundBubble) { [weak self] in .picture(self?.soundBubble.coverImage) }
+        hold.onFire = { [weak self] in self?.onSoundSheetRequested?() }
+        hold.isEnabled = false
+        soundHold = hold
+    }
+
+    /// Scrolled away from the comments' start (#1929): the sound bubble
+    /// offers the way back to the top, and its sheet moves to a hold — kept
+    /// for VoiceOver as a custom action.
+    func setSoundShowsReturn(_ shows: Bool, animated: Bool = true) {
+        guard shows != soundBubble.showsReturn else { return }
+        soundBubble.setShowsReturn(shows, animated: animated)
+        applySoundHold()
+    }
+
+    /// The way back's hold, and VoiceOver's road to the sheet, as the
+    /// bubble stands: only on the chevron, only for a sound the post plays.
+    private func applySoundHold() {
+        let armsSheet = soundBubble.showsReturn && soundFace?.isAvailable == true
+        soundHold?.isEnabled = armsSheet
+        soundBubble.accessibilityCustomActions = armsSheet ? [
+            UIAccessibilityCustomAction(name: "Sound") { [weak self] _ in
+                self?.onSoundSheetRequested?()
+                return true
+            },
+        ] : nil
     }
 
     private func railBottomConstraint() -> NSLayoutConstraint {
@@ -862,6 +898,7 @@ final class SnapChromeView: UIView {
     func setSoundFace(_ face: SnapSoundFace?) {
         soundFace = face
         soundBubble.setFace(face, pipeline: imagePipeline)
+        applySoundHold()
         applySoundVisibility()
     }
 
@@ -1415,6 +1452,7 @@ final class SnapChromeView: UIView {
     /// holds them still across the media and comments layouts.
     var debugBoostButton: UIButton { boostButton }
     var debugSoundBubble: SnapSoundBubbleButton { soundBubble }
+    var debugSoundHold: HoldToArmPresenter? { soundHold }
     /// The glass column's items, shape by shape, as the column stands them
     /// now (#1872).
     var debugColumnItems: [[String]] { columnSlots().map { $0.map(\.id) } }
@@ -1927,6 +1965,7 @@ final class SnapChromeView: UIView {
         postLikeCount = nil
         applyLikeBadge(animated: false)
         soundFace = nil
+        setSoundShowsReturn(false, animated: false)
         soundBubble.setFace(nil, pipeline: nil)
         soundBubble.isHidden = true
         // Back to the unwired default (enabled, nothing undoable) — the

@@ -26,7 +26,8 @@ struct SoundRecordGlassTests {
         defer { window.isHidden = true }
         let glass = try? #require(effectViews(in: record).first)
         #expect(glass?.effect is UIGlassEffect, "the glass did not materialize on the window")
-        #expect(record.cover.superview === glass?.contentView, "the cover is not inside the glass")
+        // Through the holder the way back fades (#1929), never the glass.
+        #expect(glass.map { record.cover.isDescendant(of: $0.contentView) } == true, "the cover is not inside the glass")
         let side = min(AvatarImageView.bubbleDiameter, record.bounds.width - 2 * SoundRecordGlass.rim)
         #expect(record.cover.bounds.size == CGSize(width: side, height: side), "the cover is not the bubble face size")
         #expect(record.cover.center == CGPoint(x: record.bounds.midX, y: record.bounds.midY))
