@@ -6,8 +6,9 @@ import UIKit
 /// **The inbox header's injected items — the shell's bell and balance.**
 ///
 /// Items the shell injects are held by the screen and composed into its bar:
-/// `[bell] … [coins][search]`. These inboxes have no search composed, so no
-/// magnifier (`InboxSystemSearchTests` pins the one with search).
+/// `[bell] … [coins]`, the search stacked under the bar. These inboxes have
+/// no search composed, so no field (`InboxSystemSearchTests` pins the one
+/// with search).
 @MainActor
 struct InboxHeaderAccessoryTests {
     /// The thinnest surface the container accepts: one page, no data.
@@ -64,7 +65,7 @@ struct InboxHeaderAccessoryTests {
     }
 
     /// With nothing injected and no search composed, the bar is empty: no
-    /// magnifier that would open nothing.
+    /// search field that would open nothing.
     @Test func withoutSearchTheBarIsEmpty() {
         let screen = inbox()
         screen.loadViewIfNeeded()

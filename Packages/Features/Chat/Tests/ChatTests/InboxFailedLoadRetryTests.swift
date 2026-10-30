@@ -1,11 +1,12 @@
 import CoreModels
+import DesignSystem
 import Foundation
 import Testing
 import UIKit
 @testable import Chat
 
 // A FAILED FIRST LOAD HAS A WAY OUT (#797). The inbox, the requests and the
-// suggestions said "Pull to retry" — but their pull opens search. Each status
+// suggestions said "Pull to retry" — but their pull opened search (until #1901). Each status
 // view now carries Try Again; these pin that the action is there, that it
 // reaches the view model's reload, and that the rows it brings replace it.
 
@@ -102,6 +103,29 @@ struct InboxFailedLoadRetryTests {
         controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
         controller.view.layoutIfNeeded()
         return controller
+    }
+
+    /// THE PULL REFRESHES AGAIN (#1901, the owner 2026-10-30): with search
+    /// stacked under the bar, the pull that opened search went, and every
+    /// page's list wears the app's refresh control, as the Feed's does. A
+    /// pull on the inbox reloads it.
+    @Test func everyPagePullsToRefreshWithTheAppsLoader() async throws {
+        let inbox = FlakyInbox()
+        await inbox.startAnswering()
+        let catalog = InboxCatalog(repository: inbox)
+        let pages: [any InboxSurface] = [
+            ConversationListViewController(viewModel: ConversationListViewModel(catalog: catalog)),
+            MessageRequestsViewController(viewModel: MessageRequestsViewModel(catalog: catalog)),
+            SuggestionsViewController(viewModel: SuggestionsViewModel(repository: FlakySuggestions()), imagePipeline: nil),
+        ]
+        for page in pages {
+            _ = screen(page)
+            #expect(page.listScrollView?.refreshControl is AppRefreshControl,
+                    "\(type(of: page)) has no pull to refresh, or the stock spinner")
+        }
+        let control = try #require(pages[0].listScrollView?.refreshControl)
+        control.sendActions(for: .valueChanged)
+        #expect(await settle { await inbox.inboxLoads >= 1 }, "a pull did not reload the inbox")
     }
 
     @Test func aFailedInboxOffersTryAgainWhichReloadsIt() async throws {

@@ -487,9 +487,9 @@ struct InboxSearchViewModelTests {
 // MARK: - The inbox's search is the system's (#1679)
 
 /// The inbox searches through UIKit's `UISearchController` (the owner,
-/// 2026-10-24): the bar rests as the magnifier — `.integratedButton`, placed
-/// by UIKit — and expands into the field in place. No field in the title
-/// slot, no hand-made bar dissolve.
+/// 2026-10-24), its field STACKED under the bar since #1901 (the owner,
+/// 2026-10-30): the integrated magnifier's close dragged a wide empty field
+/// across the bar. No field in the title slot, no hand-made bar dissolve.
 @MainActor
 struct InboxSystemSearchTests {
     private final class BlankSurface: UIViewController, InboxSurface {
@@ -510,17 +510,19 @@ struct InboxSystemSearchTests {
         )
     }
 
-    @Test func theSearchIsTheSystemsIntegratedButton() throws {
+    @Test func theSearchIsTheSystemsStackedField() throws {
         let screen = searchableInbox()
         let balance = UIBarButtonItem(customView: UIView())
         screen.setTrailingAccessoryItem(balance)
         screen.loadViewIfNeeded()
 
         let search = try #require(screen.navigationItem.searchController)
-        #expect(screen.navigationItem.preferredSearchBarPlacement == .integratedButton)
+        #expect(screen.navigationItem.preferredSearchBarPlacement == .stacked)
+        // It collapses into the bar as the list scrolls (#1901).
+        #expect(screen.navigationItem.hidesSearchBarWhenScrolling)
         #expect(search.searchResultsController is InboxSearchResultsViewController)
         // ⚠️ The placement item is NOT among the bar's items: iOS 26 throws
-        // ("only supported in UIToolbar") — UIKit places the magnifier itself.
+        // ("only supported in UIToolbar").
         let trailing = try #require(screen.navigationItem.rightBarButtonItems)
         #expect(trailing.count == 1 && trailing.first === balance)
         #expect(screen.navigationItem.titleView == nil, "a field in the title slot")
@@ -536,22 +538,15 @@ struct InboxSystemSearchTests {
         #expect(screen.searchPlaceholderShown == "Search people and chats")
     }
 
-    /// ⚠️ THE FIELD COLLAPSES EMPTY (#1901, the owner's film): closed, it
-    /// slid back into the magnifier with its words, across the bar and over
-    /// the balance pill. From `willDismiss` it holds no text and no
-    /// placeholder; the placeholder is back before the next opening.
-    @Test func theFieldCollapsesEmptyAndOpensWithItsWords() throws {
+    /// The stacked field rests with its words: a close leaves the
+    /// placeholder in place (#1901 once emptied it, for a field that folded
+    /// back into a magnifier).
+    @Test func aClosedSearchKeepsItsPlaceholder() throws {
         let screen = searchableInbox()
         screen.loadViewIfNeeded()
         let search = try #require(screen.navigationItem.searchController)
         screen.willPresentSearchController(search)
-        search.searchBar.text = "ava"
-
         screen.willDismissSearchController(search)
-        #expect(search.searchBar.text?.isEmpty != false, "the typed text travels with the close")
-        #expect(screen.searchPlaceholderShown?.isEmpty != false, "the placeholder travels with the close")
-
-        screen.willPresentSearchController(search)
-        #expect(screen.searchPlaceholderShown == "Search people and chats", "the next opening has no words")
+        #expect(screen.searchPlaceholderShown == "Search people and chats")
     }
 }

@@ -221,6 +221,7 @@ struct AppLoaderTests {
         window.isHidden = false
         defer { window.isHidden = true }
         let loader = indicator.debugLoader
+        indicator.minimumShown = 0
         loader.reducesMotion = { false }
 
         indicator.setPull(HeroPullToRefreshView.threshold / 2)
@@ -248,6 +249,7 @@ struct AppLoaderTests {
         let control = AppRefreshControl()
         list.refreshControl = control
         let loader = control.debugLoader
+        control.minimumShown = 0
         loader.reducesMotion = { false }
 
         #expect(control.tintColor == .clear, "the stock spinner still draws")
@@ -261,6 +263,39 @@ struct AppLoaderTests {
         #expect(!loader.isAnimating)
     }
 
+    /// ⚠️ THE LOADER TURNS AT LEAST ITS MINIMUM (#1901): the inbox reloads
+    /// from memory and ended its loader within a frame of the pull. An end
+    /// asked earlier waits for the minimum; one asked later ends at once.
+    @Test func aRefreshEndsNoSoonerThanItsMinimum() async {
+        // ⚠️ THE WINDOW IS SHOWN ONLY FOR THE SYNCHRONOUS PART. A refresh
+        // control refreshes only in a window, but one left VISIBLE across the
+        // sleeps below was taken by the toast suites, running meanwhile, as the
+        // one to present from (their sheet never came).
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        let list = UIScrollView(frame: window.bounds)
+        list.contentSize = CGSize(width: 390, height: 2000)
+        window.addSubview(list)
+        let control = AppRefreshControl()
+        list.refreshControl = control
+        control.minimumShown = 0.2
+
+        window.isHidden = false
+        control.beginRefreshing()
+        control.endRefreshing()
+        #expect(control.isRefreshing, "the loader ended before its minimum")
+        window.isHidden = true
+        try? await Task.sleep(for: .milliseconds(600))
+        #expect(!control.isRefreshing, "the loader never ended")
+
+        let indicator = HeroPullToRefreshView(frame: CGRect(x: 0, y: 0, width: 200, height: 60))
+        indicator.minimumShown = 0.2
+        indicator.beginRefreshing()
+        indicator.endRefreshing()
+        #expect(indicator.debugIsRefreshing, "the hero loader ended before its minimum")
+        try? await Task.sleep(for: .milliseconds(600))
+        #expect(!indicator.debugIsRefreshing, "the hero loader never ended")
+    }
+
     /// After a refresh, the list folding back is not a pull (#1400): once
     /// the ring's fade is over, nothing shows again until the list is at
     /// rest — or a finger pulls anew.
@@ -271,6 +306,7 @@ struct AppLoaderTests {
         window.isHidden = false
         defer { window.isHidden = true }
         let loader = indicator.debugLoader
+        indicator.minimumShown = 0
         loader.reducesMotion = { false }
         indicator.setPull(HeroPullToRefreshView.threshold * 2, isTracking: true)
         indicator.beginRefreshing()
@@ -298,6 +334,7 @@ struct AppLoaderTests {
         let control = AppRefreshControl()
         list.refreshControl = control
         let loader = control.debugLoader
+        control.minimumShown = 0
         loader.reducesMotion = { false }
         let top = list.adjustedContentInset.top
         control.beginRefreshing()

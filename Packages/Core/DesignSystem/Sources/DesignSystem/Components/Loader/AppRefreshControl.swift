@@ -22,6 +22,13 @@ public final class AppRefreshControl: UIRefreshControl {
     private let thresholdFeedback = PullThresholdFeedback()
     /// A refresh just ended and the list is folding back (#1400).
     private var isSettling = false
+    /// How long the loader turns at least once a refresh starts
+    /// (`PullRefreshTiming`). Tests set 0.
+    public var minimumShown = PullRefreshTiming.minimumShown
+    /// When the current refresh started, and which one it is: a delayed end
+    /// never ends a refresh that started after it was asked.
+    private var startedAt: CFTimeInterval?
+    private var generation = 0
 
     public override init() {
         super.init()
@@ -29,7 +36,10 @@ public final class AppRefreshControl: UIRefreshControl {
         tintColor = .clear
         addSubview(loader)
         // A user's pull fires `.valueChanged` without `beginRefreshing()`.
-        addAction(UIAction { [weak self] _ in self?.loader.startAnimating() }, for: .valueChanged)
+        addAction(UIAction { [weak self] _ in
+            self?.started()
+            self?.loader.startAnimating()
+        }, for: .valueChanged)
     }
 
     @available(*, unavailable)
@@ -69,13 +79,34 @@ public final class AppRefreshControl: UIRefreshControl {
 
     public override func beginRefreshing() {
         super.beginRefreshing()
+        started()
         loader.startAnimating()
     }
 
+    /// Ends the spin, once it has turned `minimumShown`: a list that answers
+    /// from memory would otherwise flash the loader for a frame (#1901, the
+    /// owner 2026-10-30, next to the Feed's, which waits on the network).
     public override func endRefreshing() {
+        if isRefreshing, let startedAt {
+            let left = minimumShown - (CACurrentMediaTime() - startedAt)
+            if left > 0 {
+                let asked = generation
+                DispatchQueue.main.asyncAfter(deadline: .now() + left) { [weak self] in
+                    guard let self, self.generation == asked else { return }
+                    self.endRefreshing()
+                }
+                return
+            }
+        }
+        startedAt = nil
         if isRefreshing { isSettling = true }
         super.endRefreshing()
         loader.stopAnimating()
+    }
+
+    private func started() {
+        generation += 1
+        startedAt = CACurrentMediaTime()
     }
 
     #if DEBUG
@@ -85,4 +116,11 @@ public final class AppRefreshControl: UIRefreshControl {
     /// Drives the pull as an offset would (#1400). Tests.
     func debugFollow(_ scrollView: UIScrollView) { follow(scrollView) }
     #endif
+}
+
+/// The pull to refresh's timing, one for every list (#1901).
+public enum PullRefreshTiming {
+    /// How long the loader turns at least, however fast the list answers:
+    /// the inbox reloading from memory flashed it for a frame.
+    public static let minimumShown: TimeInterval = 1.0
 }
