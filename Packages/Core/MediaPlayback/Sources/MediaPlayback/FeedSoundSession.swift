@@ -47,9 +47,12 @@ public final class FeedSoundSession {
     private var ringerTicks: AnyObject?
     /// Whether a ringer check is under way.
     private var isProbing = false
+    /// What the last ringer check read since the sound was turned on: nil
+    /// before the first.
+    private var lastReadSilent: Bool?
     private let readsOtherAudio: @MainActor () -> Bool
     private let startsObserving: (@escaping @MainActor () -> Void) -> AnyObject?
-    private let probesSilent: (@escaping @MainActor @Sendable (Bool) -> Void) -> Void
+    private let probesSilent: @MainActor (@escaping @MainActor @Sendable (Bool) -> Void) -> Void
     private let startsTicking: (@escaping @MainActor () -> Void) -> AnyObject?
 
     /// - Parameters:
@@ -76,11 +79,14 @@ public final class FeedSoundSession {
                 Task { @MainActor in changed() }
             }
         },
-        probeSilent: @escaping (@escaping @MainActor @Sendable (Bool) -> Void) -> Void = RingerProbe.probe,
+        probeSilent: @escaping @MainActor (@escaping @MainActor @Sendable (Bool) -> Void) -> Void = RingerProbe.probe,
         tick: @escaping (@escaping @MainActor () -> Void) -> AnyObject? = { fire in
-            Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+            // In the common modes: a feed being scrolled still checks.
+            let timer = Timer(timeInterval: 1, repeats: true) { _ in
                 MainActor.assumeIsolated { fire() }
             }
+            RunLoop.main.add(timer, forMode: .common)
+            return timer
         }
     ) {
         readsOtherAudio = otherAudioPlaying
@@ -132,15 +138,27 @@ public final class FeedSoundSession {
         probesSilent { [weak self] silent in
             guard let self else { return }
             isProbing = false
-            if silent { ringerWentSilent() }
+            ringerRead(silent: silent)
         }
+    }
+
+    /// ⚠️ A CHANGE TO SILENT, NEVER THE STATE. A phone already on silent is
+    /// where a volume key matters most — the viewer reaching for the sound
+    /// through the switch — and reading "silent" there would turn it off a
+    /// second after the key. Only the switch moving from ring to silent, with
+    /// the sound on, turns it off.
+    func ringerRead(silent: Bool) {
+        guard isTurnedOn else { return }
+        defer { lastReadSilent = silent }
+        guard silent, lastReadSilent == false else { return }
+        ringerWentSilent()
     }
 
     /// The phone was put on silent with the sound on: off again, and the
     /// next volume key turns it back on.
-    func ringerWentSilent() {
-        guard isTurnedOn else { return }
+    private func ringerWentSilent() {
         isTurnedOn = false
+        lastReadSilent = nil
         settleWatch()
         NotificationCenter.default.post(name: Self.didTurnOff, object: self)
     }
@@ -150,6 +168,7 @@ public final class FeedSoundSession {
     public func volumeDidChange() {
         guard !isTurnedOn, !readsOtherAudio() else { return }
         isTurnedOn = true
+        lastReadSilent = nil
         settleWatch()
         NotificationCenter.default.post(name: Self.didTurnOn, object: self)
     }
@@ -190,8 +209,10 @@ public enum RingerProbe {
     private static let soundID: SystemSoundID? = makeSound()
 
     /// Calls `done` on the main actor with whether the phone is on silent.
-    public static func probe(_ done: @escaping @MainActor @Sendable (Bool) -> Void) {
-        guard let soundID else { return }
+    @MainActor public static func probe(_ done: @escaping @MainActor @Sendable (Bool) -> Void) {
+        // No sound to time: the switch cannot be read, so it reads "ringing"
+        // and the sound stays as the viewer set it.
+        guard let soundID else { return done(false) }
         let start = CACurrentMediaTime()
         AudioServicesPlaySystemSoundWithCompletion(soundID, completion(start: start, done))
     }

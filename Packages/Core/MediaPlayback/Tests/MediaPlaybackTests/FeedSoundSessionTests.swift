@@ -101,6 +101,7 @@ struct FeedSoundSessionTests {
 
         sound.checkRinger()
         #expect(sound.isTurnedOn, "a ringing phone turned the sound off")
+        #expect(probe.ringerChecks == 1)
         nonisolated(unsafe) var told = false
         let token = NotificationCenter.default.addObserver(
             forName: FeedSoundSession.didTurnOff, object: sound, queue: nil
@@ -114,6 +115,25 @@ struct FeedSoundSessionTests {
         #expect(probe.observing == 2, "the next volume key goes unheard")
         sound.volumeDidChange()
         #expect(sound.isTurnedOn)
+    }
+
+    /// ⚠️ ON A PHONE ALREADY SILENT, A VOLUME KEY KEEPS THE SOUND (the
+    /// reviewer's catch): the checks read "silent" from the start, which is
+    /// no change — only ring → silent turns it off.
+    @Test func aPhoneAlreadySilentKeepsTheSoundAKeyTurnedOn() {
+        let probe = Probe()
+        probe.silent = true
+        let sound = session(probe)
+        sound.setWatching(true, by: NSObject())
+        sound.volumeDidChange()
+        sound.checkRinger()
+        sound.checkRinger()
+        #expect(sound.isTurnedOn, "the switch already on silent turned the sound off")
+        probe.silent = false
+        sound.checkRinger()
+        probe.silent = true
+        sound.checkRinger()
+        #expect(!sound.isTurnedOn, "ring → silent kept the sound on")
     }
 
     /// No feed playing, no ringer check.
@@ -142,6 +162,7 @@ struct FeedSoundSessionTests {
         sound.setWatching(true, by: controller)
         sound.volumeDidChange()
         #expect(AVAudioSession.sharedInstance().category == .playback)
+        sound.checkRinger()
         probe.silent = true
         sound.checkRinger()
         #expect(AVAudioSession.sharedInstance().category == .ambient, "on silent again, still heard through it")
