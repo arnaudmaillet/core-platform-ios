@@ -44,6 +44,10 @@ public final class ViewportShare {
     private weak var host: UIView?
     private var link: CADisplayLink?
     private weak var cover: UIView?
+    /// Bumped by every `track`: only the latest transition's end settles the
+    /// share. A push begun before the previous one's completion ran would
+    /// otherwise have its link stopped and its share overwritten by the old end.
+    private var generation = 0
 
     public init(host: UIView) {
         self.host = host
@@ -72,15 +76,28 @@ public final class ViewportShare {
     public func track(
         _ coordinator: UIViewControllerTransitionCoordinator, cover: UIView, coversAtEnd: Bool
     ) {
-        self.cover = cover
-        startLink()
+        let tracked = beginTracking(cover)
         coordinator.animate(alongsideTransition: nil) { [weak self] context in
-            guard let self else { return }
-            stopLink()
-            self.cover = nil
-            let covered = context.isCancelled ? !coversAtEnd : coversAtEnd
-            report(covered ? 0 : 1)
+            self?.transitionEnded(tracked, cancelled: context.isCancelled, coversAtEnd: coversAtEnd)
         }
+    }
+
+    /// Starts sampling `cover`; returns the transition's generation.
+    func beginTracking(_ cover: UIView) -> Int {
+        self.cover = cover
+        generation += 1
+        startLink()
+        return generation
+    }
+
+    /// A tracked transition's end: settles the share on what it decided —
+    /// unless a newer transition began meanwhile, which owns the share now.
+    func transitionEnded(_ tracked: Int, cancelled: Bool, coversAtEnd: Bool) {
+        guard generation == tracked else { return }
+        stopLink()
+        cover = nil
+        let covered = cancelled ? !coversAtEnd : coversAtEnd
+        report(covered ? 0 : 1)
     }
 
     /// The share of `host` left uncovered by `cover`, both in window

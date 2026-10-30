@@ -47,4 +47,20 @@ struct ViewportShareTests {
         #expect(told == [0.4, 1])
         #expect(share.share == 1)
     }
+
+    /// Two transitions overlapping (a push begun before the previous one's
+    /// completion ran): the older end neither settles the share nor stops the
+    /// newer one's sampling; the newer end does.
+    @Test func onlyTheLatestTransitionSettlesTheShare() {
+        let share = ViewportShare(host: UIView())
+        let first = share.beginTracking(UIView())
+        let second = share.beginTracking(UIView())
+        share.transitionEnded(first, cancelled: false, coversAtEnd: true)
+        #expect(share.share == 1, "the older push's end overwrote the newer transition's share")
+        share.transitionEnded(second, cancelled: true, coversAtEnd: true)
+        #expect(share.share == 1)
+        let third = share.beginTracking(UIView())
+        share.transitionEnded(third, cancelled: false, coversAtEnd: true)
+        #expect(share.share == 0)
+    }
 }
