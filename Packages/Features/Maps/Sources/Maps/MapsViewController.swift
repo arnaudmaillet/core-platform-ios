@@ -310,7 +310,9 @@ final class MapsViewController: UIViewController {
     private(set) var isGuestLocked = false
     /// The dark veil over the locked map, above the map and below the bars, so
     /// the location card stays on top of it.
-    private let guestVeil = UIView()
+    /// The deepest band the viewer may reach (#1907): the country band for
+    /// a guest without location, everything otherwise.
+    private lazy var depthClamp = MapDepthClamp(mapView: mapView)
     /// The world view is framed once the map has a size: framed in
     /// `viewDidLoad`, before it has one, MapKit picks a continent instead.
     private var needsWorldView = false
@@ -845,12 +847,6 @@ final class MapsViewController: UIViewController {
             forAnnotationViewWithReuseIdentifier: MapClusterAnnotationView.reuseIdentifier
         )
         mapView.pin(to: view)
-        // Above the map, below the bars (added next) — so the location card
-        // sits on top of it (#564).
-        guestVeil.backgroundColor = UIColor.black.withAlphaComponent(Self.guestVeilAlpha)
-        guestVeil.isUserInteractionEnabled = false
-        guestVeil.alpha = 0
-        guestVeil.pin(to: view)
         #if DEBUG
         installChromeTrace()
         #endif
@@ -1180,9 +1176,6 @@ final class MapsViewController: UIViewController {
         }
     }
 
-    /// How dark the locked guest map is (#564).
-    static let guestVeilAlpha: CGFloat = 0.55
-
     /// Whether a viewer sees the locked guest showcase: a guest whose location
     /// is not allowed. Members are never locked, and neither is a map with no
     /// locator (`permission` nil): without the card there would be no way out.
@@ -1192,10 +1185,11 @@ final class MapsViewController: UIViewController {
         return permission != .allowed
     }
 
-    /// The map's interaction, from BOTH gates: an open transition (`inert`)
-    /// and the guest lock. Pure, for tests.
+    /// The map's interaction: only an open transition makes it inert. The
+    /// guest without location moves it too since #1907, within the country
+    /// band (`MapDepthClamp`). Pure, for tests.
     static func mapIsInteractive(inert: Bool, guestLocked: Bool) -> Bool {
-        !(inert || guestLocked)
+        !inert
     }
 
     /// Re-reads the lock and applies it: the veil, the world view, the map's
@@ -1203,24 +1197,22 @@ final class MapsViewController: UIViewController {
     /// and flies to the current country once it is known.
     private func updateGuestLock(animated: Bool) {
         let locked = Self.guestLocationLocked(isMember: isMember(), permission: locator?.permission)
-        guard locked != isGuestLocked || (locked && guestVeil.alpha == 0) else { return }
+        // The ceiling, whatever else changed (#1907): a guest without location
+        // roams the world at country level; everyone else is unlocked.
+        depthClamp.ceiling = locked ? .country : .unlocked
+        guard locked != isGuestLocked else { return }
         let wasLocked = isGuestLocked
         isGuestLocked = locked
         applyMapInteraction()
-        mapView.showsCompass = !locked
-        // Meaningless on a locked map; the card is what matters.
+        // The guest moves the map now (#1907): the compass follows it.
+        mapView.showsCompass = true
+        // They filter posts the guest cannot see; the card is what matters.
         filterBar.isHidden = locked
         if locked {
             subFilterBar.isHidden = true
             pendingQuery?.cancel()
             needsWorldView = true
             frameWorldIfNeeded()
-        }
-        let veilAlpha: CGFloat = locked ? 1 : 0
-        if animated {
-            UIView.animate(withDuration: 0.3) { self.guestVeil.alpha = veilAlpha }
-        } else {
-            guestVeil.alpha = veilAlpha
         }
         updateLocationControls()
         guard wasLocked, !locked else { return }
@@ -2038,8 +2030,9 @@ final class MapsViewController: UIViewController {
 
     private func scheduleQuery() {
         pendingQuery?.cancel()
-        // Nothing to fetch for a locked showcase: the world is under the veil
-        // (#564). Unlocking flies somewhere, and that settle queries.
+        // Nothing to fetch for the guest without location: they roam the
+        // countries' own layer (#564, #1907). Unlocking flies somewhere, and
+        // that settle queries.
         guard !isGuestLocked else { return }
         let work = DispatchWorkItem { [weak self] in self?.runQuery() }
         pendingQuery = work
@@ -2257,6 +2250,8 @@ final class MapsViewController: UIViewController {
         // Nothing goes through the band: nothing is hidden behind anything.
         if ordered.isEmpty || unclustered { bandOcclusion = MapClusterEngine.Occlusion() }
         guard !ordered.isEmpty else { return [] }
+        // The ceiling reads the bands from the same spans (#1907).
+        depthClamp.spans = MapClusterEngine.spansByKind(of: ordered)
         return unclustered
             ? ordered.map {
                 MapClusterEngine.Item(
@@ -2514,11 +2509,7 @@ final class MapsViewController: UIViewController {
     /// per degree, longitude scaled by the latitude's cosine) is exact
     /// enough at banding scales.
     private var currentViewportDiagonalKm: Double {
-        let region = mapView.region
-        let latKm = region.span.latitudeDelta * 111.0
-        let lngKm = region.span.longitudeDelta * 111.0
-            * max(0.01, cos(region.center.latitude * .pi / 180))
-        return (latKm * latKm + lngKm * lngKm).squareRoot()
+        MapDepthClamp.diagonalKm(of: mapView.region)
     }
 
     // MARK: - Live previews
@@ -2660,6 +2651,8 @@ extension MapsViewController: MKMapViewDelegate {
         #if DEBUG
         logSettledCamera()
         #endif
+        // The ceiling's camera distance, re-read at rest (#1907).
+        depthClamp.calibrate()
         reconcileClustersForSettle()
         flushPendingDiffs()
         scheduleQuery()

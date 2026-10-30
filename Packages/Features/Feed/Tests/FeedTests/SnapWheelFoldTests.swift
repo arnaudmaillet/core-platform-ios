@@ -79,7 +79,7 @@ struct SnapWheelFoldTests {
         let chrome = SnapChromeView(frame: SnapActionColumnLayoutTests.screen)
         chrome.setFixedInsets(SnapActionColumnLayoutTests.insets)
         chrome.configure(with: SnapActionColumnLayoutTests.mediaModel())
-        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         chrome.layoutIfNeeded()
         #expect(chrome.debugGlassColumn.presentedFace(of: "like") != nil)
         chrome.setColumnCollapsed(true, animated: false)

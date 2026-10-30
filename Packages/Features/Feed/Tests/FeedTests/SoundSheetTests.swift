@@ -840,76 +840,36 @@ struct SoundSheetTests {
 
     // MARK: - The post's record (#1148)
 
-    /// The record mirrors the post: it turns while the post plays — muted
-    /// too — with ❚❚, stops with ▶︎, and wears the mute badge while the
-    /// sound is off.
+    /// The record mirrors the post: it turns while the post plays, with ❚❚,
+    /// and stops with ▶︎. No muted state since #1931: the sound follows the
+    /// device, and this button only pauses and resumes.
     @Test func theRecordFollowsThePost() throws {
         let controller = sheet(tiles: 3)
         try laidOut(controller)
         let header = try #require(controller.debugHeader)
-        #expect(!header.debugIsSpinning && !header.debugShowsPause && !header.debugShowsMutedBadge)
-
-        controller.setPostPlayback(.init(playing: true, muted: false, available: true))
-        #expect(header.debugIsSpinning && header.debugShowsPause)
-        #expect(!header.debugShowsMutedBadge)
-
-        controller.setPostPlayback(.init(playing: true, muted: true, available: true))
-        #expect(header.debugIsSpinning, "a muted post that plays stood still")
-        #expect(header.debugShowsMutedBadge)
-
-        controller.setPostPlayback(.init(playing: false, muted: true, available: true))
         #expect(!header.debugIsSpinning && !header.debugShowsPause)
-        // Paused, the middle offers ▶︎ even muted (2026-10-16).
-        #expect(!header.debugShowsMutedBadge, "a paused post kept 🔇 over ▶︎")
 
-        controller.setPostPlayback(.init(playing: false, muted: false, available: true))
-        #expect(!header.debugShowsMutedBadge, "unmuting left the badge")
-    }
-
-    /// Muted, the button in the middle says 🔇 in place of ❚❚ or ▶︎ (the
-    /// owner, 2026-10-16), and gives it back when the sound returns.
-    @Test func muteTakesTheMiddleGlyph() throws {
-        let controller = sheet(tiles: 3)
-        controller.setPostPlayback(.init(playing: true, muted: false, available: true))
-        try laidOut(controller)
-        let header = try #require(controller.debugHeader)
+        controller.setPostPlayback(.init(playing: true, available: true))
+        #expect(header.debugIsSpinning && header.debugShowsPause)
         #expect(header.debugShownGlyph == "pause.fill")
-        controller.setPostPlayback(.init(playing: true, muted: true, available: true))
-        #expect(header.debugShownGlyph == "speaker.slash.fill")
-        #expect(header.debugCoverDimmed, "the cover is not dimmed behind 🔇")
-        // Paused: ▶︎, muted or not — 🔇 shows only while the post plays.
-        controller.setPostPlayback(.init(playing: false, muted: true, available: true))
-        #expect(header.debugShownGlyph == "play.fill")
-        #expect(!header.debugCoverDimmed)
-        controller.setPostPlayback(.init(playing: false, muted: false, available: true))
-        #expect(header.debugShownGlyph == "play.fill")
-    }
 
-    /// A long press on the record mutes or unmutes the post, as the post's
-    /// own sound bubble does (the owner, 2026-10-16).
-    @Test func aHoldOnTheRecordTogglesTheMute() throws {
-        let controller = sheet(tiles: 3)
-        try laidOut(controller)
-        var mutes = 0, plays = 0
-        controller.onToggleMute = { mutes += 1 }
-        controller.onTogglePlayback = { plays += 1 }
-        controller.debugHoldRecord()
-        #expect(mutes == 1)
-        #expect(plays == 0, "the hold also played or paused")
+        controller.setPostPlayback(.init(playing: false, available: true))
+        #expect(!header.debugIsSpinning && !header.debugShowsPause)
+        #expect(header.debugShownGlyph == "play.fill")
     }
 
     /// ▶︎ ⇄ ❚❚ is one glyph view swapping its symbol (a symbol replace, the
     /// owner 2026-10-15), and the same state twice swaps nothing.
     @Test func theRecordsGlyphFollowsThePlayback() throws {
         let controller = sheet(tiles: 3)
-        controller.setPostPlayback(.init(playing: false, muted: false, available: true))
+        controller.setPostPlayback(.init(playing: false, available: true))
         try laidOut(controller)
         let header = try #require(controller.debugHeader)
         #expect(header.debugShownGlyph == "play.fill")
-        controller.setPostPlayback(.init(playing: true, muted: false, available: true))
+        controller.setPostPlayback(.init(playing: true, available: true))
         #expect(header.debugShownGlyph == "pause.fill")
         #expect(header.debugShowsPause)
-        controller.setPostPlayback(.init(playing: false, muted: false, available: true))
+        controller.setPostPlayback(.init(playing: false, available: true))
         #expect(header.debugShownGlyph == "play.fill")
         #expect(!header.debugShowsPause)
     }
@@ -920,7 +880,7 @@ struct SoundSheetTests {
     /// bare one flew in at the default size and jumped at the end.
     @Test func theGlyphReplacesAConfiguredSymbolInTheGlass() throws {
         let controller = sheet(tiles: 3)
-        controller.setPostPlayback(.init(playing: false, muted: false, available: true))
+        controller.setPostPlayback(.init(playing: false, available: true))
         try laidOut(controller)
         let header = try #require(controller.debugHeader)
         #expect(header.debugGlyphIsInTheGlass)
@@ -930,7 +890,7 @@ struct SoundSheetTests {
         // The witness: a bare symbol is drawn at another size.
         #expect(UIImage(systemName: "pause.fill")?.size != configured("pause.fill"))
         #expect(header.debugGlyphImage?.size == configured("play.fill"))
-        controller.setPostPlayback(.init(playing: true, muted: false, available: true))
+        controller.setPostPlayback(.init(playing: true, available: true))
         #expect(header.debugGlyphImage?.size == configured("pause.fill"))
     }
 
@@ -953,7 +913,7 @@ struct SoundSheetTests {
     /// anywhere on the disc, not only on the glyph; never beside it.
     @Test func theWholeRecordTakesTheTap() throws {
         let controller = sheet(tiles: 3)
-        controller.setPostPlayback(.init(playing: true, muted: false, available: true))
+        controller.setPostPlayback(.init(playing: true, available: true))
         try laidOut(controller)
         let header = try #require(controller.debugHeader)
         let record = header.debugRecordFrame
@@ -971,21 +931,19 @@ struct SoundSheetTests {
         #expect(!controller.recordTakesTap(at: centre, in: header), "a pushed screen covers the record")
         navigation.popViewController(animated: false)
 
-        controller.setPostPlayback(.init(playing: false, muted: false, available: false))
+        controller.setPostPlayback(.init(playing: false, available: false))
         #expect(!controller.recordTakesTap(at: centre, in: header), "a post with no sound takes no tap")
     }
 
-    /// A post with no audio: the record without its glyph, refusing taps, and
-    /// no badge.
+    /// A post with no audio: the record without its glyph, refusing taps.
     @Test func aPostWithNoAudioCannotBeToggled() throws {
         let controller = sheet(tiles: 3)
-        controller.setPostPlayback(.init(playing: false, muted: true, available: false))
+        controller.setPostPlayback(.init(playing: false, available: false))
         try laidOut(controller)
         var toggles = 0
         controller.onTogglePlayback = { toggles += 1 }
         let header = try #require(controller.debugHeader)
         #expect(!header.debugCanToggle)
-        #expect(!header.debugShowsMutedBadge)
         header.debugTapRecord()
         #expect(toggles == 0)
     }

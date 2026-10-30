@@ -210,6 +210,12 @@ public final class VideoPlaybackController {
     var audiblePlayers: Set<ObjectIdentifier> = []
     /// The heard clip's level (`setAudibleVolume`, #1914).
     var audibleVolume: Float = 1
+    /// The feed's sound (#1931): turned on by a volume key, it keeps the
+    /// session `.playback`. The app's one session; tests pass their own.
+    public var feedSound: FeedSoundSession = .shared {
+        didSet { settleAudioSession() }
+    }
+    private var feedSoundObserver: NSObjectProtocol?
     /// The one surface a viewer is listening to, and the player last made
     /// heard for it — see `setAudibleSurface`.
     weak var audibleSurface: VideoRenderView?
@@ -281,6 +287,19 @@ public final class VideoPlaybackController {
         self.capacity = capacity
         self.byteCache = byteCache
         try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .moviePlayback)
+        // A volume key turned the feed's sound on (#1931): heard through the
+        // silent switch from now on.
+        feedSoundObserver = NotificationCenter.default.addObserver(
+            forName: FeedSoundSession.didTurnOn, object: nil, queue: .main
+        ) { [weak self] note in
+            // The sender's identity, read here: a `Notification` cannot cross
+            // into the main actor's isolation.
+            let sender = (note.object as AnyObject?).map(ObjectIdentifier.init)
+            MainActor.assumeIsolated {
+                guard let self, sender == ObjectIdentifier(self.feedSound) else { return }
+                self.settleAudioSession()
+            }
+        }
         // Return players are a convenience the close can do without (#923):
         // under memory pressure they go first, and the close lands on a still.
         // Lookahead players (#895) are speculative too, and go with them.

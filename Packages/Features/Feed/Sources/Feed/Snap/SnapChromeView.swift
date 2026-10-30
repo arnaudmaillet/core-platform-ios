@@ -208,8 +208,6 @@ final class SnapChromeView: UIView {
     /// post has no sound bubble (the feed pushes it, `setSoundFace`).
     private var soundFace: SnapSoundFace?
     private var imagePipeline: ImagePipeline?
-    /// The sound bubble was held: toggle the feed's sound (#683).
-    var onSoundToggleRequested: (() -> Void)?
     /// The sound bubble was tapped: open the sound sheet (#683).
     var onSoundSheetRequested: (() -> Void)?
     /// The rail's top edge as a cell-relative constant (see `buildLayout`).
@@ -808,7 +806,7 @@ final class SnapChromeView: UIView {
         shortcutRail.follow = { [weak self] in self?.glassColumn.presentedFace(of: ColumnItem.like) }
         mountColumn(in: self)
         soundBubble.onTap = { [weak self] in self?.onSoundSheetRequested?() }
-        soundBubble.onLongPress = { [weak self] in self?.onSoundToggleRequested?() }
+        // No hold since #1931: there is no in-app mute to toggle.
     }
 
     private func railBottomConstraint() -> NSLayoutConstraint {

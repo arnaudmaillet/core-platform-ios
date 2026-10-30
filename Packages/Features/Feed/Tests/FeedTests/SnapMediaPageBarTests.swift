@@ -1516,6 +1516,6 @@ struct SnapStripBrowseTests {
 @MainActor
 private func showPostActions(on view: SnapChromeView) {
     view.showsPostActions = true
-    view.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+    view.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
     view.layoutIfNeeded()
 }

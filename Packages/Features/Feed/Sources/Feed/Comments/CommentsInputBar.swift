@@ -1852,7 +1852,6 @@ final class CommentsInputBar: UIView {
                 face.draw(into: railCoverSlot)
             }
             railRecord.isHidden = false
-            railRecord.showsMutedBadge = face.isMuted && face.isAvailable
             railButton.accessibilityLabel = "Sound"
             railButton.alpha = face.isAvailable ? 1 : 0.45
             railFaceSymbol = Self.soundRailSymbol
@@ -1863,7 +1862,6 @@ final class CommentsInputBar: UIView {
         railButton.alpha = 1
         railButton.isHidden = symbol == nil
         railRecord.isHidden = true
-        railRecord.showsMutedBadge = false
         railRecord.setSpinning(false)
         if let glass = railGlassConfiguration {
             // Back to the button's own glass; its glyph is drawn afresh.
@@ -1926,7 +1924,6 @@ final class CommentsInputBar: UIView {
     /// The sound face's cover and whether it is turning now (#692).
     var debugRailCover: SoundRecordGlass { railRecord }
     var debugRailIsSpinning: Bool { railRecord.isSpinning }
-    var debugRailMutedBadgeShown: Bool { railRecord.showsMutedBadge }
     /// The waveform / send button inside the field.
     var debugFieldActionButton: UIButton { fieldActionButton }
     /// The symbol the rail button wears.

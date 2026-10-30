@@ -26,7 +26,9 @@ struct GuestMapLockTests {
     @Test func theInteractionCombinesBothGates() {
         #expect(MapsViewController.mapIsInteractive(inert: false, guestLocked: false))
         #expect(!MapsViewController.mapIsInteractive(inert: true, guestLocked: false))
-        #expect(!MapsViewController.mapIsInteractive(inert: false, guestLocked: true))
+        // The guest without location moves the map since #1907, within the
+        // country band (`MapDepthClamp`).
+        #expect(MapsViewController.mapIsInteractive(inert: false, guestLocked: true))
         #expect(!MapsViewController.mapIsInteractive(inert: true, guestLocked: true))
     }
 }

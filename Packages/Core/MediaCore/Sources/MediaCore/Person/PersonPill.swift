@@ -205,19 +205,15 @@ public final class PersonPill: UIView {
             row.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
         }
 
-        // The ring hugs the face from outside, inside the wrapper's
-        // breathing room, so it never moves the row or the pill's width.
+        // ⚠️ THE RING IS A DISC BEHIND THE FACE (#1912), never a border round
+        // it. A 2 pt border whose inner edge met the face's edge left a
+        // hairline seam on screen: two anti-aliased edges on the same circle,
+        // each letting the backdrop through its uncovered part of a pixel.
+        // Drawn behind, the face's edge blends over the ring's colour, and
+        // no seam can form. The friends' ring is the accent (#1379): a view's
+        // background re-resolves a dynamic colour itself.
         ring.isUserInteractionEnabled = false
-        ring.layer.borderWidth = PersonPillRing.width
-        ring.layer.borderColor = UIColor.clear.cgColor
-        // The friends' ring is the accent (#1379): a border holds a CGColor
-        // and re-resolves nothing itself.
-        registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, AccentThemeTrait.self]
-        ) { (pill: PersonPill, _: UITraitCollection) in
-            pill.ring.layer.borderColor = PersonPillRing.ink(for: pill.ringRelation)
-                .resolvedColor(with: pill.traitCollection).cgColor
-        }
+        ring.backgroundColor = .clear
         ring.layer.cornerCurve = .circular
         ring.layer.cornerRadius = AvatarImageView.bubbleDiameter / 2 + PersonPillRing.width
         ring.constrain(in: self) { _ in
@@ -226,6 +222,7 @@ public final class PersonPill: UIView {
             ring.widthAnchor.constraint(equalTo: avatar.widthAnchor, constant: PersonPillRing.width * 2)
             ring.heightAnchor.constraint(equalTo: avatar.heightAnchor, constant: PersonPillRing.width * 2)
         }
+        sendSubviewToBack(ring)
 
         // ⚠️ ON THE FACE'S CIRCLE, 45° BELOW ITS TRAILING SIDE (the owner,
         // 2026-10-28, #1793 — replacing #1277's "centred on the disc's edge,
@@ -369,6 +366,7 @@ public final class PersonPill: UIView {
         guard let statusBadge else { return }
         self.badge = badge
         statusBadge.show(badge, animated: animated)
+        setNeedsLayout()
         setRing(badge, animated: animated)
         updateAccessibility()
     }
@@ -387,19 +385,67 @@ public final class PersonPill: UIView {
     public func setRing(_ relation: Badge, animated: Bool) {
         guard statusBadge != nil, relation != ringRelation else { return }
         ringRelation = relation
-        let ink = PersonPillRing.ink(for: relation).resolvedColor(with: traitCollection).cgColor
+        let ink = PersonPillRing.ink(for: relation)
         if animated, window != nil {
-            let fade = CABasicAnimation(keyPath: "borderColor")
-            fade.fromValue = ring.layer.presentation()?.borderColor ?? ring.layer.borderColor
-            fade.toValue = ink
-            fade.duration = 0.25
-            ring.layer.add(fade, forKey: "borderColor")
+            UIView.animate(withDuration: 0.25) { self.ring.backgroundColor = ink }
+        } else {
+            ring.backgroundColor = ink
         }
-        ring.layer.borderColor = ink
     }
 
     /// The ring's ink now — clear for none. Tests.
-    public var drawnRingColor: UIColor { UIColor(cgColor: ring.layer.borderColor ?? UIColor.clear.cgColor) }
+    public var drawnRingColor: UIColor {
+        (ring.backgroundColor ?? .clear).resolvedColor(with: traitCollection)
+    }
+
+    /// Whether the ring is a disc drawn behind the face (#1912). Tests.
+    public var ringIsBackingDisc: Bool {
+        ring.layer.borderWidth == 0 && (subviews.firstIndex(of: ring) ?? .max) < (subviews.firstIndex { avatar.isDescendant(of: $0) } ?? 0)
+    }
+
+    // MARK: - The badge's cutout (#1912)
+
+    /// What the badge is cut out of: the face and the ring under it lose a
+    /// disc the badge's radius plus `cutoutGap`, so whatever is behind the
+    /// pill shows round the badge — the system's idiom for a status mark on
+    /// a face. A true cutout, never a stroke in a guessed colour: the pill
+    /// is glass over moving video.
+    public static let cutoutGap: CGFloat = 1.5
+    private let faceCutout = CAShapeLayer()
+    private let ringCutout = CAShapeLayer()
+
+    public override func layoutSubviews() {
+        super.layoutSubviews()
+        applyBadgeCutout()
+    }
+
+    private func applyBadgeCutout() {
+        guard let statusBadge, badge != .none, !statusBadge.isHidden, statusBadge.bounds.width > 0 else {
+            avatar.layer.mask = nil
+            ring.layer.mask = nil
+            return
+        }
+        let radius = PersonPillBadgeView.diameter / 2 + Self.cutoutGap
+        for (view, mask) in [(avatar as UIView, faceCutout), (ring, ringCutout)] {
+            let centre = statusBadge.convert(CGPoint(x: statusBadge.bounds.midX, y: statusBadge.bounds.midY), to: view)
+            let path = UIBezierPath(rect: view.bounds.insetBy(dx: -radius, dy: -radius))
+            path.append(UIBezierPath(arcCenter: centre, radius: radius, startAngle: 0, endAngle: 2 * .pi, clockwise: true))
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            mask.fillRule = .evenOdd
+            mask.frame = view.bounds
+            mask.path = path.cgPath
+            CATransaction.commit()
+            view.layer.mask = mask
+        }
+    }
+
+    /// The badge's cutout as drawn on the face: its radius, nil without one.
+    /// Tests.
+    public var drawnCutoutRadius: CGFloat? {
+        guard avatar.layer.mask === faceCutout, faceCutout.path != nil else { return nil }
+        return PersonPillBadgeView.diameter / 2 + Self.cutoutGap
+    }
 
     /// The symbol the badge draws now — nil for none. Tests.
     public var drawnBadgeSymbol: String? { statusBadge?.drawn.symbolName }

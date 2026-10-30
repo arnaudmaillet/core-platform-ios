@@ -227,18 +227,11 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     }
 
     private var isPlaying = false
-    private var isMuted = false
 
-    /// ⚠️ MUTED TAKES THE MIDDLE WHILE IT PLAYS (the owner, 2026-10-16): the
-    /// button says 🔇 in place of ❚❚ while the sound is off, and ▶︎ whenever
-    /// the post is paused — one glyph in the middle of the record, never a
-    /// second one beside it.
+    /// ▶︎ while paused, ❚❚ while it plays — no muted state since #1931: the
+    /// sound follows the device, and this button only pauses and resumes.
     private func applyGlyph() {
-        // Muted shows only while the post plays (the owner, 2026-10-16): a
-        // paused post offers ▶︎, muted or not.
-        let name = isPlaying ? (isMuted ? "speaker.slash.fill" : "pause.fill") : "play.fill"
-        // The cover dims behind 🔇, as the post's bubble does behind its own.
-        recordGlass.setCoverDimmed(name == "speaker.slash.fill", animated: window != nil)
+        let name = isPlaying ? "pause.fill" : "play.fill"
         guard name != shownGlyph else { return }
         shownGlyph = name
         if let image = UIImage(systemName: name, withConfiguration: Self.glyphConfiguration) {
@@ -298,18 +291,8 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         recordGlass.setSpinning(playing)
     }
 
-    /// The feed's sound is off: the badge, which does not turn.
-    func setMuted(_ muted: Bool) {
-        isMuted = muted
-        applyGlyph()
-    }
-
     #if DEBUG
     var debugIsSpinning: Bool { recordGlass.isSpinning }
-    /// The button in the middle says muted (🔇), and the record draws no
-    /// second muted glyph of its own.
-    var debugShowsMutedBadge: Bool { shownGlyph == "speaker.slash.fill" && !recordGlass.showsMutedBadge }
-    var debugCoverDimmed: Bool { recordGlass.debugCoverDimmed }
     /// The glyph says ❚❚ (the post plays) rather than ▶︎.
     var debugShowsPause: Bool { record.accessibilityLabel == "Pause post" }
     /// The glyph's symbol, as last asked for.

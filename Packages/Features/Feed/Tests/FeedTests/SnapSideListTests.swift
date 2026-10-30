@@ -975,7 +975,7 @@ struct SnapSwipeChainTests {
                 .compactMap { $0.contentView.subviews.compactMap { $0 as? SnapChromeView }.first }.first,
             "guard: a page's chrome"
         )
-        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false))
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         chrome.showsPostActions = true
         chrome.layoutIfNeeded()
         let capsule = chrome.postActions

@@ -13,7 +13,7 @@ import UIKit
 @MainActor
 struct SnapComposerSoundSlotTests {
     private typealias Layout = SnapActionColumnLayoutTests
-    private static let face = SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: false)
+    private static let face = SnapSoundFace(coverURL: nil, isAvailable: true)
 
     /// A tap on the slot is the host's action, whatever the slot wears.
     @Test func aTapOnTheSoundSlotIsTheHostsAction() {
@@ -39,7 +39,7 @@ struct SnapComposerSoundSlotTests {
         bar.railFace = .sound(Self.face)
         bar.debugHoldRail()
         #expect(holds == 1)
-        bar.railFace = .sound(SnapSoundFace(coverURL: nil, isAvailable: false, isMuted: false))
+        bar.railFace = .sound(SnapSoundFace(coverURL: nil, isAvailable: false))
         bar.debugHoldRail()
         #expect(holds == 1, "a sound the post does not play took the mute")
         bar.railFace = .pin(isPinned: false)
@@ -62,9 +62,10 @@ struct SnapComposerSoundSlotTests {
         #expect(holds == 1)
     }
 
-    /// ⚠️ THE TEXT PAGE: the snap feed wires its panel's slot to the feed's
-    /// own sound — a HOLD flips `FeedSound` (#683) — and a tap to the sheet.
-    @Test func aTextPagesSlotTogglesTheFeedsSound() throws {
+    /// ⚠️ THE TEXT PAGE: the snap feed wires its panel's slot's TAP to the
+    /// sound sheet; its hold mutes nothing since #1931 — the sound follows
+    /// the device.
+    @Test func aTextPagesSlotOpensTheSheetAndHoldsNothing() throws {
         let feed = SnapFeedViewController(
             viewModel: FeedViewModel(repository: SlotSilentProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
@@ -85,11 +86,7 @@ struct SnapComposerSoundSlotTests {
         #expect(bar.debugRailSymbol == CommentsInputBar.soundRailSymbol, "the text page's slot does not wear its sound")
         #expect(bar.onRailAction != nil, "the tap is not wired to the sound sheet")
 
-        let before = FeedSound.isOn
-        bar.debugHoldRail()
-        #expect(FeedSound.isOn != before, "the slot's hold did not toggle the sound")
-        bar.debugHoldRail()
-        #expect(FeedSound.isOn == before)
+        #expect(bar.onRailLongPress == nil, "the slot's hold still does something")
     }
 
     /// ⚠️ A TEXT PAGE'S RECORD TURNS (#692): the slot's cover turns while
@@ -109,12 +106,11 @@ struct SnapComposerSoundSlotTests {
         bar.setRailSpinning(false)
         #expect(!bar.debugRailIsSpinning)
 
-        bar.railFace = .sound(SnapSoundFace(coverURL: nil, isAvailable: true, isMuted: true))
-        #expect(bar.debugRailMutedBadgeShown)
+        bar.railFace = .sound(SnapSoundFace(coverURL: nil, isAvailable: true))
         bar.setRailSpinning(true)
         #expect(bar.debugRailIsSpinning)
 
-        bar.railFace = .sound(SnapSoundFace(coverURL: nil, isAvailable: false, isMuted: false))
+        bar.railFace = .sound(SnapSoundFace(coverURL: nil, isAvailable: false))
         bar.setRailSpinning(true)
         #expect(!bar.debugRailIsSpinning, "a post with no sound turned")
         bar.railFace = .pin(isPinned: false)
@@ -134,12 +130,12 @@ struct SnapComposerSoundSlotTests {
         try #require(poster.pngData()).write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
 
-        let file = SnapSoundFace(coverURL: url, isAvailable: true, isMuted: false)
+        let file = SnapSoundFace(coverURL: url, isAvailable: true)
         #expect(file.localCover != nil)
 
         let remote = SnapSoundFace(
             coverURL: URL(string: "https://example.test/\(UUID().uuidString).jpg"),
-            isAvailable: true, isMuted: false
+            isAvailable: true
         )
         #expect(remote.localCover == nil, "a remote cover drew before its fetch")
     }

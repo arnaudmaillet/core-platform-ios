@@ -116,7 +116,7 @@ enum SettingsSection: String, CaseIterable, Sendable {
         case .notifications: ["Push notifications by category", "Email notifications", "Pause and quiet hours"]
         case .whatYouSee: ["Sensitive content", "Reset For You", "Chronological feed"]
         case .activity: ["Recently deleted", "Likes and history", "Time limits and breaks"]
-        case .playback: ["Autoplay", "Start with sound", "Background play"]
+        case .playback: ["Autoplay", "Background play"]
         case .display: ["Light, dark or system appearance", "Reduce motion"]
         case .emojis: ["Animated emojis"]
         case .mediaComments: ["Reaction band", "Muted words and accounts", "Subtitles"]

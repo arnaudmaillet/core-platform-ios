@@ -14,8 +14,8 @@ final class AppPreferencesViewController: UIViewController {
         case playback, players, sounds, appearance, care, motion, emojis, band, subtitles, commentsScreen, muted, language
     }
 
-    private enum Item: Hashable {
-        case autoplay, startsWithSound
+    enum Item: Hashable {
+        case autoplay
         case backgroundPlay, pictureInPicture
         case playerPool
         case interfaceSounds, haptics
@@ -265,9 +265,9 @@ final class AppPreferencesViewController: UIViewController {
         dataSource.apply(snapshot, animatingDifferences: false)
     }
 
-    private static func items(in section: Section) -> [Item] {
+    static func items(in section: Section) -> [Item] {
         switch section {
-        case .playback: [.autoplay, .startsWithSound, .backgroundPlay, .pictureInPicture]
+        case .playback: [.autoplay, .backgroundPlay, .pictureInPicture]
         case .players: [.playerPool]
         case .sounds: [.interfaceSounds, .haptics]
         case .appearance: [.appearance]
@@ -352,11 +352,6 @@ final class AppPreferencesViewController: UIViewController {
                 self?.playback.update { $0.autoplay = choice }
             }, for: .valueChanged)
             install(control, in: cell, title: "Autoplay Videos")
-        case .startsWithSound:
-            cell.contentConfiguration = Self.label("Start with Sound", symbol: "speaker.wave.2")
-            cell.accessories = [switchAccessory(isOn: playback.preferences.startsWithSound) { [weak self] isOn in
-                self?.playback.update { $0.startsWithSound = isOn }
-            }]
         case .backgroundPlay:
             cell.contentConfiguration = Self.label("Background Play", symbol: "lock.iphone")
             cell.accessories = [switchAccessory(isOn: playback.preferences.backgroundPlay) { [weak self] isOn in
