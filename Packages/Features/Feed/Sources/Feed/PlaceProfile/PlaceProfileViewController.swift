@@ -898,16 +898,65 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         // No accessory any more (one page, no strip): the tab bar is the
         // app's, asserted from `viewDidAppear` (`assertAppTabBar`).
 
-        syncAutoplay()
+        // A plain screen popping off this one (#1914): the clips come back as
+        // it uncovers half, on the pop's own frames. A post's flight home, a
+        // tab switch, a first appearance: now, as before.
+        if let coordinator = transitionCoordinator, !isMovingToParent,
+           !(coordinator.viewController(forKey: .from) is any ZoomTransitionDestination),
+           let cover = coordinator.view(forKey: .from) {
+            viewportShare.track(coordinator, cover: cover, coversAtEnd: false)
+        } else {
+            viewportShare.report(1)
+            syncAutoplay()
+        }
     }
 
+    /// ⚠️ NOT AT THE PUSH'S FIRST FRAME (#1914): a plain screen pushed over
+    /// this one (the Popular list, the gallery) pauses its clips once it
+    /// covers half of it — the rule of every screen covered by another
+    /// (`ViewportShare`) — and a drag abandoned before half never pauses them.
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        // Off screen, this page holds no claim on the shared player pool —
-        // the feed pushed above it is about to want every loan.
+        // A post opened from here: off screen, this page holds no claim on
+        // the shared player pool — the feed pushed above it is about to want
+        // every loan. At once, as before.
+        if navigationController?.topViewController is any ZoomTransitionDestination {
+            stopAutoplay()
+            return
+        }
+        if let coordinator = transitionCoordinator, !isMovingFromParent,
+           let cover = coordinator.view(forKey: .to) {
+            viewportShare.track(coordinator, cover: cover, coversAtEnd: true)
+            return
+        }
+        viewportShare.report(0)
+    }
+
+    /// The share of this page still on screen under a plain pushed screen,
+    /// or as one pops off it (#1914): its clips play at half and above.
+    private lazy var viewportShare: ViewportShare = {
+        let share = ViewportShare(host: view)
+        share.onChange = { [weak self] _ in self?.applyViewportShare() }
+        return share
+    }()
+
+    private var viewportSharePlays = true
+
+    private func applyViewportShare() {
+        let plays = ViewportShare.plays(at: viewportShare.share)
+        guard plays != viewportSharePlays else { return }
+        viewportSharePlays = plays
+        if plays { syncAutoplay() } else { stopAutoplay() }
+    }
+
+    private func stopAutoplay() {
         for hosted in hostedPages { hosted.setAutoplayActive(false) }
         shelf.setAutoplayActive(false)
     }
+
+    /// The share now, for tests.
+    var debugViewportShare: ViewportShare { viewportShare }
+    var debugAutoplayIsActive: Bool { viewportSharePlays }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
