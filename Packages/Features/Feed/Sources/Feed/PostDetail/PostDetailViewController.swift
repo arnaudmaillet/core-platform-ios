@@ -862,6 +862,66 @@ final class PostDetailViewController: UIViewController {
     /// deliberately stays full-width: the rail's territory ends well above
     /// the footer.
 
+    /// A tap in the EMPTY ROOM above a short stream closes the comments
+    /// (#1926, the owner): the room the bottom anchor leaves between the top
+    /// bar and the caption (`bottomAnchorSlack`) is the media's, as the ✕
+    /// says. Wired by media pages only, as the pull-down is; nil turns it
+    /// off. A stream that fills its room has no such room: nothing changes.
+    ///
+    /// ⚠️ FILTERED AT `shouldReceive`, so the tap never sees a touch on a row:
+    /// it cannot compete with the rows' own taps, the pull-down or a scroll.
+    func setEmptyRoomTapHandler(_ handler: (() -> Void)?) {
+        onEmptyRoomTap = handler
+        if handler != nil, emptyRoomTap.view == nil {
+            collectionView.addGestureRecognizer(emptyRoomTap)
+        }
+        emptyRoomTap.isEnabled = handler != nil
+    }
+    private var onEmptyRoomTap: (() -> Void)?
+
+    private lazy var emptyRoomTap: UITapGestureRecognizer = {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(emptyRoomTapped(_:)))
+        tap.cancelsTouchesInView = false
+        tap.delegate = emptyRoomFilter
+        return tap
+    }()
+
+    private lazy var emptyRoomFilter = TouchFilter { [weak self] location in
+        self?.emptyRoomContains(location) ?? false
+    }
+
+    /// Whether `location`, in the stream's own coordinates, is in the empty
+    /// room: above the content's first row, while the anchor leaves room
+    /// there.
+    func emptyRoomContains(_ location: CGPoint) -> Bool {
+        bottomAnchorSlack > 0.5 && location.y < 0
+    }
+
+    @objc private func emptyRoomTapped(_ tap: UITapGestureRecognizer) {
+        guard tap.state == .ended, emptyRoomContains(tap.location(in: collectionView)) else { return }
+        tapEmptyRoom()
+    }
+
+    /// With the keyboard up, the first tap puts the keyboard away — the
+    /// writer is only leaving the field — and the next one closes.
+    private func tapEmptyRoom() {
+        if keyboardHeightFromBottom != nil {
+            view.endEditing(true)
+            return
+        }
+        onEmptyRoomTap?()
+    }
+
+    /// A tap at `location` in the stream's coordinates, through the
+    /// recogniser's own decision, for tests.
+    func debugTapStream(at location: CGPoint) {
+        guard emptyRoomTap.isEnabled, emptyRoomContains(location) else { return }
+        tapEmptyRoom()
+    }
+
+    /// The stream's frame of reference, for tests.
+    var debugStream: UICollectionView { collectionView }
+
     /// Wires the INTERACTIVE pull-down dismissal: dragging the list down
     /// from its top drives the collapse under the finger. The list forwards
     /// each phase with the raw downward translation and release velocity;
@@ -2980,5 +3040,19 @@ extension PostDetailViewController: UICollectionViewDelegate {
     /// engaged stream carries a top content inset.
     private func overshoot(of scrollView: UIScrollView) -> CGFloat {
         max(0, -(scrollView.contentOffset.y + scrollView.contentInset.top))
+    }
+}
+
+/// A gesture delegate that lets its recogniser see only the touches whose
+/// location, in the recogniser's view, `accepts`.
+private final class TouchFilter: NSObject, UIGestureRecognizerDelegate {
+    private let accepts: (CGPoint) -> Bool
+
+    init(accepts: @escaping (CGPoint) -> Bool) {
+        self.accepts = accepts
+    }
+
+    func gestureRecognizer(_ recognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        accepts(touch.location(in: recognizer.view))
     }
 }
