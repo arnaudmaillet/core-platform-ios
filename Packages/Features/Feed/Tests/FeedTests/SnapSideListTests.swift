@@ -923,11 +923,8 @@ struct SnapSwipeChainTests {
         let edge = CGPoint(x: feed.view.bounds.maxX - 6, y: feed.view.bounds.midY)
         #expect(feed.isInTrailingEdge(edge))
         #expect(Self.isPanel(Self.stage(feed, for: .leftward, at: edge)), "a carousel's edge pushed the author")
-        let chrome = try #require(
-            feed.collectionView.visibleCells
-                .compactMap { $0.contentView.subviews.compactMap { $0 as? SnapChromeView }.first }.first,
-            "guard: a page's chrome"
-        )
+        let shownChromes = feed.collectionView.visibleCells.compactMap { ($0 as? SnapFeedCell)?.debugChrome }
+        let chrome = try #require(shownChromes.first, "guard: a page's chrome")
         let boost = chrome.debugBoostButton
         let column = boost.convert(CGPoint(x: boost.bounds.minX + 3, y: boost.bounds.midY), to: feed.view)
         #expect(feed.isOnTrailingColumn(column))
@@ -951,11 +948,8 @@ struct SnapSwipeChainTests {
     /// pushes the author, as one born in the strip does.
     @Test func aLeftwardDragFromTheTrailingColumnPushesTheAuthor() async throws {
         let feed = try await tests.openableFeedForChain(["p1", "p2"], router: ProfileRouter())
-        let chrome = try #require(
-            feed.collectionView.visibleCells
-                .compactMap { $0.contentView.subviews.compactMap { $0 as? SnapChromeView }.first }.first,
-            "guard: a page's chrome"
-        )
+        let shownChromes = feed.collectionView.visibleCells.compactMap { ($0 as? SnapFeedCell)?.debugChrome }
+        let chrome = try #require(shownChromes.first, "guard: a page's chrome")
         let boost = chrome.debugBoostButton
         // Its leading edge: inboard of the strip, still on the column.
         let point = boost.convert(CGPoint(x: boost.bounds.minX + 3, y: boost.bounds.midY), to: feed.view)
@@ -970,11 +964,8 @@ struct SnapSwipeChainTests {
     /// opened the side list.
     @Test func aLeftwardDragFromTheCapsulePushesTheAuthor() async throws {
         let feed = try await tests.openableFeedForChain(["p1", "p2"], router: ProfileRouter())
-        let chrome = try #require(
-            feed.collectionView.visibleCells
-                .compactMap { $0.contentView.subviews.compactMap { $0 as? SnapChromeView }.first }.first,
-            "guard: a page's chrome"
-        )
+        let shownChromes = feed.collectionView.visibleCells.compactMap { ($0 as? SnapFeedCell)?.debugChrome }
+        let chrome = try #require(shownChromes.first, "guard: a page's chrome")
         chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
         chrome.showsPostActions = true
         chrome.layoutIfNeeded()

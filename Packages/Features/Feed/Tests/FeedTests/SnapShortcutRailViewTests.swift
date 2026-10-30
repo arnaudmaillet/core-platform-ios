@@ -646,7 +646,7 @@ struct SnapShortcutRailViewTests {
         // ambient safe-area tracking — a moving cell's ambient insets
         // re-derive every transition frame and must not bound the zone.
         cell.applyChromeInsets(UIEdgeInsets(top: 116, left: 0, bottom: 83, right: 0))
-        let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
+        let chrome = try #require(Optional(cell.debugChrome))
         #expect(chrome.layoutMargins.top == 116)
         // The screen's footer, plus the breath every feed stands on (#1722).
         #expect(chrome.layoutMargins.bottom == 83 + SnapActionColumn.bottomBreath)

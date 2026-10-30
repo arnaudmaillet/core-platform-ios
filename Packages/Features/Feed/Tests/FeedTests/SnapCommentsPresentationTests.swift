@@ -263,7 +263,7 @@ struct SnapCommentsPresentationTests {
         // Tolerance, not equality: `UIView.alpha` round-trips through a
         // Float, so the CGFloat constant never comes back bit-identical.
         #expect(abs(backdrop.dimOpacity - SnapCommentsLayout.backdropDimOpacity) < 0.001)
-        let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
+        let chrome = try #require(Optional(cell.debugChrome))
         // THE CHROME IS THE FADED LAYER — one alpha for every surface it
         // owns, which is what makes the engagement one animation instead of
         // seven (see `setCommentsEngagedProgress`).
@@ -337,7 +337,7 @@ struct SnapCommentsPresentationTests {
     @Test func engagedCellHasNoRailToCollideWith() throws {
         let cell = SnapFeedCell(frame: Self.container)
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
-        let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
+        let chrome = try #require(Optional(cell.debugChrome))
         chrome.configure(with: FeedItemDisplayModel(
             id: PostID("post-0004"),
             authorID: ProfileID("profile-1"),
@@ -594,7 +594,7 @@ struct SnapCommentsPresentationTests {
         )
         #expect(frost.alpha == 0)
         // And the page's own chrome is fully present, as at rest.
-        let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
+        let chrome = try #require(Optional(cell.debugChrome))
         #expect(chrome.alpha == 1)
         #expect(cell.isCommentsEngaged == false)
     }
@@ -1055,7 +1055,7 @@ struct SnapCommentsPresentationTests {
             // reactions rail (which used to hold a trailing column open) is
             // faded out with the rest of the page chrome.
             let chrome = try #require(
-                cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first
+                Optional(cell.debugChrome)
             )
             let rail = chrome.debugShortcutRail
             #expect(rail.superview?.alpha == 0) // the wheel's layer carries the chrome's fade (#1872)
@@ -2696,7 +2696,7 @@ struct SnapCommentsPresentationTests {
         let cell = SnapFeedCell(frame: Self.container)
         cell.applyChromeInsets(UIEdgeInsets(top: Self.topInset, left: 0, bottom: 34, right: 0))
         cell.layoutIfNeeded()
-        let chrome = try #require(cell.contentView.subviews.compactMap { $0 as? SnapChromeView }.first)
+        let chrome = try #require(Optional(cell.debugChrome))
         let rail = chrome.debugShortcutRail
 
         #expect(rail.alpha == 1) // at rest
