@@ -269,7 +269,11 @@ struct ProfileBellAndMapMenuTests {
 
         screen.debugToggleMute(.posts)
         #expect(screen.debugMuteBellItem?.image == UIImage(systemName: "bell.slash"), "bell showed before the toast")
-        try #require(await settle { (screen.navigationItem.rightBarButtonItems ?? []).contains(where: isToast) })
+        // ⚠️ THE TOAST'S ARRIVAL, NOT ITS PRESENCE (#1951). It shows once the
+        // server answered and leaves after a few seconds; on a starved runner
+        // (179 s for this test) a poll gap outlasted it, and a presence poll
+        // missed a toast that had come and gone. Counted, it cannot be missed.
+        try #require(await settle { screen.debugMuteToastsShown == 1 }, "no toast for the unmute")
         #expect(muted.image == UIImage(systemName: "bell.slash"), "the bell on the bar flipped with its toast")
         #expect(screen.debugMuteBellItem?.image == UIImage(systemName: "bell"))
     }
