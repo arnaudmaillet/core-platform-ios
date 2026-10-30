@@ -105,6 +105,11 @@ final class ExploreTabCoordinator: TabCoordinator {
         // same line on the other roots for the widths it protects.
         mapViewController.navigationItem.backButtonDisplayMode = .minimal
         navigationController.viewControllers = [mapViewController]
+        // The guest without location's way out leads the bar (#1907): it comes
+        // and goes with the map's offer.
+        (mapViewController as? any GuestLocationOffering)?.onGuestLocationOfferChange = { [weak self] _ in
+            self?.applyBarItems()
+        }
         installBarItems()
 
         #if DEBUG
@@ -146,12 +151,34 @@ final class ExploreTabCoordinator: TabCoordinator {
         applyBarItems()
     }
 
+    /// "Allow location" (#1907): the location glyph and the title in one
+    /// bubble the bar draws (`BarItems.labeled`); a tap asks, or opens
+    /// Settings once denied.
+    private func allowLocationItem(for offering: (any GuestLocationOffering)?) -> UIBarButtonItem {
+        let (item, label) = BarItems.labeled(
+            id: Self.allowLocationItemID, title: "Allow location", image: UIImage(systemName: "location.fill")
+        ) { [weak offering] in offering?.allowGuestLocation() }
+        label.accessibilityHint = "Shows posts around you"
+        return item
+    }
+
+    static let allowLocationItemID = "explore.allow-location"
+
     private func applyBarItems() {
         guard let map = mapViewController else { return }
         // The trailing group through the toasts' door (#1420, #1679): under a
         // bar toast these are the items that come back.
         guard container.memberGate.isMember else {
-            map.navigationItem.leftBarButtonItem = nil
+            // `[Allow location] … [search]` while the guest's location is not
+            // allowed (#1907); the leading slot is empty otherwise.
+            let offering = map as? any GuestLocationOffering
+            let items = offering?.offersGuestLocation == true ? [allowLocationItem(for: offering)] : []
+            if map.navigationItem.leftBarButtonItems?.map(\.identifier) != items.map(\.identifier) {
+                // ⚠️ `viewIfLoaded`: reading `view` would load the map here, and
+                // its `viewDidLoad` re-enters this method with the real offer —
+                // which this call, computed before, would then overwrite.
+                map.navigationItem.setLeftBarButtonItems(items, animated: map.viewIfLoaded?.window != nil)
+            }
             map.setOwnTrailingBarItems([searchButtonItem], animated: false)
             return
         }
