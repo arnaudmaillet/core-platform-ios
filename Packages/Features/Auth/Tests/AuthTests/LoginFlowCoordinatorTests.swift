@@ -22,21 +22,38 @@ struct LoginFlowCoordinatorTests {
         #expect(methods.toolbarItems?.isEmpty ?? true)
     }
 
-    /// With no gated action, the headline says both: every method logs in
-    /// and signs up (#1811).
-    @Test func withNoGatedActionTheHeadlineSaysBoth() throws {
+    /// No title (#1908, the owner): the methods say what they do. The list
+    /// opens one side margin under the sheet's top.
+    @Test func withNoGatedActionTheListHasNoHeadline() throws {
         let flow = LoginFlowCoordinator().start()
 
         let methods = try #require(try firstScreen(of: flow) as? MethodSelectionViewController)
-        #expect(methods.prompt == "Log in or sign up")
+        #expect(methods.prompt == nil)
+        methods.loadViewIfNeeded()
+        #expect(methods.tableView(methods.tableView, viewForHeaderInSection: 0) == nil, "a headline over the methods")
     }
 
-    /// Opened by a gated action, the flow leads with the reason.
-    @Test func aGatedActionsPromptIsTheHeadline() throws {
+    /// A gated opening shows its reason only behind `-signin-reason-line`
+    /// (#1908): the owner judges both. Off in a test run, so the bare list.
+    @Test func aGatedActionsReasonWaitsForItsFlag() throws {
         let flow = LoginFlowCoordinator().start(prompt: GatedAction.like.signUpPrompt)
 
         let methods = try #require(try firstScreen(of: flow) as? MethodSelectionViewController)
-        #expect(methods.prompt == "Log in or sign up to like this post")
+        #expect(MethodSelectionViewController.showsReasonLine == false)
+        #expect(methods.prompt == nil)
+        // With the line, it is the gated reason, one quiet line.
+        methods.prompt = GatedAction.like.signUpPrompt
+        methods.loadViewIfNeeded()
+        let header = methods.tableView(methods.tableView, viewForHeaderInSection: 0)
+        let label = header.flatMap { firstLabel(in: $0) }
+        #expect(label?.text == "Log in or sign up to like this post")
+        #expect(label?.textColor == .secondaryLabel)
+    }
+
+    private func firstLabel(in view: UIView) -> UILabel? {
+        if let label = view as? UILabel { return label }
+        for subview in view.subviews { if let found = firstLabel(in: subview) { return found } }
+        return nil
     }
 
     /// No "Already have an account? Log in" row and no "or" (#1811): one

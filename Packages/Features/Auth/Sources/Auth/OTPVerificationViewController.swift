@@ -55,6 +55,11 @@ final class OTPVerificationViewController: UITableViewController {
         field.addAction(UIAction { [weak self] _ in self?.codeChanged() }, for: .editingChanged)
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        focusAlongTransition(codeCell.textField)
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         codeCell.textField.becomeFirstResponder()

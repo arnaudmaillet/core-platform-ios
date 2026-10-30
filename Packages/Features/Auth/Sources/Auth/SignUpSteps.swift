@@ -36,6 +36,11 @@ final class EmailEntryViewController: SignUpStepViewController {
         super.viewDidLoad()
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        focusAlongTransition(emailCell.textField)
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         emailCell.textField.becomeFirstResponder()
@@ -100,6 +105,7 @@ final class VerificationCodeViewController: SignUpStepViewController {
     /// time still left, which the stop below never touched.
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        focusAlongTransition(codeCell.textField)
         guard resendTimer?.isValid != true else { return }
         if resendAvailableAt > Date() {
             startResendCountdown()
@@ -332,6 +338,11 @@ final class ProfileSetupViewController: SignUpStepViewController {
         trailingRows = [statusCell]
         super.viewDidLoad()
         renderStatus()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        focusAlongTransition(handleCell.textField)
     }
 
     override func viewDidAppear(_ animated: Bool) {

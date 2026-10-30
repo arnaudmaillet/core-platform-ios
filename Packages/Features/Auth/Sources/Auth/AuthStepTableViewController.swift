@@ -1,16 +1,17 @@
 import DesignSystem
 import UIKit
 
-/// Inset-grouped table whose content hugs the BOTTOM of the visible area —
-/// above the keyboard while it is up — instead of the top. Implemented as a
-/// top content inset recomputed each layout pass: the inset absorbs the free
-/// space, so when content outgrows the viewport (accessibility sizes) the
-/// inset collapses to zero and the table degrades to normal scrolling.
+/// Every sign-in step's inset-grouped table, its content laid from the TOP
+/// (#1908, the owner): the hero, the field and the primary button under the
+/// bar, so the keyboard's arrival moves nothing. It used to hug the bottom of
+/// the visible area — a block waiting at the foot of a full-height sheet,
+/// then climbing with the keyboard: three motions before the viewer could
+/// type. At the largest text sizes the content scrolls.
 ///
 /// Also owns the flow's shared section metrics: zeroed implicit top padding,
 /// collapsed footers, and self-sizing headers, so every visible gap belongs
 /// to an explicit header height.
-class BottomAnchoredTableViewController: UITableViewController {
+class AuthStepTableViewController: UITableViewController {
     /// Whether this step shows no navigation bar: the method list (#1811),
     /// whose headline is its table's. The form steps show one, for the way
     /// back.
@@ -26,7 +27,7 @@ class BottomAnchoredTableViewController: UITableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // A bottom-pinned form shouldn't bounce when everything fits.
+        // A form that fits shouldn't bounce.
         tableView.alwaysBounceVertical = false
         // No effect under the bar: the rows run up under the pills untouched — see
         // `prefersClearTopEdge`.
@@ -71,11 +72,6 @@ class BottomAnchoredTableViewController: UITableViewController {
         }
     }
     #endif
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        anchorContentToBottom()
-    }
 
     /// Plain-text link row (clear background, centered, tinted) — the flow's
     /// secondary-action register: Resend, Read the Privacy Policy.
@@ -131,17 +127,18 @@ class BottomAnchoredTableViewController: UITableViewController {
         }
         return header
     }
+}
 
-    private func anchorContentToBottom() {
-        // adjustedContentInset.bottom carries the keyboard overlap (plus the
-        // home indicator); the top system inset is read from safeAreaInsets
-        // because adjustedContentInset.top would echo the pad being set here.
-        let available = tableView.bounds.height
-            - tableView.safeAreaInsets.top
-            - tableView.adjustedContentInset.bottom
-        let pad = max(0, available - tableView.contentSize.height)
-        guard tableView.contentInset.top != pad else { return }
-        tableView.contentInset.top = pad
-        tableView.contentOffset.y = -(pad + tableView.safeAreaInsets.top)
+extension UIViewController {
+    /// The step's field takes focus AS the push runs (#1908): the keyboard
+    /// rises in the same animation as the slide and the sheet's growth, and
+    /// from one step to the next it hands over in place — never down and up
+    /// again. A step's `viewDidAppear` focus stays the fallback.
+    func focusAlongTransition(_ field: UIResponder) {
+        guard let coordinator = transitionCoordinator else { return }
+        coordinator.animate(alongsideTransition: { [weak self] _ in
+            self?.view.layoutIfNeeded()
+            field.becomeFirstResponder()
+        })
     }
 }
