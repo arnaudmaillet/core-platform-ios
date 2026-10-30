@@ -2872,6 +2872,13 @@ final class SnapFeedViewController: UIViewController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.setForeground(true) }
         })
+        // The sound turned on, or off by the silent switch (#1931): Background
+        // Play and Picture in Picture follow it.
+        for name in [FeedSoundSession.didTurnOn, FeedSoundSession.didTurnOff] {
+            appObservers.add(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refreshAudibleSurface() }
+            })
+        }
         // The launch screen lifting (#1812): what the page would have been
         // heard saying under it starts now.
         appObservers.add(center.addObserver(
@@ -2938,8 +2945,12 @@ final class SnapFeedViewController: UIViewController {
     private func refreshPictureInPicture(ownerCell: SnapFeedCell? = nil) {
         guard let videoPlayback, !isAwaitingPictureInPicture else { return }
         var surface: VideoRenderView?
-        // A single clip floats, never a carousel's muted one (#1849).
-        if MediaPlaybackPolicy.floatsInPictureInPicture, isOnScreen, isForeground, let owner = playbackOwner,
+        // A single clip floats, never a carousel's muted one (#1849); and only
+        // once the viewer turned the sound on (#1931, the owner 2026-10-30): a
+        // readied window makes the session `.playback`, which a phone on
+        // silent would hear before any volume key.
+        if MediaPlaybackPolicy.floatsInPictureInPicture, videoPlayback.feedSound.isTurnedOn,
+           isOnScreen, isForeground, let owner = playbackOwner,
            ownerModel.map(SnapSoundState.clipIsHeard(in:)) ?? true,
            let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
             surface = cell.audibleSurface
@@ -2965,11 +2976,12 @@ final class SnapFeedViewController: UIViewController {
     }
 
     /// Background Play (#483): keeps the clip this screen is being heard
-    /// through playing off screen — only when the viewer turned it on, and
-    /// this screen (not one under it) owns the sound.
+    /// through playing off screen — only when the viewer turned it on, the
+    /// sound is on (#1931: a phone on silent never hears it through the
+    /// background), and this screen (not one under it) owns the sound.
     private func continueInBackground() -> Bool {
         guard MediaPlaybackPolicy.playsInBackground, isOnScreen, !isAudioYielded,
-              let videoPlayback, let surface = ownAudibleSurface,
+              let videoPlayback, videoPlayback.feedSound.isTurnedOn, let surface = ownAudibleSurface,
               surface === videoPlayback.currentAudibleSurface
         else { return false }
         let model = playbackOwner.flatMap { $0 < orderedIDs.count ? modelsByID[orderedIDs[$0]] : nil }

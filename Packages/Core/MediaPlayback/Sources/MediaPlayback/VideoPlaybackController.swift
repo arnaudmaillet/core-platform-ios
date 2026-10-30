@@ -215,7 +215,7 @@ public final class VideoPlaybackController {
     public var feedSound: FeedSoundSession = .shared {
         didSet { settleAudioSession() }
     }
-    private var feedSoundObserver: NSObjectProtocol?
+    private var feedSoundObservers: [NSObjectProtocol] = []
     /// The one surface a viewer is listening to, and the player last made
     /// heard for it — see `setAudibleSurface`.
     weak var audibleSurface: VideoRenderView?
@@ -288,16 +288,16 @@ public final class VideoPlaybackController {
         self.byteCache = byteCache
         try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .moviePlayback)
         // A volume key turned the feed's sound on (#1931): heard through the
-        // silent switch from now on.
-        feedSoundObserver = NotificationCenter.default.addObserver(
-            forName: FeedSoundSession.didTurnOn, object: nil, queue: .main
-        ) { [weak self] note in
-            // The sender's identity, read here: a `Notification` cannot cross
-            // into the main actor's isolation.
-            let sender = (note.object as AnyObject?).map(ObjectIdentifier.init)
-            MainActor.assumeIsolated {
-                guard let self, sender == ObjectIdentifier(self.feedSound) else { return }
-                self.settleAudioSession()
+        // silent switch — until the phone is put on silent again.
+        feedSoundObservers = [FeedSoundSession.didTurnOn, FeedSoundSession.didTurnOff].map { name in
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                // The sender's identity, read here: a `Notification` cannot
+                // cross into the main actor's isolation.
+                let sender = (note.object as AnyObject?).map(ObjectIdentifier.init)
+                MainActor.assumeIsolated {
+                    guard let self, sender == ObjectIdentifier(self.feedSound) else { return }
+                    self.settleAudioSession()
+                }
             }
         }
         // Return players are a convenience the close can do without (#923):
