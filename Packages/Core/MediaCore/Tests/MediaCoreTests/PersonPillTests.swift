@@ -84,6 +84,23 @@ struct PersonPillTests {
                 "a hydrated short name kept the cold floor")
     }
 
+    /// Too narrow for a name, the pill is its face alone (#1924, the owner:
+    /// "minimum width = avatar"): no labels, a circle the bar draws around
+    /// the avatar — never the row crushing the face into an oval. Given room
+    /// again, the name comes back.
+    @Test func tooNarrowForANameThePillIsItsFace() {
+        let pill = Self.laidOut(PersonPill(carriesBadge: true, ceiling: 220))
+        pill.setWidthBudget(PersonPill.faceOnlyWidth)
+        #expect(pill.showsFaceOnly)
+        let face = pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        #expect(abs(face - PersonPill.faceOnlyWidth) < 0.5, "the face-only pill is \(face) wide")
+        #expect(pill.accessibilityLabel?.contains("Ada Lovelace") == true, "VoiceOver lost the name")
+
+        pill.setWidthBudget(180)
+        #expect(!pill.showsFaceOnly, "the name did not come back")
+        #expect(pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width > PersonPill.faceOnlyWidth + 20)
+    }
+
     /// A badge change is a symbol replace when animated, and nothing else.
     @Test func anAnimatedChangeIsOneReplace() {
         let pill = PersonPill(carriesBadge: true)

@@ -47,6 +47,9 @@ struct SnapBarPillWidths: Equatable {
     /// footer's stock items leave (`toolbarReserve(icon:)`), capped, so the
     /// run never folds into `•••`.
     var toolbarAuthor: CGFloat
+    /// The same on a text post's footer (#1924): `[author] [♥ n] [☆] [↪]`,
+    /// the like in repost's place (`textToolbarReserve`).
+    var toolbarAuthorBesideLike: CGFloat
     /// Whether the comments sort shows its word; false without a sort.
     var sortShowsTitle: Bool
 
@@ -104,6 +107,15 @@ struct SnapBarPillWidths: Equatable {
         28 + 10 + 13 + (platter ? (2 * icon + 31) + 13 : 0) + 48 + 28 + slack
     }
 
+    /// A text post's footer (#1924): the margins and the pill's glass as
+    /// above, the like's `like`-wide bubble, ☆ alone in its own (its glyph
+    /// and the bar's 10), ↪'s 48, the 13pt gaps between, and the slack.
+    /// Repost lives in the share sheet there: with it, the run folded ⇄ and
+    /// ↪ into `•••` on an iPhone SE (the owner, 2026-10-30).
+    static func textToolbarReserve(icon: CGFloat, like: CGFloat) -> CGFloat {
+        28 + 10 + 13 + like + 13 + (icon + 10) + 13 + 48 + 28 + slack
+    }
+
     /// A stock glyph item's width at `traits`' text size.
     @MainActor
     static func toolbarIcon(for traits: UITraitCollection) -> CGFloat {
@@ -138,12 +150,15 @@ struct SnapBarPillWidths: Equatable {
     ///   - walletWidth: the wallet badge's fitted width, nil without a wallet.
     ///   - sort: the comments sort's widths while it is on the bar, else nil.
     ///   - toolbarIcon: a stock glyph item's width at the screen's text size.
+    ///   - toolbarLike: a text post's footer like, its bubble's width
+    ///     (`SnapFooterToolbar.likeBubbleWidth`); nil with no such footer.
     static func resolve(
         navBarWidth: CGFloat,
         toolbarWidth: CGFloat,
         walletWidth: CGFloat?,
         sort: Sort?,
-        toolbarIcon: CGFloat = defaultToolbarIcon
+        toolbarIcon: CGFloat = defaultToolbarIcon,
+        toolbarLike: CGFloat? = nil
     ) -> SnapBarPillWidths {
         // Everything on the nav bar but the author pill, the sort (if any)
         // `sortWidth` points wide. The back arrow is always paid for: whether
@@ -163,6 +178,11 @@ struct SnapBarPillWidths: Equatable {
         return SnapBarPillWidths(
             author: clamp(room(sortWidth: sortWidth), cap: authorCap),
             toolbarAuthor: clamp(toolbarWidth - toolbarReserve(icon: toolbarIcon), cap: toolbarAuthorCap),
+            toolbarAuthorBesideLike: clamp(
+                toolbarWidth - (toolbarLike.map { textToolbarReserve(icon: toolbarIcon, like: $0) }
+                    ?? toolbarReserve(icon: toolbarIcon)),
+                cap: toolbarAuthorCap
+            ),
             sortShowsTitle: showsTitle
         )
     }

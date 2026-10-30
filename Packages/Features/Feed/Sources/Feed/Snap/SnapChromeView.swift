@@ -175,6 +175,24 @@ final class SnapChromeView: UIView {
             applyPostActionsLayout()
         }
     }
+
+    /// (#1924, the owner): a TEXT page's like stands in the screen's footer —
+    /// its heart and count beside save and repost — so the column floats no
+    /// pill over the composer, and a short comment list rests on it. A media
+    /// page keeps its pill; so does a screen with no footer.
+    var likeInFooter = false {
+        didSet {
+            guard likeInFooter != oldValue else { return }
+            applyLikePillVisibility()
+        }
+    }
+
+    private func applyLikePillVisibility() {
+        let hidden = likeInFooter && !hasMedia
+        guard boostButton.isHidden != hidden else { return }
+        boostButton.isHidden = hidden
+        glassColumn.refresh(animated: false)
+    }
     private let columnLayer = SnapActionColumnLayer()
     /// The column's bubbles as ONE glass (#1872): the like, the post's
     /// actions and the sound fuse, split and fold into the sound — the
@@ -992,9 +1010,9 @@ final class SnapChromeView: UIView {
         // it needs no stream to appear and the flight replica — which never
         // receives one — draws the identical corner.
         // ⚠️ THE LIKE PILL IS ALWAYS THERE (#1713, the owner): no post hides
-        // its likes. On every page (#695): a text page's composer reserves its
-        // room.
-        boostButton.isHidden = false
+        // its likes. On every page (#695) — but a text page's stands in the
+        // screen's footer when it has one (#1924, `likeInFooter`).
+        boostButton.isHidden = likeInFooter && !hasMedia
         // The badge's count, from what the card knew; the screen then pushes
         // the post's live one (`setPostLikeCount`).
         postLikeCount = model.likeCount
