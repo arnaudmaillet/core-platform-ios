@@ -152,6 +152,20 @@ enum MapClusterEngine {
         return exp2((log2(zoomScale) * 4).rounded(.down) / 4)
     }
 
+    /// Each level's characteristic H3 span (km) over `pins` — the minimum
+    /// where places of one kind differ; empty when no rung carries an index.
+    /// The banding's input, and the depth ceiling's (#1907).
+    static func spansByKind(of pins: [MapPin]) -> [MapPlace.Kind: Double] {
+        var spans: [MapPlace.Kind: Double] = [:]
+        for pin in pins {
+            for place in pin.places {
+                guard let h3 = place.h3Index, let cell = H3CellGeometry(index: h3) else { continue }
+                spans[place.kind] = min(spans[place.kind] ?? .greatestFiniteMagnitude, cell.averageSpanKm)
+            }
+        }
+        return spans
+    }
+
     static func cluster(
         _ pins: [MapPin], zoomScale: Double, cellPoints: Double,
         zoomLevel: Int32? = nil, viewportDiagonalKm: Double? = nil,
@@ -218,15 +232,7 @@ enum MapClusterEngine {
         // Each level's characteristic H3 span, over the whole corpus (the
         // minimum where places of one kind differ) — the dynamic banding's
         // input. Empty when no rung carries an index → zoom fallback.
-        var spansByKind: [MapPlace.Kind: Double] = [:]
-        for pin in pins {
-            for place in pin.places {
-                guard let h3 = place.h3Index, let cell = H3CellGeometry(index: h3) else { continue }
-                spansByKind[place.kind] = min(
-                    spansByKind[place.kind] ?? .greatestFiniteMagnitude, cell.averageSpanKm
-                )
-            }
-        }
+        let spansByKind = Self.spansByKind(of: pins)
         // `nil` means the LOCAL band — the viewer is inside the deepest
         // cell (dynamic), past the fallback's city band, or no banding
         // input was given at all (geometry-only callers): the hierarchy
