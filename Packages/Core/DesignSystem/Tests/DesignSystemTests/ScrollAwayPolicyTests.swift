@@ -69,4 +69,50 @@ struct HoldToArmPresenterTests {
         #expect(fired == 0)
         #expect(hold.debugDisc == nil)
     }
+
+    /// The "+"'s placement (#1929): a host hanging the hold on a whole bar
+    /// says where the disc goes and in which view, and hears the press come
+    /// and go — the selection lock's two ends.
+    @Test func aHostPlacesTheDiscAndHearsThePress() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let root = UIViewController()
+        window.rootViewController = root
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let bar = UIView(frame: CGRect(x: 0, y: 760, width: 390, height: 84))
+        let overlay = UIView(frame: window.bounds)
+        root.view.addSubview(bar)
+        root.view.addSubview(overlay)
+        let bubble = CGRect(x: 326, y: 770, width: 48, height: 48)
+        var events: [String] = []
+        let hold = HoldToArmPresenter(view: bar) { .symbol("camera.fill") }
+        hold.host = { overlay }
+        hold.discFrame = { host in HoldToArmPresenter.frame(over: bubble, in: host.bounds) }
+        hold.onPressBegan = { events.append("began") }
+        hold.onPressFinished = { events.append("finished") }
+
+        hold.debugPress(at: CGPoint(x: bubble.midX, y: 10))
+        let disc = try #require(hold.debugDisc)
+        #expect(disc.superview === overlay, "the disc is not in the host's view")
+        #expect(abs(disc.frame.midX - min(bubble.midX, 390 - HoldToArmPresenter.Metrics.edgeMargin - disc.frame.width / 2)) < 0.5)
+        #expect(disc.frame.maxY == bubble.minY - HoldToArmPresenter.Metrics.gap)
+        #expect(hold.isHolding)
+        hold.debugRelease()
+        #expect(!hold.isHolding)
+        #expect(events == ["began", "finished"])
+    }
+
+    /// The default placement: over the view, clear of the screen's sides,
+    /// and under a ceiling when one is given.
+    @Test func theDiscFrameStaysClearOfTheEdges() {
+        let bounds = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let side = HoldRingDiscView.Metrics.diameter
+        let nearEdge = HoldToArmPresenter.frame(over: CGRect(x: 370, y: 700, width: 20, height: 20), in: bounds)
+        #expect(nearEdge.maxX <= 390 - HoldToArmPresenter.Metrics.edgeMargin + 0.5)
+        #expect(nearEdge.height == side)
+        let underCeiling = HoldToArmPresenter.frame(
+            over: CGRect(x: 100, y: 700, width: 48, height: 48), ceiling: 650, in: bounds
+        )
+        #expect(underCeiling.maxY == 650 - HoldToArmPresenter.Metrics.gap)
+    }
 }
