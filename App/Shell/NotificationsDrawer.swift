@@ -55,6 +55,10 @@ final class NotificationsDrawer {
         // media pauses (#1703, the owner: the feed played on behind it).
         container.onDidOpen = { [weak self] in self?.onSetAsideChange?(true) }
         container.onDidClose = { [weak self] in self?.onSetAsideChange?(false) }
+        // And as it moves (#1914): the clip fades with the share of the
+        // screen left showing, and pauses at half — the rule of every screen
+        // that covers another.
+        container.onMainShareChange = { [weak self] share in self?.onMainShareChange?(share) }
         // A guest has no notifications: the edge swipe stays shut for them (the
         // bell asks them to sign up instead). The bell's own `open()` is left
         // ungated, so it opens the drawer once they have.
@@ -69,6 +73,8 @@ final class NotificationsDrawer {
     /// The main screen was set aside (true: the drawer is opening or open) or
     /// brought back (false: closed).
     var onSetAsideChange: ((Bool) -> Void)?
+    /// The share of the main screen still showing, 0…1, frame by frame.
+    var onMainShareChange: ((CGFloat) -> Void)?
 
     #if DEBUG
     /// How many foot blurs the drawer's stack carries — one (#1576). QA.
@@ -81,8 +87,8 @@ final class NotificationsDrawer {
     /// The bell's action.
     func open() {
         guard edgeBelongsToDrawer else { return }
-        // At the tap, not at the settle: the media stops as the drawer moves.
-        onSetAsideChange?(true)
+        // The media fades and pauses with the slide (`onMainShareChange`,
+        // #1914), no longer at the tap.
         container.open(animated: true)
     }
 

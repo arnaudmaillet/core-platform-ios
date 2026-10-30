@@ -74,6 +74,11 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
         (pages[Self.shotsIndex] as? SnapFeedViewController)?.setSetAside(setAside)
     }
 
+    /// …and fades and pauses with the drawer's slide (#1914).
+    func setVisibleShare(_ share: CGFloat) {
+        (pages[Self.shotsIndex] as? SnapFeedViewController)?.setVisibleShare(share)
+    }
+
     /// The page the sector opens on: Shots. DEBUG: Feed under the QA hooks
     /// that drive its list (`-foryou-*`, `-zoom-repeat*`, `-hero-audit`) —
     /// they were written for a tab that opened on it.

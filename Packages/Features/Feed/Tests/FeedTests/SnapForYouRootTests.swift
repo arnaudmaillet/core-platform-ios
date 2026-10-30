@@ -216,6 +216,27 @@ struct SnapForYouRootTests {
         #expect(root.debugIsWatchedByLifecycle, "the feed did not resume at half")
     }
 
+    /// The drawer's slide is one more source of the share (#1914): the clip
+    /// fades with it and pauses below half, then plays again as it closes.
+    @Test func theDrawersSlidePausesTheFeedPastHalf() async throws {
+        let root = feed(root: true)
+        let nav = UINavigationController(rootViewController: root)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = nav
+        window.isHidden = false
+        defer { window.isHidden = true }
+        for _ in 0..<200 where !root.debugIsWatchedByLifecycle { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(root.debugIsWatchedByLifecycle)
+
+        root.setVisibleShare(0.7)
+        #expect(root.debugViewportShare.share == 0.7)
+        #expect(root.debugIsWatchedByLifecycle)
+        root.setVisibleShare(0.3)
+        #expect(!root.debugIsWatchedByLifecycle, "the feed plays on behind a drawer past half")
+        root.setVisibleShare(1)
+        #expect(root.debugIsWatchedByLifecycle, "the feed did not resume as the drawer closed")
+    }
+
     // MARK: - Set aside by the notifications drawer (#1703)
 
     /// The drawer slides the shell aside with the feed still on screen: its

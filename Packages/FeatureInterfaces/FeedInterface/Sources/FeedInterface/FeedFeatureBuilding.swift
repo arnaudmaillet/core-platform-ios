@@ -632,4 +632,7 @@ public protocol ForYouSectorPaging: AnyObject {
     /// The shell slid the sector aside (the notifications drawer): its media
     /// pauses until it comes back.
     func setSetAside(_ setAside: Bool)
+    /// The share of the sector still on screen as the shell slides it aside,
+    /// 0…1 (#1914): its clip fades with it and pauses at half.
+    func setVisibleShare(_ share: CGFloat)
 }

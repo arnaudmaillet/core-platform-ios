@@ -90,6 +90,34 @@ struct SideDrawerContainerTests {
         }
     }
 
+    /// The share of the main screen still showing (#1914), told as the drawer
+    /// moves: a drag frame by frame, and the landing.
+    @Test func theMainScreensShareIsToldAsTheDrawerMoves() {
+        hosting { container, _, _ in
+            var told: [CGFloat] = []
+            container.onMainShareChange = { told.append($0) }
+            let width = container.drawerWidth
+            let screen = container.view.bounds.width
+            container.beginTracking()
+            container.updateTracking(translation: width * 0.3)
+            let peek = SideDrawerContainerViewController.mainShare(slide: width * 0.3, width: screen)
+            #expect(abs((told.last ?? 1) - peek) < 0.001, "a drag frame was not told")
+            container.endTracking(velocity: 0, animated: false)
+            #expect(told.last == 1, "closed, the main screen is not whole again")
+            container.open(animated: false)
+            let open = SideDrawerContainerViewController.mainShare(slide: width, width: screen)
+            #expect(abs((told.last ?? 1) - open) < 0.001)
+            #expect(open < 0.5, "an open drawer leaves the main screen more than half")
+        }
+    }
+
+    @Test func theMainShareIsWhatTheSlideLeaves() {
+        #expect(SideDrawerContainerViewController.mainShare(slide: 0, width: 400) == 1)
+        #expect(SideDrawerContainerViewController.mainShare(slide: 200, width: 400) == 0.5)
+        #expect(SideDrawerContainerViewController.mainShare(slide: 500, width: 400) == 0)
+        #expect(SideDrawerContainerViewController.mainShare(slide: 100, width: 0) == 1)
+    }
+
     @Test func aDragFollowsTheFingerAndAShortReleaseFallsBack() {
         hosting { container, _, drawer in
             let width = container.drawerWidth

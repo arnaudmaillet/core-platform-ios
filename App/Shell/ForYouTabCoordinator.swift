@@ -32,6 +32,11 @@ final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
         (navigationController.viewControllers.first as? any ForYouSectorPaging)?.setSetAside(setAside)
     }
 
+    /// The share of the tab still showing as the drawer moves (#1914).
+    func setVisibleShare(_ share: CGFloat) {
+        (navigationController.viewControllers.first as? any ForYouSectorPaging)?.setVisibleShare(share)
+    }
+
     /// The tab bar goes dark over the For You tab's Shots (#1697, #1703) —
     /// not over Feed.
     var wantsDarkTabBar: Bool {
