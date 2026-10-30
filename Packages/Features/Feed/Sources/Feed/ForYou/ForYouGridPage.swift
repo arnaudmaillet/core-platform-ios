@@ -3008,12 +3008,30 @@ final class ForYouGridPage: UIView {
                     title: TakingLongerCopy.title,
                     subtitle: "The posts are still on their way.",
                     actionTitle: TakingLongerCopy.action,
-                    action: { [weak self] in self?.onRefresh?() }
+                    action: { [weak self] in self?.retry() }
                 )
             }
         }
         return gate
     }()
+
+    /// A host's answer that is not one of the page's own states — a status
+    /// (a private profile's lock, a tab's empty copy) or titled groups — ends
+    /// the cold load as `render(_:)`'s do (#1900): the bones and "taking
+    /// longer" can never land over it, and an answer waiting out the bones'
+    /// minimum is replaced by it (#1786).
+    func settle(_ reveal: @escaping @MainActor () -> Void) {
+        skeletonGate.finish(reveal)
+    }
+
+    /// A Try Again: the page goes back to loading at once — the gate starts
+    /// again, so its bones show after the delay — and asks its host (#1900).
+    /// Whatever comes back lands through the gate, even the answer that was
+    /// there before.
+    func retry() {
+        render(.loading)
+        onRefresh?()
+    }
 
     func render(_ state: ForYouViewModel.PageState) {
         // ⚠️ THE COLD SKELETON IS THE GATE'S (#1770): a page that answers
