@@ -117,6 +117,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     private var didTapMapPinForQA = false
     /// Latches the `-profile-relationships` QA push to a single firing.
     private var didPushRelationshipsForQA = false
+    /// Mute-change toasts shown (#1951): their ARRIVAL, which a test cannot
+    /// miss, where their presence on the bar lasts only a few seconds.
+    private(set) var debugMuteToastsShown = 0
     #endif
 
     /// The own-profile settings gear; pushes `AccountSettingsViewController`.
@@ -1565,6 +1568,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         case .unblocked(let handle):
             Feedback.success("Unblocked \(handle)", symbol: "hand.raised.slash.fill", from: self)
         case .muteChanged(let handle, let scopes):
+            #if DEBUG
+            debugMuteToastsShown += 1
+            #endif
             Feedback.success(
                 ProfileViewModel.muteMessage(handle: handle, scopes: scopes),
                 symbol: scopes.isEmpty ? "speaker.wave.2.fill" : "speaker.slash.fill",

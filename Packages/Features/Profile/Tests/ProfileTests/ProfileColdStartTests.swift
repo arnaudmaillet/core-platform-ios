@@ -335,7 +335,15 @@ final class ProfileColdStartTests {
         let cache = try launchCache()
         let liked = [tile("l1", at: 70), tile("l2", at: 65)]
         let (first, shownFirst) = open(.currentUser, cache: cache, profiles: ColdProfiles(), gallery: gallery(liked: liked))
-        try #require(await settle { ids(shownFirst.snapshots.last?.reactions) == ["l1", "l2"] })
+        // ⚠️ THE LIKES AND THE FIRST PAGE, NOT THE LIKES ALONE (#1952). The
+        // cache keeps a gallery only once its posts (or tagged) are in
+        // (`ProfileGalleryStore.corpora`): likes landing first are on screen
+        // and in no write yet. Waited on alone, a slow runner flushed nothing
+        // and the cold start read no likes.
+        try #require(await settle {
+            ids(shownFirst.snapshots.last?.reactions) == ["l1", "l2"]
+                && !ids(shownFirst.snapshots.last?.activity).isEmpty
+        })
         cache.waitForDeviceWrites()
         withExtendedLifetime(first) {}
 
