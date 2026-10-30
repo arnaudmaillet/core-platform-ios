@@ -808,8 +808,19 @@ final class SelectorLiquidLens {
         // prototype never met this: its track is a plain view. Converted
         // through the presentation layers, the lens is transformed exactly as
         // the glass and the titles are, frame by frame.
+        //
+        // ⚠️ BUT ACROSS ONLY, never up and down (#1905, the owner's device,
+        // 2026-10-30). Pulled upward, the presentation tree reports the whole
+        // row risen ~5.5 pt — titles and lens alike, no transform on any
+        // ancestor — yet the render server draws the real titles ~3.6 pt up,
+        // and a lens placed from those layers came out ~13 pt up, its title
+        // with it: well above the row. The native `UISegmentedControl` keeps
+        // its lens and its title on the row's line whatever the finger does
+        // vertically. So the lens takes the model's vertical centre, and its
+        // title the model's vertical mapping (below); the presentation tree
+        // keeps the horizontal and the scale, which the 2026-10-26 fix needs.
         let shown = Self.presentationConvert(lens, from: space, to: glass)
-        let inGlass = shown.rect
+        let inGlass = Self.onTheRow(shown: shown.rect, model: space.convert(lens, to: glass))
         #if DEBUG
         if Self.traces { trace(lens: lens, shown: inGlass, in: space) }
         #endif
@@ -850,8 +861,17 @@ final class SelectorLiquidLens {
         if let overlay, let titles {
             // Glass point → titles point, through the host's live transform:
             // an origin and a scale (the transform is a scale and a shift).
-            let mapped = Self.presentationConvert(CGRect(x: 0, y: 0, width: 100, height: 100), from: glass, to: titles).rect
-            let origin = mapped.origin
+            let unit = CGRect(x: 0, y: 0, width: 100, height: 100)
+            let mapped = Self.presentationConvert(unit, from: glass, to: titles).rect
+            // The title's vertical, like the lens's, is the row's (#1905): at
+            // the lens's centre, the model's mapping.
+            let origin = CGPoint(
+                x: mapped.minX,
+                y: Self.overlayOriginY(
+                    lensCentreY: inGlass.midY, scale: mapped.width / 100,
+                    modelOffsetY: glass.convert(unit, to: titles).minY
+                )
+            )
             u.overlayScale = Float(mapped.width / 100)
             u.overlayEnabled = 1
             u.overlayWidth = Float(overlay.width)
@@ -964,6 +984,20 @@ final class SelectorLiquidLens {
 
     /// `rect` in `from`'s space → `to`'s, through the presentation layers
     /// when there are any (an in-flight transform on an ancestor counts).
+    /// `shown`'s horizontal and size, centred on `model`'s vertical centre:
+    /// the lens on the row's line, wherever the finger pulls it (#1905).
+    /// Pure, for tests.
+    static func onTheRow(shown: CGRect, model: CGRect) -> CGRect {
+        CGRect(x: shown.minX, y: model.midY - shown.height / 2, width: shown.width, height: shown.height)
+    }
+
+    /// The overlay's vertical origin that draws, at the lens's centre, the
+    /// title the MODEL puts there: the shader samples `glass·scale + origin`,
+    /// and the model maps a glass point by `+ modelOffsetY`. Pure, for tests.
+    static func overlayOriginY(lensCentreY: CGFloat, scale: CGFloat, modelOffsetY: CGFloat) -> CGFloat {
+        modelOffsetY + lensCentreY * (1 - scale)
+    }
+
     private static func presentationConvert(_ rect: CGRect, from: UIView, to: UIView) -> (rect: CGRect, live: Bool) {
         guard let source = from.layer.presentation(), let target = to.layer.presentation() else {
             return (from.convert(rect, to: to), false)
