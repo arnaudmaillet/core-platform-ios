@@ -631,6 +631,10 @@ final class SnapFeedViewController: UIViewController {
         self.bookmarks = bookmarks
         super.init(nibName: nil, bundle: nil)
         savedObservation = entities.observePosts { [weak self] change in
+            // The footer like's count moves with the store (#1924).
+            if let self, let id = self.footerLikeFace?.id, change.contains(id) {
+                self.refreshFooterLike(for: self.modelsByID[id], animated: true)
+            }
             guard let self, let id = self.bookmarkGlyphPostID, change.contains(id) else { return }
             // The post's counts move here too (a realtime tick): only a
             // changed save re-draws.
@@ -1766,6 +1770,8 @@ final class SnapFeedViewController: UIViewController {
                 cell.onRequestSoundSheet = { [weak self] in self?.presentSoundSheet() }
                 // The For You root's save and repost (#1681), in the column.
                 cell.setPostActions(shown: self.isForYouRoot, saved: self.bookmarks.isSaved(id.rawValue))
+                // A text page's like, in the footer when there is one (#1924).
+                cell.setLikeInFooter(self.footerCarriesTextLike)
                 // …and its bottom block one breath higher over the tab bar,
                 // no room for an absent strip (#1716).
                 cell.setSitsOverTabBar(self.isForYouRoot)
@@ -1894,7 +1900,9 @@ final class SnapFeedViewController: UIViewController {
                 ? SnapBarPillWidths.Sort(glyph: commentSortButton.glyphWidth, titled: commentSortButton.titledWidth)
                 : nil,
             // The footer's glyph items grow with the text size (#1679).
-            toolbarIcon: SnapBarPillWidths.toolbarIcon(for: traitCollection)
+            toolbarIcon: SnapBarPillWidths.toolbarIcon(for: traitCollection),
+            // …and so does a text post's like beside them (#1924).
+            toolbarLike: defaultToolbarItems.isEmpty ? nil : SnapFooterToolbar.likeBubbleWidth(for: traitCollection)
         )
         barPillWidths = widths
         commentSortButton.setTitleHidden(sortOnBar && !widths.sortShowsTitle)
@@ -1918,7 +1926,19 @@ final class SnapFeedViewController: UIViewController {
         }
         // The toolbar's leading slot (#671): the room the audio capsule had —
         // the CAP, since #925: the pill takes its own width under it.
-        authorWidthBudget = isForYouRoot ? forYouRootPillBudget(bar: bar, sortOnBar: sortOnBar) : widths.toolbarAuthor
+        applyAuthorWidthBudget(bar: bar, sortOnBar: sortOnBar)
+    }
+
+    /// The pill's room: the top bar's on the For You root, else the footer's
+    /// — less the like's on a text post (#1924), so the run never folds.
+    private func applyAuthorWidthBudget(bar: CGFloat? = nil, sortOnBar: Bool? = nil) {
+        guard let widths = barPillWidths else { return }
+        if isForYouRoot {
+            guard let bar else { return }
+            authorWidthBudget = forYouRootPillBudget(bar: bar, sortOnBar: sortOnBar ?? false)
+        } else {
+            authorWidthBudget = footerLikeItem == nil ? widths.toolbarAuthor : widths.toolbarAuthorBesideLike
+        }
         authorIdentityView.setWidthBudget(authorWidthBudget)
     }
 
@@ -2550,7 +2570,7 @@ final class SnapFeedViewController: UIViewController {
         // separator gives Share its own (#1679). The toolbar is STATE-INVARIANT:
         // the comments exit is the nav bar's ✕, and the sort selector is the
         // nav bar's too (`setEngagedChrome`).
-        defaultToolbarItems = [authorItem, .flexibleSpace(), bookmarkItem, repost, BarItems.separator(), share]
+        defaultToolbarItems = [authorItem, footerFlexibleSpace, bookmarkItem, repost, BarItems.separator(), share]
         // The For You root wears no toolbar (#1681): the tab bar holds the
         // bottom, the pill is the top bar's, save and repost are the action
         // column's.
@@ -3252,16 +3272,92 @@ final class SnapFeedViewController: UIViewController {
         bookmarkItem.isEnabled = available
         repostToolbarItem?.isEnabled = available
         shareToolbarItem?.isEnabled = available
+        // A text page's like (#1924): none for a post that turned unavailable.
+        refreshFooterLike(for: modelsByID[id], animated: true)
     }
 
     private var repostToolbarItem: UIBarButtonItem?
     private var shareToolbarItem: UIBarButtonItem?
+
+    // MARK: - A text page's footer like (#1924)
+
+    /// Whether a text page's like stands in this screen's footer (#1924, the
+    /// owner): `[author] [♥ count] [☆ ⇄] [↪]`, and no pill floating over the
+    /// composer, so a short comment list rests on it. A screen with no
+    /// footer (the For You root, media only) keeps the pill.
+    private var footerCarriesTextLike: Bool { !defaultToolbarItems.isEmpty }
+
+    /// The footer's like while a text page is active; nil on a media page,
+    /// whose like is its column's pill.
+    private var footerLikeItem: UIBarButtonItem?
+    /// What that item draws, so an unchanged face mints nothing.
+    private var footerLikeFace: FooterLikeFace?
+
+    private struct FooterLikeFace: Equatable {
+        let id: PostID
+        let count: Int64?
+        let spent: Int
+    }
+
+    /// Points the footer like at `model` — minted for a text page, gone for
+    /// a media one. A new count or a new face is a new item under the same
+    /// identifier, set animated (R3): the bar morphs it.
+    private func refreshFooterLike(for model: FeedItemDisplayModel?, animated: Bool) {
+        guard footerCarriesTextLike else { return }
+        let face = model.flatMap { model -> FooterLikeFace? in
+            guard model.mediaURL == nil, !unavailablePostIDs.contains(model.id) else { return nil }
+            return FooterLikeFace(
+                id: model.id, count: viewModel.visibleLikeCount(for: model), spent: boost.boostTotal(on: model.id) ?? 0
+            )
+        }
+        guard face != footerLikeFace else { return }
+        let presenceChanged = (face == nil) != (footerLikeFace == nil)
+        footerLikeFace = face
+        footerLikeItem = face.map { face in
+            SnapFooterToolbar.makeLikeItem(count: face.count, spent: face.spent) { [weak self] in
+                self?.likeFromFooter()
+            }
+        }
+        if presenceChanged { applyAuthorWidthBudget() }
+        setToolbarItems(footerToolbarItems(), animated: animated && canAnimateBarItems)
+    }
+
+    /// The footer as it stands. On a text page the like follows the author,
+    /// in a bubble of its own, and repost moves into the share sheet — as on
+    /// Shots (`shareSheetActions`) — or the run folds into `•••` on an
+    /// iPhone SE (the owner, 2026-10-30): `[author] [♥ 382] [☆] [↪]`.
+    private func footerToolbarItems() -> [UIBarButtonItem] {
+        var items = defaultToolbarItems
+        guard let like = footerLikeItem,
+              let flexible = items.firstIndex(where: { $0 === footerFlexibleSpace }) else { return items }
+        items.removeAll { $0 === repostToolbarItem }
+        items.insert(contentsOf: [like, footerLikeSeparator], at: flexible + 1)
+        return items
+    }
+
+    /// The footer's spacer and the like's separator, kept so the like goes
+    /// in its place.
+    private let footerFlexibleSpace = UIBarButtonItem.flexibleSpace()
+    private let footerLikeSeparator = BarItems.separator()
+
+    /// A tap on the footer's heart: the page's pill's tap, on the active
+    /// text page.
+    private func likeFromFooter() {
+        guard let id = footerLikeFace?.id else { return }
+        performBoost(on: id, spend: .likes(WalletStore.Policy.defaultStakeAmount), feedbackCell: snapCell(for: id))
+    }
 
     #if DEBUG
     /// The toolbar's post actions, for a test: save, repost, share.
     var debugToolbarPostActions: [UIBarButtonItem] {
         [bookmarkItem, repostToolbarItem, shareToolbarItem].compactMap { $0 }
     }
+
+    /// The footer's like, nil off a text page (#1924).
+    var debugFooterLikeItem: UIBarButtonItem? { footerLikeItem }
+
+    /// A tap on the footer's like, through the screen's own path.
+    func debugTapFooterLike() { likeFromFooter() }
 
     /// A like staked straight through the wallet, as a tap's spend lands —
     /// without the toast, whose one undo slot is shared by the whole process.
@@ -3346,7 +3442,11 @@ final class SnapFeedViewController: UIViewController {
         // the loading page has no page above it and keeps its own.
         // A media page folds its column into the sound while its comments
         // are up (#1872): the composer keeps the slot alone (#1923).
-        detail.setActionColumnHostedByPage(hostedByPage, foldsIntoSlot: model.mediaURL != nil)
+        // A text page's like stands in the footer (#1924): its column is the
+        // sound alone too.
+        detail.setActionColumnHostedByPage(
+            hostedByPage, foldsIntoSlot: model.mediaURL != nil || footerCarriesTextLike
+        )
         let face = soundFace(for: model)
         // No face on a text post with no sound (#1790): no slot either.
         detail.setRailSoundFace(face, keepsSlot: face != nil || !SnapSoundState.isText(model))
@@ -3376,6 +3476,7 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func refreshVisibleBoostControls() {
+        refreshFooterLike(for: activeModel, animated: true)
         guard boost.wallet != nil else { return }
         for indexPath in collectionView.indexPathsForVisibleItems {
             guard orderedIDs.indices.contains(indexPath.item),
@@ -5743,10 +5844,11 @@ final class SnapFeedViewController: UIViewController {
     /// may read (#1409), Report only with somewhere to file it. Both leave
     /// the sheet first.
     func shareSheetActions(for id: PostID) -> [ShareSheetAction] {
-        // Repost on Shots only: a pushed post's toolbar carries it already
-        // (#1728, the owner).
+        // Repost on Shots, and on a text page, whose footer gave its place to
+        // the like (#1924); a pushed media post's toolbar carries it (#1728,
+        // the owner).
         var actions: [ShareSheetAction] = []
-        if isForYouRoot {
+        if isForYouRoot || footerLikeFace?.id == id {
             actions.append(ShareSheetAction(title: "Repost", symbol: PostActionSymbol.repost, dismissesSheet: false) {
                 [weak self] in self?.repostRequested()
             })

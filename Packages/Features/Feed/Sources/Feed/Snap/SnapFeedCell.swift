@@ -677,6 +677,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.showsPostActions = shown
         chrome.postActions.setSaved(saved)
     }
+    /// A text page's like stands in the screen's footer (#1924): no pill
+    /// in its column.
+    func setLikeInFooter(_ inFooter: Bool) { chrome.likeInFooter = inFooter }
     /// Shots' bottom layout: one breath higher, no strip room (#1716).
     func setSitsOverTabBar(_ sits: Bool) { chrome.sitsOverTabBar = sits }
     /// The author INSIDE the page, without glass (#1699, the For You root's):

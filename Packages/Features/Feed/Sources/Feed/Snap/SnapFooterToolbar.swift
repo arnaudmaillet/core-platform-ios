@@ -28,6 +28,7 @@ enum SnapFooterToolbar {
         static let repost = "feed.snap.repost"
         static let more = "feed.snap.more"
         static let share = "feed.snap.share"
+        static let like = "feed.snap.like"
     }
 
     /// The bar's items, left to right: the leading container under
@@ -72,6 +73,46 @@ enum SnapFooterToolbar {
     /// ⋯ — the thread's and the text composer's menu.
     static func makeMoreItem(menu: UIMenu) -> UIBarButtonItem {
         BarItems.icon(id: ID.more, image: UIImage(systemName: "ellipsis"), label: "More actions", menu: menu)
+    }
+
+    /// A text post's like (#1924, the owner): the heart and the post's count
+    /// in one bubble the bar draws (`BarItems.labeled`), between the author
+    /// and save — a tap likes, as the page's pill does; the burst's toast is
+    /// its undo. Outline at rest, the points' pink once staked
+    /// (`LikesSymbol`). The heart alone when the count is hidden (#397).
+    ///
+    /// ⚠️ ITS WORD AND GLYPH ARE FIXED (R3): a new count or a new face is a
+    /// new item under `ID.like`, which the bar animates.
+    static func makeLikeItem(count: Int64?, spent: Int, action: @escaping () -> Void) -> UIBarButtonItem {
+        let heart = LikesSymbol.likeImage(staked: spent > 0, likeGlyph)
+        let item: UIBarButtonItem
+        if let count {
+            let (labeled, label) = BarItems.labeled(id: ID.like, title: count.formattedCompact(), image: heart, action: action)
+            label.accessibilityLabel = "Like"
+            label.accessibilityValue = SnapRailBoostButton.accessibilityValue(likeCount: count, staked: spent)
+            item = labeled
+        } else {
+            item = BarItems.icon(id: ID.like, image: heart, label: "Like", action: action)
+        }
+        return item
+    }
+
+    /// The footer heart's size: the stock glyphs' beside it.
+    private static let likeGlyph = UIImage.SymbolConfiguration(textStyle: .body, scale: .large)
+
+    /// The like's bubble on a text post's footer at a wide count ("999K"),
+    /// the glass around it included — measured at `traits`' text size.
+    static func likeBubbleWidth(for traits: UITraitCollection) -> CGFloat {
+        let probe = StretchedBarLabel(
+            title: Int64(999_000).formattedCompact(), image: LikesSymbol.likeImage(staked: false, likeGlyph),
+            ink: .label, weight: .regular, action: {}
+        )
+        // Measured at the default size and scaled as the bar's text is: an
+        // off-window label does not follow a trait override.
+        let width = UIFontMetrics(forTextStyle: .body).scaledValue(
+            for: probe.intrinsicContentSize.width, compatibleWith: traits
+        )
+        return ceil(width) + 10
     }
 
     /// Share (#1728, the owner): on the post screen, ⋯ and its menu gave way

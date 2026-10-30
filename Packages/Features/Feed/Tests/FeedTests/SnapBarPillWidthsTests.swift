@@ -99,6 +99,25 @@ struct SnapBarPillWidthsTests {
         }
     }
 
+    /// A text post's footer (#1924): `[author] [♥ n] [☆] [↪]` fits at the
+    /// default size and at XXXL's glyphs, the pill at its face when the
+    /// room is short — never folding into `•••`.
+    @Test(arguments: phoneWidths)
+    func theTextFooterFitsWithItsLike(_ width: CGFloat) {
+        // Measured on the iPhone SE (`-open-post post-0002`): the like's
+        // bubble 99pt at "382" and 102 at XXXL, ☆'s 48 at both — "999K" is
+        // about 22 wider.
+        let measured: [(icon: CGFloat, like: CGFloat)] = [(38, 121), (49, 125)]
+        for (icon, like) in measured {
+            let pill = SnapBarPillWidths.resolve(
+                navBarWidth: width, toolbarWidth: width, walletWidth: Self.wallet, sort: nil,
+                toolbarIcon: icon, toolbarLike: like
+            ).toolbarAuthorBesideLike
+            let run = 27.5 + (pill + 10) + 12.5 + like + 12.5 + 48 + 12.5 + 48 + 27.5
+            #expect(run <= width, "\(width)pt, \(icon)pt glyphs: the text footer is \(run) — it folds into •••")
+        }
+    }
+
     /// What a pill's width depends on is the bars — and the one input that
     /// moves inside a screen's life is what else is on them. A narrower bar,
     /// a wallet, a sort: each only ever takes width away.

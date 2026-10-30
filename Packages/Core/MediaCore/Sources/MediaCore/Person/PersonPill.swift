@@ -138,6 +138,9 @@ public final class PersonPill: UIView {
     /// The floor while the redaction bars show; nil for none.
     private let coldWidth: CGFloat?
     private var maxWidthConstraint: NSLayoutConstraint?
+    /// The labels' end of the row, `Spacing.md` short of the pill's — none
+    /// when the pill is its face alone.
+    private var rowTrailingConstraint: NSLayoutConstraint?
     private var minWidthConstraint: NSLayoutConstraint?
 
     /// - Parameters:
@@ -194,9 +197,11 @@ public final class PersonPill: UIView {
         // The face's leading inset matches its breathing in the wrapper, so it
         // sits evenly in the glass on three sides; the labels end the pill.
         let breathing = max(0, (Self.wrapperHeight - AvatarImageView.bubbleDiameter) / 2)
+        let rowTrailing = row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Spacing.md)
+        rowTrailingConstraint = rowTrailing
         row.constrain(in: self) { parent in
             row.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: breathing)
-            row.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Spacing.md)
+            rowTrailing
             row.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
         }
 
@@ -316,7 +321,30 @@ public final class PersonPill: UIView {
         guard target > 0, target.isFinite, maxWidthConstraint?.constant != target else { return false }
         maxWidthConstraint?.constant = target
         applyWidthFloor()
+        applyFaceOnly()
         return true
+    }
+
+    /// The narrowest a pill is drawn (#1924, the owner): its face alone, in
+    /// a circle — the bar's bubble around the avatar.
+    public static let faceOnlyWidth: CGFloat = AvatarImageView.bubbleDiameter
+
+    /// The cap under which the labels give way altogether: the face, the
+    /// gap past it and the pill's end, and room for a few letters. Squeezed
+    /// below it, the row crushed the face into an oval.
+    static var faceOnlyThreshold: CGFloat {
+        faceOnlyWidth + PersonPillBadgeView.overhang + Spacing.xs + Spacing.md + 32
+    }
+
+    /// Whether the pill shows its face alone, its cap too narrow for a name.
+    public var showsFaceOnly: Bool { labelsStack.isHidden }
+
+    private func applyFaceOnly() {
+        let faceOnly = widthCap < Self.faceOnlyThreshold
+        guard faceOnly != labelsStack.isHidden else { return }
+        labelsStack.isHidden = faceOnly
+        rowTrailingConstraint?.constant = faceOnly ? 0 : -Spacing.md
+        updateAccessibility()
     }
 
     /// The widest the pill is drawn now.
