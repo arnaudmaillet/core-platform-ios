@@ -192,9 +192,9 @@ final class ConversationThreadViewController: UIViewController {
     private var owesTailPin = false
     private var hasEstablishedClearance = false
     /// Whether a short transcript starts from the bottom (#1799, the
-    /// `-stream-bottom-anchor` experiment). Settable for tests, before the
+    /// default since #1923). Settable for tests, before the
     /// view loads.
-    var anchorsShortStream = StreamBottomAnchor.isEnabled
+    var anchorsShortStream = true
     /// The room above a short transcript, worn in the top inset
     /// (`syncBottomAnchor`).
     private(set) var bottomAnchorSlack: CGFloat = 0
@@ -1531,7 +1531,7 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     /// A short transcript STARTS FROM THE BOTTOM, as in a messaging app
-    /// (#1799, behind `-stream-bottom-anchor`): the room above it — the
+    /// (#1799; the default since #1923): the room above it — the
     /// slack, `StreamBottomAnchor` — is worn in the top inset, so two
     /// messages rest just above the composer. A transcript taller than the
     /// stream has no slack and is exactly as before; growing past it, the

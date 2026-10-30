@@ -995,14 +995,28 @@ final class PostDetailViewController: UIViewController {
     /// lifted column and the stake on it included), plus the breath a resting
     /// row keeps above it — the column's two bubbles sit at the trailing
     /// edge, where a resting row's ♥ would be.
+    ///
+    /// ⚠️ LESS THE SECTION'S OWN BOTTOM INSET (#1923). The last row already
+    /// ends `Spacing.lg` above the content's end; counted on top of the
+    /// breath, the comments rested ~24 pt higher over the composer than a
+    /// conversation's messages over theirs (the owner, 2026-10-30). The two
+    /// streams now keep the same `Spacing.sm` there.
     private var engagedFooterClearance: CGFloat {
-        composerRestingGap
-            + CommentsInputBar.restingHeight(for: .large, postActions: composeBar.showsPostActions)
-            + Self.composerTopBreath
+        composerRestingGap + restingComposerHeight(for: .large) + Self.composerTopBreath
+            - streamSectionVerticalInsets
     }
 
-    /// Between the resting composer's top and the content resting above it.
-    private static let composerTopBreath: CGFloat = 16
+    /// The resting composer's height: its column as it stands — the slot
+    /// alone once a media page folds its column (#1923).
+    private func restingComposerHeight(for category: UIContentSizeCategory) -> CGFloat {
+        CommentsInputBar.restingHeight(
+            for: category, showsStake: composeBar.showsStake, postActions: composeBar.showsPostActions
+        )
+    }
+
+    /// Between the resting composer's top and the last row resting above it:
+    /// a conversation's (`ConversationThreadViewController.syncBottomClearance`).
+    private static let composerTopBreath: CGFloat = Spacing.sm
 
     /// The composer's resting gap above the footer line: its input row
     /// `glassGap` above the toolbar's glass — the bar lifts its own column
@@ -1125,19 +1139,19 @@ final class PostDetailViewController: UIViewController {
     }
 
     /// Whether a stream shorter than its room starts from the bottom (#1799,
-    /// the `-stream-bottom-anchor` experiment). Settable for tests, before
+    /// the default since #1923). Settable for tests, before
     /// the stream is engaged.
-    var anchorsShortStream = StreamBottomAnchor.isEnabled
+    var anchorsShortStream = true
 
     /// The room above a short stream, worn in the top inset on top of the
     /// engaged top (`syncBottomAnchor`).
     private(set) var bottomAnchorSlack: CGFloat = 0
 
-    /// A short stream STARTS FROM THE BOTTOM (#1799, behind
-    /// `-stream-bottom-anchor`): the caption and its comments are one block,
-    /// the post its first message, resting just above the composer — the
-    /// room above them (`StreamBottomAnchor`) worn in the top inset, ON TOP
-    /// of the engaged top. No order changes: Recent, Trending, replies under
+    /// A short stream STARTS FROM THE BOTTOM (#1799, the default since
+    /// #1923): the caption and its comments are one block, the post its
+    /// first message, resting just above the composer — the room above them
+    /// (`StreamBottomAnchor`) worn in the top inset, ON TOP of the engaged
+    /// top. No order changes: Recent, Trending, replies under
     /// their parent and downward paging are as before; expanding a thread's
     /// replies in a short stream grows the block upward.
     ///
@@ -1153,8 +1167,16 @@ final class PostDetailViewController: UIViewController {
         guard anchorsShortStream, let engaged = engagedStreamInsets else { return }
         let room = availableStreamHeight - keyboardLift
         guard room > 0 else { return }
-        collectionView.layoutIfNeeded()
-        let slack = StreamBottomAnchor.slack(viewport: room, contentHeight: collectionView.contentSize.height)
+        // An invitation with no caption (a text post's draft) is full height
+        // and centred, never anchored — as an empty conversation's. Decided
+        // before the layout below: forced on a page still being fitted, it
+        // froze the invitation's row at a stale height.
+        let standsAlone = emptyPageStandsAlone
+        guard !standsAlone || bottomAnchorSlack != 0 else { return }
+        if !standsAlone { collectionView.layoutIfNeeded() }
+        let slack = standsAlone
+            ? 0
+            : StreamBottomAnchor.slack(viewport: room, contentHeight: collectionView.contentSize.height)
         guard abs(slack - bottomAnchorSlack) > 0.5 || abs(collectionView.contentInset.top - (engaged.top + slack)) > 0.5
         else { return }
         let wasResting = collectionView.contentOffset.y <= -collectionView.contentInset.top + 0.5
@@ -1184,7 +1206,7 @@ final class PostDetailViewController: UIViewController {
         let category = traitCollection.preferredContentSizeCategory
         let restingBottomInset = engaged.bottom - engagedFooterClearance
         let restingTop = view.bounds.height - restingBottomInset - composerRestingGap
-            - CommentsInputBar.restingHeight(for: category, postActions: composeBar.showsPostActions)
+            - restingComposerHeight(for: category)
         let risenTop = view.bounds.height - covered - Spacing.sm - CommentsInputBar.restingInputRowHeight(for: category)
         return max(0, restingTop - risenTop)
     }
@@ -1460,8 +1482,24 @@ final class PostDetailViewController: UIViewController {
 
     /// The snap feed's page draws the action column above this panel (#695):
     /// the composer only reserves its room.
-    func setActionColumnHostedByPage(_ hosted: Bool) {
+    ///
+    /// ⚠️ A MEDIA PAGE FOLDS ITS COLUMN (`foldsIntoSlot`). With the comments
+    /// up, its like and its post's actions fold into the sound bubble
+    /// (#1872): only the slot is left, on the input row's line. Reserving
+    /// the stake and the actions there kept ~110 pt of nothing over the
+    /// field, and the stream, anchored to the bottom, rested that far above
+    /// the composer (#1923, the owner's film). The composer keeps the slot
+    /// alone, as a conversation's does; a text page's column never folds
+    /// and keeps its whole room.
+    func setActionColumnHostedByPage(_ hosted: Bool, foldsIntoSlot: Bool = false) {
         composeBar.hostsActionColumn = !hosted
+        let standsStake = !(hosted && foldsIntoSlot)
+        guard composeBar.showsStake != standsStake else { return }
+        let clearance = engagedFooterClearance
+        composeBar.showsStake = standsStake
+        // Insets set before this keep the old clearance: set them again.
+        guard let engaged = engagedStreamInsets else { return }
+        setEngagedInsets(top: engaged.top, bottomInset: engaged.bottom - clearance)
     }
 
     /// The page's overlay offset as the side list opens (#1730): the
@@ -2377,8 +2415,10 @@ final class PostDetailViewController: UIViewController {
         }
         // Anchored to the bottom (#1799), the page is its block alone: the
         // caption and the invitation rest together just above the composer,
-        // the slack above them — not a page filling the room.
-        if anchorsShortStream, engagedStreamInsets != nil {
+        // the slack above them — not a page filling the room. With no caption
+        // (a text post's draft) the invitation stands alone, full height and
+        // centred, as an empty conversation's does.
+        if anchorsShortStream, engagedStreamInsets != nil, caption > 0 {
             return EmptyPageFit(copy: emptyPageCopy, height: block, blockOffset: 0)
         }
         let height = SnapCommentsLayout.emptyPageHeight(availableHeight: available, blockHeight: block)
@@ -2438,9 +2478,7 @@ final class PostDetailViewController: UIViewController {
         let restingBottomInset = engaged.bottom - engagedFooterClearance
         let category = traitCollection.preferredContentSizeCategory
         let composerBottom = view.bounds.height - restingBottomInset - composerRestingGap
-        var composerTop = composerBottom - CommentsInputBar.restingHeight(
-            for: category, postActions: composeBar.showsPostActions
-        )
+        var composerTop = composerBottom - restingComposerHeight(for: category)
         // ⚠️ CONVERTED HERE, NEVER STORED CONVERTED. The sheet grows to its
         // large height FOR the keyboard, which moves this view under a frame
         // that has not moved: a top converted when the notification arrived
@@ -2507,6 +2545,12 @@ final class PostDetailViewController: UIViewController {
         syncBottomAnchor(animated: true)
     }
 
+    /// The empty page shown with no caption over it: a text post's draft.
+    private var emptyPageStandsAlone: Bool {
+        streamDataSource.snapshot().itemIdentifiers.contains(.emptyState)
+            && captionRowHeight(width: streamRowWidth) == 0
+    }
+
     /// The empty stream's section insets, mirroring the layout
     /// (`collectionView`): no top inset — the stream leads with its caption
     /// row, even while a draft has none yet — and `Spacing.lg` at the bottom.
@@ -2536,10 +2580,11 @@ final class PostDetailViewController: UIViewController {
         // line (accessibility sizes: the field reaches ~80pt).
         let rowTop = engaged.top + caption
         let restingBottomInset = engaged.bottom - engagedFooterClearance
-        let composerHeight = CommentsInputBar.restingHeight(
-            for: contentSizeCategory, postActions: composeBar.showsPostActions
-        )
-        let blockClearsComposer = rowTop + block + composerRestingGap + composerHeight + restingBottomInset
+        let composerHeight = restingComposerHeight(for: contentSizeCategory)
+        // The fit keeps the row `Spacing.lg` over the composer
+        // (`currentEmptyPageFit`): so does the floor.
+        let blockClearsComposer = rowTop + block + Spacing.lg + composerRestingGap + composerHeight
+            + restingBottomInset
         return ceil(max(rowHoldsBlock, blockClearsComposer))
     }
 

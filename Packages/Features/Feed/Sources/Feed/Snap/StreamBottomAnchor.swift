@@ -1,8 +1,9 @@
 import UIKit
 
 /// A stream shorter than its viewport STARTS FROM THE BOTTOM, as in a
-/// messaging app (#1799, the owner's experiment of 2026-10-27): two messages
-/// rest just above the composer, not under the top bar.
+/// messaging app (#1799, the owner's experiment of 2026-10-27; the default
+/// since #1923, 2026-10-30): two messages rest just above the composer, not
+/// under the top bar.
 ///
 /// Anchoring only — no order changes anywhere. The room left above a short
 /// stream (the SLACK) is added to its top inset; a stream as tall as its
@@ -18,16 +19,6 @@ import UIKit
 /// One helper for every host, so no screen grows its own arithmetic: the
 /// conversation (phase 1), the comments (phase 2).
 enum StreamBottomAnchor {
-    /// QA, DEBUG only, off by default: `-stream-bottom-anchor` turns the
-    /// experiment on. Without it every stream is top-aligned, as before.
-    static let isEnabled: Bool = {
-        #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-stream-bottom-anchor")
-        #else
-        false
-        #endif
-    }()
-
     /// The room above a stream of `contentHeight` in a `viewport` — the
     /// stream's bounds less its top and bottom insets, the composer's
     /// clearance included, and WITHOUT any slack already applied.
