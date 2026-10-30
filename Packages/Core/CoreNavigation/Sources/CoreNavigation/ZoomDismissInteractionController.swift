@@ -378,6 +378,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // that looked exactly like a passing one. The staging is what makes a
         // card exist, so the arming belongs where the card is assigned.
         ZoomGeometrySampler.shared.start(card: flight.mediaCard, label: "grab")
+        // `-grab-frames`: the held stretch's and the release's frame pacing
+        // (#1915) — what drawing the page at a scale costs.
+        GrabFramePacer.shared.start()
         #endif
         self.presentingView = presentingView
         self.screenRadius = screenRadius
@@ -678,6 +681,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     #endif
 
     func releaseGrab(translation: CGPoint, velocity: CGPoint, ended: Bool, in view: UIView) {
+        #if DEBUG
+        GrabFramePacer.shared.released()
+        #endif
         guard isInteracting, let context, let flight else {
             // A grab that armed but never got a transition to drive (the pop
             // was refused, or another driver took it). Left armed, this driver
@@ -960,6 +966,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // restores blanket-fashion when it becomes the screen again.
         #if DEBUG
         ZoomGeometrySampler.shared.stop()
+        GrabFramePacer.shared.stop(outcome: cancelled ? "cancel" : "commit")
         #endif
         // A cancelled grab has to hand back the hidden state the owner undid
         // when the grab began; a completed one is reported through `didShow`.
