@@ -76,10 +76,28 @@ public final class ViewportShare {
     public func track(
         _ coordinator: UIViewControllerTransitionCoordinator, cover: UIView, coversAtEnd: Bool
     ) {
+        guard isCover(cover) else { return }
         let tracked = beginTracking(cover)
         coordinator.animate(alongsideTransition: nil) { [weak self] context in
             self?.transitionEnded(tracked, cancelled: context.isCancelled, coversAtEnd: coversAtEnd)
         }
+    }
+
+    /// Whether `cover` can cover the host: never the host, nor a screen
+    /// holding it.
+    ///
+    /// ⚠️ A CANCELLED TRANSITION HANDS THE HOST ITS OWN VIEW (the owner's
+    /// device, 2026-10-30). A push over the host abandoned half way calls
+    /// its `viewWillAppear` again, with the host's own screen as the
+    /// transition's `from`; a pop back to it abandoned calls its
+    /// `viewWillDisappear`, with the host as the `to`. Measured as a cover,
+    /// the host hid all of itself: the share read 0, the cancel settled it
+    /// on "covered", and the clip stayed paused, at volume 0, on a screen
+    /// the viewer was looking at. Those transitions are already tracked
+    /// from their start, by their real cover, which settles the share.
+    func isCover(_ cover: UIView) -> Bool {
+        guard let host else { return false }
+        return !host.isDescendant(of: cover)
     }
 
     /// Starts sampling `cover`; returns the transition's generation.
