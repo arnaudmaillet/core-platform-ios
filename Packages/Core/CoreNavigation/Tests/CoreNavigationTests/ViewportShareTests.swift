@@ -63,4 +63,25 @@ struct ViewportShareTests {
         share.transitionEnded(third, cancelled: false, coversAtEnd: true)
         #expect(share.share == 0)
     }
+
+    /// A cancelled transition hands the host its own screen as the cover
+    /// (the owner's device: a drag toward the profile abandoned left the
+    /// post paused, silent). The host, or a screen holding it, never covers
+    /// it; the transition's real cover, tracked from its start, settles it.
+    @Test func theHostIsNeverItsOwnCover() {
+        let screen = UIView()
+        let host = UIView()
+        screen.addSubview(host)
+        let share = ViewportShare(host: host)
+        #expect(!share.isCover(host))
+        #expect(!share.isCover(screen), "the screen holding the host covered it")
+        #expect(share.isCover(UIView()))
+
+        // The push over the host, abandoned: its re-appearance is not tracked,
+        // and the push's own end gives the host back its screen.
+        let push = share.beginTracking(UIView())
+        share.report(0.2)
+        share.transitionEnded(push, cancelled: true, coversAtEnd: true)
+        #expect(share.share == 1)
+    }
 }
