@@ -28,6 +28,9 @@ final class SoundRecordGlass: UIView {
     /// The record: the cover's picture.
     let cover = UIImageView()
     private let glass = UIVisualEffectView(effect: nil)
+    /// Holds the record inside the glass, so the record can fade while the
+    /// glass stands (#1929). The cover's own alpha is its loading ladder's.
+    private let coverHolder = UIView()
     /// The glass's thickness around the record, at least.
     static let rim: CGFloat = 3
     /// The record's side: a bubble's face size (`AvatarImageView
@@ -47,7 +50,9 @@ final class SoundRecordGlass: UIView {
 
         cover.contentMode = .scaleAspectFill
         cover.clipsToBounds = true
-        glass.contentView.addSubview(cover)
+        coverHolder.isUserInteractionEnabled = false
+        glass.contentView.addSubview(coverHolder)
+        coverHolder.addSubview(cover)
     }
 
     @available(*, unavailable)
@@ -66,6 +71,7 @@ final class SoundRecordGlass: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         glass.frame = bounds
+        coverHolder.frame = bounds
         let rimmed = bounds.insetBy(dx: Self.rim, dy: Self.rim)
         let side = min(coverSide ?? rimmed.width, rimmed.width, rimmed.height)
         cover.frame = CGRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side)
@@ -81,6 +87,12 @@ final class SoundRecordGlass: UIView {
         ) {
             self.transform = pressed ? CGAffineTransform(scaleX: 1.08, y: 1.08) : .identity
         }
+    }
+
+    /// The record's opacity inside the glass, which never fades (#1929).
+    var recordAlpha: CGFloat {
+        get { coverHolder.alpha }
+        set { coverHolder.alpha = newValue }
     }
 
     /// Turns the record while the post plays audibly; Reduce Motion stills it.

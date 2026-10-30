@@ -82,9 +82,10 @@ struct SnapSoundFace: Equatable {
 /// The column's lower bubble (#671): the sound's record IN its glass
 /// (`SoundRecordGlass`, #1150).
 ///
-/// - A TAP opens the sound sheet; a LONG PRESS toggles the feed's sound
-///   (#683).
-/// - A `speaker.slash` badge on its corner while the sound is off.
+/// - A TAP opens the sound sheet. No hold of its own since #1931.
+/// - Scrolled away from the stream's start (#1929), the record cross-fades
+///   with `chevron.up` in the same glass (`setShowsReturn`): the host's tap
+///   then goes back to the top, and its hold arms the sheet.
 /// - A greyed `music.note.slash`, refusing both, on a post with no sound.
 /// - The cover turns like a record while the post plays AUDIBLY
 ///   (`setSpinning`): it says the sound is playing, so it follows play,
@@ -95,12 +96,23 @@ struct SnapSoundFace: Equatable {
 /// itself: the record view inside it is the glass, and the button's
 /// highlight presses it (`isHighlighted`).
 final class SnapSoundBubbleButton: UIButton {
-    /// A tap: open the sound sheet.
+    /// A tap: open the sound sheet — or, while the way back shows, go back
+    /// to the stream's start (the host reads `showsReturn`).
     var onTap: (() -> Void)?
-    /// A long press: toggle the sound.
-    var onLongPress: (() -> Void)?
 
     private let record = SoundRecordGlass()
+    /// The way back's glyph, in the record's glass (#1929). The glass is
+    /// never faded: the record and the glyph cross-fade inside it.
+    /// The composer slot's glyph size (`CommentsInputBar`), so the two
+    /// chevrons read alike.
+    private let returnGlyph = UIImageView(
+        image: UIImage.symbol(named: "chevron.up", configuration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
+    )
+    /// Whether the way back shows instead of the record.
+    private(set) var showsReturn = false
+    /// What the host last asked of the record, kept while the way back
+    /// hides it: the record turns again when it comes back (#692).
+    private var wantsSpinning = false
     /// Whether the bubble wears its own glass — off in the page's action
     /// column (#1872), which is one glass for all its bubbles.
     var drawsGlass: Bool {
@@ -124,27 +136,45 @@ final class SnapSoundBubbleButton: UIButton {
         config.background.backgroundColor = .clear
         configuration = config
         addSubview(record)
+        returnGlyph.tintColor = .label
+        returnGlyph.contentMode = .center
+        returnGlyph.alpha = 0
+        returnGlyph.isUserInteractionEnabled = false
+        addSubview(returnGlyph)
 
         addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .primaryActionTriggered)
-        // A recognised hold cancels the button's touch, so it never also
-        // counts as the tap.
-        let hold = UILongPressGestureRecognizer(target: self, action: #selector(held(_:)))
-        hold.minimumPressDuration = 0.4
-        addGestureRecognizer(hold)
 
         isAccessibilityElement = true
         accessibilityLabel = "Sound"
-        accessibilityHint = "Double-tap for the sound. Touch and hold to mute or unmute."
+        accessibilityHint = "Double-tap for the sound."
         isHidden = true
+    }
+
+    /// The way back (#1929): the record cross-fades with `chevron.up`, the
+    /// glass standing still. The record stops while hidden.
+    func setShowsReturn(_ shows: Bool, animated: Bool) {
+        guard shows != showsReturn else { return }
+        showsReturn = shows
+        accessibilityLabel = shows ? "Back to top" : "Sound"
+        accessibilityHint = shows ? nil : "Double-tap for the sound."
+        // An unavailable sound stays greyed; the way back always answers.
+        isEnabled = shows || face?.isAvailable == true
+        alpha = shows || face?.isAvailable != false ? 1 : 0.45
+        let apply = {
+            self.record.recordAlpha = shows ? 0 : 1
+            self.returnGlyph.alpha = shows ? 1 : 0
+        }
+        // A cross-fade, not a motion: Reduce Motion keeps it.
+        if animated {
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction], animations: apply)
+        } else {
+            apply()
+        }
+        applySpinning()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    @objc private func held(_ recogniser: UILongPressGestureRecognizer) {
-        guard recogniser.state == .began else { return }
-        onLongPress?()
-    }
 
     override var isHighlighted: Bool {
         didSet {
@@ -159,6 +189,9 @@ final class SnapSoundBubbleButton: UIButton {
         record.bounds = CGRect(origin: .zero, size: bounds.size)
         record.center = CGPoint(x: bounds.midX, y: bounds.midY)
         bringSubviewToFront(record)
+        returnGlyph.bounds = record.bounds
+        returnGlyph.center = record.center
+        bringSubviewToFront(returnGlyph)
     }
 
     /// Draws `face`; nil hides nothing by itself (the host decides visibility)
@@ -168,8 +201,8 @@ final class SnapSoundBubbleButton: UIButton {
         let coverChanged = face?.coverURL != self.face?.coverURL || self.face == nil
             || face?.isAvailable != self.face?.isAvailable
         self.face = face
-        isEnabled = face?.isAvailable ?? false
-        alpha = face?.isAvailable == false ? 0.45 : 1
+        isEnabled = showsReturn || face?.isAvailable == true
+        alpha = showsReturn || face?.isAvailable != false ? 1 : 0.45
         accessibilityValue = face.map { $0.isAvailable ? nil : "No audio" } ?? nil
         // A face that loses its sound always counts as a cover change, so the
         // record stops here at once, not at the host's next look (#1871).
@@ -183,9 +216,17 @@ final class SnapSoundBubbleButton: UIButton {
     /// a carousel's clips are muted (#1849), and a record that turns says a
     /// sound is playing. The rail's rule (`CommentsInputBar.setRailSpinning`).
     func setSpinning(_ spinning: Bool) {
-        guard let face, face.isAvailable else { return record.setSpinning(false) }
-        record.setSpinning(spinning)
+        wantsSpinning = spinning
+        applySpinning()
     }
+
+    private func applySpinning() {
+        guard let face, face.isAvailable, !showsReturn else { return record.setSpinning(false) }
+        record.setSpinning(wantsSpinning)
+    }
+
+    /// The record's cover as drawn now — the hold's disc carries it (#1929).
+    var coverImage: UIImage? { coverView.image }
 
     #if DEBUG
     /// Whether the record is turning now.
@@ -195,5 +236,6 @@ final class SnapSoundBubbleButton: UIButton {
     #if DEBUG
     var debugRecord: SoundRecordGlass { record }
     var debugCoverImage: UIImage? { coverView.image }
+    var debugReturnGlyphAlpha: CGFloat { returnGlyph.alpha }
     #endif
 }

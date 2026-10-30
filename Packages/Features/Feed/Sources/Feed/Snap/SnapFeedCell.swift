@@ -668,6 +668,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func setSoundSpinning(_ spinning: Bool) { chrome.setSoundSpinning(spinning) }
     /// The sound bubble was tapped: the screen opens the sound sheet (#671).
     var onRequestSoundSheet: (() -> Void)?
+    /// The sound bubble's way back (#1929): shown while the comments are
+    /// scrolled away from their start.
+    func setSoundShowsReturn(_ shows: Bool) { chrome.setSoundShowsReturn(shows) }
+    /// The way back was tapped: the screen scrolls the comments to the top.
+    var onRequestSoundReturn: (() -> Void)?
 
     /// (#1681, the For You root): save and repost upright in
     /// the column (`SnapPostActionsCapsule`), the star drawn for `saved`.
@@ -1714,6 +1719,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     }
 
     func clearComments() {
+        // The comments gone, the column unfolds onto the record (#1929).
+        chrome.setSoundShowsReturn(false, animated: false)
         commentsContainer.subviews.forEach { $0.removeFromSuperview() }
         commentsContainer.isHidden = true
         NSLayoutConstraint.deactivate(commentsContainerConstraints)
@@ -1837,6 +1844,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             self.onRequestBoostUndo?(id)
         }
         chrome.onSoundSheetRequested = { [weak self] in self?.onRequestSoundSheet?() }
+        chrome.onSoundReturnRequested = { [weak self] in self?.onRequestSoundReturn?() }
         chrome.postActions.onSave = { [weak self] in self?.onRequestSave?() }
         chrome.postActions.onShare = { [weak self] in self?.onRequestShare?() }
         representedAuthorID = model.authorID

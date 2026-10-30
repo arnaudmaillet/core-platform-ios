@@ -395,6 +395,7 @@ final class PostDetailViewController: UIViewController {
         title = "Comments"
         view.backgroundColor = .systemBackground
         configureViews()
+        installRailWayBack()
         // The snap feed's comments panel stands its stake bubble on the media
         // layout's like button: the same heart, badge and menu (#668).
         composeBar.usesLikeFace = true
@@ -1498,7 +1499,78 @@ final class PostDetailViewController: UIViewController {
     /// no sound bubble.
     private var publishedRailFace: CommentsInputBar.RailFace {
         guard railKeepsSlot else { return .noSlot }
-        return railSoundFace.map { .sound($0) } ?? .empty
+        guard let face = railSoundFace else { return .empty }
+        // The way back (#1929), on a slot this composer draws; under a page's
+        // column the page's own bubble wears it (`onScrollAwayChange`).
+        if scrollAway.showsReturn, composeBar.hostsActionColumn { return .returnTo(down: false) }
+        return .sound(face)
+    }
+
+    // MARK: The way back (#1929)
+
+    /// Scrolled away from the post's text, the sound offers the way back to
+    /// the top: a tap goes there, a hold arms the sound sheet.
+    private var scrollAway = ScrollAwayPolicy()
+    /// The way back came or went — for a host whose page draws the sound
+    /// bubble above this composer (the snap feed's column).
+    var onScrollAwayChange: ((Bool) -> Void)?
+    /// Whether the way back shows now.
+    var showsScrollAwayReturn: Bool { scrollAway.showsReturn }
+    /// The sound's tap action, the host's (`setRailSoundActions`).
+    private var soundTapAction: (() -> Void)?
+    /// The way back's hold on the composer's own slot.
+    private var railSoundHold: HoldToArmPresenter?
+    /// Whether the host asked the slot's record to turn, kept while the way
+    /// back hides it (#692).
+    private var railSpinning = false
+
+    /// Feeds the way-back policy: the distance from the stream's start, its top.
+    private func syncScrollAway(userScroll: Bool) {
+        let insets = collectionView.adjustedContentInset
+        let distance = max(0, collectionView.contentOffset.y + insets.top)
+        let viewport = collectionView.bounds.height - insets.top - insets.bottom
+        let before = scrollAway.showsReturn
+        scrollAway.update(distance: distance, viewport: viewport, isUserScroll: userScroll)
+        guard scrollAway.showsReturn != before else { return }
+        onScrollAwayChange?(scrollAway.showsReturn)
+        applyRailWayBack()
+    }
+
+    /// The composer's slot as the way back stands.
+    private func applyRailWayBack() {
+        if !viewModel.isDraft { composeBar.railFace = publishedRailFace }
+        let returns = composeBar.railFace == .returnTo(down: false)
+        if !returns { composeBar.setRailSpinning(railSpinning) }
+        let armsSheet = returns && soundTapAction != nil && railSoundFace?.isAvailable == true
+        railSoundHold?.isEnabled = armsSheet
+        // The sheet stays reachable with the chevron up: VoiceOver's road.
+        composeBar.railHoldTarget.accessibilityCustomActions = armsSheet ? [
+            UIAccessibilityCustomAction(name: "Sound") { [weak self] _ in
+                self?.soundTapAction?()
+                return true
+            },
+        ] : nil
+    }
+
+    private func installRailWayBack() {
+        composeBar.onRailAction = { [weak self] in
+            guard let self else { return }
+            if composeBar.railFace == .returnTo(down: false) { return scrollToStart(animated: true) }
+            soundTapAction?()
+        }
+        let hold = HoldToArmPresenter(view: composeBar.railHoldTarget) { [weak self] in
+            .picture(self?.composeBar.railCoverImage)
+        }
+        hold.onFire = { [weak self] in self?.soundTapAction?() }
+        hold.isEnabled = false
+        railSoundHold = hold
+    }
+
+    /// Back to the post's text, animated: UIKit's animated offset runs in a
+    /// fixed time whatever the distance, so a long way back never drags.
+    func scrollToStart(animated: Bool) {
+        let top = -collectionView.adjustedContentInset.top
+        collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: top), animated: animated)
     }
 
     private var railSoundFace: SnapSoundFace?
@@ -1552,7 +1624,10 @@ final class PostDetailViewController: UIViewController {
     /// alone, as a conversation's does; a text page's column never folds
     /// and keeps its whole room.
     func setActionColumnHostedByPage(_ hosted: Bool, foldsIntoSlot: Bool = false) {
-        composeBar.hostsActionColumn = !hosted
+        if composeBar.hostsActionColumn != !hosted {
+            composeBar.hostsActionColumn = !hosted
+            applyRailWayBack()
+        }
         let standsStake = !(hosted && foldsIntoSlot)
         guard composeBar.showsStake != standsStake else { return }
         let clearance = engagedFooterClearance
@@ -1571,15 +1646,32 @@ final class PostDetailViewController: UIViewController {
 
     /// The composer's offset now. Tests.
     var debugComposerOverlayOffset: CGFloat { composeBar.transform.ty }
+    /// The way back (#1929), for tests.
+    var debugRailFace: CommentsInputBar.RailFace { composeBar.railFace }
+    var debugRailSoundHold: HoldToArmPresenter? { railSoundHold }
+    /// A tap on the slot, through its own action.
+    func debugTapRail() { composeBar.onRailAction?() }
+    /// The stream moved to `offset` — by the reader, or not.
+    func debugScroll(to offset: CGFloat, userScroll: Bool) {
+        collectionView.contentOffset.y = offset
+        syncScrollAway(userScroll: userScroll)
+    }
+    var debugStreamOffset: CGFloat { collectionView.contentOffset.y }
+    var debugStreamTopOffset: CGFloat { -collectionView.adjustedContentInset.top }
 
     /// The slot's cover turns while the post plays aloud (#692).
     func setRailSoundSpinning(_ spinning: Bool) {
+        railSpinning = spinning
         composeBar.setRailSpinning(spinning)
     }
 
+    /// The slot's sound actions: `tap` is what the sound does (the sheet);
+    /// while the way back shows, a tap goes back to the top and a hold arms
+    /// `tap` (#1929).
     func setRailSoundActions(tap: (() -> Void)?, hold: (() -> Void)?) {
-        composeBar.onRailAction = tap
+        soundTapAction = tap
         composeBar.onRailLongPress = hold
+        applyRailWayBack()
     }
 
     /// The stake bubble's like badge reads the caption row's count — one
@@ -2989,6 +3081,9 @@ extension PostDetailViewController: UICollectionViewDelegate {
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         syncDayUnderHeader()
+        // Only the reader's own scroll shows the way back; any move hides it
+        // once the text is near again (#1929).
+        syncScrollAway(userScroll: scrollView.isTracking || scrollView.isDecelerating)
         guard let onPullDismissDrive, isPullDismissArmed, !isCommittingPullDismiss else { return }
         onPullDismissDrive(.changed, overshoot(of: scrollView), 0)
     }
