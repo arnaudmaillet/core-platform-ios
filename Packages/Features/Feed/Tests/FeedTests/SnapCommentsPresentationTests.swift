@@ -1,6 +1,7 @@
 import CoreContracts
 import CoreStorage
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import MediaCore
 import MediaPlayback
@@ -719,6 +720,44 @@ struct SnapCommentsPresentationTests {
         cell.setCommentsEngaged(true)
         cell.beginEngagedDismissal()
         #expect(card.alpha == 0)
+    }
+
+    /// REGRESSION (#1917): the action column rides the page through an
+    /// engaged dismissal — the folded sound record stood still on the screen
+    /// while the page left with the finger. Mid-grab its frame is its
+    /// station mapped through the stage's own mapping, it fades with the
+    /// thread, and the end puts it back exactly.
+    @Test func theColumnRidesTheEngagedDismissal() throws {
+        let cell = makeEngagedCell()
+        cell.contentView.layoutIfNeeded()
+        // The column's like, on its station (the test page has no sound).
+        let bubble = cell.debugChrome.debugBoostButton
+        let resting = bubble.convert(bubble.bounds, to: cell.contentView)
+        try #require(resting.width > 0, "the premise: the like stands on its station")
+
+        cell.beginEngagedDismissal()
+        let card = CGRect(x: 60, y: 300, width: 200, height: 300)
+        cell.setEngagedDismissal(ZoomDismissState(progress: 0.5, card: card, cornerRadius: 20, isSettling: true))
+        let bounds = cell.contentView.bounds
+        let fill = max(card.width / bounds.width, card.height / bounds.height)
+        let expected = CGRect(
+            x: card.midX + (resting.minX - bounds.midX) * fill,
+            y: card.midY + (resting.minY - bounds.midY) * fill,
+            width: resting.width * fill, height: resting.height * fill
+        )
+        let moved = bubble.convert(bubble.bounds, to: cell.contentView)
+        #expect(abs(moved.minX - expected.minX) < 0.5 && abs(moved.minY - expected.minY) < 0.5,
+                "the record is at \(moved), the page put it at \(expected)")
+        #expect(abs(moved.width - expected.width) < 0.5, "the record did not scale with the page")
+        let column = try #require(cell.contentView.subviews.first { $0 is SnapActionColumnLayer })
+        #expect(column.alpha < 1, "the column did not fade with the thread")
+
+        cell.endEngagedDismissal()
+        let back = bubble.convert(bubble.bounds, to: cell.contentView)
+        #expect(abs(back.minX - resting.minX) < 0.5 && abs(back.minY - resting.minY) < 0.5,
+                "the record did not come back to its station: \(back) vs \(resting)")
+        #expect(column.alpha == 1)
+        #expect(column.transform == .identity)
     }
 
     /// REGRESSION (#788): a cell recycled in the middle of a masked reveal —

@@ -754,6 +754,19 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Everything the page draws, in one frame-managed view — see
     /// `buildLayout`. A transition moves this and nothing inside it.
     private let pageStage = UIView()
+    /// The page's action column, ABOVE the chrome (#695) — the stage's twin:
+    /// same bounds, same centre, same transform, written together
+    /// (`stages`), so every movement of the page carries the column.
+    ///
+    /// ⚠️ #1917: the column used to sit in `contentView` itself, and the
+    /// engaged dismissal moved only `pageStage` — the folded sound record
+    /// stood still on the screen while the page left, and outside the card
+    /// on some frames (the owner's film). Forwarding each transform by hand
+    /// (#1549's side-list shift) is how it was forgotten; the twin cannot
+    /// be. Transparent to every touch but the column's buttons.
+    private let columnStage = SnapActionColumnLayer()
+    /// The page's two stages, which every transition writes as one.
+    private var stages: [UIView] { [pageStage, columnStage] }
     /// The grab's current mapping of page onto card — the scale, and the rect
     /// it is mapping onto — held so a layout pass cannot be the last word on
     /// where the page is.
@@ -1051,7 +1064,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.pin(to: contentView)
         // The action column rides ABOVE the chrome (#695): the comments'
         // fade takes the chrome, never the like pill and the sound bubble.
-        chrome.installActionColumn(in: contentView)
+        // In the stage's twin, so it moves with the page (#1917).
+        columnStage.frame = contentView.bounds
+        contentView.addSubview(columnStage)
+        chrome.installActionColumn(in: columnStage)
 
         // NOTE: no pause glyph is installed here. The mark that says a clip is
         // stopped belongs to the PICTURE — `SnapMediaCardView` holds it for a
@@ -1234,10 +1250,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // here for the reason it always was on the flight card: the whole page
         // is being scaled as one object, so the material is scaled WITH its
         // world rather than against it, and it lasts a third of a second.
-        pageStage.transform = CGAffineTransform(
+        let opening = CGAffineTransform(
             translationX: rect.midX - contentView.bounds.midX,
             y: rect.midY - contentView.bounds.midY
         ).scaledBy(x: scale, y: scale)
+        stages.forEach { $0.transform = opening }
         UIView.animate(
             withDuration: ZoomFlightSpring.duration, delay: 0,
             usingSpringWithDamping: ZoomFlightSpring.damping,
@@ -1256,7 +1273,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // page indicator's dots hit, where the value changed in
             // `layoutSubviews` rather than in the block.
             mask.layer.cornerRadius = ScreenGeometry.cornerRadius(behind: self)
-            self.pageStage.transform = .identity
+            self.stages.forEach { $0.transform = .identity }
         }
 
     }
@@ -1454,11 +1471,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // that is what `settling` says.
         let centre = CGPoint(x: card.midX, y: card.midY)
         if settling {
-            pageStage.center = centre
+            stages.forEach { $0.center = centre }
         } else {
-            UIView.performWithoutAnimation { pageStage.center = centre }
+            UIView.performWithoutAnimation { stages.forEach { $0.center = centre } }
         }
-        pageStage.transform = CGAffineTransform(scaleX: fill, y: fill)
+        stages.forEach { $0.transform = CGAffineTransform(scaleX: fill, y: fill) }
         // ⚠️ THE CARD'S RADIUS, HANDED OVER — never a second copy of the curve.
         //
         // The window computed its own interpolation from the display's corner
@@ -1497,13 +1514,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// middle of a gesture costs nothing.
     override func layoutSubviews() {
         super.layoutSubviews()
-        pageStage.bounds = CGRect(origin: .zero, size: contentView.bounds.size)
+        stages.forEach { $0.bounds = CGRect(origin: .zero, size: contentView.bounds.size) }
         // ⚠️ NOT WHILE A TRANSITION IS MOVING IT. The centre is one of the two
         // channels the grab drives (see `setEngagedDismissalProgress`), and a
         // layout pass re-centring the stage mid-gesture would drag the page
         // back to the middle of the screen between two events.
         guard !isEngagedDismissing else { return }
-        pageStage.center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY)
+        stages.forEach { $0.center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY) }
     }
 
     /// Every layer that makes up the page's face — one list, so the grab has
@@ -1523,8 +1540,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// this spent two rounds chasing. Over the CARD's photograph, through a
     /// cleared ground, it is what it always was — a wash on the picture, fading
     /// out with the words it serves.
+    ///
+    /// The column's stage is one too (#1917): the folded record fades with
+    /// the thread it sits beside, from its own resting alpha.
     private var dismissalTravellers: [UIView] {
-        [commentsContainer, headerFrost, mediaBackdrop]
+        [commentsContainer, headerFrost, mediaBackdrop, columnStage]
     }
 
     /// How far the page overhangs the card it covers. Small enough to be
@@ -1550,8 +1570,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func endEngagedDismissal() {
         guard isEngagedDismissing else { return }
         isEngagedDismissing = false
-        pageStage.transform = .identity
-        pageStage.center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY)
+        stages.forEach {
+            $0.transform = .identity
+            $0.center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY)
+        }
         for (view, resting) in zip(dismissalTravellers, restingAlphas) {
             view.alpha = resting
         }
@@ -1575,7 +1597,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         groundForMaskedReveal = nil
         // Identity, unconditionally: an interrupted flight must not strand the
         // page under a transform nobody can see the origin of.
-        pageStage.transform = .identity
+        stages.forEach { $0.transform = .identity }
     }
 
     /// Materializes the header band's blur AHEAD of the engagement.
@@ -3360,7 +3382,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // The reveal's spring may still be carrying the stage to identity, and
         // a released dismissal's spring may still be fading the layers it
         // drives: neither may play out on the next post.
-        pageStage.layer.removeAllAnimations()
+        stages.forEach { $0.layer.removeAllAnimations() }
         dismissalTravellers.forEach { $0.layer.removeAllAnimations() }
         mediaCard.isHidden = false
         mediaCard.alpha = 1
