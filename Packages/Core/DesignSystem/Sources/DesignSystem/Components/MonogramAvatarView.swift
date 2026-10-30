@@ -95,12 +95,13 @@ public final class MonogramAvatarView: UIView {
         }
     }
 
-    /// The final initials' grey (#1912): a step darker than the media ground
-    /// in light mode, a step lighter in dark — apart from the badge's quiet
-    /// disc and the following ring in both. The candidates the owner compared
-    /// are on the PR.
+    /// The final initials' grey (#1912): the lightest of the candidates the
+    /// owner compared, in each appearance (the owner, 2026-10-30) —
+    /// `systemGray4` in light, a step darker than the media ground;
+    /// `systemGray2` in dark. Apart from the badge's quiet disc and the
+    /// following ring in both.
     public static let initialsPlateColor = UIColor { traits in
-        traits.userInterfaceStyle == .dark ? .systemGray3 : .systemGray4
+        traits.userInterfaceStyle == .dark ? .systemGray2 : .systemGray4
     }
 
     /// The plate's colour as drawn now. Tests.

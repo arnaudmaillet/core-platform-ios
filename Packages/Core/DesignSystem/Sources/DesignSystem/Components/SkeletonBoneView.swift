@@ -53,21 +53,33 @@ public final class SkeletonBoneView: UIView {
 
     private let rounding: Rounding
     private let gradient = CAGradientLayer()
+    /// The ground, under the band.
+    ///
+    /// ⚠️ A LAYER, NEVER THE VIEW'S `backgroundColor` (#1912). Inside a
+    /// glass bar item UIKit paints a view's background itself, outside its
+    /// masks (memory `glass-paints-background-color`): the author pill's
+    /// loading face showed the bone as a disc with no cutout for its badge.
+    /// A layer's colour is drawn where the layer is, under every mask.
+    private let ground = CALayer()
 
     /// The bone's ground (#1753): `Surface.skeleton`, one opaque neutral grey,
     /// unless the host states another — the ONE way to change it (a raw
     /// `backgroundColor` is caught by `SkeletonGroundGuardTests`). `.clear`
     /// for a bone that adds only the sweep over a ground of its own.
     public var fill: UIColor {
-        didSet { backgroundColor = fill }
+        didSet { applyGround() }
     }
+
+    /// The ground as drawn now. Tests.
+    public var drawnGround: CGColor? { ground.backgroundColor }
 
     public init(rounding: Rounding = .capsule, fill: UIColor = Surface.skeleton) {
         self.rounding = rounding
         self.fill = fill
         super.init(frame: .zero)
         isUserInteractionEnabled = false
-        backgroundColor = fill
+        layer.addSublayer(ground)
+        applyGround()
         layer.cornerCurve = .continuous
         layer.masksToBounds = true
         if case .fixed(let radius) = rounding {
@@ -81,8 +93,9 @@ public final class SkeletonBoneView: UIView {
         layer.addSublayer(gradient)
         applyGradientColors()
 
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
+        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (self: Self, _) in
             self.applyGradientColors()
+            self.applyGround()
         }
         // Backgrounding strips layer animations; coming back must resume the
         // sweep, not freeze the band mid-screen.
@@ -134,6 +147,7 @@ public final class SkeletonBoneView: UIView {
         super.layoutSubviews()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        ground.frame = bounds
         if let window {
             // Stretch the gradient to the window so every bone shows the same
             // screen-wide band, each clipped to its own silhouette.
@@ -148,6 +162,13 @@ public final class SkeletonBoneView: UIView {
         if case .capsule = rounding {
             layer.cornerRadius = bounds.height / 2
         }
+        CATransaction.commit()
+    }
+
+    private func applyGround() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        ground.backgroundColor = fill.resolvedColor(with: traitCollection).cgColor
         CATransaction.commit()
     }
 

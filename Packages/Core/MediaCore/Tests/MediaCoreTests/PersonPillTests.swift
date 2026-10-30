@@ -179,4 +179,59 @@ struct PersonPillTests {
         pill.layoutIfNeeded()
         #expect(pill.drawnCutoutRadius == nil, "a cutout with no badge")
     }
+
+    /// ⚠️ THE RING IS CUT OUT TOO, in its own path (the owner's device,
+    /// 2026-10-30): a ring painted as the view's background is drawn by the
+    /// bar's glass outside the mask, and the friends' pink filled the cutout.
+    @Test(arguments: [PersonPill.Badge.following, .friends])
+    func theRingLosesTheBadgesCutout(_ relation: PersonPill.Badge) {
+        let pill = Self.laidOut(PersonPill(carriesBadge: true))
+        pill.setBadge(relation, animated: false)
+        pill.layoutIfNeeded()
+        #expect(pill.ringIsBackingDisc)
+        #expect(pill.ringIsCutOut, "the ring fills the badge's cutout")
+    }
+
+    /// ⚠️ A BAND, NOT A DISC (the owner's device, 2026-10-30): behind a face
+    /// still loading, a disc showed as a grey plate with a piece of the
+    /// picture over it. The band covers the face's centre nowhere, runs under
+    /// its edge, and stops at the ring's outer edge.
+    @Test func theRingIsABandUnderTheFacesEdge() {
+        let bounds = CGRect(x: 0, y: 0, width: 40, height: 40)
+        let path = PersonPill.ringPath(in: bounds, cutout: nil)
+        #expect(!path.contains(CGPoint(x: 20, y: 20)), "the ring fills the face")
+        #expect(!path.contains(CGPoint(x: 20, y: 5)), "the band reaches past the tuck")
+        #expect(path.contains(CGPoint(x: 20, y: 1)), "no band outside the face")
+        #expect(path.contains(CGPoint(x: 20, y: 2.5)), "the band does not run under the face's edge")
+    }
+
+    /// ⚠️ THE WHOLE FACE SHOWS, BUT THE CUTOUT (the owner's device,
+    /// 2026-10-30): a mask cut from the face's bounds before its row had laid
+    /// it out showed a corner of the face and nothing else.
+    @Test func theWholeFaceShowsButTheCutout() {
+        let pill = PersonPill(carriesBadge: true)
+        pill.setName("Ada Lovelace", handle: "@ada")
+        pill.setBadge(.following, animated: false)
+        pill.frame.size = pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        pill.layoutIfNeeded()
+        let side = AvatarImageView.bubbleDiameter
+        for point in [CGPoint(x: side / 2, y: side / 2), CGPoint(x: side * 0.8, y: side * 0.2),
+                      CGPoint(x: side * 0.2, y: side * 0.8)] {
+            #expect(pill.faceShows(at: point), "the face is masked at \(point)")
+        }
+        let badge = pill.debugGeometry.badge!
+        let centre = pill.convert(CGPoint(x: badge.midX, y: badge.midY), to: pill.avatar)
+        #expect(!pill.faceShows(at: centre), "no cutout under the badge")
+    }
+
+    /// The face's mask reaches its skeleton: the bone's ground is a layer,
+    /// never a background the glass would paint outside the mask.
+    @Test func theLoadingFaceKeepsTheCutout() {
+        let pill = Self.laidOut(PersonPill(carriesBadge: true))
+        pill.setBadge(.following, animated: false)
+        pill.layoutIfNeeded()
+        #expect(pill.drawnCutoutRadius != nil)
+        #expect(pill.avatar.skeleton.subviews.allSatisfy { $0.backgroundColor == nil },
+                "the bone paints its ground as the view's background")
+    }
 }
