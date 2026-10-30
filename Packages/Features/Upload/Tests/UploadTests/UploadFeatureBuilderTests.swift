@@ -55,24 +55,34 @@ struct UploadFeatureBuilderTests {
         #expect(entry.post.caption == "Hello")
     }
 
-    /// Upload Media opens on the library picker as a sheet standing at its full
-    /// height, with a way out in its own bar — a screen whose only exit is a
-    /// swipe nobody is told about is a trap.
-    @Test func theMediaEntryOpensThePickerAsAFullHeightSheet() throws {
+    /// Upload Media opens on the library picker FULL SCREEN (#1904, the owner
+    /// 2026-10-30): a multistep edit, no card over the media, no grabber to
+    /// drop a selection with — and a way out in its own bar.
+    @Test func theMediaEntryOpensThePickerFullScreen() throws {
         let builder = UploadFeatureBuilder(
             composer: RecordingComposer(), textPostScreens: { RecordingTextPostScreens() }
         )
         let navigation = try #require(builder.makeMediaUploadViewController() as? UINavigationController)
         let root = try #require(navigation.viewControllers.first)
-        let sheet = try #require(navigation.sheetPresentationController)
 
-        #expect(navigation.modalPresentationStyle == .pageSheet, "a sheet, not full screen")
-        #expect(sheet.detents.count == 1, "one height, with nowhere to collapse to")
-        #expect(sheet.selectedDetentIdentifier == .large, "and it opens to the top")
+        #expect(navigation.modalPresentationStyle == .fullScreen, "full screen, not a sheet")
         #expect(root is MediaPickerViewController)
         #expect(
             root.navigationItem.leftBarButtonItems?.first?.title == "Cancel",
             "the way out the top bar promises"
         )
+    }
+
+    /// The camera opens full screen too (#1904), with no status bar over its
+    /// preview, as the system's Camera app.
+    @Test func theCameraOpensFullScreenWithoutAStatusBar() throws {
+        let builder = UploadFeatureBuilder(
+            composer: RecordingComposer(), textPostScreens: { RecordingTextPostScreens() }
+        )
+        let navigation = try #require(builder.makeCameraViewController() as? UINavigationController)
+        #expect(navigation.modalPresentationStyle == .fullScreen)
+        let camera = try #require(navigation.viewControllers.first as? CaptureViewController)
+        #expect(navigation.childForStatusBarHidden === camera)
+        #expect(camera.prefersStatusBarHidden)
     }
 }

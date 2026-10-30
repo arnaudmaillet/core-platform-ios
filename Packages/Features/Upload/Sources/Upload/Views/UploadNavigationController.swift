@@ -69,6 +69,10 @@ final class UploadNavigationController: UINavigationController {
         holdTheBackSwipeToTheEdge()
     }
 
+    /// The step on screen says whether the status bar shows: hidden on the
+    /// camera, as the system's Camera app (#1904); shown elsewhere.
+    override var childForStatusBarHidden: UIViewController? { topViewController }
+
     /// ⚠️ RE-APPLIED AS THE STACK CHANGES. UIKit re-arms its transition gestures
     /// around pushes, so a delegate taken once at load is not enough.
     override func pushViewController(_ viewController: UIViewController, animated: Bool) {

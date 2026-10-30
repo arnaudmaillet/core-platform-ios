@@ -243,6 +243,10 @@ final class CaptureViewController: UIViewController {
 
     // MARK: - Lifecycle
 
+    /// Full screen, the preview under the island: no status bar, as the
+    /// system's Camera app (#1904).
+    override var prefersStatusBarHidden: Bool { true }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         overrideUserInterfaceStyle = .dark

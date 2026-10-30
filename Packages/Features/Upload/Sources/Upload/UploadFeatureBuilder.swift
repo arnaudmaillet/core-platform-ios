@@ -46,8 +46,7 @@ public struct UploadFeatureBuilder {
 
     /// "Upload Media" — photos and videos from the library.
     ///
-    /// A sheet that opens to the top and stays there, showing the album as a
-    /// three-column grid.
+    /// Full screen (#1904), showing the album as a three-column grid.
     public func makeMediaUploadViewController() -> UIViewController {
         // ⚠️ ONE LIBRARY FOR THE WHOLE FLOW, NOT ONE PER SCREEN. The Photos
         // implementation keeps the assets it fetched keyed by identifier, and
@@ -73,25 +72,21 @@ public struct UploadFeatureBuilder {
         // would let a drag anywhere on the screen leave the flow, and this one is
         // wanted from the window's edge only. See `UploadNavigationController`.
         let navigation = UploadNavigationController(rootViewController: picker)
-        navigation.modalPresentationStyle = .pageSheet
-        if let sheet = navigation.sheetPresentationController {
-            // ONE DETENT, AND THE FLOW IS SIMPLER FOR IT. The picker used to
-            // offer a resting height of a single album row and open from there;
-            // it now opens to the top and stays, so there is no second height to
-            // travel to, nothing to expand when the album is scrolled at its
-            // edge, and no custom detent to resolve.
-            sheet.detents = [.large()]
-            sheet.selectedDetentIdentifier = .large
-            sheet.prefersGrabberVisible = true
-        }
+        // ⚠️ FULL SCREEN (#1904, the owner 2026-10-30): a multistep photo and
+        // video edit — the HIG's own case for it. The sheet drew a card over
+        // the media, put the editor's sound picker and stickers in a sheet
+        // over a sheet, and let a drag on its grabber drop up to 20 picked
+        // items unasked. UIKit's rise from the bottom; Cancel is the way out,
+        // and asks before it drops a selection.
+        navigation.modalPresentationStyle = .fullScreen
         return navigation
     }
 
     /// "Camera" — a photograph or a video, captured here.
     ///
-    /// The sheet the picker is — full height, one detent, "Cancel" at the top
-    /// left — opening on the camera; a capture goes on to the editor and the
-    /// finalisation screen exactly as a library pick does.
+    /// Full screen like the picker (#1904), opening on the camera; a capture
+    /// goes on to the editor and the finalisation screen exactly as a library
+    /// pick does.
     ///
     /// ⚠️ **THE DRAFT OWNS THE CAPTURES' FILES.** `PostDraft.captureFolder` is
     /// removed when the draft goes, which is when this sheet does — after the
@@ -160,14 +155,11 @@ public struct UploadFeatureBuilder {
         }
         camera.presetSoundTitle = soundtrack?.title
         let navigation = UploadNavigationController(rootViewController: camera)
-        navigation.modalPresentationStyle = .pageSheet
-        if let sheet = navigation.sheetPresentationController {
-            // The picker's sheet, for the picker's reasons: full height, one
-            // detent, nothing to resolve. Asked for over a zoom transition.
-            sheet.detents = [.large()]
-            sheet.selectedDetentIdentifier = .large
-            sheet.prefersGrabberVisible = true
-        }
+        // ⚠️ FULL SCREEN (#1904): a camera view, by the HIG's own example —
+        // the preview edge to edge, no grabber over it, no sheet's pull
+        // competing with the capture's drags. The ✕ is the way out, and asks
+        // before it discards takes.
+        navigation.modalPresentationStyle = .fullScreen
         return navigation
     }
 
