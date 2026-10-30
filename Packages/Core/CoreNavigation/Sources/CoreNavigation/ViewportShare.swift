@@ -15,12 +15,17 @@ import UIKit
 ///   interactive: read frame by frame from the covering screen's
 ///   presentation layer while the transition runs (a display link only
 ///   then), so a cancelled drag reports the way back (`track`);
+/// - **the host's own arrival and departure**, a push bringing it in, a pop
+///   or a grab carrying the live screen off: read from the host's own
+///   presentation layer, as the part of it inside the window
+///   (`trackArrival`, `trackDeparture`);
 /// - the host's own pager or drawer, reported as a fraction (`report`).
 ///
-/// ⚠️ ONLY WHAT COVERS THE HOST. Its own pop or dismissal (a grab carrying
-/// its player to a tile) is never measured: the screen under it is not a
-/// cover, and the flight keeps the player playing. The host decides which
-/// transitions to hand over.
+/// ⚠️ THE SCREEN UNDER A DEPARTING HOST IS NEVER ITS COVER: a host leaving
+/// is measured by where it is, not by what it uncovers. And a flight
+/// carrying the host's player to a tile is not handed over at all: the
+/// flight keeps that player playing. The host decides which transitions to
+/// hand over.
 @MainActor
 public final class ViewportShare {
     /// The share now: 1 with nothing over the host.
@@ -28,6 +33,12 @@ public final class ViewportShare {
 
     /// Told on every change of `share`.
     public var onChange: ((CGFloat) -> Void)?
+
+    /// Whether a clip plays at the share now (`plays(at:)`).
+    public private(set) var plays = true
+
+    /// Told when `plays` flips: the gate a host with no sound to fade needs.
+    public var onPlaysChange: ((Bool) -> Void)?
 
     /// The threshold of the rule: plays at or above it.
     public static let playThreshold: CGFloat = 0.5
@@ -44,6 +55,11 @@ public final class ViewportShare {
     private weak var host: UIView?
     private var link: CADisplayLink?
     private weak var cover: UIView?
+    /// Whether the tracked transition is the host's own departure, sampled
+    /// from the host rather than from a cover.
+    private var isDeparting = false
+    /// Whether the running link has seen the host in a window.
+    private var hasSampled = false
     /// Bumped by every `track`: only the latest transition's end settles the
     /// share. A push begun before the previous one's completion ran would
     /// otherwise have its link stopped and its share overwritten by the old end.
@@ -59,11 +75,13 @@ public final class ViewportShare {
         guard abs(clamped - share) > 0.001 else { return }
         share = clamped
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-viewport-share") {
-            print(String(format: "[viewport-share] %.3f", clamped))
-        }
+        trace(String(format: "%.3f", clamped))
         #endif
         onChange?(clamped)
+        let nowPlays = Self.plays(at: clamped)
+        guard nowPlays != plays else { return }
+        plays = nowPlays
+        onPlaysChange?(nowPlays)
     }
 
     /// Follows `coordinator`'s transition, in which `cover` is the screen
@@ -83,6 +101,104 @@ public final class ViewportShare {
         }
     }
 
+    /// Follows `coordinator`'s transition bringing the host itself onto the
+    /// screen (#1914, the owner 2026-10-31: a pushed profile's clips waited
+    /// for the push's end): the share is the part of the host already inside
+    /// the window, so its clips start once half of it is in. At its end the
+    /// share settles on whole, or on gone for a cancel.
+    public func trackArrival(_ coordinator: UIViewControllerTransitionCoordinator) {
+        report(0)
+        let tracked = beginDeparture()
+        coordinator.animate(alongsideTransition: nil) { [weak self] context in
+            self?.transitionEnded(tracked, cancelled: context.isCancelled, coversAtEnd: false)
+        }
+    }
+
+    /// Follows `coordinator`'s transition carrying the host itself off the
+    /// screen (#1914, the owner 2026-10-31: a page's clips stopped at the
+    /// first frame of the grab taking it back): the share is the part of the
+    /// host still inside the window, so a slide pauses it past half and a
+    /// grab that only holds it keeps it whole. At its end the share settles
+    /// on gone, or on whole again for a cancel.
+    public func trackDeparture(_ coordinator: UIViewControllerTransitionCoordinator) {
+        let tracked = beginDeparture()
+        coordinator.animate(alongsideTransition: nil) { [weak self] context in
+            self?.transitionEnded(tracked, cancelled: context.isCancelled, coversAtEnd: true)
+        }
+    }
+
+    /// What a screen's appearance or disappearance asks of its host.
+    public enum Change: Equatable {
+        /// The share follows a transition; the host hears it through
+        /// `onChange`.
+        case followed
+        /// Nothing to follow: the host acts now, as it always did (an
+        /// appearance starts its clips where it always started them; a
+        /// disappearance has already reported 0).
+        case now
+        /// A post opened from the screen, flying into a zoom destination: the
+        /// flight owns the player it carries, and the host keeps its own rule
+        /// for the rest.
+        case flight
+    }
+
+    /// The screen hosting this share is about to appear: a push bringing it
+    /// in is followed by its own place (`trackArrival`), a plain screen
+    /// popping off it by that screen (`track`). A flight's return, a tab
+    /// switch or a first appearance with no transition answer `.now`.
+    public func screenWillAppear(_ screen: UIViewController) -> Change {
+        trace("will appear moving=\(screen.isMovingToParent) transition=\(screen.transitionCoordinator != nil)"
+              + " cancelled=\(screen.transitionCoordinator?.isCancelled == true)")
+        guard let coordinator = screen.transitionCoordinator else { return .now }
+        // ⚠️ A DEPARTURE ABANDONED (the owner's device, 2026-10-31: a grab
+        // released short left the screen's clips stopped). UIKit calls the
+        // screen's appearance once the cancel has run — with
+        // `isMovingToParent` TRUE (traced) — on a coordinator that is over.
+        // Taken for a push, it started an "arrival" whose cancel settled the
+        // share on gone. The departure, tracked from its start, settles it.
+        if coordinator.isCancelled { return .followed }
+        if screen.isMovingToParent {
+            guard !(screen is any ZoomTransitionDestination) else { return .now }
+            trackArrival(coordinator)
+            return .followed
+        }
+        guard !(coordinator.viewController(forKey: .from) is any ZoomTransitionDestination),
+              let cover = coordinator.view(forKey: .from)
+        else { return .now }
+        track(coordinator, cover: cover, coversAtEnd: false)
+        return .followed
+    }
+
+    /// The screen hosting this share is about to disappear: its own pop is
+    /// followed by its own place (`trackDeparture`), a plain screen pushed
+    /// over it by that screen (`track`). A post opened from it answers
+    /// `.flight`; with no transition to follow the share reports 0 now.
+    public func screenWillDisappear(_ screen: UIViewController) -> Change {
+        let coordinator = screen.transitionCoordinator
+        trace("will disappear moving=\(screen.isMovingFromParent) transition=\(coordinator != nil)"
+              + " cancelled=\(coordinator?.isCancelled == true)")
+        // ⚠️ A PUSH ABANDONED: UIKit calls the screen's disappearance once
+        // the cancel has run, on a coordinator that is over. Its arrival,
+        // tracked from the start, has already settled the share.
+        if let coordinator, coordinator.isCancelled {
+            report(0)
+            return .now
+        }
+        if screen.isMovingFromParent, let coordinator {
+            trackDeparture(coordinator)
+            return .followed
+        }
+        if screen.navigationController?.topViewController is any ZoomTransitionDestination {
+            return .flight
+        }
+        if let coordinator, let cover = coordinator.view(forKey: .to) {
+            track(coordinator, cover: cover, coversAtEnd: true)
+            return .followed
+        }
+        report(0)
+        return .now
+    }
+
     /// Whether `cover` can cover the host: never the host, nor a screen
     /// holding it.
     ///
@@ -100,10 +216,32 @@ public final class ViewportShare {
         return !host.isDescendant(of: cover)
     }
 
+    /// `-viewport-share`: the host's screen and what happened to its share.
+    func trace(_ event: @autoclosure () -> String) {
+        #if DEBUG
+        guard ProcessInfo.processInfo.arguments.contains("-viewport-share") else { return }
+        let owner = host.map { String(describing: type(of: $0.next ?? $0)) } ?? "gone"
+        print("[viewport-share] \(owner) \(event())")
+        #endif
+    }
+
     /// Starts sampling `cover`; returns the transition's generation.
     func beginTracking(_ cover: UIView) -> Int {
         self.cover = cover
+        isDeparting = false
         generation += 1
+        trace("track cover #\(generation)")
+        startLink()
+        return generation
+    }
+
+    /// Starts sampling the host's own place (an arrival or a departure);
+    /// returns the transition's generation.
+    func beginDeparture() -> Int {
+        cover = nil
+        isDeparting = true
+        generation += 1
+        trace("track own place #\(generation)")
         startLink()
         return generation
     }
@@ -111,9 +249,11 @@ public final class ViewportShare {
     /// A tracked transition's end: settles the share on what it decided —
     /// unless a newer transition began meanwhile, which owns the share now.
     func transitionEnded(_ tracked: Int, cancelled: Bool, coversAtEnd: Bool) {
+        trace("end #\(tracked) of #\(generation) cancelled=\(cancelled)")
         guard generation == tracked else { return }
         stopLink()
         cover = nil
+        isDeparting = false
         let covered = cancelled ? !coversAtEnd : coversAtEnd
         report(covered ? 0 : 1)
     }
@@ -128,8 +268,19 @@ public final class ViewportShare {
         return 1 - hiddenArea / (visible.width * visible.height)
     }
 
+    /// The share of a departing `host` still inside the window's `bounds`,
+    /// against the host's own area: a host held smaller in the middle of the
+    /// screen keeps all of it. Pure, for tests.
+    public static func departureShare(host: CGRect, in bounds: CGRect) -> CGFloat {
+        guard host.width > 0, host.height > 0 else { return 0 }
+        let visible = host.intersection(bounds)
+        guard !visible.isNull else { return 0 }
+        return visible.width * visible.height / (host.width * host.height)
+    }
+
     private func startLink() {
         stopLink()
+        hasSampled = false
         let link = CADisplayLink(target: LinkTarget(self), selector: #selector(LinkTarget.tick(_:)))
         link.add(to: .main, forMode: .common)
         self.link = link
@@ -144,10 +295,26 @@ public final class ViewportShare {
     }
 
     fileprivate func sample() {
-        guard let host, let cover, let window = host.window else { return }
+        // A host that LEFT the window has nothing left to measure: the link
+        // stops rather than tick for a transition whose end it may never
+        // hear. One not in it yet (an arrival's first tick) waits.
+        guard let host else { return stopLink() }
+        guard let window = host.window else {
+            if hasSampled { trace("left the window"); stopLink() }
+            return
+        }
+        hasSampled = true
+        let windowLayer = window.layer.presentation() ?? window.layer
+        if isDeparting {
+            let hostLayer = host.layer.presentation() ?? host.layer
+            let hostRect = hostLayer.convert(hostLayer.bounds, to: windowLayer)
+            report(Self.departureShare(host: hostRect, in: window.bounds))
+            return
+        }
+        guard let cover else { return }
         let hostRect = host.convert(host.bounds, to: window)
         let coverLayer = cover.layer.presentation() ?? cover.layer
-        let coverRect = coverLayer.convert(coverLayer.bounds, to: window.layer.presentation() ?? window.layer)
+        let coverRect = coverLayer.convert(coverLayer.bounds, to: windowLayer)
         report(Self.share(host: hostRect, cover: coverRect, in: window.bounds))
     }
 

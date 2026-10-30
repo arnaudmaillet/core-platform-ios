@@ -167,6 +167,10 @@ final class DiscoverGalleryViewController: UIViewController {
         #if DEBUG
         PushedListJumpTrace.begin("gallery will-appear", page: page, host: view)
         #endif
+        // Pushed in, or a plain screen popping off it (#1914): the clips start
+        // once half of the screen is on display. Otherwise from
+        // `viewDidAppear`, as before.
+        _ = viewportShare.screenWillAppear(self)
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -190,16 +194,32 @@ final class DiscoverGalleryViewController: UIViewController {
         // The handoff a tap opened is over: the post is a tile among tiles
         // again, and every visible one may claim a player.
         page.endPlaybackHandoff()
+        viewportShare.report(1)
         page.setAutoplayActive(true)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        // Off screen — covered by a post, or popped — this grid holds no claim
-        // on the shared pool. The tapped post's player is exempt: it is in
-        // the handoff scope, flying.
-        page.setAutoplayActive(false)
+        // Covered by a post, this grid holds no claim on the shared pool, at
+        // once. The tapped post's player is exempt: it is in the handoff
+        // scope, flying. Popped, or under a plain screen: once half of it is
+        // gone (#1914).
+        if viewportShare.screenWillDisappear(self) == .flight {
+            page.setAutoplayActive(false)
+        }
     }
+
+    /// The share of this screen on screen (#1914): its clips play at half and
+    /// above — from half way through the push that brings it in, until half
+    /// way through the pop that takes it off or a plain screen pushed over it.
+    private lazy var viewportShare: ViewportShare = {
+        let share = ViewportShare(host: view)
+        share.onPlaysChange = { [weak self] plays in self?.page.setAutoplayActive(plays) }
+        return share
+    }()
+
+    /// The share now, for tests.
+    var debugViewportShare: ViewportShare { viewportShare }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)

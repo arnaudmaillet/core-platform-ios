@@ -84,4 +84,67 @@ struct ViewportShareTests {
         share.transitionEnded(push, cancelled: true, coversAtEnd: true)
         #expect(share.share == 1)
     }
+
+    /// The host's own departure (a pop sliding it off, a grab holding it):
+    /// the part of it still inside the window, against its own area.
+    @Test func aDepartingHostKeepsWhatIsStillOnScreen() {
+        func share(_ host: CGRect) -> CGFloat { ViewportShare.departureShare(host: host, in: screen) }
+        #expect(share(screen) == 1)
+        #expect(abs(share(screen.offsetBy(dx: 200, dy: 0)) - 0.5) < 0.001, "a slide half off")
+        #expect(abs(share(screen.offsetBy(dx: 300, dy: 0)) - 0.25) < 0.001)
+        #expect(share(screen.offsetBy(dx: 400, dy: 0)) == 0)
+        // Held smaller in the middle of the screen, as a grab holds it.
+        #expect(share(CGRect(x: 80, y: 160, width: 240, height: 480)) == 1, "a held page lost its share")
+        #expect(share(.zero) == 0)
+    }
+
+    /// A departure settles on gone once it completes, and on whole again
+    /// when it is abandoned.
+    @Test func aDepartureEndsGoneOrWhole() {
+        let share = ViewportShare(host: UIView())
+        let abandoned = share.beginDeparture()
+        share.report(0.7)
+        share.transitionEnded(abandoned, cancelled: true, coversAtEnd: true)
+        #expect(share.share == 1, "an abandoned grab left the host short of its screen")
+        let gone = share.beginDeparture()
+        share.transitionEnded(gone, cancelled: false, coversAtEnd: true)
+        #expect(share.share == 0)
+    }
+
+    /// An arrival (a push bringing the host in) settles on whole once it
+    /// completes, and on gone when it is abandoned.
+    @Test func anArrivalEndsWholeOrGone() {
+        let share = ViewportShare(host: UIView())
+        share.report(0)
+        let abandoned = share.beginDeparture()
+        share.transitionEnded(abandoned, cancelled: true, coversAtEnd: false)
+        #expect(share.share == 0, "an abandoned push left the host playing")
+        let arrived = share.beginDeparture()
+        share.transitionEnded(arrived, cancelled: false, coversAtEnd: false)
+        #expect(share.share == 1)
+    }
+
+    /// The gate a host with no sound to fade reads: told once per flip.
+    @Test func thePlaysGateIsToldOncePerFlip() {
+        let share = ViewportShare(host: UIView())
+        var told: [Bool] = []
+        share.onPlaysChange = { told.append($0) }
+        share.report(0.8)
+        share.report(0.4)
+        share.report(0.2)
+        share.report(0.5)
+        share.report(1)
+        #expect(told == [false, true])
+        #expect(share.plays)
+    }
+
+    /// A screen leaving with no transition to follow (a tab switch) reports
+    /// gone at once; coming back with none leaves the start to its host.
+    @Test func aScreenWithNoTransitionActsNow() {
+        let screen = UIViewController()
+        let share = ViewportShare(host: screen.view)
+        #expect(share.screenWillDisappear(screen) == .now)
+        #expect(share.share == 0)
+        #expect(share.screenWillAppear(screen) == .now)
+    }
 }

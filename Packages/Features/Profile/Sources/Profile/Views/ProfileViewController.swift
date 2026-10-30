@@ -558,6 +558,11 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         }
         // A pushed profile's strip rides the stack's toolbar (#728).
         selector.showToolbar(for: self, animated: animated)
+        // Pushed in, or a plain screen popping off this one (#1914): the
+        // gallery's clips start once half of the screen is on display, on the
+        // transition's own frames. Every other appearance starts them from
+        // `viewDidAppear`, as before.
+        _ = viewportShare.screenWillAppear(self)
         // The accessory's collapse rides the active page: name it again on
         // every appearance, as the inbox's pager does (#1191).
         galleryPager.republishActiveScrollView()
@@ -641,12 +646,31 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // screen taking over brings items of its own (the relations screen,
         // the feed).
         selector.hide(leaving: self, animated: animated, alongside: transitionCoordinator)
-        // Stops as this screen is covered — including by the post it just
-        // opened, whose own player is what should be heard.
-        galleryPager.setAutoplayActive(false)
         // Not the banner (#1399): the hero page plays it on while the screen
         // leaves.
+        //
+        // ⚠️ NOT AT THE TRANSITION'S FIRST FRAME (#1914, the owner
+        // 2026-10-31): the gallery's clips play while this screen holds half
+        // the viewport — the rule of every screen (`ViewportShare`). Its own
+        // pop pauses them once it is half off, a screen pushed over it once it
+        // covers half, and a drag abandoned before half never pauses them.
+        if viewportShare.screenWillDisappear(self) == .flight {
+            // A post opened from a tile: its own player is what should be
+            // heard, at once.
+            galleryPager.setAutoplayActive(false)
+        }
     }
+
+    /// The share of this screen on screen (#1914): its gallery's clips play
+    /// at half and above.
+    private lazy var viewportShare: ViewportShare = {
+        let share = ViewportShare(host: view)
+        share.onPlaysChange = { [weak self] plays in self?.galleryPager.setAutoplayActive(plays) }
+        return share
+    }()
+
+    /// The share now, for tests.
+    var debugViewportShare: ViewportShare { viewportShare }
 
     /// The post has finished covering this screen, so the tapped tile can be
     /// brought clear of the chrome without anyone seeing it move.
@@ -673,6 +697,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         #endif
         // Both facts are true only here: the screen owns the display AND its
         // cells are realized. Reconciling any earlier finds no candidates.
+        viewportShare.report(1)
         galleryPager.setAutoplayActive(true)
         // The pager's horizontal pan yields to the stack's edge-swipe pop:
         // without this, an edge-start drag over the grid PAGES instead of
