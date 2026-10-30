@@ -76,6 +76,14 @@ extension VideoPlaybackController {
     }
     #endif
 
+    /// The heard clip's level, 0…1 (#1914): its screen's share of the
+    /// viewport — full on the whole screen, silent at half, where the host
+    /// pauses it. A clip handed to the surface later is heard at this level.
+    public func setAudibleVolume(_ volume: Float) {
+        audibleVolume = min(1, max(0, volume))
+        surfaceHeardPlayer?.volume = audibleVolume
+    }
+
     /// The surface `setAudibleSurface` last named, if it is still alive.
     public var currentAudibleSurface: VideoRenderView? { audibleSurface }
 
@@ -88,8 +96,10 @@ extension VideoPlaybackController {
         if let previous = surfaceHeardPlayer, previous !== target,
            !audiblePlayers.contains(ObjectIdentifier(previous)) {
             previous.isMuted = true
+            previous.volume = 1
         }
         target?.isMuted = false
+        target?.volume = audibleVolume
         surfaceHeardPlayer = target
     }
 

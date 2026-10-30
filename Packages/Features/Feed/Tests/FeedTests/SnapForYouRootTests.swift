@@ -193,6 +193,29 @@ struct SnapForYouRootTests {
         #expect(!tabs.isTabBarHidden)
     }
 
+    // MARK: - A screen over the feed past half pauses it (#1914)
+
+    /// The share of the feed still on screen is its clip's gate: below half
+    /// nothing plays — the clip pauses, never stops — and at half it plays
+    /// again. A push over it reports the share frame by frame.
+    @Test func belowHalfTheFeedPausesAndAtHalfItPlaysAgain() async throws {
+        let root = feed(root: true)
+        let nav = UINavigationController(rootViewController: root)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = nav
+        window.isHidden = false
+        defer { window.isHidden = true }
+        for _ in 0..<200 where !root.debugIsWatchedByLifecycle { try await Task.sleep(for: .milliseconds(10)) }
+        try #require(root.debugIsWatchedByLifecycle)
+
+        root.debugViewportShare.report(0.6)
+        #expect(root.debugIsWatchedByLifecycle, "the feed paused above half")
+        root.debugViewportShare.report(0.4)
+        #expect(!root.debugIsWatchedByLifecycle, "the feed plays on under a screen past half")
+        root.debugViewportShare.report(0.5)
+        #expect(root.debugIsWatchedByLifecycle, "the feed did not resume at half")
+    }
+
     // MARK: - Set aside by the notifications drawer (#1703)
 
     /// The drawer slides the shell aside with the feed still on screen: its

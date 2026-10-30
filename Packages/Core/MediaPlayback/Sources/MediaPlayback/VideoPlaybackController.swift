@@ -208,6 +208,8 @@ public final class VideoPlaybackController {
     /// PLAYER and emptied by `retire` like every other per-player table here.
     var soundBindings: [ObjectIdentifier: SoundBinding] = [:]
     var audiblePlayers: Set<ObjectIdentifier> = []
+    /// The heard clip's level (`setAudibleVolume`, #1914).
+    var audibleVolume: Float = 1
     /// The one surface a viewer is listening to, and the player last made
     /// heard for it — see `setAudibleSurface`.
     weak var audibleSurface: VideoRenderView?
