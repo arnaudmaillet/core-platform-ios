@@ -50,7 +50,13 @@ public final class FeedSoundSession {
             return session.isOtherAudioPlaying || session.secondaryAudioShouldBeSilencedHint
         },
         observe: @escaping (@escaping @MainActor () -> Void) -> AnyObject? = { changed in
-            AVAudioSession.sharedInstance().observe(\.outputVolume, options: [.new]) { _, _ in
+            let session = AVAudioSession.sharedInstance()
+            // ⚠️ `outputVolume` reports only while the session is ACTIVE: on a
+            // silent phone before anything plays, the first key would go
+            // unseen. Active under `.ambient`, which mixes — another app's
+            // music keeps playing.
+            try? session.setActive(true)
+            return session.observe(\.outputVolume, options: [.new]) { _, _ in
                 Task { @MainActor in changed() }
             }
         }
