@@ -2077,13 +2077,47 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// mosaic, a profile — covers this screen with players of its own that
     /// want the same pool, and nothing is flying. The stack's top separates a
     /// push from a tab switch: on a push it is already the pushed screen.
+    ///
+    /// ⚠️ NOT AT THE PUSH'S FIRST FRAME (#1914): a screen pushed over this one
+    /// pauses its clips once it covers half of it — the rule of every screen
+    /// covered by another (`ViewportShare`) — and a drag abandoned before half
+    /// never pauses them. A switch to another tab, with no transition to
+    /// follow, stops them at once, as before.
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        setLeadActive(false)
-        if !(navigationController?.topViewController is any ZoomTransitionDestination) {
-            page.setAutoplayActive(false)
+        if navigationController?.topViewController is any ZoomTransitionDestination {
+            setLeadActive(false)
+            return
         }
+        if let coordinator = transitionCoordinator, !isMovingFromParent,
+           let cover = coordinator.view(forKey: .to) {
+            viewportShare.track(coordinator, cover: cover, coversAtEnd: true)
+            return
+        }
+        viewportShare.report(0)
     }
+
+    /// The share of this screen still on screen under a pushed screen, or as
+    /// one pops off it (#1914): its clips and its rows play at half and above.
+    private lazy var viewportShare: ViewportShare = {
+        let share = ViewportShare(host: view)
+        share.onChange = { [weak self] _ in self?.applyViewportShare() }
+        return share
+    }()
+
+    private var viewportSharePlays = true
+
+    private func applyViewportShare() {
+        let plays = ViewportShare.plays(at: viewportShare.share)
+        guard plays != viewportSharePlays else { return }
+        viewportSharePlays = plays
+        page.setAutoplayActive(plays)
+        setLeadActive(plays)
+    }
+
+    /// The share now, for tests.
+    var debugViewportShare: ViewportShare { viewportShare }
+    var debugAutoplayIsActive: Bool { viewportSharePlays }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
@@ -2091,7 +2125,16 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // stranded park. A live transition owns its own scope and closes it in
         // `onSourceReturned`.
         if activeTransition == nil { page.discardPlaybackHandoff() }
-        page.setAutoplayActive(true)
+        // A plain screen popping off this one (#1914): the clips come back as
+        // it uncovers half, on the pop's own frames. A flight's return, a tab
+        // switch, a first appearance: now, as before.
+        if activeTransition == nil, let coordinator = transitionCoordinator, !isMovingToParent,
+           let cover = coordinator.view(forKey: .from) {
+            viewportShare.track(coordinator, cover: cover, coversAtEnd: false)
+        } else {
+            viewportShare.report(1)
+            page.setAutoplayActive(true)
+        }
         // A row's flight is closing: the close measures where it lands as it
         // begins, and the row may have been scrolled under the open post — so
         // the face or card it flew from is brought back into view first.
