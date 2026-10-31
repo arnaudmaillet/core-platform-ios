@@ -537,7 +537,21 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
     /// poster under Reduce Motion, Low Power Mode and idle calm (#580), and as
     /// soon as the banner has scrolled away.
     public var bannerVideoShouldPlay: Bool {
-        view.window != nil && heroHeader.bannerShouldPlay(hostShowing: isShownOnScreen || isLeavingScreen)
+        view.window != nil && viewportAllowsBanner
+            && heroHeader.bannerShouldPlay(hostShowing: isShownOnScreen || isLeavingScreen)
+    }
+
+    /// Whether this screen holds half of the display (#1914, the owner
+    /// 2026-10-31): the subclass sets it from its `ViewportShare`. The banner
+    /// starts half way through the push that brings the screen in, and stops
+    /// half way through the one that takes it off or covers it — as the rest
+    /// of the screen's clips do. It still plays through the start of the
+    /// screen's departure (#1399), up to half.
+    public var viewportAllowsBanner = true {
+        didSet {
+            guard viewportAllowsBanner != oldValue else { return }
+            updateBannerVideo()
+        }
     }
 
     @objc private func decorativeMotionDidChange() {

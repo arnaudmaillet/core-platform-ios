@@ -78,6 +78,13 @@ public final class ViewportShare {
         Self.byHost.setObject(self, forKey: host)
     }
 
+    /// What the share is measured against: the window unless set. A screen
+    /// inside a sheet names the sheet (#1914, the owner 2026-10-31): a sheet
+    /// at a medium detent can hold less than half of the display while it is
+    /// the whole of what the viewer reads, so its screens take their half of
+    /// the sheet, not of the display.
+    public var reference: (() -> UIView?)?
+
     /// A fraction from a source of the host's own (a pager, a drawer).
     public func report(_ value: CGFloat) {
         let clamped = min(1, max(0, value))
@@ -353,10 +360,11 @@ public final class ViewportShare {
         }
         hasSampled = true
         let windowLayer = window.layer.presentation() ?? window.layer
+        let bounds = referenceBounds(in: window, windowLayer)
         if isDeparting {
             let hostLayer = host.layer.presentation() ?? host.layer
             let hostRect = hostLayer.convert(hostLayer.bounds, to: windowLayer)
-            report(Self.ownShare(of: hostRect, in: window.bounds))
+            report(Self.ownShare(of: hostRect, in: bounds))
             return
         }
         guard let cover else { return }
@@ -371,7 +379,15 @@ public final class ViewportShare {
         }
         let coverLayer = cover.layer.presentation() ?? cover.layer
         let coverRect = coverLayer.convert(coverLayer.bounds, to: windowLayer)
-        report(Self.share(coveredBy: coverRect, in: window.bounds) - Self.coveredYield)
+        report(Self.share(coveredBy: coverRect, in: bounds) - Self.coveredYield)
+    }
+
+    /// The window's bounds, or the reference's rect as shown now, in window
+    /// coordinates.
+    private func referenceBounds(in window: UIWindow, _ windowLayer: CALayer) -> CGRect {
+        guard let view = reference?(), view.window === window else { return window.bounds }
+        let layer = view.layer.presentation() ?? view.layer
+        return layer.convert(layer.bounds, to: windowLayer)
     }
 
     /// The display link's target, weakly holding the share so the link never

@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import MediaCore
 import MediaPlayback
@@ -121,21 +122,41 @@ final class SoundSheetGalleryViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         lookahead.setOnScreen(true)
+        // Pushed into the sheet (#1914): the tiles start once this screen
+        // holds half of the sheet.
+        _ = viewportShare.screenWillAppear(self)
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        viewportShare.report(1)
         setAutoplayActive(true)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        // Popped, or the sheet going: the tiles give their players back now.
-        setAutoplayActive(false)
+        // The sheet going: this screen holds all of it to the end. Popped:
+        // until it holds less than half of the sheet (#1914). The tiles give
+        // their players back once the screen is gone (`viewDidDisappear`).
+        if navigationController?.isBeingDismissed == true { return }
+        if viewportShare.screenWillDisappear(self) == .flight {
+            setAutoplayActive(false)
+        }
     }
+
+    /// The share of this screen in its SHEET (#1914): measured against the
+    /// sheet, not the display — at a medium detent the sheet is all the
+    /// viewer reads.
+    private lazy var viewportShare: ViewportShare = {
+        let share = ViewportShare(host: view)
+        share.reference = { [weak self] in self?.navigationController?.view }
+        share.onPlaysChange = { [weak self] plays in self?.setAutoplayActive(plays) }
+        return share
+    }()
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        setAutoplayActive(false)
         // The stay is over: what only this grid wanted is cancelled.
         lookahead.setOnScreen(false)
     }

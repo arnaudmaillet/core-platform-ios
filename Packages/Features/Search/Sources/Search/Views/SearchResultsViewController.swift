@@ -792,6 +792,9 @@ final class SearchResultsViewController: UIViewController {
         searchField.text = viewModel.submittedQueryText
         render(viewModel.currentPhase)
         showPosts(postState(for: viewModel.currentPhase))
+        // Pushed in, or a plain screen popping off it (#1914): the posts start
+        // once half of the screen is on display.
+        _ = viewportShare.screenWillAppear(self)
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -811,6 +814,7 @@ final class SearchResultsViewController: UIViewController {
         // `updatePlayback` reads, and a screen arriving has none until it has
         // appeared — asked earlier it would decide "not visible" and leave
         // every clip frozen on the screen the viewer is looking at.
+        viewportShare.report(1)
         updatePlayback()
     }
 
@@ -827,9 +831,23 @@ final class SearchResultsViewController: UIViewController {
         )
         // Anything pushed over this screen — a post, a profile, a refine — gets
         // the pool. A grid under another screen holding players is the leak
-        // this call exists to prevent.
-        postsPage.setPlaybackActive(false)
+        // this call exists to prevent. A post opened from a tile takes it at
+        // once; a plain screen once it covers half of this one, and this one
+        // popped once half of it is gone (#1914) — at half, exactly one of the
+        // two holds the screen (`ViewportShare`).
+        if viewportShare.screenWillDisappear(self) == .flight {
+            postsPage.setPlaybackActive(false)
+        }
     }
+
+    /// The share of this screen on screen (#1914): its clips play at half and
+    /// above — from half way through the push that brings it in, until half
+    /// way through the pop that takes it off or a plain screen pushed over it.
+    private lazy var viewportShare: ViewportShare = {
+        let share = ViewportShare(host: view)
+        share.onPlaysChange = { [weak self] _ in self?.updatePlayback() }
+        return share
+    }()
 
     /// The selector's toolbar item. Internal, not private, so the tests can
     /// assert where the strip is installed.
@@ -942,7 +960,7 @@ final class SearchResultsViewController: UIViewController {
     /// same rule at the same granularity — the page at the active index, and no
     /// other.
     private func updatePlayback() {
-        let active = isViewLoaded && view.window != nil
+        let active = isViewLoaded && view.window != nil && viewportShare.plays
         let index = tabBar.selectedIndex
         postsPage.setPlaybackActive(active && index == 0)
     }

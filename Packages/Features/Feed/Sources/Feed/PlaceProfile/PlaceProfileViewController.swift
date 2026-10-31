@@ -937,7 +937,11 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     private lazy var viewportShare: ViewportShare = {
         let share = ViewportShare(host: view)
         share.onPlaysChange = { [weak self] plays in
-            if plays { self?.syncAutoplay() } else { self?.stopAutoplay() }
+            guard let self else { return }
+            if plays { syncAutoplay() } else { stopAutoplay() }
+            // The banner follows a transition's half only: with none, its own
+            // rule stops it once the page is gone (#1399).
+            if plays || transitionCoordinator != nil { viewportAllowsBanner = plays }
         }
         return share
     }()

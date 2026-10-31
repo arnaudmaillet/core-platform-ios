@@ -646,8 +646,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // screen taking over brings items of its own (the relations screen,
         // the feed).
         selector.hide(leaving: self, animated: animated, alongside: transitionCoordinator)
-        // Not the banner (#1399): the hero page plays it on while the screen
-        // leaves.
+        // The banner too (#1399): the hero page plays it on while the screen
+        // leaves, up to half (`viewportAllowsBanner`).
         //
         // ⚠️ NOT AT THE TRANSITION'S FIRST FRAME (#1914, the owner
         // 2026-10-31): the gallery's clips play while this screen holds half
@@ -665,7 +665,14 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// at half and above.
     private lazy var viewportShare: ViewportShare = {
         let share = ViewportShare(host: view)
-        share.onPlaysChange = { [weak self] plays in self?.galleryPager.setAutoplayActive(plays) }
+        share.onPlaysChange = { [weak self] plays in
+            guard let self else { return }
+            galleryPager.setAutoplayActive(plays)
+            // The banner follows a transition's half. With none to follow
+            // the screen is gone at once, and the banner's own rule stops it
+            // then (#1399) — stopped and restarted here, it lost its player.
+            if plays || transitionCoordinator != nil { viewportAllowsBanner = plays }
+        }
         return share
     }()
 

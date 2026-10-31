@@ -139,12 +139,14 @@ import UIKit
 /// **FROM EXPANDED, A DRAG DOWN COMES BACK TO COLLAPSED**; a second one
 /// closes.
 ///
-/// **THE RECORD IS THE POST'S** (#1148): the sheet only ever opens from a post,
-/// so its sound is the post's sound, and it has no player of its own. The
-/// header's record mirrors the post (`setPostPlayback`) and its tap plays or
-/// pauses the post (`onTogglePlayback`). Opening the sheet never silences or
-/// pauses the post; a feed opened from a tile covers it (`onCoverChanged`),
-/// for the trip.
+/// **THE RECORD IS THE SHEET'S OWN TRACK** (the owner, 2026-10-31, reversing
+/// #1148's mirror of the post): two tracks, the sheet's and the post's, and
+/// playing one pauses the other. The record plays the sound's preview on a
+/// player of its own; while it plays, the post behind is covered
+/// (`onCoverChanged`), and when the post plays again the feed stops the
+/// preview (`stopPreview`). A feed opened from a tile covers the post too,
+/// for the trip. The post also pauses under the expanded sheet
+/// (`onExpandedChange`).
 final class SoundSheetViewController: UIViewController {
     struct Tile: Hashable, Sendable {
         let postID: PostID
@@ -220,33 +222,42 @@ final class SoundSheetViewController: UIViewController {
     /// Whether the clip behind should pause: a feed opened from a tile covers
     /// it. NEVER the detent alone, and never the sheet just being open.
     var onCoverChanged: ((Bool) -> Void)?
-    /// The record's tap: play or pause the post the sheet opened over.
-    var onTogglePlayback: (() -> Void)?
-    /// The post's playback, as the record shows it (#1148).
-    struct PostPlayback: Equatable {
-        /// The post plays: the record turns, the glyph is ❚❚. No muted state
-        /// since #1931 — the sound follows the device.
+
+    /// Told when the sheet settles expanded or collapsed (#1914, the owner
+    /// 2026-10-31): the post behind plays under the collapsed sheet and
+    /// pauses under the expanded one — the sheet's STATE decides, not a
+    /// share of the display.
+    var onExpandedChange: ((Bool) -> Void)?
+    /// What the record shows: the sheet's own track.
+    struct RecordPlayback: Equatable {
+        /// The preview plays: the record turns, the glyph is ❚❚. No muted
+        /// state since #1931 — the sound follows the device.
         var playing = false
-        /// The post has something to hear; false shows the record with no
-        /// glyph, refusing taps (the bubble greyed).
+        /// The sound has a preview to play; false shows the record with no
+        /// glyph, refusing taps.
         var available = true
     }
 
-    private(set) var postPlayback = PostPlayback()
+    private(set) var record = RecordPlayback()
 
-    /// What the post does now — the feed tells the sheet, as it tells the
-    /// post's own bubble.
-    func setPostPlayback(_ playback: PostPlayback) {
-        guard playback != postPlayback else { return }
-        let availabilityChanged = playback.available != postPlayback.available
-        postPlayback = playback
+    private func setRecord(_ playback: RecordPlayback) {
+        guard playback != record else { return }
+        let availabilityChanged = playback.available != record.available
+        record = playback
         guard let header else { return }
         if availabilityChanged { configure(header) } else { apply(playback, to: header) }
     }
 
-    private func apply(_ playback: PostPlayback, to header: SoundSheetHeaderView) {
+    private func apply(_ playback: RecordPlayback, to header: SoundSheetHeaderView) {
         header.setPlaying(playback.available && playback.playing)
     }
+
+    #if DEBUG
+    /// Draws the record in a state, for the glyph's tests.
+    func debugShowRecord(playing: Bool, available: Bool) {
+        setRecord(RecordPlayback(playing: playing, available: available))
+    }
+    #endif
     /// A tile was chosen; the sheet is already on its way out.
     var onSelectPost: ((PostID) -> Void)?
     /// Opens a NEW feed of the posts with this sound, flying out of the tapped
@@ -405,6 +416,7 @@ final class SoundSheetViewController: UIViewController {
         self.imagePipeline = imagePipeline
         self.savedSounds = savedSounds
         self.videoPlayback = videoPlayback
+        record = RecordPlayback(playing: false, available: sound.previewURL != nil)
         autoplay = videoPlayback.map { SoundSheetAutoplay(pool: $0, imagePipeline: imagePipeline) }
         super.init(nibName: nil, bundle: nil)
     }
@@ -546,6 +558,14 @@ final class SoundSheetViewController: UIViewController {
     override func viewIsAppearing(_ animated: Bool) {
         super.viewIsAppearing(animated)
         lookahead.setOnScreen(true)
+        // The sheet rising: this screen holds all of it, so its tiles play
+        // from the rise (#1914). A section popping off it: from half.
+        if isBeingPresented || navigationController?.isBeingPresented == true {
+            viewportShare.report(1)
+            if !isShowingFeed { setAutoplayActive(true) }
+        } else {
+            _ = viewportShare.screenWillAppear(self)
+        }
         // In a window now: the real width, and the toolbar's real band — the
         // bottom safe area less the window's. Both are the BAR's and the
         // screen's, the same at any detent, so reading them here converges:
@@ -576,6 +596,7 @@ final class SoundSheetViewController: UIViewController {
         reveal.wake()
         // Up, or back from a pushed section: the tiles are the viewer's
         // again — unless a feed opened from one still covers them.
+        viewportShare.report(1)
         if !isShowingFeed { setAutoplayActive(true) }
         installRecordTap()
         #if DEBUG
@@ -605,7 +626,7 @@ final class SoundSheetViewController: UIViewController {
     }
 
     @objc private func recordTapped() {
-        onTogglePlayback?()
+        togglePreview()
     }
 
     /// Whether `point`, in `view`'s space, is on the record (and the record
@@ -651,19 +672,43 @@ final class SoundSheetViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        // Going, or a section pushed over it: every tile gives its player
-        // back now, on the way out — none is left bound to a sheet nobody
+        // The sheet going: this screen holds all of it to the end, and its
+        // tiles play through the fall (#1914). A section pushed over it: until
+        // it covers half. Every tile gives its player back once the screen
+        // is gone (`viewDidDisappear`) — none is left bound to a sheet nobody
         // sees (#884).
-        setAutoplayActive(false)
+        if isSheetBeingDismissed { return }
+        if viewportShare.screenWillDisappear(self) == .flight {
+            setAutoplayActive(false)
+        }
     }
+
+    /// The share of this screen in its SHEET (#1914): its tiles play while it
+    /// holds half of the sheet — through the sheet's own rise and fall, where
+    /// it holds all of it, and until half way through a section pushed over
+    /// it or its own pop. Measured against the sheet, not the display: at a
+    /// medium detent the sheet is all the viewer reads.
+    private lazy var viewportShare: ViewportShare = {
+        let share = ViewportShare(host: view)
+        share.reference = { [weak self] in self?.navigationController?.view }
+        share.onPlaysChange = { [weak self] plays in
+            guard let self else { return }
+            setAutoplayActive(plays && !isShowingFeed)
+        }
+        return share
+    }()
+
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         // Off screen (a section pushed over it, or gone): nothing to watch,
         // and nothing to fetch ahead for — the stay's owner is revoked.
+        setAutoplayActive(false)
         reveal.sleep()
         lookahead.setOnScreen(false)
         guard isSheetBeingDismissed else { return }
+        stopPreview()
+        tearDownPreview()
         setCovering(false)
         onDismissed?()
     }
@@ -1046,13 +1091,13 @@ final class SoundSheetViewController: UIViewController {
             title: sound.title ?? "Original sound",
             subtitle: sound.artist ?? "@\(authorHandle)",
             meta: Self.meta(duration: sound.duration, posts: postCount),
-            canToggle: postPlayback.available
+            canToggle: record.available
         )
-        apply(postPlayback, to: header)
+        apply(record, to: header)
         header.onTogglePlayback = { [weak self] in
             // A transport control: silent (#1881).
-            guard let self, postPlayback.available else { return }
-            onTogglePlayback?()
+            guard let self, record.available else { return }
+            togglePreview()
         }
         if let url = sound.artworkURL ?? fallbackArtworkURL {
             header.loadArtwork(url, pipeline: imagePipeline)
@@ -1353,7 +1398,7 @@ final class SoundSheetViewController: UIViewController {
                 subtitle: sound.artist ?? "@\(authorHandle)",
                 // The meta line is one line whatever it says.
                 meta: Self.meta(duration: sound.duration, posts: postCount),
-                canToggle: postPlayback.available
+                canToggle: record.available
             )
         }
         headerHeightCache = (key, height)
@@ -1589,10 +1634,103 @@ final class SoundSheetViewController: UIViewController {
         onCoverChanged?(covering)
     }
 
-    /// ⚠️ NOT `isExpanded`: the expanded detent leaves the clip behind playing,
-    /// like the collapsed one — only a second sound or a second feed covers it.
+    /// The sheet's own track playing, or a feed opened from a tile: either
+    /// covers the post behind. (The expanded detent pauses it too, through
+    /// `onExpandedChange`.)
     private func refreshCover() {
-        setCovering(isShowingFeed)
+        setCovering(isPreviewing || isShowingFeed)
+    }
+
+    // MARK: - The sheet's own track
+
+    /// Whether the record plays the sound's preview.
+    private(set) var isPreviewing = false
+    private var preview: AVPlayer?
+    private var previewEndObserver: NSObjectProtocol?
+    private var previewTimeObserver: Any?
+    private var previewStart: Task<Void, Never>?
+
+    private func togglePreview() {
+        isPreviewing ? stopPreview() : startPreview()
+    }
+
+    private func startPreview() {
+        guard let url = sound.previewURL, !isPreviewing else { return }
+        isPreviewing = true
+        setRecord(RecordPlayback(playing: true, available: record.available))
+        refreshCover()
+        // A transport control: silent (#1881).
+        if let preview {
+            preview.play()
+            return
+        }
+        // The sound's address can be one only the pool opens (a clip's
+        // original sound, `mock://` in the mock): resolved through it.
+        let pool = videoPlayback
+        previewStart = Task { [weak self] in
+            let playable: URL
+            if url.isFileURL || ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+                playable = url
+            } else if let resolved = try? await pool?.playableURL(for: url) {
+                playable = resolved
+            } else {
+                self?.stopPreview()
+                return
+            }
+            guard let self, isPreviewing, !Task.isCancelled else { return }
+            let player = makePreviewPlayer(for: playable)
+            player.actionAtItemEnd = .pause
+            previewEndObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.stopPreview(rewinding: true) }
+            }
+            previewTimeObserver = player.addPeriodicTimeObserver(
+                forInterval: CMTime(value: 1, timescale: 4), queue: .main
+            ) { [weak self] time in
+                MainActor.assumeIsolated { self?.previewTicked(time.seconds) }
+            }
+            preview = player
+            player.play()
+        }
+    }
+
+    /// The preview's player: through the pool's byte cache when there is one
+    /// (#895), so a sound previewed twice, or a clip's original sound whose
+    /// clip already played, is not fetched again.
+    func makePreviewPlayer(for url: URL) -> AVPlayer {
+        AVPlayer(playerItem: videoPlayback?.soundItem(for: url) ?? AVPlayerItem(url: url))
+    }
+
+    /// Stops the sheet's own track: its record's tap, its end, the sheet
+    /// going — or the post played again, which the feed says (the two tracks
+    /// never play together).
+    func stopPreview(rewinding: Bool = false) {
+        guard isPreviewing else { return }
+        isPreviewing = false
+        preview?.pause()
+        if rewinding { preview?.seek(to: .zero) }
+        setRecord(RecordPlayback(playing: false, available: record.available))
+        header?.setMeta(Self.meta(duration: sound.duration, posts: postCount))
+        refreshCover()
+    }
+
+    /// The preview's player and its observers go with the sheet.
+    private func tearDownPreview() {
+        previewStart?.cancel()
+        previewStart = nil
+        if let previewEndObserver { NotificationCenter.default.removeObserver(previewEndObserver) }
+        if let previewTimeObserver { preview?.removeTimeObserver(previewTimeObserver) }
+        previewEndObserver = nil
+        previewTimeObserver = nil
+        preview?.pause()
+        preview = nil
+    }
+
+    private func previewTicked(_ seconds: Double) {
+        guard isPreviewing, seconds.isFinite else { return }
+        let total = sound.duration.map { " / \(Self.clock($0))" } ?? ""
+        header?.setMeta("\(Self.clock(seconds))\(total)")
     }
 
     /// A feed opened from a tile covers everything, the page behind the sheet
@@ -1941,14 +2079,16 @@ extension SoundSheetViewController: UISheetPresentationControllerDelegate {
     /// the delegate, a programmatic change (`debugExpand`) does not report it
     /// at all. It puts the posts back at their top at collapsed (the Popular
     /// row under the sound, the reveal's line where the fold is), and wakes
-    /// the reveal to follow the sheet's spring; nothing else: the clip behind
-    /// plays on at either.
+    /// the reveal to follow the sheet's spring, and tells the post behind
+    /// (`onExpandedChange`): it plays under the collapsed sheet and pauses
+    /// under the expanded one (#1914).
     fileprivate func detentChanged(to identifier: UISheetPresentationController.Detent.Identifier?) {
         let expanded = Self.isExpanded(identifier)
         guard expanded != isExpanded else { return }
         isExpanded = expanded
         traceSettledHeight(expanded: expanded)
         reveal.wake()
+        onExpandedChange?(expanded)
         guard dataSource != nil, !expanded else { return }
         collectionView.setContentOffset(
             CGPoint(x: collectionView.contentOffset.x, y: -collectionView.adjustedContentInset.top),

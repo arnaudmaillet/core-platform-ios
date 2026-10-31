@@ -122,6 +122,12 @@ final class SnapCellPlayback: NSObject {
         isSheetPaused = false
     }
 
+    /// The sheet's resume, owed no more: the page stopped being the playing
+    /// one while it was covered.
+    func forgetSheetPause() {
+        isSheetPaused = false
+    }
+
     /// The hold ended: resumes the clip if the hold is what stopped it.
     func endHold() {
         guard isHeldPaused, let pool, let view = surface() else { return }

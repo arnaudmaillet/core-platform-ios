@@ -1522,6 +1522,12 @@ final class SnapFeedViewController: UIViewController {
         guard plays != viewportSharePlays else { return }
         viewportSharePlays = plays
         refreshVisibility()
+        // Every record of the post's sound turns with it (#1148), the sound
+        // sheet's included (the owner 2026-10-31: the sheet's record kept
+        // turning over a post its expansion had paused). Asked now, and once
+        // more after the turn, for a pause the player settles a beat later.
+        refreshCoverSpin()
+        DispatchQueue.main.async { [weak self] in self?.refreshCoverSpin() }
     }
 
     /// The share now, for tests.
@@ -5476,30 +5482,11 @@ final class SnapFeedViewController: UIViewController {
         activeSnapCell?.setSoundSpinning(playing)
         (commentsContentVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
         (previewRestingVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
-        if let soundSheet, let model = activeModel {
-            soundSheet.setPostPlayback(postPlayback(of: model, playing: playing))
+        // Two tracks, never together (the owner, 2026-10-31): the post
+        // playing again — the viewer's tap on it — stops the sheet's own.
+        if playing, let soundSheet, soundSheet.isPreviewing {
+            soundSheet.stopPreview()
         }
-    }
-
-    /// What the sound sheet's record shows of `model`'s page (#1148).
-    private func postPlayback(of model: FeedItemDisplayModel, playing: Bool) -> SoundSheetViewController.PostPlayback {
-        SoundSheetViewController.PostPlayback(
-            playing: playing, available: soundFace(for: model)?.isAvailable ?? false
-        )
-    }
-
-    /// The sound sheet's record, tapped: the page's own playback toggles — a
-    /// clip as a tap on the video does (its paused mark included), a photo or
-    /// text page's song paused or resumed where it was (#1148).
-    private func togglePagePlayback() {
-        guard let model = activeModel else { return }
-        if let cell = activeSnapCell, cell.canTogglePlayback {
-            cell.togglePlayback()
-        } else {
-            songPausedFor = songPausedFor == model.id ? nil : model.id
-            refreshSong()
-        }
-        refreshCoverSpin()
     }
 
     private func setCoverSpinWatch(_ on: Bool) {
@@ -5533,8 +5520,18 @@ final class SnapFeedViewController: UIViewController {
         let original = inputs.original
         let current = model.id
         let content = soundSheetContent(current: current, original: original, rankings: rankings)
+        // The sheet's own track (the owner, 2026-10-31): a clip's original
+        // sound is the clip itself, which the pool opens even where a bare
+        // player cannot (`mock://`) — the sheet resolves it through the pool.
+        var sound = inputs.sound
+        if sound.previewURL == nil, SnapSoundState.isSingleClip(model), let clip = model.mediaURL {
+            sound = PostSound(
+                id: sound.id, title: sound.title, artist: sound.artist,
+                previewURL: clip, artworkURL: sound.artworkURL, duration: sound.duration
+            )
+        }
         let sheet = SoundSheetViewController(
-            sound: inputs.sound,
+            sound: sound,
             authorHandle: inputs.authorHandle,
             fallbackArtworkURL: inputs.fallbackArtworkURL,
             sections: content.sections,
@@ -5552,11 +5549,9 @@ final class SnapFeedViewController: UIViewController {
         // The cell that is covered now is the one to uncover, whatever the
         // feed does meanwhile.
         weak var covered = activeSnapCell
-        // The record is the post's (#1148): it mirrors the page, and its tap
-        // plays or pauses the page.
-        let playing = postIsPlaying
-        sheet.setPostPlayback(postPlayback(of: model, playing: playing))
-        sheet.onTogglePlayback = { [weak self] in self?.togglePagePlayback() }
+        // The record is the sheet's own track (the owner, 2026-10-31): its
+        // preview covers the page while it plays (`onCoverChanged`), and the
+        // page playing again stops it (`refreshCoverSpin`).
         soundSheet = sheet
         sheet.onCoverChanged = { [weak self] covering in
             covered?.setCoveredBySheet(covering)
@@ -5565,6 +5560,15 @@ final class SnapFeedViewController: UIViewController {
         sheet.onDismissed = { [weak self] in
             covered?.setCoveredBySheet(false)
             self?.yieldAudio(false)
+            self?.viewportShare.report(1)
+        }
+        // ⚠️ THE SHEET'S STATE, NOT A SHARE OF THE DISPLAY (#1914, the owner
+        // 2026-10-31): the post played on behind the sheet at every height.
+        // Under the collapsed sheet it plays on, its sound with it — the
+        // sheet is about that sound (#1148); under the expanded one it
+        // pauses, and plays again when the sheet collapses or goes.
+        sheet.onExpandedChange = { [weak self] expanded in
+            self?.viewportShare.report(expanded ? 0 : 1)
         }
         sheet.onSelectPost = { [weak self] id in self?.showPost(id) }
         sheet.openFeedHero = openFeedHero

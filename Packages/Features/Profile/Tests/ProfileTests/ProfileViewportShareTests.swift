@@ -66,6 +66,17 @@ struct ProfileViewportShareTests {
         #expect(screen.debugViewportShare.plays, "the gallery did not come back at half")
     }
 
+    /// With no transition to follow (a tab switch, or a dismissal driven
+    /// only by appearance calls), the banner is left to its own rule (#1399):
+    /// it is not stopped at the share's first drop. Its following of a
+    /// transition's half is the device check.
+    @Test func theBannerIsNotStoppedWithoutATransition() {
+        let screen = screen()
+        #expect(screen.viewportAllowsBanner)
+        screen.debugViewportShare.report(0.4)
+        #expect(screen.viewportAllowsBanner, "the banner stopped with no transition to follow")
+    }
+
     /// No transition to follow (a tab switch): stopped at once, and back once
     /// the screen has appeared, as before.
     @Test func aTabSwitchStopsAndRestartsAtOnce() {
