@@ -118,9 +118,11 @@ struct StackArbiterTests {
         #expect(root.presentedViewController === next, "the sheet opened since stays")
     }
 
-    /// Every screen of an arbitrated stack hands its back button to the
-    /// arbiter — pushed or set — and keeps the chevron-only look.
-    @Test func anArbitratedStackGivesEveryBackButtonToTheArbiter() {
+    /// ⚠️ NO SCREEN GETS A `backAction`: on iOS 27.2 it makes the bar draw a
+    /// back button of its own, on a tab's root and beside a screen's own
+    /// leading chevron (the owner's device, 2026-10-31). Every screen keeps
+    /// the chevron-only look.
+    @Test func anArbitratedStackSetsNoBackAction() {
         let root = UIViewController()
         let stack = ArbitratedNavigationController(rootViewController: root)
         let pushed = UIViewController()
@@ -128,9 +130,36 @@ struct StackArbiterTests {
         let set = UIViewController()
         stack.setViewControllers([root, pushed, set], animated: false)
         for screen in [root, pushed, set] {
-            #expect(screen.navigationItem.backAction != nil)
+            #expect(screen.navigationItem.backAction == nil)
             #expect(screen.navigationItem.backButtonDisplayMode == .minimal)
         }
+    }
+
+    /// The back button pops through `popViewController`, which an arbitrated
+    /// stack hands to its arbiter: a second pop while the first lands is
+    /// dropped — the double tap that took out two screens.
+    @Test func aSecondPopWhileTheFirstLandsIsDropped() {
+        let screens = (0..<3).map { _ in UIViewController() }
+        let stack = ArbitratedNavigationController(rootViewController: screens[0])
+        stack.setViewControllers(screens, animated: false)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = stack
+        window.isHidden = false
+        defer { window.isHidden = true }
+        #expect(stack.popViewController(animated: true) === screens[2])
+        #expect(stack.popViewController(animated: true) == nil)
+        #expect(stack.viewControllers.contains(screens[1]), "the second pop took out the screen below")
+    }
+
+    /// A pop at the root, and an unanimated pop, behave as UIKit's.
+    @Test func plainPopsStillPop() {
+        let screens = (0..<3).map { _ in UIViewController() }
+        let stack = ArbitratedNavigationController(rootViewController: screens[0])
+        stack.setViewControllers(screens, animated: false)
+        #expect(stack.popViewController(animated: false) === screens[2])
+        #expect(stack.popViewController(animated: false) === screens[1])
+        #expect(stack.popViewController(animated: false) == nil)
+        #expect(stack.viewControllers == [screens[0]])
     }
 
     /// A gesture closes the screen it is on, on top: never one below.

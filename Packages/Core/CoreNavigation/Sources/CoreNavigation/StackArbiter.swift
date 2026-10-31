@@ -30,7 +30,7 @@ import UIKit
 /// full-surface back swipe on bar-hiding screens (PR #672) — and owns no
 /// recognizer: the back gestures keep their own guards, and close through
 /// `close(_:whenBusy: .drop)`. The back BUTTON closes through it on an
-/// `ArbitratedNavigationController` (each screen's `backAction`). A sheet's
+/// `ArbitratedNavigationController` (its `popViewController`). A sheet's
 /// close is DesignSystem's `closePresentation()`; `StackCloseGuardTests`
 /// keeps raw pops and dismisses out of the app.
 @MainActor
@@ -62,6 +62,11 @@ public final class StackArbiter {
     /// A close this arbiter issued and that has not landed yet.
     public private(set) var isPending = false
 
+    /// True only while the arbiter's own `popViewController` call runs, so a
+    /// stack that routes its pops here (`pop(in:animated:viaSuper:)`) lets
+    /// that one through.
+    private(set) var isIssuingPop = false
+
     init(_ navigationController: UINavigationController) {
         self.navigationController = navigationController
     }
@@ -90,9 +95,13 @@ public final class StackArbiter {
             return .deferred
         }
         if isTop {
-            isPending = true
+            // An unanimated pop has landed when the call returns: nothing to
+            // wait for, and the next pop is the next screen's.
+            isPending = animated
+            isIssuingPop = true
             navigation.popViewController(animated: animated)
-            settle(navigation)
+            isIssuingPop = false
+            if animated { settle(navigation) }
         } else {
             // Below the top: taken out alone, without a transition — the
             // screen above is the viewer's and stays where it is.
