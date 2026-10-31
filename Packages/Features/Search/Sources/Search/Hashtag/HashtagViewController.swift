@@ -55,6 +55,9 @@ final class HashtagViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        // Pushed in, or a plain screen popping off it (#1914): the clips start
+        // once half of the screen is on display.
+        _ = viewportShare.screenWillAppear(self)
         guard !hasLoaded else { return }
         hasLoaded = true
         Task { [weak self] in await self?.viewModel.load() }
@@ -62,13 +65,27 @@ final class HashtagViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        viewportShare.report(1)
         page.setPlaybackActive(true)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        page.setPlaybackActive(false)
+        // A post opened from a tile: at once. Popped, or under a plain screen:
+        // once half of it is gone (#1914).
+        if viewportShare.screenWillDisappear(self) == .flight {
+            page.setPlaybackActive(false)
+        }
     }
+
+    /// The share of this screen on screen (#1914): its clips play at half and
+    /// above — from half way through the push that brings it in, until half
+    /// way through the pop that takes it off or a plain screen pushed over it.
+    private lazy var viewportShare: ViewportShare = {
+        let share = ViewportShare(host: view)
+        share.onPlaysChange = { [weak self] plays in self?.page.setPlaybackActive(plays) }
+        return share
+    }()
 
     private func configurePage() {
         let child = page.viewController
@@ -171,15 +188,36 @@ final class HashtagRecentViewController: UIViewController {
         render()
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // Pushed in, or a plain screen popping off it (#1914): the clips start
+        // once half of the screen is on display.
+        _ = viewportShare.screenWillAppear(self)
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        viewportShare.report(1)
         list.setPlaybackActive(true)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        list.setPlaybackActive(false)
+        // A post opened from a tile: at once. Popped, or under a plain screen:
+        // once half of it is gone (#1914).
+        if viewportShare.screenWillDisappear(self) == .flight {
+            list.setPlaybackActive(false)
+        }
     }
+
+    /// The share of this screen on screen (#1914): its clips play at half and
+    /// above — from half way through the push that brings it in, until half
+    /// way through the pop that takes it off or a plain screen pushed over it.
+    private lazy var viewportShare: ViewportShare = {
+        let share = ViewportShare(host: view)
+        share.onPlaysChange = { [weak self] plays in self?.list.setPlaybackActive(plays) }
+        return share
+    }()
 
     func render() {
         guard isViewLoaded else { return }

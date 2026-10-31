@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import FeedInterface
 import MediaCore
@@ -71,15 +72,36 @@ final class ProfileMediaGalleryViewController: UIViewController {
         grid.setChromeOcclusion(UIEdgeInsets(top: safe.top, left: 0, bottom: safe.bottom, right: 0))
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // Pushed in, or a plain screen popping off it (#1914): the clips start
+        // once half of the screen is on display.
+        _ = viewportShare.screenWillAppear(self)
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        viewportShare.report(1)
         grid.setPageActive(true)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        grid.setPageActive(false)
+        // A post opened from a tile: at once. Popped, or under a plain screen:
+        // once half of it is gone (#1914).
+        if viewportShare.screenWillDisappear(self) == .flight {
+            grid.setPageActive(false)
+        }
     }
+
+    /// The share of this screen on screen (#1914): its clips play at half and
+    /// above — from half way through the push that brings it in, until half
+    /// way through the pop that takes it off or a plain screen pushed over it.
+    private lazy var viewportShare: ViewportShare = {
+        let share = ViewportShare(host: view)
+        share.onPlaysChange = { [weak self] plays in self?.grid.setPageActive(plays) }
+        return share
+    }()
 
     /// The post has covered this screen: the tapped tile is brought clear of
     /// the bar without anyone seeing it move — the profile's own rule.
