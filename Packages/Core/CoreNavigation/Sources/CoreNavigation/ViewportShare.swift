@@ -19,7 +19,14 @@ import UIKit
 ///   or a grab carrying the live screen off: read from the host's own
 ///   presentation layer, as the part of it inside the window
 ///   (`trackArrival`, `trackDeparture`);
-/// - the host's own pager or drawer, reported as a fraction (`report`).
+/// - the host's own pager or drawer, reported as a fraction (`report`);
+/// - **a cover over the host's level** — a sheet expanded, a full-screen
+///   presentation, a declared overlay (#1970, `ScreenCovers`): the share
+///   reads 0 while it covers, and what the other sources say once it ends.
+///
+/// **The rule, whole: a clip plays while its screen holds most of the
+/// viewport and nothing covers it.** A cover declares itself; a sheet covers
+/// when expanded, never when collapsed.
 ///
 /// ⚠️ THE SCREEN UNDER A DEPARTING HOST IS NEVER ITS COVER: a host leaving
 /// is measured by where it is, not by what it uncovers. And a flight
@@ -30,6 +37,13 @@ import UIKit
 public final class ViewportShare {
     /// The share now: 1 with nothing over the host.
     public private(set) var share: CGFloat = 1
+
+    /// What the sources say, covers apart: the share once no cover hides
+    /// the host.
+    private var measured: CGFloat = 1
+
+    /// Whether a cover above the host's level hides it (`ScreenCovers`).
+    public private(set) var isCovered = false
 
     /// Told on every change of `share`.
     public var onChange: ((CGFloat) -> Void)?
@@ -76,6 +90,25 @@ public final class ViewportShare {
     public init(host: UIView) {
         self.host = host
         Self.byHost.setObject(self, forKey: host)
+        ScreenCovers.startListening()
+    }
+
+    /// Every live share, for the covers of their windows.
+    static var live: [ViewportShare] {
+        Self.byHost.objectEnumerator()?.allObjects.compactMap { $0 as? ViewportShare } ?? []
+    }
+
+    /// The host's view, for the covers of its window.
+    var hostView: UIView? { host }
+
+    /// A cover above the host's level began or ended: 0 while it covers, and
+    /// what the sources say once it ends — a share they moved meanwhile
+    /// included.
+    func setCovered(_ covered: Bool) {
+        guard covered != isCovered else { return }
+        isCovered = covered
+        trace(covered ? "covered" : "uncovered")
+        publish()
     }
 
     /// What the share is measured against: the window unless set. A screen
@@ -88,21 +121,29 @@ public final class ViewportShare {
     /// A fraction from a source of the host's own (a pager, a drawer).
     public func report(_ value: CGFloat) {
         let clamped = min(1, max(0, value))
-        guard abs(clamped - share) > 0.001 else { return }
-        share = clamped
+        guard abs(clamped - measured) > 0.001 else { return }
+        measured = clamped
         #if DEBUG
         trace(String(format: "%.3f", clamped))
         #endif
-        onChange?(clamped)
-        let nowPlays = Self.plays(at: clamped)
-        if nowPlays != plays {
-            plays = nowPlays
-            onPlaysChange?(nowPlays)
-        }
+        publish()
         // The screens under this one, told in the same breath.
         guard isDeparting, let host else { return }
         for follower in followers.allObjects where follower.cover === host {
             follower.report(1 - clamped - Self.coveredYield)
+        }
+    }
+
+    /// The share the host hears: what the sources say, or 0 under a cover.
+    private func publish() {
+        let effective = isCovered ? 0 : measured
+        guard abs(effective - share) > 0.001 else { return }
+        share = effective
+        onChange?(effective)
+        let nowPlays = Self.plays(at: effective)
+        if nowPlays != plays {
+            plays = nowPlays
+            onPlaysChange?(nowPlays)
         }
     }
 
@@ -260,7 +301,7 @@ public final class ViewportShare {
     func adopt(_ follower: ViewportShare) {
         guard !followers.contains(follower) else { return }
         followers.add(follower)
-        follower.report(1 - share - Self.coveredYield)
+        follower.report(1 - measured - Self.coveredYield)
     }
 
     /// `-viewport-share`: the host's screen and what happened to its share.

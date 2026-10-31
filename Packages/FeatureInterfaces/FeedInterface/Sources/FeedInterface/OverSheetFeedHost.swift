@@ -66,3 +66,12 @@ public final class OverSheetFeedHost: UIViewController {
         if !closePresentation(animated: false, completion: { finished?() }) { finished?() }
     }
 }
+
+/// ⚠️ NOT A COVER (#1970), though it stands over the whole screen. The feed
+/// flies out of a tile of the sheet's gallery, carrying that tile's player:
+/// covering the gallery would pause the very player the feed shows (one
+/// clock for both surfaces, #1960). The feed's own push is what the screens
+/// under it follow, as they did before.
+extension OverSheetFeedHost: ScreenCovering {
+    public var coversScreen: Bool { false }
+}

@@ -238,6 +238,8 @@ final class WalletSheetViewController: UIViewController {
         sheet.animateChanges {
             sheet.selectedDetentIdentifier = .large
         }
+        // A programmatic change tells no delegate.
+        coverChanged()
     }
 
     private var sheet: UISheetPresentationController? {
@@ -938,9 +940,18 @@ extension WalletSheetViewController: UICollectionViewDelegate {
 }
 
 extension WalletSheetViewController: UISheetPresentationControllerDelegate {
-    // Pulled up (or scrolled) to large, the sheet keeps both detents (#1732):
-    // nothing to do on a detent change any more.
+    // Pulled up (or scrolled) to large, the sheet keeps both detents (#1732).
+    // Its height is a cover's (#1970): large pauses the clips behind.
+    func sheetPresentationControllerDidChangeSelectedDetentIdentifier(
+        _ sheetPresentationController: UISheetPresentationController
+    ) {
+        coverChanged()
+    }
 }
+
+/// Two heights over Shots (#1970): collapsed it is the daily glance and the
+/// clip behind plays on; large, it covers it. The default reads the detent.
+extension WalletSheetViewController: ScreenCovering {}
 
 /// Holds notification tokens and unregisters them on its own deallocation
 /// (when the owning sheet is released). `@unchecked Sendable` so its deinit

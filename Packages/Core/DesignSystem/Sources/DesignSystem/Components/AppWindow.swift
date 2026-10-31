@@ -30,4 +30,24 @@ open class AppWindow: UIWindow {
     public var carriesBarTapShield: Bool {
         gestureRecognizers?.contains { $0 is BarTapShield } ?? false
     }
+
+    // MARK: - What is presented (#1970)
+
+    /// Posted, with the window as its object, when a view joins the window or
+    /// is about to leave it: UIKit installs a presentation's container in the
+    /// window when it presents, and takes it out when it dismisses — the
+    /// app's sheets, the system's, any SDK's. CoreNavigation's `ScreenCovers`
+    /// reads the presentation chain again on it, to pause the clips a cover
+    /// hides; DesignSystem does not know it.
+    public static let subviewsDidChange = Notification.Name("AppWindow.subviewsDidChange")
+
+    override open func didAddSubview(_ subview: UIView) {
+        super.didAddSubview(subview)
+        NotificationCenter.default.post(name: Self.subviewsDidChange, object: self)
+    }
+
+    override open func willRemoveSubview(_ subview: UIView) {
+        super.willRemoveSubview(subview)
+        NotificationCenter.default.post(name: Self.subviewsDidChange, object: self)
+    }
 }

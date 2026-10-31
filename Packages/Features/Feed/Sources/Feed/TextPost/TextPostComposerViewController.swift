@@ -448,6 +448,7 @@ final class TextPostComposerViewController: UIViewController {
               sheet.selectedDetentIdentifier != .large else { return }
         expandedForKeyboard = true
         sheet.animateChanges { sheet.selectedDetentIdentifier = .large }
+        coverChanged()
     }
 
     private func keyboardWillHide() {
@@ -459,6 +460,7 @@ final class TextPostComposerViewController: UIViewController {
         guard expandedForKeyboard, let sheet = navigationController?.sheetPresentationController else { return }
         expandedForKeyboard = false
         sheet.animateChanges { sheet.selectedDetentIdentifier = Self.restingDetentIdentifier }
+        coverChanged()
     }
 
     // MARK: - Resting height
@@ -766,3 +768,14 @@ extension TextPostComposerViewController: UIAdaptivePresentationControllerDelega
 // another. Its subtitle ("and a cover") went with the move, at Arnaud's
 // instruction — the word now centres on the disc. Everything else, including the
 // measured reason its text is pinned at `.large`, is recorded there.
+
+/// A resting height, and large for a thread or the keyboard (#1970): it
+/// covers the clips behind only at large. The default reads the detent; a
+/// drag is heard through the presentation's delegate, which is this screen.
+extension TextPostComposerViewController: ScreenCovering, UISheetPresentationControllerDelegate {
+    func sheetPresentationControllerDidChangeSelectedDetentIdentifier(
+        _ sheetPresentationController: UISheetPresentationController
+    ) {
+        coverChanged()
+    }
+}

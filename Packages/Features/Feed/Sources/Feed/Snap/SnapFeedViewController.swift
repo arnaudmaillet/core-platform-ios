@@ -1072,6 +1072,9 @@ final class SnapFeedViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        #if DEBUG
+        publishViewportProbe()
+        #endif
         // …and play again on a return to an open list (#1509).
         if let sideList, sideList.isOpen { sideList.listView.setPlaying(true) }
         #if DEBUG
@@ -1522,6 +1525,9 @@ final class SnapFeedViewController: UIViewController {
     private var viewportSharePlays = true
 
     private func viewportShareDidChange(_ share: CGFloat) {
+        #if DEBUG
+        publishViewportProbe()
+        #endif
         let volume = ViewportShare.volume(at: share)
         videoPlayback?.setAudibleVolume(volume)
         songPlayer.volume = volume
@@ -1539,6 +1545,31 @@ final class SnapFeedViewController: UIViewController {
 
     /// The share now, for tests.
     var debugViewportShare: ViewportShare { viewportShare }
+
+    #if DEBUG
+    /// `-viewport-probe` (#1970): the share's state as an accessibility
+    /// probe on the window, over any sheet — what a UI test reads, the way
+    /// the hero audit's probe is read. `viewport;plays=1;covered=0;share=1.00`.
+    private static let viewportProbe: UIView = {
+        let probe = UIView(frame: CGRect(x: 0, y: 120, width: 2, height: 2))
+        probe.backgroundColor = .clear
+        probe.isAccessibilityElement = true
+        probe.accessibilityLabel = "viewport probe"
+        return probe
+    }()
+
+    func publishViewportProbe() {
+        guard ProcessInfo.processInfo.arguments.contains("-viewport-probe"), let window = view.window else { return }
+        let probe = Self.viewportProbe
+        if probe.superview !== window { window.addSubview(probe) }
+        window.bringSubviewToFront(probe)
+        probe.accessibilityIdentifier = String(
+            format: "viewport;plays=%d;covered=%d;share=%.2f",
+            // From the share: `onChange` is told before `plays` is updated.
+            ViewportShare.plays(at: viewportShare.share) ? 1 : 0, viewportShare.isCovered ? 1 : 0, viewportShare.share
+        )
+    }
+    #endif
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
@@ -5571,16 +5602,10 @@ final class SnapFeedViewController: UIViewController {
         sheet.onDismissed = { [weak self] in
             covered?.setCoveredBySheet(false)
             self?.yieldAudio(false)
-            self?.viewportShare.report(1)
         }
-        // ⚠️ THE SHEET'S STATE, NOT A SHARE OF THE DISPLAY (#1914, the owner
-        // 2026-10-31): the post played on behind the sheet at every height.
-        // Under the collapsed sheet it plays on, its sound with it — the
-        // sheet is about that sound (#1148); under the expanded one it
-        // pauses, and plays again when the sheet collapses or goes.
-        sheet.onExpandedChange = { [weak self] expanded in
-            self?.viewportShare.report(expanded ? 0 : 1)
-        }
+        // The expanded sheet pauses the post, and its collapse or its going
+        // plays it again: the sheet declares itself a cover (#1970), and
+        // `viewportShare` hears it — nothing to wire here.
         sheet.onSelectPost = { [weak self] id in self?.showPost(id) }
         sheet.openFeedHero = openFeedHero
         sheet.galleryPost = galleryPost
