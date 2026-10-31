@@ -150,7 +150,7 @@ final class SearchFilterSheetViewController: UIViewController {
         )
         let done = UIBarButtonItem(
             title: "Done",
-            primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) }
+            primaryAction: UIAction { [weak self] _ in self?.closePresentation() }
         )
         // `.prominent` (iOS 26's rename of `.done`) gives the affirmative its
         // filled accent capsule — the same weight the map's filter sheet gives
@@ -252,7 +252,7 @@ final class SearchFilterSheetViewController: UIViewController {
     /// sheet exists to avoid.
     private func revertAndDismiss() {
         revertForTesting()
-        dismiss(animated: true)
+        closePresentation()
     }
 
     /// Turns the sheet's drag-to-dismiss off while a segment is being touched.

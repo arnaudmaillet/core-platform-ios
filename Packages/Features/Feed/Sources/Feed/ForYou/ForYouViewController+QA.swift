@@ -271,7 +271,7 @@ extension ForYouViewController {
                             guard let self, let nav = self.navigationController else { return false }
                             return nav.topViewController !== self.stackScreen && nav.transitionCoordinator == nil
                         }) { [weak self] in
-                            self?.navigationController?.popViewController(animated: true)
+                            self?.navigationController?.topViewController?.closeScreen()
                             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                                 QAWait.until("-zoom-repeat round \(round) reopen", { [weak self] in
                                     guard let self, let nav = self.navigationController else { return false }
@@ -406,7 +406,7 @@ extension ForYouViewController {
                     && nav.transitionCoordinator == nil
             }) { [weak self] in
                 print("[qa] -foryou-demo-close: popping the feed")
-                self?.navigationController?.popViewController(animated: true)
+                self?.navigationController?.topViewController?.closeScreen()
             }
         }
     }

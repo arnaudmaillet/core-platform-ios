@@ -483,7 +483,7 @@ extension FamilyAndTeensViewController {
         let model = SupervisionAcceptModel(manager: supervisionList.manager, code: code, viewerRole: viewerRole)
         let accept = SupervisionAcceptViewController(model: model) { [weak self] accept, link in
             self?.supervisionList?.accepted(link)
-            accept.navigationController?.popViewController(animated: true)
+            accept.closeScreen()
             if let self { Feedback.success(SupervisionCopy.linkedToast(link), from: self) }
         }
         navigationController?.pushViewController(accept, animated: true)
@@ -497,7 +497,7 @@ extension FamilyAndTeensViewController {
             supervision: link, list: supervisionList, overviewing: supervisionList.manager as? any SupervisionOverviewing,
             imagePipeline: imagePipeline, router: router
         ) { [weak self] detail, ended, wasGone in
-            detail.navigationController?.popViewController(animated: true)
+            detail.closeScreen()
             guard let self else { return }
             if wasGone {
                 // The other side ended it first, or the teen turned 18.

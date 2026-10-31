@@ -567,7 +567,7 @@ extension MainTabCoordinator {
             // In the window, as a screen firing a toast is.
             stack.view.layoutIfNeeded()
             Feedback.success("Still here after the pop", from: pushed)
-            stack.popViewController(animated: false)
+            pushed.closeScreen(animated: false)
             return
         }
         let names: [ToastPosition: String] = [

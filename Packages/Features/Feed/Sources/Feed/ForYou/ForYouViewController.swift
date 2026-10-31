@@ -1661,14 +1661,15 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             #endif
         }
         // Accessing `view` loads it so the grab-to-dismiss pan can attach.
-        transition.attachInteractiveDismissal(to: feed.view) { [weak self] in
+        transition.attachInteractiveDismissal(to: feed.view) { [weak feed] in
             // ⚠️ THE BAR IS NOT PUT BACK HERE any more. Grab-begin used to
             // restore its hidden STATE at alpha 0 — outside the transition,
             // where it paints — and show it at the landing. A grab is a
             // question until it is released: `viewWillAppear` (which UIKit runs
             // inside the pop below) hands the bar to `TabBarRevealPolicy`, and
             // UIKit shows it when the release commits. A cancel never raises it.
-            self?.navigationController?.popViewController(animated: true)
+            // The FEED is what leaves (#1144), never whatever is on top.
+            feed?.closeScreen(whenBusy: .drop)
         }
         session.takeDelegateSlot()
         // Pay the destination's first layout and raster HERE: in the tap's
@@ -1754,9 +1755,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 QAWait.fail("-foryou-demo-grab",
                             "overridden by -foryou-demo-tapback; the two are exclusive, pass one")
             }
-            transition.onDestinationShown = { [weak navigationController] in
+            transition.onDestinationShown = { [weak feed] in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    navigationController?.popViewController(animated: true)
+                    feed?.closeScreen()
                 }
             }
         }
@@ -1840,10 +1841,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             }
         }
         #endif
-        transition.attachInteractiveDismissal(to: feed.view) { [weak self] in
+        transition.attachInteractiveDismissal(to: feed.view) { [weak feed] in
             // The same bar rule the flight path states: nothing at the begin,
             // UIKit shows it when the release commits.
-            self?.navigationController?.popViewController(animated: true)
+            feed?.closeScreen(whenBusy: .drop)
         }
         return source
     }

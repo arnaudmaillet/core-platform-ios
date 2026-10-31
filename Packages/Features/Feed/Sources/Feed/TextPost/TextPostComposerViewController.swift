@@ -388,7 +388,7 @@ final class TextPostComposerViewController: UIViewController {
 
     private func close() {
         view.endEditing(true)
-        dismiss(animated: true)
+        closePresentation()
     }
 
     // MARK: - Drafts

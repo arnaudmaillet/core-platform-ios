@@ -1,6 +1,7 @@
 import Testing
 import UIKit
 @testable import CoreNavigation
+import DesignSystem
 
 /// One close, one screen (#1144): a close names its screen, closes it only,
 /// and never twice.
@@ -79,5 +80,61 @@ struct StackArbiterTests {
         // Not presented (cancelled, swiped down): nothing happens.
         presenter.dismiss(presented: picker, animated: false)
         #expect(window.rootViewController?.presentedViewController === presenter, "the presenter stays")
+    }
+
+    private func shownWindow() -> UIWindow {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = UIViewController()
+        window.isHidden = false
+        return window
+    }
+
+    /// A screen inside a sheet's stack closes the SHEET, through the one
+    /// that presented it. (A package test host never completes a modal, so
+    /// only the synchronous answer is checked — see the
+    /// `test-host-modal-never-completes` note.)
+    @Test func aScreenInASheetClosesTheSheet() {
+        let window = shownWindow()
+        defer { window.isHidden = true }
+        let root = window.rootViewController!
+        let content = UIViewController()
+        let sheet = UINavigationController(rootViewController: content)
+        root.present(sheet, animated: false)
+        #expect(content.closePresentation(animated: false))
+    }
+
+    /// A screen in no presentation — a tab's own stack, a sheet already gone
+    /// — closes nothing, where `dismiss(animated:)` would have closed what
+    /// the screen's ancestor presents.
+    @Test func aScreenInNoPresentationClosesNothing() {
+        let window = shownWindow()
+        defer { window.isHidden = true }
+        let root = window.rootViewController!
+        let next = UIViewController()
+        root.present(next, animated: false)
+        let gone = UIViewController()
+        #expect(!gone.closePresentation(animated: false))
+        #expect(gone.closeScreen(animated: false) == .alreadyGone)
+        #expect(root.presentedViewController === next, "the sheet opened since stays")
+    }
+
+    /// A gesture closes now or not at all: behind a running transition it is
+    /// dropped, where a tap is asked again once the transition ends.
+    @Test func aGestureIsDroppedBehindARunningTransition() async {
+        let (navigation, screens) = stack(2)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = navigation
+        window.isHidden = false
+        defer { window.isHidden = true }
+        window.layoutIfNeeded()
+        let pushed = UIViewController()
+        navigation.pushViewController(pushed, animated: true)
+        for _ in 0..<100 where navigation.transitionCoordinator == nil {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(navigation.transitionCoordinator != nil, "the push is running")
+        #expect(pushed.closeScreen(whenBusy: .drop) == .dropped)
+        #expect(pushed.closeScreen() == .deferred)
+        #expect(navigation.viewControllers == screens + [pushed], "nothing closed yet")
     }
 }

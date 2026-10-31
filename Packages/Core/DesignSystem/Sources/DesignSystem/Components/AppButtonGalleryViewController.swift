@@ -47,7 +47,7 @@ public final class AppButtonGalleryViewController: UIViewController {
             column.trailingAnchor.constraint(lessThanOrEqualTo: scroll.frameLayoutGuide.trailingAnchor, constant: -Spacing.lg),
         ])
         navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
-            self?.dismiss(animated: true)
+            self?.closePresentation()
         })
         buildMotion()
         buildAspects()

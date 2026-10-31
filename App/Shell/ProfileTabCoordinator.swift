@@ -33,7 +33,7 @@ final class ProfileTabCoordinator: TabCoordinator {
     /// the screen it was pushed from. The own profile states `.never`, and so
     /// does every screen Settings pushes.
     let navigationController: UINavigationController = {
-        let navigation = ChevronBackNavigationController()
+        let navigation = ArbitratedNavigationController()
         navigation.navigationBar.prefersLargeTitles = true
         return navigation
     }()

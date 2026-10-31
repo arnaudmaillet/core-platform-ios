@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// The clear root of a navigation stack a feed is pushed onto from INSIDE A
@@ -60,6 +61,6 @@ public final class OverSheetFeedHost: UIViewController {
         guard hasShownFeed else { return }
         let finished = onFinished
         onFinished = nil
-        navigationController?.presentingViewController?.dismiss(animated: false) { finished?() }
+        closePresentation(animated: false) { finished?() }
     }
 }

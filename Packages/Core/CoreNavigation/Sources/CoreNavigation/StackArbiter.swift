@@ -1,3 +1,4 @@
+import DesignSystem
 import ObjectiveC
 import UIKit
 
@@ -41,6 +42,15 @@ public final class StackArbiter {
         case deferred
     }
 
+    /// What a close does when a transition is running.
+    public enum WhenBusy: Sendable {
+        /// Asked again once it ends, if the screen is still there: a tap.
+        case retry
+        /// Nothing (`.dropped`): a gesture, which closes now or not at all —
+        /// a grab begun during a transition must not pop after its release.
+        case drop
+    }
+
     private weak var navigationController: UINavigationController?
 
     /// A close this arbiter issued and that has not landed yet.
@@ -52,7 +62,7 @@ public final class StackArbiter {
 
     /// Closes `screen`, and only it.
     @discardableResult
-    public func close(_ screen: UIViewController, animated: Bool = true) -> CloseResult {
+    public func close(_ screen: UIViewController, animated: Bool = true, whenBusy: WhenBusy = .retry) -> CloseResult {
         guard let navigation = navigationController,
               let index = navigation.viewControllers.firstIndex(where: { $0 === screen }), index > 0 else {
             return .alreadyGone
@@ -60,6 +70,7 @@ public final class StackArbiter {
         guard !isPending else { return .dropped }
         let isTop = index == navigation.viewControllers.count - 1
         if isTop, let running = navigation.transitionCoordinator {
+            guard whenBusy == .retry else { return .dropped }
             // The viewer's own back swipe, or a push still landing: asked again
             // once it has, only if the screen is still there.
             running.animate(alongsideTransition: nil) { [weak self, weak screen] _ in
@@ -120,25 +131,10 @@ public extension UIViewController {
     /// arbiter, or — the root of a presentation — dismissed, only while it is
     /// still the one presented. Nothing happens when it has already gone.
     @discardableResult
-    func closeScreen(animated: Bool = true) -> StackArbiter.CloseResult {
+    func closeScreen(animated: Bool = true, whenBusy: StackArbiter.WhenBusy = .retry) -> StackArbiter.CloseResult {
         if let navigation = navigationController, navigation.viewControllers.first !== self {
-            return navigation.arbiter.close(self, animated: animated)
+            return navigation.arbiter.close(self, animated: animated, whenBusy: whenBusy)
         }
-        let presented = navigationController ?? self
-        guard let presenter = presented.presentingViewController,
-              presenter.presentedViewController === presented, !presented.isBeingDismissed else {
-            return .alreadyGone
-        }
-        presenter.dismiss(animated: animated)
-        return .closed
-    }
-
-    /// Dismisses `presented` only while it is the one this controller
-    /// presents (#1144). ⚠️ `dismiss` on a controller presenting nothing
-    /// dismisses that controller itself — a picker's late completion once
-    /// closed the conversation that presented it.
-    func dismiss(presented: UIViewController, animated: Bool = true) {
-        guard presentedViewController === presented, !presented.isBeingDismissed else { return }
-        dismiss(animated: animated)
+        return closePresentation(animated: animated) ? .closed : .alreadyGone
     }
 }

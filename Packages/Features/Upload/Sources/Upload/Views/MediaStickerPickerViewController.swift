@@ -225,7 +225,7 @@ final class MediaStickerPickerViewController: UIViewController {
         case .emoji: content = .emoji(id)
         }
         onPick?(content)
-        dismiss(animated: true)
+        closePresentation()
     }
 
     // MARK: - Cells

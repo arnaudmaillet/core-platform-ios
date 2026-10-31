@@ -67,7 +67,7 @@ public enum StakeShop {
         }
         guard let stack = navigation(in: context) else { return nil }
         if let covering = context.presentedViewController, !covering.isBeingDismissed {
-            context.dismiss(animated: true) { stack.pushViewController(shop, animated: true) }
+            context.dismiss(presented: covering) { stack.pushViewController(shop, animated: true) }
         } else {
             stack.pushViewController(shop, animated: true)
         }

@@ -650,7 +650,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // so the pan has something to attach to.
         transition.attachInteractiveDismissal(
             to: destination.view, axes: [.horizontal, .vertical]
-        ) { [weak nav, weak transition, weak session] in
+        ) { [weak nav, weak transition, weak session, weak destination] in
             // ⚠️ NOT WHILE A CARD CLOSE HOLDS THE SLOT. It forwards a `.hero`
             // pop to this flight already, and taking the slot from it was
             // permanent: after a cancelled grab, paging to a text post and
@@ -664,7 +664,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // the bar's state back at alpha 0 and the landing showed it. The
             // feed brings it back itself, through UIKit, once its close is
             // committed — see `SnapFeedViewController.revealDockForClose`.
-            nav?.popViewController(animated: true)
+            // The post is what leaves (#1144), never whatever is on top.
+            destination?.closeScreen(whenBusy: .drop)
         }
         #if DEBUG
         // `-zoom-live-log`: the grab is invisible until a finger arrives, and

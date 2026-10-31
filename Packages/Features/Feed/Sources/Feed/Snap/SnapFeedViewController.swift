@@ -869,14 +869,16 @@ final class SnapFeedViewController: UIViewController {
         // mid-transition, silently, but everything before it here already ran:
         // the dock rose for a close that never happened (and stayed over the
         // feed when it was the present still landing), and the owner restaged
-        // for it. The chevron is simply not live until the stack is at rest.
-        if let nav = navigationController, nav.isTransitioningItsStack { return }
+        // for it. The chevron is simply not live until the stack is at rest —
+        // nor while the arbiter's own close of it is landing: a double tap's
+        // second half, a turn before any coordinator exists (#1144).
+        if let nav = navigationController, nav.isTransitioningItsStack || nav.arbiter.isPending { return }
         onWillCloseFeed?()
         if let nav = navigationController, nav.viewControllers.first !== self {
             revealDockBeforePop(on: nav)
-            nav.popViewController(animated: true)
+            nav.arbiter.close(self)
         } else {
-            dismiss(animated: true)
+            closePresentation()
         }
     }
 

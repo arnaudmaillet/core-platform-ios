@@ -432,7 +432,7 @@ final class ProfileRelationshipsViewController: UIViewController {
         // anchored to its own appearance, so the pop transition is recordable.
         if arguments.contains("-profile-relationships-pop") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.navigationController?.popViewController(animated: true)
+                self?.closeScreen()
             }
         }
         #endif

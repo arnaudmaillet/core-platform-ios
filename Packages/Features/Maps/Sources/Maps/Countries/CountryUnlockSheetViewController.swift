@@ -113,7 +113,7 @@ final class CountryUnlockSheetViewController: UIViewController {
         // ✕ top-RIGHT, the sound sheet's side (the owner, 2026-10-22: it was
         // left in #1600, "la croix … doit être à droite").
         let close = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
-            (self?.navigationController ?? self)?.dismiss(animated: true)
+            self?.closePresentation()
         })
         close.accessibilityIdentifier = "countryUnlock.close"
         close.identifier = "countryUnlock.close"
@@ -321,7 +321,7 @@ final class CountryUnlockSheetViewController: UIViewController {
             Haptics.play(.success)
             let code = country.code
             let unlocked = onUnlocked
-            dismiss(animated: true) { unlocked?(code) }
+            closePresentation { unlocked?(code) }
         case .insufficientGems(let needed, _):
             Haptics.play(.error)
             refreshBalance(price: needed)
@@ -332,7 +332,7 @@ final class CountryUnlockSheetViewController: UIViewController {
         case .failed:
             Feedback.failure(ShopPurchaseFeedback.unreachable, from: self)
         case .unknownCountry:
-            dismiss(animated: true)
+            closePresentation()
         }
     }
 

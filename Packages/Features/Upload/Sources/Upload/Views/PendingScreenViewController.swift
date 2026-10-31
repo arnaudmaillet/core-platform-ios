@@ -18,7 +18,7 @@ final class PendingScreenViewController: UIViewController {
         guard showsClose else { return }
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             systemItem: .close,
-            primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) }
+            primaryAction: UIAction { [weak self] _ in self?.closePresentation() }
         )
         navigationItem.leftBarButtonItem?.identifier = "upload.pending.close"
     }

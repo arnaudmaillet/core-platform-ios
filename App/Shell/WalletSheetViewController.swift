@@ -529,7 +529,7 @@ final class WalletSheetViewController: UIViewController {
         navigationItem.subtitleView = titleGauge
         navigationItem.largeTitleDisplayMode = .never
         let close = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
-            self?.dismiss(animated: true)
+            self?.closePresentation()
         })
         close.identifier = Self.closeItemIdentifier
         close.accessibilityIdentifier = Self.closeItemIdentifier

@@ -1,3 +1,4 @@
+import CoreNavigation
 import DesignSystem
 import UIKit
 
@@ -345,7 +346,10 @@ final class MediaPickerViewController: UIViewController {
     /// is confirmed before it goes — full screen, there is no drag to stop
     /// at, and Cancel is the only way out.
     func cancel() {
-        guard !selection.isEmpty else { return dismiss(animated: true) }
+        guard !selection.isEmpty else {
+            closePresentation()
+            return
+        }
         let count = selection.count
         let alert = UIAlertController(
             title: count == 1 ? "Discard 1 item?" : "Discard \(count) items?",
@@ -353,7 +357,7 @@ final class MediaPickerViewController: UIViewController {
         )
         alert.addAction(UIAlertAction(title: "Keep Editing", style: .cancel))
         alert.addAction(UIAlertAction(title: "Discard", style: .destructive) { [weak self] _ in
-            self?.dismiss(animated: true)
+            self?.closePresentation()
         })
         present(alert, animated: true)
     }
@@ -1034,8 +1038,8 @@ extension MediaPickerViewController {
                         guard let nav, let editor else { return false }
                         return nav.topViewController === editor && nav.transitionCoordinator == nil
                             && editor.viewIfLoaded?.window != nil
-                    }) { [weak nav] in
-                        nav?.popViewController(animated: true)
+                    }) { [weak editor] in
+                        editor?.closeScreen()
                     }
                 }
             } else {
