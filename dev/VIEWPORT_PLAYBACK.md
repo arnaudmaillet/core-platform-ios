@@ -61,9 +61,14 @@ override func viewWillDisappear(_ animated: Bool) {
 - **`.now`:** there is no transition to follow, for example a tab switch. The disappearance has already reported 0. The appearance leaves the start where the host always put it.
 - **`.flight`:** a post opened from the screen, flying into a zoom destination. The flight carries the tapped tile's player, and the host keeps its own rule.
 
-**Adopted by:** Shots (`SnapFeedViewController`, with the sound fade), the For You grid, the notifications drawer (as a source), the place page, the profile and its media gallery, the Popular list, Discover's gallery, the search results and the hashtag screens. On a hero page (the profile, the place page), the banner's muted loop follows the same share through `HeroPageViewController.viewportAllowsBanner`. It still plays through the start of a departure (#1399), up to half.
+**Adopted by:** Shots (`SnapFeedViewController`, with the sound fade), the For You grid, the notifications drawer (as a source), the place page, the profile and its media gallery, the Popular list, Discover's gallery, the search results, the hashtag screens and the sound sheet. On a hero page (the profile, the place page), the banner's muted loop follows the same share through `HeroPageViewController.viewportAllowsBanner`. It still plays through the start of a departure (#1399), up to half.
 
-**Not yet:** a screen inside a sheet (the sound sheet's gallery). A sheet at a medium detent can hold less than half of the display while it is the whole of what the viewer reads, so its share needs to be measured against the sheet, not the display.
+## Sheets
+
+A sheet at its collapsed detent can hold less than half of the display while it is all the viewer reads. So:
+- **The screens inside a sheet take their half of the SHEET** (`ViewportShare.reference` names the sheet's container). The sound sheet's tiles play through the sheet's rise and fall, and a section pushed inside the sheet starts at half of the sheet.
+- **The screen behind a sheet follows the sheet's STATE, not a share of the display** (the owner's call, 2026-10-31). The post behind the sound sheet plays under the collapsed sheet and pauses under the expanded one (`SoundSheetViewController.onExpandedChange`).
+- **The sound sheet's record is the sheet's own track.** Two tracks, the sheet's and the post's: playing one pauses the other. The record's preview covers the post (`onCoverChanged`), and the post played again stops the preview.
 
 ## Shared players: a paused surface holds a still (MediaPlayback)
 
