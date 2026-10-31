@@ -40,7 +40,7 @@ final class NotificationsDrawer {
     ///     the router onto the TAB stacks, never onto this one.
     init(tabBarController: UITabBarController, list: UIViewController) {
         self.tabBarController = tabBarController
-        let navigation = ChevronBackNavigationController(rootViewController: list)
+        let navigation = ArbitratedNavigationController(rootViewController: list)
         navigation.navigationBar.prefersLargeTitles = true
         // The blur at the foot of the screen the tab stacks wear (#1002),
         // on the drawer's own stack too (#1576): over its screens, under its

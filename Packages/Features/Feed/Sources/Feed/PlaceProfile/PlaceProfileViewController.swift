@@ -369,8 +369,8 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
             // Announcing a staging would tell the page a flight is arriving
             // that never does (see `ZoomTransitionController.init`).
             let transition = ZoomTransitionController(source: source, destination: self, presents: false)
-            transition.attachInteractiveDismissal(to: view, axes: [.horizontal]) { [weak nav] in
-                nav?.popViewController(animated: true)
+            transition.attachInteractiveDismissal(to: view, axes: [.horizontal]) { [weak self] in
+                self?.closeScreen(whenBusy: .drop)
             }
             transition.onSourceReturned = { [weak transition, weak nav] in
                 // Landed on the map: the flow is over, and its lease ends,

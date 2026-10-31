@@ -398,7 +398,7 @@ final class CaptureViewController: UIViewController {
 
     private func close() {
         isClosing = true
-        dismiss(animated: true)
+        closePresentation()
     }
 
     /// The toolbar's close button — what Cancel was, and it asks what Cancel

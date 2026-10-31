@@ -10,11 +10,13 @@ import UIKit
 ///
 /// No delegate: a navigation delegate costs bar-hiding screens their
 /// full-surface back swipe (see `NativePopGestureEnabler`), so the marking
-/// rides the push and set calls instead.
+/// rides the push and set calls instead — through `screenJoins(_:)`, which a
+/// subclass extends (CoreNavigation's `ArbitratedNavigationController` gives
+/// each screen's back button to the stack's arbiter, #1144).
 open class ChevronBackNavigationController: UINavigationController {
     override public init(rootViewController: UIViewController) {
         super.init(rootViewController: rootViewController)
-        Self.markChevronOnly(rootViewController)
+        screenJoins(rootViewController)
     }
 
     override public init(nibName nibNameOrNil: String?, bundle nibBundleOrNil: Bundle?) {
@@ -29,18 +31,23 @@ open class ChevronBackNavigationController: UINavigationController {
     public required init?(coder aDecoder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override open func pushViewController(_ viewController: UIViewController, animated: Bool) {
-        topViewController.map(Self.markChevronOnly)
-        Self.markChevronOnly(viewController)
+        topViewController.map(screenJoins)
+        screenJoins(viewController)
         super.pushViewController(viewController, animated: animated)
     }
 
     override open var viewControllers: [UIViewController] {
-        didSet { viewControllers.forEach(Self.markChevronOnly) }
+        didSet { viewControllers.forEach(screenJoins) }
     }
 
     override open func setViewControllers(_ viewControllers: [UIViewController], animated: Bool) {
-        viewControllers.forEach(Self.markChevronOnly)
+        viewControllers.forEach(screenJoins)
         super.setViewControllers(viewControllers, animated: animated)
+    }
+
+    /// Every screen, as it joins the stack (and again when it is re-set).
+    open func screenJoins(_ viewController: UIViewController) {
+        Self.markChevronOnly(viewController)
     }
 
     /// The back button `viewController` lends the screen pushed over it:

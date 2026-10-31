@@ -1,3 +1,4 @@
+import CoreNavigation
 import CoreNetworking
 import DesignSystem
 import UIKit
@@ -272,6 +273,6 @@ extension SecurityCheckupViewController: UICollectionViewDelegate {
             retry(item.id == "account" ? .account : .sessions)
             return
         }
-        navigationController?.popViewController(animated: true)
+        closeScreen()
     }
 }

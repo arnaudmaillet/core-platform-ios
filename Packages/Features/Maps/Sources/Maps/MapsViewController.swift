@@ -1078,7 +1078,7 @@ final class MapsViewController: UIViewController {
         #if DEBUG
         OfferLog.note("close requested returning=\(returning)")
         #endif
-        offerSheet.dismiss(animated: true)
+        offerSheet.closePresentation()
     }
 
     /// The offer is closing — by a tap or a pan on the map, a swipe on its
@@ -3372,7 +3372,7 @@ extension MapsViewController: MKMapViewDelegate {
                               + " stack=\(nav?.viewControllers.map { "\(type(of: $0))" } ?? [])")
                     }
                     #endif
-                    nav?.popViewController(animated: true)
+                    feedVC?.closeScreen(whenBusy: .drop)
                 }
             }
             // Its landing is the session's `.toIntermediate` ending (below).
@@ -3499,22 +3499,22 @@ extension MapsViewController: MKMapViewDelegate {
             _ = clusterGallery
             // Right, and up past the end of the list (#761): both to the map.
             transition.attachInteractiveDismissal(to: feedVC.view, axes: [.horizontal, .upward]) {
-                [weak nav] in
+                [weak feedVC] in
                 // The bottom chrome comes back from `viewWillAppear`, which
                 // this pop runs — see the pin grab below.
-                nav?.popViewController(animated: true)
+                feedVC?.closeScreen(whenBusy: .drop)
             }
         } else {
             // Case A (single pin / generic cluster): both axes fly home to
             // the pin.
-            transition.attachInteractiveDismissal(to: feedVC.view) { [weak nav] in
+            transition.attachInteractiveDismissal(to: feedVC.view) { [weak feedVC] in
                 // ⚠️ NOTHING ABOUT THE DOCK AT GRAB-BEGIN any more. It used to
                 // put the bar's state back here at alpha 0 and show it at the
                 // landing. A grab is a question until it is released: the pop
                 // below runs this screen's `viewWillAppear`, which restores the
                 // filter bars and hands the dock to `TabBarRevealPolicy` —
                 // UIKit shows it when the release commits.
-                nav?.popViewController(animated: true)
+                feedVC?.closeScreen(whenBusy: .drop)
             }
         }
         // Map is covered by the feed → stop its previews, except the tapped

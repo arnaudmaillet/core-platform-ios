@@ -19,7 +19,7 @@ final class MessagesTabCoordinator: TabCoordinator, GlyphTab {
         onUnreadChange?()
     }
     var childCoordinators: [Coordinator] = []
-    let navigationController: UINavigationController = ChevronBackNavigationController()
+    let navigationController: UINavigationController = ArbitratedNavigationController()
 
     private let container: AppContainer
     /// The shell's bell, minted into this header's leading edge.

@@ -522,8 +522,9 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             // just landed.
             // From what presented it: the sheet may itself be presenting the
             // form's own sheet (#1908), and `dismiss` on a presenter closes
-            // only what it presented.
-            (sheet.presentingViewController ?? sheet).dismiss(animated: true) { [weak self] in
+            // only what it presented: `closePresentation` asks the sheet's own
+            // presenter, which closes the form's sheet with it.
+            sheet.closePresentation { [weak self] in
                 // The screen on top of the active tab: its safe area clears the
                 // tab bar, which the shell's own view does not.
                 guard let screen = self?.mainTabCoordinator?.activeNavigationController?.topViewController
@@ -707,7 +708,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         if let index = arguments.firstIndex(of: "-auto-pop") {
             let delay = arguments.dropFirst(index + 1).first.flatMap(Double.init) ?? 2.5
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak tabCoordinator] in
-                tabCoordinator?.activeNavigationController?.popViewController(animated: true)
+                tabCoordinator?.activeNavigationController?.topViewController?.closeScreen()
             }
         }
         #endif

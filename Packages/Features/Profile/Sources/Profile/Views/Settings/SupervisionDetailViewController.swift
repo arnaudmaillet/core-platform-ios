@@ -319,7 +319,7 @@ final class SupervisionDetailViewController: UIViewController {
     func openLimitsEditor() {
         guard let overview, overview.canEditLimits, overview.overview != nil else { return }
         let editor = SupervisionLimitsViewController(model: overview, teenName: supervision.name) { [weak self] editor in
-            editor.navigationController?.popViewController(animated: true)
+            editor.closeScreen()
             if let self { Feedback.success(SupervisionCopy.limitsSaved, from: self) }
         }
         navigationController?.pushViewController(editor, animated: true)

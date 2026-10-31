@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import CoreStorage
 import DesignSystem
 import MediaCore
@@ -524,7 +525,7 @@ final class SearchViewController: UIViewController {
         // unanimated for the reason the push is: `animated: false` plus the
         // container's dissolve is the whole transition. See `crossDissolve`.
         navigationController?.crossDissolve { [weak self] in
-            self?.navigationController?.popViewController(animated: false)
+            self?.closeScreen(animated: false)
         }
     }
 
@@ -575,7 +576,7 @@ final class SearchViewController: UIViewController {
             //
             // A CUT, not merely unanimated — see `UINavigationController.cut`.
             navigationController?.cut { [weak self] in
-                self?.navigationController?.popViewController(animated: false)
+                self?.closeScreen(animated: false)
             }
         }
     }

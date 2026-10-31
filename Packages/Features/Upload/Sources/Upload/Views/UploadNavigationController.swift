@@ -1,3 +1,4 @@
+import CoreNavigation
 import UIKit
 
 /// The upload flow's stack, with its back-swipe held to the window's leading
@@ -76,6 +77,8 @@ final class UploadNavigationController: UINavigationController {
     /// ⚠️ RE-APPLIED AS THE STACK CHANGES. UIKit re-arms its transition gestures
     /// around pushes, so a delegate taken once at load is not enough.
     override func pushViewController(_ viewController: UIViewController, animated: Bool) {
+        // Its back button closes it, once (#1144) — see `ArbitratedNavigationController`.
+        StackArbiter.adoptBackButton(of: viewController)
         super.pushViewController(viewController, animated: animated)
         holdTheBackSwipeToTheEdge()
     }

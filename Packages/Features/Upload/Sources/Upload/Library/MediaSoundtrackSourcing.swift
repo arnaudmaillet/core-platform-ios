@@ -1,3 +1,4 @@
+import DesignSystem
 import PhotosUI
 import UIKit
 import UniformTypeIdentifiers
@@ -156,7 +157,7 @@ final class SystemSoundtrackSource: MediaSoundtrackSourcing {
         /// compiles cleanly. Only the copy's URL crosses back; the provider, which
         /// is not `Sendable`, never leaves this method.
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-            picker.dismiss(animated: true)
+            picker.closePresentation()
             guard let answer = take() else { return }
             guard let provider = results.first?.itemProvider else { return answer(.cancelled) }
             let movie = UTType.movie.identifier

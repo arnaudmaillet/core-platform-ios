@@ -167,7 +167,7 @@ final class ToastMessageSheet: UIViewController {
 
     private func close() {
         guard presented.presentingViewController != nil else { return gone() }
-        presented.dismiss(animated: true)
+        closePresentation()
     }
 
     private func act() {
@@ -180,7 +180,7 @@ final class ToastMessageSheet: UIViewController {
             action?()
             return
         }
-        presented.dismiss(animated: true) { action?() }
+        closePresentation { action?() }
     }
 
     private func gone() {

@@ -826,8 +826,8 @@ extension MainTabCoordinator: AppNavigating {
         #endif
         // Tab-owning routes mean "take me there": anything presented over the
         // shell would keep covering the destination, so dismiss it first.
-        if tabBarController.presentedViewController != nil {
-            tabBarController.dismiss(animated: true)
+        if let covering = tabBarController.presentedViewController {
+            tabBarController.dismiss(presented: covering)
         }
         tabBarController.selectedTab = match.1.tab
         applyTabBarStyle()
@@ -847,8 +847,8 @@ extension MainTabCoordinator: AppNavigating {
         // payload: anything presented over the shell would cover the pushed
         // timeline, so dismiss it first, then push onto the selected tab's
         // stack. No tab switch: back returns exactly to where the user was.
-        if tabBarController.presentedViewController != nil {
-            tabBarController.dismiss(animated: true)
+        if let covering = tabBarController.presentedViewController {
+            tabBarController.dismiss(presented: covering)
         }
         guard let navigationController = tabBarController.selectedViewController as? UINavigationController else { return }
         feedFlow?.push(on: navigationController)

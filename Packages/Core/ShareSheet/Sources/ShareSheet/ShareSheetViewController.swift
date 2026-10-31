@@ -918,7 +918,7 @@ public final class ShareSheetViewController: UIViewController {
             scale: traitCollection.displayScale
         )
         let card = card
-        dismiss(animated: true) { [onSystemShare] in
+        closePresentation { [onSystemShare] in
             onSystemShare?(card, image)
         }
     }
@@ -927,7 +927,7 @@ public final class ShareSheetViewController: UIViewController {
     /// stack this sheet is covering, so the sheet has to be gone first.
     private func send(to target: ShareTarget) {
         let card = card
-        dismiss(animated: true) { [onSendToTarget] in
+        closePresentation { [onSendToTarget] in
             onSendToTarget?(target, card)
         }
     }
@@ -936,7 +936,7 @@ public final class ShareSheetViewController: UIViewController {
     /// it leaves (`dismissesSheet`).
     private func perform(_ action: ShareSheetAction) {
         guard action.dismissesSheet else { return action.handler() }
-        dismiss(animated: true) { action.handler() }
+        closePresentation { action.handler() }
     }
 
     private func copyLink() {

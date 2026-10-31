@@ -1478,11 +1478,11 @@ final class NewPostViewController: UIViewController {
         let confirm = {
             copyFailed ? Self.reportCopyFailure(on: presenter) : Self.confirmPublished(on: presenter)
         }
-        guard presentingViewController != nil else {
+        // Already leaving (a second landing): said at once, closed once.
+        guard presentingViewController != nil, closePresentation(completion: confirm) else {
             confirm()
             return
         }
-        presenter.dismiss(animated: true, completion: confirm)
     }
 
     /// What the author is told when the post is up but its copy is not, and

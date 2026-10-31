@@ -1636,7 +1636,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// standing, but it can't get here: own profiles can't be blocked.
     private func leaveAfterBlock() {
         // An open menu-spawned alert would otherwise ride out the pop.
-        presentedViewController?.dismiss(animated: false)
+        if let alert = presentedViewController { dismiss(presented: alert, animated: false) }
         // THIS profile, wherever it is now (#1144): the block answered after
         // an `await`, and the viewer may have gone back or pushed on since —
         // a plain pop would have closed that other screen.

@@ -1,3 +1,4 @@
+import CoreNavigation
 import DesignSystem
 import UIKit
 
@@ -222,7 +223,7 @@ final class EditFieldViewController: UIViewController {
         guard saveButton.isEnabled else { return }
         view.endEditing(true)
         config.onSave(currentText.trimmingCharacters(in: .whitespacesAndNewlines))
-        navigationController?.popViewController(animated: true)
+        closeScreen()
     }
 }
 
