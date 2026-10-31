@@ -729,9 +729,10 @@ final class AppContainer {
 
     // MARK: - Wallet
 
-    /// The viewer's point wallet — the client-side mock behind the currency
-    /// badge, the claim sheet, and every boost button
-    /// (`BACKEND_VIRTUAL_CURRENCY.md` is the ask for the real service).
+    /// The viewer's wallet behind the currency badge, the claim sheet and
+    /// every boost button: a member's is `wallet.v1`'s
+    /// (`BACKEND_VIRTUAL_CURRENCY.md`, what the app binds to); a guest's
+    /// stays on the device.
     /// ONE instance, deliberately: `WalletStore`'s change notification is
     /// scoped to the instance that changed, so the map badge only hears
     /// about a feed spend because both surfaces hold this same object.

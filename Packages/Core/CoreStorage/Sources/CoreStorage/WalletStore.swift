@@ -244,9 +244,11 @@ public struct WalletTransactionPage: Equatable, Sendable {
 ///
 /// ⚠️ **SETTLEMENT IS DEFERRED, BY DESIGN** (charter V5.3 §33): a stake is
 /// ACTIVE until `settlesAt`, and only then has an outcome — a reward in gems,
-/// or none. Mock-only today: no service settles anything, so the outcome is
-/// derived here from the target and the amount (`Policy.mockOutcome`) — stable,
-/// so a stake never changes its mind between two readings.
+/// or none. A member's stakes are the server's (`ListMyStakes`, #903), settled
+/// in shadow mode — a verdict, no gems, until backend #890. A store with no
+/// server (package tests) derives the outcome here from the target and the
+/// amount (`Policy.mockOutcome`) — stable, so a stake never changes its mind
+/// between two readings.
 public struct WalletStake: Equatable, Sendable, Identifiable {
     public enum Outcome: Equatable, Sendable {
         /// The stake was judged to have carried information: gems earned.
