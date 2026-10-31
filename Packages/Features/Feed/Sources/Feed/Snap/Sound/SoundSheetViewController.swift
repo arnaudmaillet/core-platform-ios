@@ -220,6 +220,12 @@ final class SoundSheetViewController: UIViewController {
     /// Whether the clip behind should pause: a feed opened from a tile covers
     /// it. NEVER the detent alone, and never the sheet just being open.
     var onCoverChanged: ((Bool) -> Void)?
+
+    /// Told when the sheet settles expanded or collapsed (#1914, the owner
+    /// 2026-10-31): the post behind plays under the collapsed sheet and
+    /// pauses under the expanded one — the sheet's STATE decides, not a
+    /// share of the display.
+    var onExpandedChange: ((Bool) -> Void)?
     /// The record's tap: play or pause the post the sheet opened over.
     var onTogglePlayback: (() -> Void)?
     /// The post's playback, as the record shows it (#1148).
@@ -1972,14 +1978,16 @@ extension SoundSheetViewController: UISheetPresentationControllerDelegate {
     /// the delegate, a programmatic change (`debugExpand`) does not report it
     /// at all. It puts the posts back at their top at collapsed (the Popular
     /// row under the sound, the reveal's line where the fold is), and wakes
-    /// the reveal to follow the sheet's spring; nothing else: the clip behind
-    /// plays on at either.
+    /// the reveal to follow the sheet's spring, and tells the post behind
+    /// (`onExpandedChange`): it plays under the collapsed sheet and pauses
+    /// under the expanded one (#1914).
     fileprivate func detentChanged(to identifier: UISheetPresentationController.Detent.Identifier?) {
         let expanded = Self.isExpanded(identifier)
         guard expanded != isExpanded else { return }
         isExpanded = expanded
         traceSettledHeight(expanded: expanded)
         reveal.wake()
+        onExpandedChange?(expanded)
         guard dataSource != nil, !expanded else { return }
         collectionView.setContentOffset(
             CGPoint(x: collectionView.contentOffset.x, y: -collectionView.adjustedContentInset.top),
