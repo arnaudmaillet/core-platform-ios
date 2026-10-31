@@ -110,13 +110,13 @@ struct SnapPageScrimTests {
         #expect(scrimTop(makeChrome(showsAuthorRow: true)) == scrimTop(makeChrome(showsAuthorRow: true)))
     }
 
-    /// The fade begins clear and eases in, so its edge cannot be seen.
-    @Test func theFadeEasesInFromClear() {
-        let alphas = SnapChromeView.scrimFadeColors.map { $0.cgColor.alpha }
+    /// One progressive ramp: clear at its top, darker at every stop, down to
+    /// the edge's darkness at the screen's bottom — no plateau.
+    @Test func theRampDarkensAllTheWayToTheBottom() {
+        let alphas = SnapChromeView.scrimColors.map { $0.cgColor.alpha }
         #expect(alphas.first == 0)
-        #expect(abs((alphas.last ?? 0) - SnapChromeView.scrimBlockAlpha) < 0.001)
-        #expect(zip(alphas, alphas.dropFirst()).allSatisfy { $0 < $1 })
-        // Ease-in: the first half of the fade carries less than half the darkness.
-        #expect(alphas[2] < SnapChromeView.scrimBlockAlpha / 2)
+        #expect(abs((alphas.last ?? 0) - SnapChromeView.scrimEdgeAlpha) < 0.001)
+        #expect(zip(alphas, alphas.dropFirst()).allSatisfy { $0 < $1 }, "\(alphas)")
+        #expect(SnapChromeView.scrimLocations.first == 0 && SnapChromeView.scrimLocations.last == 1)
     }
 }

@@ -33,34 +33,36 @@ final class SnapChromeView: UIView {
     /// The comment surfaces above the caption no longer get it, by the
     /// owner's decision.
     ///
-    /// Two pieces, both pinned to the block's top so they ride its animated
-    /// frame with no jump: a short eased fade (`scrimFade`), then the darkness
-    /// down to the bottom edge. The flight's replica builds the same
-    /// constraints, so it lands pixel-identical.
-    private let scrimView = UIView()
-    private let scrimFadeView = GradientView(colors: SnapChromeView.scrimFadeColors,
-                                             locations: SnapChromeView.scrimFadeLocations)
-    private let scrimBodyView = GradientView(colors: [
-        UIColor.black.withAlphaComponent(SnapChromeView.scrimBlockAlpha),
-        UIColor.black.withAlphaComponent(SnapChromeView.scrimEdgeAlpha),
-    ])
+    /// ONE progressive ramp, from clear at its top to `scrimEdgeAlpha` at the
+    /// screen's bottom edge, darker all the way down (the owner, 2026-10-31,
+    /// on the device: no fade that stops on a plateau). Its top sits
+    /// `scrimFade` above the caption block and is pinned there, so it rides
+    /// the block's animated frame with no jump; its stops are fractions of
+    /// its height, so they stretch with it. The flight's replica builds the
+    /// same constraints, so it lands pixel-identical.
+    private let scrimView = GradientView(colors: SnapChromeView.scrimColors,
+                                         locations: SnapChromeView.scrimLocations)
 
-    /// How far above the caption block the scrim's fade begins. The card's
-    /// is 36 pt (`PostCardCaptionOverlay`); the page's text is larger.
-    static let scrimFade: CGFloat = 56
-    /// The darkness at the caption block's top, where the fade ends.
-    static let scrimBlockAlpha: CGFloat = 0.5
+    /// How far above the caption block the ramp begins: far enough that the
+    /// caption already sits on a fair part of its darkness. The card's scrim
+    /// starts 36 pt up (`PostCardCaptionOverlay`); the page's text is larger
+    /// and its ramp runs on to the screen's edge.
+    static let scrimFade: CGFloat = 120
     /// The darkness at the bottom edge, under the caption and the toolbar —
     /// what it was before #1983.
     static let scrimEdgeAlpha: CGFloat = 0.75
 
-    /// The fade's stops: clear to `scrimBlockAlpha` on an ease-in curve, so
-    /// its edge cannot be seen.
-    static let scrimFadeLocations: [NSNumber] = [0, 0.25, 0.5, 0.75, 1]
-    static var scrimFadeColors: [UIColor] {
-        scrimFadeLocations.map { location in
+    /// The ramp's stops, from clear to `scrimEdgeAlpha` on an ease-out curve:
+    /// it darkens fastest at its top, so the caption — a third of the way
+    /// down — already sits on about 0.45, and it keeps darkening, ever more
+    /// gently, to the bottom edge. A smoothstep left the caption on 0.26 and
+    /// it read poorly over a bright clip. The top's own slope is spread over
+    /// the whole ramp (about 0.005 a point): no visible edge.
+    static let scrimLocations: [NSNumber] = (0...8).map { NSNumber(value: Double($0) / 8) }
+    static var scrimColors: [UIColor] {
+        scrimLocations.map { location in
             let t = CGFloat(truncating: location)
-            return UIColor.black.withAlphaComponent(scrimBlockAlpha * t * t)
+            return UIColor.black.withAlphaComponent(scrimEdgeAlpha * (1 - (1 - t) * (1 - t)))
         }
     }
 
@@ -519,19 +521,7 @@ final class SnapChromeView: UIView {
             scrimView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
             scrimView.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
         }
-        scrimFadeView.constrain(in: scrimView) { parent in
-            scrimFadeView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-            scrimFadeView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-            scrimFadeView.topAnchor.constraint(equalTo: parent.topAnchor)
-            scrimFadeView.heightAnchor.constraint(equalToConstant: Self.scrimFade)
-        }
-        scrimBodyView.constrain(in: scrimView) { parent in
-            scrimBodyView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-            scrimBodyView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-            scrimBodyView.topAnchor.constraint(equalTo: scrimFadeView.bottomAnchor)
-            scrimBodyView.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-        }
-        // Its top: the caption block's, less the fade (`applyAuthorRowLayout`
+        // Its top: the caption block's, less the lead (`applyAuthorRowLayout`
         // picks the author row's while it shows).
         scrimOverCaption = scrimView.topAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Self.scrimFade)
 
