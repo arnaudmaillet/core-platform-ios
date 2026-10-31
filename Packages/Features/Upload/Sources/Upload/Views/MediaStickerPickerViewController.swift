@@ -327,3 +327,9 @@ extension MediaStickerPickerViewController {
     func debugPick(_ id: String) { pick(id) }
 }
 #endif
+
+/// Medium and large over the media editor (#1970), whose playback is its own
+/// (no clip host's `ViewportShare`): it never pauses one.
+extension MediaStickerPickerViewController: ScreenCovering {
+    var coversScreen: Bool { false }
+}

@@ -742,6 +742,9 @@ public final class ShareSheetViewController: UIViewController {
     private func applySheetMode(searching: Bool) {
         guard let sheet = sheetPresentationController else { return }
         isModalInPresentation = searching
+        // Searching grows it to large, a cover's height (#1970); a
+        // programmatic change tells no delegate.
+        defer { coverChanged() }
         sheet.animateChanges {
             sheet.detents = searching ? [.large()] : [contentDetent()]
             sheet.selectedDetentIdentifier = searching ? .large : Self.detentIdentifier
@@ -1019,3 +1022,7 @@ extension ShareSheetViewController: UICollectionViewDelegate {
         send(to: target)
     }
 }
+
+/// Fitted to its content, then large while searching (#1970): it covers the
+/// clips behind only at large. The default reads the detent.
+extension ShareSheetViewController: ScreenCovering {}

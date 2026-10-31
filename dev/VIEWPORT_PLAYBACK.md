@@ -2,7 +2,9 @@
 
 The rule (#1914, the owner, 2026-10-30 and 2026-10-31):
 
-> **A clip plays while its screen holds at least half of the display.** It pauses below half. Where a screen fades its sound (Shots), the sound follows the share, from full on the whole display down to silent at half.
+> **A clip plays while its screen holds at least half of the display and nothing covers it.** It pauses below half. Where a screen fades its sound (Shots), the sound follows the share, from full on the whole display down to silent at half.
+>
+> **A cover declares itself; a sheet covers when expanded, never when collapsed** (#1970).
 
 The rule belongs to the **screen**, not to the post or the player:
 - The same post plays in Shots, in a grid and on a place page, under different rules of space.
@@ -18,6 +20,7 @@ One `ViewportShare` per screen, built on the screen's own `view`.
 | Its own arrival (a push) | The part of the display it already takes | `trackArrival(_:)` |
 | Its own departure (a pop, a grab carrying it off) | The part of the display it still takes | `trackDeparture(_:)` |
 | A drawer or a pager of its own | A fraction the host reports | `report(_:)` |
+| A cover above its level (#1970) | 0 while it covers; the other sources' share once it ends | `ScreenCovers`, automatic |
 
 **Three guarantees, each paid for on the owner's device:**
 1. **One reference: the display.** Every share is measured against the window. A screen held smaller than half the display (by a grab) holds less than half.
@@ -67,8 +70,41 @@ override func viewWillDisappear(_ animated: Bool) {
 
 A sheet at its collapsed detent can hold less than half of the display while it is all the viewer reads. So:
 - **The screens inside a sheet take their half of the SHEET** (`ViewportShare.reference` names the sheet's container). The sound sheet's tiles play through the sheet's rise and fall, and a section pushed inside the sheet starts at half of the sheet.
-- **The screen behind a sheet follows the sheet's STATE, not a share of the display** (the owner's call, 2026-10-31). The post behind the sound sheet plays under the collapsed sheet and pauses under the expanded one (`SoundSheetViewController.onExpandedChange`).
+- **The screen behind a sheet follows the sheet's STATE, not a share of the display** (the owner's call, 2026-10-31). The post behind the sound sheet plays under the collapsed sheet and pauses under the expanded one: the sheet is a declared cover (below).
 - **The sound sheet's record is the sheet's own track.** Two tracks, the sheet's and the post's: playing one pauses the other. The record's preview covers the post (`onCoverChanged`), and the post played again stops the preview.
+
+## Covers: every presentation, seen by the window (#1970)
+
+**Whatever is presented over a screen can cover it**, whoever presented it: the app, the system (the share sheet, Safari, Sign in with Apple) or an SDK. No presenter and no host changes for it.
+
+```
+AppWindow.didAddSubview / willRemoveSubview      a presentation's container comes or goes
+  → ScreenCovers (one per window), the next turn: the root's presentedViewController chain
+    → each level: declared (ScreenCovering), or the default table below
+      → every live ViewportShare in the window: covered by a level above its own → share 0
+```
+
+**The default table**, read whenever a presentation comes or goes:
+
+| Presentation | Covers |
+|---|---|
+| `.fullScreen`, `.overFullScreen` | yes |
+| A sheet whose selected detent is `.large()` | yes |
+| A sheet at a smaller detent (medium, custom, fitted) | no |
+| An alert, an action sheet, a popover | no |
+| Anything else (a custom transition) | when its view fills the window |
+
+**Rules:**
+- **Levels.** A screen's level is its place in the presentation chain: 0 for the root's screens, 1 for what the root presents, and so on. Only a cover above a host's level hides it. The sound sheet never pauses the gallery inside it.
+- **What the window cannot see** is a sheet changing height while it stays up. Such an app sheet declares itself (`ScreenCovering`, DesignSystem). By default it covers at large, and it calls `coverChanged()` when its detent changes: a drag tells its sheet's delegate, a programmatic change tells no one. `ScreenCoveringGuardTests` fails on an app sheet with several detents, or one selected after it presents, that does not declare. A system sheet with several heights is read when it opens and when it closes.
+- **Declared today:**
+  - the sound sheet, covering while expanded, even at a fitted height shorter than half the screen;
+  - the wallet, the share sheet and the text post composer, covering at large;
+  - the map's sub-filter sheet and the sticker picker, never covering, since there is no clip host under them;
+  - `OverSheetFeedHost`, never covering: the feed flies out of a gallery tile carrying its player, and pausing the gallery would pause that player.
+- **Not a presentation?** A popup, a window or an overlay takes a token: `ScreenCovers.of(window).begin(covers:)`. The cover ends when the token ends or goes away.
+- **It fails open.** If UIKit stopped installing a presentation's container in the window, clips would play on as before, never stuck paused. A host out of the window is never held covered. `ScreenCoverUITests` is the check that the window still hears presentations.
+- **Only what the rule paused resumes.** A host already follows `onPlaysChange`. A post the viewer paused, or held, stays as it was.
 
 ## Shared players: a paused surface holds a still (MediaPlayback)
 

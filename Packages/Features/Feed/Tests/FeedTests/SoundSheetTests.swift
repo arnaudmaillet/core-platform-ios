@@ -154,18 +154,22 @@ struct SoundSheetTests {
     /// ONE detent: a second opened an empty band under the sound (#1162; the
     /// owner, on a device). Posts arriving bring the expanded detent back.
     /// The post behind follows the sheet's STATE (#1914, the owner
-    /// 2026-10-31): the sheet says when it settles expanded and collapsed,
-    /// once per change.
-    @Test func theSheetTellsWhenItSettlesExpandedOrCollapsed() {
+    /// 2026-10-31), through the cover contract (#1970): the sheet covers
+    /// while expanded, and tells the window's covers once per change.
+    @Test func theSheetCoversWhileExpandedAndSaysSoOncePerChange() {
         let controller = sheet(tiles: 6)
         _ = controller.wrappedInSheet()
         controller.loadViewIfNeeded()
-        var told: [Bool] = []
-        controller.onExpandedChange = { told.append($0) }
+        let told = Told()
+        let observer = NotificationCenter.default.addObserver(
+            forName: ScreenCoveringNotification.didChange, object: controller, queue: nil
+        ) { _ in MainActor.assumeIsolated { told.values.append(controller.coversScreen) } }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        #expect(!controller.coversScreen, "collapsed, it covers nothing")
         controller.debugExpand()
         controller.debugExpand()
         controller.debugCollapse()
-        #expect(told == [true, false])
+        #expect(told.values == [true, false])
     }
 
     @Test func aSoundWithNothingBelowHasOneDetent() throws {
@@ -1479,4 +1483,10 @@ struct SoundSheetTests {
         controller.showSection(.recent)
         #expect(navigation.topViewController === controller, "the Recent grid pushed")
     }
+}
+
+/// What a notification told, collected on the main actor.
+@MainActor
+private final class Told {
+    var values: [Bool] = []
 }

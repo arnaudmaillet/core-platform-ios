@@ -145,8 +145,8 @@ import UIKit
 /// player of its own; while it plays, the post behind is covered
 /// (`onCoverChanged`), and when the post plays again the feed stops the
 /// track (`releaseTrack`). A feed opened from a tile covers the post too,
-/// for the trip. The post also pauses under the expanded sheet
-/// (`onExpandedChange`).
+/// for the trip. The post also pauses under the expanded sheet: the sheet
+/// declares itself a cover while expanded (`ScreenCovering`, #1970).
 final class SoundSheetViewController: UIViewController {
     struct Tile: Hashable, Sendable {
         let postID: PostID
@@ -223,11 +223,6 @@ final class SoundSheetViewController: UIViewController {
     /// it. NEVER the detent alone, and never the sheet just being open.
     var onCoverChanged: ((Bool) -> Void)?
 
-    /// Told when the sheet settles expanded or collapsed (#1914, the owner
-    /// 2026-10-31): the post behind plays under the collapsed sheet and
-    /// pauses under the expanded one — the sheet's STATE decides, not a
-    /// share of the display.
-    var onExpandedChange: ((Bool) -> Void)?
     /// What the record shows: the sheet's own track.
     struct RecordPlayback: Equatable {
         /// The preview plays: the record turns, the glyph is ❚❚. No muted
@@ -1647,8 +1642,8 @@ final class SoundSheetViewController: UIViewController {
     }
 
     /// The sheet's own track playing, or a feed opened from a tile: either
-    /// covers the post behind. (The expanded detent pauses it too, through
-    /// `onExpandedChange`.)
+    /// covers the post behind. (The expanded detent pauses it too: the sheet
+    /// is a declared cover, `ScreenCovering`.)
     private func refreshCover() {
         setCovering(isTrackEngaged || isShowingFeed)
     }
@@ -2249,16 +2244,16 @@ extension SoundSheetViewController: UISheetPresentationControllerDelegate {
     /// the delegate, a programmatic change (`debugExpand`) does not report it
     /// at all. It puts the posts back at their top at collapsed (the Popular
     /// row under the sound, the reveal's line where the fold is), and wakes
-    /// the reveal to follow the sheet's spring, and tells the post behind
-    /// (`onExpandedChange`): it plays under the collapsed sheet and pauses
-    /// under the expanded one (#1914).
+    /// the reveal to follow the sheet's spring, and tells the window's covers
+    /// (`coverChanged()`, #1970): the post behind plays under the collapsed
+    /// sheet and pauses under the expanded one.
     fileprivate func detentChanged(to identifier: UISheetPresentationController.Detent.Identifier?) {
         let expanded = Self.isExpanded(identifier)
         guard expanded != isExpanded else { return }
         isExpanded = expanded
         traceSettledHeight(expanded: expanded)
         reveal.wake()
-        onExpandedChange?(expanded)
+        coverChanged()
         guard dataSource != nil, !expanded else { return }
         collectionView.setContentOffset(
             CGPoint(x: collectionView.contentOffset.x, y: -collectionView.adjustedContentInset.top),
@@ -2452,4 +2447,15 @@ extension SoundSheetViewController: UIGestureRecognizerDelegate {
     ) -> Bool {
         gestureRecognizer === recordTap
     }
+}
+
+// MARK: - Cover (#1970)
+
+/// ⚠️ THE SHEET'S STATE, NOT A SHARE OF THE DISPLAY (#1914, the owner
+/// 2026-10-31): its expanded detent can be a fitted one shorter than half
+/// the screen, so the default table (large only) would miss it. It covers
+/// while expanded; the gallery inside it is at its own level, never paused
+/// by it.
+extension SoundSheetViewController: ScreenCovering {
+    var coversScreen: Bool { isExpanded }
 }

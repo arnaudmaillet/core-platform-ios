@@ -743,3 +743,9 @@ final class MapSubFilterRowCell: UICollectionViewListCell {
         )
     }
 }
+
+/// Medium and large over the map (#1970), which plays no clip: it never
+/// hides one, at either height.
+extension MapSubFilterSheetViewController: ScreenCovering {
+    var coversScreen: Bool { false }
+}
