@@ -1647,8 +1647,12 @@ final class SoundSheetViewController: UIViewController {
     private(set) var isPreviewing = false
     private var preview: AVPlayer?
     private var previewEndObserver: NSObjectProtocol?
-    private var previewTimeObserver: Any?
     private var previewStart: Task<Void, Never>?
+    /// Feeds the header's bar while the track plays (#1964): 30 fps, the
+    /// Shots clip bar's feed (`SnapCellPlayback.startPlayheadFeed`).
+    private var previewFeed: CADisplayLink?
+    /// Where the track last stood, 0…1 — the bar holds it while paused.
+    private var previewFraction: Double?
 
     private func togglePreview() {
         isPreviewing ? stopPreview() : startPreview()
@@ -1659,6 +1663,10 @@ final class SoundSheetViewController: UIViewController {
         isPreviewing = true
         setRecord(RecordPlayback(playing: true, available: record.available))
         refreshCover()
+        // The bar shows from the first play: loading until the track says its
+        // length, then its position (#1964).
+        header?.setTrackProgress(previewFraction, loading: preview == nil)
+        startPreviewFeed()
         // A transport control: silent (#1881).
         if let preview {
             preview.play()
@@ -1685,11 +1693,6 @@ final class SoundSheetViewController: UIViewController {
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.stopPreview(rewinding: true) }
             }
-            previewTimeObserver = player.addPeriodicTimeObserver(
-                forInterval: CMTime(value: 1, timescale: 4), queue: .main
-            ) { [weak self] time in
-                MainActor.assumeIsolated { self?.previewTicked(time.seconds) }
-            }
             preview = player
             player.play()
         }
@@ -1709,9 +1712,19 @@ final class SoundSheetViewController: UIViewController {
         guard isPreviewing else { return }
         isPreviewing = false
         preview?.pause()
-        if rewinding { preview?.seek(to: .zero) }
+        stopPreviewFeed()
+        if rewinding {
+            // The end: the bar back to the start, then gone.
+            preview?.seek(to: .zero)
+            previewFraction = nil
+            header?.setTrackProgress(0, loading: false)
+            header?.hideTrackProgress()
+        } else {
+            // Paused: the bar stays where the track is, so the next tap
+            // resumes visibly from there.
+            header?.setTrackProgress(previewFraction, loading: false)
+        }
         setRecord(RecordPlayback(playing: false, available: record.available))
-        header?.setMeta(Self.meta(duration: sound.duration, posts: postCount))
         refreshCover()
     }
 
@@ -1720,17 +1733,56 @@ final class SoundSheetViewController: UIViewController {
         previewStart?.cancel()
         previewStart = nil
         if let previewEndObserver { NotificationCenter.default.removeObserver(previewEndObserver) }
-        if let previewTimeObserver { preview?.removeTimeObserver(previewTimeObserver) }
         previewEndObserver = nil
-        previewTimeObserver = nil
+        stopPreviewFeed()
+        previewFraction = nil
+        header?.hideTrackProgress()
         preview?.pause()
         preview = nil
     }
 
-    private func previewTicked(_ seconds: Double) {
-        guard isPreviewing, seconds.isFinite else { return }
-        let total = sound.duration.map { " / \(Self.clock($0))" } ?? ""
-        header?.setMeta("\(Self.clock(seconds))\(total)")
+    private func startPreviewFeed() {
+        stopPreviewFeed()
+        let link = CADisplayLink(target: PreviewFeedTarget(self), selector: #selector(PreviewFeedTarget.tick(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: 30, preferred: 30)
+        link.add(to: .main, forMode: .common)
+        previewFeed = link
+    }
+
+    private func stopPreviewFeed() {
+        previewFeed?.invalidate()
+        previewFeed = nil
+    }
+
+    /// One frame of the bar: the track's position against ITS OWN length —
+    /// `sound.duration` can be missing — and loading while that length is
+    /// unknown or the player waits.
+    fileprivate func feedPreview() {
+        guard isPreviewing else { return stopPreviewFeed() }
+        guard let player = preview, let item = player.currentItem else {
+            header?.setTrackProgress(previewFraction, loading: true)
+            return
+        }
+        let duration = item.duration.seconds
+        let current = player.currentTime().seconds
+        guard duration.isFinite, duration > 0, current.isFinite else {
+            header?.setTrackProgress(previewFraction, loading: true)
+            return
+        }
+        let fraction = min(max(current / duration, 0), 1)
+        previewFraction = fraction
+        header?.setTrackProgress(fraction, loading: player.timeControlStatus == .waitingToPlayAtSpecifiedRate)
+    }
+
+    /// The feed's target, holding the sheet weakly: a link retains its target.
+    @MainActor
+    private final class PreviewFeedTarget: NSObject {
+        weak var sheet: SoundSheetViewController?
+        init(_ sheet: SoundSheetViewController) { self.sheet = sheet }
+        @objc func tick(_ link: CADisplayLink) {
+            guard let sheet else { return link.invalidate() }
+            sheet.feedPreview()
+        }
     }
 
     /// A feed opened from a tile covers everything, the page behind the sheet

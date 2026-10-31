@@ -891,6 +891,23 @@ struct SoundSheetTests {
         #expect(covers == [true, false])
     }
 
+    /// The track's playhead (#1964, placement (b)): the bar shows from the
+    /// first play, holds its place while paused, and leaves at the end. The
+    /// meta line keeps the sound's length and its posts.
+    @Test func theTracksBarShowsHoldsAndLeaves() throws {
+        let controller = sheet(tiles: 3, preview: Self.previewFile)
+        try laidOut(controller)
+        let header = try #require(controller.debugHeader)
+        #expect(!header.debugTrackBarIsShown, "a bar before any play")
+        header.debugTapRecord()
+        #expect(header.debugTrackBarIsShown)
+        controller.stopPreview()
+        #expect(header.debugTrackBarIsShown, "the paused track's bar left")
+        header.debugTapRecord()
+        controller.stopPreview(rewinding: true)
+        #expect(!header.debugTrackBarIsShown, "the bar outlived the track's end")
+    }
+
     /// ▶︎ ⇄ ❚❚ is one glyph view swapping its symbol (a symbol replace, the
     /// owner 2026-10-15), and the same state twice swaps nothing.
     @Test func theRecordsGlyphFollowsThePlayback() throws {
