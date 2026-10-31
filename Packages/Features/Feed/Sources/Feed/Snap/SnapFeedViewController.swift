@@ -1522,6 +1522,12 @@ final class SnapFeedViewController: UIViewController {
         guard plays != viewportSharePlays else { return }
         viewportSharePlays = plays
         refreshVisibility()
+        // Every record of the post's sound turns with it (#1148), the sound
+        // sheet's included (the owner 2026-10-31: the sheet's record kept
+        // turning over a post its expansion had paused). Asked now, and once
+        // more after the turn, for a pause the player settles a beat later.
+        refreshCoverSpin()
+        DispatchQueue.main.async { [weak self] in self?.refreshCoverSpin() }
     }
 
     /// The share now, for tests.

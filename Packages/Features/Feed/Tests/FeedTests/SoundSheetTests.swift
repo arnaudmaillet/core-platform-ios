@@ -152,6 +152,21 @@ struct SoundSheetTests {
     /// A sound with nothing under it — its one post the one watched — has
     /// ONE detent: a second opened an empty band under the sound (#1162; the
     /// owner, on a device). Posts arriving bring the expanded detent back.
+    /// The post behind follows the sheet's STATE (#1914, the owner
+    /// 2026-10-31): the sheet says when it settles expanded and collapsed,
+    /// once per change.
+    @Test func theSheetTellsWhenItSettlesExpandedOrCollapsed() {
+        let controller = sheet(tiles: 6)
+        _ = controller.wrappedInSheet()
+        controller.loadViewIfNeeded()
+        var told: [Bool] = []
+        controller.onExpandedChange = { told.append($0) }
+        controller.debugExpand()
+        controller.debugExpand()
+        controller.debugCollapse()
+        #expect(told == [true, false])
+    }
+
     @Test func aSoundWithNothingBelowHasOneDetent() throws {
         let controller = sheet(tiles: 0, popular: false)
         let navigation = controller.wrappedInSheet()
