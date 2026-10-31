@@ -386,9 +386,10 @@ final class SnapChromeView: UIView {
         applyAuthorRowLayout()
     }
 
-    /// The relation changed (a follow, from here or elsewhere).
-    func setAuthorRowBadge(_ badge: PersonPill.Badge) {
-        authorRow.setBadge(badge, animated: authorRow.window != nil)
+    /// The relation changed (a follow, from here or elsewhere), as the
+    /// author binding draws it (#1972).
+    func setAuthorRowBadge(_ badge: PersonPill.Badge, animated: Bool) {
+        authorRow.setBadge(badge, animated: animated)
     }
 
     /// A comments surface was tapped (empty-state pill, subtitle zone, or

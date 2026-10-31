@@ -692,8 +692,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         guard shown else { return }
         chrome.setAuthorRow(model, badge: badge, pipeline: pipeline)
     }
-    /// The relation the author row's badge says, after a follow.
-    func setAuthorRowBadge(_ badge: PersonPill.Badge) { chrome.setAuthorRowBadge(badge) }
     /// The author row: a tap (the card), a hold (the profile), its "+".
     var onRequestAuthorCard: (() -> Void)?
     var onRequestAuthorProfile: (() -> Void)?
@@ -3622,4 +3620,18 @@ final class CALayerAnimationCompletion: NSObject, CAAnimationDelegate {
     func animationDidStop(_ animation: CAAnimation, finished: Bool) {
         body()
     }
+}
+
+/// The author row's badge, as the screen's `AuthorBadgeBinding` draws it
+/// (#1972): bound at configure, redrawn on every answer for its author,
+/// visible or not.
+extension SnapFeedCell: AuthorBadgeDrawing {
+    func drawAuthorBadge(_ badge: PersonPill.Badge, animated: Bool) {
+        chrome.setAuthorRowBadge(badge, animated: animated)
+    }
+
+    var drawsAuthorBadgeOnScreen: Bool { window != nil }
+
+    /// The symbol the author row's badge draws now — nil for none. Tests.
+    var authorRowBadgeSymbol: String? { chrome.authorRow.drawnBadgeSymbol }
 }
