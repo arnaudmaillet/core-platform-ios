@@ -563,7 +563,39 @@ public final class VideoRenderView: UIView {
         return false
     }
 
+    /// Whether this surface stopped taking its player's frames to hold the
+    /// last one (`holdStill`).
+    private(set) var isHoldingStill = false
+
+    /// Holds the frame on screen and stops taking the player's (#1914, the
+    /// owner's device, 2026-10-31): the player goes on for another surface
+    /// sharing it — one asset, one player — and this one, paused by its
+    /// owner, must not mirror that clip. Filmed: the post behind a profile,
+    /// at a fifth of the screen, playing in step with the profile's tile of
+    /// the same post.
+    ///
+    /// A sample-buffer layer keeps its last frame on its own once nothing is
+    /// enqueued: nothing is redrawn and no picture loss is announced, so the
+    /// page shows no loader. Under `-avplayer-render` the poster stands in.
+    func holdStill() {
+        guard !isHoldingStill else { return }
+        isHoldingStill = true
+        if let renderer {
+            renderer.removeSurface(self)
+            self.renderer = nil
+        } else {
+            playerLayer?.player = nil
+            updatePosterVisibility(ready: false)
+        }
+    }
+
+    /// The still is over: the pool binds the player again.
+    func releaseStill() {
+        isHoldingStill = false
+    }
+
     func detach(reason: String = "detach") {
+        isHoldingStill = false
         playerLayer?.player = nil
         detachFromRenderer(reason: reason)
         // No player → nothing to display → the poster comes back.

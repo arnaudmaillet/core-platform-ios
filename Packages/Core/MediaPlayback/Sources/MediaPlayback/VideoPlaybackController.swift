@@ -192,6 +192,13 @@ public final class VideoPlaybackController {
     /// The media URL each bound view is playing, so a parked player can be
     /// matched back to the same asset.
     private var playingURL: [ObjectIdentifier: URL] = [:]
+
+    /// The surfaces their owner paused (`setPaused(true)`).
+    private var pausedSurfaces: Set<ObjectIdentifier> = []
+
+    /// The paused surfaces holding a still while the player they share plays
+    /// for another surface (`holdStill`).
+    private var stilledSurfaces: Set<ObjectIdentifier> = []
     /// A player detached from its view but still running, waiting for the next
     /// `play` of the same URL to adopt it. See `parkPlayback(from:)`.
     private var parked: (url: URL, player: AVPlayer)?
@@ -369,6 +376,11 @@ public final class VideoPlaybackController {
         let token = nextGenerationToken()
         generation[key] = token
         let requested = CACurrentMediaTime()
+        // Asked to play: no longer paused, and a still it held gives way to
+        // whichever player binds it below (#1914).
+        pausedSurfaces.remove(key)
+        let wasStilled = stilledSurfaces.remove(key) != nil
+        if wasStilled { view.releaseStill() }
 
         // A player parked for this exact asset is adopted whole — same item,
         // same playhead — instead of starting a second one at zero. This is the
@@ -407,8 +419,10 @@ public final class VideoPlaybackController {
         // live player on this clip and post is playing what was asked.
         if let current = activePlayers[key], playingURL[key] == mediaURL, playingScope[key] == scope,
            current.currentItem.map({ $0.status != .failed }) ?? false {
+            if wasStilled { bind(current, to: view) }
             current.currentItem?.preferredPeakBitRate = peakBitRate
             current.play()
+            stillPausedSurfaces(sharing: current, besides: key)
             return
         }
 
@@ -437,6 +451,7 @@ public final class VideoPlaybackController {
             playingScope[key] = scope
             VideoProducerLog.emit("JOIN \(VideoProducerLog.name(shared)) owner+=\(view.debugProducerName) \(mediaURL.lastPathComponent)")
             shared.play()
+            stillPausedSurfaces(sharing: shared, besides: key)
             return
         }
 
@@ -488,6 +503,7 @@ public final class VideoPlaybackController {
             playingScope[key] = scope
             VideoProducerLog.emit("JOIN \(VideoProducerLog.name(shared)) owner+=\(view.debugProducerName) \(mediaURL.lastPathComponent)")
             shared.play()
+            stillPausedSurfaces(sharing: shared, besides: key)
             return
         }
 
@@ -1686,6 +1702,8 @@ public final class VideoPlaybackController {
             generation[key] = nil
             playingURL[key] = nil
             playingScope[key] = nil
+            pausedSurfaces.remove(key)
+            stilledSurfaces.remove(key)
             guard let player = activePlayers.removeValue(forKey: key) else { continue }
             let stillInUse = activePlayers.values.contains { $0 === player }
                 || parked.map { $0.player === player } ?? false
@@ -1752,7 +1770,8 @@ public final class VideoPlaybackController {
     /// did a pause take, did a resume take — and intent is what they need. This
     /// answers the other question, and diagnostics should ask this one.
     public func isPlayingForReal(in view: VideoRenderView) -> Bool {
-        activePlayers[ObjectIdentifier(view)]?.timeControlStatus == .playing
+        guard !isStilled(view) else { return false }
+        return activePlayers[ObjectIdentifier(view)]?.timeControlStatus == .playing
     }
 
     /// How fast the clip in `view` is moving right now: its rate while it
@@ -1762,7 +1781,7 @@ public final class VideoPlaybackController {
     /// been asked for a rate it is not delivering, and a caller extrapolating
     /// from that rate would run ahead of a picture that is not moving.
     public func advancingRate(in view: VideoRenderView) -> Double {
-        guard let player = watchedPlayer(in: view), player.timeControlStatus == .playing else {
+        guard !isStilled(view), let player = watchedPlayer(in: view), player.timeControlStatus == .playing else {
             return 0
         }
         return Double(player.rate)
@@ -1772,11 +1791,12 @@ public final class VideoPlaybackController {
     /// media to do so — buffering at the start, or stalled mid-clip (#1537).
     /// Not a viewer's pause.
     public func isWaitingToPlay(in view: VideoRenderView) -> Bool {
-        watchedPlayer(in: view)?.timeControlStatus == .waitingToPlayAtSpecifiedRate
+        guard !isStilled(view) else { return false }
+        return watchedPlayer(in: view)?.timeControlStatus == .waitingToPlayAtSpecifiedRate
     }
 
     public func isAdvancing(in view: VideoRenderView) -> Bool {
-        guard let player = watchedPlayer(in: view) else { return false }
+        guard !isStilled(view), let player = watchedPlayer(in: view) else { return false }
         return player.timeControlStatus != .paused
     }
 
@@ -1826,7 +1846,17 @@ public final class VideoPlaybackController {
         guard let player = watchedPlayer(in: view) else { return false }
         // The floating window shows its own play / pause; it is told.
         defer { if pictureInPicture?.surface === view { refreshPictureInPictureState() } }
+        let key = ObjectIdentifier(view)
         if paused {
+            pausedSurfaces.insert(key)
+            // ⚠️ A SHARED PLAYER STILL WANTED ELSEWHERE (#1914): pausing it
+            // would stop the other surface too. This one holds its frame and
+            // lets the player go on.
+            if activePlayers[key] === player, player.timeControlStatus != .paused,
+               surfaces(sharing: player, besides: key).contains(where: { !pausedSurfaces.contains($0.key) }) {
+                holdStill(key: key, view: view)
+                return true
+            }
             // ⚠️ WHERE THE PICTURE WAS, remembered — because an adaptive stream
             // does not necessarily come back to it.
             //
@@ -1838,6 +1868,7 @@ public final class VideoPlaybackController {
             pausedAnchors[ObjectIdentifier(player)] = player.currentTime()
             player.pause()
         } else {
+            resumeSurface(key: key, view: view, on: player)
             // ⚠️ Whatever is queued belongs to BEFORE the pause.
             //
             // The picture resumes at the playhead, and anything still waiting in
@@ -1872,8 +1903,49 @@ public final class VideoPlaybackController {
                 }
             }
             player.play()
+            stillPausedSurfaces(sharing: player, besides: key)
         }
         return true
+    }
+
+    /// The other surfaces bound to `player`.
+    private func surfaces(sharing player: AVPlayer, besides key: ObjectIdentifier) -> [ObjectIdentifier: VideoRenderView] {
+        var shared: [ObjectIdentifier: VideoRenderView] = [:]
+        for (other, candidate) in activePlayers where other != key && candidate === player {
+            if let view = surfaces[other]?.view { shared[other] = view }
+        }
+        return shared
+    }
+
+    /// `player` plays for `key`: every other surface on it that its owner
+    /// paused holds its frame instead of mirroring the clip (#1914).
+    private func stillPausedSurfaces(sharing player: AVPlayer, besides key: ObjectIdentifier) {
+        for (other, view) in surfaces(sharing: player, besides: key) where pausedSurfaces.contains(other) {
+            holdStill(key: other, view: view)
+        }
+    }
+
+    private func holdStill(key: ObjectIdentifier, view: VideoRenderView) {
+        guard !stilledSurfaces.contains(key) else { return }
+        stilledSurfaces.insert(key)
+        view.holdStill()
+        VideoProducerLog.emit("STILL owner=\(view.debugProducerName) holds its frame, the player plays elsewhere")
+    }
+
+    /// A surface asked to play again: it is no longer paused, and a still it
+    /// held gives way to the player.
+    private func resumeSurface(key: ObjectIdentifier, view: VideoRenderView, on player: AVPlayer) {
+        pausedSurfaces.remove(key)
+        if stilledSurfaces.remove(key) != nil {
+            view.releaseStill()
+            bind(player, to: view)
+        }
+    }
+
+    /// Whether `view` holds a still while its player plays for another
+    /// surface: to its owner, it is paused.
+    private func isStilled(_ view: VideoRenderView) -> Bool {
+        stilledSurfaces.contains(ObjectIdentifier(view))
     }
 
     /// Plays the clip in `view` at `rate` — 1 is as shot, 2 twice as fast.
@@ -2281,6 +2353,7 @@ public final class VideoPlaybackController {
     /// play button that does nothing, because it is already trying.
     public func isPaused(in view: VideoRenderView) -> Bool? {
         guard let player = watchedPlayer(in: view) else { return nil }
+        if isStilled(view) { return true }
         return player.timeControlStatus == .paused
     }
 
@@ -2290,6 +2363,10 @@ public final class VideoPlaybackController {
     @discardableResult
     public func togglePlayback(in view: VideoRenderView) -> Bool {
         guard let player = watchedPlayer(in: view) else { return false }
+        if isStilled(view) {
+            setPaused(false, in: view)
+            return false
+        }
         if player.timeControlStatus == .paused {
             player.play()
             return false
@@ -2800,6 +2877,8 @@ public final class VideoPlaybackController {
     }
 
     private func detach(key: ObjectIdentifier, view: VideoRenderView) {
+        pausedSurfaces.remove(key)
+        stilledSurfaces.remove(key)
         view.detach(reason: "controller.stop")
         // Read BEFORE the ledger is cleared: these two are what the playhead is
         // filed under, and three lines down they are gone.
