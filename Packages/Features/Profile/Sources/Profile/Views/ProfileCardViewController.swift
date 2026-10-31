@@ -679,7 +679,7 @@ final class ProfileCardViewController: UIViewController {
     }
 
     private func close() {
-        (navigationController ?? self).dismiss(animated: true)
+        closePresentation()
     }
 
     /// Closes the card, then runs `body` — on the presenter's stack, which
@@ -687,7 +687,8 @@ final class ProfileCardViewController: UIViewController {
     private func closeThen(_ body: @escaping () -> Void) {
         let presented: UIViewController = navigationController ?? self
         guard presented.presentingViewController != nil else { return body() }
-        presented.dismiss(animated: true, completion: body)
+        // Once: a second tap while the card leaves runs nothing (#1144).
+        closePresentation(completion: body)
     }
 
     private func presentShareSheet() {

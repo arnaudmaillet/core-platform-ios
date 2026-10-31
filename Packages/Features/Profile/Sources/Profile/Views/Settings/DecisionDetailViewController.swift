@@ -414,7 +414,7 @@ final class AppealComposerViewController: UIViewController, UITextViewDelegate {
         navigationItem.largeTitleDisplayMode = .never
         view.backgroundColor = .systemGroupedBackground
         navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .cancel, primaryAction: UIAction { [weak self] _ in
-            self?.dismiss(animated: true)
+            self?.closePresentation()
         })
         navigationItem.leftBarButtonItem?.identifier = "settings.decision.cancel"
         navigationItem.rightBarButtonItem = sendItem()
@@ -507,7 +507,7 @@ final class AppealComposerViewController: UIViewController, UITextViewDelegate {
                 let filedAt = try await file(statement)
                 Haptics.play(.success)
                 onFiled?(filedAt)
-                dismiss(animated: true)
+                closePresentation()
             } catch {
                 Haptics.play(.error)
                 isSending = false

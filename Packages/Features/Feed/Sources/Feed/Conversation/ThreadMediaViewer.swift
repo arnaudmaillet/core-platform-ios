@@ -114,7 +114,7 @@ final class ThreadPhotoViewerController: UIViewController, UIScrollViewDelegate 
         let close = UIButton(configuration: .glass())
         close.configuration?.image = UIImage(systemName: "xmark")
         close.accessibilityLabel = "Close"
-        close.addAction(UIAction { [weak self] _ in self?.dismiss(animated: true) }, for: .primaryActionTriggered)
+        close.addAction(UIAction { [weak self] _ in self?.closePresentation() }, for: .primaryActionTriggered)
         close.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(close)
         NSLayoutConstraint.activate([
@@ -198,6 +198,6 @@ final class ThreadPhotoViewerController: UIViewController, UIScrollViewDelegate 
             scrollView.setZoomScale(1, animated: true)
             return
         }
-        dismiss(animated: true)
+        closePresentation()
     }
 }

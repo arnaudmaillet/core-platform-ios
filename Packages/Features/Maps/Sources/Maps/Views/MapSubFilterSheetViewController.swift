@@ -441,14 +441,14 @@ final class MapSubFilterSheetViewController: UIViewController {
     /// preference write, all to arrive where it already was.
     func commitAndDismiss() {
         if hasChanges { onOptionsChanged(sections.active) }
-        dismiss(animated: true)
+        closePresentation()
     }
 
     /// Cancel: close, having published nothing. The buffer dies with the
     /// controller and the row never heard about any of it — which is why there
     /// is no restore path to get wrong.
     func cancelAndDismiss() {
-        dismiss(animated: true)
+        closePresentation()
     }
 
     /// A section's title; Active's carries how full the row is, `3 of 5` —
@@ -536,7 +536,7 @@ final class MapSubFilterSheetViewController: UIViewController {
     /// Deliberately WITHOUT committing: leaving for a profile is not agreeing
     /// to the edits, so this is a Cancel that happens to route somewhere.
     private func openProfile(_ favorite: MapFavorite) {
-        dismiss(animated: true) { [rowActions] in rowActions.openProfile(favorite) }
+        closePresentation { [rowActions] in rowActions.openProfile(favorite) }
     }
 
     /// Mute rides the HOST, not the edit buffer — it is an account courtesy

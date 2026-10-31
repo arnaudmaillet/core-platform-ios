@@ -234,12 +234,8 @@ public final class ContentFittingNavigationController: UINavigationController, U
     /// gate hears it from the sheet's own disappearance). The form's sheet
     /// closes back to the list.
     private func leave() {
-        if isForm {
-            dismiss(animated: true)
-            onDismissed?()
-        } else {
-            (parent ?? self).dismiss(animated: true)
-        }
+        closePresentation()
+        if isForm { onDismissed?() }
     }
 
     // MARK: - UINavigationControllerDelegate

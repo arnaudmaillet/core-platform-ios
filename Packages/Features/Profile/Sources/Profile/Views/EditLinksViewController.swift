@@ -1,3 +1,4 @@
+import CoreNavigation
 import DesignSystem
 import UIKit
 
@@ -135,7 +136,7 @@ final class EditLinksViewController: UIViewController {
         guard saveButton.isEnabled else { return }
         view.endEditing(true)
         onSave(collectedLinks)
-        navigationController?.popViewController(animated: true)
+        closeScreen()
     }
 }
 

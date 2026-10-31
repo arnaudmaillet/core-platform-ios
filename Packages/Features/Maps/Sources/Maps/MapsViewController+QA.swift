@@ -512,7 +512,7 @@ extension MapsViewController {
             // exactly what the first three runs did.
             transition.debugScriptedGrab(axis: soakCursor % 2 == 0 ? .horizontal : .vertical)
         } else if navigationController?.topViewController !== self {
-            navigationController?.popViewController(animated: true)
+            navigationController?.topViewController?.closeScreen()
         }
     }
 }

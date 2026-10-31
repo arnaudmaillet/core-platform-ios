@@ -53,7 +53,7 @@ final class AppButtonCatalogViewController: UIViewController {
         ])
         navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
             self?.view.window?.layer.speed = 1
-            self?.dismiss(animated: true)
+            self?.closePresentation()
         })
         buildTools()
         buildSystemReference()

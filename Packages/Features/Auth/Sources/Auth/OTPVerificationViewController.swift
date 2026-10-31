@@ -42,7 +42,7 @@ final class OTPVerificationViewController: UITableViewController {
         setOwnTrailingBarItems([verifyButton], animated: false)
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             systemItem: .cancel,
-            primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) }
+            primaryAction: UIAction { [weak self] _ in self?.closePresentation() }
         )
         navigationItem.leftBarButtonItem?.identifier = "auth.otp.cancel"
         verifyButton.isEnabled = false

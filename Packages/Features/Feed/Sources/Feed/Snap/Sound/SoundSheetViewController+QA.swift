@@ -1,5 +1,6 @@
 #if DEBUG
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import PostGrid
 import UIKit
@@ -103,7 +104,7 @@ extension SoundSheetViewController {
                 DispatchQueue.main.asyncAfter(deadline: .now() + (pages > 0 ? 2.5 : 1.0)) {
                     QAWait.until("\(label) close", { feed() != nil }) {
                         print("[qa] \(label): closing")
-                        feed()?.navigationController?.popViewController(animated: true)
+                        feed()?.closeScreen()
                     }
                 }
             }

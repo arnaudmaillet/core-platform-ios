@@ -1,3 +1,4 @@
+import CoreNavigation
 import DesignSystem
 import MediaCore
 import PostGrid
@@ -146,7 +147,7 @@ final class VideoBannerPickerViewController: UIViewController {
     private func pick(_ post: GalleryPost?) {
         Haptics.play(.tick)
         onPick(post)
-        navigationController?.popViewController(animated: true)
+        closeScreen()
     }
 }
 

@@ -28,7 +28,7 @@ public final class HapticCatalogViewController: UIViewController, UIScrollViewDe
         super.viewDidLoad()
         view.backgroundColor = Surface.page
         navigationItem.rightBarButtonItem = UIBarButtonItem(
-            systemItem: .close, primaryAction: UIAction { [weak self] _ in self?.dismiss(animated: true) }
+            systemItem: .close, primaryAction: UIAction { [weak self] _ in self?.closePresentation() }
         )
         scroll.alwaysBounceVertical = true
         scroll.translatesAutoresizingMaskIntoConstraints = false

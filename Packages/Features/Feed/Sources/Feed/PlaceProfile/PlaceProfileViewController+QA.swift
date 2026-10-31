@@ -27,7 +27,7 @@ extension PlaceProfileViewController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
             guard let self, let nav = self.navigationController,
                   nav.topViewController === self else { return }
-            nav.popViewController(animated: true)
+            closeScreen()
         }
     }
 

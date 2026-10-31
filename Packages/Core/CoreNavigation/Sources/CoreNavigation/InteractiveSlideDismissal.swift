@@ -432,7 +432,10 @@ public final class InteractiveSlideDismissal: NSObject {
     private func beginSwipe() {
         guard interaction == nil, revealGrab == nil,
               let nav = navigationController,
-              let feed = feedViewController, nav.topViewController === feed else { return }
+              let feed = feedViewController, nav.topViewController === feed,
+              // A close of this stack still landing — a chevron tapped a turn
+              // ago — owns it until it has (#1144).
+              !nav.arbiter.isPending else { return }
         // ⚠️ THE GEOMETRY IS ASKED FOR HERE, not carried from the opening.
         //
         // What a card-shaped close carries — the row's rect, the caption's cut,
@@ -464,8 +467,9 @@ public final class InteractiveSlideDismissal: NSObject {
         // stack edit here is a plain transaction, not a mid-transition one.
         onWillBeginPop?(activeAxis)
         // Triggers the pop; the delegate below vends the slide animator and
-        // this driver because `interaction` is now non-nil.
-        nav.popViewController(animated: true)
+        // this driver because `interaction` is now non-nil. Through the
+        // arbiter, so a chevron tapped during the swipe closes nothing more.
+        nav.arbiter.close(feed, whenBusy: .drop)
     }
 
     private func releaseSwipe(translation: CGPoint, velocity: CGPoint, ended: Bool, in view: UIView) {

@@ -568,7 +568,7 @@ final class LoginFlowCoordinator {
     /// Back to the method list: the form's sheet goes.
     private func closeForm() {
         guard let form = formNavigation else { return }
-        form.dismiss(animated: true)
+        form.closePresentation()
         forgetForm()
     }
 

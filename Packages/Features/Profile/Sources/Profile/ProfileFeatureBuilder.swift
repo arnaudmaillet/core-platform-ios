@@ -167,7 +167,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             resolveTeen: { try await account.currentAccount().ageBracket.isTeen }
         ) { accept, link in
             let navigation = accept.navigationController
-            navigation?.popViewController(animated: true)
+            accept.closeScreen()
             if let landing = navigation?.topViewController ?? navigation {
                 Feedback.success(SupervisionCopy.linkedToast(link), from: landing)
             }

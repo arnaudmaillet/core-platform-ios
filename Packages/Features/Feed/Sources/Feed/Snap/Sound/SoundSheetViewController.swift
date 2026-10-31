@@ -736,7 +736,7 @@ final class SoundSheetViewController: UIViewController {
     /// swipe down: the feed behind is uncovered on the way out
     /// (`viewDidDisappear`).
     func close() {
-        (navigationController ?? self).dismiss(animated: true)
+        closePresentation()
     }
 
     // MARK: - Toolbar
@@ -1925,7 +1925,7 @@ final class SoundSheetViewController: UIViewController {
         // put rather than closing the sheet on nothing.
         guard openFeedHero == nil else { return }
         let select = onSelectPost
-        dismiss(animated: true) { select?(id) }
+        closePresentation { select?(id) }
     }
 
     private func openFeed(from tile: Tile, order: [PostID], source: TileSource) -> Bool {
@@ -2220,7 +2220,7 @@ final class SoundSheetViewController: UIViewController {
         let sound = sound
         // "Use" opens the camera: a guest signs up first, then lands in it.
         MemberGates.perform(.useSound, from: self) { [weak self] in
-            self?.dismiss(animated: true) { onUseSound(sound) }
+            self?.closePresentation { onUseSound(sound) }
         }
     }
 
