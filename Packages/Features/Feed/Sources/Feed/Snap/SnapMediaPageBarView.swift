@@ -116,11 +116,11 @@ final class SnapMediaPageBarView: UIView {
     /// the footprint, which costs the layout nothing.
     static let handledTrackHeight: CGFloat = 8
     /// The cursor after a release, until the strip rests: a disc.
-    static let cursorDiameter: CGFloat = 8
+    static let cursorDiameter = PlayheadBarRenderer.cursorDiameter
     /// The cursor while handled: a vertical pill AS WIDE AS THE DISC — the
     /// owner after the device check, 2026-10-22: at 4 pt it read thinner
     /// than the cursor it grows out of and shrinks back into.
-    static let handledCursorSize = CGSize(width: cursorDiameter, height: 14)
+    static let handledCursorSize = PlayheadBarRenderer.handledCursorSize
     /// How long the bar and its cursor take to grow when touched, and to
     /// shrink back on release.
     static let handleDuration: TimeInterval = 0.2
@@ -207,9 +207,10 @@ final class SnapMediaPageBarView: UIView {
     var onScrubPreview: (((fraction: Double, x: CGFloat))?) -> Void = { _ in }
 
     private var segments: [UIView] = []
-    /// The played part of each segment — minted only for the page that is a
-    /// clip, because that is the only one that ever draws it.
-    private var fills: [Int: UIView] = [:]
+    /// The clip's bar drawn on the watched segment: the played part, the
+    /// cursor and the loading pulse — the playhead's drawing, shared with the
+    /// sound sheet's (#1964).
+    private let renderer = PlayheadBarRenderer()
     private var pageCount = 0
     /// Which picture of how many, in the corner the run leaves for it.
     ///
@@ -330,13 +331,13 @@ final class SnapMediaPageBarView: UIView {
         isHidden = !hasStrip
         guard hasStrip else { return }
         if segments.count != count {
-            // ⚠️ THE FILLS GO WITH THE SEGMENTS THEY LIVE IN (#1532). Kept by
-            // page index, a fill outlived its segment: a clip's page after a
-            // nine-photo carousel drew its played part into page 0's OLD,
-            // detached segment — an empty bar for the whole clip, whatever
-            // the player said. A new run mints its own fills.
-            fills.values.forEach { $0.removeFromSuperview() }
-            fills = [:]
+            // ⚠️ THE FILL GOES WITH THE SEGMENT IT LIVES IN (#1532). Left in
+            // it, a clip's page after a nine-photo carousel drew its played
+            // part into page 0's OLD, detached segment — an empty bar for the
+            // whole clip, whatever the player said. It is taken out, and the
+            // next layout re-parents it into the new run.
+            renderer.hidePlayed()
+            renderer.fill.removeFromSuperview()
             segments.forEach { $0.removeFromSuperview() }
             segments = (0..<count).map { _ in
                 let view = UIView()
@@ -452,7 +453,7 @@ final class SnapMediaPageBarView: UIView {
         UIView.animate(withDuration: 0.18, delay: 0,
                        options: [.allowUserInteraction, .beginFromCurrentState]) {
             self.alpha = 1
-            self.fills.values.forEach { $0.backgroundColor = self.fillInk }
+            self.renderer.fill.backgroundColor = self.fillInk
         }
     }
 
@@ -466,7 +467,7 @@ final class SnapMediaPageBarView: UIView {
         UIView.animate(withDuration: 0.45, delay: 0,
                        options: [.allowUserInteraction, .beginFromCurrentState]) {
             self.alpha = Self.restingOpacity
-            self.fills.values.forEach { $0.backgroundColor = self.fillInk }
+            self.renderer.fill.backgroundColor = self.fillInk
         }
     }
 
@@ -665,32 +666,17 @@ final class SnapMediaPageBarView: UIView {
         let isBar = clipPages.contains(index) && clipness > 0 && watched
         layoutPulse(onPage: index, isBar: isBar, clipness: clipness)
         guard isBar, let playhead = drawnPlayhead else {
-            fills[index]?.isHidden = true
-            if index == Int(position.rounded()) { cursor.isHidden = true }
+            if renderer.fill(on: segments[index]) != nil { renderer.fill.isHidden = true }
+            if index == Int(position.rounded()) { renderer.cursor.isHidden = true }
             return
         }
-        let fill = fills[index] ?? {
-            let view = UIView()
-            view.backgroundColor = fillInk
-            view.isUserInteractionEnabled = false
-            view.isHidden = true
-            segments[index].addSubview(view)
-            fills[index] = view
-            return view
-        }()
-        fill.isHidden = false
         // The ink follows the strip's state (`restingFillInk`); a wake or a
         // rest animating it lands on this same value.
-        fill.backgroundColor = fillInk
-        // ⚠️ AT ONCE, AT ITS POSITION (#1537, the owner 2026-10-21): the
-        // indicator no longer grows in from the bar's start (#1305). Its only
-        // motion is the cross-fade with the loading pulse (`setLoading`).
-        fill.alpha = clipness * proximity(toPage: index) * indicatorPresence
-        let track = segments[index].bounds.height
-        let played = max(min(CGFloat(playhead), 1), 0) * width
-        fill.frame = CGRect(x: 0, y: 0, width: played, height: track)
-        fill.layer.cornerRadius = min(track, played) / 2
-        layoutCursor(onPage: index, played: played, track: track, alpha: fill.alpha)
+        let played = renderer.drawPlayed(
+            in: segments[index], fraction: playhead, width: width,
+            alpha: clipness * proximity(toPage: index), ink: fillInk
+        )
+        layoutCursor(onPage: index, played: played, track: segments[index].bounds.height, alpha: renderer.fill.alpha)
     }
 
     /// The cursor at the end of the played part (#1544): as tall as the bar
@@ -699,26 +685,12 @@ final class SnapMediaPageBarView: UIView {
     /// It never shrinks below the bar's height, so it never vanishes into
     /// nothing; it dims with the strip.
     private func layoutCursor(onPage index: Int, played: CGFloat, track: CGFloat, alpha: CGFloat) {
-        if cursor.superview == nil {
-            cursor.isUserInteractionEnabled = false
-            addSubview(cursor)
-        }
         let segment = segments[index]
-        let disc = track + (Self.cursorDiameter - track) * awakeness.value
-        let size = CGSize(
-            width: disc + (Self.handledCursorSize.width - disc) * handling.value,
-            height: disc + (Self.handledCursorSize.height - disc) * handling.value
+        renderer.drawCursor(
+            in: self, trackMinX: segment.center.x - segment.bounds.width / 2, trackWidth: segment.bounds.width,
+            centerY: bounds.height / 2, played: played, trackHeight: track,
+            handling: handling.value, awakeness: awakeness.value, ink: fillInk, alpha: segment.alpha * alpha
         )
-        let minX = segment.center.x - segment.bounds.width / 2
-        let end = minX + played
-        // Inside the bar's ends, so the disc never hangs past the track.
-        let x = min(max(end, minX + size.width / 2), minX + max(segment.bounds.width, size.width) - size.width / 2)
-        cursor.isHidden = false
-        cursor.bounds = CGRect(origin: .zero, size: size)
-        cursor.center = CGPoint(x: x, y: bounds.height / 2)
-        cursor.layer.cornerRadius = min(size.width, size.height) / 2
-        cursor.backgroundColor = fillInk
-        cursor.alpha = segment.alpha * alpha
     }
 
     // MARK: - The bar's two tweens (#1544)
@@ -767,7 +739,6 @@ final class SnapMediaPageBarView: UIView {
     private var awakeness = Tween()
     /// How far a clip's bar is held back as segments: 1 while browsing.
     private var clipHold = Tween()
-    private let cursor = UIView()
     private var tweenLink: CADisplayLink?
 
     private func animate(_ tween: ReferenceWritableKeyPath<SnapMediaPageBarView, Tween>, to target: CGFloat, duration: TimeInterval) {
@@ -816,40 +787,18 @@ final class SnapMediaPageBarView: UIView {
 
     /// Whether the watched clip is loading: its length unknown, or the player
     /// stalled. The bar then shows the pulse instead of the indicator.
-    private(set) var isLoading = false
-    /// The indicator's and the pulse's presence, cross-faded (1 / 0 at rest).
-    private var indicatorPresence: CGFloat = 1
-    /// A light stroke that stretches from the bar's centre to its ends while
-    /// fading, looping — TikTok's loading line (the owner's choice).
-    private let pulseView = UIView()
-    private let pulseStroke = CALayer()
-    private static let pulseKey = "bar.pulse"
+    var isLoading: Bool { renderer.isLoading }
     /// The cross-fade between the pulse and the indicator.
-    static let loadingFadeDuration: TimeInterval = 0.2
+    static let loadingFadeDuration = PlayheadBarRenderer.loadingFadeDuration
     /// One stretch of the pulse.
-    static let pulseDuration: CFTimeInterval = 0.9
+    static let pulseDuration = PlayheadBarRenderer.pulseDuration
 
     /// The watched clip started or stopped loading: the pulse and the
     /// indicator cross-fade.
     func setLoading(_ loading: Bool) {
-        guard loading != isLoading else { return }
-        isLoading = loading
-        let presence: CGFloat = loading ? 0 : 1
-        indicatorPresence = presence
-        let fade = { [self] in
-            pulseView.alpha = 1 - presence
-            for (index, fill) in fills where !fill.isHidden {
-                fill.alpha = clipPresence(ofPage: index) * presence
-            }
-        }
-        if window != nil, UIView.areAnimationsEnabled {
-            UIView.animate(withDuration: Self.loadingFadeDuration, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState], animations: fade) { [weak self] _ in
-                guard let self, !self.isLoading else { return }
-                self.pulseStroke.removeAnimation(forKey: Self.pulseKey)
-            }
-        } else {
-            fade()
-            if !loading { pulseStroke.removeAnimation(forKey: Self.pulseKey) }
+        renderer.setLoading(loading, animated: window != nil && UIView.areAnimationsEnabled) { [weak self] in
+            guard let self else { return 0 }
+            return clipPresence(ofPage: Int(position.rounded()))
         }
         layoutSegments()
     }
@@ -860,55 +809,14 @@ final class SnapMediaPageBarView: UIView {
         clipPageProximity * proximity(toPage: index)
     }
 
-    /// Places the pulse in the watched clip's segment while loading, and runs
-    /// its loop — or a still, dim track under Reduce Motion or Low Power Mode
-    /// (no endless animation, #580).
+    /// Places the pulse in the watched clip's segment while loading — the
+    /// shared drawing's (`PlayheadBarRenderer.layoutPulse`).
     private func layoutPulse(onPage index: Int, isBar: Bool, clipness: CGFloat) {
-        guard isBar, isLoading || pulseView.alpha > 0.001 else {
-            if segments.indices.contains(index), pulseView.superview === segments[index] { pulseView.isHidden = true }
+        guard isBar else {
+            if renderer.pulse(on: segments[index]) != nil { renderer.layoutPulse(on: nil, inWindow: false, ink: .white) }
             return
         }
-        let segment = segments[index]
-        if pulseView.superview !== segment {
-            pulseView.removeFromSuperview()
-            pulseView.isUserInteractionEnabled = false
-            pulseView.clipsToBounds = true
-            if pulseStroke.superlayer == nil {
-                pulseStroke.backgroundColor = UIColor.white.cgColor
-                pulseView.layer.addSublayer(pulseStroke)
-            }
-            segment.addSubview(pulseView)
-            if !isLoading { pulseView.alpha = 0 }
-        }
-        pulseView.isHidden = false
-        pulseView.frame = segment.bounds
-        pulseView.layer.cornerRadius = segment.bounds.height / 2
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        pulseStroke.frame = pulseView.bounds
-        pulseStroke.cornerRadius = pulseView.bounds.height / 2
-        CATransaction.commit()
-        let moves = isLoading && window != nil && !MotionPreference.stillsDecoration
-        if moves, pulseStroke.animation(forKey: Self.pulseKey) == nil {
-            let stretch = CABasicAnimation(keyPath: "transform.scale.x")
-            stretch.fromValue = 0.02
-            stretch.toValue = 1
-            let fade = CABasicAnimation(keyPath: "opacity")
-            fade.fromValue = 0.9
-            fade.toValue = 0
-            let loop = CAAnimationGroup()
-            loop.animations = [stretch, fade]
-            loop.duration = Self.pulseDuration
-            loop.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            loop.repeatCount = .infinity
-            loop.isRemovedOnCompletion = false
-            pulseStroke.add(loop, forKey: Self.pulseKey)
-        } else if !moves {
-            pulseStroke.removeAnimation(forKey: Self.pulseKey)
-            // Still: a dim track — the bar says "not yet" without moving.
-            pulseStroke.opacity = isLoading ? 0.35 : 0
-        }
-        if moves { pulseStroke.opacity = 1 }
+        renderer.layoutPulse(on: segments[index], inWindow: window != nil, ink: .white)
     }
 
     /// 1 on the page itself, 0 a page away, linear between — the tent above.
@@ -1356,28 +1264,34 @@ final class SnapMediaPageBarView: UIView {
     /// coordinates — nil when the page draws no bar.
     /// Whether a clip's fill is animating — never since #1537. Tests.
     func debugFillIsAnimating(_ index: Int) -> Bool {
-        guard let fill = fills[index] else { return false }
+        guard let fill = debugFill(index) else { return false }
         return (fill.layer.animationKeys() ?? []).isEmpty == false
     }
 
     /// The indicator's ink (its white's alpha) on `index`. Tests.
     func debugFillInk(_ index: Int) -> CGFloat? {
         var white: CGFloat = 0, ink: CGFloat = 0
-        guard fills[index]?.backgroundColor?.getWhite(&white, alpha: &ink) == true else { return nil }
+        guard debugFill(index)?.backgroundColor?.getWhite(&white, alpha: &ink) == true else { return nil }
         return ink
     }
 
     /// The loading pulse: shown (its presence), and looping. Tests.
-    var debugPulsePresence: CGFloat { pulseView.isHidden || pulseView.superview == nil ? 0 : pulseView.alpha }
-    var debugPulseIsLooping: Bool { pulseStroke.animation(forKey: Self.pulseKey) != nil }
+    var debugPulsePresence: CGFloat {
+        let pulse = renderer.pulseView
+        return pulse.isHidden || pulse.superview == nil ? 0 : pulse.alpha
+    }
+    var debugPulseIsLooping: Bool { renderer.pulseStroke.animation(forKey: PlayheadBarRenderer.pulseKey) != nil }
     /// The indicator's alpha on `index`, or nil when it draws none. Tests.
     func debugFillAlpha(_ index: Int) -> CGFloat? {
-        guard let fill = fills[index], !fill.isHidden else { return nil }
+        guard let fill = debugFill(index), !fill.isHidden else { return nil }
         return fill.alpha
     }
 
     /// The cursor's size, or nil when it is not drawn. Tests.
-    var debugCursorSize: CGSize? { cursor.isHidden || cursor.superview == nil ? nil : cursor.bounds.size }
+    var debugCursorSize: CGSize? {
+        let cursor = renderer.cursor
+        return cursor.isHidden || cursor.superview == nil ? nil : cursor.bounds.size
+    }
     /// The bar's drawn thickness on `index`. Tests.
     func debugTrackHeight(_ index: Int) -> CGFloat? { segmentFrame(index)?.height }
     /// Runs both tweens to their targets now. Tests.
@@ -1391,8 +1305,14 @@ final class SnapMediaPageBarView: UIView {
         layoutSegments()
     }
 
+    /// The fill, if it is drawn on `index`'s segment.
+    private func debugFill(_ index: Int) -> UIView? {
+        guard segments.indices.contains(index) else { return nil }
+        return renderer.fill(on: segments[index])
+    }
+
     func debugFillFrame(_ index: Int) -> CGRect? {
-        guard let fill = fills[index], !fill.isHidden, fill.alpha > 0.01,
+        guard let fill = debugFill(index), !fill.isHidden, fill.alpha > 0.01,
               fill.isDescendant(of: self) else { return nil }
         return fill.convert(fill.bounds, to: self)
     }
