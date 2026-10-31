@@ -510,6 +510,7 @@ public final class VideoRenderView: UIView {
     /// completion frame. That was the flash at the END of the zoom once the
     /// surface itself was being handed along instead of re-created.
     func attach(_ player: AVPlayer, renderer: VideoFrameRenderer? = nil) {
+        isHoldingStill = false
         if let renderer {
             guard self.renderer !== renderer else { return }
             // ⚠️ A NEW SOURCE MAKES WHAT IS QUEUED STALE.

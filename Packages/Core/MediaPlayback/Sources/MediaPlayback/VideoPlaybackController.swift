@@ -207,6 +207,14 @@ public final class VideoPlaybackController {
     /// paused at a fifth of the screen, played in step with the profile's
     /// tile of the same post).
     private var stilledSurfaces: Set<ObjectIdentifier> = []
+
+    /// The player each still was taken from, so the surface can take it back
+    /// — a surface that only JOINED a playback has no loan to find it by.
+    private var stilledPlayers: [ObjectIdentifier: WeakPlayer] = [:]
+
+    private struct WeakPlayer {
+        weak var player: AVPlayer?
+    }
     /// A player detached from its view but still running, waiting for the next
     /// `play` of the same URL to adopt it. See `parkPlayback(from:)`.
     private var parked: (url: URL, player: AVPlayer)?
@@ -387,6 +395,7 @@ public final class VideoPlaybackController {
         // Asked to play: no longer paused, and a still it held gives way to
         // whichever player binds it below (#1914).
         pausedSurfaces.remove(key)
+        stilledPlayers[key] = nil
         let wasStilled = stilledSurfaces.remove(key) != nil
         if wasStilled { view.releaseStill() }
 
@@ -1712,6 +1721,7 @@ public final class VideoPlaybackController {
             playingScope[key] = nil
             pausedSurfaces.remove(key)
             stilledSurfaces.remove(key)
+            stilledPlayers[key] = nil
             guard let player = activePlayers.removeValue(forKey: key) else { continue }
             let stillInUse = activePlayers.values.contains { $0 === player }
                 || parked.map { $0.player === player } ?? false
@@ -1911,11 +1921,20 @@ public final class VideoPlaybackController {
         return true
     }
 
-    /// The other surfaces bound to `player`.
+    /// The other surfaces bound to `player`: those holding a loan on it, and
+    /// those that only joined it (a hero landing's page, a mirror).
+    ///
+    /// ⚠️ THE JOINED ONES TOO (the owner's device, 2026-10-31): a post opened
+    /// from a grid tile JOINS the tile's player, with no loan of its own, and
+    /// went on mirroring the profile's tile of the same post.
     private func surfaces(sharing player: AVPlayer, besides key: ObjectIdentifier) -> [ObjectIdentifier: VideoRenderView] {
         var shared: [ObjectIdentifier: VideoRenderView] = [:]
         for (other, candidate) in activePlayers where other != key && candidate === player {
             if let view = surfaces[other]?.view { shared[other] = view }
+        }
+        for view in renderers[ObjectIdentifier(player)]?.surfaceViews ?? [] {
+            let other = ObjectIdentifier(view)
+            if other != key { shared[other] = view }
         }
         return shared
     }
@@ -1941,8 +1960,9 @@ public final class VideoPlaybackController {
     }
 
     private func holdStill(key: ObjectIdentifier, view: VideoRenderView) {
-        guard !stilledSurfaces.contains(key) else { return }
+        guard !isStilled(view), let player = watchedPlayer(in: view) else { return }
         stilledSurfaces.insert(key)
+        stilledPlayers[key] = WeakPlayer(player: player)
         view.holdStill()
         VideoProducerLog.emit("STILL owner=\(view.debugProducerName) holds its frame, the player plays elsewhere")
     }
@@ -1951,6 +1971,7 @@ public final class VideoPlaybackController {
     /// held gives way to the player.
     private func resumeSurface(key: ObjectIdentifier, view: VideoRenderView, on player: AVPlayer) {
         pausedSurfaces.remove(key)
+        stilledPlayers[key] = nil
         if stilledSurfaces.remove(key) != nil {
             view.releaseStill()
             bind(player, to: view)
@@ -1960,7 +1981,7 @@ public final class VideoPlaybackController {
     /// Whether `view` holds a still while its player plays for another
     /// surface: to its owner, it is paused.
     private func isStilled(_ view: VideoRenderView) -> Bool {
-        stilledSurfaces.contains(ObjectIdentifier(view))
+        stilledSurfaces.contains(ObjectIdentifier(view)) && view.isHoldingStill
     }
 
     /// Plays the clip in `view` at `rate` — 1 is as shot, 2 twice as fast.
@@ -2845,6 +2866,7 @@ public final class VideoPlaybackController {
     /// files — the sound controls — ask the same player every control here asks.
     func watchedPlayer(in view: VideoRenderView) -> AVPlayer? {
         activePlayers[ObjectIdentifier(view)] ?? view.boundPlayer
+            ?? stilledPlayers[ObjectIdentifier(view)]?.player
     }
 
     private func activePlayer(playing mediaURL: URL) -> AVPlayer? {
@@ -2885,6 +2907,8 @@ public final class VideoPlaybackController {
     /// Makes `view` display `player`: a layer binding in player-layer mode, a
     /// surface-set insertion in sample-buffer mode.
     private func bind(_ player: AVPlayer, to view: VideoRenderView) {
+        // Bound again, it shows the player: no pause of its own to remember.
+        pausedSurfaces.remove(ObjectIdentifier(view))
         view.attach(player, renderer: renderer(for: player))
         // Every route that puts a player behind a surface ends here, so this is
         // where the audible surface learns that its player changed.
@@ -2894,6 +2918,7 @@ public final class VideoPlaybackController {
     private func detach(key: ObjectIdentifier, view: VideoRenderView) {
         pausedSurfaces.remove(key)
         stilledSurfaces.remove(key)
+        stilledPlayers[key] = nil
         if let player = activePlayers[key] { pauseIfOnlyStillsRemain(on: player, besides: key) }
         view.detach(reason: "controller.stop")
         // Read BEFORE the ledger is cleared: these two are what the playhead is

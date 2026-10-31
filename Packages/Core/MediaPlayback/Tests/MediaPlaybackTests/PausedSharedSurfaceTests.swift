@@ -94,4 +94,23 @@ struct PausedSharedSurfaceTests {
         #expect(!page.isHoldingStill)
         #expect(pool.isAdvancing(in: tile))
     }
+
+    /// The page of a post opened from a grid tile only JOINS the tile's player
+    /// (no loan of its own). Paused, then played by another surface, it holds
+    /// a still too, and takes the player back when it resumes.
+    @Test func aJoinedSurfaceHoldsAStillToo() async {
+        let pool = VideoPlaybackController(source: StubSource(), poolSize: 4, capacity: 4)
+        let tile = surface(), page = surface(), card = surface()
+        await pool.play(url, in: tile, scope: "post-a")
+        #expect(pool.attachSurface(page, to: url, scope: "post-a"))
+        #expect(!pool.hasPlayer(in: page), "the premise: the page holds no loan")
+        #expect(pool.setPaused(true, in: page))
+        await pool.play(url, in: card, scope: "post-a")
+
+        #expect(page.isHoldingStill, "the joined page mirrored the card's clip")
+        #expect(pool.isPaused(in: page) == true)
+        #expect(pool.setPaused(false, in: page))
+        #expect(!page.isHoldingStill)
+        #expect(pool.isAdvancing(in: page))
+    }
 }
