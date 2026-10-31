@@ -198,6 +198,14 @@ public final class VideoPlaybackController {
 
     /// The paused surfaces holding a still while the player they share plays
     /// for another surface (`holdStill`).
+    ///
+    /// ⚠️ A PAUSE STILL STOPS THE SHARED CLOCK. One asset, one player: a
+    /// post's card and its page share one, and a viewer's pause must stop
+    /// both — the card behind the page included, sound and all. Only when
+    /// ANOTHER surface then plays that player do the paused ones stop showing
+    /// it (#1914, the owner's device, 2026-10-31: the post behind a profile,
+    /// paused at a fifth of the screen, played in step with the profile's
+    /// tile of the same post).
     private var stilledSurfaces: Set<ObjectIdentifier> = []
     /// A player detached from its view but still running, waiting for the next
     /// `play` of the same URL to adopt it. See `parkPlayback(from:)`.
@@ -1848,15 +1856,10 @@ public final class VideoPlaybackController {
         defer { if pictureInPicture?.surface === view { refreshPictureInPictureState() } }
         let key = ObjectIdentifier(view)
         if paused {
+            // One clock: a pause stops every picture on the player, as it
+            // always has. What changes is a LATER play by another surface
+            // (`stillPausedSurfaces`).
             pausedSurfaces.insert(key)
-            // ⚠️ A SHARED PLAYER STILL WANTED ELSEWHERE (#1914): pausing it
-            // would stop the other surface too. This one holds its frame and
-            // lets the player go on.
-            if activePlayers[key] === player, player.timeControlStatus != .paused,
-               surfaces(sharing: player, besides: key).contains(where: { !pausedSurfaces.contains($0.key) }) {
-                holdStill(key: key, view: view)
-                return true
-            }
             // ⚠️ WHERE THE PICTURE WAS, remembered — because an adaptive stream
             // does not necessarily come back to it.
             //
@@ -1923,6 +1926,18 @@ public final class VideoPlaybackController {
         for (other, view) in surfaces(sharing: player, besides: key) where pausedSurfaces.contains(other) {
             holdStill(key: other, view: view)
         }
+    }
+
+    /// The surface leaving `player` was the last one playing it: if every
+    /// surface left on it is paused, the player pauses too — no sound, no
+    /// clock running under pictures that all hold a still.
+    private func pauseIfOnlyStillsRemain(on player: AVPlayer, besides key: ObjectIdentifier) {
+        let remaining = surfaces(sharing: player, besides: key)
+        guard !remaining.isEmpty, remaining.keys.allSatisfy({ pausedSurfaces.contains($0) }),
+              player.timeControlStatus != .paused
+        else { return }
+        pausedAnchors[ObjectIdentifier(player)] = player.currentTime()
+        player.pause()
     }
 
     private func holdStill(key: ObjectIdentifier, view: VideoRenderView) {
@@ -2879,6 +2894,7 @@ public final class VideoPlaybackController {
     private func detach(key: ObjectIdentifier, view: VideoRenderView) {
         pausedSurfaces.remove(key)
         stilledSurfaces.remove(key)
+        if let player = activePlayers[key] { pauseIfOnlyStillsRemain(on: player, besides: key) }
         view.detach(reason: "controller.stop")
         // Read BEFORE the ledger is cleared: these two are what the playhead is
         // filed under, and three lines down they are gone.

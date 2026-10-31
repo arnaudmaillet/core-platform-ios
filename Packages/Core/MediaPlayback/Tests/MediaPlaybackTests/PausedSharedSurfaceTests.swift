@@ -9,9 +9,9 @@ import UIKit
 /// One asset, one player: a profile's tile of the post Shots shows joins the
 /// player Shots paused under the profile. Both surfaces were bound to it, so
 /// when the tile played it, the post behind — at a fifth of the screen —
-/// played in step. The paused surface now holds its frame, unbound, and takes
-/// the player back when it resumes; the player pauses only when every surface
-/// on it is paused.
+/// played in step. A paused surface now holds its frame, unbound, while
+/// another plays the player, and takes it back when it resumes. A pause still
+/// stops the shared clock.
 @MainActor
 struct PausedSharedSurfaceTests {
     private struct StubSource: VideoSource {
@@ -49,22 +49,37 @@ struct PausedSharedSurfaceTests {
         #expect(pool.isAdvancing(in: page))
     }
 
-    /// The other way: the tile paused while the page still plays the shared
-    /// player — the player goes on for the page, the tile holds its frame.
-    @Test func pausingOneSurfaceDoesNotStopTheOther() async {
+    /// A pause still stops the shared clock — the viewer's pause on a page
+    /// must stop the card behind it too, sound and all. No still: there is
+    /// nothing playing to mirror.
+    @Test func aPauseStillStopsTheSharedClock() async {
         let pool = VideoPlaybackController(source: StubSource(), poolSize: 4, capacity: 4)
         let page = surface(), tile = surface()
         await pool.play(url, in: page, scope: "post-a")
         await pool.play(url, in: tile, scope: "post-a")
 
         #expect(pool.setPaused(true, in: tile))
-        #expect(tile.isHoldingStill)
-        #expect(pool.isAdvancing(in: page), "pausing the tile stopped the page")
+        #expect(!pool.isAdvancing(in: page))
+        #expect(!tile.isHoldingStill)
+        #expect(!page.isHoldingStill)
+    }
 
-        // Every surface paused: the player itself pauses.
+    /// The surface playing the shared player leaves while the only other one
+    /// holds a still: the player pauses, so no sound runs under a still.
+    @Test func theLastPlayingSurfaceLeavingPausesThePlayer() async {
+        let pool = VideoPlaybackController(source: StubSource(), poolSize: 4, capacity: 4)
+        let page = surface(), tile = surface()
+        await pool.play(url, in: page, scope: "post-a")
         #expect(pool.setPaused(true, in: page))
+        await pool.play(url, in: tile, scope: "post-a")
+        #expect(page.isHoldingStill)
+
+        pool.stop(tile)
         #expect(pool.isPaused(in: page) == true)
-        #expect(!page.isHoldingStill, "the last surface held a still instead of pausing the player")
+        // Resumed, the page takes its player back.
+        #expect(pool.setPaused(false, in: page))
+        #expect(!page.isHoldingStill)
+        #expect(pool.isAdvancing(in: page))
     }
 
     /// A surface stopped while it holds a still forgets it.
