@@ -223,13 +223,13 @@ public final class ScreenCovers {
         return fills(presented, bounds)
     }
 
-    /// A sheet covers at `.large()`: its selected detent, or — none selected
-    /// — its first, as UIKit shows it. Pure, for tests.
+    /// A sheet covers at `.large()` — see `ScreenCoveringSheet` for none
+    /// selected (UIKit shows the smallest). Pure, for tests.
     static func coversAsSheet(
         selected: UISheetPresentationController.Detent.Identifier?,
         detents: [UISheetPresentationController.Detent.Identifier]
     ) -> Bool {
-        (selected ?? detents.first ?? .large) == .large
+        ScreenCoveringSheet.coversAtLarge(selected: selected, detents: detents)
     }
 
     /// The declaring screen: `presented` itself, or the root of its stack.

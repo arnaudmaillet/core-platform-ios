@@ -134,7 +134,10 @@ struct ScreenCoversTests {
         // Two heights, the smaller selected: it covers once at large.
         #expect(!ScreenCovers.coversAsSheet(selected: .medium, detents: [.medium, .large]))
         #expect(ScreenCovers.coversAsSheet(selected: .large, detents: [.medium, .large]))
-        #expect(!ScreenCovers.coversAsSheet(selected: nil, detents: [.medium, .large]), "UIKit shows the first")
+        // None selected: UIKit shows the SMALLEST, whatever the order listed.
+        #expect(!ScreenCovers.coversAsSheet(selected: nil, detents: [.medium, .large]))
+        #expect(!ScreenCovers.coversAsSheet(selected: nil, detents: [.large, .medium]), "read as the first listed")
+        #expect(ScreenCovers.coversAsSheet(selected: nil, detents: [.large]))
         #expect(ScreenCovers.coversAsSheet(selected: nil, detents: []), "a sheet with no detents is large")
     }
 

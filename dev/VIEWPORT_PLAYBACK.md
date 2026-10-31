@@ -91,6 +91,7 @@ AppWindow.didAddSubview / willRemoveSubview      a presentation's container come
 | `.fullScreen`, `.overFullScreen` | yes |
 | A sheet whose selected detent is `.large()` | yes |
 | A sheet at a smaller detent (medium, custom, fitted) | no |
+| A sheet with no detent selected | only when every detent is `.large()`: UIKit shows the smallest |
 | An alert, an action sheet, a popover | no |
 | Anything else (a custom transition) | when its view fills the window |
 
