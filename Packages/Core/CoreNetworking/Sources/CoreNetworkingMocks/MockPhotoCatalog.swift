@@ -2,6 +2,12 @@ import Foundation
 
 /// The mock corpus's REAL photographs, grouped in galleries.
 ///
+/// ⚠️ TWO POOLS (the owner, 2026-10-31). POSTS draw from `posts`, the
+/// photographs of the owner's "media 2" folder (`Scripts/import-mock-photos.py
+/// --posts=`). The galleries and singles are no post's any more: they are kept
+/// because the AVATARS and so the banners read them (`avatarPhoto`), and an
+/// author keeps the face they had.
+///
 /// Imported by `Scripts/import-mock-photos.py` into `Resources/MockPhotos`
 /// (long side ≤ 1440 px, JPEG, metadata stripped) and listed in `photos.json`.
 /// A gallery is one source folder: the photos of one shoot, which is what a
@@ -42,6 +48,10 @@ public struct MockPhotoCatalog: Sendable {
     public let singles: [Photo]
     /// The id of the manifest entry holding `singles`.
     public static let singlesID = "singles"
+    /// The photographs posts draw from — single photos and collection pages.
+    public let posts: [Photo]
+    /// The id of the manifest entry holding `posts`.
+    public static let postsID = "posts"
     /// Every photo of every gallery, in gallery order.
     public let photos: [Photo]
     private let directory: URL?
@@ -55,36 +65,37 @@ public struct MockPhotoCatalog: Sendable {
         else {
             self.galleries = []
             self.singles = []
+            self.posts = []
             self.photos = []
             return
         }
-        self.galleries = galleries.filter { !$0.photos.isEmpty && $0.id != Self.singlesID }
+        self.galleries = galleries.filter { !$0.photos.isEmpty && ![Self.singlesID, Self.postsID].contains($0.id) }
         self.singles = galleries.first { $0.id == Self.singlesID }?.photos ?? []
-        self.photos = self.galleries.flatMap(\.photos) + singles
+        self.posts = galleries.first { $0.id == Self.postsID }?.photos ?? []
+        self.photos = self.galleries.flatMap(\.photos) + singles + posts
     }
 
     /// The picture of a SINGLE-photo post, `ordinal` counting those posts
-    /// across the whole mock world (the owner, 2026-10-16: no two posts on
-    /// one picture, and a gallery is a carousel, not a pool).
-    ///
-    /// The singles first, each once. Past them — the last resort the owner
-    /// allowed — gallery pages other than the heads, gallery by gallery so a
-    /// shoot is spent in one run rather than scattered. Cycles only when the
-    /// whole catalog is spent.
+    /// across the whole mock world: `posts` in order, each once, then round
+    /// again — one picture may be several posts' (the owner, 2026-10-31),
+    /// each post with its own id.
     public func singlePhoto(forOrdinal ordinal: Int) -> Photo? {
-        let pool = singlePool
-        guard !pool.isEmpty else { return nil }
-        return pool[Self.wrap(ordinal, pool.count)]
+        guard !posts.isEmpty else { return nil }
+        return posts[Self.wrap(ordinal, posts.count)]
     }
 
-    /// Every picture a single-photo post may take, in the order posts spend
-    /// it: the singles, then gallery pages past their heads.
+    /// The pool avatars are drawn from: the singles, then gallery pages past
+    /// their heads — the pool posts drew from before "media 2", kept as it was
+    /// so every author keeps their picture.
     private var singlePool: [Photo] { singles + galleries.flatMap { $0.photos.dropFirst() } }
 
     /// The picture of an AVATAR — and so of a profile's banner — `ordinal`
     /// counting avatars of one orientation (#1314).
     ///
-    /// ⚠️ FROM THE OTHER END OF THE POSTS' POOL. Avatars used to stride over
+    /// ⚠️ NEVER FROM `posts`: avatars and banners keep the old photographs
+    /// (the owner, 2026-10-31).
+    ///
+    /// From the other end of the old posts' pool. Avatars used to stride over
     /// every photo, so a dozen authors wore a picture that was also a post's
     /// (the owner, 2026-10-17: "éviter le plus possible d'avoir des
     /// doublons"). Posts spend the pool from its head (the 46 singles first)
@@ -106,18 +117,18 @@ public struct MockPhotoCatalog: Sendable {
         return photos[Self.wrap(slot, photos.count)]
     }
 
-    /// The gallery for a dataset slot, cycling through the galleries.
-    public func gallery(forSlot slot: Int) -> Gallery? {
-        guard !galleries.isEmpty else { return nil }
-        return galleries[Self.wrap(slot, galleries.count)]
+    /// Page `page` of the collection at `slot`: a run of `posts` starting
+    /// `collectionStride` pictures apart per collection, so two collections
+    /// open on different pictures. The few collections the corpus keeps are
+    /// fixtures for the carousel (the owner, 2026-10-31: few carousels), and
+    /// "media 2" has no shoots to make them of.
+    public func photo(inGalleryForSlot slot: Int, page: Int) -> Photo? {
+        guard !posts.isEmpty else { return nil }
+        return posts[Self.wrap(slot * Self.collectionStride + page, posts.count)]
     }
 
-    /// Page `page` of the gallery at `slot`, cycling WITHIN that gallery when
-    /// a collection has more pages than the gallery has photos — so every
-    /// page of one collection comes from one shoot.
-    public func photo(inGalleryForSlot slot: Int, page: Int) -> Photo? {
-        gallery(forSlot: slot).map { $0.photos[Self.wrap(page, $0.photos.count)] }
-    }
+    /// How far apart two collections start in `posts`.
+    static let collectionStride = 5
 
     /// The photo a `mock://photo/<photo-id>` URL names, if it names one.
     public func photo(for url: URL) -> Photo? {

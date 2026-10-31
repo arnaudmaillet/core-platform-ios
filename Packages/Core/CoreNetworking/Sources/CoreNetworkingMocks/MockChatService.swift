@@ -452,11 +452,11 @@ public final class MockChatService: @unchecked Sendable {
     /// A catalog photo as the client's `ChatMediaRef` writes one
     /// (`cpmedia://v1?kind=image&url=…&w=…&h=…`).
     static var seededPhotoReference: String? {
-        // The last single-photo ordinal: after every post's own picture, so a
-        // chat photo is not a post's (`MockSocialDataset.Ordinals`).
-        let worldPhotos = MockWorldSeed.placements.filter { $0.post.kind == .photo }.count
+        // The single-photo ordinal after every post's (`MockSocialDataset
+        // .Ordinals`). Round the pool, it may be a post's picture too: one
+        // media may serve several (the owner, 2026-10-31).
         guard let photo = MockPhotoCatalog.shared.singlePhoto(
-            forOrdinal: MockSocialDataset.worldSingleBase + worldPhotos
+            forOrdinal: MockSocialDataset.arrivalSingleBase + 1
         ) else { return nil }
         let media = photo.media
         let url = media.url.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? media.url

@@ -79,10 +79,11 @@ struct MockMediaFixturesTests {
         #expect(Set(ids).count == ids.count)
     }
 
-    /// The clips carry the shape coverage the public films never could: they
-    /// were all landscape, so portrait video had to be synthesized.
+    /// The clips POSTS draw carry the shape coverage the public films never
+    /// could: they were all landscape, so portrait video had to be
+    /// synthesized.
     @Test func clipsCoverPortraitLandscapeAndSquare() {
-        let aspects = clips.clips.map { Double($0.width) / Double($0.height) }
+        let aspects = clips.postClips.map { Double($0.width) / Double($0.height) }
         #expect(aspects.contains { (0.95...1.05).contains($0) }, "no square clip")
         #expect(aspects.contains { $0 > 1.05 }, "no landscape clip")
         #expect(aspects.contains { $0 < 0.95 }, "no portrait clip")

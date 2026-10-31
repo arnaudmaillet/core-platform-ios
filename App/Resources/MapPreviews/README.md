@@ -16,6 +16,11 @@ hand. One segment each: the clip's opening, which is also the poster the feed
 shows (`MockMediaFixtures.bakedClip(for:)` names the clip, `openingSegment`
 finds its `-0`).
 
+Since 2026-10-31 the posts' clips are the owner's "media 2" (`--own-sound`).
+A RETIRED clip (the corpus's first ones, `"retired": true` in `clips.json`)
+keeps its sheet only when an animated avatar or a video banner still reads its
+video (`--keep-video`): the avatar is cut from the clip, its sheet the fallback.
+
 These are the only sheets. The Big Buck Bunny and Sintel film sheets that used
 to sit beside them went with the public video fixtures: the mock plays only its
 own clips.

@@ -16,6 +16,13 @@ clips never renumbers the ones already committed.
 `--rebake-sheets` re-bakes every committed clip's preview sheet and nothing
 else — no sources needed, nothing re-encoded.
 
+`--own-sound=PATH --keep-video=clip-01,…` (repeatable; 2026-10-31, the owner's
+"media 2" and "media3"):
+PATH's videos become the clips every post draws from, each heard with its own
+audio — no sound file, never lent — and every clip committed before is
+retired: kept for its sound and its poster, its video and its sheet only when
+`--keep-video` names it. See `import_own_sound`.
+
 Sources are folders and/or loose files. Pairs every video with its sound (the full track a post is set to — usually
 longer than the clip), re-encodes both small enough to live in the repo, grabs
 a poster frame, and writes `clips.json`, the manifest `MockClipCatalog` reads.
@@ -175,15 +182,92 @@ def bake_sheets(clip_ids):
     print(f"{len(baked)} sheets, {size / 1_000_000:.1f} MB in {SHEETS}")
 
 
+def import_own_sound(folders, keep_video):
+    """`--own-sound=PATH`: PATH's videos become the clips posts draw from.
+
+    Each is heard with its OWN audio, from its player: it is encoded with the
+    clip, never extracted to a sound file, and never lent to another post
+    (`soundIsUnique`). Every clip already committed that is not one of them is
+    RETIRED: no post draws it any more, its sound stays (photo and text posts
+    borrow it) and its poster too (the sound's artwork). Its video and its
+    sheet go, unless `--keep-video=` names it — what the animated avatars and
+    the video banners still read.
+    """
+    manifest_path = OUT / "clips.json"
+    committed = json.loads(manifest_path.read_text())
+    imported_sources = {p.stem for folder in folders for p in folder.glob("*.mp4")}
+    previous = {entry["source"]: entry["id"] for entry in committed}
+    next_number = max(int(e["id"].split("-")[1]) for e in committed) + 1
+
+    kept = []
+    for entry in committed:
+        if entry["source"] in imported_sources:
+            continue
+        entry["retired"] = True
+        if entry["id"] not in keep_video:
+            for stale in [OUT / f"{entry['id']}.mp4"]:
+                stale.unlink(missing_ok=True)
+        kept.append(entry)
+
+    scale = "scale='if(gt(iw,ih),-2,min(iw\\,720))':'if(gt(iw,ih),min(ih\\,720),-2)'"
+    added = []
+    for video in sorted((p for folder in folders for p in folder.glob("*.mp4")), key=lambda p: p.name):
+        clip_id = previous.get(video.stem)
+        if clip_id is None:
+            clip_id = f"clip-{next_number:02d}"
+            next_number += 1
+        target, poster = OUT / f"{clip_id}.mp4", OUT / f"{clip_id}.jpg"
+        if not (target.exists() and poster.exists()):
+            run(["-i", str(video), "-t", str(VIDEO_SECONDS), "-vf", scale, "-fpsmax", "30",
+                 "-c:v", "libx265", "-preset", "medium", "-crf", "24",
+                 "-x265-params", "vbv-maxrate=1000:vbv-bufsize=2000:log-level=error",
+                 "-tag:v", "hvc1", "-pix_fmt", "yuv420p",
+                 "-c:a", "aac", "-b:a", "64k", "-ac", "2",
+                 "-movflags", "+faststart", str(target)])
+            run(["-ss", "0.5", "-i", str(target), "-frames:v", "1",
+                 "-vf", "scale=320:-2", "-q:v", "6", str(poster)])
+        encoded = probe(target)
+        added.append({
+            "id": clip_id,
+            "width": encoded["width"],
+            "height": encoded["height"],
+            "duration": round(encoded["duration"], 2),
+            # Its sound is its own audio track: as long as the clip.
+            "soundDuration": round(encoded["duration"], 2),
+            "soundTitle": None,
+            "soundArtist": None,
+            "source": video.stem,
+            "soundIsUnique": True,
+        })
+        print(f"{clip_id}  {encoded['width']}x{encoded['height']}  {encoded['duration']:.1f}s")
+
+    manifest = sorted(kept + added, key=lambda e: int(e["id"].split("-")[1]))
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    bake_sheets([e["id"] for e in manifest if not e.get("retired") or e["id"] in keep_video])
+    total = sum(p.stat().st_size for p in OUT.iterdir())
+    print(f"{len(added)} clips drawn by posts, {len(kept)} retired, {total / 1_000_000:.1f} MB in {OUT}")
+
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
+    own_sound = [Path(arg.split("=", 1)[1]).expanduser() for arg in sys.argv[1:]
+                 if arg.startswith("--own-sound=")]
+    if own_sound:
+        keep_video = {clip for arg in sys.argv[1:] if arg.startswith("--keep-video=")
+                      for clip in arg.split("=", 1)[1].split(",") if clip}
+        if not BAKER.exists():
+            subprocess.run(["swift", "build", "--package-path", str(ROOT / "Tools/IconBaker"),
+                            "-c", "release"], check=True)
+        import_own_sound(own_sound, keep_video)
+        return
     if "--rebake-sheets" in sys.argv:
         if not BAKER.exists():
             subprocess.run(["swift", "build", "--package-path", str(ROOT / "Tools/IconBaker"),
                             "-c", "release"], check=True)
         clips = json.loads((OUT / "clips.json").read_text())
-        bake_sheets([clip["id"] for clip in clips])
+        # A retired clip whose video went has no sheet to bake.
+        bake_sheets([clip["id"] for clip in clips if (OUT / f"{clip['id']}.mp4").exists()])
         return
     sources = [Path(arg).expanduser() for arg in sys.argv[1:] if not arg.startswith("--")]
     unique_sources = [Path(arg.split("=", 1)[1]).expanduser() for arg in sys.argv[1:]

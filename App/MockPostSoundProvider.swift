@@ -7,7 +7,8 @@ import Foundation
 /// never to one of its media).
 ///
 /// - A post made of ONE real clip (`MockClipCatalog`) is set to that clip's
-///   full sound.
+///   own sound: its "Original sound", heard from the clip itself (the owner's
+///   "media 2" clips have no sound file, 2026-10-31).
 /// - Any other post — a photograph, a carousel (its clips included), a text
 ///   post — is set to a song (`MockSongCatalog`) or to another clip's sound,
 ///   the way a post borrows a sound it did not make — most often one of a few
@@ -74,7 +75,10 @@ struct MockPostSoundProvider: PostSoundProviding {
             else { continue }
             borrowed[id] = sound
             postsBySound[sound, default: []].append(id)
-            if sound.hasPrefix("song-") {
+            // A song, or a RETIRED clip's sound (no post plays that clip any
+            // more): the first post set to it is its original, and its author
+            // the one credited.
+            if sound.hasPrefix("song-") || clips.clip(id: sound)?.isRetired == true {
                 if originals[sound] == nil { originals[sound] = id }
                 if creators[sound] == nil, let handle = handles[post.authorProfileID] {
                     creators[sound] = "@\(handle)"
@@ -156,7 +160,9 @@ struct MockPostSoundProvider: PostSoundProviding {
             title: clip.soundTitle,
             // An original sound is credited to whoever made the clip.
             artist: clip.soundArtist ?? creators[clip.id],
-            previewURL: clips.soundFileURL(clipID: clip.id),
+            // A "media 2" clip has no sound file: its sound is its own audio,
+            // played from the clip's video.
+            previewURL: clips.soundFileURL(clipID: clip.id) ?? clips.videoFileURL(clipID: clip.id),
             artworkURL: clips.posterFileURL(clipID: clip.id),
             duration: clip.soundDuration
         )
@@ -226,9 +232,9 @@ extension MockPostSoundProvider {
     /// posts, and the sound sheet's first row and "View all" never showed on
     /// real mock data.)
     private static let chart: [(share: Int, sound: Hit)] = [
-        (22, .clip(slot: 0)),   // post-0000's original sound
+        (22, .clip(slot: 0)),   // clip-01's sound (a retired clip's)
         (16, .song(slot: 6)),   // "Haru Haru" · BIGBANG, a named track
-        (11, .clip(slot: 2)),   // post-0006's original sound
+        (11, .clip(slot: 2)),   // clip-03's sound (a retired clip's)
         (8, .song(slot: 11)),   // "This song drops"
         (6, .song(slot: 0)),    // "Champagne Coast (piano cover)"
     ]

@@ -471,6 +471,12 @@ public enum MockWorldSeed {
         placements.filter { if case .video = $0.post.kind { true } else { false } }.count
     }
 
+    /// How many of the world's posts are photo posts — the run of photo slots
+    /// it draws (`MockSocialDataset.worldSingleBase`).
+    static var photoCount: Int {
+        placements.filter { if case .photo = $0.post.kind { true } else { false } }.count
+    }
+
     public static var placements: [Placement] {
         var result: [Placement] = []
         for country in countries {
@@ -519,7 +525,7 @@ public enum MockWorldSeed {
                     fallback: "mock://video/world-\(index)", shape: shape
                 )
             case .photo:
-                MockSocialDataset.photo(slot: MockSocialDataset.worldSingleBase + (photoOrdinal[index] ?? 0),
+                MockSocialDataset.photoPostMedia(slot: MockSocialDataset.worldSingleBase + (photoOrdinal[index] ?? 0),
                                         fallback: "world-\(index)", shape: shape)
             case .text:
                 nil

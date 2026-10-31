@@ -1,11 +1,19 @@
 import Foundation
 
-/// The mock corpus's REAL video clips: short videos with their own soundtrack,
-/// each paired with the full sound the post is set to.
+/// The mock corpus's REAL video clips.
 ///
 /// Imported by `Scripts/import-mock-clips.py` into `Resources/MockClips`,
-/// re-encoded small enough to commit (HEVC 540p, ≤25 s; sounds AAC ≤30 s),
+/// re-encoded small enough to commit (HEVC ≤720p, ≤25 s; sounds AAC ≤30 s),
 /// and listed in `clips.json`.
+///
+/// ⚠️ TWO KINDS (the owner, 2026-10-31):
+/// - **The clips posts draw from** (`postClips`): the owner's "media 2"
+///   videos, each heard with its OWN audio, from its player. They have no
+///   sound file, and their sound is never lent (`soundIsUnique`).
+/// - **The retired clips**, the corpus's first: no post draws them any more.
+///   Their sounds stay, and photo and text posts keep borrowing them. A few
+///   keep their video too, the ones the animated avatars and the video
+///   banners read (`--keep-video`).
 ///
 /// The dataset addresses a clip as `mock://video/<clip-id>?w=&h=` — still a
 /// `mock://video/` URL, so every rule that routes on it (the attachment's MIME,
@@ -28,13 +36,20 @@ public struct MockClipCatalog: Sendable {
         /// The clip's sound belongs to its own post alone (the owner,
         /// 2026-10-16: `--unique=` in the import): never lent to another post.
         public let soundIsUnique: Bool?
+        /// No post draws this clip any more (the owner's "media 2",
+        /// 2026-10-31): kept for its sound, its poster and — for a few — the
+        /// avatars and banners that read its video.
+        public let retired: Bool?
 
         public var lendsItsSound: Bool { soundIsUnique != true }
+        public var isRetired: Bool { retired == true }
     }
 
     public static let shared = MockClipCatalog(bundle: .module)
 
     public let clips: [Clip]
+    /// The clips posts draw from, in order: every clip but the retired ones.
+    public let postClips: [Clip]
     private let directory: URL?
 
     init(bundle: Bundle) {
@@ -45,26 +60,40 @@ public struct MockClipCatalog: Sendable {
               let clips = try? JSONDecoder().decode([Clip].self, from: data)
         else {
             self.clips = []
+            self.postClips = []
             return
         }
         self.clips = clips
+        self.postClips = clips.filter { !$0.isRetired }
     }
 
-    /// The clip for a dataset slot: every clip once, in order, then — past
-    /// the catalog's end — round the clips whose sound may be shared, so a
-    /// repeat is spread evenly (each clip again at most once more than any
-    /// other) and a clip whose sound is its post's alone is never a second
-    /// post's (the owner, 2026-10-16). Nil only when the resources are
+    /// The clip for a dataset slot: every post clip once, in order, then
+    /// round again — one clip may be several posts' (the owner, 2026-10-31),
+    /// each post with its own id, and a repeat carries the clip's own sound
+    /// with it. Never a retired clip. Nil only when the resources are
     /// missing, and the dataset then synthesizes as before.
     public func clip(forSlot slot: Int) -> Clip? {
-        guard !clips.isEmpty else { return nil }
-        if slot >= 0, slot < clips.count { return clips[slot] }
-        return borrowableClip(forSlot: slot - clips.count)
-            ?? clips[((slot % clips.count) + clips.count) % clips.count]
+        guard !postClips.isEmpty else { return nil }
+        return postClips[((slot % postClips.count) + postClips.count) % postClips.count]
+    }
+
+    /// The clip the animated avatar of the author at `index` is cut from: a
+    /// RETIRED clip, the index round them.
+    ///
+    /// ⚠️ NEVER A POST'S CLIP (the owner, 2026-10-31: avatars keep the old
+    /// media). The avatars went round every baked sheet, so importing the
+    /// posts' new clips would have given every animated author another face.
+    /// The retired clips are the ones they went round before, in the same
+    /// order; the ones read keep their video (`--keep-video`).
+    public func avatarClip(forSheetAvatar index: Int) -> Clip? {
+        let retired = clips.filter(\.isRetired)
+        guard !retired.isEmpty else { return nil }
+        return retired[((index % retired.count) + retired.count) % retired.count]
     }
 
     /// The clips whose sound another post may borrow — every clip but the
-    /// ones whose sound is their post's alone.
+    /// ones whose sound is their post's alone: the retired clips' sounds, in
+    /// the order they always had, so a borrowing post keeps its sound.
     public var borrowableClips: [Clip] { clips.filter(\.lendsItsSound) }
 
     /// The borrowable clip for a slot, cycling through the borrowable ones.
