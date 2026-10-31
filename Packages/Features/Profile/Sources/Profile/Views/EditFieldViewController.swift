@@ -55,7 +55,7 @@ final class EditFieldViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = config.title
-        view.backgroundColor = .systemGroupedBackground
+        view.backgroundColor = Surface.page
         saveButton.identifier = "profile.editField.save"
         navigationItem.rightBarButtonItem = saveButton
         configureInput()
@@ -88,8 +88,8 @@ final class EditFieldViewController: UIViewController {
     // MARK: - Setup
 
     private func configureInput() {
-        card.backgroundColor = .secondarySystemGroupedBackground
-        card.layer.cornerRadius = 12
+        // The card contract (#1497): lighter than its page, the For You card's corner.
+        Surface.dressCard(card)
 
         if config.multiline {
             multiLineView.font = .appFont(forTextStyle: .body)

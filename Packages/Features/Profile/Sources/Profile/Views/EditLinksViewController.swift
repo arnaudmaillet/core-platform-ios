@@ -35,7 +35,7 @@ final class EditLinksViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Links"
-        view.backgroundColor = .systemGroupedBackground
+        view.backgroundColor = Surface.page
         saveButton.identifier = "profile.editLinks.save"
         navigationItem.rightBarButtonItem = saveButton
         configureLayout()
@@ -158,8 +158,8 @@ private final class LinkRowView: UIView {
 
     init(link: ProfileLink) {
         super.init(frame: .zero)
-        backgroundColor = .secondarySystemGroupedBackground
-        layer.cornerRadius = 12
+        // The card contract (#1497).
+        Surface.dressCard(self)
 
         configure(labelField, placeholder: "Title", keyboard: .default, autocap: .words)
         labelField.text = link.label

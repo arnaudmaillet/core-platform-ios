@@ -84,7 +84,8 @@ public final class ShopStorefrontViewController: UIViewController {
         static let packsSideBySide = 3
         /// At most this many items on a shelf; the full list is its See all.
         static let shelfLimit = 10
-        static let cardRadius: CGFloat = 16
+        /// Every card's corner (#1497), which the price bubble nests in.
+        static let cardRadius: CGFloat = Surface.cardCornerRadius
         /// Between two shelves: the app's section gap.
         static var shelfGap: CGFloat { SectionTitleView.gapAbove() }
     }
@@ -145,7 +146,8 @@ public final class ShopStorefrontViewController: UIViewController {
 
     override public func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+        // The page under the cards (#1497): its cards are lighter than it.
+        view.backgroundColor = Surface.page
         navigationItem.largeTitleDisplayMode = .never
 
         scroll.alwaysBounceVertical = true
@@ -927,9 +929,9 @@ class ShopCardView: UIView {
 
     init(menu: UIMenu? = nil) {
         super.init(frame: .zero)
-        backgroundColor = .tertiarySystemFill
-        layer.cornerRadius = ShopStorefrontViewController.Metrics.cardRadius
-        layer.cornerCurve = .continuous
+        // The card contract (#1497): lighter than the page, never a fill
+        // darker than it (`tertiarySystemFill` was).
+        Surface.dressCard(self)
         hitArea.translatesAutoresizingMaskIntoConstraints = false
         addSubview(hitArea)
         hitArea.pin(to: self)
@@ -963,7 +965,7 @@ class ShopCardView: UIView {
     func flash() {
         backgroundColor = .systemFill
         UIView.animate(withDuration: 0.6, delay: 0.3, options: [.allowUserInteraction]) {
-            self.backgroundColor = .tertiarySystemFill
+            self.backgroundColor = Surface.card
         }
     }
 }

@@ -59,9 +59,8 @@ final class SupervisionConsentView: UIView {
 
     init() {
         super.init(frame: .zero)
-        backgroundColor = .secondarySystemGroupedBackground
-        layer.cornerRadius = 16
-        layer.cornerCurve = .continuous
+        // The card contract (#1497).
+        Surface.dressCard(self)
 
         titleLabel.font = .appFont(forTextStyle: .headline)
         titleLabel.adjustsFontForContentSizeCategory = true
