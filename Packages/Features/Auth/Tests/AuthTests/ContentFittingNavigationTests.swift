@@ -74,8 +74,9 @@ struct ContentFittingNavigationTests {
 
     /// The fitted height ends where the step's last section does — not at
     /// the grouped table's `contentSize`, whose trailing padding was a second
-    /// bottom margin under the legal line (#1908) — less the bottom inset the
-    /// sheet adds back (none in a test window).
+    /// bottom margin under the legal line (#1908) — plus the bar's band over
+    /// it (#1969), less the bottom inset the sheet adds back (none in a test
+    /// window).
     @Test func theFittedHeightEndsAtTheLastSection() throws {
         let methods = MethodSelectionViewController(methods: SignInMethod.offered(passkeys: false))
         let navigation = ContentFittingNavigationController(rootViewController: methods)
@@ -88,8 +89,10 @@ struct ContentFittingNavigationTests {
         let table = methods.tableView!
         let end = table.rectForFooter(inSection: table.numberOfSections - 1).maxY
         let fitted = try #require(navigation.fittedHeight)
-        #expect(abs(fitted - (end - window.safeAreaInsets.bottom).rounded(.up)) < 1)
-        #expect(fitted <= table.contentSize.height, "the trailing padding is still counted")
+        let bar = methods.view.safeAreaInsets.top - navigation.view.safeAreaInsets.top
+        #expect(bar > 30, "the list's bar adds no band: \(bar)")
+        #expect(abs(fitted - (bar + end - window.safeAreaInsets.bottom).rounded(.up)) < 1)
+        #expect(fitted - bar <= table.contentSize.height, "the trailing padding is still counted")
     }
 
     /// The steps lay their content from the TOP (#1908): no inset pushes it

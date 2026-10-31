@@ -79,10 +79,11 @@ final class LoginFlowCoordinator {
     }
 
     /// The flow's stack, with the method list on it. Presented as a sheet
-    /// over the app (`ContentFittingNavigationController.fit`) it has no close
-    /// button (#1811): the swipe is the way out, protected once a code was
-    /// sent. No title and no reason line (#1908, the owner): the methods say
-    /// what they do.
+    /// over the app (`ContentFittingNavigationController.fit`), under a bar:
+    /// help (?), one fixed title and close (×) (#1969). × and the swipe close
+    /// the list at once; the form's swipe is protected once a code was sent.
+    /// No reason line (#1908, the owner): the title does not change with
+    /// the gated action.
     func start() -> UIViewController {
         let methodSelection = MethodSelectionViewController(
             methods: SignInMethod.offered(passkeys: passkeys != nil && signUp != nil)
@@ -95,6 +96,7 @@ final class LoginFlowCoordinator {
 
         // A short sheet for the list (#563); the form gets its own (#1908).
         let navigation = ContentFittingNavigationController(rootViewController: methodSelection)
+        methodSelection.onClose = { [weak navigation] in navigation?.close() }
         navigation.protectsInput = Self.protectsInput(at:)
         navigationController = navigation
         #if DEBUG

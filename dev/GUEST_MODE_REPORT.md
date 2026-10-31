@@ -250,11 +250,15 @@ This is the `GatedAction` enum the code would carry (§6.3). Each case maps to o
 
 **The sheet: a hybrid (#1811, the owner 2026-10-28).**
 - **The method choice is a content-fitted sheet** over what the guest was doing (#563): one content-sized detent, capped at the screen's height (taller content scrolls), never draggable taller than its content, with the grabber. Sign in with Apple and passkeys finish there, through the system's own sheets.
-- **The headline always says both**: "Log in or sign up", or "Log in or sign up to like this post" (the gated action's words). Every method logs an account in and signs a new one up, so there is no separate "Already have an account? Log in" link and no "or".
-- Below the headline: Continue with Apple, Continue with Google, then Continue with email / phone (decision 2), and one legal line: "By continuing, you agree to our Terms of Service and acknowledge our Privacy Policy." The two names open their pages in place, and they are plain text while a page has no address.
-- **The form is the same sheet at full height.** Picking email or phone grows it with the push, every later step stays at full height, and back to the method list restores the fitted height. The SMS code is a step of that stack, never a second sheet.
-- **No close button, no toolbar, no language globe.** The method list shows no bar at all; the form steps show one for the way back. The swipe is the way out:
-  - before a code is sent, a swipe closes the sheet at once;
+- **A bar with one fixed title (#1969, the owner 2026-10-31): help (?) leading, "Log in or sign up" in the centre, close (×) trailing.**
+  - The title is the same whatever opened the sheet (Settings, a tab's entry, a gated action). The gated action's reason line stays out (#1908).
+  - Every method logs an account in and signs a new one up, so the title says both, and there is no separate "Already have an account? Log in" link and no "or".
+  - "?" is not wired yet: it shows, and a tap does nothing.
+  - The sheet's fitted height counts the bar's band.
+- Under the bar: Continue with Apple, Continue with Google, then Continue with email / phone (decision 2), and one legal line: "By continuing, you agree to our Terms of Service and acknowledge our Privacy Policy." The two names open their pages in place, and they are plain text while a page has no address.
+- **The form is its own sheet, at full height, over the list (#1908).** Picking email or phone presents it; every later step pushes inside it, and the SMS code is one of those steps. A swipe down takes the form away, back to the list.
+- **No toolbar, no language globe.** The ways out:
+  - on the method list, × or a swipe closes the sheet at once (× waits while Sign in with Apple or a passkey is running);
   - once a code has been sent, and on every later step, the sheet asks once: "Leave now?", "What you've entered won't be kept.", Keep going or Stop. VoiceOver's escape gesture follows the same rule.
   - Closing does nothing else: no nag, no counter.
 - It opens over whatever is on screen, including a hero-presented post or another sheet.

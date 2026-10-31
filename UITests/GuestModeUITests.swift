@@ -29,6 +29,11 @@ final class GuestModeUITests: XCTestCase {
         app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", prefix)).firstMatch
     }
 
+    /// The sign-in sheet's bar (#1969): one title, whatever opened it.
+    private func signInSheet(in app: XCUIApplication) -> XCUIElement {
+        app.navigationBars["Log in or sign up"]
+    }
+
     /// Decision 8: no nudges. A guest scrolls For You and nothing asks them
     /// to sign up until they try to do something.
     func testAGuestBrowsesForYouWithoutBeingAsked() {
@@ -152,9 +157,33 @@ final class GuestModeUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Text Post"].exists, "the create menu opened for a guest")
     }
 
-    /// A gated action asks, titled for that action; closing the sheet leaves
-    /// the guest on the screen they were reading.
+    /// A gated action asks, under the sheet's one title; a swipe down closes
+    /// it and leaves the guest on the screen they were reading.
     func testClosingTheSignUpSheetLeavesTheGuestWhereTheyWere() {
+        let (app, follow, prompt) = askToFollowAsGuest()
+        // The swipe down, from the grabber above the bar, to the bottom of
+        // the screen.
+        let grabber = prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: -0.2))
+        grabber.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
+
+        XCTAssertTrue(prompt.waitForNonExistence(timeout: 8), "the sign-up sheet did not close")
+        XCTAssertTrue(follow.waitForExistence(timeout: 5), "closing the sheet moved the guest off the profile")
+    }
+
+    /// × closes the sheet at once (#1969), the same exit as the swipe.
+    func testTheCloseItemClosesTheSignUpSheet() {
+        let (_, follow, prompt) = askToFollowAsGuest()
+        let close = prompt.buttons["auth.methods.close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "the sheet's bar has no close item")
+        XCTAssertTrue(prompt.buttons["auth.methods.help"].exists, "the sheet's bar has no help item")
+        close.tap()
+
+        XCTAssertTrue(prompt.waitForNonExistence(timeout: 8), "× did not close the sign-up sheet")
+        XCTAssertTrue(follow.waitForExistence(timeout: 5), "closing the sheet moved the guest off the profile")
+    }
+
+    /// A guest taps Follow on a profile: its Follow button and the sheet's bar.
+    private func askToFollowAsGuest() -> (XCUIApplication, XCUIElement, XCUIElement) {
         let app = launch(["-open-profile", "prof-1"])
         // By its LABEL, whatever its type (#1154): Follow is a toggle
         // (`AppButton.isToggle`), which XCUITest lists as a toggle, not a
@@ -164,15 +193,9 @@ final class GuestModeUITests: XCTestCase {
         XCTAssertTrue(follow.waitForExistence(timeout: 25), "the profile has no Follow button")
         follow.tap()
 
-        let prompt = staticText(beginningWith: "Log in or sign up to follow", in: app)
+        let prompt = signInSheet(in: app)
         XCTAssertTrue(prompt.waitForExistence(timeout: 8), "Follow did not ask the guest to sign up")
-        // No close button (#1811): the sheet closes with a swipe down, from
-        // its grabber, above the headline, to the bottom of the screen.
-        let grabber = prompt.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: -1.5))
-        grabber.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.98)))
-
-        XCTAssertTrue(prompt.waitForNonExistence(timeout: 8), "the sign-up sheet did not close")
-        XCTAssertTrue(follow.waitForExistence(timeout: 5), "closing the sheet moved the guest off the profile")
+        return (app, follow, prompt)
     }
 
     /// The whole loop: a guest reads a post and its comments, likes it (the
@@ -222,7 +245,7 @@ final class GuestModeUITests: XCTestCase {
     // MARK: Steps
 
     /// Opens the post's sign-up sheet by liking it as a guest: the like
-    /// button, its value before, and the sheet's headline. `-open-post` opens
+    /// button, its value before, and the sheet's bar. `-open-post` opens
     /// the vertical feed (#1577, one post screen): its rail's heart.
     private func likeAsGuest(in app: XCUIApplication) -> (XCUIElement, String?, XCUIElement) {
         let like = app.buttons["Like"]
@@ -236,11 +259,10 @@ final class GuestModeUITests: XCTestCase {
         )
         let before = like.value as? String
         like.tap()
-        // The generic like prompt: a guest is never told about the welcome
-        // gift, nor an amount of likes (#1146, the owner 2026-10-14).
-        let prompt = staticText(beginningWith: "Log in or sign up to like this post", in: app)
+        // The sheet's one title (#1969): never the welcome gift, nor an
+        // amount of likes (#1146, the owner 2026-10-14).
+        let prompt = signInSheet(in: app)
         XCTAssertTrue(prompt.waitForExistence(timeout: 8), "like did not ask the guest to sign up")
-        XCTAssertFalse(prompt.label.contains(where: \.isNumber), "the like prompt names an amount: \(prompt.label)")
         return (like, before, prompt)
     }
 

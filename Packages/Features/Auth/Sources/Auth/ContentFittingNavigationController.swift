@@ -26,10 +26,11 @@ import UIKit
 /// anchoring moves the content inset, not the content). The change is
 /// reported on the next turn, outside the layout pass that produced it.
 ///
-/// THE SWIPE IS THE WAY OUT (#1811): no close button. Before a code is sent a
-/// swipe closes the sheet at once; once one has (`protectsInput`), a swipe —
-/// or VoiceOver's escape — asks one confirmation first, so what was typed is
-/// never thrown away by accident. The form's way out is back to the list.
+/// THE WAY OUT: the list's × (#1969) and the swipe (#1811). Before a code is
+/// sent a swipe closes the sheet at once; once one has (`protectsInput`), a
+/// swipe — or VoiceOver's escape — asks one confirmation first, so what was
+/// typed is never thrown away by accident. The form's way out is back to
+/// the list.
 public final class ContentFittingNavigationController: UINavigationController, UINavigationControllerDelegate,
     UISheetPresentationControllerDelegate {
     /// The top step's height changed: the sheet should ask `fittedHeight`
@@ -98,9 +99,9 @@ public final class ContentFittingNavigationController: UINavigationController, U
               step.tableView.contentSize.height > 0 else { return nil }
         let table: UITableView = step.tableView
         // The bar's band as the step sees it: what it adds to its safe area
-        // over the stack's own — none on the method list, which shows no bar
-        // (#1811). ⚠️ NOT the bar's frame, which carries the sheet's top
-        // padding unevenly.
+        // over the stack's own — the method list's title bar (#1969).
+        // ⚠️ NOT the bar's frame, which carries the sheet's top padding
+        // unevenly.
         let bar = max(0, step.view.safeAreaInsets.top - view.safeAreaInsets.top)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-sheet-fit-trace") {
@@ -191,6 +192,12 @@ public final class ContentFittingNavigationController: UINavigationController, U
 
     public func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
         onDismissed?()
+    }
+
+    /// The list's × (#1969): the swipe's exit — the sheet closes at once, and
+    /// its container answers the gate as it does for a swipe.
+    func close() {
+        leave()
     }
 
     /// VoiceOver's escape, the only non-visual way out with no close button:
