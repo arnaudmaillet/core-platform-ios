@@ -189,4 +189,15 @@ struct ViewportShareTests {
         }
         #expect(underShare.plays)
     }
+
+    /// A screen inside a sheet takes its half of the SHEET: a section pushed
+    /// half way across a medium-detent sheet holds half of it, though that is
+    /// a quarter of the display.
+    @Test func aScreenInASheetTakesItsHalfOfTheSheet() {
+        let sheet = CGRect(x: 0, y: 400, width: 400, height: 400)
+        let section = sheet.offsetBy(dx: 200, dy: 0)
+        #expect(abs(ViewportShare.ownShare(of: section, in: sheet) - 0.5) < 0.001)
+        #expect(abs(ViewportShare.ownShare(of: section, in: screen) - 0.25) < 0.001, "the premise: a quarter of the display")
+        #expect(ViewportShare.plays(at: ViewportShare.ownShare(of: section, in: sheet)))
+    }
 }

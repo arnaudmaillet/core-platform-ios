@@ -546,6 +546,14 @@ final class SoundSheetViewController: UIViewController {
     override func viewIsAppearing(_ animated: Bool) {
         super.viewIsAppearing(animated)
         lookahead.setOnScreen(true)
+        // The sheet rising: this screen holds all of it, so its tiles play
+        // from the rise (#1914). A section popping off it: from half.
+        if isBeingPresented || navigationController?.isBeingPresented == true {
+            viewportShare.report(1)
+            if !isShowingFeed { setAutoplayActive(true) }
+        } else {
+            _ = viewportShare.screenWillAppear(self)
+        }
         // In a window now: the real width, and the toolbar's real band — the
         // bottom safe area less the window's. Both are the BAR's and the
         // screen's, the same at any detent, so reading them here converges:
@@ -576,6 +584,7 @@ final class SoundSheetViewController: UIViewController {
         reveal.wake()
         // Up, or back from a pushed section: the tiles are the viewer's
         // again — unless a feed opened from one still covers them.
+        viewportShare.report(1)
         if !isShowingFeed { setAutoplayActive(true) }
         installRecordTap()
         #if DEBUG
@@ -651,16 +660,38 @@ final class SoundSheetViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        // Going, or a section pushed over it: every tile gives its player
-        // back now, on the way out — none is left bound to a sheet nobody
+        // The sheet going: this screen holds all of it to the end, and its
+        // tiles play through the fall (#1914). A section pushed over it: until
+        // it covers half. Every tile gives its player back once the screen
+        // is gone (`viewDidDisappear`) — none is left bound to a sheet nobody
         // sees (#884).
-        setAutoplayActive(false)
+        if isSheetBeingDismissed { return }
+        if viewportShare.screenWillDisappear(self) == .flight {
+            setAutoplayActive(false)
+        }
     }
+
+    /// The share of this screen in its SHEET (#1914): its tiles play while it
+    /// holds half of the sheet — through the sheet's own rise and fall, where
+    /// it holds all of it, and until half way through a section pushed over
+    /// it or its own pop. Measured against the sheet, not the display: at a
+    /// medium detent the sheet is all the viewer reads.
+    private lazy var viewportShare: ViewportShare = {
+        let share = ViewportShare(host: view)
+        share.reference = { [weak self] in self?.navigationController?.view }
+        share.onPlaysChange = { [weak self] plays in
+            guard let self else { return }
+            setAutoplayActive(plays && !isShowingFeed)
+        }
+        return share
+    }()
+
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         // Off screen (a section pushed over it, or gone): nothing to watch,
         // and nothing to fetch ahead for — the stay's owner is revoked.
+        setAutoplayActive(false)
         reveal.sleep()
         lookahead.setOnScreen(false)
         guard isSheetBeingDismissed else { return }
