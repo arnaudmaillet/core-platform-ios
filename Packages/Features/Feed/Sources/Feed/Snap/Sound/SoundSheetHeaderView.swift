@@ -54,10 +54,11 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
     private let metaLabel = UILabel()
-    /// The sheet's own track's playhead (#1964, the owner's choice (b)): the
-    /// Shots clip bar's drawing, along the header's bottom edge, in the room
-    /// the section gap already leaves — the sheet does not change size.
-    private let progressBar = PlayheadBarView()
+    /// The sheet's own track's playhead (#1964, the owner's choice (a)):
+    /// under the title, the meta line's width — the Shots clip bar's drawing
+    /// and handling (`PlayheadBarView`). Always laid out, so the header's
+    /// height (which the collapsed detent counts) never changes with it.
+    let trackBar = PlayheadBarView()
     private let artworkBackdrop = UIView()
 
     override init(frame: CGRect) {
@@ -142,6 +143,10 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         labels.axis = .vertical
         labels.spacing = 2
         labels.setCustomSpacing(Spacing.xs, after: subtitleLabel)
+        labels.setCustomSpacing(Spacing.sm, after: metaLabel)
+        trackBar.ink = .surface(.label)
+        labels.addArrangedSubview(trackBar)
+        trackBar.heightAnchor.constraint(equalToConstant: PlayheadBarView.cursorRoom).isActive = true
 
         artwork.insertSubview(artworkBackdrop, at: 0)
         NSLayoutConstraint.activate([
@@ -169,38 +174,19 @@ final class SoundSheetHeaderView: UICollectionReusableView {
             record.widthAnchor.constraint(equalToConstant: Self.artworkSide),
             record.heightAnchor.constraint(equalToConstant: Self.artworkSide),
         ])
-        progressBar.ink = .surface(.label)
-        progressBar.isHidden = true
-        progressBar.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(progressBar)
-        NSLayoutConstraint.activate([
-            progressBar.leadingAnchor.constraint(equalTo: leadingAnchor),
-            progressBar.trailingAnchor.constraint(equalTo: trailingAnchor),
-            progressBar.topAnchor.constraint(equalTo: bottomAnchor, constant: Spacing.sm),
-            progressBar.heightAnchor.constraint(equalToConstant: PlayheadBarView.cursorRoom),
-        ])
         setPlaying(false)
     }
 
     /// The sheet's track at `fraction` (nil: no known position), loading or
-    /// not: the bar shows.
+    /// not.
     func setTrackProgress(_ fraction: Double?, loading: Bool) {
-        progressBar.isHidden = false
-        progressBar.setLoading(loading)
-        progressBar.setProgress(fraction)
-    }
-
-    /// The track ended or went: the bar leaves.
-    func hideTrackProgress() {
-        progressBar.setLoading(false)
-        progressBar.setProgress(nil)
-        progressBar.isHidden = true
+        trackBar.setLoading(loading)
+        trackBar.setProgress(fraction)
     }
 
     #if DEBUG
-    /// The bar's played width, nil while hidden or with no position. Tests.
-    var debugTrackPlayedWidth: CGFloat? { progressBar.isHidden ? nil : progressBar.debugPlayedWidth }
-    var debugTrackBarIsShown: Bool { !progressBar.isHidden }
+    /// The bar's played width, nil with no position. Tests.
+    var debugTrackPlayedWidth: CGFloat? { trackBar.debugPlayedWidth }
     #endif
 
     @available(*, unavailable)

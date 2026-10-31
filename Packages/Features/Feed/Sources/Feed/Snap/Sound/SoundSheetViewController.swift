@@ -1094,6 +1094,13 @@ final class SoundSheetViewController: UIViewController {
             canToggle: record.available
         )
         apply(record, to: header)
+        // The track's bar: the video's handling (#1964) — a drag or a tap
+        // moves the preview.
+        header.trackBar.isScrubbable = preview != nil
+        header.trackBar.onScrubBegan = { [weak self] in self?.beginTrackScrub() }
+        header.trackBar.onSeekRequested = { [weak self] fraction in self?.seekTrack(to: fraction) }
+        header.trackBar.onScrubEnded = { [weak self] _ in self?.endTrackScrub() }
+        header.setTrackProgress(previewFraction, loading: false)
         header.onTogglePlayback = { [weak self] in
             // A transport control: silent (#1881).
             guard let self, record.available else { return }
@@ -1694,6 +1701,7 @@ final class SoundSheetViewController: UIViewController {
                 MainActor.assumeIsolated { self?.stopPreview(rewinding: true) }
             }
             preview = player
+            header?.trackBar.isScrubbable = true
             player.play()
         }
     }
@@ -1716,9 +1724,8 @@ final class SoundSheetViewController: UIViewController {
         if rewinding {
             // The end: the bar back to the start, then gone.
             preview?.seek(to: .zero)
-            previewFraction = nil
+            previewFraction = 0
             header?.setTrackProgress(0, loading: false)
-            header?.hideTrackProgress()
         } else {
             // Paused: the bar stays where the track is, so the next tap
             // resumes visibly from there.
@@ -1736,9 +1743,46 @@ final class SoundSheetViewController: UIViewController {
         previewEndObserver = nil
         stopPreviewFeed()
         previewFraction = nil
-        header?.hideTrackProgress()
+        header?.setTrackProgress(nil, loading: false)
+        header?.trackBar.isScrubbable = false
         preview?.pause()
         preview = nil
+    }
+
+    // MARK: - The track's scrub (#1964)
+
+    /// Whether the track was playing when the finger took the bar.
+    private var resumesAfterTrackScrub = false
+
+    /// The finger took the bar: the track holds still under it (the record
+    /// still says it plays — the scrub is a pause the viewer did not ask for,
+    /// and the post behind stays covered).
+    private func beginTrackScrub() {
+        resumesAfterTrackScrub = isPreviewing && preview?.timeControlStatus != .paused
+        preview?.pause()
+        stopPreviewFeed()
+    }
+
+    /// The bar asked for `fraction`: the track lands exactly there.
+    private func seekTrack(to fraction: Double) {
+        guard let player = preview, let duration = player.currentItem?.duration.seconds,
+              duration.isFinite, duration > 0 else { return }
+        previewFraction = fraction
+        player.seek(
+            to: CMTime(seconds: duration * fraction, preferredTimescale: 600),
+            toleranceBefore: .zero, toleranceAfter: .zero
+        )
+        // A tap while the track plays: it plays on from there, fed again.
+        if isPreviewing, previewFeed == nil, !resumesAfterTrackScrub { startPreviewFeed() }
+    }
+
+    /// The finger let go: the track plays on if it was playing.
+    private func endTrackScrub() {
+        guard resumesAfterTrackScrub else { return }
+        resumesAfterTrackScrub = false
+        guard isPreviewing else { return }
+        preview?.play()
+        startPreviewFeed()
     }
 
     private func startPreviewFeed() {

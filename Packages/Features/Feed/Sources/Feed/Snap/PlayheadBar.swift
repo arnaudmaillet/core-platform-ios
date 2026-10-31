@@ -186,8 +186,13 @@ final class PlayheadBarRenderer {
     }
 }
 
-/// A playhead bar on its own (#1964): a thin track with the shared drawing
-/// on it (`PlayheadBarRenderer`) — the sound sheet's track, read-only.
+/// A playhead bar on its own (#1964): a track with the shared drawing on it
+/// (`PlayheadBarRenderer`) and, when `isScrubbable`, the Shots clip bar's
+/// handling — exactly the video's (the owner, 2026-10-31): it grows from
+/// 3 to 8 pt under the finger, its cursor turns from a disc into a pill,
+/// a drag seeks from where the playhead was, a tap seeks where it lands, and
+/// the released position is held until the player catches up. The sound
+/// sheet's track.
 @MainActor
 final class PlayheadBarView: UIView {
     /// What it draws in: white over a picture, as the Shots strip does, or
@@ -197,22 +202,72 @@ final class PlayheadBarView: UIView {
         case surface(UIColor)
     }
 
-    /// The track's thickness: the Shots clip bar's at rest.
-    static let trackHeight: CGFloat = SnapMediaPageBarView.clipTrackHeight
+    typealias Strip = SnapMediaPageBarView
 
     var ink: Ink = .onMedia {
         didSet { setNeedsLayout() }
     }
 
+    /// Whether a finger may move the playhead.
+    var isScrubbable = false {
+        didSet {
+            scrubGesture.isEnabled = isScrubbable
+            if isScrubbable { claimAncestorPans() }
+        }
+    }
+
+    /// ⚠️ THE PANS ABOVE THE BAR STAND DOWN FOR ITS SCRUB (the owner,
+    /// 2026-10-31: "as the video's does"). Shots tells every pan on its
+    /// screen to wait for the clip bar's scrub to fail
+    /// (`SnapFeedViewController`, "THE DISMISSAL STANDS DOWN FOR A SCRUB"):
+    /// a drag along the bar must not also drag the sheet, scroll its posts
+    /// or pop its stack. This bar does it itself, for every pan among its
+    /// ancestors — `require(toFail:)`, not a delegate, which would let both
+    /// run. A touch elsewhere never reaches the scrub and holds nobody up.
+    private func claimAncestorPans() {
+        guard isScrubbable, window != nil else { return }
+        var ancestor = superview
+        while let view = ancestor {
+            for pan in view.gestureRecognizers ?? [] where pan is UIPanGestureRecognizer && !claimedPans.contains(pan) {
+                pan.require(toFail: scrubGesture)
+                claimedPans.add(pan)
+            }
+            ancestor = view.superview
+        }
+    }
+
+    private let claimedPans = NSHashTable<UIGestureRecognizer>.weakObjects()
+
+    /// A drag along the bar began (the host pauses), moved the playhead
+    /// (`onSeekRequested`, also a tap's), and let go (`onScrubEnded`, with the
+    /// released position, nil when cancelled).
+    var onScrubBegan: (() -> Void)?
+    var onSeekRequested: ((Double) -> Void)?
+    var onScrubEnded: ((Double?) -> Void)?
+
     private let track = UIView()
     private let renderer = PlayheadBarRenderer()
-    private var fraction: Double?
+    private var playhead: Double?
+    private var heldPlayhead: Double?
+    private var heldReleasedAt: CFTimeInterval?
+    private var drawnPlayhead: Double? { heldPlayhead ?? playhead }
+
+    private let scrubGesture: UILongPressGestureRecognizer = {
+        let scrub = UILongPressGestureRecognizer()
+        scrub.minimumPressDuration = 0
+        scrub.allowableMovement = .greatestFiniteMagnitude
+        scrub.cancelsTouchesInView = true
+        return scrub
+    }()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        isUserInteractionEnabled = false
         track.isUserInteractionEnabled = false
         addSubview(track)
+        alpha = Strip.restingOpacity
+        scrubGesture.addTarget(self, action: #selector(handleScrubGesture(_:)))
+        scrubGesture.isEnabled = false
+        addGestureRecognizer(scrubGesture)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -221,12 +276,17 @@ final class PlayheadBarView: UIView {
         CGSize(width: UIView.noIntrinsicMetric, height: Self.cursorRoom)
     }
 
-    /// Room for the cursor's disc above and below the track.
+    /// The bar's footprint: the cursor's disc. The handled track and pill
+    /// grow outside it, which costs the layout nothing.
     static let cursorRoom: CGFloat = PlayheadBarRenderer.cursorDiameter
 
     /// Where the playhead is, 0…1; nil for no known position.
     func setProgress(_ fraction: Double?) {
-        self.fraction = fraction
+        let moved = playhead != fraction
+        let wasHeld = heldPlayhead != nil
+        playhead = fraction
+        releaseHeldPlayheadIfCaughtUp()
+        guard moved || (wasHeld && heldPlayhead == nil) else { return }
         setNeedsLayout()
         layoutIfNeeded()
     }
@@ -237,32 +297,205 @@ final class PlayheadBarView: UIView {
         setNeedsLayout()
     }
 
-    private var playedInk: UIColor {
+    private func releaseHeldPlayheadIfCaughtUp(now: CFTimeInterval = CACurrentMediaTime()) {
+        guard heldPlayhead != nil, let releasedAt = heldReleasedAt else { return }
+        let caughtUp = playhead.map { abs($0 - (heldPlayhead ?? $0)) <= Strip.handoverTolerance } ?? true
+        guard caughtUp || now - releasedAt >= Strip.handoverTimeout else { return }
+        heldPlayhead = nil
+        heldReleasedAt = nil
+    }
+
+    // MARK: - Ink, awake and at rest (the strip's, #1544)
+
+    private var isAwake = false
+    private var baseInk: UIColor {
         switch ink {
         case .onMedia: .white
         case .surface(let color): color
         }
     }
+    private var fillInk: UIColor { baseInk.withAlphaComponent(isAwake ? 1 : Strip.restingFillInk) }
+    private var wakeTimer: Timer?
+
+    private func wake() {
+        wakeTimer?.invalidate()
+        wakeTimer = Timer.scheduledTimer(withTimeInterval: Strip.wakeDuration, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.rest() }
+        }
+        guard alpha < 1 || !isAwake else { return }
+        isAwake = true
+        animate(\.awakeness, to: 1, duration: 0.18)
+        UIView.animate(withDuration: 0.18, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState]) {
+            self.alpha = 1
+            self.renderer.fill.backgroundColor = self.fillInk
+        }
+    }
+
+    private func rest() {
+        wakeTimer?.invalidate()
+        wakeTimer = nil
+        isAwake = false
+        animate(\.awakeness, to: 0, duration: 0.45)
+        UIView.animate(withDuration: 0.45, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState]) {
+            self.alpha = Strip.restingOpacity
+            self.renderer.fill.backgroundColor = self.fillInk
+        }
+    }
+
+    // MARK: - The tweens (the strip's)
+
+    private var handling = Strip.Tween()
+    private var awakeness = Strip.Tween()
+    private var tweenLink: CADisplayLink?
+
+    private func animate(_ tween: ReferenceWritableKeyPath<PlayheadBarView, Strip.Tween>, to target: CGFloat, duration: TimeInterval) {
+        let moves = window != nil && !UIAccessibility.isReduceMotionEnabled
+        self[keyPath: tween].move(to: target, duration: moves ? duration : 0, now: CACurrentMediaTime())
+        guard handling.isMoving || awakeness.isMoving else { return setNeedsLayout() }
+        guard tweenLink == nil else { return }
+        let link = CADisplayLink(target: TweenTarget(self), selector: #selector(TweenTarget.tick(_:)))
+        link.add(to: .main, forMode: .common)
+        tweenLink = link
+    }
+
+    fileprivate func stepTweens() {
+        let now = CACurrentMediaTime()
+        handling.step(now: now)
+        awakeness.step(now: now)
+        setNeedsLayout()
+        layoutIfNeeded()
+        guard !handling.isMoving, !awakeness.isMoving else { return }
+        tweenLink?.invalidate()
+        tweenLink = nil
+    }
+
+    @MainActor
+    private final class TweenTarget: NSObject {
+        weak var bar: PlayheadBarView?
+        init(_ bar: PlayheadBarView) { self.bar = bar }
+        @objc func tick(_ link: CADisplayLink) {
+            guard let bar else { return link.invalidate() }
+            bar.stepTweens()
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        claimAncestorPans()
+        guard window == nil else { return }
+        tweenLink?.invalidate()
+        tweenLink = nil
+        handling.settle(at: 0)
+    }
+
+    // MARK: - Layout
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let height = Self.trackHeight
+        let height = Strip.clipTrackHeight + (Strip.handledTrackHeight - Strip.clipTrackHeight) * handling.value
         track.frame = CGRect(x: 0, y: (bounds.height - height) / 2, width: bounds.width, height: height)
         track.layer.cornerRadius = height / 2
-        track.backgroundColor = playedInk.withAlphaComponent(SnapMediaPageBarView.restingAlpha)
-        renderer.layoutPulse(on: track, inWindow: window != nil, ink: playedInk)
-        guard let fraction, bounds.width > 0 else { return renderer.hidePlayed() }
-        let played = renderer.drawPlayed(in: track, fraction: fraction, width: bounds.width, alpha: 1, ink: playedInk)
+        track.backgroundColor = baseInk.withAlphaComponent(Strip.restingAlpha)
+        renderer.layoutPulse(on: track, inWindow: window != nil, ink: baseInk)
+        guard let fraction = drawnPlayhead, bounds.width > 0 else { return renderer.hidePlayed() }
+        let played = renderer.drawPlayed(in: track, fraction: fraction, width: bounds.width, alpha: 1, ink: fillInk)
         renderer.drawCursor(
             in: self, trackMinX: 0, trackWidth: bounds.width, centerY: bounds.height / 2,
-            played: played, trackHeight: height, handling: 0, awakeness: 0,
-            ink: playedInk, alpha: renderer.fill.alpha
+            played: played, trackHeight: height, handling: handling.value, awakeness: awakeness.value,
+            ink: fillInk, alpha: renderer.fill.alpha
         )
+    }
+
+    // MARK: - The scrub (the strip's, without pages)
+
+    private var seekAnchor: Double?
+    private var touchDownX: CGFloat = 0
+    private var travelled = false
+    private var isDraggingPlayhead = false
+
+    @objc private func handleScrubGesture(_ recognizer: UIGestureRecognizer) {
+        handleScrub(recognizer.state, atX: recognizer.location(in: self).x)
+    }
+
+    private func handleScrub(_ state: UIGestureRecognizer.State, atX x: CGFloat) {
+        guard isScrubbable else { return }
+        switch state {
+        case .began:
+            wake()
+            touchDownX = x
+            travelled = false
+            isDraggingPlayhead = false
+            animate(\.handling, to: 1, duration: Strip.handleDuration)
+            seekAnchor = drawnPlayhead ?? 0
+        case .changed:
+            wake()
+            if abs(x - touchDownX) > Strip.travelThreshold { travelled = true }
+            guard travelled else { return }
+            if !isDraggingPlayhead {
+                isDraggingPlayhead = true
+                heldReleasedAt = nil
+                onScrubBegan?()
+            }
+            seek(draggedTo: x)
+        case .ended, .cancelled, .failed:
+            wake()
+            animate(\.handling, to: 0, duration: Strip.handleDuration)
+            if isDraggingPlayhead {
+                isDraggingPlayhead = false
+                heldReleasedAt = CACurrentMediaTime()
+                onScrubEnded?(state == .ended ? heldPlayhead : nil)
+                if state != .ended {
+                    heldPlayhead = nil
+                    heldReleasedAt = nil
+                    setNeedsLayout()
+                }
+                return
+            }
+            guard state == .ended, !travelled, bounds.width > 1 else { return }
+            let fraction = Double(min(max(x / bounds.width, 0), 1))
+            heldPlayhead = fraction
+            heldReleasedAt = CACurrentMediaTime()
+            setNeedsLayout()
+            onSeekRequested?(fraction)
+        default:
+            break
+        }
+    }
+
+    private func seek(draggedTo x: CGFloat) {
+        guard let seekAnchor, bounds.width > 0 else { return }
+        let fraction = min(max(seekAnchor + Double((x - touchDownX) / bounds.width), 0), 1)
+        heldPlayhead = fraction
+        setNeedsLayout()
+        layoutIfNeeded()
+        onSeekRequested?(fraction)
+    }
+
+    /// The touch reaches past the thin bar, as the strip's does.
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        let grown = bounds.insetBy(dx: 0, dy: -(44 - bounds.height) / 2)
+        return grown.contains(point)
     }
 
     #if DEBUG
     /// The played part's width, or nil when none is drawn. Tests.
     var debugPlayedWidth: CGFloat? { renderer.fill.isHidden ? nil : renderer.fill.bounds.width }
     var debugIsLoading: Bool { renderer.isLoading }
+    var debugTrackHeight: CGFloat { track.bounds.height }
+    var debugCursorSize: CGSize? { renderer.cursor.isHidden ? nil : renderer.cursor.bounds.size }
+    var debugHeldPlayhead: Double? { heldPlayhead }
+    var debugScrubGesture: UIGestureRecognizer { scrubGesture }
+    /// Whether `pan` was told to wait for this bar's scrub to fail. Tests.
+    func debugHolds(_ pan: UIGestureRecognizer) -> Bool { claimedPans.contains(pan) }
+    func debugScrub(_ state: UIGestureRecognizer.State, atX x: CGFloat) { handleScrub(state, atX: x) }
+    func debugFinishTweens() {
+        let later = CACurrentMediaTime() + 10
+        handling.step(now: later)
+        awakeness.step(now: later)
+        tweenLink?.invalidate()
+        tweenLink = nil
+        setNeedsLayout()
+        layoutIfNeeded()
+    }
     #endif
 }
