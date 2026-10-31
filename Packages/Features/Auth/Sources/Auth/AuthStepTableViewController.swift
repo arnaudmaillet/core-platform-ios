@@ -12,11 +12,6 @@ import UIKit
 /// collapsed footers, and self-sizing headers, so every visible gap belongs
 /// to an explicit header height.
 class AuthStepTableViewController: UITableViewController {
-    /// Whether this step shows no navigation bar: the method list (#1811),
-    /// whose headline is its table's. The form steps show one, for the way
-    /// back.
-    var hidesNavigationBar: Bool { false }
-
     /// Footers collapse to 1pt (a literal 0 falls back to the grouped
     /// default), set via the `sectionFooterHeight`/`estimatedSectionFooterHeight`
     /// PROPERTIES — with the estimate left automatic, the footer-height
@@ -37,13 +32,6 @@ class AuthStepTableViewController: UITableViewController {
         tableView.sectionHeaderTopPadding = 0
         tableView.sectionFooterHeight = Self.collapsedFooterHeight
         tableView.estimatedSectionFooterHeight = Self.collapsedFooterHeight
-    }
-
-    /// No toolbar on any step (#1811): its legal links became the method
-    /// list's legal line, and the language globe went.
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        navigationController?.setNavigationBarHidden(hidesNavigationBar, animated: animated)
     }
 
     #if DEBUG

@@ -2,18 +2,51 @@ import DesignSystem
 import UIKit
 
 /// Screen 1 of the sign-in flow: an explicit method menu — the federated
-/// providers plus the email and phone credential flows — with no title
-/// (#1908): every method logs an account in and signs a new one up (a code proves the address, and an address with an account signs
-/// straight in, #840), so there is no separate "Log in" link. It ends on the
-/// legal line. No input, no keyboard, no navigation bar: a pure branch point
-/// in a content-fitted sheet. Dumb view: reports selections upward; the flow
-/// coordinator decides where to go.
+/// providers plus the email and phone credential flows — under one fixed
+/// title, "Log in or sign up" (#1969): every method logs an account in and
+/// signs a new one up (a code proves the address, and an address with an
+/// account signs straight in, #840), so there is no separate "Log in" link.
+/// It ends on the legal line. Its bar carries help (?) leading and close (×)
+/// trailing (#1969, reversing #1811's bar-less list). No input, no keyboard:
+/// a pure branch point in a content-fitted sheet. Dumb view: reports
+/// selections upward; the flow coordinator decides where to go.
 final class MethodSelectionViewController: AuthStepTableViewController {
     var onMethodSelected: ((SignInMethod) -> Void)?
     /// The legal line's pages (#1811); a nil one shows its name as plain text.
     var legalLinks = AuthLegalLinks()
     /// A legal link was tapped: the flow opens the page in place.
     var onOpenLink: ((URL) -> Void)?
+    /// The help item (?) was tapped. Not wired yet (#1969): nil, and the tap
+    /// does nothing — no alert, no haptic.
+    var onHelp: (() -> Void)?
+    /// The close item (×) was tapped: the flow closes the sheet, as a swipe.
+    var onClose: (() -> Void)?
+
+    /// The sheet's title, whatever opened it (#1969): every method both logs
+    /// in and signs up, so neither word alone.
+    static let sheetTitle = "Log in or sign up"
+    static let helpItemIdentifier = "auth.methods.help"
+    static let closeItemIdentifier = "auth.methods.close"
+
+    private lazy var helpItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(image: UIImage(systemName: "questionmark"), primaryAction: UIAction { [weak self] _ in
+            self?.onHelp?()
+        })
+        item.identifier = Self.helpItemIdentifier
+        item.accessibilityIdentifier = Self.helpItemIdentifier
+        item.accessibilityLabel = "Help"
+        return item
+    }()
+
+    private lazy var closeItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
+            self?.onClose?()
+        })
+        item.identifier = Self.closeItemIdentifier
+        item.accessibilityIdentifier = Self.closeItemIdentifier
+        item.accessibilityLabel = "Close"
+        return item
+    }()
 
     private static let methodCornerRadius: CGFloat = 12
 
@@ -35,14 +68,16 @@ final class MethodSelectionViewController: AuthStepTableViewController {
         self.methods = methods
         sections = methods.map(Section.method) + [.legal]
         super.init(style: .insetGrouped)
+        // An inline title in the bar's own appearance, as on the form's steps.
+        title = Self.sheetTitle
+        navigationItem.largeTitleDisplayMode = .never
+        navigationItem.leftBarButtonItem = helpItem
+        navigationItem.rightBarButtonItem = closeItem
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// The list shows no bar (#1811): no close, no globe, and the headline is
-    /// the table's.
-    override var hidesNavigationBar: Bool { true }
 
     /// ⚠️ NO SCROLL WHILE THE LIST FITS (#1908, the owner 2026-10-30: the
     /// sheet scrolled though nothing was hidden). The table's content runs
@@ -105,6 +140,11 @@ final class MethodSelectionViewController: AuthStepTableViewController {
     /// The coordinator locks the screen itself; this is only what it shows.
     func setWorking(_ method: SignInMethod?) {
         workingMethod = method
+        // ⚠️ × WAITS FOR THE CALL (#1969). Sign in with Apple or a passkey
+        // goes on in the system's sheet and on the server; closing under it
+        // would leave its answer — a birthday step, a second step, an error
+        // — nowhere to land. The row's spinner says why.
+        closeItem.isEnabled = method == nil
         guard isViewLoaded else { return }
         for (index, section) in sections.enumerated() {
             guard case .method(let candidate) = section,
@@ -147,8 +187,8 @@ final class MethodSelectionViewController: AuthStepTableViewController {
     override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
         switch sections[section] {
         case .method(let method):
-            // The list opens one side margin under the sheet's top, as the
-            // rows sit from its sides.
+            // The list opens one side margin under the bar, as the rows sit
+            // from the sheet's sides.
             if method == methods.first { return Spacing.lg }
             return Spacing.sm - Self.collapsedFooterHeight // tight cohesive menu
         case .legal:

@@ -10,26 +10,56 @@ struct LoginFlowCoordinatorTests {
         return try #require(navigation.viewControllers.first)
     }
 
-    /// No close button (#1811): the sheet's swipe is the way out. The method
-    /// list shows no bar at all — no close, no globe — and no toolbar.
-    @Test func theMethodListHasNoCloseButtonAndNoBars() throws {
+    /// A bar again (#1969): help (?) leading, one fixed title, close (×)
+    /// trailing — plain native items, and no toolbar.
+    @Test func theMethodListShowsHelpTitleAndClose() throws {
         let flow = LoginFlowCoordinator().start()
         let methods = try #require(try firstScreen(of: flow) as? MethodSelectionViewController)
 
-        #expect(methods.navigationItem.leftBarButtonItem == nil)
-        #expect(methods.navigationItem.rightBarButtonItem == nil)
-        #expect(methods.hidesNavigationBar)
+        #expect(methods.title == "Log in or sign up")
+        #expect(methods.navigationItem.largeTitleDisplayMode == .never)
+        let help = try #require(methods.navigationItem.leftBarButtonItem)
+        #expect(help.identifier == MethodSelectionViewController.helpItemIdentifier)
+        #expect(help.accessibilityLabel == "Help")
+        #expect(help.customView == nil && help.isEnabled)
+        let close = try #require(methods.navigationItem.rightBarButtonItem)
+        #expect(close.identifier == MethodSelectionViewController.closeItemIdentifier)
+        #expect(close.accessibilityLabel == "Close")
+        #expect(close.customView == nil)
         #expect(methods.toolbarItems?.isEmpty ?? true)
+        // × is the flow's: it closes the sheet the way a swipe does.
+        #expect(methods.onClose != nil)
+        // ? is not wired yet: nothing answers it.
+        #expect(methods.onHelp == nil)
     }
 
-    /// No title (#1908, the owner): the methods say what they do. The list
-    /// opens one side margin under the sheet's top.
-    @Test func withNoGatedActionTheListHasNoHeadline() throws {
+    /// The title is the sheet's, never the gated action's: the flow is not
+    /// even told what opened it (#1908's reason line stays out).
+    @Test func theTitleIsTheSameWhateverOpenedTheSheet() throws {
+        for _ in 0..<2 {
+            let methods = try #require(try firstScreen(of: LoginFlowCoordinator().start()) as? MethodSelectionViewController)
+            #expect(methods.title == MethodSelectionViewController.sheetTitle)
+        }
+    }
+
+    /// The list opens one side margin under its bar, with no headline row.
+    @Test func theListHasNoHeadlineRow() throws {
         let flow = LoginFlowCoordinator().start()
 
         let methods = try #require(try firstScreen(of: flow) as? MethodSelectionViewController)
         methods.loadViewIfNeeded()
         #expect(methods.tableView(methods.tableView, viewForHeaderInSection: 0) == nil, "a headline over the methods")
+    }
+
+    /// × waits for a running sign-in (Sign in with Apple, a passkey): its
+    /// answer must find the sheet still there.
+    @Test func closeWaitsForARunningSignIn() throws {
+        let methods = MethodSelectionViewController()
+        let close = try #require(methods.navigationItem.rightBarButtonItem)
+        methods.setWorking(.passkey)
+        #expect(!close.isEnabled)
+        methods.setWorking(nil)
+        #expect(close.isEnabled)
     }
 
     /// ⚠️ THE FORM IS ITS OWN SHEET (#1908, the owner 2026-10-30): picking
