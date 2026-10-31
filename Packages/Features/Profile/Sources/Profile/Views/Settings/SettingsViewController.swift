@@ -399,3 +399,9 @@ private final class SettingsMenuButtonCell: UICollectionViewListCell {
         button.isEnabled = menu != nil
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension SettingsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

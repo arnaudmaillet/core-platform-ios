@@ -259,4 +259,10 @@ public final class AppButtonGalleryViewController: UIViewController {
         required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension AppButtonGalleryViewController: StackScreen {
+    public var leaving: ScreenLeaving { .nativeBack }
+}
 #endif

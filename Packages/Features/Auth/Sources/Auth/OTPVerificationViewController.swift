@@ -120,3 +120,10 @@ final class OTPVerificationViewController: UITableViewController {
         "Sent to \(phoneDisplay)"
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension OTPVerificationViewController: StackScreen {
+    /// It hides its back button behind its own Cancel.
+    var leaving: ScreenLeaving { .nativeBack(unlessHiddenIn: navigationItem) }
+}

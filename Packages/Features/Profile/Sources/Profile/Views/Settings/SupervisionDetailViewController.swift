@@ -404,3 +404,9 @@ extension SupervisionDetailViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension SupervisionDetailViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

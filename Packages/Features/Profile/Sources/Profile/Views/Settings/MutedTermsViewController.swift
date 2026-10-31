@@ -137,3 +137,9 @@ final class MutedTermsViewController: UIViewController {
         applySnapshot()
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension MutedTermsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

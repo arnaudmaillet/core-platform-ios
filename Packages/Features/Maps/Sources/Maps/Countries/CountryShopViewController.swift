@@ -948,3 +948,9 @@ final class StakePackRowCell: UICollectionViewListCell {
         detailLabel.text = Self.detail(offer)
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension CountryShopViewController: StackScreen {
+    public var leaving: ScreenLeaving { .nativeBack }
+}

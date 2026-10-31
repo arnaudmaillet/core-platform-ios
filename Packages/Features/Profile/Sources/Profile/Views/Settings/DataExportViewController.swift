@@ -186,3 +186,9 @@ extension DataExportViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension DataExportViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

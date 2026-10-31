@@ -218,3 +218,9 @@ extension BlockedAccountsViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension BlockedAccountsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

@@ -1026,3 +1026,9 @@ final class SearchNotificationObserverBag: @unchecked Sendable {
     func add(_ token: any NSObjectProtocol) { tokens.append(token) }
     deinit { tokens.forEach(NotificationCenter.default.removeObserver) }
 }
+
+// MARK: - How it is left (#1144)
+
+extension SearchResultsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

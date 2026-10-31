@@ -232,3 +232,9 @@ extension ContactFriendsViewController: UICollectionViewDelegate {
         viewModel.rowTapped(id)
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension ContactFriendsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

@@ -241,3 +241,9 @@ extension FollowRequestsViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension FollowRequestsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

@@ -216,3 +216,9 @@ extension MutedAccountsViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension MutedAccountsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

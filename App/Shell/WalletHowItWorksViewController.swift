@@ -103,3 +103,9 @@ final class WalletHowItWorksViewController: UIViewController {
         return row
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension WalletHowItWorksViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

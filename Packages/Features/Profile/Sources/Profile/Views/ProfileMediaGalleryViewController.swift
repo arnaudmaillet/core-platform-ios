@@ -111,3 +111,9 @@ final class ProfileMediaGalleryViewController: UIViewController {
         if isMovingFromParent { onClose?() }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension ProfileMediaGalleryViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

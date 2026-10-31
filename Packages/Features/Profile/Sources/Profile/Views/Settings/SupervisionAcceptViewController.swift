@@ -208,3 +208,9 @@ final class SupervisionAcceptViewController: UIViewController {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension SupervisionAcceptViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

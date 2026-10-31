@@ -156,3 +156,15 @@ final class LicenseTextViewController: UIViewController {
         view.addSubview(textView)
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension AcknowledgementsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}
+
+// MARK: - How it is left (#1144)
+
+extension LicenseTextViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

@@ -1203,3 +1203,10 @@ extension SearchViewController {
     var debugSections: [SearchSection] { dataSource?.snapshot().sectionIdentifiers ?? [] }
     var debugItems: [SearchItem] { dataSource?.snapshot().itemIdentifiers ?? [] }
 }
+
+// MARK: - How it is left (#1144)
+
+extension SearchViewController: StackScreen {
+    /// Hides its back button: left by Cancel only.
+    var leaving: ScreenLeaving { .controlsOnly }
+}

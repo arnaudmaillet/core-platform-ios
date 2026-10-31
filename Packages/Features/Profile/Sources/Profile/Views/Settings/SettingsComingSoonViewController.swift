@@ -84,3 +84,9 @@ extension SettingsComingSoonViewController: UICollectionViewDataSource {
         return view
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension SettingsComingSoonViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

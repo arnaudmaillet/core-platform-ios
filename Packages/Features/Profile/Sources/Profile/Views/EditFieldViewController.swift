@@ -230,3 +230,9 @@ final class EditFieldViewController: UIViewController {
 extension EditFieldViewController: UITextViewDelegate {
     func textViewDidChange(_ textView: UITextView) { refreshState() }
 }
+
+// MARK: - How it is left (#1144)
+
+extension EditFieldViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

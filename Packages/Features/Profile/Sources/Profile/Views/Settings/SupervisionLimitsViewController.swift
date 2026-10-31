@@ -227,3 +227,9 @@ extension SupervisionLimitsViewController: UICollectionViewDelegate {
         collectionView.deselectItem(at: indexPath, animated: true)
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension SupervisionLimitsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

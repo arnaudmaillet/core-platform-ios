@@ -130,3 +130,10 @@ extension UIViewController {
         })
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension AuthStepTableViewController: StackScreen {
+    /// A sign-in step hides its back button where going back would lose the flow.
+    var leaving: ScreenLeaving { .nativeBack(unlessHiddenIn: navigationItem) }
+}

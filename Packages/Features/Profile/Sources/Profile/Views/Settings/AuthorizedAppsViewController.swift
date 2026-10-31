@@ -248,3 +248,9 @@ extension AuthorizedAppsViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension AuthorizedAppsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

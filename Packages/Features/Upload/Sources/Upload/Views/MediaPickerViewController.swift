@@ -1202,3 +1202,9 @@ final class BenchFrameTimer: NSObject {
     }
 }
 #endif
+
+// MARK: - How it is left (#1144)
+
+extension MediaPickerViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

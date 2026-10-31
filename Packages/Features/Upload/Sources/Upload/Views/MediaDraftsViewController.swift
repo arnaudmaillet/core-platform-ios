@@ -33,3 +33,9 @@ final class MediaDraftsViewController: UIViewController {
         emptyState.pin(to: view)
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension MediaDraftsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

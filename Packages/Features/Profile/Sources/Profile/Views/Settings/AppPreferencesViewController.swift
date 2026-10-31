@@ -578,3 +578,9 @@ extension AppPreferencesViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension AppPreferencesViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

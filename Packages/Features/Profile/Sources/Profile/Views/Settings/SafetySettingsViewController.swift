@@ -113,3 +113,9 @@ extension SafetySettingsViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension SafetySettingsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

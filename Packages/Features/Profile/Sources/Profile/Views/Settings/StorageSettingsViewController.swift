@@ -293,3 +293,9 @@ extension StorageSettingsViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension StorageSettingsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

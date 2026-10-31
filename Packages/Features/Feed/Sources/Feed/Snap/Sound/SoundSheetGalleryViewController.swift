@@ -263,3 +263,9 @@ extension SoundSheetGalleryViewController: UICollectionViewDelegate {
         autoplay?.stop(cell)
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension SoundSheetGalleryViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

@@ -161,3 +161,9 @@ final class BirthDateViewController: UIViewController {
         present(alert, animated: true)
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension BirthDateViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

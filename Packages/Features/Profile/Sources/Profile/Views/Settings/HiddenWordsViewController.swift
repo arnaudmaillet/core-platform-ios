@@ -349,3 +349,9 @@ extension HiddenWordsViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension HiddenWordsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

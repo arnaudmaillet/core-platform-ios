@@ -607,3 +607,9 @@ extension ProfileRelationshipsViewController: UISearchResultsUpdating, UISearchC
         searchBar.searchTextField.resignFirstResponder()
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension ProfileRelationshipsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

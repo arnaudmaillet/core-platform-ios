@@ -4053,3 +4053,9 @@ extension MediaEditorViewController {
         return seconds
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension MediaEditorViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

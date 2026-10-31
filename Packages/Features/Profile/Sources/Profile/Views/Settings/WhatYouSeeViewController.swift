@@ -566,3 +566,9 @@ extension WhatYouSeeViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension WhatYouSeeViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

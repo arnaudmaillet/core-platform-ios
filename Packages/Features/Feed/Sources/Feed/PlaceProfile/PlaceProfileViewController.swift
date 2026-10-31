@@ -2607,3 +2607,10 @@ private struct GrabFrozenScroller {
     weak var scroller: UIScrollView?
     let wasEnabled: Bool
 }
+
+// MARK: - How it is left (#1144)
+
+extension PlaceProfileViewController: StackScreen {
+    /// Its return to the map, or its marker close, owns the way back; otherwise UIKit's.
+    var leaving: ScreenLeaving { zoomOwnsInteractiveDismissal ? .ownGesture : .nativeBack }
+}

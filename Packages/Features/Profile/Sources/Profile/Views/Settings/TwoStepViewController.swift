@@ -1034,3 +1034,22 @@ extension BackupCodesViewController: UICollectionViewDelegate {
         selectRow?(indexPath)
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension BackupCodesViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}
+
+// MARK: - How it is left (#1144)
+
+extension TwoStepEnrollmentViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}
+
+// MARK: - How it is left (#1144)
+
+extension TwoStepViewController: StackScreen {
+    /// Its back button is hidden while a step is at work.
+    var leaving: ScreenLeaving { .nativeBack(unlessHiddenIn: navigationItem) }
+}

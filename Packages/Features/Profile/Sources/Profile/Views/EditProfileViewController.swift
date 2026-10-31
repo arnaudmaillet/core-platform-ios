@@ -720,3 +720,8 @@ private final class EditProfileHeroCell: UICollectionViewListCell {
     }()
 }
 
+// MARK: - How it is left (#1144)
+
+extension EditProfileViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}
