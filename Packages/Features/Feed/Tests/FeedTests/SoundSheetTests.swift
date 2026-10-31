@@ -859,7 +859,9 @@ struct SoundSheetTests {
     private static let previewFile = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("preview.m4a")
 
     /// The record plays the sheet's OWN track: a tap starts it (❚❚, turning)
-    /// and covers the post behind; a second tap stops it and uncovers it.
+    /// and covers the post behind; a second tap PAUSES it — and the post
+    /// stays paused (the owner, 2026-10-31): only the post played again, or
+    /// the sheet going, gives the sound back.
     @Test func theRecordPlaysTheSheetsOwnTrack() throws {
         let controller = sheet(tiles: 3, preview: Self.previewFile)
         try laidOut(controller)
@@ -876,7 +878,8 @@ struct SoundSheetTests {
         header.debugTapRecord()
         #expect(!controller.isPreviewing)
         #expect(!header.debugIsSpinning && header.debugShownGlyph == "play.fill")
-        #expect(covers == [true, false], "the two tracks played together")
+        #expect(covers == [true], "pausing the sheet's track handed the sound back to the post")
+        #expect(controller.isTrackEngaged)
     }
 
     /// The post played again stops the sheet's track: the feed says so.
@@ -886,8 +889,9 @@ struct SoundSheetTests {
         var covers: [Bool] = []
         controller.onCoverChanged = { covers.append($0) }
         try #require(controller.debugHeader).debugTapRecord()
-        controller.stopPreview()
+        controller.releaseTrack()
         #expect(!controller.isPreviewing)
+        #expect(!controller.isTrackEngaged)
         #expect(covers == [true, false])
     }
 
@@ -903,8 +907,9 @@ struct SoundSheetTests {
         #expect(header.debugTrackPlayedWidth == nil, "a position before any play")
         #expect(!header.trackBar.isScrubbable, "a bar to scrub with no track")
         header.debugTapRecord()
-        controller.stopPreview(rewinding: true)
+        controller.debugEndTrack()
         #expect(header.debugTrackPlayedWidth == 0, "the end left the bar where it was")
+        #expect(controller.isPreviewing, "the track stopped at its end instead of looping")
     }
 
     /// ▶︎ ⇄ ❚❚ is one glyph view swapping its symbol (a symbol replace, the

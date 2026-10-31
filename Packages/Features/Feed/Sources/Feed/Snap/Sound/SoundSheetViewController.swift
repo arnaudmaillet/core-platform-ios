@@ -144,7 +144,7 @@ import UIKit
 /// playing one pauses the other. The record plays the sound's preview on a
 /// player of its own; while it plays, the post behind is covered
 /// (`onCoverChanged`), and when the post plays again the feed stops the
-/// preview (`stopPreview`). A feed opened from a tile covers the post too,
+/// track (`releaseTrack`). A feed opened from a tile covers the post too,
 /// for the trip. The post also pauses under the expanded sheet
 /// (`onExpandedChange`).
 final class SoundSheetViewController: UIViewController {
@@ -253,6 +253,9 @@ final class SoundSheetViewController: UIViewController {
     }
 
     #if DEBUG
+    /// The track reached its end. Tests.
+    func debugEndTrack() { loopPreview() }
+
     /// Draws the record in a state, for the glyph's tests.
     func debugShowRecord(playing: Bool, available: Bool) {
         setRecord(RecordPlayback(playing: playing, available: available))
@@ -707,7 +710,7 @@ final class SoundSheetViewController: UIViewController {
         reveal.sleep()
         lookahead.setOnScreen(false)
         guard isSheetBeingDismissed else { return }
-        stopPreview()
+        releaseTrack()
         tearDownPreview()
         setCovering(false)
         onDismissed?()
@@ -1099,7 +1102,7 @@ final class SoundSheetViewController: UIViewController {
         header.trackBar.isScrubbable = preview != nil
         header.trackBar.onScrubBegan = { [weak self] in self?.beginTrackScrub() }
         header.trackBar.onSeekRequested = { [weak self] fraction in self?.seekTrack(to: fraction) }
-        header.trackBar.onScrubEnded = { [weak self] _ in self?.endTrackScrub() }
+        header.trackBar.onScrubEnded = { [weak self] fraction in self?.endTrackScrub(at: fraction) }
         header.setTrackProgress(previewFraction, loading: false)
         header.onTogglePlayback = { [weak self] in
             // A transport control: silent (#1881).
@@ -1645,13 +1648,18 @@ final class SoundSheetViewController: UIViewController {
     /// covers the post behind. (The expanded detent pauses it too, through
     /// `onExpandedChange`.)
     private func refreshCover() {
-        setCovering(isPreviewing || isShowingFeed)
+        setCovering(isTrackEngaged || isShowingFeed)
     }
 
     // MARK: - The sheet's own track
 
     /// Whether the record plays the sound's preview.
     private(set) var isPreviewing = false
+    /// Whether the sheet's track holds the sound: from its first play until
+    /// the post is played again or the sheet goes. PAUSED, it still holds it
+    /// (the owner, 2026-10-31): pausing the record does not hand the sound
+    /// back to the post behind.
+    private(set) var isTrackEngaged = false
     private var preview: AVPlayer?
     private var previewEndObserver: NSObjectProtocol?
     private var previewStart: Task<Void, Never>?
@@ -1668,6 +1676,7 @@ final class SoundSheetViewController: UIViewController {
     private func startPreview() {
         guard let url = sound.previewURL, !isPreviewing else { return }
         isPreviewing = true
+        isTrackEngaged = true
         setRecord(RecordPlayback(playing: true, available: record.available))
         refreshCover()
         // The bar shows from the first play: loading until the track says its
@@ -1698,7 +1707,7 @@ final class SoundSheetViewController: UIViewController {
             previewEndObserver = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main
             ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.stopPreview(rewinding: true) }
+                MainActor.assumeIsolated { self?.loopPreview() }
             }
             preview = player
             header?.trackBar.isScrubbable = true
@@ -1713,26 +1722,40 @@ final class SoundSheetViewController: UIViewController {
         AVPlayer(playerItem: videoPlayback?.soundItem(for: url) ?? AVPlayerItem(url: url))
     }
 
-    /// Stops the sheet's own track: its record's tap, its end, the sheet
-    /// going — or the post played again, which the feed says (the two tracks
-    /// never play together).
-    func stopPreview(rewinding: Bool = false) {
+    /// Pauses the sheet's own track: its record's tap, or the sheet going.
+    /// The track keeps the sound (`isTrackEngaged`): the post behind stays
+    /// paused, and the bar holds where the track is, so the next tap resumes
+    /// visibly from there.
+    func stopPreview() {
         guard isPreviewing else { return }
         isPreviewing = false
         preview?.pause()
         stopPreviewFeed()
-        if rewinding {
-            // The end: the bar back to the start, then gone.
-            preview?.seek(to: .zero)
-            previewFraction = 0
-            header?.setTrackProgress(0, loading: false)
-        } else {
-            // Paused: the bar stays where the track is, so the next tap
-            // resumes visibly from there.
-            header?.setTrackProgress(previewFraction, loading: false)
-        }
+        header?.setTrackProgress(previewFraction, loading: false)
         setRecord(RecordPlayback(playing: false, available: record.available))
+    }
+
+    /// The post was played again — the viewer's tap on it — or the sheet
+    /// goes: the sheet's track gives the sound back (the two tracks never
+    /// play together).
+    func releaseTrack() {
+        stopPreview()
+        guard isTrackEngaged else { return }
+        isTrackEngaged = false
         refreshCover()
+    }
+
+    /// The end of the track: it LOOPS (the owner, 2026-10-31) — back to the
+    /// start, the bar with it, and on.
+    fileprivate func loopPreview() {
+        previewFraction = 0
+        header?.setTrackProgress(0, loading: false)
+        preview?.seek(to: .zero) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isPreviewing else { return }
+                self.preview?.play()
+            }
+        }
     }
 
     /// The preview's player and its observers go with the sheet.
@@ -1753,36 +1776,64 @@ final class SoundSheetViewController: UIViewController {
 
     /// Whether the track was playing when the finger took the bar.
     private var resumesAfterTrackScrub = false
+    /// A finger is dragging the bar: it moves the bar, not the player.
+    private var isTrackScrubbing = false
 
     /// The finger took the bar: the track holds still under it (the record
-    /// still says it plays — the scrub is a pause the viewer did not ask for,
-    /// and the post behind stays covered).
+    /// still says it plays — the scrub is a pause the viewer did not ask for).
     private func beginTrackScrub() {
+        isTrackScrubbing = true
         resumesAfterTrackScrub = isPreviewing && preview?.timeControlStatus != .paused
         preview?.pause()
         stopPreviewFeed()
     }
 
-    /// The bar asked for `fraction`: the track lands exactly there.
+    /// The bar asked for `fraction`. ⚠️ DRAGGING, THE BAR MOVES ALONE (the
+    /// owner, 2026-10-31: the release stuttered against the video's): an
+    /// exact seek per finger move kept a streamed track seeking, and the
+    /// feed read the old position at the release and caught up with a jump.
+    /// The player is moved once, where the finger lets go (`endTrackScrub`)
+    /// — or here, for a tap.
     private func seekTrack(to fraction: Double) {
+        previewFraction = fraction
+        guard !isTrackScrubbing else { return }
+        land(at: fraction, resuming: isPreviewing)
+    }
+
+    /// The finger let go at `fraction` (nil: cancelled).
+    private func endTrackScrub(at fraction: Double?) {
+        isTrackScrubbing = false
+        let resumes = resumesAfterTrackScrub && isPreviewing
+        resumesAfterTrackScrub = false
+        guard let fraction else {
+            if resumes { preview?.play(); startPreviewFeed() }
+            return
+        }
+        land(at: fraction, resuming: resumes)
+    }
+
+    /// One exact seek; the track plays on — and the bar is fed again — only
+    /// once the player has LANDED, as the video's bar waits for its seeks
+    /// (`VideoPlaybackController.whenSeeksSettle`). Until then the bar holds
+    /// the finger's position.
+    private func land(at fraction: Double, resuming: Bool) {
         guard let player = preview, let duration = player.currentItem?.duration.seconds,
               duration.isFinite, duration > 0 else { return }
-        previewFraction = fraction
+        stopPreviewFeed()
         player.seek(
             to: CMTime(seconds: duration * fraction, preferredTimescale: 600),
             toleranceBefore: .zero, toleranceAfter: .zero
-        )
-        // A tap while the track plays: it plays on from there, fed again.
-        if isPreviewing, previewFeed == nil, !resumesAfterTrackScrub { startPreviewFeed() }
-    }
-
-    /// The finger let go: the track plays on if it was playing.
-    private func endTrackScrub() {
-        guard resumesAfterTrackScrub else { return }
-        resumesAfterTrackScrub = false
-        guard isPreviewing else { return }
-        preview?.play()
-        startPreviewFeed()
+        ) { [weak self] finished in
+            MainActor.assumeIsolated {
+                guard let self, finished else { return }
+                if resuming, self.isPreviewing { player.play() }
+                if self.isPreviewing {
+                    self.startPreviewFeed()
+                } else {
+                    self.header?.setTrackProgress(fraction, loading: false)
+                }
+            }
+        }
     }
 
     private func startPreviewFeed() {

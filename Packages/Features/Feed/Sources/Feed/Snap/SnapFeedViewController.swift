@@ -5484,8 +5484,8 @@ final class SnapFeedViewController: UIViewController {
         (previewRestingVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
         // Two tracks, never together (the owner, 2026-10-31): the post
         // playing again — the viewer's tap on it — stops the sheet's own.
-        if playing, let soundSheet, soundSheet.isPreviewing {
-            soundSheet.stopPreview()
+        if playing, let soundSheet, soundSheet.isTrackEngaged {
+            soundSheet.releaseTrack()
         }
     }
 
