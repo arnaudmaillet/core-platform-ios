@@ -118,6 +118,21 @@ struct StackArbiterTests {
         #expect(root.presentedViewController === next, "the sheet opened since stays")
     }
 
+    /// Every screen of an arbitrated stack hands its back button to the
+    /// arbiter — pushed or set — and keeps the chevron-only look.
+    @Test func anArbitratedStackGivesEveryBackButtonToTheArbiter() {
+        let root = UIViewController()
+        let stack = ArbitratedNavigationController(rootViewController: root)
+        let pushed = UIViewController()
+        stack.pushViewController(pushed, animated: false)
+        let set = UIViewController()
+        stack.setViewControllers([root, pushed, set], animated: false)
+        for screen in [root, pushed, set] {
+            #expect(screen.navigationItem.backAction != nil)
+            #expect(screen.navigationItem.backButtonDisplayMode == .minimal)
+        }
+    }
+
     /// A gesture closes the screen it is on, on top: never one below.
     @Test func aGestureNeverTakesOutAScreenBelowTheTop() {
         let (navigation, screens) = stack(3)
