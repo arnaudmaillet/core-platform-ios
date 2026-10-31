@@ -1972,9 +1972,7 @@ private struct MockAnimatedAvatarResolver: AnimatedAvatarResolving, @unchecked S
 
     func sheet(for avatarURL: URL, rung: AnimatedAvatars.Rung) async -> AnimatedIconSheet? {
         guard let index = MockSocialDataset.sheetAvatarIndex(avatarURL) else { return nil }
-        let clips = await MainActor.run { catalog.ids.filter { $0.hasSuffix("-0") } }
-        guard !clips.isEmpty else { return nil }
-        let previewID = clips[index % clips.count]
+        guard let previewID = Self.previewID(forSheetAvatar: index) else { return nil }
         // Baked once, then read back on every launch after (#1841): cutting
         // 48 frames out of a clip at launch kept the first post's avatar on
         // its skeleton for 8–17 s on the simulator.
@@ -1985,6 +1983,12 @@ private struct MockAnimatedAvatarResolver: AnimatedAvatarResolving, @unchecked S
         guard let baked = await bake(previewID: previewID, rung: rung) else { return nil }
         Task.detached(priority: .utility) { Self.store.store(baked, forKey: key) }
         return baked
+    }
+
+    /// The preview an animated avatar is cut from: its clip's opening sheet
+    /// (`MockClipCatalog.avatarClip(forSheetAvatar:)`, never a post's clip).
+    static func previewID(forSheetAvatar index: Int) -> String? {
+        MockClipCatalog.shared.avatarClip(forSheetAvatar: index).map { "\($0.id)-0" }
     }
 
     /// Where the baked sheets are kept across launches.

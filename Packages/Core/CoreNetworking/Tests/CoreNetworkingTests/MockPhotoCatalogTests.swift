@@ -5,9 +5,10 @@ import Testing
 @testable import CoreNetworking
 @testable import CoreNetworkingMocks
 
-/// The mock corpus's pictures are the bundled photo galleries
-/// (`MockPhotoCatalog`): every image post, every photo page of a collection,
-/// in both catalogs — and a collection is ONE gallery.
+/// The mock corpus's pictures are the bundled photographs
+/// (`MockPhotoCatalog`): every image post and every photo page of a
+/// collection draw from `posts` ("media 2", 2026-10-31), in both catalogs;
+/// the galleries and singles are the avatars'.
 struct MockPhotoCatalogTests {
     private var catalog: MockPhotoCatalog { .shared }
 
@@ -52,6 +53,8 @@ struct MockPhotoCatalogTests {
                 #expect(photo.id.hasPrefix("\(gallery.id)-"), "\(photo.id) sits in \(gallery.id)")
             }
         }
+        #expect(!catalog.posts.isEmpty, "the bundle carries no post photos")
+        for photo in catalog.posts { #expect(photo.id.hasPrefix("post-"), "\(photo.id) sits in posts") }
     }
 
     /// A URL that is not a catalog photo stays synthetic: the fetcher paints it.
@@ -61,14 +64,16 @@ struct MockPhotoCatalogTests {
         #expect(catalog.fileURL(forPhoto: try #require(URL(string: "mock://avatar/1?w=10&h=10"))) == nil)
     }
 
-    /// A collection with more pages than its gallery has photos cycles WITHIN
-    /// the gallery, never into the next one.
-    @Test func galleryPagesCycleWithinTheirGallery() throws {
-        let gallery = try #require(catalog.gallery(forSlot: 0), "the bundle carries no photo galleries")
-        for page in 0..<(gallery.photos.count * 2 + 1) {
-            let photo = try #require(catalog.photo(inGalleryForSlot: 0, page: page))
-            #expect(gallery.photos.contains(photo))
-            #expect(photo == gallery.photos[page % gallery.photos.count])
+    /// A collection's pages are a run of `posts`, each collection starting
+    /// further on, cycling past the pool's end.
+    @Test func collectionPagesRunThroughThePostPhotos() throws {
+        let pool = catalog.posts
+        try #require(!pool.isEmpty, "the bundle carries no post photos")
+        for slot in 0..<3 {
+            for page in 0..<(pool.count + 1) {
+                let photo = try #require(catalog.photo(inGalleryForSlot: slot, page: page))
+                #expect(photo == pool[(slot * MockPhotoCatalog.collectionStride + page) % pool.count])
+            }
         }
     }
 
@@ -94,46 +99,27 @@ struct MockPhotoCatalogTests {
         }
     }
 
-    /// ⚠️ A COLLECTION IS ONE SHOOT: every photo page of a post — its head
-    /// included when the head is a photo — comes from a single gallery.
-    @Test func everyCollectionsPhotoPagesShareOneGallery() throws {
-        try #require(!catalog.photos.isEmpty, "the bundle carries no photos")
-        for dataset in [MockSocialDataset(), MockSocialDataset(mediaCatalog: .realAssets)] {
-            let collections = dataset.posts.filter { !$0.extraMedia.isEmpty }
-            #expect(!collections.isEmpty)
-            var photoPages = 0
-            for post in collections {
-                let galleries = Set(photos(of: post).compactMap { $0.photo.flatMap(catalog.gallery(containing:))?.id })
-                #expect(galleries.count <= 1, "\(post.postID) mixes galleries \(galleries.sorted())")
-                photoPages += photos(of: post).count
-            }
-            #expect(photoPages > 2, "no collection carries photo pages")
-        }
-    }
-
-    /// Within a collection the photo pages do not repeat while the gallery
-    /// still has photos left to show.
-    @Test func aCollectionDoesNotRepeatAPhotoItsGalleryCanAvoid() {
+    /// Within a collection the photo pages do not repeat while the pool has
+    /// photos left to show.
+    @Test func aCollectionDoesNotRepeatAPhotoThePoolCanAvoid() {
         let dataset = MockSocialDataset()
-        for post in dataset.posts where !post.extraMedia.isEmpty {
+        let collections = dataset.posts.filter { !$0.extraMedia.isEmpty }
+        #expect(collections.contains { photos(of: $0).count > 2 }, "no collection carries photo pages")
+        for post in collections {
             let pages = photos(of: post).compactMap { $0.photo }
-            guard let gallery = pages.first.flatMap(catalog.gallery(containing:)),
-                  pages.count <= gallery.photos.count else { continue }
+            guard pages.count <= catalog.posts.count else { continue }
             #expect(Set(pages.map(\.id)).count == pages.count, "\(post.postID) repeats a photo")
         }
     }
 
-    /// The main timeline's single photos are all different pictures, spread
-    /// over more than one gallery.
-    @Test func timelinePhotosAreDistinctAndSpreadAcrossGalleries() {
+    /// The main timeline's photos are all different pictures until the pool
+    /// is spent.
+    @Test func timelinePhotosAreDistinctUntilThePoolIsSpent() {
         let dataset = MockSocialDataset()
-        let timeline = dataset.posts.filter { $0.postID.hasPrefix("post-0") && $0.parentID.isEmpty }
+        let timeline = dataset.posts.filter { $0.postID.hasPrefix("post-0") }
         let pictures = timeline.compactMap(\.media).filter { $0.url.hasPrefix(MockPhotoCatalog.scheme) }.map(\.url)
         #expect(!pictures.isEmpty)
-        #expect(Set(pictures).count == min(pictures.count, catalog.photos.count))
-        let galleries = Set(pictures.compactMap { URL(string: $0).flatMap(catalog.photo(for:)) }
-            .compactMap { catalog.gallery(containing: $0)?.id })
-        #expect(galleries.count > 1)
+        #expect(Set(pictures).count == min(pictures.count, catalog.posts.count))
     }
 
     // MARK: - On the wire and on the map

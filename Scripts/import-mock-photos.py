@@ -2,6 +2,13 @@
 """Imports a folder of photo galleries as the mock BFF's picture corpus.
 
     Scripts/import-mock-photos.py ~/Downloads/photos
+    Scripts/import-mock-photos.py "--posts=~/Desktop/media 2" --posts=~/Desktop/media3
+
+`--posts=PATH` (2026-10-31, the owner's "media 2") imports only PATH's photos,
+flat, as the manifest entry `"id": "posts"` (photos `post-NN`): the pictures
+posts draw from. Everything else in the folder stays as committed — the
+galleries and singles are what the avatars and banners read. (A whole-folder
+run rewrites everything, `posts` included: run `--posts` again after it.)
 
 One GALLERY per subfolder that holds `.jpg`, `.heic` or `.webp` files (subfolders with
 none — the video-only ones — and `.DS_Store` are ignored). A photo that is a
@@ -85,7 +92,59 @@ def strip_metadata(data: bytes) -> bytes:
     return bytes(out)
 
 
+def encode(photo: Path, photo_id: str, scratch: str) -> dict:
+    """One photo, downscaled, rotated upright and stripped, into `OUT`."""
+    original = sips_properties(photo)
+    # Stripping EXIF drops the orientation tag, so a rotated source would come
+    # out on its side: the rotation goes into the pixels first. A mirrored
+    # orientation is refused, not guessed.
+    rotation = {None: 0, 1: 0, 3: 180, 6: 90, 8: 270}.get(original["orientation"])
+    if rotation is None:
+        sys.exit(f"{photo}: EXIF orientation {original['orientation']} is not handled")
+    encoded = Path(scratch) / f"{photo_id}.jpg"
+    resize = ["-Z", str(LONG_SIDE)] if max(original["width"], original["height"]) > LONG_SIDE else []
+    rotate = ["-r", str(rotation)] if rotation else []
+    subprocess.run(["sips", *rotate, *resize, "-s", "format", "jpeg", "-s", "formatOptions", str(QUALITY),
+                    str(photo), "--out", str(encoded)], check=True, capture_output=True)
+    (OUT / encoded.name).write_bytes(strip_metadata(encoded.read_bytes()))
+    size = sips_properties(OUT / encoded.name)
+    return {"id": photo_id, "file": encoded.name, "width": size["width"], "height": size["height"]}
+
+
+def import_posts(folders):
+    """`--posts=PATH` (repeatable): the photos of every PATH, in that order,
+    become the pictures posts draw from.
+
+    Written as the manifest entry `"id": "posts"`, photos `post-NN`, and
+    nothing else is touched: the galleries and singles already committed stay,
+    because the avatars and banners still read them.
+    """
+    manifest_path = OUT / "photos.json"
+    manifest = [g for g in json.loads(manifest_path.read_text()) if g["id"] != "posts"]
+    for stale in OUT.glob("post-*.jpg"):
+        stale.unlink()
+    photos, seen = [], set()
+    with tempfile.TemporaryDirectory() as scratch:
+        for photo in (p for folder in folders for p in sorted(
+                (p for p in folder.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".heic", ".webp")),
+                key=natural_key)):
+            digest = hashlib.sha256(photo.read_bytes()).hexdigest()
+            if digest in seen:
+                print(f"skip (duplicate): {photo.name}")
+                continue
+            seen.add(digest)
+            photos.append(encode(photo, f"post-{len(photos) + 1:02d}", scratch))
+            print(f"{photos[-1]['id']}  {photos[-1]['width']}x{photos[-1]['height']}  <- {photo.name}")
+    manifest.append({"id": "posts", "photos": photos})
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    print(f"{len(photos)} post photos in {OUT}")
+
+
 def main():
+    posts = [arg.split("=", 1)[1] for arg in sys.argv[1:] if arg.startswith("--posts=")]
+    if posts:
+        import_posts([Path(folder).expanduser() for folder in posts])
+        return
     if len(sys.argv) != 2:
         sys.exit(__doc__)
     source = Path(sys.argv[1]).expanduser()
@@ -119,23 +178,8 @@ def main():
                     continue
                 seen.add(digest)
                 index += 1
-                original = sips_properties(photo)
-                # Stripping EXIF drops the orientation tag, so a rotated source
-                # would come out on its side: the rotation goes into the
-                # pixels first. A mirrored orientation is refused, not guessed.
-                rotation = {None: 0, 1: 0, 3: 180, 6: 90, 8: 270}.get(original["orientation"])
-                if rotation is None:
-                    sys.exit(f"{photo}: EXIF orientation {original['orientation']} is not handled")
                 photo_id = f"single-{index:02d}" if is_singles else f"{gallery_id}-{index:02d}"
-                encoded = Path(scratch) / f"{photo_id}.jpg"
-                resize = ["-Z", str(LONG_SIDE)] if max(original["width"], original["height"]) > LONG_SIDE else []
-                rotate = ["-r", str(rotation)] if rotation else []
-                subprocess.run(["sips", *rotate, *resize, "-s", "format", "jpeg", "-s", "formatOptions", str(QUALITY),
-                                str(photo), "--out", str(encoded)], check=True, capture_output=True)
-                (OUT / encoded.name).write_bytes(strip_metadata(encoded.read_bytes()))
-                size = sips_properties(OUT / encoded.name)
-                photos.append({"id": photo_id, "file": encoded.name,
-                               "width": size["width"], "height": size["height"]})
+                photos.append(encode(photo, photo_id, scratch))
             manifest.append({"id": gallery_id, "photos": photos})
             dimensions = sorted({f"{p['width']}x{p['height']}" for p in photos})
             print(f"{gallery_id}  {len(photos):2d} photos  {', '.join(dimensions)}  <- {folder.name}")
