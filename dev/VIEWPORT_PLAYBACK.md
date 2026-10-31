@@ -61,7 +61,7 @@ override func viewWillDisappear(_ animated: Bool) {
 - **`.now`:** there is no transition to follow, for example a tab switch. The disappearance has already reported 0. The appearance leaves the start where the host always put it.
 - **`.flight`:** a post opened from the screen, flying into a zoom destination. The flight carries the tapped tile's player, and the host keeps its own rule.
 
-**Adopted by:** Shots (`SnapFeedViewController`, with the sound fade), the For You grid, the notifications drawer (as a source), the place page, the profile and its media gallery, the Popular list, Discover's gallery, the search results and the hashtag screens.
+**Adopted by:** Shots (`SnapFeedViewController`, with the sound fade), the For You grid, the notifications drawer (as a source), the place page, the profile and its media gallery, the Popular list, Discover's gallery, the search results and the hashtag screens. On a hero page (the profile, the place page), the banner's muted loop follows the same share through `HeroPageViewController.viewportAllowsBanner`. It still plays through the start of a departure (#1399), up to half.
 
 **Not yet:** a screen inside a sheet (the sound sheet's gallery). A sheet at a medium detent can hold less than half of the display while it is the whole of what the viewer reads, so its share needs to be measured against the sheet, not the display.
 

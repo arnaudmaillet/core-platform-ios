@@ -938,6 +938,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         let share = ViewportShare(host: view)
         share.onPlaysChange = { [weak self] plays in
             if plays { self?.syncAutoplay() } else { self?.stopAutoplay() }
+            self?.viewportAllowsBanner = plays
         }
         return share
     }()

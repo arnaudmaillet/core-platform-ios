@@ -66,6 +66,18 @@ struct ProfileViewportShareTests {
         #expect(screen.debugViewportShare.plays, "the gallery did not come back at half")
     }
 
+    /// The banner's loop follows the same share: it stops below half and
+    /// comes back at half (#1399 still plays it through the start of a
+    /// departure).
+    @Test func theBannerFollowsTheShare() {
+        let screen = screen()
+        #expect(screen.viewportAllowsBanner)
+        screen.debugViewportShare.report(0.4)
+        #expect(!screen.viewportAllowsBanner, "the banner plays on under a screen past half")
+        screen.debugViewportShare.report(0.6)
+        #expect(screen.viewportAllowsBanner, "the banner did not come back at half")
+    }
+
     /// No transition to follow (a tab switch): stopped at once, and back once
     /// the screen has appeared, as before.
     @Test func aTabSwitchStopsAndRestartsAtOnce() {
