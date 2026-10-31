@@ -1001,7 +1001,7 @@ final class SnapFeedViewController: UIViewController {
         // own (a push, a presentation, a flight), it owns the whole screen.
         if let coordinator = transitionCoordinator, !isMovingToParent, !isBeingPresented,
            navigationController?.isBeingPresented != true, !isAwaitingAnyFlight,
-           let cover = coordinator.view(forKey: .from) {
+           let cover = ViewportShare.cover(of: coordinator, .from) {
             viewportShare.track(coordinator, cover: cover, coversAtEnd: false)
         } else {
             viewportShare.report(1)
@@ -1499,7 +1499,7 @@ final class SnapFeedViewController: UIViewController {
         // screen's own pop or dismissal: the screen under it is no cover, and
         // a grab carries this very player to its tile.
         if !isMovingFromParent, !isBeingDismissed, navigationController?.isBeingDismissed != true,
-           !isAwaitingAnyFlight, let cover = coordinator.view(forKey: .to) {
+           !isAwaitingAnyFlight, let cover = ViewportShare.cover(of: coordinator, .to) {
             viewportShare.track(coordinator, cover: cover, coversAtEnd: true)
         }
     }

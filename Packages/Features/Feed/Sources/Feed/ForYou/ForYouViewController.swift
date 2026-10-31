@@ -2090,7 +2090,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             return
         }
         if let coordinator = transitionCoordinator, !isMovingFromParent,
-           let cover = coordinator.view(forKey: .to) {
+           let cover = ViewportShare.cover(of: coordinator, .to) {
             viewportShare.track(coordinator, cover: cover, coversAtEnd: true)
             return
         }
@@ -2129,7 +2129,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // it uncovers half, on the pop's own frames. A flight's return, a tab
         // switch, a first appearance: now, as before.
         if activeTransition == nil, let coordinator = transitionCoordinator, !isMovingToParent,
-           let cover = coordinator.view(forKey: .from) {
+           let cover = ViewportShare.cover(of: coordinator, .from) {
             viewportShare.track(coordinator, cover: cover, coversAtEnd: false)
         } else {
             viewportShare.report(1)

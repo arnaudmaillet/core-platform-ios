@@ -65,8 +65,17 @@ public final class ViewportShare {
     /// otherwise have its link stopped and its share overwritten by the old end.
     private var generation = 0
 
+    /// Every live share by its host's view, so that a covered host reads the
+    /// share of the screen covering it rather than measuring it a second time.
+    private static let byHost = NSMapTable<UIView, ViewportShare>.weakToWeakObjects()
+
+    /// The covered hosts taking this host's complement while it arrives or
+    /// leaves.
+    private let followers = NSHashTable<ViewportShare>.weakObjects()
+
     public init(host: UIView) {
         self.host = host
+        Self.byHost.setObject(self, forKey: host)
     }
 
     /// A fraction from a source of the host's own (a pager, a drawer).
@@ -79,9 +88,15 @@ public final class ViewportShare {
         #endif
         onChange?(clamped)
         let nowPlays = Self.plays(at: clamped)
-        guard nowPlays != plays else { return }
-        plays = nowPlays
-        onPlaysChange?(nowPlays)
+        if nowPlays != plays {
+            plays = nowPlays
+            onPlaysChange?(nowPlays)
+        }
+        // The screens under this one, told in the same breath.
+        guard isDeparting, let host else { return }
+        for follower in followers.allObjects where follower.cover === host {
+            follower.report(1 - clamped - Self.coveredYield)
+        }
     }
 
     /// Follows `coordinator`'s transition, in which `cover` is the screen
@@ -103,8 +118,8 @@ public final class ViewportShare {
 
     /// Follows `coordinator`'s transition bringing the host itself onto the
     /// screen (#1914, the owner 2026-10-31: a pushed profile's clips waited
-    /// for the push's end): the share is the part of the host already inside
-    /// the window, so its clips start once half of it is in. At its end the
+    /// for the push's end): the share is the part of the screen the host
+    /// already takes, so its clips start once it takes half. At its end the
     /// share settles on whole, or on gone for a cancel.
     public func trackArrival(_ coordinator: UIViewControllerTransitionCoordinator) {
         report(0)
@@ -117,8 +132,8 @@ public final class ViewportShare {
     /// Follows `coordinator`'s transition carrying the host itself off the
     /// screen (#1914, the owner 2026-10-31: a page's clips stopped at the
     /// first frame of the grab taking it back): the share is the part of the
-    /// host still inside the window, so a slide pauses it past half and a
-    /// grab that only holds it keeps it whole. At its end the share settles
+    /// screen the host still takes, so its clips pause once it takes less
+    /// than half — slid half off, or held smaller than half the screen. At its end the share settles
     /// on gone, or on whole again for a cancel.
     public func trackDeparture(_ coordinator: UIViewControllerTransitionCoordinator) {
         let tracked = beginDeparture()
@@ -163,7 +178,7 @@ public final class ViewportShare {
             return .followed
         }
         guard !(coordinator.viewController(forKey: .from) is any ZoomTransitionDestination),
-              let cover = coordinator.view(forKey: .from)
+              let cover = Self.cover(of: coordinator, .from)
         else { return .now }
         track(coordinator, cover: cover, coversAtEnd: false)
         return .followed
@@ -191,12 +206,29 @@ public final class ViewportShare {
         if screen.navigationController?.topViewController is any ZoomTransitionDestination {
             return .flight
         }
-        if let coordinator, let cover = coordinator.view(forKey: .to) {
+        if let coordinator, let cover = Self.cover(of: coordinator, .to) {
             track(coordinator, cover: cover, coversAtEnd: true)
             return .followed
         }
         report(0)
         return .now
+    }
+
+    /// The screen covering a host in `coordinator`'s transition: the view of
+    /// the controller at `key` — the very view that screen measures itself
+    /// by when it arrives or leaves.
+    ///
+    /// ⚠️ NOT `view(forKey:)` (the owner's device, 2026-10-31): the view the
+    /// transition hands over can be another than the controller's — the
+    /// screen under a popped profile and the profile itself then measured
+    /// two different rects, their shares added up to 1.09 (traced), and both
+    /// played. Read from one view, the two shares are each other's
+    /// complement.
+    public static func cover(
+        of coordinator: UIViewControllerTransitionCoordinator, _ key: UITransitionContextViewControllerKey
+    ) -> UIView? {
+        if let view = coordinator.viewController(forKey: key)?.viewIfLoaded { return view }
+        return coordinator.view(forKey: key == .from ? .from : .to)
     }
 
     /// Whether `cover` can cover the host: never the host, nor a screen
@@ -214,6 +246,14 @@ public final class ViewportShare {
     func isCover(_ cover: UIView) -> Bool {
         guard let host else { return false }
         return !host.isDescendant(of: cover)
+    }
+
+    /// Takes `follower`, a host this one covers, as a screen following its
+    /// share: told its complement now and on every change.
+    func adopt(_ follower: ViewportShare) {
+        guard !followers.contains(follower) else { return }
+        followers.add(follower)
+        follower.report(1 - share - Self.coveredYield)
     }
 
     /// `-viewport-share`: the host's screen and what happened to its share.
@@ -258,25 +298,33 @@ public final class ViewportShare {
         report(covered ? 0 : 1)
     }
 
-    /// The share of `host` left uncovered by `cover`, both in window
-    /// coordinates, against the window's `bounds`. Pure, for tests.
-    public static func share(host: CGRect, cover: CGRect, in bounds: CGRect) -> CGFloat {
-        let visible = host.intersection(bounds)
-        guard !visible.isNull, visible.width > 0, visible.height > 0 else { return 0 }
-        let hidden = visible.intersection(cover)
-        let hiddenArea = hidden.isNull ? 0 : hidden.width * hidden.height
-        return 1 - hiddenArea / (visible.width * visible.height)
+    // ⚠️ ONE MEASURE FOR BOTH SCREENS: THE SCREEN'S (the owner's device,
+    // 2026-10-31). A departing screen used to be measured against its own
+    // area and the screen under it against the window — and iOS shrinks a
+    // page it pops, so the two added up to as much as 1.09 (traced): Shots
+    // started at 0.50 under a profile still reading 0.59, and both played.
+    // Measured against the same window, the two always add up to 1, and only
+    // one of them can hold half.
+
+    /// The share of the screen left to a host under `cover`: what `cover`
+    /// does not take of the window's `bounds`, in window coordinates. Pure,
+    /// for tests.
+    public static func share(coveredBy cover: CGRect, in bounds: CGRect) -> CGFloat {
+        1 - ownShare(of: cover, in: bounds)
     }
 
-    /// The share of a departing `host` still inside the window's `bounds`,
-    /// against the host's own area: a host held smaller in the middle of the
-    /// screen keeps all of it. Pure, for tests.
-    public static func departureShare(host: CGRect, in bounds: CGRect) -> CGFloat {
-        guard host.width > 0, host.height > 0 else { return 0 }
+    /// The share of the screen a host arriving or leaving takes: its part of
+    /// the window's `bounds`, against the window. Pure, for tests.
+    public static func ownShare(of host: CGRect, in bounds: CGRect) -> CGFloat {
+        guard bounds.width > 0, bounds.height > 0 else { return 0 }
         let visible = host.intersection(bounds)
         guard !visible.isNull else { return 0 }
-        return visible.width * visible.height / (host.width * host.height)
+        return visible.width * visible.height / (bounds.width * bounds.height)
     }
+
+    /// What a covered host gives up at the exact half: the screen over it
+    /// plays there, so the two never play together.
+    static let coveredYield: CGFloat = 0.0005
 
     private func startLink() {
         stopLink()
@@ -308,14 +356,22 @@ public final class ViewportShare {
         if isDeparting {
             let hostLayer = host.layer.presentation() ?? host.layer
             let hostRect = hostLayer.convert(hostLayer.bounds, to: windowLayer)
-            report(Self.departureShare(host: hostRect, in: window.bounds))
+            report(Self.ownShare(of: hostRect, in: window.bounds))
             return
         }
         guard let cover else { return }
-        let hostRect = host.convert(host.bounds, to: window)
+        // ⚠️ ONE MEASURE, NOT TWO (the owner's device, 2026-10-31): measured
+        // on its own display link, the screen under a moving one read a frame
+        // apart from it, and both still played for a frame or two at half
+        // (traced). A cover that measures its own place is followed instead:
+        // this share is its complement, told whenever it changes.
+        if let source = Self.byHost.object(forKey: cover), source.isDeparting, source.link != nil {
+            source.adopt(self)
+            return
+        }
         let coverLayer = cover.layer.presentation() ?? cover.layer
         let coverRect = coverLayer.convert(coverLayer.bounds, to: windowLayer)
-        report(Self.share(host: hostRect, cover: coverRect, in: window.bounds))
+        report(Self.share(coveredBy: coverRect, in: window.bounds) - Self.coveredYield)
     }
 
     /// The display link's target, weakly holding the share so the link never
