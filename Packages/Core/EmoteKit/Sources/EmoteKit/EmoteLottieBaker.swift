@@ -317,6 +317,9 @@ enum EmoteMainPark {
             CATransaction.commit()
             return
         }
+        #if DEBUG
+        EmoteOffMainLayoutProbe.installIfAsked()
+        #endif
         whileParked { CATransaction.commit() }
     }
 
@@ -393,6 +396,20 @@ enum EmoteMainPark {
         let falling = CFRunLoopObserverCreateWithHandler(
             kCFAllocatorDefault, CFRunLoopActivity.beforeWaiting.rawValue, true, Int.max
         ) { _, _ in
+            // ⚠️ THE MAIN THREAD NEVER FALLS ASLEEP WITH A LAYOUT PENDING
+            // (#1603). A Core Animation commit lays out every context's
+            // pending layers, from whichever thread commits — and iOS 26/27's
+            // floating bar (`_UIFloatingBarContainerView`, a presented
+            // stack's toolbar) is marked for layout AFTER UIKit's own commit
+            // of the turn. The main thread then slept with it pending, a
+            // bake's parked commit laid it out on the bake thread, and Auto
+            // Layout stopped the process (caught by `EmoteOffMainLayoutProbe`
+            // in the Feed lane's first run). Flushed here — after every other
+            // observer, on the main thread — whatever is pending is laid out
+            // where it belongs, and a commit made while it sleeps finds
+            // nothing of the main thread's to lay out. A flush with nothing
+            // pending costs nothing.
+            CATransaction.flush()
             installed.condition.lock()
             installed.mainAsleep = true
             installed.everAsleep = true
@@ -685,3 +702,4 @@ extension Duration {
         return Double(parts.seconds) * 1000 + Double(parts.attoseconds) / 1e15
     }
 }
+
