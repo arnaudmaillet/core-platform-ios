@@ -603,3 +603,9 @@ extension SecuritySettingsViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension SecuritySettingsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

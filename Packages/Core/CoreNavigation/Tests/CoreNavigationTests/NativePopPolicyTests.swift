@@ -1,4 +1,6 @@
+import DesignSystem
 import Testing
+import UIKit
 @testable import CoreNavigation
 
 /// The edge-swipe-to-pop decision.
@@ -12,7 +14,8 @@ struct NativePopPolicyTests {
         hidesBackButton: Bool = false,
         owns: Bool? = nil,
         customLeading: Bool = false,
-        supplements: Bool = false
+        supplements: Bool = false,
+        declared: ScreenLeaving? = nil
     ) -> Bool {
         NativePopPolicy.shouldBegin(
             isAtRoot: isAtRoot,
@@ -20,8 +23,34 @@ struct NativePopPolicyTests {
             hidesBackButton: hidesBackButton,
             ownsInteractiveDismissal: owns,
             hasCustomLeadingItem: customLeading,
-            leadingItemsSupplementBackButton: supplements
+            leadingItemsSupplementBackButton: supplements,
+            declaredLeaving: declared
         )
+    }
+
+    /// A screen's contract (#1144): anything but `.nativeBack` refuses the
+    /// native back swipe, whatever the other signals say.
+    @Test func aScreenThatIsNotLeftNativelyNeverGetsTheNativePop() {
+        #expect(decide(declared: .ownGesture) == false)
+        #expect(decide(declared: .controlsOnly) == false)
+        #expect(decide(owns: false, declared: .ownGesture) == false)
+    }
+
+    /// `.nativeBack` never WIDENS the decision: the signals still refuse.
+    @Test func nativeBackLeavesTheDecisionToTheSignals() {
+        #expect(decide(declared: .nativeBack) == true)
+        #expect(decide(customLeading: true, declared: .nativeBack) == false)
+        #expect(decide(hidesBackButton: true, declared: .nativeBack) == false)
+        #expect(decide(owns: true, declared: .nativeBack) == false)
+    }
+
+    /// A step hides its back button while it works: only its controls leave it.
+    @MainActor
+    @Test func aHiddenBackButtonMeansControlsOnly() {
+        let item = UINavigationItem()
+        #expect(ScreenLeaving.nativeBack(unlessHiddenIn: item) == .nativeBack)
+        item.hidesBackButton = true
+        #expect(ScreenLeaving.nativeBack(unlessHiddenIn: item) == .controlsOnly)
     }
 
     /// The regression: a text post is a hero destination BY TYPE but arrived by

@@ -329,3 +329,9 @@ extension LocationSharingViewController {
     func debugChooseCityLevel(_ value: Bool) { chooseCityLevel(value) }
 }
 #endif
+
+// MARK: - How it is left (#1144)
+
+extension LocationSharingViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

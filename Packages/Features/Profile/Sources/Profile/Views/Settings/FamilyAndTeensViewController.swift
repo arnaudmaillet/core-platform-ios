@@ -569,3 +569,9 @@ extension FamilyAndTeensViewController {
     }
     #endif
 }
+
+// MARK: - How it is left (#1144)
+
+extension FamilyAndTeensViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

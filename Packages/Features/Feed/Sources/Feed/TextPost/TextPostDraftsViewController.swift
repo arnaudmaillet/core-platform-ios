@@ -113,3 +113,9 @@ extension TextPostDraftsViewController: UICollectionViewDelegate {
         onSelect?(draft)
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension TextPostDraftsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

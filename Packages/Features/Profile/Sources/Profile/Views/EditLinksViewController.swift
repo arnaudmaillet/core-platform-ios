@@ -216,3 +216,9 @@ private final class LinkRowView: UIView {
 
     @objc private func fieldChanged() { onChange?() }
 }
+
+// MARK: - How it is left (#1144)
+
+extension EditLinksViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

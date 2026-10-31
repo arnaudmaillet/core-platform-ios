@@ -2849,3 +2849,9 @@ extension ProfileViewController: ContentPopGating {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension ProfileViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

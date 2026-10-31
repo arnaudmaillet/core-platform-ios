@@ -251,3 +251,9 @@ extension VerificationRequestViewController {
     func debugChoose(_ option: VerificationCategory) { choose(option) }
 }
 #endif
+
+// MARK: - How it is left (#1144)
+
+extension VerificationRequestViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

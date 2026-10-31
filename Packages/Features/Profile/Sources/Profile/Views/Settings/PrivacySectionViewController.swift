@@ -540,3 +540,9 @@ extension PrivacySectionViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension PrivacySectionViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

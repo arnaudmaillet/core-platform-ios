@@ -324,3 +324,9 @@ final class ScreenTimeWeekView: UIView, UIContentView {
         }.joined(separator: ", ")
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension YourActivityViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

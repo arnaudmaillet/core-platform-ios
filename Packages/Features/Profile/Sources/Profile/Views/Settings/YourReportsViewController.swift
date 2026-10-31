@@ -326,3 +326,9 @@ extension YourReportsViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension YourReportsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

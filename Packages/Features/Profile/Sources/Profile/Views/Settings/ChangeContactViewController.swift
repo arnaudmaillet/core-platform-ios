@@ -341,3 +341,10 @@ final class ChangeContactViewController: UIViewController {
         present(alert, animated: true)
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension ChangeContactViewController: StackScreen {
+    /// Its back button is hidden while a change is at work.
+    var leaving: ScreenLeaving { .nativeBack(unlessHiddenIn: navigationItem) }
+}

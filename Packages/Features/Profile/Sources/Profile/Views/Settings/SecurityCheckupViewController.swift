@@ -276,3 +276,9 @@ extension SecurityCheckupViewController: UICollectionViewDelegate {
         closeScreen()
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension SecurityCheckupViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

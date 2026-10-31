@@ -414,3 +414,9 @@ final class PasskeysModel {
 
     private static var unavailableText: String { PasskeysViewController.unavailableText }
 }
+
+// MARK: - How it is left (#1144)
+
+extension PasskeysViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

@@ -256,3 +256,9 @@ extension ListPrivacyViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension ListPrivacyViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

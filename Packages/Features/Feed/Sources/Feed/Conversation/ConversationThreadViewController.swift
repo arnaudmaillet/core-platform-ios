@@ -1967,3 +1967,9 @@ extension ConversationThreadViewController: SwipeStageHosting {
         return false
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension ConversationThreadViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

@@ -1716,3 +1716,9 @@ extension NewPostViewController {
     var debugFormIsLive: Bool { list.isUserInteractionEnabled }
 }
 #endif
+
+// MARK: - How it is left (#1144)
+
+extension NewPostViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

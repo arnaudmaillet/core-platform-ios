@@ -1,3 +1,4 @@
+import DesignSystem
 import Foundation
 
 /// Whether the native edge-swipe-to-pop may begin, as a pure decision.
@@ -21,15 +22,21 @@ public enum NativePopPolicy {
     ///     affordance, and UIKit's own contract takes the gesture with it.
     ///   - leadingItemsSupplementBackButton: unless the screen says the item
     ///     merely supplements the back button.
+    ///   - declaredLeaving: the screen's own contract (`StackScreen`, #1144),
+    ///     nil for a screen that states none. Anything but `.nativeBack`
+    ///     refuses; `.nativeBack` leaves the decision to the signals above,
+    ///     which it never widens.
     public static func shouldBegin(
         isAtRoot: Bool,
         isTransitioning: Bool,
         hidesBackButton: Bool,
         ownsInteractiveDismissal: Bool?,
         hasCustomLeadingItem: Bool,
-        leadingItemsSupplementBackButton: Bool
+        leadingItemsSupplementBackButton: Bool,
+        declaredLeaving: ScreenLeaving? = nil
     ) -> Bool {
         if isAtRoot || isTransitioning || hidesBackButton { return false }
+        if let declaredLeaving, declaredLeaving != .nativeBack { return false }
         // A hero destination answers for itself. One that disclaims ownership
         // has ASKED for the ordinary pop — custom leading item and all, since
         // its back chevron is exactly such an item and the gesture is the only

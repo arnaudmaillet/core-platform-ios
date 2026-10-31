@@ -579,3 +579,9 @@ extension NotificationSettingsViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension NotificationSettingsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

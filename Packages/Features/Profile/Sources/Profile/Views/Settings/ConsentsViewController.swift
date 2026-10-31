@@ -305,3 +305,9 @@ extension ConsentsViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension ConsentsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

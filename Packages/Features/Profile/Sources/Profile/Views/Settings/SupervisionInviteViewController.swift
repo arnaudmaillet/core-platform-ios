@@ -235,3 +235,9 @@ final class SupervisionInviteViewController: UIViewController {
         Feedback.success("Code copied", symbol: "doc.on.doc", from: self)
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension SupervisionInviteViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

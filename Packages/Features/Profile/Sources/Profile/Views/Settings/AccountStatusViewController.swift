@@ -193,3 +193,9 @@ extension AccountStatusViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension AccountStatusViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

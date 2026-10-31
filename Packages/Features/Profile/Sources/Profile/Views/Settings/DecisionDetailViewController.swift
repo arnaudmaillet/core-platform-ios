@@ -536,3 +536,9 @@ final class AppealComposerViewController: UIViewController, UITextViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension DecisionDetailViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

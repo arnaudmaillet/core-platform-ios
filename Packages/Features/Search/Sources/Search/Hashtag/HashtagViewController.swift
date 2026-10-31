@@ -226,3 +226,15 @@ final class HashtagRecentViewController: UIViewController {
         list.setHasMore(viewModel.hasMore(.recent))
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension HashtagRecentViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}
+
+// MARK: - How it is left (#1144)
+
+extension HashtagViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

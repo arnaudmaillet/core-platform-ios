@@ -400,3 +400,9 @@ extension LimitInteractionsViewController {
     var debugIsLoaded: Bool { if case .loaded = phase { true } else { false } }
 }
 #endif
+
+// MARK: - How it is left (#1144)
+
+extension LimitInteractionsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

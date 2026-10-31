@@ -388,3 +388,9 @@ extension ActivityDiscoveryViewController {
     }
 }
 #endif
+
+// MARK: - How it is left (#1144)
+
+extension ActivityDiscoveryViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

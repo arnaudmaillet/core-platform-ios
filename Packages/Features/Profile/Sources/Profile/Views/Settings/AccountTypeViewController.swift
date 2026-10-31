@@ -448,3 +448,9 @@ extension AccountTypeViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension AccountTypeViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

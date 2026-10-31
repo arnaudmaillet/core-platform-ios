@@ -1740,3 +1740,9 @@ final class ShopThemeCardView: ShopCardView {
     /// The swatch's stops as drawn. Tests.
     var drawnSwatch: [UIColor] { swatch.drawnColours }
 }
+
+// MARK: - How it is left (#1144)
+
+extension ShopStorefrontViewController: StackScreen {
+    public var leaving: ScreenLeaving { .nativeBack }
+}

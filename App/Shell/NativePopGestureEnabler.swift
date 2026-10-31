@@ -1,4 +1,5 @@
 import CoreNavigation
+import DesignSystem
 import UIKit
 
 /// Keeps the native edge-swipe-to-pop alive on a stack whose delegate slot is
@@ -76,7 +77,8 @@ extension NativePopGestureEnabler: UIGestureRecognizerDelegate {
             hidesBackButton: top.navigationItem.hidesBackButton,
             ownsInteractiveDismissal: (top as? any ZoomTransitionDestination)?.zoomOwnsInteractiveDismissal,
             hasCustomLeadingItem: top.navigationItem.leftBarButtonItem != nil,
-            leadingItemsSupplementBackButton: top.navigationItem.leftItemsSupplementBackButton
+            leadingItemsSupplementBackButton: top.navigationItem.leftItemsSupplementBackButton,
+            declaredLeaving: (top as? any StackScreen)?.leaving
         )
     }
 }

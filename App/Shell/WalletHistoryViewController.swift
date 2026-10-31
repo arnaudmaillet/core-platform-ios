@@ -543,3 +543,9 @@ extension WalletHistoryViewController {
         return SkeletonRowConfiguration(redacting: content, trailingBoneWidth: 44)
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension WalletHistoryViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

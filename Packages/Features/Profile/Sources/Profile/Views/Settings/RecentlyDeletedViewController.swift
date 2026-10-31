@@ -278,3 +278,9 @@ extension RecentlyDeletedViewController {
     }
 }
 #endif
+
+// MARK: - How it is left (#1144)
+
+extension RecentlyDeletedViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

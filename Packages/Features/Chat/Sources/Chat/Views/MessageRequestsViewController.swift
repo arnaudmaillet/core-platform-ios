@@ -503,3 +503,9 @@ extension MessageRequestsViewController: InboxSurface {
         #endif
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension MessageRequestsViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

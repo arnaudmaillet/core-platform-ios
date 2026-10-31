@@ -169,3 +169,9 @@ extension SettingsLinksViewController: UICollectionViewDelegate {
         }
     }
 }
+
+// MARK: - How it is left (#1144)
+
+extension SettingsLinksViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}

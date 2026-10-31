@@ -8541,3 +8541,10 @@ private final class BarAuthorBadge: AuthorBadgeDrawing {
 
     var drawsAuthorBadgeOnScreen: Bool { owner?.view.window != nil }
 }
+
+// MARK: - How it is left (#1144)
+
+extension SnapFeedViewController: StackScreen {
+    /// Its hero or slide owns the way back when it was opened by one; a plain push goes back natively.
+    var leaving: ScreenLeaving { zoomOwnsInteractiveDismissal ? .ownGesture : .nativeBack }
+}

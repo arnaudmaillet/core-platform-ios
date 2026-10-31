@@ -412,3 +412,9 @@ final class ForYouPostListViewController: UIViewController {
     }
     #endif
 }
+
+// MARK: - How it is left (#1144)
+
+extension ForYouPostListViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
+}
