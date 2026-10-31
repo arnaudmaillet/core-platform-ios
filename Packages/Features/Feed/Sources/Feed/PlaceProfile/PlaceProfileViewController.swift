@@ -901,11 +901,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
         // A plain screen popping off this one (#1914): the clips come back as
         // it uncovers half, on the pop's own frames. A post's flight home, a
         // tab switch, a first appearance: now, as before.
-        if let coordinator = transitionCoordinator, !isMovingToParent,
-           !(coordinator.viewController(forKey: .from) is any ZoomTransitionDestination),
-           let cover = coordinator.view(forKey: .from) {
-            viewportShare.track(coordinator, cover: cover, coversAtEnd: false)
-        } else {
+        if viewportShare.screenWillAppear(self) == .now {
             viewportShare.report(1)
             syncAutoplay()
         }
@@ -915,38 +911,41 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     /// this one (the Popular list, the gallery) pauses its clips once it
     /// covers half of it — the rule of every screen covered by another
     /// (`ViewportShare`) — and a drag abandoned before half never pauses them.
+    ///
+    /// ⚠️ NOR AT ITS OWN GRAB'S (the owner 2026-10-31): the window close
+    /// carries this live page under the finger, and the slide too, so its
+    /// clips play while it holds half the viewport on its way out. Only the
+    /// hero return hides the page behind the marker's face, and stops them
+    /// at once, as before.
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        if isMovingFromParent, returnsBehindTheMarker {
+            viewportShare.report(0)
+            return
+        }
         // A post opened from here: off screen, this page holds no claim on
         // the shared player pool — the feed pushed above it is about to want
         // every loan. At once, as before.
-        if navigationController?.topViewController is any ZoomTransitionDestination {
+        if viewportShare.screenWillDisappear(self) == .flight {
             stopAutoplay()
-            return
         }
-        if let coordinator = transitionCoordinator, !isMovingFromParent,
-           let cover = coordinator.view(forKey: .to) {
-            viewportShare.track(coordinator, cover: cover, coversAtEnd: true)
-            return
-        }
-        viewportShare.report(0)
     }
 
-    /// The share of this page still on screen under a plain pushed screen,
-    /// or as one pops off it (#1914): its clips play at half and above.
+    /// The share of this page on screen — under a plain pushed screen, as
+    /// one pops off it, or on its own way out (#1914): its clips play at half
+    /// and above.
     private lazy var viewportShare: ViewportShare = {
         let share = ViewportShare(host: view)
-        share.onChange = { [weak self] _ in self?.applyViewportShare() }
+        share.onPlaysChange = { [weak self] plays in
+            if plays { self?.syncAutoplay() } else { self?.stopAutoplay() }
+        }
         return share
     }()
 
-    private var viewportSharePlays = true
-
-    private func applyViewportShare() {
-        let plays = ViewportShare.plays(at: viewportShare.share)
-        guard plays != viewportSharePlays else { return }
-        viewportSharePlays = plays
-        if plays { syncAutoplay() } else { stopAutoplay() }
+    /// Whether this page's way home is the hero return, which flies the
+    /// marker's face over the hidden page (`setZoomContentHidden`).
+    private var returnsBehindTheMarker: Bool {
+        markerClose == nil && mapReturnTransition != nil
     }
 
     private func stopAutoplay() {
@@ -956,7 +955,7 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
 
     /// The share now, for tests.
     var debugViewportShare: ViewportShare { viewportShare }
-    var debugAutoplayIsActive: Bool { viewportSharePlays }
+    var debugAutoplayIsActive: Bool { viewportShare.plays }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)

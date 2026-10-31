@@ -12,7 +12,7 @@ struct ViewportShareTests {
     /// is what the cover leaves.
     @Test func theShareIsWhatTheCoverLeaves() {
         func share(coverX: CGFloat) -> CGFloat {
-            ViewportShare.share(host: screen, cover: screen.offsetBy(dx: coverX, dy: 0), in: screen)
+            ViewportShare.share(coveredBy: screen.offsetBy(dx: coverX, dy: 0), in: screen)
         }
         #expect(share(coverX: 400) == 1, "an off-screen cover hid something")
         #expect(abs(share(coverX: 200) - 0.5) < 0.001)
@@ -83,5 +83,110 @@ struct ViewportShareTests {
         share.report(0.2)
         share.transitionEnded(push, cancelled: true, coversAtEnd: true)
         #expect(share.share == 1)
+    }
+
+    /// The host's own arrival or departure (a push, a pop, a grab holding
+    /// it): the part of the SCREEN it takes.
+    @Test func aMovingHostTakesItsPartOfTheScreen() {
+        func share(_ host: CGRect) -> CGFloat { ViewportShare.ownShare(of: host, in: screen) }
+        #expect(share(screen) == 1)
+        #expect(abs(share(screen.offsetBy(dx: 200, dy: 0)) - 0.5) < 0.001, "a slide half off")
+        #expect(abs(share(screen.offsetBy(dx: 300, dy: 0)) - 0.25) < 0.001)
+        #expect(share(screen.offsetBy(dx: 400, dy: 0)) == 0)
+        // Held smaller in the middle of the screen, as a grab holds it: the
+        // screen it takes, not its own size.
+        #expect(abs(share(CGRect(x: 80, y: 160, width: 240, height: 480)) - 0.36) < 0.001)
+        #expect(share(.zero) == 0)
+    }
+
+    /// A departure settles on gone once it completes, and on whole again
+    /// when it is abandoned.
+    @Test func aDepartureEndsGoneOrWhole() {
+        let share = ViewportShare(host: UIView())
+        let abandoned = share.beginDeparture()
+        share.report(0.7)
+        share.transitionEnded(abandoned, cancelled: true, coversAtEnd: true)
+        #expect(share.share == 1, "an abandoned grab left the host short of its screen")
+        let gone = share.beginDeparture()
+        share.transitionEnded(gone, cancelled: false, coversAtEnd: true)
+        #expect(share.share == 0)
+    }
+
+    /// An arrival (a push bringing the host in) settles on whole once it
+    /// completes, and on gone when it is abandoned.
+    @Test func anArrivalEndsWholeOrGone() {
+        let share = ViewportShare(host: UIView())
+        share.report(0)
+        let abandoned = share.beginDeparture()
+        share.transitionEnded(abandoned, cancelled: true, coversAtEnd: false)
+        #expect(share.share == 0, "an abandoned push left the host playing")
+        let arrived = share.beginDeparture()
+        share.transitionEnded(arrived, cancelled: false, coversAtEnd: false)
+        #expect(share.share == 1)
+    }
+
+    /// The gate a host with no sound to fade reads: told once per flip.
+    @Test func thePlaysGateIsToldOncePerFlip() {
+        let share = ViewportShare(host: UIView())
+        var told: [Bool] = []
+        share.onPlaysChange = { told.append($0) }
+        share.report(0.8)
+        share.report(0.4)
+        share.report(0.2)
+        share.report(0.5)
+        share.report(1)
+        #expect(told == [false, true])
+        #expect(share.plays)
+    }
+
+    /// A screen leaving with no transition to follow (a tab switch) reports
+    /// gone at once; coming back with none leaves the start to its host.
+    @Test func aScreenWithNoTransitionActsNow() {
+        let screen = UIViewController()
+        let share = ViewportShare(host: screen.view)
+        #expect(share.screenWillDisappear(screen) == .now)
+        #expect(share.share == 0)
+        #expect(share.screenWillAppear(screen) == .now)
+    }
+
+    /// The leak the owner filmed: a page popped and shrunk by iOS, over the
+    /// screen it uncovers. Measured against the same screen, the two shares
+    /// add up to 1 at every frame, and at most one of them plays.
+    @Test func twoScreensNeverPlayTogether() {
+        for step in 0...40 {
+            let progress = CGFloat(step) / 40
+            let scale = 1 - 0.08 * progress
+            let width = screen.width * scale, height = screen.height * scale
+            let leaving = CGRect(
+                x: screen.width * progress + (screen.width - width) / 2,
+                y: (screen.height - height) / 2, width: width, height: height
+            )
+            let top = ViewportShare.ownShare(of: leaving, in: screen)
+            let under = ViewportShare.share(coveredBy: leaving, in: screen) - ViewportShare.coveredYield
+            #expect(!(ViewportShare.plays(at: top) && ViewportShare.plays(at: under)),
+                    "both played at progress \(progress): \(top) over \(under)")
+        }
+        // The exact half goes to the screen on top.
+        let half = screen.offsetBy(dx: screen.width / 2, dy: 0)
+        #expect(ViewportShare.plays(at: ViewportShare.ownShare(of: half, in: screen)))
+        #expect(!ViewportShare.plays(at: ViewportShare.share(coveredBy: half, in: screen) - ViewportShare.coveredYield))
+    }
+
+    /// The screen under a moving one follows its share rather than measuring
+    /// it again: the complement, told in the same breath, so the two never
+    /// both hold half — not even for a frame.
+    @Test func aCoveredScreenFollowsTheScreenOverIt() {
+        let top = UIView(), under = UIView()
+        let topShare = ViewportShare(host: top)
+        let underShare = ViewportShare(host: under)
+        _ = underShare.beginTracking(top)
+        _ = topShare.beginDeparture()
+        topShare.adopt(underShare)
+        for value in stride(from: CGFloat(1), through: 0, by: -0.01) {
+            topShare.report(value)
+            #expect(abs(topShare.share + underShare.share - 1) < 0.002)
+            #expect(!(topShare.plays && underShare.plays), "both played at \(value)")
+        }
+        #expect(underShare.plays)
     }
 }
