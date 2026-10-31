@@ -77,10 +77,14 @@ final class UploadNavigationController: UINavigationController {
     /// ⚠️ RE-APPLIED AS THE STACK CHANGES. UIKit re-arms its transition gestures
     /// around pushes, so a delegate taken once at load is not enough.
     override func pushViewController(_ viewController: UIViewController, animated: Bool) {
-        // Its back button closes it, once (#1144) — see `ArbitratedNavigationController`.
-        StackArbiter.adoptBackButton(of: viewController)
         super.pushViewController(viewController, animated: animated)
         holdTheBackSwipeToTheEdge()
+    }
+
+    /// Its back button closes the screen on top, once (#1144) — see
+    /// `ArbitratedNavigationController`.
+    override func popViewController(animated: Bool) -> UIViewController? {
+        StackArbiter.pop(in: self, animated: animated) { super.popViewController(animated: animated) }
     }
 
     override func viewDidAppear(_ animated: Bool) {

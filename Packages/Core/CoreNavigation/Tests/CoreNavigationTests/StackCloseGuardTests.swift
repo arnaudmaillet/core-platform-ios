@@ -20,6 +20,10 @@ struct StackCloseGuardTests {
     static let allowed: [String: String] = [
         // The rule's own implementation.
         "StackArbiter.swift": "the arbiter's pop",
+        // The two stacks that hand UIKit's pop (the back button's) to the
+        // arbiter: the override, and its `super` call.
+        "ArbitratedNavigationController.swift": "routes popViewController through the arbiter",
+        "UploadNavigationController.swift": "routes popViewController through the arbiter",
         "PresentationClose.swift": "the guarded presentation close",
         // Not UIKit's `dismiss(animated:)`: a toast's own, on a view.
         "ToastView.swift": "the toast's own dismiss",
