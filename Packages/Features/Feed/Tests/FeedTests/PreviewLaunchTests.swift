@@ -61,8 +61,12 @@ struct PreviewLaunchTests {
     @Test(arguments: [GalleryPost.Kind.text, .photo])
     func aWindowOpensOutOfTheLift(kind: GalleryPost.Kind) throws {
         // Captured a minute ahead: the window's frame reads the clock.
-        let (launch, window) = try launch(post("p", kind: kind), now: CACurrentMediaTime() + 60)
-        let reveal = try #require(launch.revealLaunch(now: CACurrentMediaTime() + 60))
+        // One reading of the clock for both (#1962): a stall longer than the
+        // capture's lifetime between two readings expired it on a starved
+        // runner.
+        let now = CACurrentMediaTime() + 60
+        let (launch, window) = try launch(post("p", kind: kind), now: now)
+        let reveal = try #require(launch.revealLaunch(now: now))
         #expect(reveal.frame(window) == Self.drawnAt)
         #expect(reveal.cornerRadius == PreviewLaunch.cornerRadius)
         #expect(reveal.cornerCurve == .continuous)

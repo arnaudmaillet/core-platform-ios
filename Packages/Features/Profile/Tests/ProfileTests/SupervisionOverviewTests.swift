@@ -25,8 +25,12 @@ struct SupervisionOverviewTests {
         let bff = MockBFF()
         let lifecycle = MockAccountLifecycle()
         MockAccountService(lifecycle: lifecycle).register(on: bff)
+        // One fixed instant for the seed and the read (#1961): a run that
+        // crosses local midnight must not move the overview's window.
+        let now = Date()
         MockSupervisionService(
-            dataset: MockSocialDataset(), viewerAge: { lifecycle.viewerAge }, seed: seed, autoAcceptDelay: nil
+            dataset: MockSocialDataset(), viewerAge: { lifecycle.viewerAge }, seed: seed, autoAcceptDelay: nil,
+            clock: { now }
         ).register(on: bff)
         let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
         let defaults = UserDefaults(suiteName: "overview-\(UUID().uuidString)")!

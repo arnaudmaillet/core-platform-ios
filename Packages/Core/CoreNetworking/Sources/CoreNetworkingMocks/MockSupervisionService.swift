@@ -56,6 +56,9 @@ public final class MockSupervisionService: @unchecked Sendable {
     private let viewerAge: @Sendable () -> Int?
     private let autoAcceptDelay: TimeInterval?
     private let drawCode: @Sendable () -> String
+    /// The time the overview's seven days are counted from: the clock the
+    /// seed was read from, so the two cannot disagree (#1961).
+    private let clock: @Sendable () -> Date
     private var links: [Link] = []
     private var invites: [String: Invite] = [:]
     private var failedAccepts = 0
@@ -83,14 +86,19 @@ public final class MockSupervisionService: @unchecked Sendable {
     ///   - autoAcceptDelay: how old a code the viewer made is when the other
     ///     side takes it up; nil never (tests that count links).
     ///   - drawCode: the codes the viewer's invites get (tests pin one).
+    ///   - clock: what "now" is — the seed's days end on it and the
+    ///     overview's window is counted from it (tests pin one).
     public init(
         dataset: MockSocialDataset,
         viewerAge: @escaping @Sendable () -> Int?,
         seed: Seed? = nil,
         autoAcceptDelay: TimeInterval? = MockSupervisionService.defaultAutoAcceptDelay,
-        now: Date = Date(),
-        drawCode: @escaping @Sendable () -> String = MockSupervisionService.randomInviteCode
+        now: Date? = nil,
+        drawCode: @escaping @Sendable () -> String = MockSupervisionService.randomInviteCode,
+        clock: @escaping @Sendable () -> Date = { Date() }
     ) {
+        let now = now ?? clock()
+        self.clock = clock
         self.dataset = dataset
         self.viewerAge = viewerAge
         self.autoAcceptDelay = autoAcceptDelay
@@ -400,7 +408,13 @@ public final class MockSupervisionService: @unchecked Sendable {
         var overview = Account_V1_SupervisionOverview()
         overview.limits = found.record.map(Self.view(of:)) ?? Account_V1_SupervisionLimitsView()
         // The last 7 local days with time counted, most recent first.
-        let recent = Set((0..<7).compactMap { Calendar.current.date(byAdding: .day, value: -$0, to: Date()) }.map { Self.dayKey($0) })
+        //
+        // ⚠️ FROM `clock`, NOT `Date()` (#1961): the seed's days end on the
+        // clock it was read from, and a run that crossed local midnight
+        // between the seed and this read moved the window a day on — the
+        // oldest seeded day fell out, today had none, and 6 came back.
+        let today = clock()
+        let recent = Set((0..<7).compactMap { Calendar.current.date(byAdding: .day, value: -$0, to: today) }.map { Self.dayKey($0) })
         overview.screenTime = found.minutes.filter { recent.contains($0.key) && $0.value > 0 }
             .sorted { $0.key > $1.key }
             .map { entry in
