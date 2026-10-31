@@ -113,4 +113,17 @@ struct PausedSharedSurfaceTests {
         #expect(!page.isHoldingStill)
         #expect(pool.isAdvancing(in: page))
     }
+
+    /// Another surface playing the shared player moves its clock on on
+    /// purpose: the anchor of the earlier pause goes, so the paused surface
+    /// resumes where the clip is rather than seeking back to where it paused.
+    @Test func anotherSurfacesPlayRetiresTheOldPauseAnchor() async {
+        let pool = VideoPlaybackController(source: StubSource(), poolSize: 4, capacity: 4)
+        let page = surface(), tile = surface()
+        await pool.play(url, in: page, scope: "post-a")
+        #expect(pool.setPaused(true, in: page))
+        #expect(pool.debugPausedAnchorCount == 1)
+        await pool.play(url, in: tile, scope: "post-a")
+        #expect(pool.debugPausedAnchorCount == 0, "the page would seek back to its pause on resuming")
+    }
 }

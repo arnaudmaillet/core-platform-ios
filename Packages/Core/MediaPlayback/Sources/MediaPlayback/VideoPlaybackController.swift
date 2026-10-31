@@ -467,6 +467,7 @@ public final class VideoPlaybackController {
             playingURL[key] = mediaURL
             playingScope[key] = scope
             VideoProducerLog.emit("JOIN \(VideoProducerLog.name(shared)) owner+=\(view.debugProducerName) \(mediaURL.lastPathComponent)")
+            playsForAnotherSurface(shared)
             shared.play()
             stillPausedSurfaces(sharing: shared, besides: key)
             return
@@ -519,6 +520,7 @@ public final class VideoPlaybackController {
             playingURL[key] = mediaURL
             playingScope[key] = scope
             VideoProducerLog.emit("JOIN \(VideoProducerLog.name(shared)) owner+=\(view.debugProducerName) \(mediaURL.lastPathComponent)")
+            playsForAnotherSurface(shared)
             shared.play()
             stillPausedSurfaces(sharing: shared, besides: key)
             return
@@ -1957,6 +1959,19 @@ public final class VideoPlaybackController {
         else { return }
         pausedAnchors[ObjectIdentifier(player)] = player.currentTime()
         player.pause()
+    }
+
+    /// `player` starts again for a surface that did not pause it: the clock
+    /// moves on on purpose, so the anchor its last pause left describes a
+    /// moment that is over.
+    ///
+    /// ⚠️ LEFT IN PLACE, IT WAS A SEEK BACK (the owner's device, 2026-10-31):
+    /// the profile's tile played the post's player on for seconds, then the
+    /// post resumed it, read seconds of "drift" against the anchor of its own
+    /// pause, and seeked back exactly — a stutter on every hand-back from the
+    /// profile to the post, and none the other way.
+    private func playsForAnotherSurface(_ player: AVPlayer) {
+        pausedAnchors[ObjectIdentifier(player)] = nil
     }
 
     private func holdStill(key: ObjectIdentifier, view: VideoRenderView) {
