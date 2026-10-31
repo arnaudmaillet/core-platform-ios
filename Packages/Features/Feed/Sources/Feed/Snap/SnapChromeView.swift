@@ -21,14 +21,54 @@ import UIKit
 /// Geometry is data-independent: labels fill in whenever `configure` runs
 /// (possibly mid-flight, on a cold tap) without moving the scaffold.
 final class SnapChromeView: UIView {
-    /// The bottom legibility scrim. The mid-stop pulls meaningful darkness up
-    /// behind the comment ticker's lanes — the band's naked text has no
-    /// capsules, so the scrim is its only contrast — while the bottom stays
-    /// as dark as before under the caption and toolbar.
-    private let scrimView = GradientView(
-        colors: [.clear, UIColor.black.withAlphaComponent(0.45), UIColor.black.withAlphaComponent(0.75)],
-        locations: [0, 0.55, 1]
-    )
+    /// The bottom legibility scrim: it protects the caption block — the
+    /// caption, and the author row above it on Shots — and leaves the picture
+    /// alone above it (#1983, the owner 2026-10-31: "the scrim ends at the
+    /// caption block, as a card's does").
+    ///
+    /// ⚠️ IT WAS 68 % OF THE PAGE, from 32 % of the screen down, so that its
+    /// mid-stop sat behind the reaction band and the subtitle zone (#46). It
+    /// darkened the middle of every picture to 0.80 of its value and the
+    /// subject with it — the post looked darker full screen than on its tile.
+    /// The comment surfaces above the caption no longer get it, by the
+    /// owner's decision.
+    ///
+    /// ONE progressive ramp, from clear at its top to `scrimEdgeAlpha` at the
+    /// screen's bottom edge, darker all the way down (the owner, 2026-10-31,
+    /// on the device: no fade that stops on a plateau). Its top sits
+    /// `scrimFade` above the caption block and is pinned there, so it rides
+    /// the block's animated frame with no jump; its stops are fractions of
+    /// its height, so they stretch with it. The flight's replica builds the
+    /// same constraints, so it lands pixel-identical.
+    private let scrimView = GradientView(colors: SnapChromeView.scrimColors,
+                                         locations: SnapChromeView.scrimLocations)
+
+    /// How far above the caption block the ramp begins: far enough that the
+    /// caption already sits on a fair part of its darkness. The card's scrim
+    /// starts 36 pt up (`PostCardCaptionOverlay`); the page's text is larger
+    /// and its ramp runs on to the screen's edge.
+    static let scrimFade: CGFloat = 120
+    /// The darkness at the bottom edge, under the caption and the toolbar —
+    /// what it was before #1983.
+    static let scrimEdgeAlpha: CGFloat = 0.75
+
+    /// The ramp's stops, from clear to `scrimEdgeAlpha` on an ease-out curve:
+    /// it darkens fastest at its top, so the caption — a third of the way
+    /// down — already sits on about 0.45, and it keeps darkening, ever more
+    /// gently, to the bottom edge. A smoothstep left the caption on 0.26 and
+    /// it read poorly over a bright clip. The top's own slope is spread over
+    /// the whole ramp (about 0.005 a point): no visible edge.
+    static let scrimLocations: [NSNumber] = (0...8).map { NSNumber(value: Double($0) / 8) }
+    static var scrimColors: [UIColor] {
+        scrimLocations.map { location in
+            let t = CGFloat(truncating: location)
+            return UIColor.black.withAlphaComponent(scrimEdgeAlpha * (1 - (1 - t) * (1 - t)))
+        }
+    }
+
+    /// The scrim's top on the caption, and on the author row while it shows.
+    private var scrimOverCaption: NSLayoutConstraint!
+    private var scrimOverAuthor: NSLayoutConstraint!
 
     /// An `EmoteLabel`: the caption's emoji and `:code:` emotes animate in
     /// place, at the caption's own size (`composedCaption` marks them).
@@ -330,6 +370,7 @@ final class SnapChromeView: UIView {
             // Over the seam between the pill and the caption too.
             authorLane.bottomAnchor.constraint(equalTo: captionLabel.topAnchor),
         ])
+        scrimOverAuthor = scrimView.topAnchor.constraint(equalTo: authorRow.topAnchor, constant: -Self.scrimFade)
     }
 
     @objc private func captionTapped() {
@@ -341,6 +382,10 @@ final class SnapChromeView: UIView {
 
     #if DEBUG
     var debugAuthorLane: UIView { authorLane }
+    /// The scrim, the caption and the author row, for the scrim's suite.
+    var debugScrimView: UIView { scrimView }
+    var debugCaptionLabel: UIView { captionLabel }
+    var debugAuthorRow: UIView { authorRow }
     /// A hold on the author row, as a finger's would land.
     func debugHoldAuthorRow() { authorRowLongPressed() }
     #endif
@@ -363,8 +408,8 @@ final class SnapChromeView: UIView {
         let shown = showsAuthorRow && hasMedia
         authorRow.isHidden = !shown
         authorLane.isHidden = !shown
-        let overAuthor: [NSLayoutConstraint] = [subtitleOverAuthor, emptyStateOverAuthor]
-        let overCaption: [NSLayoutConstraint] = [subtitleOverCaption, emptyStateOverCaption]
+        let overAuthor: [NSLayoutConstraint] = [subtitleOverAuthor, emptyStateOverAuthor, scrimOverAuthor]
+        let overCaption: [NSLayoutConstraint] = [subtitleOverCaption, emptyStateOverCaption, scrimOverCaption]
         // Off before on: two required bottoms at once would conflict.
         NSLayoutConstraint.deactivate(shown ? overCaption : overAuthor)
         NSLayoutConstraint.activate(shown ? overAuthor : overCaption)
@@ -475,11 +520,10 @@ final class SnapChromeView: UIView {
             scrimView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             scrimView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
             scrimView.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-            // 0.68 (was 0.62 pre-subtitles): tall enough that the gradient's
-            // mid-stop sits behind the subtitle zone AND the ticker band
-            // stacked above the caption block.
-            scrimView.heightAnchor.constraint(equalTo: parent.heightAnchor, multiplier: 0.68)
         }
+        // Its top: the caption block's, less the lead (`applyAuthorRowLayout`
+        // picks the author row's while it shows).
+        scrimOverCaption = scrimView.topAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Self.scrimFade)
 
         // Caption, over the scrim; its trailing edge stops one md short of the
         // sound bubble (`installSoundBubble`). The margins guide tracks the
@@ -730,6 +774,7 @@ final class SnapChromeView: UIView {
         emptyStateOverAuthor = commentEmptyState.bottomAnchor.constraint(equalTo: authorRow.topAnchor, constant: -Spacing.md)
         emptyStateOverCaption.isActive = true
         installAuthorRow()
+        scrimOverCaption.isActive = true
         // The danmaku in the stream's seat (#1699): md over the author row,
         // as the stream stands.
         tickerOverAuthor = commentTicker.bottomAnchor.constraint(equalTo: authorRow.topAnchor, constant: -Spacing.md)
