@@ -61,6 +61,8 @@ public final class OverSheetFeedHost: UIViewController {
         guard hasShownFeed else { return }
         let finished = onFinished
         onFinished = nil
-        closePresentation(animated: false) { finished?() }
+        // The trip ends either way (#1144 review): a stack already leaving,
+        // or no longer presented, still says it is over.
+        if !closePresentation(animated: false, completion: { finished?() }) { finished?() }
     }
 }

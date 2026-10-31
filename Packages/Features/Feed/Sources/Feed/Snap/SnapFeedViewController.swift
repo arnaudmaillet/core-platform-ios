@@ -649,8 +649,13 @@ final class SnapFeedViewController: UIViewController {
             guard Self.bookmarkSymbol(saved: saved) != self.drawnBookmarkSymbol else { return }
             self.refreshBookmarkGlyph(for: id)
         }
+        // Every pill showing an author — the page's rows and the bar's —
+        // through one binding (#1972).
         followStore.onRelationChange = { [weak self] author in
-            self?.followRelationDidChange(for: author)
+            self?.authorBadges.relationDidChange(for: author)
+        }
+        followStore.onEveryRelationChange = { [weak self] in
+            self?.authorBadges.viewerDidChange()
         }
         followSubscription = followEvents?.subscribeOnMain { [weak self] change in
             self?.followStore.graphDidChange(change)
@@ -1844,6 +1849,9 @@ final class SnapFeedViewController: UIViewController {
                     shown: self.isForYouRoot, model: model,
                     badge: self.followStore.badge(for: model.authorID), pipeline: self.imagePipeline
                 )
+                // Bound to its author (#1972): a page configured ahead of
+                // time — prefetched — hears its author's answer too.
+                self.authorBadges.bind(cell, to: self.isForYouRoot ? model.authorID : nil)
                 let author = model.authorID
                 cell.onRequestAuthorCard = { [weak self] in
                     guard let self else { return }
@@ -2324,6 +2332,9 @@ final class SnapFeedViewController: UIViewController {
     /// populated feed.
     func showAuthor(_ model: FeedItemDisplayModel) {
         let badge = followStore.badge(for: model.authorID)
+        // The bar's pill follows this author's answers from now on (#1972);
+        // drawn below with the pill's own swap rules.
+        defer { authorBadges.bind(barAuthorBadge, to: model.authorID) }
         let shown = authorIdentityView.shownAuthor?.authorID
         // The For You root wears the pill in no bar (#1699): nothing to
         // transition, so no fresh pill per page of the tab's endless scroll.
@@ -2424,12 +2435,9 @@ final class SnapFeedViewController: UIViewController {
             guard let self, self.view.window != nil else { return }
             self.reinstallAuthorItem()
             // A follow relation that arrived during the flight was left for
-            // this moment (`followRelationDidChange`): its symbol replaces
+            // this moment (`drawBarAuthorBadge`): its symbol replaces
             // the badge's now.
-            let author = self.authorIdentityView.shownAuthor?.authorID
-            self.authorIdentityView.setFollowBadge(
-                self.followStore.badge(for: author), animated: self.canAnimateBarItems
-            )
+            self.authorBadges.reapply(self.barAuthorBadge)
             // An author the flight kept waiting swaps in now, natively (#1791).
             self.showPendingAuthor()
         }
@@ -2437,23 +2445,24 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Follow
 
-    /// Re-draws the pill's badge when its author's relation changed — its
-    /// symbol replaced, nothing else (#925). During a presentation the
-    /// landing install is armed
-    /// and will read the new answer — the badge changes once the screen has
-    /// landed, where it can be seen to change.
-    private func followRelationDidChange(for author: ProfileID) {
-        // The For You root's author rows (#1699): every visible page by them.
-        if isForYouRoot {
-            let badge = followStore.badge(for: author)
-            for case let cell as SnapFeedCell in collectionView.visibleCells where cell.shownAuthorID == author {
-                cell.setAuthorRowBadge(badge)
-            }
-        }
-        guard authorIdentityView.shownAuthor?.authorID == author,
-              authorIdentityView.followBadge != followStore.badge(for: author) else { return }
+    /// Every pill that shows an author — the page's rows (#1699) and the
+    /// bar's — bound to it in one place (#1972).
+    private(set) lazy var authorBadges = AuthorBadgeBinding(store: followStore)
+
+    /// The bar's pill, as the binding sees it: whichever pill is shown now.
+    private lazy var barAuthorBadge = BarAuthorBadge(owner: self)
+
+    /// Re-draws the bar pill's badge — its symbol replaced, nothing else
+    /// (#925). During a presentation the landing install is armed and draws
+    /// it again — the badge changes once the screen has landed, where it can
+    /// be seen to change.
+    fileprivate func drawBarAuthorBadge(_ badge: PersonPill.Badge) {
+        // Bound to the author being shown — one a transition keeps waiting
+        // (`pendingAuthor`) is drawn when its pill swaps in.
+        guard authorIdentityView.shownAuthor?.authorID == authorBadges.author(of: barAuthorBadge),
+              authorIdentityView.followBadge != badge else { return }
         if authorPillAwaitsLandingInstall, isAwaitingAnyFlight || transitionCoordinator != nil { return }
-        authorIdentityView.setFollowBadge(followStore.badge(for: author), animated: canAnimateBarItems)
+        authorIdentityView.setFollowBadge(badge, animated: canAnimateBarItems)
     }
 
     /// The pill's "+": follows the author, OPTIMISTICALLY — the profile's
@@ -6203,6 +6212,9 @@ extension SnapFeedViewController: UICollectionViewDelegate {
         }
         // A page coming on while the side list is open wears its pose (#1509).
         (cell as? SnapFeedCell)?.setSideListOverlayOffset(sideListOverlayOffset)
+        // …and its author's badge as known now (#1972), whatever it was
+        // configured with.
+        if let snapCell = cell as? SnapFeedCell { authorBadges.reapply(snapCell) }
         // …and the content freeze's state, frozen or not (#1738).
         if let snapCell = cell as? SnapFeedCell {
             carouselFreeze.display(snapCell) { $0.setCarouselScrollEnabled($1) }
@@ -8486,4 +8498,21 @@ extension SnapFeedViewController: HeaderAccessoryHosting {
     /// The feed wears its own points badge (`walletBadgeItem`): the shell's
     /// is not installed here.
     public func setTrailingAccessoryItem(_ item: UIBarButtonItem?) {}
+}
+
+/// The bar's author pill as the author binding draws it (#1972): whichever
+/// pill is shown now, through the bar's own rules (`drawBarAuthorBadge`).
+@MainActor
+private final class BarAuthorBadge: AuthorBadgeDrawing {
+    private weak var owner: SnapFeedViewController?
+
+    init(owner: SnapFeedViewController) {
+        self.owner = owner
+    }
+
+    func drawAuthorBadge(_ badge: PersonPill.Badge, animated: Bool) {
+        owner?.drawBarAuthorBadge(badge)
+    }
+
+    var drawsAuthorBadgeOnScreen: Bool { owner?.view.window != nil }
 }

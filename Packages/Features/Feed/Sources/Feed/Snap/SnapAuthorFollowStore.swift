@@ -40,6 +40,11 @@ final class SnapAuthorFollowStore {
     /// badge and forgets what a pair of pages draws.
     var onRelationChange: ((ProfileID) -> Void)?
 
+    /// Called after every relation was forgotten at once — a viewer change
+    /// (#1972): an author whose answer was unknown before and still is
+    /// reports nothing through `onRelationChange`, yet must be asked again.
+    var onEveryRelationChange: (() -> Void)?
+
     init(writer: (any SocialGraphWriting)?, reader: (any SocialGraphReading)?, entities: EntityStore = EntityStore()) {
         self.writer = writer
         self.reader = reader
@@ -67,6 +72,7 @@ final class SnapAuthorFollowStore {
             reported[author] = .some(relation)
             onRelationChange?(author)
         }
+        if case .everything = change { onEveryRelationChange?() }
     }
 
     /// What the pill's badge draws for `author`: "+" for someone the viewer
