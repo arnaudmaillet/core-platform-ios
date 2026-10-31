@@ -54,6 +54,11 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
     private let metaLabel = UILabel()
+    /// The sheet's own track's playhead (#1964, the owner's choice (a)):
+    /// under the title, the meta line's width — the Shots clip bar's drawing
+    /// and handling (`PlayheadBarView`). Always laid out, so the header's
+    /// height (which the collapsed detent counts) never changes with it.
+    let trackBar = PlayheadBarView()
     private let artworkBackdrop = UIView()
 
     override init(frame: CGRect) {
@@ -138,6 +143,10 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         labels.axis = .vertical
         labels.spacing = 2
         labels.setCustomSpacing(Spacing.xs, after: subtitleLabel)
+        labels.setCustomSpacing(Spacing.sm, after: metaLabel)
+        trackBar.ink = .surface(.label)
+        labels.addArrangedSubview(trackBar)
+        trackBar.heightAnchor.constraint(equalToConstant: PlayheadBarView.cursorRoom).isActive = true
 
         artwork.insertSubview(artworkBackdrop, at: 0)
         NSLayoutConstraint.activate([
@@ -167,6 +176,18 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         ])
         setPlaying(false)
     }
+
+    /// The sheet's track at `fraction` (nil: no known position), loading or
+    /// not.
+    func setTrackProgress(_ fraction: Double?, loading: Bool) {
+        trackBar.setLoading(loading)
+        trackBar.setProgress(fraction)
+    }
+
+    #if DEBUG
+    /// The bar's played width, nil with no position. Tests.
+    var debugTrackPlayedWidth: CGFloat? { trackBar.debugPlayedWidth }
+    #endif
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }

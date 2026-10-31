@@ -1131,7 +1131,7 @@ final class SnapMediaPageBarView: UIView {
     /// How far a finger must move before it stops being a tap. A few points:
     /// enough to absorb the roll of a thumb, far less than the shortest
     /// deliberate drag.
-    private static let travelThreshold: CGFloat = 6
+    static let travelThreshold: CGFloat = 6
 
     private func seek(draggedTo x: CGFloat) {
         guard let seekAnchor, let bar = barWidth, bar > 0 else { return }
