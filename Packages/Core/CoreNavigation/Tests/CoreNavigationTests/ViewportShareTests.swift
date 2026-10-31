@@ -200,4 +200,23 @@ struct ViewportShareTests {
         #expect(abs(ViewportShare.ownShare(of: section, in: screen) - 0.25) < 0.001, "the premise: a quarter of the display")
         #expect(ViewportShare.plays(at: ViewportShare.ownShare(of: section, in: sheet)))
     }
+
+    /// A sheet over the host is followed with no transition to end it, and
+    /// settled when it goes. A newer transition owns the share meanwhile.
+    @Test func aSheetIsFollowedUntilItGoes() {
+        let host = UIView()
+        let share = ViewportShare(host: host)
+        share.trackCover(UIView())
+        share.report(0.3)
+        share.endCoverTracking(coveredAtEnd: false)
+        #expect(share.share == 1, "the sheet gone left the host short of its screen")
+
+        share.trackCover(UIView())
+        let push = share.beginTracking(UIView())
+        share.endCoverTracking(coveredAtEnd: false)
+        share.report(0.2)
+        #expect(share.share == 0.2, "an old sheet's end settled a newer transition's share")
+        share.transitionEnded(push, cancelled: false, coversAtEnd: true)
+        #expect(share.share == 0)
+    }
 }

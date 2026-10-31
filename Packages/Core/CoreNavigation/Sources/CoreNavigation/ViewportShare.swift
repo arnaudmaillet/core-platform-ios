@@ -60,6 +60,8 @@ public final class ViewportShare {
     private var isDeparting = false
     /// Whether the running link has seen the host in a window.
     private var hasSampled = false
+    /// The generation of an open-ended `trackCover`, if one runs.
+    private var coverGeneration: Int?
     /// Bumped by every `track`: only the latest transition's end settles the
     /// share. A push begun before the previous one's completion ran would
     /// otherwise have its link stopped and its share overwritten by the old end.
@@ -121,6 +123,24 @@ public final class ViewportShare {
         coordinator.animate(alongsideTransition: nil) { [weak self] context in
             self?.transitionEnded(tracked, cancelled: context.isCancelled, coversAtEnd: coversAtEnd)
         }
+    }
+
+    /// Follows `cover` for as long as it stands over the host, with no
+    /// transition to end it: a sheet presented over the host, dragged from
+    /// one detent to another (#1914, the owner 2026-10-31: the post behind
+    /// the sound sheet and the sheet's tiles played together at every
+    /// height). `endCoverTracking` settles it.
+    public func trackCover(_ cover: UIView) {
+        guard isCover(cover) else { return }
+        coverGeneration = beginTracking(cover)
+    }
+
+    /// The cover followed by `trackCover` is gone (`coveredAtEnd` false) or
+    /// stays (true). Nothing when another transition took over meanwhile.
+    public func endCoverTracking(coveredAtEnd: Bool) {
+        guard let tracked = coverGeneration else { return }
+        coverGeneration = nil
+        transitionEnded(tracked, cancelled: false, coversAtEnd: coveredAtEnd)
     }
 
     /// Follows `coordinator`'s transition bringing the host itself onto the

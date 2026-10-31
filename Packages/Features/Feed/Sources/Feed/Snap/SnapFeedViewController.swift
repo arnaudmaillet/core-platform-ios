@@ -5565,12 +5565,21 @@ final class SnapFeedViewController: UIViewController {
         sheet.onDismissed = { [weak self] in
             covered?.setCoveredBySheet(false)
             self?.yieldAudio(false)
+            self?.viewportShare.endCoverTracking(coveredAtEnd: false)
         }
         sheet.onSelectPost = { [weak self] id in self?.showPost(id) }
         sheet.openFeedHero = openFeedHero
         sheet.galleryPost = galleryPost
         // Inside a navigation controller, for the toolbar its actions live in.
-        present(sheet.wrappedInSheet(), animated: true)
+        let navigation = sheet.wrappedInSheet()
+        present(navigation, animated: true)
+        // ⚠️ THE PAGE TAKES ITS HALF OF THE DISPLAY UNDER THE SHEET TOO (#1914,
+        // the owner 2026-10-31): it played on at every height. Followed for
+        // as long as the sheet stands, its rise, its detents and its drags
+        // included: collapsed (under half of the display) the page plays on,
+        // its sound with it; expanded, it fades and pauses. The sheet's own
+        // tiles take their half of the sheet, and play at every height.
+        viewportShare.trackCover(navigation.view)
         #if DEBUG
         debugPresentedSoundSheet = sheet
         #endif
