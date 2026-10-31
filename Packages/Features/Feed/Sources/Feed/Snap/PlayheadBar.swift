@@ -276,9 +276,11 @@ final class PlayheadBarView: UIView {
         CGSize(width: UIView.noIntrinsicMetric, height: Self.cursorRoom)
     }
 
-    /// The bar's footprint: the cursor's disc. The handled track and pill
-    /// grow outside it, which costs the layout nothing.
-    static let cursorRoom: CGFloat = PlayheadBarRenderer.cursorDiameter
+    /// The bar's footprint: the handled cursor's pill, so nothing it draws
+    /// ever reaches past its own frame. ⚠️ Not the disc (the owner,
+    /// 2026-10-31: the cursor read cut at its top): the 14 pt pill overran an
+    /// 8 pt row, into whatever its containers clip.
+    static let cursorRoom: CGFloat = PlayheadBarRenderer.handledCursorSize.height
 
     /// Where the playhead is, 0…1; nil for no known position.
     func setProgress(_ fraction: Double?) {

@@ -1866,7 +1866,28 @@ final class SoundSheetViewController: UIViewController {
         }
         let fraction = min(max(current / duration, 0), 1)
         previewFraction = fraction
-        header?.setTrackProgress(fraction, loading: player.timeControlStatus == .waitingToPlayAtSpecifiedRate)
+        header?.setTrackProgress(fraction, loading: isStalled(player))
+    }
+
+    /// Since when the track has been waiting to play, if it is.
+    private var previewWaitingSince: CFTimeInterval?
+    /// How long a wait lasts before the bar says "loading".
+    static let stallDelay: CFTimeInterval = 0.4
+
+    /// ⚠️ A WAIT THAT LASTS, NOT EVERY WAIT (the owner, 2026-10-31: a micro
+    /// jump at every release of the bar). A seek and its play leave the
+    /// player waiting for a frame or two; called loading at once, the bar
+    /// cross-faded to the pulse and dropped its cursor for a frame. The
+    /// video's bar says it only for a wait the viewer would see.
+    private func isStalled(_ player: AVPlayer) -> Bool {
+        guard player.timeControlStatus == .waitingToPlayAtSpecifiedRate else {
+            previewWaitingSince = nil
+            return false
+        }
+        let now = CACurrentMediaTime()
+        let since = previewWaitingSince ?? now
+        previewWaitingSince = since
+        return now - since >= Self.stallDelay
     }
 
     /// The feed's target, holding the sheet weakly: a link retains its target.
