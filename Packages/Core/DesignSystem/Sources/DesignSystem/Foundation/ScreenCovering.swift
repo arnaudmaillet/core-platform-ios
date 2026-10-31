@@ -21,12 +21,30 @@ public protocol ScreenCovering: UIViewController {
 public extension ScreenCovering {
     var coversScreen: Bool {
         guard let sheet = (navigationController ?? self).sheetPresentationController else { return true }
-        return (sheet.selectedDetentIdentifier ?? sheet.detents.first?.identifier ?? .large) == .large
+        return ScreenCoveringSheet.coversAtLarge(
+            selected: sheet.selectedDetentIdentifier, detents: sheet.detents.map(\.identifier)
+        )
     }
 
     /// Tells the window's covers to read this screen again.
     func coverChanged() {
         NotificationCenter.default.post(name: ScreenCoveringNotification.didChange, object: self)
+    }
+}
+
+/// The one reading of a sheet's height as a cover (#1970), shared by the
+/// declared default and CoreNavigation's default table.
+public enum ScreenCoveringSheet {
+    /// A sheet covers at `.large()`. With no detent selected, UIKit shows the
+    /// SMALLEST of its detents — not the first listed — so it covers then
+    /// only when every detent is large (no detents at all means `.large()`).
+    /// Pure, for tests.
+    public static func coversAtLarge(
+        selected: UISheetPresentationController.Detent.Identifier?,
+        detents: [UISheetPresentationController.Detent.Identifier]
+    ) -> Bool {
+        if let selected { return selected == .large }
+        return detents.allSatisfy { $0 == .large }
     }
 }
 
