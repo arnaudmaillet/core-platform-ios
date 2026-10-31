@@ -30,13 +30,14 @@ struct SoundSheetTests {
     private typealias Sheet = SoundSheetViewController
 
     private func sheet(
-        tiles count: Int = 1, popular: Bool = true, original: Int? = nil, saved: SavedSoundStore? = nil
+        tiles count: Int = 1, popular: Bool = true, original: Int? = nil, saved: SavedSoundStore? = nil,
+        preview: URL? = nil
     ) -> SoundSheetViewController {
         let content = Self.content(count, popular: popular, original: original)
         return SoundSheetViewController(
             sound: PostSound(
                 id: "clip-01", title: "Veridis Quo", artist: "Daft Punk",
-                previewURL: nil, artworkURL: nil, duration: 30
+                previewURL: preview, artworkURL: nil, duration: 30
             ),
             authorHandle: "ava",
             fallbackArtworkURL: nil,
@@ -853,38 +854,54 @@ struct SoundSheetTests {
         #expect(try tileIDs(in: .recent, of: controller) == ["p10", "p9", "p8"])
     }
 
-    // MARK: - The post's record (#1148)
+    // MARK: - The sheet's own track (the owner, 2026-10-31)
 
-    /// The record mirrors the post: it turns while the post plays, with ❚❚,
-    /// and stops with ▶︎. No muted state since #1931: the sound follows the
-    /// device, and this button only pauses and resumes.
-    @Test func theRecordFollowsThePost() throws {
-        let controller = sheet(tiles: 3)
+    private static let previewFile = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("preview.m4a")
+
+    /// The record plays the sheet's OWN track: a tap starts it (❚❚, turning)
+    /// and covers the post behind; a second tap stops it and uncovers it.
+    @Test func theRecordPlaysTheSheetsOwnTrack() throws {
+        let controller = sheet(tiles: 3, preview: Self.previewFile)
         try laidOut(controller)
+        var covers: [Bool] = []
+        controller.onCoverChanged = { covers.append($0) }
         let header = try #require(controller.debugHeader)
         #expect(!header.debugIsSpinning && !header.debugShowsPause)
 
-        controller.setPostPlayback(.init(playing: true, available: true))
+        header.debugTapRecord()
+        #expect(controller.isPreviewing)
         #expect(header.debugIsSpinning && header.debugShowsPause)
         #expect(header.debugShownGlyph == "pause.fill")
 
-        controller.setPostPlayback(.init(playing: false, available: true))
-        #expect(!header.debugIsSpinning && !header.debugShowsPause)
-        #expect(header.debugShownGlyph == "play.fill")
+        header.debugTapRecord()
+        #expect(!controller.isPreviewing)
+        #expect(!header.debugIsSpinning && header.debugShownGlyph == "play.fill")
+        #expect(covers == [true, false], "the two tracks played together")
+    }
+
+    /// The post played again stops the sheet's track: the feed says so.
+    @Test func thePostPlayingStopsTheSheetsTrack() throws {
+        let controller = sheet(tiles: 3, preview: Self.previewFile)
+        try laidOut(controller)
+        var covers: [Bool] = []
+        controller.onCoverChanged = { covers.append($0) }
+        try #require(controller.debugHeader).debugTapRecord()
+        controller.stopPreview()
+        #expect(!controller.isPreviewing)
+        #expect(covers == [true, false])
     }
 
     /// ▶︎ ⇄ ❚❚ is one glyph view swapping its symbol (a symbol replace, the
     /// owner 2026-10-15), and the same state twice swaps nothing.
     @Test func theRecordsGlyphFollowsThePlayback() throws {
-        let controller = sheet(tiles: 3)
-        controller.setPostPlayback(.init(playing: false, available: true))
+        let controller = sheet(tiles: 3, preview: Self.previewFile)
         try laidOut(controller)
         let header = try #require(controller.debugHeader)
         #expect(header.debugShownGlyph == "play.fill")
-        controller.setPostPlayback(.init(playing: true, available: true))
+        controller.debugShowRecord(playing: true, available: true)
         #expect(header.debugShownGlyph == "pause.fill")
         #expect(header.debugShowsPause)
-        controller.setPostPlayback(.init(playing: false, available: true))
+        controller.debugShowRecord(playing: false, available: true)
         #expect(header.debugShownGlyph == "play.fill")
         #expect(!header.debugShowsPause)
     }
@@ -894,8 +911,7 @@ struct SoundSheetTests {
     /// symbol it is handed already carries the glyph's size and weight — a
     /// bare one flew in at the default size and jumped at the end.
     @Test func theGlyphReplacesAConfiguredSymbolInTheGlass() throws {
-        let controller = sheet(tiles: 3)
-        controller.setPostPlayback(.init(playing: false, available: true))
+        let controller = sheet(tiles: 3, preview: Self.previewFile)
         try laidOut(controller)
         let header = try #require(controller.debugHeader)
         #expect(header.debugGlyphIsInTheGlass)
@@ -905,30 +921,15 @@ struct SoundSheetTests {
         // The witness: a bare symbol is drawn at another size.
         #expect(UIImage(systemName: "pause.fill")?.size != configured("pause.fill"))
         #expect(header.debugGlyphImage?.size == configured("play.fill"))
-        controller.setPostPlayback(.init(playing: true, available: true))
+        controller.debugShowRecord(playing: true, available: true)
         #expect(header.debugGlyphImage?.size == configured("pause.fill"))
-    }
-
-    /// The record's tap toggles the POST, once — the sheet has no player of
-    /// its own any more.
-    @Test func aTapTogglesThePostOnce() throws {
-        let controller = sheet(tiles: 3)
-        try laidOut(controller)
-        var toggles = 0
-        controller.onTogglePlayback = { toggles += 1 }
-        let header = try #require(controller.debugHeader)
-        header.debugTapRecord()
-        #expect(toggles == 1)
-        #expect(!Mirror(reflecting: controller).children.contains { $0.value is AVPlayer },
-                "the sheet holds a player of its own")
     }
 
     /// ⚠️ THE WHOLE RECORD TAKES THE TAP (#1162): its upper half, under the
     /// sheet's bar, never did — the tap is the sheet's now, and it begins
     /// anywhere on the disc, not only on the glyph; never beside it.
     @Test func theWholeRecordTakesTheTap() throws {
-        let controller = sheet(tiles: 3)
-        controller.setPostPlayback(.init(playing: true, available: true))
+        let controller = sheet(tiles: 3, preview: Self.previewFile)
         try laidOut(controller)
         let header = try #require(controller.debugHeader)
         let record = header.debugRecordFrame
@@ -946,21 +947,18 @@ struct SoundSheetTests {
         #expect(!controller.recordTakesTap(at: centre, in: header), "a pushed screen covers the record")
         navigation.popViewController(animated: false)
 
-        controller.setPostPlayback(.init(playing: false, available: false))
-        #expect(!controller.recordTakesTap(at: centre, in: header), "a post with no sound takes no tap")
+        controller.debugShowRecord(playing: false, available: false)
+        #expect(!controller.recordTakesTap(at: centre, in: header), "a sound with nothing to play takes no tap")
     }
 
-    /// A post with no audio: the record without its glyph, refusing taps.
-    @Test func aPostWithNoAudioCannotBeToggled() throws {
+    /// A sound with no preview: the record without its glyph, refusing taps.
+    @Test func aSoundWithNoPreviewCannotBePlayed() throws {
         let controller = sheet(tiles: 3)
-        controller.setPostPlayback(.init(playing: false, available: false))
         try laidOut(controller)
-        var toggles = 0
-        controller.onTogglePlayback = { toggles += 1 }
         let header = try #require(controller.debugHeader)
         #expect(!header.debugCanToggle)
         header.debugTapRecord()
-        #expect(toggles == 0)
+        #expect(!controller.isPreviewing)
     }
 
     // MARK: - Collapsed detent

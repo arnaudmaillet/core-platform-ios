@@ -2943,6 +2943,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// covered: a clip the viewer had paused stays paused.
     func setCoveredBySheet(_ covered: Bool) {
         guard videoPlayback != nil, let surface = audibleSurface else { return }
+        // Uncovered while the page is no longer the playing one (the sheet
+        // expanded meanwhile, #1914): the resume owed is forgotten, not paid.
+        if !covered, !isActive {
+            playback.forgetSheetPause()
+            return
+        }
         playback.setCovered(covered, on: surface)
     }
 
