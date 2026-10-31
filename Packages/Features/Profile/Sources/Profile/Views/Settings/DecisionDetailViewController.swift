@@ -412,7 +412,7 @@ final class AppealComposerViewController: UIViewController, UITextViewDelegate {
         // Presented in its own stack, which wants no large title; stated so
         // the Settings guard reads every screen here the same (#1906).
         navigationItem.largeTitleDisplayMode = .never
-        view.backgroundColor = .systemGroupedBackground
+        view.backgroundColor = Surface.page
         navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .cancel, primaryAction: UIAction { [weak self] _ in
             self?.closePresentation()
         })
@@ -428,9 +428,8 @@ final class AppealComposerViewController: UIViewController, UITextViewDelegate {
 
         textView.font = .appFont(forTextStyle: .body)
         textView.adjustsFontForContentSizeCategory = true
-        textView.backgroundColor = .secondarySystemGroupedBackground
-        textView.layer.cornerRadius = 12
-        textView.layer.cornerCurve = .continuous
+        // The appeal's box is a card (#1497).
+        Surface.dressCard(textView)
         textView.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
         textView.delegate = self
         textView.accessibilityLabel = "Your appeal"

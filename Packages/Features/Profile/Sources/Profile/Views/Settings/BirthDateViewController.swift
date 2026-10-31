@@ -36,7 +36,7 @@ final class BirthDateViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemGroupedBackground
+        view.backgroundColor = Surface.page
         navigationItem.largeTitleDisplayMode = .never
         setOwnTrailingBarItems([saveItem()], animated: false)
 
@@ -58,9 +58,8 @@ final class BirthDateViewController: UIViewController {
         note.numberOfLines = 0
 
         let card = UIView()
-        card.backgroundColor = .secondarySystemGroupedBackground
-        card.layer.cornerRadius = 26
-        card.layer.cornerCurve = .continuous
+        // The card contract (#1497).
+        Surface.dressCard(card)
         picker.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(picker)
         let stack = UIStackView(arrangedSubviews: [card, note])
