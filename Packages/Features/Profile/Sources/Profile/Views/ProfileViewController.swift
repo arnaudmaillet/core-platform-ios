@@ -666,8 +666,12 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     private lazy var viewportShare: ViewportShare = {
         let share = ViewportShare(host: view)
         share.onPlaysChange = { [weak self] plays in
-            self?.galleryPager.setAutoplayActive(plays)
-            self?.viewportAllowsBanner = plays
+            guard let self else { return }
+            galleryPager.setAutoplayActive(plays)
+            // The banner follows a transition's half. With none to follow
+            // the screen is gone at once, and the banner's own rule stops it
+            // then (#1399) — stopped and restarted here, it lost its player.
+            if plays || transitionCoordinator != nil { viewportAllowsBanner = plays }
         }
         return share
     }()
