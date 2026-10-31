@@ -215,6 +215,14 @@ public final class VideoPlaybackController {
     private struct WeakPlayer {
         weak var player: AVPlayer?
     }
+
+    /// Every surface this pool has bound to a player, owners and joined ones
+    /// alike, held weakly: which surfaces share a player, whatever backs them.
+    ///
+    /// ⚠️ NOT THE RENDERER'S LIST: under `-avplayer-render` there is no
+    /// renderer, and a surface that only joined a player was found by
+    /// nothing — the legacy lane's `aJoinedSurfaceHoldsAStillToo` (#1960).
+    private let boundSurfaces = NSHashTable<VideoRenderView>.weakObjects()
     /// A player detached from its view but still running, waiting for the next
     /// `play` of the same URL to adopt it. See `parkPlayback(from:)`.
     private var parked: (url: URL, player: AVPlayer)?
@@ -1923,8 +1931,9 @@ public final class VideoPlaybackController {
         return true
     }
 
-    /// The other surfaces bound to `player`: those holding a loan on it, and
-    /// those that only joined it (a hero landing's page, a mirror).
+    /// The other surfaces on `player`: those holding a loan on it, those that
+    /// only joined it (a hero landing's page, a mirror), and those holding a
+    /// still taken from it.
     ///
     /// ⚠️ THE JOINED ONES TOO (the owner's device, 2026-10-31): a post opened
     /// from a grid tile JOINS the tile's player, with no loan of its own, and
@@ -1934,9 +1943,10 @@ public final class VideoPlaybackController {
         for (other, candidate) in activePlayers where other != key && candidate === player {
             if let view = surfaces[other]?.view { shared[other] = view }
         }
-        for view in renderers[ObjectIdentifier(player)]?.surfaceViews ?? [] {
+        for view in boundSurfaces.allObjects {
             let other = ObjectIdentifier(view)
-            if other != key { shared[other] = view }
+            guard other != key else { continue }
+            if view.boundPlayer === player || stilledPlayers[other]?.player === player { shared[other] = view }
         }
         return shared
     }
@@ -2526,7 +2536,10 @@ public final class VideoPlaybackController {
         }
         // The sibling may itself be a JOINED surface with no loan — reach its
         // binding directly.
-        return view.attachAlongside(sibling)
+        guard view.attachAlongside(sibling) else { return false }
+        pausedSurfaces.remove(ObjectIdentifier(view))
+        boundSurfaces.add(view)
+        return true
     }
 
     /// Releases a surface attached with `attachSurface`, leaving the playback
@@ -2924,6 +2937,7 @@ public final class VideoPlaybackController {
     private func bind(_ player: AVPlayer, to view: VideoRenderView) {
         // Bound again, it shows the player: no pause of its own to remember.
         pausedSurfaces.remove(ObjectIdentifier(view))
+        boundSurfaces.add(view)
         view.attach(player, renderer: renderer(for: player))
         // Every route that puts a player behind a surface ends here, so this is
         // where the audible surface learns that its player changed.

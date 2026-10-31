@@ -196,9 +196,6 @@ final class VideoFrameRenderer {
 
     var surfaceCount: Int { surfaces.count }
 
-    /// The surfaces this renderer feeds — owners and joined ones alike.
-    var surfaceViews: [VideoRenderView] { surfaces.allObjects }
-
     /// Stops this renderer for good: no clock, no output, no surfaces. Called
     /// when its player goes back to the idle pool.
     func invalidate() {
