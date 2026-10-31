@@ -118,6 +118,13 @@ struct StackArbiterTests {
         #expect(root.presentedViewController === next, "the sheet opened since stays")
     }
 
+    /// A gesture closes the screen it is on, on top: never one below.
+    @Test func aGestureNeverTakesOutAScreenBelowTheTop() {
+        let (navigation, screens) = stack(3)
+        #expect(navigation.arbiter.close(screens[1], animated: false, whenBusy: .drop) == .dropped)
+        #expect(navigation.viewControllers == screens)
+    }
+
     /// A gesture closes now or not at all: behind a running transition it is
     /// dropped, where a tap is asked again once the transition ends.
     @Test func aGestureIsDroppedBehindARunningTransition() async {

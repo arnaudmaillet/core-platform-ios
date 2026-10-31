@@ -28,7 +28,11 @@ import UIKit
 ///
 /// It is not the stack's delegate — any navigation delegate removes the
 /// full-surface back swipe on bar-hiding screens (PR #672) — and owns no
-/// recognizer yet: the back gestures keep their own guards for now.
+/// recognizer: the back gestures keep their own guards, and close through
+/// `close(_:whenBusy: .drop)`. The back BUTTON closes through it on an
+/// `ArbitratedNavigationController` (each screen's `backAction`). A sheet's
+/// close is DesignSystem's `closePresentation()`; `StackCloseGuardTests`
+/// keeps raw pops and dismisses out of the app.
 @MainActor
 public final class StackArbiter {
     public enum CloseResult: Equatable, Sendable {
@@ -46,8 +50,10 @@ public final class StackArbiter {
     public enum WhenBusy: Sendable {
         /// Asked again once it ends, if the screen is still there: a tap.
         case retry
-        /// Nothing (`.dropped`): a gesture, which closes now or not at all —
-        /// a grab begun during a transition must not pop after its release.
+        /// Nothing (`.dropped`): a gesture, which closes its screen now, from
+        /// the top, or not at all — a grab begun during a transition must not
+        /// pop after its release, nor take out a screen the viewer no longer
+        /// sees.
         case drop
     }
 
@@ -69,6 +75,7 @@ public final class StackArbiter {
         }
         guard !isPending else { return .dropped }
         let isTop = index == navigation.viewControllers.count - 1
+        if !isTop, whenBusy == .drop { return .dropped }
         if isTop, let running = navigation.transitionCoordinator {
             guard whenBusy == .retry else { return .dropped }
             // The viewer's own back swipe, or a push still landing: asked again
