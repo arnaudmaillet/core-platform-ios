@@ -255,6 +255,8 @@ final class SoundSheetViewController: UIViewController {
     #if DEBUG
     /// The track reached its end. Tests.
     func debugEndTrack() { loopPreview() }
+    /// Whether the bar's feed runs. Tests.
+    var debugPreviewFeedRuns: Bool { previewFeed != nil }
 
     /// Draws the record in a state, for the glyph's tests.
     func debugShowRecord(playing: Bool, available: Bool) {

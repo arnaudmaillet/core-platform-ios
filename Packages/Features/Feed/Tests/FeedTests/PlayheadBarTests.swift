@@ -69,6 +69,9 @@ struct PlayheadBarTests {
         #expect(ended.count == 1 && abs((ended[0] ?? 0) - 0.75) < 0.001)
         #expect(bar.debugTrackHeight == SnapMediaPageBarView.clipTrackHeight)
         #expect(bar.debugHeldPlayhead != nil, "the released position was not held")
+        // The player catches up: the bar is the player's again.
+        bar.setProgress(0.75)
+        #expect(bar.debugHeldPlayhead == nil, "the hold outlived the player catching up")
     }
 
     /// A tap seeks where it lands; a bar that is not scrubbable ignores it.
