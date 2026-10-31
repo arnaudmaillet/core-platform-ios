@@ -2,7 +2,7 @@
 
 > The app's currency A is **likes** (#1397). The wire keeps its field names (`points`, `points_cap`, `points_per_shot`, `points_earned`/`_spent`): they are the backend's contract, renamed only by a backend change.
 
-**Status (2026-10-13):** the backend wallet exists. It is `wallet.v1` on the client edge (backend #665 and the follow-ups below), published on `buf.build/core-platform/contracts`. This document used to be the iOS team's *request* for that service. It now records **what the app binds to**, and what the client still keeps locally.
+**Status (2026-10-31, #841):** the backend wallet exists, and a member's wallet is the server's end to end — balance, claim, stakes, their list and history, the stake packs and the gem catalogue. Only gem *minting* is still shadow (§7). It is `wallet.v1` on the client edge (backend #665 and the follow-ups below), published on `buf.build/core-platform/contracts`. This document used to be the iOS team's *request* for that service. It now records **what the app binds to**, and what the client still keeps locally.
 
 **Related:**
 - `dev/economy/ECONOMY_CHARTER_V5.3.*.md`: the economy's design.
@@ -92,7 +92,7 @@ A like is one unit of currency A **staked** on a post or a comment (#676). There
 A pack of `stake_pack_shots` shots, each staking `points_per_shot` of the viewer's **own** likes in one tap. It costs `stake_pack_price` gems, read from the `Wallet`, never hard-coded. Gems buy the convenience, never likes.
 - A shot is never clamped: room for less than a whole shot answers `SHOT_DOES_NOT_FIT`.
 - A refusal keeps the shot.
-- `BuyStakePack` is in the contract. The app still sells the pack from the local mock (§7).
+- **The packs come in tiers** (`Wallet.stake_packs`, backend #941). A member buys one with `BuyStakePack(pack_id, idempotency_key)` (`StakePackService`); a refusal is in-band (`PACK_STILL_ACTIVE`, `INSUFFICIENT_GEMS`).
 
 ## 6. The welcome gift
 
@@ -100,12 +100,19 @@ A guest's likes are a locked pile that grows with each day the app has been open
 - With a server wallet, the app does **not** credit it locally (`WelcomeGift.settle` only marks it settled, #1008). It reads the wallet again after the sign-in.
 - The guest's refresh token always goes with `Login` and `SignUp`.
 
-## 7. What is still local, and why
+## 7. Gems: what they buy, and what is still not live
 
-| Local | Until |
+**What gems buy, on the server (#1475):** for a member, every gem spend is the server's, at the price shown, with one idempotency key per purchase:
+- a stake pack: `wallet.v1 BuyStakePack` (§5);
+- a profile item or an accent theme: `wallet.v1 PurchaseItem` against the catalogue (`ListCatalog`, `ListOwnedItems`, backend #892);
+- a country: `geo_discovery.v1 UnlockCountry`.
+
+**Settlement is shadow mode** (backend #665 part 4): a position settles **24 h** after its first stake, with a verdict — `PENDING`, then `REWARDED` or `NOT_REWARDED` — and **no gems**. Earned gems are not minted until backend #890. The app shows the verdicts (`ListMyStakes`, #903) and never a gem the balance does not hold.
+
+| Still local | Why |
 |---|---|
-| Gems, stake shots, buying the pack, country unlocks | the gem catalogue and minting (backend #890, #892) |
-| The stakes list on the claim sheet (`WalletStore.stakes()`, demo stakes) | #903: `ListMyStakes`, active / settled, outcome only while settlement is in shadow mode |
-| Settlement and its gem rewards (`Policy.mockOutcome`, 6 h) | backend settlement: **24 h** after a position's first stake, and **shadow mode** (no gems minted) until backend #890 |
+| A guest's welcome gift (§6) | a guest has no wallet; credited by the server at sign-up |
+| A guest's or a server-less store's gems (`WalletStore.spendGems`) | the device's mock; a member's are refused there (`assertionFailure`, #1475) |
+| `WalletStore.Policy.mockOutcome` (gems ~55% of the time) | only a store with no server reads it (package tests); the app's mock environment runs `MockWalletService`, which settles in shadow mode like the backend |
 
-The mock (`MockWalletService`) mirrors §3 and §4 with one wallet per account, kept across launches. The app's mock wallet opens at 250 likes; package tests open one with a generous balance. It also credits the welcome gift (§6) when a guest becomes a member.
+The mock (`MockWalletService`) mirrors §3–§5 and §7 with one wallet per account, kept across launches: the claim policy, the stake outcomes in the server's order (`OWN_CONTENT` included), the 24 h shadow settlement, the pack tiers and the catalogue. The app's mock wallet opens at 250 likes; package tests open one with a generous balance. It also credits the welcome gift (§6) when a guest becomes a member.
