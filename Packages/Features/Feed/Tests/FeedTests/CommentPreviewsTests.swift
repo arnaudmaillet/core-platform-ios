@@ -79,6 +79,18 @@ struct CommentPreviewsTests {
         #expect(repository.cachedTopComments(for: opened)?.map(\.id) == loaded.map(\.id), "the page did not replace the seed")
     }
 
+    /// A ranked page (#2007) is never the warmed first page: that one is
+    /// Recent's, what a post opens on.
+    @Test func aRankedPageIsNotTheWarmedFirstPage() async throws {
+        let repository = makeRepository()
+        let post = PostID(MockCommentService.longConversationPostIDs.first!)
+        let ranked = try await repository.loadCommentsPage(for: post, after: nil, order: .trending)
+        #expect(!ranked.entries.isEmpty)
+        #expect(!repository.holdsComments(for: post), "the ranked page was warmed as Recent's")
+        _ = try await repository.loadCommentsPage(for: post, after: nil)
+        #expect(repository.cachedTopComments(for: post) != nil)
+    }
+
     /// The previews were filtered for one viewer: a change wipes them.
     @Test func aViewerChangeWipesThePreviews() async {
         let repository = makeRepository()
