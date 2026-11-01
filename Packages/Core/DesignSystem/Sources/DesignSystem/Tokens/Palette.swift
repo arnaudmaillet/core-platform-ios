@@ -45,7 +45,9 @@ import UIKit
 /// - **The gradient is the brand's signature, kept to a few places**
 ///   (`brandGradient`): launch, onboarding, empty states, celebrations —
 ///   never on recurring chrome. Whether the story ring and a key moment's
-///   hero button wear it is still compared on the device (`rules`).
+///   hero button wear it is still compared on the device (`rules`). One
+///   exception, at the owner's request (#2034): the profile switcher's
+///   per-profile unread counts wear it.
 public enum Palette {
     // MARK: - Primary: pink
 

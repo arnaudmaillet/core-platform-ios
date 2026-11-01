@@ -46,6 +46,7 @@ struct StackScreenGuardTests {
         "TextPostComposerViewController": "a sheet",
         "OverSheetFeedHost": "a sheet",
         "ShareSheetViewController": "a sheet",
+        "ProfileSwitcherMenuController": "a menu over the screen, left by a pick or a tap outside",
         "ThreadPhotoViewerController": "a full-screen viewer",
         "MediaStickerPickerViewController": "a sheet",
         "ForYouPostPreviewViewController": "a context menu's preview",

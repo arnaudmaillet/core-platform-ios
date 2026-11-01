@@ -1631,28 +1631,30 @@ struct SnapCommentsPresentationTests {
         let button = try #require(Self.firstView(UIButton.self, in: bubble))
         #expect(button.superview === bubble.contentView)
         #expect(button.bounds.size == bubble.bounds.size)
-        #expect(button.showsMenuAsPrimaryAction)
+        // A tap opens the app's one switcher (#2034), not a `UIMenu`.
+        #expect(!button.showsMenuAsPrimaryAction)
+        #expect(button.menu == nil)
     }
 
-    /// The switcher menu arms the face and nothing else does: with no menu
-    /// the button is disabled, so a host that wires no switcher (the pushed
-    /// comments screen) can't present an empty one.
-    @Test func profileMenuArmsTheAvatarAndNilDisarmsIt() throws {
+    /// The switcher arms the face and nothing else does: with none the
+    /// button is disabled, so a host that wires no switcher (the pushed
+    /// comments screen) can't open an empty one.
+    @Test func profileSwitchArmsTheAvatarAndNilDisarmsIt() throws {
         let bar = CommentsInputBar()
         let button = try #require(
             Self.firstView(UIButton.self, in: bar.subviews.compactMap { $0 as? UIVisualEffectView }
                 .first { Self.firstView(MonogramAvatarView.self, in: $0) != nil }!)
         )
         #expect(button.isEnabled == false)
-        #expect(button.menu == nil)
 
-        bar.setProfileMenu(UIMenu(children: [UIAction(title: "Ava") { _ in }]))
+        var opened: UIView?
+        bar.setProfileSwitch { opened = $0 }
         #expect(button.isEnabled)
-        #expect(button.menu != nil)
+        button.sendActions(for: .primaryActionTriggered)
+        #expect(opened === button, "the switcher did not open from the face")
 
-        bar.setProfileMenu(nil)
+        bar.setProfileSwitch(nil)
         #expect(button.isEnabled == false)
-        #expect(button.menu == nil)
     }
 
     /// The disc is never blank: before any identity resolves the bar already

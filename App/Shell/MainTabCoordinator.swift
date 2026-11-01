@@ -101,38 +101,72 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// Backs the Profile tab's long-press switcher menu.
     private lazy var profileSwitcher = container.profileFeature.makeProfileSwitcher()
 
-    /// An invisible button laid over the Profile tab, carrying the switcher as
-    /// its `menu`.
+    /// An invisible ANCHOR laid over the Profile tab, which the switcher opens
+    /// from (#2034). It takes no touch: the tab keeps its own press response
+    /// and its tap, and the hold is the bar's (`profileHold`).
     ///
-    /// **Why a control and not a `UIContextMenuInteraction`.** A context menu
-    /// always LIFTS its source: it hides the original, floats a scaled copy and
-    /// dims everything behind. On a tab that produced a second avatar hovering
-    /// over the bar, clipped to whatever `visiblePath` allowed — an artifact
-    /// with no place on fixed chrome, and one the interaction offers no way to
-    /// switch off. Narrowing the path only makes the floating copy smaller.
-    ///
-    /// A `UIControl` presents the same `UIMenu` anchored to itself without any
-    /// of that, which is exactly how the map avatar's `UIBarButtonItem.menu`
-    /// behaved before Profile became a tab. Because this button is invisible and
-    /// is a *different view* from the tab, UIKit never touches the real icon:
-    /// not hidden, not snapshotted, not moved.
-    ///
-    /// Two properties, neither of them the default, are what make it long-press:
-    /// `UIControl` ships with `isContextMenuInteractionEnabled == false`, so a
-    /// `menu` alone is inert; and `showsMenuAsPrimaryAction` must stay FALSE, or
-    /// the menu opens on tap and swallows tab selection.
+    /// **Why not a `UIContextMenuInteraction`.** A context menu always LIFTS
+    /// its source: it hides the original, floats a scaled copy and dims
+    /// everything behind. On a tab that produced a second avatar hovering over
+    /// the bar. This anchor is a *different view* from the tab, so UIKit never
+    /// touches the real icon: not hidden, not snapshotted, not moved.
     private lazy var profileMenuOverlay: UIButton = {
         let button = UIButton(type: .custom)
         button.backgroundColor = .clear
-        button.isContextMenuInteractionEnabled = true
-        button.showsMenuAsPrimaryAction = false
-        button.accessibilityLabel = "Profile"
-        button.accessibilityHint = "Double tap and hold to switch profile"
-        // The overlay covers the real tab button, so a plain tap has to be
-        // forwarded or it would be swallowed.
-        button.addAction(UIAction { [weak self] _ in self?.selectTab(.profile) }, for: .primaryActionTriggered)
+        button.isUserInteractionEnabled = false
+        button.isAccessibilityElement = false
         return button
     }()
+
+    /// The Profile tab's hold, hung on the BAR as the "+"'s is
+    /// (`CreateHoldShortcut`): the iOS 26 bar takes a touch on its items for
+    /// its own selection, so a recognizer on an overlay never began. It looks
+    /// only at touches on the Profile tab (`shouldReceive`).
+    ///
+    /// **Hold, slide, release** as a system menu: the hold opens the switcher
+    /// (`beginTracking`), the finger lights the rows it crosses, and lifting
+    /// it on one picks it — lifted on none, the switcher stays open. A tap
+    /// still selects the tab: before the hold is recognized a lift fails it,
+    /// and once recognized it cancels the touch, which is no tap.
+    private lazy var profileHold: UILongPressGestureRecognizer = {
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(profileOverlayHeld(_:)))
+        hold.minimumPressDuration = 0.4
+        hold.delegate = self
+        return hold
+    }()
+    /// The switcher the hold opened, following the finger until it lifts.
+    private var switcherTracking: (any ProfileSwitcherTracking)?
+
+    #if DEBUG
+    /// `-profile-switcher-hold`: the Profile tab's hold, past its recognition
+    /// — the switcher opened from the tab, as the finger would open it. The
+    /// simulator delivers no hold to the bar's items.
+    func debugHoldProfileTab() {
+        alignMenuOverlays()
+        switcherTracking = profileSwitcher?.beginTracking(
+            from: profileMenuOverlay, over: tabBarController, includesAddProfile: true,
+            onSwitch: {}, onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
+        )
+    }
+    #endif
+
+    @objc private func profileOverlayHeld(_ gesture: UILongPressGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            guard isMember else { return }
+            switcherTracking = profileSwitcher?.beginTracking(
+                from: profileMenuOverlay, over: tabBarController, includesAddProfile: true,
+                onSwitch: {}, onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
+            )
+        case .changed:
+            switcherTracking?.move(to: gesture.location(in: nil))
+        case .ended:
+            switcherTracking?.end()
+            switcherTracking = nil
+        default:
+            switcherTracking = nil
+        }
+    }
     /// The For You root, rebuilt on a change of viewer.
     private var forYouTab: ForYouTabCoordinator?
 
@@ -192,13 +226,12 @@ final class MainTabCoordinator: NSObject, Coordinator {
         for (_, tab) in orderedTabs {
             (tab as? ExploreTabCoordinator)?.viewerDidChange()
         }
-        profileMenuOverlay.isContextMenuInteractionEnabled = isMember
+        profileHold.isEnabled = isMember
         sweepOrphanedAccessory()
         loadAvatar()
         refreshUnreadBadge()
         Task { [weak self] in
             await self?.profileSwitcher?.reload()
-            self?.rebuildSwitcherMenu()
         }
     }
 
@@ -245,13 +278,11 @@ final class MainTabCoordinator: NSObject, Coordinator {
         )
         // A stake's final failure is told (#1775).
         observeLikesGivenBack()
-        // Warm the switcher up front. `makeMenu` is synchronous by design — it
-        // reads the last `reload` — so without this the first long-press builds
-        // its menu from an empty snapshot and offers only "Add Profile", with
-        // the viewer's own profiles missing.
+        // Warm the switcher up front: it opens from the last `reload`, so
+        // without this the first hold would open on an empty snapshot,
+        // offering only "Add Profile", with the viewer's own profiles missing.
         Task { [weak self] in
             await self?.profileSwitcher?.reload()
-            self?.rebuildSwitcherMenu()
         }
 
         let feedFlow = FeedFlowCoordinator(container: container)
@@ -292,7 +323,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
             }
             addChild(tab)
         }
-        profileMenuOverlay.isContextMenuInteractionEnabled = isMember
+        profileHold.isEnabled = isMember
         popGestureEnablers = orderedTabs.map { NativePopGestureEnabler(taking: $0.1.navigationController) }
         // The blur at the foot of the screen, mirroring the status band's:
         // one per stack, over its screens and under its bars and the tab bar
@@ -327,6 +358,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
             self?.refreshTabGlyphs()
         }
         createHold.install()
+        tabBarController.tabBar.addGestureRecognizer(profileHold)
         // ⚠️ **iOS 27 STOPPED DETACHING A SEARCH TAB BY ITS TYPE ALONE.** It now
         // gives the separate bubble — its "prominent" treatment — to the tab
         // named by `prominentTabIdentifier`, and when that is nil only to a
@@ -409,7 +441,6 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // snapshot rather than the menu — there is no menu object to replace.
         Task { [weak self] in
             await self?.profileSwitcher?.reload()
-            self?.rebuildSwitcherMenu()
         }
     }
 
@@ -766,14 +797,6 @@ extension MainTabCoordinator {
         bar.bringSubviewToFront(overlay)
     }
 
-    /// Installs the switcher menu from the factory's current snapshot.
-    fileprivate func rebuildSwitcherMenu() {
-        profileMenuOverlay.menu = profileSwitcher?.makeMenu(
-            onSwitch: {},
-            onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
-        )
-    }
-
     /// Opens one of the "+" menu's destinations.
     ///
     /// PRESENTED over the shell, not pushed onto the current tab: making a
@@ -883,3 +906,16 @@ protocol AccountScopedTab: TabCoordinator {
 
 extension ProfileTabCoordinator: AccountScopedTab {}
 extension MessagesTabCoordinator: AccountScopedTab {}
+
+// MARK: - The Profile tab's hold (#2034)
+
+extension MainTabCoordinator: UIGestureRecognizerDelegate {
+    /// Only touches on the Profile tab, from a member, with nothing covering
+    /// the bar.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard gestureRecognizer === profileHold, isMember, tabBarController.presentedViewController == nil,
+              let tab = profileTab?.tab, let bar = gestureRecognizer.view,
+              let frame = tab.frame(in: bar), !frame.isEmpty else { return false }
+        return frame.contains(touch.location(in: bar))
+    }
+}

@@ -1672,14 +1672,23 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // picked up through `.activeProfileDidChange`, so this screen refreshes
         // whichever switcher was used.
         if switcherFactory != nil {
+            // A native item (the bar contract, #1679) that opens the app's
+            // one switcher, anchored to itself (#2034).
+            var item: UIBarButtonItem?
             let switcher = BarItems.icon(
-                id: "profile.switcher", image: UIImage(systemName: "person.2"), label: "Switch Profile",
-                menu: UIMenu(children: [])
-            )
+                id: "profile.switcher", image: UIImage(systemName: "person.2"), label: "Switch Profile"
+            ) { [weak self] in
+                guard let self, let item else { return }
+                self.switcherFactory?.present(
+                    from: .barItem(item), over: self, includesAddProfile: true,
+                    onSwitch: {}, onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
+                )
+            }
+            item = switcher
             switcher.tintColor = .label
             switcherItem = switcher
-            // Pre-load profiles + avatars, then set a SYNCHRONOUS menu — its
-            // content lands in the first frame, not popped in after the popover.
+            // Pre-load profiles, avatars and counts, so the switcher opens
+            // complete on its first frame.
             reloadSwitcherMenu()
         }
     }
@@ -1822,14 +1831,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// was used — this screen's own, or the Profile tab's long-press menu, which
     /// is built by the shell and cannot call back into here.
     private func reloadSwitcherMenu() {
-        guard let switcherFactory, let switcherItem else { return }
-        Task { [weak self] in
-            await switcherFactory.reload()
-            switcherItem.menu = switcherFactory.makeMenu(
-                onSwitch: {},
-                onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
-            )
-        }
+        guard let switcherFactory else { return }
+        Task { await switcherFactory.reload() }
     }
 
     /// The active profile changed — from any switcher anywhere.
