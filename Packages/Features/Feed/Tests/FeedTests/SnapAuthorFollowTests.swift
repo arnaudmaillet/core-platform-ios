@@ -422,11 +422,15 @@ struct SnapAuthorFollowTests {
         await Self.settle { graph.pendingFollows == 1 }
         #expect(try Self.pill(feed).offersFollow == false, "the \"+\" came back before the graph answered")
         #expect(Self.toast(in: feed.view) == nil, "the failure was said before the graph answered")
+        #expect(feed.debugFollowFailureToastsShown == 0, "the failure was said before the graph answered")
         graph.answerFollow(accepting: false)
         await Self.settle { (try? Self.pill(feed).offersFollow) == true }
         #expect(try Self.pill(feed).offersFollow)
-        let toast = try #require(Self.toast(in: feed.view), "the refused follow was silent")
-        #expect(toast.style == .failure)
+        // Counted on ARRIVAL (#1979): the toast is gone after a few seconds,
+        // and a starved runner looked for it once, too late.
+        await Self.settle { feed.debugFollowFailureToastsShown == 1 }
+        #expect(feed.debugFollowFailureToastsShown == 1, "the refused follow was silent")
+        if let toast = Self.toast(in: feed.view) { #expect(toast.style == .failure) }
     }
 
     /// The failure names the author by the model's handle, never by parsing
