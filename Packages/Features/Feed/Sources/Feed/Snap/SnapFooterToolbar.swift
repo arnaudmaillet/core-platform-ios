@@ -28,6 +28,8 @@ enum SnapFooterToolbar {
         static let repost = "feed.snap.repost"
         static let more = "feed.snap.more"
         static let share = "feed.snap.share"
+        /// The post's sound, the footer's trailing item on a media page (#1999).
+        static let sound = "feed.snap.sound"
         static let like = "feed.snap.like"
     }
 
@@ -43,6 +45,12 @@ enum SnapFooterToolbar {
 
     /// The footer's trailing run alone, right-aligned: `actions`, then `more`
     /// behind a separator. For a footer with nothing to lead with (#1999).
+    /// The side of the footer's platters (measured on the iPhone 18 Pro
+    /// simulator, iOS 27.2: the save-and-repost platter and the author pill
+    /// stand 44 pt tall), which a custom item that draws its own glass
+    /// matches — the sound's record (#1999). At 36 pt it read a size smaller.
+    static let bubbleSide: CGFloat = 44
+
     static func trailingItems(actions: [UIBarButtonItem], more: UIBarButtonItem?) -> [UIBarButtonItem] {
         var items: [UIBarButtonItem] = [.flexibleSpace()]
         items += actions
@@ -121,9 +129,6 @@ enum SnapFooterToolbar {
         return ceil(width) + 10
     }
 
-    /// Share (#1728, the owner): on the post screen, ⋯ and its menu gave way
-    /// to the share sheet — where Not interested and Report now live.
-    static func makeShareItem(action: @escaping () -> Void) -> UIBarButtonItem {
-        BarItems.icon(id: ID.share, image: UIImage(systemName: "arrowshape.turn.up.right"), label: "Share", action: action)
-    }
+    // Share left the bar for the page's column on every pushed page (#1999);
+    // `ID.share` names it there.
 }

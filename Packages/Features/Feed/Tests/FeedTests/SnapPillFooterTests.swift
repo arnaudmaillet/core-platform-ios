@@ -59,7 +59,7 @@ struct SnapPillFooterTests {
             #expect(items[1].customView == nil, "a dynamic space after the pill")
             let actions = items.dropFirst(2).prefix(2).compactMap(\.accessibilityLabel)
             #expect(actions == ["Save", "Repost"], "the capsule is not [save, repost]: \(actions)")
-            #expect(items.last?.accessibilityLabel == "Share")
+            #expect(items.last?.identifier == SnapFooterToolbar.ID.sound, "the sound does not end the bar (#1999)")
             #expect(!items.contains { $0.customView is SnapMediaAttributionView }, "the audio capsule stayed")
 
             let nav = feed.navigationItem.rightBarButtonItems ?? []
@@ -67,11 +67,11 @@ struct SnapPillFooterTests {
         }
     }
 
-    /// Share is the footer's last item (#1728), and its sheet holds Not
-    /// interested and Report.
-    @Test func shareEndsTheFooter() {
+    /// The sound is the footer's last item (#1999, where Share was, #1728),
+    /// and the share sheet still holds Not interested and Report.
+    @Test func theSoundEndsTheFooter() {
         do {
-            #expect(feed().toolbarItems?.last?.accessibilityLabel == "Share")
+            #expect(feed().toolbarItems?.last?.identifier == SnapFooterToolbar.ID.sound)
             #expect(feed().shareSheetActions(for: PostID("p1")).map(\.title) == ["Not interested", "Report"])
         }
     }

@@ -226,10 +226,11 @@ struct SnapBarPillWidthsTests {
         // The author pill leads the TOOLBAR (#671, the layout since #680).
         let toolbar = feed.toolbarItems ?? []
         let pill = try #require(toolbar.compactMap { $0.customView as? SnapAuthorIdentityView }.first)
-        // Share (#1728, was ⋯) is a stock item (#1679): its view is UIKit's.
+        // The post's sound ends the bar (#1999, where Share was): a
+        // container, so its view is the record itself.
         let more = try #require(
-            toolbar.last { $0.accessibilityLabel == "Share" }.flatMap(SnapActionColumnLayoutTests.hostedView(of:)),
-            "\(width)pt: the share item was folded away"
+            toolbar.last { $0.identifier == SnapFooterToolbar.ID.sound }?.customView,
+            "\(width)pt: the sound item was folded away"
         )
 
         for (name, view) in [("author", pill), ("wallet", badge), ("sort", sort),

@@ -62,15 +62,19 @@ struct SnapToolbarCompositionTests {
 
     // MARK: - The bar
 
-    /// ⚠️ SAVE AND REPOST, in that order (#865), then Share (#1728: the ⋯
-    /// and its menu gave way to it).
-    @Test func theTrailingRunIsSaveRepostAndShare() {
-        let actions = toolbarActions(feed())
-        #expect(labels(actions) == ["Save", "Repost", "Share"],
-                "the trailing run is not [save, repost, share]: \(labels(actions))")
-        #expect(actions.map(\.identifier) == [
-            SnapFooterToolbar.ID.save, SnapFooterToolbar.ID.repost, SnapFooterToolbar.ID.share,
-        ], "an action lost its identity")
+    /// ⚠️ SAVE AND REPOST, in that order (#865), then THE SOUND (#1999,
+    /// rewritten from #1728's Share): Share moved to the page's column, and
+    /// the post's sound — a stock container, "Sound" — ends the bar.
+    @Test func theTrailingRunIsSaveRepostAndTheSound() throws {
+        let feed = feed()
+        let actions = toolbarActions(feed)
+        #expect(labels(actions) == ["Save", "Repost"], "the trailing run is not [save, repost]: \(labels(actions))")
+        #expect(actions.map(\.identifier) == [SnapFooterToolbar.ID.save, SnapFooterToolbar.ID.repost],
+                "an action lost its identity")
+        let sound = try #require(feed.toolbarItems?.last)
+        #expect(sound.identifier == SnapFooterToolbar.ID.sound, "the sound does not end the bar")
+        #expect(sound.customView?.accessibilityLabel == "Sound")
+        #expect(!(feed.toolbarItems ?? []).contains { $0.identifier == SnapFooterToolbar.ID.share }, "Share is still on the bar")
     }
 
     /// Save then repost, SIDE BY SIDE — two stock items with nothing between,
@@ -109,10 +113,12 @@ struct SnapToolbarCompositionTests {
         let items = try #require(feed().toolbarItems)
         let separator = try #require(items.dropFirst(4).first)
         #expect(separator.customView == nil && separator.accessibilityLabel == nil, "no separator before the ⋯")
-        let share = try #require(items.last)
-        #expect(share.accessibilityLabel == "Share")
-        #expect(share.customView == nil, "Share is a button in a custom view (#1679)")
-        #expect(share.menu == nil, "Share still opens a menu (#1728: it opens the sheet)")
+        // The post's sound ends the bar now (#1999, where Share was): a stock
+        // container (#1679) whose own glass is the record's.
+        let sound = try #require(items.last)
+        #expect(sound.identifier == SnapFooterToolbar.ID.sound)
+        #expect(sound.customView is SnapSoundBubbleButton, "the sound is not the record")
+        #expect(sound.menu == nil, "the sound opens a menu")
     }
 
     // MARK: - Share (#1728)

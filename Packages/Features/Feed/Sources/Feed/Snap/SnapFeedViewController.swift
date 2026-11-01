@@ -1865,7 +1865,7 @@ final class SnapFeedViewController: UIViewController {
                 // The sound bubble (#671): its face, and its tap. No hold since
                 // #1931: the sound follows the device.
                 cell.setSoundFace(self.soundFace(for: model))
-                cell.setSlotSharesPost(self.slotSharesPost(model))
+                cell.setSlotSharesPost(self.slotSharesPost(model), holdArmsShare: self.slotHoldArmsShare(model))
                 cell.onRequestSoundSheet = { [weak self] in self?.presentSoundSheet() }
                 // Its way back, while the comments are scrolled away (#1929).
                 cell.onRequestSoundReturn = { [weak self, weak cell] in
@@ -2662,14 +2662,15 @@ final class SnapFeedViewController: UIViewController {
         // publishes one. Pressing it does nothing today.
         let repost = SnapFooterToolbar.makeRepostItem()
         repostToolbarItem = repost
-        // ⋯ became Share (#1728, the owner): the share sheet, whose tray holds
-        // Not interested and Report — the menu's two — and no Repost, which
-        // stands right beside it in this bar.
-        let share = SnapFooterToolbar.makeShareItem { [weak self] in
-            guard let self, let model = self.activeModel else { return }
-            self.presentShareSheet(for: model.id)
-        }
-        shareToolbarItem = share
+        // ⚠️ THE SOUND TAKES SHARE'S PLACE (#1999, the owner 2026-11-01):
+        // Share moved to the page's column, on the sound bubble's frame, and
+        // the post's sound came here — the active page's cover, turning
+        // while it plays; a tap opens the sound sheet. A stock container
+        // (#1679) whose CONTENT follows the page, so paging never re-lays
+        // out the bar. A text page has no sound: its footer drops it.
+        footerSoundButton.onTap = { [weak self] in self?.presentSoundSheet() }
+        let sound = BarItems.container(id: SnapFooterToolbar.ID.sound, view: footerSoundButton, ownBackground: true)
+        footerSoundItem = sound
 
         // ONE item set, for every state (#671):
         //
@@ -2681,7 +2682,7 @@ final class SnapFeedViewController: UIViewController {
         // separator gives Share its own (#1679). The toolbar is STATE-INVARIANT:
         // the comments exit is the nav bar's ✕, and the sort selector is the
         // nav bar's too (`setEngagedChrome`).
-        defaultToolbarItems = [authorItem, footerFlexibleSpace, bookmarkItem, repost, shareSeparator, share]
+        defaultToolbarItems = [authorItem, footerFlexibleSpace, bookmarkItem, repost, shareSeparator, sound]
         // The For You root wears no toolbar (#1681): the tab bar holds the
         // bottom, the pill is the top bar's, save and repost are the action
         // column's.
@@ -3394,13 +3395,34 @@ final class SnapFeedViewController: UIViewController {
         let available = !unavailablePostIDs.contains(id)
         bookmarkItem.isEnabled = available
         repostToolbarItem?.isEnabled = available
-        shareToolbarItem?.isEnabled = available
+        footerSoundItem?.isEnabled = available
+        footerSoundButton.isUserInteractionEnabled = available
         // A text page's like (#1924): none for a post that turned unavailable.
         refreshFooterLike(for: modelsByID[id], animated: true)
     }
 
     private var repostToolbarItem: UIBarButtonItem?
-    private var shareToolbarItem: UIBarButtonItem?
+    /// The footer's trailing item: the active page's sound (#1999).
+    private var footerSoundItem: UIBarButtonItem?
+    /// What it draws: the record, as the page's bubble drew it, on the bar's
+    /// 36 pt bubble.
+    private let footerSoundButton: SnapSoundBubbleButton = {
+        let button = SnapSoundBubbleButton()
+        button.isHidden = false
+        button.accessibilityIdentifier = SnapFooterToolbar.ID.sound
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: SnapFooterToolbar.bubbleSide),
+            button.heightAnchor.constraint(equalToConstant: SnapFooterToolbar.bubbleSide),
+        ])
+        return button
+    }()
+
+    /// The footer's sound for `model`, in place (#1999): its cover, or the
+    /// greyed note for a media post with none (#683).
+    private func refreshFooterSound(for model: FeedItemDisplayModel) {
+        footerSoundButton.setFace(soundFace(for: model), pipeline: imagePipeline)
+    }
 
     // MARK: - A text page's footer like (#1924)
 
@@ -3454,7 +3476,7 @@ final class SnapFeedViewController: UIViewController {
         var items = defaultToolbarItems
         guard let like = footerLikeItem,
               let flexible = items.firstIndex(where: { $0 === footerFlexibleSpace }) else { return items }
-        items.removeAll { $0 === repostToolbarItem || $0 === shareToolbarItem || $0 === shareSeparator }
+        items.removeAll { $0 === repostToolbarItem || $0 === footerSoundItem || $0 === shareSeparator }
         items.insert(contentsOf: [like, footerLikeSeparator], at: flexible + 1)
         return items
     }
@@ -3474,9 +3496,9 @@ final class SnapFeedViewController: UIViewController {
     }
 
     #if DEBUG
-    /// The toolbar's post actions, for a test: save, repost, share.
+    /// The toolbar's post actions, for a test: save, repost, the sound.
     var debugToolbarPostActions: [UIBarButtonItem] {
-        [bookmarkItem, repostToolbarItem, shareToolbarItem].compactMap { $0 }
+        [bookmarkItem, repostToolbarItem, footerSoundItem].compactMap { $0 }
     }
 
     /// The footer's like, nil off a text page (#1924).
@@ -3548,16 +3570,25 @@ final class SnapFeedViewController: UIViewController {
                   let model = modelsByID[orderedIDs[indexPath.item]],
                   let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { continue }
             cell.setSoundFace(soundFace(for: model))
-            cell.setSlotSharesPost(slotSharesPost(model))
+            cell.setSlotSharesPost(slotSharesPost(model), holdArmsShare: slotHoldArmsShare(model))
         }
+        if let model = activeModel { refreshFooterSound(for: model) }
         applyRailSlot(to: commentsContentVC)
         applyRailSlot(to: previewRestingVC)
     }
 
-    /// Whether `model`'s slot is its Share (#1999): a pushed text page. On
-    /// the For You root its column already carries Share (#1681).
+    /// Whether `model`'s slot is its Share (#1999): every pushed page — a
+    /// text post has no sound, and a media post's moves to the footer. The
+    /// For You root keeps its column as it is (#1681): no toolbar there.
     func slotSharesPost(_ model: FeedItemDisplayModel) -> Bool {
-        SnapSoundState.isText(model) && !isForYouRoot
+        !isForYouRoot
+    }
+
+    /// Whether the way back's hold over Share arms it (#1999): a media
+    /// page's — "a hold arms its own action" (#1929). A text page's arms
+    /// nothing, as before.
+    func slotHoldArmsShare(_ model: FeedItemDisplayModel) -> Bool {
+        !SnapSoundState.isText(model)
     }
 
     /// The composer's rail slot, decided in one place (#1999): Share on a
@@ -3580,15 +3611,19 @@ final class SnapFeedViewController: UIViewController {
             hostedByPage, foldsIntoSlot: model.mediaURL != nil || footerCarriesTextLike
         )
         // ⚠️ THE SLOT'S ONE DECISION (#1999), for every page:
-        //   - a media page: the sound, greyed with none (#683);
-        //   - a pushed text page: Share, the toolbar's (a text post has no
-        //     sound), which leaves the footer;
+        //   - a pushed page, text or media: Share, the toolbar's old action;
+        //     a media page's sound moves to the footer's trailing item;
+        //   - a media page on the For You root: the sound, greyed with none
+        //     (#683) — the root keeps its column as it is;
         //   - a text page on the For You root: no slot, the field widens —
         //     its column already carries Share (#1681);
         //   - scrolled away, any: the way back (#1929), the panel's call.
         let face = soundFace(for: model)
         let sharesInSlot = slotSharesPost(model)
-        detail.setRailShare(sharesInSlot ? { [weak self] in self?.presentShareSheet(for: id) } : nil)
+        detail.setRailShare(
+            sharesInSlot ? { [weak self] in self?.presentShareSheet(for: id) } : nil,
+            holdArms: slotHoldArmsShare(model)
+        )
         detail.setRailSoundFace(face, keepsSlot: face != nil || sharesInSlot)
         // The For You root's save and repost (#1681), in the composer's
         // column too — drawn on a text page, reserved under a media page's.
@@ -5393,7 +5428,9 @@ final class SnapFeedViewController: UIViewController {
         applyToolbarPostActions(for: model.id)
         // The page's sound bubble and the panel's rail slot (#671).
         activeSnapCell?.setSoundFace(soundFace(for: model))
-        activeSnapCell?.setSlotSharesPost(slotSharesPost(model))
+        activeSnapCell?.setSlotSharesPost(slotSharesPost(model), holdArmsShare: slotHoldArmsShare(model))
+        // The footer's sound follows the page in place (#1999).
+        refreshFooterSound(for: model)
         applyRailSlot(to: commentsContentVC)
     }
 
@@ -5557,6 +5594,8 @@ final class SnapFeedViewController: UIViewController {
         // — and so does the panel's slot, where a TEXT page's sound lives
         // (#692), and the sound sheet's record.
         activeSnapCell?.setSoundSpinning(playing)
+        // The footer's record too (#1999): the media page's sound lives there.
+        footerSoundButton.setSpinning(playing)
         (commentsContentVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
         (previewRestingVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
         // Two tracks, never together (the owner, 2026-10-31): the post
@@ -7748,7 +7787,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // appearing at the landing (#683).
         chrome.setSoundFace(soundFace(for: model))
         // …or the post's Share, a pushed text page's (#1999).
-        chrome.setSlotSharesPost(slotSharesPost(model))
+        chrome.setSlotSharesPost(slotSharesPost(model), holdArmsShare: slotHoldArmsShare(model))
         // The replica's boost anchor wears the same face as the live one —
         // a boosted post must not flash back to the glyph mid-flight.
         chrome.setBoostTotal(boost.boostTotal(on: model.id) ?? 0)

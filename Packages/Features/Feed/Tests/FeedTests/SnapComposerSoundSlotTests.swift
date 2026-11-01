@@ -86,11 +86,12 @@ struct SnapComposerSoundSlotTests {
         thumbnailURL: nil, audioText: nil, likeCount: 3
     )
 
-    /// ⚠️ THE SLOT'S ONE DECISION (#1999, `applyRailSlot`): a pushed text
-    /// page wears Share — never its sound, even one the provider names — a
-    /// text page of the For You root has no slot, and a media page wears its
-    /// sound. (Rewritten from #1929's "a text page's slot opens the sheet".)
-    @Test func theSlotIsShareOnAPushedTextPageNoneOnTheRootAndTheSoundOnMedia() throws {
+    /// ⚠️ THE SLOT'S ONE DECISION (#1999, `applyRailSlot`): every pushed
+    /// page wears Share — a text page never its sound, even one the provider
+    /// names, and a media page's sound moves to the footer; on the For You
+    /// root a text page has no slot and a media page keeps its sound.
+    /// (Rewritten from #1929's "a text page's slot opens the sheet".)
+    @Test func theSlotIsShareOnEveryPushedPageAndTheRootKeepsItsColumn() throws {
         let (panel, window) = Layout.engagedPanel()
         defer { window.isHidden = true }
 
@@ -101,12 +102,15 @@ struct SnapComposerSoundSlotTests {
         #expect(bar.debugRailButton.accessibilityIdentifier == SnapFooterToolbar.ID.share)
         #expect(bar.onRailLongPress == nil, "the slot's hold still does something")
 
+        feed(root: false, model: Self.mediaPage).applyRailSlot(to: panel)
+        #expect(bar.railFace == .share, "a pushed media page's slot is not Share")
+
         feed(root: true, model: Self.textPage).applyRailSlot(to: panel)
         #expect(bar.railFace == .noSlot, "a text page of the For You root kept a slot")
 
-        feed(root: false, model: Self.mediaPage).applyRailSlot(to: panel)
+        feed(root: true, model: Self.mediaPage).applyRailSlot(to: panel)
         guard case .sound = bar.railFace else {
-            Issue.record("a media page's slot is not its sound: \(bar.railFace)")
+            Issue.record("a For You root media page's slot is not its sound: \(bar.railFace)")
             return
         }
         #expect(bar.debugRailButton.accessibilityIdentifier == nil)
