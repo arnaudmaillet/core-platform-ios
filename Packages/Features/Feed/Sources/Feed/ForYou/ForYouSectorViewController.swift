@@ -25,9 +25,6 @@ protocol ForYouSectorPage: UIViewController {
     func sectorPageDidChangeActivity(_ isActive: Bool)
     /// The sector's safe area, handed over (see the sector's note on Feed).
     func sectorSafeAreaDidChange(_ insets: UIEdgeInsets)
-    /// Whether a horizontal drag starting now is the page's own — a drawer it
-    /// holds open, which the swipe closes — rather than a change of page.
-    func sectorPageOwnsHorizontalDrag(velocity: CGPoint) -> Bool
 }
 
 /// The For You tab (#1703, #1705, the owner 2026-10-24/25): two pages — Feed
@@ -123,10 +120,6 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
         // pages' own gesture, from the very edge (a root has no back swipe) (#1739).
         pager.leadingPullTarget = DrawerPull.shared
         pager.reservesLeadingEdge = false
-        pager.yieldsDrag = { [weak self] velocity in
-            guard let self else { return false }
-            return self.pages[self.activeIndex].sectorPageOwnsHorizontalDrag(velocity: velocity)
-        }
         pager.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(pager)
         NSLayoutConstraint.activate([

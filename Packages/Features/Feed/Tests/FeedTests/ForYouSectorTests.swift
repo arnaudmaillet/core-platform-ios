@@ -12,7 +12,6 @@ struct ForYouSectorTests {
     /// `navigationItem`, which answers the sector's item while in front.
     final class Page: UIViewController, ForYouSectorPage {
         let mark: UIBarButtonItem
-        var ownsDrag = false
         private(set) var activity: [Bool] = []
         private(set) var handedInsets: UIEdgeInsets?
         var sectorNavigationItem: UINavigationItem?
@@ -35,7 +34,6 @@ struct ForYouSectorTests {
 
         func sectorPageDidChangeActivity(_ isActive: Bool) { activity.append(isActive) }
         func sectorSafeAreaDidChange(_ insets: UIEdgeInsets) { handedInsets = insets }
-        func sectorPageOwnsHorizontalDrag(velocity: CGPoint) -> Bool { ownsDrag }
     }
 
     private func sector() -> (ForYouSectorViewController, feed: Page, shots: Page) {
