@@ -139,6 +139,38 @@ struct BottomEdgeBlurViewTests {
         #expect(BottomEdgeBlurView.scale(statusBandHeight: -4) == 0)
     }
 
+    /// The height the band reports is the height it draws, whatever the
+    /// status band: 62 (Dynamic Island), 54, 47 and 20 (SE) points.
+    @Test func theBandDrawsTheHeightItReports() {
+        for statusBand: CGFloat in [62, 54, 47, 20] {
+            #expect(abs(BottomEdgeBlurView.scale(statusBandHeight: statusBand) * BottomEdgeBlurView.softEdgeHeight
+                - statusBand) < 0.001)
+        }
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let band = BottomEdgeBlurView()
+        band.frame = window.bounds
+        window.addSubview(band) // never made visible, as this suite's other windows
+        band.layoutIfNeeded()
+        #expect(band.pocket.frame.height == BottomEdgeBlurView.bandHeight(in: window))
+        #expect(BottomEdgeBlurView.bandHeight(in: nil) == 0)
+    }
+
+    /// A fitted height clears the band (#1995): its part over the bottom
+    /// safe area, plus the gap — the Rewards sheet's collapsed detent.
+    @Test func aFittedHeightClearsTheBand() {
+        // A Dynamic Island iPhone: 62 pt band, 34 pt home indicator.
+        #expect(BottomEdgeBlurView.clearance(band: 62, bottomInset: 34, gap: 8) == 36)
+        // An SE: 20 pt band, no bottom inset.
+        #expect(BottomEdgeBlurView.clearance(band: 20, bottomInset: 0, gap: 8) == 28)
+        // No band (landscape), or a band under the inset: the gap alone.
+        #expect(BottomEdgeBlurView.clearance(band: 0, bottomInset: 0, gap: 8) == 8)
+        #expect(BottomEdgeBlurView.clearance(band: 20, bottomInset: 34, gap: 8) == 8)
+        // So the control's bottom stands at least the band above the edge.
+        for (band, inset): (CGFloat, CGFloat) in [(62, 34), (20, 0)] {
+            #expect(BottomEdgeBlurView.clearance(band: band, bottomInset: inset, gap: 8) + inset >= band)
+        }
+    }
+
     /// Off-window there is no status band to mirror, so the view stays hidden.
     @Test func offWindowItIsHidden() {
         let band = BottomEdgeBlurView()
