@@ -597,6 +597,9 @@ final class SnapFeedViewController: UIViewController {
     /// Loads posts into the repository's cache, after which `galleryPost`
     /// answers for them — the sound sheet's tiles outside this feed.
     private let prewarmPosts: (@Sendable ([PostID]) async -> Void)?
+    /// Warms the first comments of the posts this feed lists beside its own:
+    /// the side list's, the sound sheet's (#2002).
+    var postOpenWarm: PostOpenWarm?
 
     init(
         viewModel: FeedViewModel,
@@ -3973,7 +3976,9 @@ final class SnapFeedViewController: UIViewController {
             cell.removeRestingPlaceholder(current.placeholder)
         }
         let placeholder = RestingCommentsPlaceholderView(
-            model: model, imagePipeline: imagePipeline, safeAreaTop: view.safeAreaInsets.top
+            model: model, imagePipeline: imagePipeline, safeAreaTop: view.safeAreaInsets.top,
+            // What the warm already holds flies in as real rows (#2002).
+            heldComments: viewModel.heldTopComments(for: id)
         )
         cell.installRestingPlaceholder(placeholder)
         deferredResting = (id, cell, placeholder)
@@ -5620,6 +5625,9 @@ final class SnapFeedViewController: UIViewController {
         sheet.galleryPost = galleryPost
         // Inside a navigation controller, for the toolbar its actions live in.
         present(sheet.wrappedInSheet(), animated: true)
+        // Its posts open full screen: their first comments are warmed, in
+        // the sheet's order, and dropped from the queue when it goes (#2002).
+        postOpenWarm?.warmLater(content.tiles.map(\.postID), owner: sheet)
         #if DEBUG
         debugPresentedSoundSheet = sheet
         #endif
@@ -7689,6 +7697,12 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             chrome.setMediaPageCount(1, current: 0, clipPages: [0])
         }
         chrome.updateCommentStreams(viewModel.commentStreams(for: model.id))
+        // ⚠️ AND THE PILL SHOWS ITS FIRST CUE (#2002): a replica's zone used
+        // to stay down, never activated, and the pill faded in after the
+        // landing. Active, it presents the warmed first cue INSTANTLY, with
+        // its count bubble, as the page under it does; the page then keeps
+        // it at the landing (`SnapSubtitleView.replayEntrance`).
+        chrome.setSubtitlesActive(true)
         // And the sound bubble, so it flies in with the page rather than
         // appearing at the landing (#683).
         chrome.setSoundFace(soundFace(for: model))

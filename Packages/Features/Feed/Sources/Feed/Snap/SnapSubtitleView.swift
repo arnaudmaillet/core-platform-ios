@@ -82,6 +82,10 @@ final class SnapSubtitleView: UIView {
     /// before or after it, so both paths funnel into `startIfNeeded`.
     private var isActive = false
     private var isCycling = false
+    /// Whether the running cycle began INSTANTLY: the page owned its cues
+    /// when it came on screen, which is when the flight's replica showed the
+    /// same first cue (#2002).
+    private var cycleStartedInstantly = false
     /// Invalidates stale CA completions across stops — completions fire even
     /// for removed animations, and a stale one must not advance a cycle a
     /// newer owner already reset.
@@ -294,7 +298,8 @@ final class SnapSubtitleView: UIView {
     /// unloaded stream) hides it — the leading slot now carries the author
     /// avatar, and the badge is engagement metadata riding along on top.
     /// Rides the same update path as the cues (`updateCommentStreams`, never
-    /// `configure`), so the flight replica's badge stays empty and invisible.
+    /// `configure`), so the flight replica's badge shows what the page's
+    /// does (#2002).
     func setCommentCount(_ count: Int) {
         countLabel.text = count > 0 ? Self.countText(count) : nil
         countBadge.isHidden = countLabel.text == nil
@@ -319,10 +324,16 @@ final class SnapSubtitleView: UIView {
 
     /// A flight has landed on this page: the pill it set under a hidden
     /// chrome enters now, with its lead-in and fade, on the cue it was
-    /// showing — the caption, the rail and the bar were in the flight's
-    /// replica and simply stop being covered; the pill was not.
+    /// showing.
+    ///
+    /// ⚠️ NOT WHEN THE REPLICA CARRIED IT (#2002): a page that owned its cues
+    /// when it came on screen read them from the same warm as the flight's
+    /// replica, which showed the first one from its first frame. The pill
+    /// is already there, the same cue, so it stays: an entrance here would
+    /// be a fade-out-and-in of what the flight just showed. Only cues that
+    /// landed during the flight (a cold open) enter now.
     func replayEntrance() {
-        guard isActive, !cues.isEmpty else { return }
+        guard isActive, !cues.isEmpty, !cycleStartedInstantly else { return }
         stopCycle()
         nextIndex = (nextIndex + cues.count - 1) % cues.count
         startIfNeeded(fadingIn: true)
@@ -351,6 +362,7 @@ final class SnapSubtitleView: UIView {
     private func startIfNeeded(fadingIn: Bool) {
         guard isActive, !cues.isEmpty, !isCycling else { return }
         isCycling = true
+        cycleStartedInstantly = !fadingIn
         presentNextCue(fadingIn: fadingIn)
     }
 

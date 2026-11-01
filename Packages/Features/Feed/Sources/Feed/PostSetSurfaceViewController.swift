@@ -45,6 +45,11 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     var viewController: UIViewController { self }
 
     private let page: ForYouGridPage
+    /// The page's warm of its visible posts' first comments (#2002).
+    var postOpenWarm: PostOpenWarm? {
+        get { page.postOpenWarm }
+        set { page.postOpenWarm = newValue }
+    }
     private let style: PostSetSurfaceStyle
     private let hydrate: ([PostID]) async -> [GalleryPost]
 

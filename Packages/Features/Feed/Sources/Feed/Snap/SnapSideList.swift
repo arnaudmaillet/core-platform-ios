@@ -406,6 +406,9 @@ final class SnapSideListController: NSObject, SwipePanel {
             loadTask = nil
             loadedAnchor = anchor
             listView.show(entries)
+            // Its posts' first comments, in its order, for the post a tap
+            // shows (#2002); dropped from the queue when the list goes.
+            host?.postOpenWarm?.warmLater(entries.map(\.post.id), owner: listView)
             listView.autoplay?.mirror(host?.activePostID)
             listView.outline(anchor)
             // Settled open before the list came: it drives the card now.

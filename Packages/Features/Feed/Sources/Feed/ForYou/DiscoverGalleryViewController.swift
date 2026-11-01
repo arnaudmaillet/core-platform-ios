@@ -55,6 +55,11 @@ import UIKit
 @MainActor
 final class DiscoverGalleryViewController: UIViewController {
     private let page: ForYouGridPage
+    /// The page's warm of its visible posts' first comments (#2002).
+    var postOpenWarm: PostOpenWarm? {
+        get { page.postOpenWarm }
+        set { page.postOpenWarm = newValue }
+    }
     /// `[points][search]`, held for the screen's life — see `PushedScreenHeader`.
     private let header: PushedScreenHeader
 
