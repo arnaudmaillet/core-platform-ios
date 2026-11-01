@@ -394,14 +394,13 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // Gated on the same answer the destination was given, so a page that
         // stood its playback down is never asked for a player it deliberately
         // does not have.
-        let arrivingMedia: ZoomLiveMediaRetry? =
-            if !source.zoomFlightCarriesLivePlayer, let destination {
-                ZoomLiveMediaRetry.arm(
-                    card: flight.mediaCard, pageSize: flight.mediaFrame.size, mirroring: destination
-                )
-            } else {
-                nil
-            }
+        if !source.zoomFlightCarriesLivePlayer, let destination {
+            ZoomLiveMediaRetry.arm(
+                card: flight.mediaCard, pageSize: flight.mediaFrame.size, mirroring: destination,
+                // Already riding the flight (#2033): the retry only fills it.
+                posed: flight.reservedLiveMediaSurface
+            )
+        }
 
         #if DEBUG
         Self.debugTrackFlightGeometry(card: flight.mediaCard)
@@ -416,18 +415,13 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             initialVelocity: CGVector(dx: 0, dy: ZoomFlight.springVelocity)
         )
         let animator = UIViewPropertyAnimator(duration: duration, timingParameters: spring)
-        // ⚠️ THE LATE PICTURE JOINS THIS ANIMATION rather than chasing it. The
-        // page's player arrives mid-flight, after the pose block below has run,
-        // and a display link posing it from the presentation is a frame behind
-        // by construction — measured at -47.6% of the card's width at the
-        // fastest part of a present. Adding its landing pose here puts it on
-        // the card's own curve, so it can be SEEN to arrive in the window
-        // instead of appearing on the settled page.
-        arrivingMedia?.joinFlight = { [weak animator] work in
-            guard let animator, animator.state != .stopped else { return false }
-            animator.addAnimations(work)
-            return true
-        }
+        // ⚠️ THE LATE PICTURE IS NOT ADDED TO THIS ANIMATION (#2033). An
+        // animation added to a running property animator starts the curve
+        // again, from now and from rest, over the time left: the picture
+        // lagged its window from its adoption to the landing, smaller and
+        // pinned to the window's top-left corner — filmed on the device. The
+        // surface it arrives on is posed by the block below from the start
+        // (`ZoomFlight.reservedLiveMediaSurface`); only its contents are late.
         #if DEBUG
         ZoomGeometrySampler.shared.start(card: flight.mediaCard, label: "present")
         animator.addCompletion { _ in
