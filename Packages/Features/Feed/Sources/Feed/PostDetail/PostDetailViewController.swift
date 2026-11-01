@@ -468,34 +468,27 @@ final class PostDetailViewController: UIViewController {
             },
         ]
 
-        guard let profileSwitcher else { return }
-        Task { [weak self] in
-            await profileSwitcher.reload()
-            guard let self else { return }
-            composeBar.setProfileMenu(profileSwitcher.makeMenu(
-                // Adding a profile is the Profile feature's flow and this
-                // composer has no route to it, so the row is omitted rather
-                // than shown inert.
-                includesAddProfile: false,
-                // The switch itself lands through the notification above;
-                // rebuilding here only re-marks which row is active, so the
-                // menu is correct the NEXT time it opens.
-                onSwitch: { [weak self] in self?.refreshProfileMenu() },
-                onAddProfile: {}
-            ))
-        }
+        refreshProfileMenu()
     }
 
+    /// Reloads the switcher's profiles and counts, and arms the avatar to
+    /// open the app's one switcher (#2034) — switch-only: adding a profile is
+    /// the Profile feature's flow and this composer has no route to it.
     private func refreshProfileMenu() {
         guard let profileSwitcher else { return }
         Task { [weak self] in
             await profileSwitcher.reload()
             guard let self else { return }
-            composeBar.setProfileMenu(profileSwitcher.makeMenu(
-                includesAddProfile: false,
-                onSwitch: { [weak self] in self?.refreshProfileMenu() },
-                onAddProfile: {}
-            ))
+            composeBar.setProfileSwitch { [weak self] source in
+                guard let self else { return }
+                profileSwitcher.present(
+                    from: .view(source), over: self, includesAddProfile: false,
+                    // The switch itself lands through the notification above;
+                    // the reload here re-marks the active row for next time.
+                    onSwitch: { [weak self] in self?.refreshProfileMenu() },
+                    onAddProfile: {}
+                )
+            }
         }
     }
 

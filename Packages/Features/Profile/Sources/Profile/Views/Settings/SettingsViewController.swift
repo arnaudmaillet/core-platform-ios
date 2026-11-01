@@ -141,7 +141,9 @@ final class SettingsViewController: UIViewController {
             cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
         }
         let switchRegistration = UICollectionView.CellRegistration<SettingsMenuButtonCell, Item> { [weak self] cell, _, _ in
-            cell.configure(title: "Switch Profile", menu: self?.makeSwitcherMenu())
+            cell.configure(title: "Switch Profile", enabled: self?.switcher != nil) { [weak self] source in
+                self?.presentSwitcher(from: source)
+            }
         }
         let logOutRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, _ in
             var content = UIListContentConfiguration.cell()
@@ -295,9 +297,10 @@ final class SettingsViewController: UIViewController {
         loadProfileScope()
     }
 
-    private func makeSwitcherMenu() -> UIMenu? {
-        // Switch-only: creating a profile belongs to the profile screen.
-        switcher?.makeMenu(includesAddProfile: false, onSwitch: {}, onAddProfile: {})
+    /// The app's one switcher (#2034), from the row. Switch-only: creating a
+    /// profile belongs to the profile screen.
+    private func presentSwitcher(from source: UIView) {
+        switcher?.present(from: .view(source), over: self, includesAddProfile: false, onSwitch: {}, onAddProfile: {})
     }
 
     // MARK: - Actions
@@ -333,7 +336,7 @@ final class SettingsViewController: UIViewController {
 
 extension SettingsViewController: UICollectionViewDelegate {
     /// ⚠️ The Switch Profile row must not highlight. A highlightable cell
-    /// claims the touch for selection and its button's menu never opens.
+    /// claims the touch for selection and its button never sees the tap.
     /// Low Power Mode neither: its switch is the whole row.
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         let item = dataSource.itemIdentifier(for: indexPath)
@@ -358,18 +361,20 @@ extension SettingsViewController: UICollectionViewDelegate {
 
 // MARK: - Menu button cell
 
-/// A list row whose whole surface is a `UIButton` showing a menu on tap.
+/// A list row whose whole surface is a `UIButton` that opens the switcher.
 ///
 /// The button fills the content view rather than riding as an accessory: an
-/// accessory button gets no touches unless wrapped in a sized host, and a
-/// menu needs the touch to reach the button itself.
+/// accessory button gets no touches unless wrapped in a sized host.
 private final class SettingsMenuButtonCell: UICollectionViewListCell {
     private let button = UIButton(type: .system)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        button.showsMenuAsPrimaryAction = true
         button.contentHorizontalAlignment = .leading
+        button.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            self.onTap?(self.button)
+        }, for: .primaryActionTriggered)
         button.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(button)
         let margins = contentView.layoutMarginsGuide
@@ -385,7 +390,10 @@ private final class SettingsMenuButtonCell: UICollectionViewListCell {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(title: String, menu: UIMenu?) {
+    private var onTap: ((UIView) -> Void)?
+
+    func configure(title: String, enabled: Bool, onTap: @escaping (UIView) -> Void) {
+        self.onTap = onTap
         var configuration = UIButton.Configuration.plain()
         configuration.title = title
         configuration.contentInsets = .zero
@@ -395,8 +403,7 @@ private final class SettingsMenuButtonCell: UICollectionViewListCell {
             return attributes
         }
         button.configuration = configuration
-        button.menu = menu
-        button.isEnabled = menu != nil
+        button.isEnabled = enabled
     }
 }
 

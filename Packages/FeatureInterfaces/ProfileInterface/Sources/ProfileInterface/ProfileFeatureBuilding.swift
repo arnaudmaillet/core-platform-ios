@@ -100,7 +100,7 @@ public protocol ProfileFeatureBuilding {
     /// The reusable profile switcher. The shell holds one for the Profile tab's
     /// long-press menu; the profile header builds its own. Nil when
     /// multi-profile switching isn't available. Call `reload()` up front so
-    /// `makeMenu()` is synchronous when the menu is requested.
+    /// the switcher opens complete on its first frame.
     func makeProfileSwitcher() -> ProfileSwitcherPresenting?
 
     /// Settings for a guest (guest mode): only what works without an account
@@ -142,27 +142,64 @@ public extension ProfileFeatureBuilding {
     }
 }
 
-/// Vends the switcher `UIMenu`. `reload()` pre-fetches + pre-formats the account
-/// profiles so `makeMenu` is fully synchronous (its `UIAction`s render title +
-/// subtitle together, no deferred load). Built and held by the profile header,
-/// which is the one surface that offers switching now that the map avatar is gone.
+/// Where the switcher opens from (#2034): a view, or a bar item (which stays
+/// a native item — the bar contract, #1679 — and anchors the switcher to
+/// itself).
+@MainActor
+public enum ProfileSwitcherSource {
+    case view(UIView)
+    case barItem(UIBarButtonItem)
+}
+
+/// A switcher opened under a finger that is still down (the Profile tab's
+/// hold): the host forwards the finger, and its release picks the row under
+/// it, as a system menu's hold-slide-release does.
+@MainActor
+public protocol ProfileSwitcherTracking: AnyObject {
+    /// The finger moved, in the window's coordinates.
+    func move(to point: CGPoint)
+    /// The finger lifted: picks the row under it, or leaves the switcher open
+    /// when it lifted on none.
+    func end()
+}
+
+/// THE ONE PROFILE SWITCHER (#2034), the same on every surface — the
+/// Profile tab's hold, the profile screen's toolbar, Settings' "Switch
+/// Profile", the comment composer's avatar. Drawn by the app rather than a
+/// `UIMenu`, because a menu row cannot carry the per-profile count on its
+/// trailing edge; each surface asks this contract and none builds rows of
+/// its own.
+///
+/// `reload()` pre-fetches and pre-formats the account's profiles, their
+/// avatars and their unread counts, so the switcher opens complete on its
+/// first frame.
 @MainActor
 public protocol ProfileSwitcherPresenting: AnyObject {
-    /// Pre-fetch + pre-format the account's profiles.
+    /// Pre-fetch + pre-format the account's profiles, avatars and counts.
     func reload() async
-    /// A synchronous switcher menu built from the last `reload`.
+    /// Opens the switcher from `source`, over `presenter`'s screen.
     ///
-    /// `includesAddProfile` false builds a SWITCH-ONLY menu. Surfaces that
-    /// cannot reach the add-profile flow ask for that rather than passing an
-    /// empty handler — the row is appended unconditionally otherwise, and a
-    /// visible row that does nothing is worse than an absent one. The
-    /// comments composer's avatar is the case: it switches who is speaking,
-    /// and creating an identity belongs to the profile screen.
-    func makeMenu(
+    /// `includesAddProfile` false opens it SWITCH-ONLY. Surfaces that cannot
+    /// reach the add-profile flow ask for that rather than passing an empty
+    /// handler — a visible row that does nothing is worse than an absent one.
+    /// The comments composer's avatar and Settings are the cases.
+    func present(
+        from source: ProfileSwitcherSource,
+        over presenter: UIViewController,
         includesAddProfile: Bool,
         onSwitch: @escaping () -> Void,
         onAddProfile: @escaping () -> Void
-    ) -> UIMenu
+    )
+    /// Opens the switcher under a finger that is still down, and hands back
+    /// what the host forwards the finger to. Nil when there is nothing to
+    /// switch to.
+    func beginTracking(
+        from source: UIView,
+        over presenter: UIViewController,
+        includesAddProfile: Bool,
+        onSwitch: @escaping () -> Void,
+        onAddProfile: @escaping () -> Void
+    ) -> (any ProfileSwitcherTracking)?
     /// Each profile's unread notifications as the last `reload` (or
     /// `reloadUnreadCounts`) read them (#2034); a profile whose count could
     /// not be read is absent.
@@ -176,13 +213,6 @@ public extension ProfileSwitcherPresenting {
     /// Whether any profile of the account, the active one included, has an
     /// unread notification: the Profile tab's dot (#2034).
     var hasUnreadNotifications: Bool { unreadCounts.values.contains { $0 > 0 } }
-
-    /// The full menu, add-profile row included — what the profile header
-    /// wants, and the shape this protocol had before switch-only surfaces
-    /// existed.
-    func makeMenu(onSwitch: @escaping () -> Void, onAddProfile: @escaping () -> Void) -> UIMenu {
-        makeMenu(includesAddProfile: true, onSwitch: onSwitch, onAddProfile: onAddProfile)
-    }
 }
 
 public extension Notification.Name {

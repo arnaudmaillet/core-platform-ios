@@ -4,15 +4,14 @@ import MediaCore
 import ProfileInterface
 import UIKit
 
-/// The reusable profile switcher, shared by the profile header's switcher bar
-/// button and the map avatar's long-press context menu — both build the exact
-/// same `UIMenu`.
+/// THE profile switcher (#2034), the same component on every surface — the
+/// Profile tab's hold, the profile screen's toolbar, Settings, the comment
+/// composer (`ProfileSwitcherMenuController`).
 ///
-/// `reload` (an async fetch) pre-formats every row into ready strings AND
-/// pre-decodes its rounded avatar `UIImage`. `makeMenu` is then **fully
-/// synchronous**: each `UIAction(title:subtitle:image:)` is assembled complete
-/// in one pass — no deferred element, no async, no image work at build time —
-/// so title, subtitle, and avatar all render together in the menu's first frame.
+/// `reload` (an async fetch) pre-formats every row into ready strings,
+/// pre-decodes its rounded avatar and reads its unread count, so the
+/// switcher opens complete on its first frame — no image work, no fetch at
+/// opening time.
 @MainActor
 final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
     private let switching: any ProfileSwitching
@@ -42,7 +41,7 @@ final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
     }
 
     /// Fetches the account's profiles and pre-builds every row (strings + rounded
-    /// avatar), so subsequent `makeMenu` calls are synchronous.
+    /// avatar, unread count), so the switcher opens complete.
     func reload() async {
         let profiles = (try? await switching.accountProfiles()) ?? []
         let activeID = await switching.activeProfileID()
@@ -85,38 +84,83 @@ final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
         }
     }
 
-    /// A synchronous switcher `UIMenu` from the pre-built rows, in the Telegram
-    /// two-section shape: inactive profiles up top, then an inline section with
-    /// the active profile and "Add Profile". Just avatar + display name, all in
-    /// standard `.label` — the section split marks the active one, no checkmark
-    /// or accent color.
-    func makeMenu(
+    /// The switcher's sections from the last `reload`, in the ONE order every
+    /// surface shows (#2034): the other profiles, then the active one and
+    /// "Add Profile" — never flipped for a source at the bottom.
+    func sections(includesAddProfile: Bool) -> [[ProfileSwitcherItem]] {
+        func item(_ row: Row) -> ProfileSwitcherItem {
+            ProfileSwitcherItem(
+                kind: .profile(row.id, isActive: row.isActive), title: row.title,
+                image: row.image, count: unreadCounts[row.id]
+            )
+        }
+        var active = rows.filter(\.isActive).map(item)
+        if includesAddProfile {
+            active.append(ProfileSwitcherItem(kind: .addProfile, title: "Add Profile", image: nil, count: nil))
+        }
+        return [rows.filter { !$0.isActive }.map(item), active]
+    }
+
+    func present(
+        from source: ProfileSwitcherSource,
+        over presenter: UIViewController,
         includesAddProfile: Bool,
         onSwitch: @escaping () -> Void,
         onAddProfile: @escaping () -> Void
-    ) -> UIMenu {
-        func action(for row: Row) -> UIAction {
-            UIAction(title: row.title, image: row.image) { [weak self] _ in
-                self?.commitSwitch(to: row.id, then: onSwitch)
+    ) {
+        _ = open(from: source, over: presenter, includesAddProfile: includesAddProfile,
+                 onSwitch: onSwitch, onAddProfile: onAddProfile)
+    }
+
+    func beginTracking(
+        from source: UIView,
+        over presenter: UIViewController,
+        includesAddProfile: Bool,
+        onSwitch: @escaping () -> Void,
+        onAddProfile: @escaping () -> Void
+    ) -> (any ProfileSwitcherTracking)? {
+        let menu = open(from: .view(source), over: presenter, includesAddProfile: includesAddProfile,
+                        onSwitch: onSwitch, onAddProfile: onAddProfile)
+        // The hold's own beat, as a system menu lifting under the finger.
+        if menu != nil { Haptics.play(.held) }
+        return menu
+    }
+
+    private func open(
+        from source: ProfileSwitcherSource,
+        over presenter: UIViewController,
+        includesAddProfile: Bool,
+        onSwitch: @escaping () -> Void,
+        onAddProfile: @escaping () -> Void
+    ) -> ProfileSwitcherMenuController? {
+        let sections = sections(includesAddProfile: includesAddProfile)
+        guard sections.contains(where: { !$0.isEmpty }), presenter.presentedViewController == nil else { return nil }
+        let menu = ProfileSwitcherMenuController(
+            sections: sections,
+            sourceRect: { [weak presenter] in Self.frame(of: source, in: presenter?.view.window) },
+            onPick: { [weak self] item in
+                switch item.kind {
+                case .profile(let id, let isActive):
+                    guard !isActive else { return }
+                    self?.commitSwitch(to: id, then: onSwitch)
+                case .addProfile:
+                    onAddProfile()
+                }
             }
+        )
+        presenter.present(menu, animated: false)
+        return menu
+    }
+
+    /// Where `source` stands, in window coordinates.
+    private static func frame(of source: ProfileSwitcherSource, in window: UIWindow?) -> CGRect? {
+        switch source {
+        case .view(let view):
+            return view.window.map { view.convert(view.bounds, to: $0) }
+        case .barItem(let item):
+            guard let window else { return nil }
+            return item.frame(in: window)
         }
-
-        // Section 1: the other profiles you can switch to.
-        let inactive = rows.filter { !$0.isActive }.map(action(for:))
-        let inactiveSection = UIMenu(title: "", options: .displayInline, children: inactive)
-
-        // Section 2: the active profile, then Add Profile — unless the caller
-        // is a switch-only surface with nowhere to send that row.
-        var activeAndActions: [UIMenuElement] = rows.filter(\.isActive).map(action(for:))
-        if includesAddProfile {
-            activeAndActions.append(UIAction(
-                title: "Add Profile",
-                image: UIImage(systemName: "person.badge.plus")
-            ) { _ in onAddProfile() })
-        }
-        let activeSection = UIMenu(title: "", options: .displayInline, children: activeAndActions)
-
-        return UIMenu(title: "", children: [inactiveSection, activeSection])
     }
 
     /// Switches the active profile, broadcasts the change (so identity chrome

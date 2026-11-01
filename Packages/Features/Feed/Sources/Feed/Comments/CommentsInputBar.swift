@@ -657,12 +657,13 @@ final class CommentsInputBar: UIView {
         // on a direct subview. Added after the face, so it lies over it.
         avatarButton.pin(to: avatarBubble.contentView)
         avatarButton.accessibilityLabel = "Switch profile"
-        // A menu, not an action: tap opens it (`showsMenuAsPrimaryAction`),
-        // and long press opens the same one — the idiom the toolbar's ⋯
-        // already uses on this screen.
-        avatarButton.showsMenuAsPrimaryAction = true
-        // Nothing to show until a switcher hands one over; without this the
-        // button would swallow taps and present an empty menu.
+        // A tap opens the app's one switcher (#2034), anchored to the face.
+        avatarButton.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            self.onProfileSwitch?(self.avatarButton)
+        }, for: .primaryActionTriggered)
+        // Nothing to open until a host wires a switcher; without this the
+        // button would swallow taps.
         avatarButton.isEnabled = false
 
         addSubview(avatarBubble)
@@ -1256,14 +1257,15 @@ final class CommentsInputBar: UIView {
         avatarView.setPicture(identity?.avatarURL, pipeline: imagePipeline)
     }
 
-    /// Installs the profile switcher on the avatar bubble. Nil disables it —
-    /// an account with nothing to switch to must not offer a menu, and a
-    /// host that wires no switcher at all (the pushed comments screen) gets
-    /// a plain, inert face.
-    func setProfileMenu(_ menu: UIMenu?) {
-        avatarButton.menu = menu
-        avatarButton.isEnabled = menu != nil
+    /// What a tap on the avatar bubble opens: the profile switcher (#2034),
+    /// handed the face to anchor to. Nil disables it — an account with
+    /// nothing to switch to must not offer one, and a host that wires no
+    /// switcher at all (the pushed comments screen) gets a plain, inert face.
+    func setProfileSwitch(_ open: ((UIView) -> Void)?) {
+        onProfileSwitch = open
+        avatarButton.isEnabled = open != nil
     }
+    private var onProfileSwitch: ((UIView) -> Void)?
 
     /// The composer's initials, by the app's one rule (#811): first letters
     /// of the first two words. The placeholder for an unknown viewer is the

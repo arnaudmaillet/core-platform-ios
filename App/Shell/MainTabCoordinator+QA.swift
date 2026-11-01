@@ -25,6 +25,9 @@ extension MainTabCoordinator {
         AccessoryCollapseAudit.installIfRequested(tabBarController: tabBarController)
         PillDragAudit.installIfRequested(tabBarController: tabBarController)
         DockTrace.installIfRequested(tabBarController: tabBarController)
+        if ProcessInfo.processInfo.arguments.contains("-profile-switcher-hold") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.debugHoldProfileTab() }
+        }
 
         // Dev convenience: `-select-tab N` opens directly on a tab for testing,
         // in bar order (0 = Explore … 3 = Profile; the "+" is not a tab and has
