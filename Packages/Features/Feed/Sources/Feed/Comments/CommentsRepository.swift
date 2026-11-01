@@ -155,6 +155,11 @@ public protocol CommentsProviding: Sendable {
     /// A page of top-level comments, with their replies: the first one when
     /// `pageToken` is nil, otherwise the one that token starts (#589).
     func loadCommentsPage(for postID: PostID, after pageToken: String?) async throws -> CommentPage
+    /// A page of top-level comments in `order` (#2007): `.recent` is
+    /// `loadCommentsPage(for:after:)`; the ranked order is the server's
+    /// POPULARITY (#977) — most liked first, ties to the newest. A ranked
+    /// page is never the warmed first page: that one is Recent's.
+    func loadCommentsPage(for postID: PostID, after pageToken: String?, order: CommentSortOrder) async throws -> CommentPage
     /// A page of one thread's replies, most popular first (#637): the first
     /// when `pageToken` is nil, otherwise the one that token starts. The
     /// page's `nextPageToken` is where the thread continues.
@@ -215,6 +220,10 @@ public extension CommentsProviding {
     func loadCommentsPage(for postID: PostID, after pageToken: String?) async throws -> CommentPage {
         guard pageToken == nil else { return CommentPage(entries: [], nextPageToken: nil) }
         return CommentPage(entries: try await loadComments(for: postID), nextPageToken: nil)
+    }
+    /// Providers with no ranking answer every order with Recent's pages.
+    func loadCommentsPage(for postID: PostID, after pageToken: String?, order: CommentSortOrder) async throws -> CommentPage {
+        try await loadCommentsPage(for: postID, after: pageToken)
     }
     /// Providers that load every reply with its page have no more to give.
     func loadReplies(for postID: PostID, to parentID: String, after pageToken: String?) async throws -> CommentPage {
@@ -380,15 +389,23 @@ public actor CommentsRepository: CommentsProviding {
     /// after reading it (blocks, hidden words, held comments), so a page can
     /// come back short, or empty, with more behind it.
     public func loadCommentsPage(for postID: PostID, after pageToken: String?) async throws -> CommentPage {
+        try await loadCommentsPage(for: postID, after: pageToken, order: .recent)
+    }
+
+    public func loadCommentsPage(for postID: PostID, after pageToken: String?, order: CommentSortOrder) async throws -> CommentPage {
+        let ranked = order != .recent
         // ⚠️ ONE PAGINATION FOR THE BAND AND THE PANEL (#2005): a page past
         // the first that either already loaded is not asked for again.
-        if let pageToken, let kept = laterPages[Self.laterPageKey(postID, pageToken)] { return kept }
+        if let pageToken, let kept = laterPages[Self.laterPageKey(postID, pageToken, ranked: ranked)] { return kept }
         // Whose page this is, asked before the fetch (#893).
         let writer = topPages.viewer
         var request = Comment_V1_ListTopLevelRequest()
         request.postID = postID.rawValue
         request.limit = pageSize
         request.pageToken = pageToken ?? ""
+        // The ranked stream (#2007, #977); a token belongs to the order that
+        // minted it.
+        if ranked { request.sort = .popularity }
         let response = await commentClient.listTopLevel(request: request, headers: [:])
         let views: [Comment_V1_CommentView]
         let nextToken: String
@@ -439,21 +456,24 @@ public actor CommentsRepository: CommentsProviding {
         // Every first-page load fills the cache, not just an explicit
         // prefetch: a page opened once and returned to should render
         // instantly the second time for the same reason it should the first.
-        if pageToken == nil { topPages.set(entries, for: postID, persistingAs: writer) }
+        // Recent's alone: the warmed first page is what a post opens on.
+        if pageToken == nil, !ranked { topPages.set(entries, for: postID, persistingAs: writer) }
         let page = CommentPage(
             entries: entries, nextPageToken: nextToken.isEmpty ? nil : nextToken, replyTokens: replyTokens
         )
         // Kept for this viewer's session, for whichever surface asks next —
         // and only while the viewer that asked is still the one signed in.
-        if let pageToken, writer == topPages.viewer { laterPages[Self.laterPageKey(postID, pageToken)] = page }
+        if let pageToken, writer == topPages.viewer {
+            laterPages[Self.laterPageKey(postID, pageToken, ranked: ranked)] = page
+        }
         return page
     }
 
     /// Pages past the first, by post and token, for this viewer (#2005).
     private var laterPages: [String: CommentPage] = [:]
 
-    private static func laterPageKey(_ postID: PostID, _ token: String) -> String {
-        "\(postID.rawValue)|\(token)"
+    private static func laterPageKey(_ postID: PostID, _ token: String, ranked: Bool) -> String {
+        "\(ranked ? "popular" : "recent")|\(postID.rawValue)|\(token)"
     }
 
     /// ⚠️ THE ORDER IS READ AGAIN PER PAGE (comment.v1): a reply whose likes

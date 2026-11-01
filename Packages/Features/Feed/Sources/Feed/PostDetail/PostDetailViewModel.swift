@@ -68,6 +68,10 @@ public final class PostDetailViewModel {
     public var onPhaseChange: ((Phase) -> Void)?
     public var onEngagementChange: ((EngagementState) -> Void)?
     public var onCommentsChange: ((CommentsState) -> Void)?
+    /// The Popular tab's stream (#2007): the comments in the server's
+    /// popularity order, with the viewer's own leading. `.loading` until its
+    /// first page answers.
+    public var onPopularCommentsChange: ((CommentsState) -> Void)?
     /// True while a comment is being posted (disables the send control).
     public var onComposingChange: ((Bool) -> Void)?
     /// Who is composing — the bar's leading avatar. Fires once per load,
@@ -194,6 +198,8 @@ public final class PostDetailViewModel {
     /// The stream's sort order — Recent is the repository's chronology,
     /// Trending reorders THREADS by engagement (see `sortedForDisplay`).
     private var commentSort: CommentSortOrder = .recent
+    /// The Popular tab's stream (#2007), beside Recent's (`comments`).
+    private let popular = RankedCommentsStream()
     /// The comments' likes, from the server (#637): point stakes like a
     /// post's, read with engagement's `BatchGetLikes` as comments arrive and
     /// moved optimistically by the viewer's taps. Living in the VIEW MODEL,
@@ -457,6 +463,8 @@ public final class PostDetailViewModel {
                 // Only a row that is NEW arrives: a replay answered with a
                 // comment already on screen (#795) is not one.
                 if self.insertSubmitted(entry) { self.onCommentPosted?(entry.id) }
+                // At Popular's top too, as the viewer's own (#2007).
+                self.popular.addOwn(entry)
                 self.emitComments()
                 self.setComposing(false)
             } catch {
@@ -523,6 +531,7 @@ public final class PostDetailViewModel {
         phase = .content(PostDetailDisplayModel(entry: entry, now: now()))
         comments = []
         resetPaging()
+        popular.reset()
         emitComments()
         onEngagementChange?(engagementState)
         onPublished?(entry)
@@ -923,6 +932,39 @@ public final class PostDetailViewModel {
         }
     }
 
+    // MARK: - Popular (#2007)
+
+    private func loadPopularIfNeeded() {
+        guard let commentsProvider, let postID, !popular.hasAnswered else { return }
+        if popular.onChange == nil { popular.onChange = { [weak self] in self?.emitPopular() } }
+        popular.loadFirst(postID: postID, from: commentsProvider)
+    }
+
+    /// The viewer neared the end of the Popular tab: its next page.
+    public func loadMorePopularComments() {
+        guard let commentsProvider, let postID else { return }
+        popular.loadMore(postID: postID, from: commentsProvider)
+    }
+
+    /// The Popular tab's rows, with the same likes, review state and own
+    /// threads as Recent's: one entity per comment.
+    private func emitPopular() {
+        guard popular.hasAnswered else {
+            if popular.hasFailed { onPopularCommentsChange?(.failed(message: Self.commentsFailureMessage)) }
+            return
+        }
+        let now = now()
+        let viewer = shownIdentity?.profileID
+        let canReview = isViewerPostOwner && commentsProvider is any HeldCommentReviewing
+        onPopularCommentsChange?(.loaded(popular.shown.map {
+            CommentDisplayModel(
+                entry: $0, now: now, canReview: canReview && !reviewing.contains($0.id),
+                isOwnThread: Self.isOwnThread($0, viewer: viewer), likes: commentLikes[$0.id]
+            )
+        }))
+        askForCommentLikes()
+    }
+
     private func emitComments() {
         let now = now()
         let viewer = shownIdentity?.profileID
@@ -938,6 +980,13 @@ public final class PostDetailViewModel {
             )
         }))
         askForCommentLikes()
+        // A like, a review, a reply count: the same comment in Popular too.
+        if popular.hasAnswered { emitPopular() }
+        // ⚠️ POPULAR ONLY WHERE THERE IS A TAB FOR IT (#2007): past
+        // `CommentSortPolicy`'s threshold, as the selector is — right after
+        // Recent's first page reaches it, so it is there before the viewer
+        // can reach the tab. Below it, one Recent stream and no request.
+        if CommentSortPolicy.isAvailable(commentCount: comments.count) { loadPopularIfNeeded() }
     }
 
     /// The likes of the comments on screen that were never asked for (#637):
@@ -946,7 +995,7 @@ public final class PostDetailViewModel {
     /// the hearts bare, asked again with the next comments.
     private func askForCommentLikes() {
         guard let commentLiking else { return }
-        let ids = comments.map(\.id).filter { !commentLikesAsked.contains($0) }
+        let ids = (comments + popular.shown).map(\.id).filter { !commentLikesAsked.contains($0) }
         guard !ids.isEmpty else { return }
         commentLikesAsked.formUnion(ids)
         Task { [weak self] in
@@ -998,6 +1047,11 @@ public final class PostDetailViewModel {
                 self.comments = approve
                     ? self.comments.map { $0.id == commentID ? $0.released() : $0 }
                     : self.comments.filter { $0.id != commentID && $0.parentID != commentID }
+                self.popular.update { list in
+                    approve
+                        ? list.map { $0.id == commentID ? $0.released() : $0 }
+                        : list.filter { $0.id != commentID && $0.parentID != commentID }
+                }
                 self.commentsProvider?.seedTopComments(self.comments, for: postID)
                 self.emitComments()
                 // The server has the last word — another device may have
