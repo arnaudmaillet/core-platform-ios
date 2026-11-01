@@ -2518,6 +2518,9 @@ final class SnapFeedViewController: UIViewController {
             guard let self else { return }
             // The "+" comes back — and says why (#802): a mark that undoes
             // itself without a word reads as a glitch, or is missed entirely.
+            #if DEBUG
+            self.debugFollowFailureToastsShown += 1
+            #endif
             Feedback.failure(name.map { "Couldn't follow \($0)" } ?? "Couldn't follow", from: self)
         }
         // Turned on at the optimistic flip (#1885), not when the graph answers.
@@ -3872,6 +3875,11 @@ final class SnapFeedViewController: UIViewController {
     /// the live field so a test can see a warm that was CONSUMED — which is the
     /// half that proves the mount paid nothing.
     private(set) var debugPrewarmedRestingID: PostID?
+
+    /// Refused-follow toasts shown (#1979): their ARRIVAL, which a test
+    /// cannot miss, where the toast itself is gone after a few seconds — a
+    /// starved runner looked for it too late.
+    private(set) var debugFollowFailureToastsShown = 0
     #endif
 
     /// One at a time: the pager moves on and the page two ahead is not worth a

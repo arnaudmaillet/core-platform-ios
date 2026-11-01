@@ -16,6 +16,14 @@ struct EmoteBakeCostTests {
     /// looser than what is measured.
     @Test func mainThreadCostOfAColdBakeForTheRecord() async throws {
         var lines: [String] = []
+        // ⚠️ A WARM-UP BAKE FIRST, unmeasured (#1985). The first bake of the
+        // process paid its cold start on the main thread — one 583 ms turn on
+        // a CI runner, with the drawing itself off main at 36 ms a frame — and
+        // the bound judged the process's start, not the bake. A different
+        // emote, so each measured one is still cold in its own engine.
+        let warmUp = EmoteEngine(diskCache: nil)
+        warmUp.bakeDelay = .zero
+        _ = await warmUp.art(for: try #require(warmUp.catalog.emote(id: "noto:1f600")), pixelSide: 64)
         let idle = MainThreadBusyMeter()
         idle.start()
         try await Task.sleep(for: .milliseconds(500))
@@ -29,41 +37,69 @@ struct EmoteBakeCostTests {
         // calls busy is charged to the bake's wall time before judging it.
         let backgroundShare = idleReport.wallMS > 0 ? min(idleReport.busyMS / idleReport.wallMS, 1) : 0
         for id in ["noto:1f976", "noto:1f602", "noto:1f525"] {
-            let engine = EmoteEngine(diskCache: nil)
-            engine.bakeDelay = .zero
-            let emote = try #require(engine.catalog.emote(id: id))
-            let parks = EmoteBakeQueue.shared.parks
-            let commitsBefore = parks.commits
-            let holdsBefore = parks.holds
-            let meter = MainThreadBusyMeter()
-            meter.start()
-            let art = try #require(await engine.art(for: emote, pixelSide: 64))
-            // Work a bake leaves behind (a deferred commit) still counts.
-            try await Task.sleep(for: .milliseconds(300))
-            let report = meter.stop()
-            // ⚠️ THE MAIN THREAD'S HOLDS FOR THE BAKE'S COMMITS, counted apart
-            // (#1037). The meter books them as busy: a main thread that wakes
-            // while a bake commits waits in its `afterWaiting` gate, inside the
-            // turn the meter times. They are judged on their own bound (each
-            // under the cap) and taken out of the drawing budget.
-            let commits = parks.commits - commitsBefore
-            let holdCount = parks.holds.count - holdsBefore.count
-            let heldMS = (parks.holds.total - holdsBefore.total).milliseconds
-            #expect(heldMS <= Double(holdCount) * (EmoteMainPark.longestWait * 1000 + 50),
-                    "\(emote.glyph): \(holdCount) holds of the main thread took \(heldMS) ms, past their cap")
-            // Before the bake moved off the main thread the main thread was
-            // busy for MORE than the drawing (deferred redraws on top);
-            // after, for about 2% of it. A quarter is slack for a slow CI.
-            let background = backgroundShare * report.wallMS
-            #expect(report.busyMS - heldMS < engine.stats.lastBakeDrawingMS / 4 + 20 + background,
-                    "\(emote.glyph): \(report) held=\(Int(heldMS))ms background=\(Int(background))ms")
-            lines.append(String(
+            // ⚠️ ONE RETRY, with a fresh (cold) engine, when a sample is over
+            // its bound (#1985): a runner descheduled for one long turn the
+            // idle sample did not foresee fails once; a bake back on the main
+            // thread fails both.
+            var sample = try await measureColdBake(id, backgroundShare: backgroundShare)
+            if !sample.withinBound {
+                lines.append("\(sample.line) — over its bound, measured again")
+                sample = try await measureColdBake(id, backgroundShare: backgroundShare)
+            }
+            #expect(sample.holdsWithinCap, "\(sample.glyph): \(sample.holdsLine)")
+            #expect(sample.withinBound, "\(sample.glyph): \(sample.boundLine)")
+            lines.append(sample.line)
+        }
+        print("[emote-main-cost]\n" + lines.joined(separator: "\n"))
+    }
+
+    /// One cold bake of `id` in a fresh engine, measured on the main thread.
+    private struct Sample {
+        let glyph: String
+        let withinBound: Bool
+        let boundLine: String
+        let holdsWithinCap: Bool
+        let holdsLine: String
+        let line: String
+    }
+
+    private func measureColdBake(_ id: String, backgroundShare: Double) async throws -> Sample {
+        let engine = EmoteEngine(diskCache: nil)
+        engine.bakeDelay = .zero
+        let emote = try #require(engine.catalog.emote(id: id))
+        let parks = EmoteBakeQueue.shared.parks
+        let commitsBefore = parks.commits
+        let holdsBefore = parks.holds
+        let meter = MainThreadBusyMeter()
+        meter.start()
+        let art = try #require(await engine.art(for: emote, pixelSide: 64))
+        // Work a bake leaves behind (a deferred commit) still counts.
+        try await Task.sleep(for: .milliseconds(300))
+        let report = meter.stop()
+        // ⚠️ THE MAIN THREAD'S HOLDS FOR THE BAKE'S COMMITS, counted apart
+        // (#1037). The meter books them as busy: a main thread that wakes
+        // while a bake commits waits in its `afterWaiting` gate, inside the
+        // turn the meter times. They are judged on their own bound (each
+        // under the cap) and taken out of the drawing budget.
+        let commits = parks.commits - commitsBefore
+        let holdCount = parks.holds.count - holdsBefore.count
+        let heldMS = (parks.holds.total - holdsBefore.total).milliseconds
+        // Before the bake moved off the main thread the main thread was
+        // busy for MORE than the drawing (deferred redraws on top);
+        // after, for about 2% of it. A quarter is slack for a slow CI.
+        let background = backgroundShare * report.wallMS
+        return Sample(
+            glyph: emote.glyph,
+            withinBound: report.busyMS - heldMS < engine.stats.lastBakeDrawingMS / 4 + 20 + background,
+            boundLine: "\(report) held=\(Int(heldMS))ms background=\(Int(background))ms",
+            holdsWithinCap: heldMS <= Double(holdCount) * (EmoteMainPark.longestWait * 1000 + 50),
+            holdsLine: "\(holdCount) holds of the main thread took \(heldMS) ms, past their cap",
+            line: String(
                 format: "%@ frames=%d %@ mainPerFrame=%.1fms bakeDrawing=%.0fms (%.1fms/frame) commits=%d holds=%d held=%.2fms",
                 emote.glyph, art.frameCount, report.description, report.busyMS / Double(art.frameCount),
                 engine.stats.lastBakeDrawingMS, engine.stats.lastBakeDrawingMS / Double(art.frameCount),
                 commits, holdCount, heldMS
-            ))
-        }
-        print("[emote-main-cost]\n" + lines.joined(separator: "\n"))
+            )
+        )
     }
 }
