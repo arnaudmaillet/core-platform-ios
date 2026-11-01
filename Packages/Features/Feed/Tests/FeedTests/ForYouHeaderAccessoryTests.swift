@@ -39,16 +39,52 @@ struct ForYouHeaderAccessoryTests {
         return item
     }
 
-    /// For You is a tab root the shell's re-tap reaches (#1309), and a page
-    /// already at its top is left where it is.
-    @Test func forYouAnswersATabReTap() {
+    /// For You's re-tap (#1309), on the app's REAL stack (#2013): its root
+    /// is the Feed | Shots sector, not this screen, and the sector forwards
+    /// the re-tap to Feed when Feed is in front. The old test built a stack
+    /// with this screen as its root, a shape the app no longer has.
+    @Test func forYouAnswersATabReTapThroughTheSector() {
         let screen = screen()
-        screen.loadViewIfNeeded()
-        let stack = UINavigationController(rootViewController: screen)
+        let sector = ForYouSectorViewController(feed: screen, shots: SectorStubPage())
+        sector.loadViewIfNeeded()
+        sector.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        sector.view.layoutIfNeeded()
+        let stack = UINavigationController(rootViewController: sector)
         let target = TabReselect.target(tappedSelectedTab: true, stack: stack)
-        #expect(target === screen)
+        #expect(target === sector, "the shell's re-tap does not reach the sector")
+
+        sector.showPage(ForYouSectorViewController.feedIndex, animated: false)
+        screen.page.setVerticalOffset(600, animated: false)
         target?.scrollToTopForTabReselect()
-        #expect(screen.page.verticalOffset <= 0.5)
+        // Animated: give the scroll a few turns of the run loop.
+        for _ in 0..<200 where screen.page.verticalOffset >= 600 {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        #expect(screen.page.verticalOffset < 600, "Feed did not head for its top")
+    }
+
+    /// On Shots the re-tap changes nothing; Feed behind it stays where it is.
+    @Test func onShotsTheReTapDoesNothing() {
+        let screen = screen()
+        let sector = ForYouSectorViewController(feed: screen, shots: SectorStubPage())
+        sector.loadViewIfNeeded()
+        sector.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        sector.view.layoutIfNeeded()
+        sector.showPage(ForYouSectorViewController.shotsIndex, animated: false)
+        screen.page.setVerticalOffset(600, animated: false)
+        let before = screen.page.verticalOffset
+        sector.scrollToTopForTabReselect()
+        #expect(screen.page.verticalOffset == before, "a re-tap on Shots scrolled the Feed")
+        #expect(sector.activeIndex == ForYouSectorViewController.shotsIndex, "a re-tap on Shots changed the page")
+    }
+
+    /// The rule: only a settled Feed in front, the drawer closed.
+    @Test func onlyASettledFeedInFrontScrolls() {
+        typealias Sector = ForYouSectorViewController
+        #expect(Sector.reselectScrollsFeed(activeIndex: Sector.feedIndex, pagerMoving: false, drawerOpen: false))
+        #expect(!Sector.reselectScrollsFeed(activeIndex: Sector.shotsIndex, pagerMoving: false, drawerOpen: false))
+        #expect(!Sector.reselectScrollsFeed(activeIndex: Sector.feedIndex, pagerMoving: true, drawerOpen: false))
+        #expect(!Sector.reselectScrollsFeed(activeIndex: Sector.feedIndex, pagerMoving: false, drawerOpen: true))
     }
 
     /// With nothing injected the header is what it always was: one trailing
@@ -167,4 +203,15 @@ private final class StubHeaderProvider: ForYouProviding, @unchecked Sendable {
     func page(after token: String) async throws -> ForYouPage {
         ForYouPage(posts: [], nextPageToken: nil)
     }
+}
+
+/// A Shots page that does nothing: the re-tap tests are about the sector.
+@MainActor
+private final class SectorStubPage: UIViewController, ForYouSectorPage {
+    var sectorNavigationItem: UINavigationItem?
+    var sectorSelectorItem: UIBarButtonItem?
+    var ownNavigationItem: UINavigationItem { super.navigationItem }
+    func sectorPageDidChangeActivity(_ isActive: Bool) {}
+    func sectorSafeAreaDidChange(_ insets: UIEdgeInsets) {}
+    func sectorPageOwnsHorizontalDrag(velocity: CGPoint) -> Bool { false }
 }

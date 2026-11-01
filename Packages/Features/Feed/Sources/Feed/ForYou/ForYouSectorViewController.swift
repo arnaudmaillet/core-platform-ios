@@ -71,8 +71,12 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
 
     /// Shots pauses behind the notifications drawer (#1703).
     func setSetAside(_ setAside: Bool) {
+        isSetAside = setAside
         (pages[Self.shotsIndex] as? SnapFeedViewController)?.setSetAside(setAside)
     }
+
+    /// Whether the notifications drawer covers the sector (#1739).
+    private(set) var isSetAside = false
 
     /// …and fades and pauses with the drawer's slide (#1914).
     func setVisibleShare(_ share: CGFloat) {
@@ -289,3 +293,25 @@ final class ForYouSectorViewController: UIViewController, HeaderAccessoryHosting
     }
 }
 
+// MARK: - The tab's re-tap (#2013)
+
+/// ⚠️ THE SECTOR IS THE TAB'S ROOT (#1703, #1705), so the shell's re-tap
+/// (#1309) reaches it, not the Feed page inside: it decides, as
+/// `TabReselectScrolling`'s note asks of a paged root. Before, it did not
+/// conform and a re-tap did nothing on either page.
+extension ForYouSectorViewController: TabReselectScrolling {
+    func scrollToTopForTabReselect() {
+        let moving = pager.map { $0.pagingScrollView.isTracking || $0.pagingScrollView.isDecelerating } ?? false
+        guard Self.reselectScrollsFeed(activeIndex: activeIndex, pagerMoving: moving, drawerOpen: isSetAside)
+        else { return }
+        (pages[Self.feedIndex] as? any TabReselectScrolling)?.scrollToTopForTabReselect()
+    }
+
+    /// Whether a re-tap scrolls Feed back to its top: only a SETTLED Feed in
+    /// front. On Shots it does nothing (the owner: no scroll, no other post,
+    /// no other page); mid-swipe between the pages, nothing; nor with the
+    /// notifications drawer open over the tab, which hides the Feed. Pure.
+    nonisolated static func reselectScrollsFeed(activeIndex: Int, pagerMoving: Bool, drawerOpen: Bool) -> Bool {
+        activeIndex == feedIndex && !pagerMoving && !drawerOpen
+    }
+}
