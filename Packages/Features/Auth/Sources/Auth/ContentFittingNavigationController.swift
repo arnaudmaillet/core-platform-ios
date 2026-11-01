@@ -258,6 +258,15 @@ public final class ContentFittingNavigationController: UINavigationController, U
         super.pushViewController(viewController, animated: animated)
     }
 
+    /// ⚠️ NO POP WHILE A CALL RUNS (#2022): the chevron is disabled, but
+    /// UIKit may not honour `isEnabled` on a back item, and a tap would pop
+    /// through the bar — leaving the call's answer (the next step, an error)
+    /// nowhere to land. The pop waits for the call, whatever asked for it.
+    public override func popViewController(animated: Bool) -> UIViewController? {
+        guard !(isForm && isFormWorking) else { return nil }
+        return super.popViewController(animated: animated)
+    }
+
     /// A step's call runs or ends (#2022): × and the back chevron are
     /// disabled, NOT hidden — the bar keeps its shape — and the edge swipe
     /// waits too. ? stays enabled.

@@ -91,6 +91,11 @@ struct AuthFormBarTests {
         #expect(form.interactivePopGestureRecognizer?.isEnabled == false)
         #expect(root.navigationItem.leftBarButtonItem?.isEnabled != false, "? was disabled")
 
+        // Whatever asks — the chevron, if UIKit lets its tap through — the
+        // pop waits for the call.
+        #expect(form.popViewController(animated: false) == nil, "a pop went through during a call")
+        #expect(form.topViewController === next)
+
         form.setFormWorking(false)
         #expect(closeItem(of: next)?.isEnabled == true)
         #expect(root.navigationItem.backBarButtonItem?.isEnabled == true)
