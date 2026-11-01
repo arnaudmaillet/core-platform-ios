@@ -2478,7 +2478,6 @@ extension ForYouViewController: TabReselectScrolling {
 
 extension ForYouViewController: ForYouSectorPage {
     func sectorPageDidChangeActivity(_ isActive: Bool) {}
-    func sectorPageOwnsHorizontalDrag(velocity: CGPoint) -> Bool { false }
 
     /// The sector's insets, which UIKit does not give this screen in there:
     /// the list is laid out from them (`ForYouGridPage.setHostedInsets`).
