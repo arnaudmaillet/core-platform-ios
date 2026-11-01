@@ -85,14 +85,17 @@ struct SnapCommentTickerViewTests {
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
     }
 
-    /// Runs the main run loop until `condition` holds, or `timeout` passes.
-    /// ⚠️ NOT A FIXED WAIT for what must come: a tenth of a second was too
-    /// short for a spawn timer under the parallel Feed run.
-    private func run(until condition: () -> Bool, timeout: TimeInterval = 3) {
-        let deadline = Date().addingTimeInterval(timeout)
-        while !condition(), Date() < deadline {
-            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+    /// Runs the main run loop until `condition` holds, for at most `looks`
+    /// turns of 10 ms; true when it held.
+    /// ⚠️ A LOOK BUDGET, NOT A WALL-CLOCK DEADLINE: a starved runner can spend
+    /// seconds before a spawn timer fires, and a deadline counts those
+    /// seconds against the test (#1979, #1985).
+    private func run(until condition: () -> Bool, looks: Int = 6_000) -> Bool {
+        for _ in 0..<looks {
+            if condition() { return true }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
         }
+        return condition()
     }
 
     /// ⚠️ THE BAND ARRIVES EMPTY (#2000, the owner 2026-11-01): activation
@@ -104,7 +107,7 @@ struct SnapCommentTickerViewTests {
             ticker.setActive(true)
             #expect(bubbleViews(ticker).isEmpty, "the band was pre-filled")
 
-            run(until: { !bubbleViews(ticker).isEmpty })
+            #expect(run(until: { !bubbleViews(ticker).isEmpty }))
             let first = bubbleViews(ticker)
             #expect(first.count == 1, "lane 0 alone enters first: \(first.count)")
             let flight = first.first?.layer.animation(forKey: "flight") as? CABasicAnimation
@@ -123,7 +126,7 @@ struct SnapCommentTickerViewTests {
         hosting { window in
             let ticker = makeTicker(in: window)
             ticker.setActive(true)
-            run(until: { !bubbleViews(ticker).isEmpty })
+            #expect(run(until: { !bubbleViews(ticker).isEmpty }))
             let lanes = Set(bubbleViews(ticker).map { Int($0.frame.minY.rounded()) })
             #expect(lanes.count == 1, "more than one lane entered at once")
         }
@@ -157,7 +160,7 @@ struct SnapCommentTickerViewTests {
 
             window.addSubview(ticker)
             #expect(bubbleViews(ticker).isEmpty, "it arrived pre-filled")
-            run(until: { !bubbleViews(ticker).isEmpty })
+            #expect(run(until: { !bubbleViews(ticker).isEmpty }))
             #expect(bubbleViews(ticker).count == 1)
             #expect(bubbleViews(ticker).allSatisfy { $0.layer.animation(forKey: "flight") != nil })
         }
@@ -175,7 +178,7 @@ struct SnapCommentTickerViewTests {
 
             ticker.setHeldForFlight(false)
             #expect(bubbleViews(ticker).isEmpty, "the landing pre-filled the band")
-            run(until: { !bubbleViews(ticker).isEmpty })
+            #expect(run(until: { !bubbleViews(ticker).isEmpty }))
             #expect(bubbleViews(ticker).count == 1)
         }
     }
@@ -217,7 +220,7 @@ struct SnapCommentTickerViewTests {
             ticker.onRunningLow = { asks += 1 }
             ticker.setActive(true)
             ticker.debugFillBand()
-            run(until: { asks > 0 }, timeout: 15)
+            #expect(run(until: { asks > 0 }))
             #expect(asks == 1)
         }
     }
