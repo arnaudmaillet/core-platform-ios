@@ -40,6 +40,17 @@ struct TickerBubbleCapsuleTests {
         #expect(bubble.avatarView.frame.midY == 12)
     }
 
+    /// The capsule rings the avatar with the same gap above, below and
+    /// before it (#1987, the owner 2026-11-01).
+    @Test func theCapsuleRingsTheAvatarEvenly() {
+        let height = TickerBubbleView.avatarDiameter + 2 * TickerBubbleView.capsuleAvatarGap
+        let bubble = bubble(height: height)
+        let avatar = bubble.avatarView.frame
+        #expect(avatar.minX == TickerBubbleView.capsuleAvatarGap)
+        #expect(avatar.minY == TickerBubbleView.capsuleAvatarGap)
+        #expect(bubble.bounds.height - avatar.maxY == TickerBubbleView.capsuleAvatarGap)
+    }
+
     /// The band measures a bubble with its capsule's ends, so the text keeps
     /// its room.
     @Test func theWidthCountsTheCapsulesEnds() {

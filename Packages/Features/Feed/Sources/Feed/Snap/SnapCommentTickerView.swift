@@ -301,12 +301,16 @@ final class SnapCommentTickerView: UIView {
         )
     }
 
-    /// One lane's height: it fits BOTH the caption line (+ insets) and the
-    /// compact avatar, so a leading circle sits centered without growing the
-    /// lane. Read once per band, at init (the band never re-measures).
+    /// One lane's height — a bubble's capsule: it fits BOTH the caption line
+    /// (+ insets) and the compact avatar with its even ring of capsule around
+    /// it (`TickerBubbleView.capsuleAvatarGap`, #1987, the owner 2026-11-01:
+    /// a taller capsule, the same gap all round the avatar). The band — and
+    /// so the engagement corner sized from it — grows with it, by the
+    /// owner's choice. Read once per band, at init (the band never
+    /// re-measures).
     private static var laneBubbleHeight: CGFloat {
         max(
-            TickerBubbleView.avatarDiameter,
+            TickerBubbleView.avatarDiameter + 2 * TickerBubbleView.capsuleAvatarGap,
             ceil(UIFont.appFont(forTextStyle: .caption1).lineHeight)
                 + TickerBubbleView.textInsets.top + TickerBubbleView.textInsets.bottom
         )
@@ -1182,11 +1186,15 @@ final class TickerBubbleView: UIView {
     static let avatarGap: CGFloat = 6
     static let textInsets = UIEdgeInsets(top: 3, left: 0, bottom: 3, right: 0)
     static let font = UIFont.scaledFont(forTextStyle: .caption1, weight: .semibold)
+    /// The capsule's ring around the avatar: the same gap above, below and
+    /// before it, wherever the lane's height comes from the avatar.
+    static let capsuleAvatarGap: CGFloat = 3
     /// The room after the text, to the capsule's end.
-    static let capsuleTrailingPadding: CGFloat = 8
+    static let capsuleTrailingPadding: CGFloat = 10
 
     /// The room before the avatar: what nests its circle concentric in the
-    /// capsule's rounded end, at a bubble `height` tall.
+    /// capsule's rounded end, at a bubble `height` tall — `capsuleAvatarGap`
+    /// at the lane's height, so the gap is even all round.
     static func capsuleLeadingInset(height: CGFloat) -> CGFloat {
         max(0, (height - avatarDiameter) / 2)
     }

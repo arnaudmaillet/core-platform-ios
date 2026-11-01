@@ -628,16 +628,49 @@ final class SubtitlePillLabel: EmoteLabel {
     }
 
     override func textRect(forBounds bounds: CGRect, limitedToNumberOfLines numberOfLines: Int) -> CGRect {
-        let textBounds = super.textRect(
-            forBounds: bounds.inset(by: Self.textInsets),
-            limitedToNumberOfLines: numberOfLines
-        )
+        let inner = bounds.inset(by: Self.textInsets)
+        var textBounds = super.textRect(forBounds: inner, limitedToNumberOfLines: numberOfLines)
+        // ⚠️ A WRAPPED CUE HUGS ITS WIDEST LINE (#1989). UILabel answers the
+        // width it was offered once the text wraps, however short its lines
+        // end up, and the pill is this label's own fill: "The pacing on that
+        // last cut is / genuinely perfect." wore 50 pt of empty pill past
+        // "is" (the owner's device, 2026-11-01). Never narrower than the
+        // widest line, so the text keeps its breaks.
+        if let widest = widestLineWidth(within: inner.width, lines: numberOfLines), widest < textBounds.width {
+            textBounds.size.width = widest
+        }
         return CGRect(
             x: textBounds.minX - Self.textInsets.left,
             y: textBounds.minY - Self.textInsets.top,
             width: textBounds.width + Self.textInsets.left + Self.textInsets.right,
             height: textBounds.height + Self.textInsets.top + Self.textInsets.bottom
         )
+    }
+
+    /// The widest laid-out line of the text, wrapped at `width` on at most
+    /// `lines` lines — nil for text that fits on one line (its width is
+    /// already its own). Rounded up, plus a point, so UILabel's own layout
+    /// at that width breaks where this one did.
+    private func widestLineWidth(within width: CGFloat, lines: Int) -> CGFloat? {
+        guard width > 0 else { return nil }
+        let content = attributedText ?? text.map { NSAttributedString(string: $0, attributes: [.font: font as Any]) }
+        guard let content, content.length > 0 else { return nil }
+        let storage = NSTextStorage(attributedString: content)
+        let layout = NSLayoutManager()
+        let container = NSTextContainer(size: CGSize(width: width, height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        container.maximumNumberOfLines = lines
+        container.lineBreakMode = .byWordWrapping
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        var widest: CGFloat = 0
+        var count = 0
+        layout.enumerateLineFragments(forGlyphRange: layout.glyphRange(for: container)) { _, used, _, _, _ in
+            widest = max(widest, used.width)
+            count += 1
+        }
+        guard count > 1 else { return nil }
+        return ceil(widest) + 1
     }
 
     /// Normally a no-op beyond the insets: the pill hugs its content, so the
