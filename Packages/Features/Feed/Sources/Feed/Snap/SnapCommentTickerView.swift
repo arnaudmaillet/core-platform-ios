@@ -122,16 +122,20 @@ final class SnapCommentTickerView: UIView {
         let view: TickerBubbleView
         let width: CGFloat
         let itemIndex: Int
+        /// The reaction it shows — what a fresh tape entry avoids repeating
+        /// while it is on screen (#2005).
+        let itemID: String
         /// Where and when the current CA flight departed — the analytic
         /// freeze fallback for a flight grabbed before its first frame was
         /// committed (`presentation()` is nil until then).
         var flightStartX: CGFloat = 0
         var flightStartTime: CFTimeInterval = 0
 
-        init(view: TickerBubbleView, width: CGFloat, itemIndex: Int) {
+        init(view: TickerBubbleView, width: CGFloat, itemIndex: Int, itemID: String) {
             self.view = view
             self.width = width
             self.itemIndex = itemIndex
+            self.itemID = itemID
         }
     }
 
@@ -145,13 +149,33 @@ final class SnapCommentTickerView: UIView {
     }
 
     private let bubbleHeight: CGFloat
+    /// The pool of reactions the band plays — every page's, merged (#2005).
     private var queue: [TickerCommentModel] = []
-    /// The queue dealt round-robin into one sub-queue per lane: scrubbing
-    /// backward needs "the previous item of THIS lane", which only exists if
-    /// lane membership is a property of the item, not of spawn timing.
-    private var laneQueues: [[TickerCommentModel]] = Array(repeating: [], count: SnapCommentTickerView.laneCount)
-    /// Per lane: the sub-queue index the next right-edge spawn will show.
+    /// Per lane, an append-only sequence of the pool, read at indexes that
+    /// only grow (#2005): a new cycle reshuffles the pool, a scrub back reads
+    /// what was shown. Scrubbing backward needs "the previous item of THIS
+    /// lane", which only exists if lane membership is a property of the
+    /// entry, not of spawn timing. A new tape per start.
+    private var tape: ReactionTape?
+    /// How many tapes this band has started — a re-activation reshuffles.
+    private var tapeStarts = 0
+    /// Per lane: the tape index the next right-edge spawn will show.
     private var laneNextIndex: [Int] = Array(repeating: 0, count: SnapCommentTickerView.laneCount)
+    /// The reactions shown since the tape started, and the pool size the
+    /// band last asked more for (#2005).
+    private var shownIDs = Set<String>()
+    private var askedMoreAtPoolSize = 0
+    /// Reactions read since the band last asked: past `reAskEvery` with the
+    /// pool unchanged, it asks again — the screen may have refused the last
+    /// ask for being too soon.
+    private var readsSinceAsk = 0
+    static let reAskEvery = 12
+    /// The band has shown most of its reactions (`runningLowShare`): the
+    /// streams may fetch the post's next page of comments (#2005). Called
+    /// once per pool size; the screen's guards decide.
+    var onRunningLow: (() -> Void)?
+    /// The share of the pool shown that asks for more: two thirds.
+    static let runningLowShare = 2.0 / 3.0
     /// Per lane, ordered left → right.
     private var laneBubbles: [[Bubble]] = Array(repeating: [], count: SnapCommentTickerView.laneCount)
     /// Mirrors the owning cell's visibility; content may arrive before or
@@ -355,15 +379,19 @@ final class SnapCommentTickerView: UIView {
         }
         #endif
         guard comments != queue else { return }
-        let wasEmpty = queue.isEmpty
+        // ⚠️ A PAGE THAT LANDED JOINS THE POOL, the band keeps running
+        // (#2005): the comments it already had are all still there, so the
+        // newcomers go into the tape's next cycles, and nothing on screen or
+        // already on the tape moves.
+        if !queue.isEmpty, Set(queue.map(\.id)).isSubset(of: Set(comments.map(\.id))) {
+            queue = comments
+            tape?.merge(comments)
+            return
+        }
         stopStream()
         queue = comments
-        for lane in 0..<Self.laneCount {
-            laneQueues[lane] = comments.enumerated()
-                .filter { $0.offset % Self.laneCount == lane }
-                .map(\.element)
-            laneNextIndex[lane] = 0
-        }
+        tape = nil
+        laneNextIndex = Array(repeating: 0, count: Self.laneCount)
         isHidden = (comments.isEmpty && !reservesBand) || MotionPreference.reducesMotion
         // Data landing on a page already on screen (a slow network beat the
         // prefetch) starts entering at the edge like any start: no pop.
@@ -393,7 +421,7 @@ final class SnapCommentTickerView: UIView {
         isActive = false
         isHeldForFlight = false // a hold nobody released must not ride a recycled cell
         queue = []
-        laneQueues = Array(repeating: [], count: Self.laneCount)
+        tape = nil
         laneNextIndex = Array(repeating: 0, count: Self.laneCount)
         isHidden = true
         alpha = 1
@@ -484,10 +512,11 @@ final class SnapCommentTickerView: UIView {
         #if DEBUG
         debugTrainsLaid += 1
         #endif
+        startTape()
         // ⚠️ NO PRE-FILL (#2000, the owner): every lane's first bubble enters
         // at the edge, lane 0 at once and the others staggered, and the steady
         // loop takes it from there (`spawn(inLane:)`).
-        for lane in 0..<Self.laneCount where !laneQueues[lane].isEmpty {
+        for lane in 0..<Self.laneCount {
             armSpawn(lane: lane, after: Self.laneEntryDelays[lane])
         }
     }
@@ -532,13 +561,13 @@ final class SnapCommentTickerView: UIView {
         for timer in spawnTimers { timer?.invalidate() }
         let phases: [TimeInterval] = [0.3, 1.5, 2.7]
         let bandWidth = bounds.width
-        for lane in 0..<Self.laneCount where !laneQueues[lane].isEmpty {
+        for lane in 0..<Self.laneCount where !queue.isEmpty {
             let speed = Self.laneSpeeds[lane]
             var cursor = -CGFloat(phases[lane]) * speed
             while cursor < bandWidth {
                 let itemIndex = laneNextIndex[lane]
                 let item = laneItem(lane, at: itemIndex)
-                laneNextIndex[lane] = wrapped(itemIndex + 1, laneQueues[lane].count)
+                laneNextIndex[lane] = itemIndex + 1
                 let width = measuredBubbleWidth(for: item.text, in: bandWidth)
                 if cursor + width > 0 {
                     let bubble = materializeBubble(item, atIndex: itemIndex, lane: lane, leftEdge: cursor, width: width)
@@ -564,7 +593,7 @@ final class SnapCommentTickerView: UIView {
     /// that guarantees no overlap.
     private func spawn(inLane lane: Int) {
         let bandWidth = bounds.width
-        guard mode == .conveying, !laneQueues[lane].isEmpty, bandWidth > 0 else { return }
+        guard mode == .conveying, !queue.isEmpty, bandWidth > 0 else { return }
 
         // Geometry-checked entry: never trust the timer cadence alone. A
         // percent-driven transition (swipe-to-pop, pin grab) freezes the
@@ -588,11 +617,12 @@ final class SnapCommentTickerView: UIView {
 
         let itemIndex = laneNextIndex[lane]
         let item = laneItem(lane, at: itemIndex)
-        laneNextIndex[lane] = wrapped(itemIndex + 1, laneQueues[lane].count)
+        laneNextIndex[lane] = itemIndex + 1
         let width = measuredBubbleWidth(for: item.text, in: bandWidth)
         let bubble = materializeBubble(item, atIndex: itemIndex, lane: lane, leftEdge: bandWidth, width: width)
         laneBubbles[lane].append(bubble)
         animateToExit(bubble, lane: lane)
+        tape?.trim(lane: lane, lowestInUse: laneBubbles[lane].map(\.itemIndex).min() ?? itemIndex)
         armSpawn(lane: lane, after: TimeInterval((width + Self.interItemGap) / Self.laneSpeeds[lane]))
     }
 
@@ -613,7 +643,7 @@ final class SnapCommentTickerView: UIView {
         )
         view.layoutIfNeeded()
         addSubview(view)
-        return Bubble(view: view, width: width, itemIndex: itemIndex)
+        return Bubble(view: view, width: width, itemIndex: itemIndex, itemID: item.id)
     }
 
     /// Flies a bubble from wherever its model currently sits to the exit at
@@ -834,7 +864,7 @@ final class SnapCommentTickerView: UIView {
         guard bandWidth > 0 else { return }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for lane in 0..<Self.laneCount where !laneQueues[lane].isEmpty {
+        for lane in 0..<Self.laneCount where !queue.isEmpty {
             for bubble in laneBubbles[lane] {
                 bubble.view.layer.position.x += laneDx[lane]
             }
@@ -844,8 +874,6 @@ final class SnapCommentTickerView: UIView {
     }
 
     private func normalizeLaneEdges(_ lane: Int, bandWidth: CGFloat) {
-        let count = laneQueues[lane].count
-
         // Retire beyond the margins. A right-edge retire "un-consumes" its
         // queue slot so the item reappears when scrubbed back.
         while let first = laneBubbles[lane].first,
@@ -864,7 +892,7 @@ final class SnapCommentTickerView: UIView {
         if laneBubbles[lane].isEmpty {
             let itemIndex = laneNextIndex[lane]
             let item = laneItem(lane, at: itemIndex)
-            laneNextIndex[lane] = wrapped(itemIndex + 1, count)
+            laneNextIndex[lane] = itemIndex + 1
             let width = measuredBubbleWidth(for: item.text, in: bandWidth)
             laneBubbles[lane] = [materializeBubble(item, atIndex: itemIndex, lane: lane, leftEdge: bandWidth - width, width: width)]
         }
@@ -875,7 +903,7 @@ final class SnapCommentTickerView: UIView {
             guard lastRight + Self.interItemGap < bandWidth + Self.scrubMargin else { break }
             let itemIndex = laneNextIndex[lane]
             let item = laneItem(lane, at: itemIndex)
-            laneNextIndex[lane] = wrapped(itemIndex + 1, count)
+            laneNextIndex[lane] = itemIndex + 1
             let width = measuredBubbleWidth(for: item.text, in: bandWidth)
             laneBubbles[lane].append(
                 materializeBubble(item, atIndex: itemIndex, lane: lane, leftEdge: lastRight + Self.interItemGap, width: width)
@@ -886,7 +914,8 @@ final class SnapCommentTickerView: UIView {
         while let first = laneBubbles[lane].first {
             let firstLeft = first.view.layer.position.x - first.width / 2
             guard firstLeft - Self.interItemGap > -Self.scrubMargin else { break }
-            let itemIndex = wrapped(first.itemIndex - 1, count)
+            // The tape's own previous entry: exactly what was shown (#2005).
+            let itemIndex = first.itemIndex - 1
             let item = laneItem(lane, at: itemIndex)
             let width = measuredBubbleWidth(for: item.text, in: bandWidth)
             laneBubbles[lane].insert(
@@ -1026,12 +1055,50 @@ final class SnapCommentTickerView: UIView {
 
     // MARK: - Queue & pool plumbing
 
+    /// The tape's entry at `index` in `lane`. A fresh one avoids every
+    /// reaction on screen in either lane (#2005).
     private func laneItem(_ lane: Int, at index: Int) -> TickerCommentModel {
-        laneQueues[lane][wrapped(index, laneQueues[lane].count)]
+        if tape == nil { startTape() }
+        let onScreen = Set(laneBubbles.joined().map(\.itemID))
+        let item = tape!.item(lane: lane, at: index, avoiding: onScreen)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
+            print(String(format: "[ticker] %.3f tape lane=%d index=%d id=%@", CACurrentMediaTime(), lane, index, item.id))
+        }
+        #endif
+        noteShown(item)
+        return item
     }
 
-    private func wrapped(_ index: Int, _ count: Int) -> Int {
-        ((index % count) + count) % count
+    /// A new tape for the pool, reshuffled per start: a re-activation does
+    /// not replay the last one.
+    private func startTape() {
+        tapeStarts += 1
+        let seed = CommentTickerBuilder.fnv1a(queue.map(\.id).joined(separator: "|")) &+ UInt64(tapeStarts)
+        tape = ReactionTape(pool: queue, laneCount: Self.laneCount, seed: seed)
+        laneNextIndex = Array(repeating: 0, count: Self.laneCount)
+        shownIDs = []
+        askedMoreAtPoolSize = 0
+        readsSinceAsk = 0
+    }
+
+    /// Counts a reaction shown, and asks for more once most of the pool has
+    /// been (#2005) — again every `reAskEvery` reads while the pool stays
+    /// the same: the screen decides (one in flight, an interval, a cap).
+    private func noteShown(_ item: TickerCommentModel) {
+        shownIDs.insert(item.id)
+        readsSinceAsk += 1
+        let pool = queue.count
+        guard pool > 0, Double(shownIDs.count) >= Double(pool) * Self.runningLowShare,
+              askedMoreAtPoolSize != pool || readsSinceAsk >= Self.reAskEvery else { return }
+        askedMoreAtPoolSize = pool
+        readsSinceAsk = 0
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
+            print(String(format: "[ticker] %.3f runningLow shown=%d pool=%d", CACurrentMediaTime(), shownIDs.count, pool))
+        }
+        #endif
+        onRunningLow?()
     }
 
     private func measuredBubbleWidth(for text: String, in bandWidth: CGFloat) -> CGFloat {

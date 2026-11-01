@@ -443,6 +443,8 @@ final class SnapChromeView: UIView {
     /// ticker band — one fan-in, one path) — the cell forwards this as a
     /// comments-engagement request with its post identity attached.
     var onCommentsTapped: (() -> Void)?
+    /// The band has shown most of its reactions (#2005).
+    var onReactionsRunningLow: (() -> Void)?
 
     /// The rail's boost anchor asked to spend on this post (tap = the
     /// default amount, long-press menu = the default or one ×100 shot).
@@ -783,6 +785,7 @@ final class SnapChromeView: UIView {
         commentEmptyState.onTap = { [weak self] in self?.onCommentsTapped?() }
         subtitleView.onTap = { [weak self] in self?.onCommentsTapped?() }
         commentTicker.onTap = { [weak self] in self?.onCommentsTapped?() }
+        commentTicker.onRunningLow = { [weak self] in self?.onReactionsRunningLow?() }
         // …and the caption (#1720, the owner): the post's words lead to what
         // is said about them.
         captionLabel.isUserInteractionEnabled = true
