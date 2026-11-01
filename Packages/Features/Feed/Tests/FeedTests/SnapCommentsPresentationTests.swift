@@ -1203,7 +1203,7 @@ struct SnapCommentsPresentationTests {
         // reason; this pins the shape.
         #expect(items.count == 6)
         #expect(items.dropFirst(2).prefix(2).map(\.accessibilityLabel) == ["Save", "Repost"])
-        #expect(items.last?.accessibilityLabel == "Share")
+        #expect(items.last?.identifier == SnapFooterToolbar.ID.sound, "the sound does not end the bar (#1999)")
     }
 
     /// ⚠️ THE FOOTER'S CORNER KEEPS ITS ⋯ IN EVERY STATE — and the toolbar is
@@ -1219,13 +1219,14 @@ struct SnapCommentsPresentationTests {
         let (_, feed) = Self.chromeHost()
         let resting = feed.toolbarItems ?? []
         #expect(!resting.isEmpty)
-        func cornerLabel() -> String? {
-            feed.toolbarItems?.last?.accessibilityLabel
+        // The corner is the post's sound now (#1999, where Share was).
+        func cornerID() -> String? {
+            feed.toolbarItems?.last?.identifier
         }
-        #expect(cornerLabel() == "Share")
+        #expect(cornerID() == SnapFooterToolbar.ID.sound)
 
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
-        #expect(cornerLabel() == "Share")
+        #expect(cornerID() == SnapFooterToolbar.ID.sound)
         #expect(feed.toolbarItems ?? [] == resting)
 
         feed.setEngagedChrome(true, hasMedia: false, animated: false)

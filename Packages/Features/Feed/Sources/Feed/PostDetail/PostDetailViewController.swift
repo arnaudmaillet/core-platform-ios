@@ -1542,10 +1542,12 @@ final class PostDetailViewController: UIViewController {
         if !viewModel.isDraft { composeBar.railFace = publishedRailFace }
         let returns = composeBar.railFace == .returnTo(down: false)
         if !returns { composeBar.setRailSpinning(railSpinning) }
-        // Over Share (#1999) the hold arms nothing: a text post has no sound.
+        // Over Share (#1999) the hold arms Share on a media page — the
+        // slot's own action — and nothing on a text page.
         let armsSheet = returns && railShareAction == nil && soundTapAction != nil
             && railSoundFace?.isAvailable == true
-        railSoundHold?.isEnabled = armsSheet
+        let armsShare = returns && railShareAction != nil && railShareHoldArms
+        railSoundHold?.isEnabled = armsSheet || armsShare
         // What the slot stood for stays reachable with the chevron up:
         // VoiceOver's road — the sound, or Share.
         if armsSheet {
@@ -1578,9 +1580,13 @@ final class PostDetailViewController: UIViewController {
             }
         }
         let hold = HoldToArmPresenter(view: composeBar.railHoldTarget) { [weak self] in
-            .picture(self?.composeBar.railCoverImage)
+            guard let self else { return .picture(nil) }
+            return railShareAction != nil ? .symbol(CommentsInputBar.shareRailSymbol) : .picture(composeBar.railCoverImage)
         }
-        hold.onFire = { [weak self] in self?.soundTapAction?() }
+        hold.onFire = { [weak self] in
+            guard let self else { return }
+            if let railShareAction { railShareAction() } else { soundTapAction?() }
+        }
         hold.isEnabled = false
         railSoundHold = hold
     }
@@ -1596,13 +1602,18 @@ final class PostDetailViewController: UIViewController {
     /// False for a text post with nothing in its slot (#1790, #1999): the
     /// composer has no slot, its field widens into it.
     private var railKeepsSlot = true
-    /// The post's Share, when the slot wears it (#1999): a pushed text page.
+    /// The post's Share, when the slot wears it (#1999): a pushed page.
     private var railShareAction: (() -> Void)?
+    /// Whether the way back's hold arms Share (#1999): a media page's.
+    private var railShareHoldArms = false
 
-    /// Share in the slot (#1999), the toolbar's action: a pushed text page,
-    /// whose sound it replaces. Nil gives the slot back to the sound.
-    func setRailShare(_ action: (() -> Void)?) {
+    /// Share in the slot (#1999), the toolbar's old action, on a pushed page:
+    /// a text page's (a text post has no sound) and a media page's (its sound
+    /// moves to the footer). `holdArms`: the way back's hold arms Share — a
+    /// media page's. Nil gives the slot back to the sound.
+    func setRailShare(_ action: (() -> Void)?, holdArms: Bool = false) {
         railShareAction = action
+        railShareHoldArms = action != nil && holdArms
         if action != nil { railKeepsSlot = true }
         guard !viewModel.isDraft else { return }
         applyRailWayBack()

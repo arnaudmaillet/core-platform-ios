@@ -95,4 +95,43 @@ struct SnapShareSlotTests {
         chrome.setSlotSharesPost(false)
         #expect(bubble.isHidden, "a page with no sound and no Share kept its bubble")
     }
+
+    /// A media page's column ends on Share (#1999): under the way back its
+    /// hold arms Share — the slot's own action (#1929) — with Share's glyph.
+    @Test func aMediaPagesWayBackHoldArmsShare() throws {
+        let chrome = SnapChromeView()
+        chrome.setSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
+        chrome.setSlotSharesPost(true, holdArmsShare: true)
+        var shares = 0
+        var sheets = 0
+        chrome.onShareRequested = { shares += 1 }
+        chrome.onSoundSheetRequested = { sheets += 1 }
+        let bubble = chrome.debugSoundBubble
+        #expect(bubble.accessibilityLabel == "Share")
+        #expect(!bubble.debugIsSpinning)
+        let hold = try #require(chrome.debugSoundHold)
+        #expect(!hold.isEnabled, "Share has a hold at rest")
+
+        chrome.setSoundShowsReturn(true, animated: false)
+        #expect(hold.isEnabled, "the way back's hold over a media page's Share is off")
+        hold.onFire?()
+        #expect(shares == 1)
+        #expect(sheets == 0, "the hold opened the sound sheet")
+    }
+
+    /// The composer's slot on a media page: the same rule.
+    @Test func aMediaPagesComposerHoldArmsShare() throws {
+        let (panel, window) = Layout.engagedPanel()
+        defer { window.isHidden = true }
+        var shares = 0
+        panel.setActionColumnHostedByPage(false)
+        panel.setRailShare({ shares += 1 }, holdArms: true)
+        panel.setRailSoundFace(SnapSoundFace(coverURL: nil, isAvailable: true))
+        #expect(panel.debugRailFace == .share)
+        panel.debugScroll(to: 3000, userScroll: true)
+        let hold = try #require(panel.debugRailSoundHold)
+        #expect(hold.isEnabled)
+        hold.onFire?()
+        #expect(shares == 1)
+    }
 }

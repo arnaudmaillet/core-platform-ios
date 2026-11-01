@@ -668,7 +668,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The sound bubble's face (#671) — see `SnapChromeView.setSoundFace`.
     func setSoundFace(_ face: SnapSoundFace?) { chrome.setSoundFace(face) }
     /// The bubble as the post's Share (#1999) — see `SnapChromeView.setSlotSharesPost`.
-    func setSlotSharesPost(_ shares: Bool) { chrome.setSlotSharesPost(shares) }
+    func setSlotSharesPost(_ shares: Bool, holdArmsShare: Bool = false) {
+        chrome.setSlotSharesPost(shares, holdArmsShare: holdArmsShare)
+    }
     /// Turns the sound bubble's cover while the post plays (#671).
     func setSoundSpinning(_ spinning: Bool) { chrome.setSoundSpinning(spinning) }
     /// The sound bubble was tapped: the screen opens the sound sheet (#671).

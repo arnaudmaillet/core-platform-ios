@@ -257,6 +257,8 @@ final class SnapChromeView: UIView {
     var onSoundReturnRequested: (() -> Void)?
     /// The bubble wears the post's Share (#1999) and was tapped.
     var onShareRequested: (() -> Void)?
+    /// Whether the way back's hold arms Share (#1999): a media page's.
+    private var holdArmsShare = false
     /// The way back's hold (#1929): the disc rises with the cover, and once
     /// full the sound sheet opens — the bubble's own tap action.
     private var soundHold: HoldToArmPresenter?
@@ -876,8 +878,16 @@ final class SnapChromeView: UIView {
         }
         // No hold of its own since #1931 (no in-app mute): only the way back
         // has one, arming the sheet (#1929).
-        let hold = HoldToArmPresenter(view: soundBubble) { [weak self] in .picture(self?.soundBubble.coverImage) }
-        hold.onFire = { [weak self] in self?.onSoundSheetRequested?() }
+        let hold = HoldToArmPresenter(view: soundBubble) { [weak self] in
+            guard let self else { return .picture(nil) }
+            return soundBubble.sharesPost ? .symbol(CommentsInputBar.shareRailSymbol) : .picture(soundBubble.coverImage)
+        }
+        // The hold arms the slot's own action (#1929): the sheet, or Share
+        // on a media page's Share (#1999).
+        hold.onFire = { [weak self] in
+            guard let self else { return }
+            if soundBubble.sharesPost { onShareRequested?() } else { onSoundSheetRequested?() }
+        }
         hold.isEnabled = false
         soundHold = hold
     }
@@ -895,9 +905,11 @@ final class SnapChromeView: UIView {
     /// bubble stands: only on the chevron, only for a sound the post plays.
     private func applySoundHold() {
         let returns = soundBubble.showsReturn
-        // Over Share (#1999) the hold arms nothing: a text post has no sound.
+        // Over Share (#1999) the hold arms Share on a media page — "a hold
+        // arms its own action" — and nothing on a text page.
         let armsSheet = returns && !soundBubble.sharesPost && soundFace?.isAvailable == true
-        soundHold?.isEnabled = armsSheet
+        let armsShare = returns && soundBubble.sharesPost && holdArmsShare
+        soundHold?.isEnabled = armsSheet || armsShare
         if armsSheet {
             soundBubble.accessibilityCustomActions = [
                 UIAccessibilityCustomAction(name: "Sound") { [weak self] _ in
@@ -918,9 +930,12 @@ final class SnapChromeView: UIView {
         }
     }
 
-    /// The bubble as the post's Share (#1999): a pushed text page, whose
-    /// column is Share alone on the sound's frame — a text post has no sound.
-    func setSlotSharesPost(_ shares: Bool) {
+    /// The bubble as the post's Share (#1999) on a pushed page: a text
+    /// page's column is Share alone on the sound's frame, a media page's
+    /// ends on Share where the sound was (the sound moves to the footer).
+    /// `holdArmsShare`: the way back's hold arms Share — a media page's.
+    func setSlotSharesPost(_ shares: Bool, holdArmsShare: Bool = false) {
+        self.holdArmsShare = shares && holdArmsShare
         soundBubble.setSharesPost(shares)
         applySoundHold()
         applySoundVisibility()
