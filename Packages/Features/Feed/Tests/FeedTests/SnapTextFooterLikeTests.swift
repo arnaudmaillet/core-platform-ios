@@ -99,11 +99,11 @@ struct SnapTextFooterLikeTests {
         return controller
     }
 
-    private func text(_ id: String) -> FeedItemDisplayModel {
+    private func text(_ id: String, author: String = "a", likes: Int64 = 3) -> FeedItemDisplayModel {
         FeedItemDisplayModel(
-            id: PostID(id), authorID: ProfileID("a"), authorName: "A", metaText: "",
+            id: PostID(id), authorID: ProfileID(author), authorName: author.uppercased(), metaText: "",
             avatarURL: nil, caption: "words", mediaURL: nil,
-            mediaKind: .image, thumbnailURL: nil, audioText: nil, likeCount: 3
+            mediaKind: .image, thumbnailURL: nil, audioText: nil, likeCount: likes
         )
     }
 
@@ -132,6 +132,30 @@ struct SnapTextFooterLikeTests {
 
     private func footerLike(in feed: SnapFeedViewController) -> UIBarButtonItem? {
         feed.toolbarItems?.first { $0.identifier == SnapFooterToolbar.ID.like }
+    }
+
+    /// ⚠️ THE LIKE CHANGES HANDS WITH THE AUTHOR (the owner's device,
+    /// 2026-11-01): once the next text page covers more than half the
+    /// screen, on the same scroll callback as the author's pill — not at the
+    /// settle, a beat later — and back again below half.
+    @Test func theFooterLikeChangesHandsWithTheAuthorAtHalf() throws {
+        let panels = Panels(posts: Posts(gone: []))
+        let feed = makeFeed([text("a", author: "x", likes: 3), text("b", author: "y", likes: 7)], panels: panels)
+        try settle(feed, on: 0)
+        func shown() -> (like: String?, author: ProfileID?) {
+            let pill = feed.toolbarItems?.lazy.compactMap { $0.customView as? SnapAuthorIdentityView }.first
+            return ((footerLike(in: feed)?.customView as? StretchedBarLabel)?.title, pill?.shownAuthor?.authorID)
+        }
+        #expect(shown().like == "3")
+        let collection = try pager(of: feed)
+        let height = collection.bounds.height
+        for (fraction, like, author) in [(0.4, "3", "x"), (0.6, "7", "y"), (0.45, "3", "x")] as [(CGFloat, String, String)] {
+            collection.setContentOffset(CGPoint(x: 0, y: height * fraction), animated: false)
+            feed.scrollViewDidScroll(collection)
+            #expect(shown().like == like, "at \(fraction) of a page the like reads \(shown().like ?? "none")")
+            #expect(shown().author == ProfileID(author), "at \(fraction) the author is \(String(describing: shown().author))")
+        }
+        withExtendedLifetime(feed) {}
     }
 
     @Test func aTextPageWearsItsLikeInTheFooterAndNoPill() throws {
