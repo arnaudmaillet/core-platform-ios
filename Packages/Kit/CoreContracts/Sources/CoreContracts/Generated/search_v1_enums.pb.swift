@@ -112,6 +112,53 @@ public nonisolated enum Search_V1_SearchSort: SwiftProtobuf.Enum, Swift.CaseIter
 
 }
 
+/// Which posts a list keeps by kind (#949): the full-screen feed keeps the
+/// opening post's kind. A post whose kind the service has not recorded (one
+/// published before it did) passes every filter.
+public nonisolated enum Search_V1_PostKindFilter: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// Every post.
+  case unspecified // = 0
+
+  /// Photo, carousel and video posts.
+  case media // = 1
+
+  /// Text-only posts.
+  case textOnly // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .media
+    case 2: self = .textOnly
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .media: return 1
+    case .textOnly: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Search_V1_PostKindFilter] = [
+    .unspecified,
+    .media,
+    .textOnly,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Search_V1_SearchEntityType: SwiftProtobuf._ProtoNameProviding {
@@ -120,4 +167,8 @@ nonisolated extension Search_V1_SearchEntityType: SwiftProtobuf._ProtoNameProvid
 
 nonisolated extension Search_V1_SearchSort: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0SEARCH_SORT_UNSPECIFIED\0\u{1}SEARCH_SORT_RELEVANCE\0\u{1}SEARCH_SORT_RECENCY\0\u{1}SEARCH_SORT_POPULARITY\0")
+}
+
+nonisolated extension Search_V1_PostKindFilter: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0POST_KIND_FILTER_UNSPECIFIED\0\u{1}POST_KIND_FILTER_MEDIA\0\u{1}POST_KIND_FILTER_TEXT_ONLY\0")
 }

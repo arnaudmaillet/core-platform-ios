@@ -32,6 +32,13 @@ public protocol Comment_V1_CommentServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `listTopLevel`(request: Comment_V1_ListTopLevelRequest, headers: Connect.Headers) async -> ResponseMessage<Comment_V1_ListCommentsResponse>
 
+    /// The first top-level comments of many posts (#976), for the tiles a
+    /// client opens full screen: per post, up to `limit` comments, the start
+    /// of what the caller's ListTopLevel lists, in its order. Best effort per
+    /// post; never a comment ListTopLevel would not return.
+    @available(iOS 13, *)
+    func `listPreviews`(request: Comment_V1_ListPreviewsRequest, headers: Connect.Headers) async -> ResponseMessage<Comment_V1_ListPreviewsResponse>
+
     /// Paginates direct replies to a top-level comment, newest-first.
     @available(iOS 13, *)
     func `listReplies`(request: Comment_V1_ListRepliesRequest, headers: Connect.Headers) async -> ResponseMessage<Comment_V1_ListCommentsResponse>
@@ -76,6 +83,11 @@ public final class Comment_V1_CommentServiceClient: Comment_V1_CommentServiceCli
     }
 
     @available(iOS 13, *)
+    public func `listPreviews`(request: Comment_V1_ListPreviewsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Comment_V1_ListPreviewsResponse> {
+        return await self.client.unary(path: "/comment.v1.CommentService/ListPreviews", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `listReplies`(request: Comment_V1_ListRepliesRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Comment_V1_ListCommentsResponse> {
         return await self.client.unary(path: "/comment.v1.CommentService/ListReplies", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -92,6 +104,7 @@ public final class Comment_V1_CommentServiceClient: Comment_V1_CommentServiceCli
             public static let reviewHeldComment = Connect.MethodSpec(name: "ReviewHeldComment", service: "comment.v1.CommentService", type: .unary)
             public static let getComment = Connect.MethodSpec(name: "GetComment", service: "comment.v1.CommentService", type: .unary)
             public static let listTopLevel = Connect.MethodSpec(name: "ListTopLevel", service: "comment.v1.CommentService", type: .unary)
+            public static let listPreviews = Connect.MethodSpec(name: "ListPreviews", service: "comment.v1.CommentService", type: .unary)
             public static let listReplies = Connect.MethodSpec(name: "ListReplies", service: "comment.v1.CommentService", type: .unary)
             public static let listCommentsByAuthor = Connect.MethodSpec(name: "ListCommentsByAuthor", service: "comment.v1.CommentService", type: .unary)
         }

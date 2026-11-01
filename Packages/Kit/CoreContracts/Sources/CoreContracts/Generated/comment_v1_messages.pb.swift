@@ -95,7 +95,7 @@ public nonisolated struct Comment_V1_GetCommentRequest: Sendable {
   public init() {}
 }
 
-/// Lists top-level (non-reply) comments for a post, newest-first.
+/// Lists top-level (non-reply) comments for a post, newest-first by default.
 public nonisolated struct Comment_V1_ListTopLevelRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -106,6 +106,13 @@ public nonisolated struct Comment_V1_ListTopLevelRequest: Sendable {
   public var limit: Int32 = 0
 
   public var pageToken: String = String()
+
+  /// NEWEST by default. POPULARITY (#977), as replies sort: the post's 500
+  /// newest top-level comments ranked by likes, ties to the newest, then the
+  /// older ones newest first. The ranking is read again per page, so a
+  /// comment whose likes changed between pages can come back: de-duplicate
+  /// by comment_id. With engagement unavailable, the newest order.
+  public var sort: Comment_V1_ReplySort = .unspecified
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -257,6 +264,54 @@ public nonisolated struct Comment_V1_ListCommentsResponse: Sendable {
   public var comments: [Comment_V1_CommentView] = []
 
   public var nextToken: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// The first top-level comments of many posts at once (#976).
+public nonisolated struct Comment_V1_ListPreviewsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// At most 50; duplicates count once.
+  public var postIds: [String] = []
+
+  /// Comments per post: 0 means 5, at most 10.
+  public var limit: Int32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// One readable post's first comments for the caller.
+public nonisolated struct Comment_V1_CommentPreview: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var postID: String = String()
+
+  /// The first comments the caller's ListTopLevel lists (newest first, the
+  /// same read gate), reply_count filled; empty when it shows none.
+  public var comments: [Comment_V1_CommentView] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Comment_V1_ListPreviewsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// In the request's order. A post the caller may not read has no entry;
+  /// neither has one that failed or was too slow: read it with ListTopLevel.
+  public var previews: [Comment_V1_CommentPreview] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -444,7 +499,7 @@ nonisolated extension Comment_V1_GetCommentRequest: SwiftProtobuf.Message, Swift
 
 nonisolated extension Comment_V1_ListTopLevelRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ListTopLevelRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{1}limit\0\u{3}page_token\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{1}limit\0\u{3}page_token\0\u{1}sort\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -455,6 +510,7 @@ nonisolated extension Comment_V1_ListTopLevelRequest: SwiftProtobuf.Message, Swi
       case 1: try { try decoder.decodeSingularStringField(value: &self.postID) }()
       case 2: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
+      case 4: try { try decoder.decodeSingularEnumField(value: &self.sort) }()
       default: break
       }
     }
@@ -470,6 +526,9 @@ nonisolated extension Comment_V1_ListTopLevelRequest: SwiftProtobuf.Message, Swi
     if !self.pageToken.isEmpty {
       try visitor.visitSingularStringField(value: self.pageToken, fieldNumber: 3)
     }
+    if self.sort != .unspecified {
+      try visitor.visitSingularEnumField(value: self.sort, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -477,6 +536,7 @@ nonisolated extension Comment_V1_ListTopLevelRequest: SwiftProtobuf.Message, Swi
     if lhs.postID != rhs.postID {return false}
     if lhs.limit != rhs.limit {return false}
     if lhs.pageToken != rhs.pageToken {return false}
+    if lhs.sort != rhs.sort {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -801,6 +861,106 @@ nonisolated extension Comment_V1_ListCommentsResponse: SwiftProtobuf.Message, Sw
   public static func ==(lhs: Comment_V1_ListCommentsResponse, rhs: Comment_V1_ListCommentsResponse) -> Bool {
     if lhs.comments != rhs.comments {return false}
     if lhs.nextToken != rhs.nextToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Comment_V1_ListPreviewsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListPreviewsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_ids\0\u{1}limit\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedStringField(value: &self.postIds) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.postIds.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.postIds, fieldNumber: 1)
+    }
+    if self.limit != 0 {
+      try visitor.visitSingularInt32Field(value: self.limit, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Comment_V1_ListPreviewsRequest, rhs: Comment_V1_ListPreviewsRequest) -> Bool {
+    if lhs.postIds != rhs.postIds {return false}
+    if lhs.limit != rhs.limit {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Comment_V1_CommentPreview: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".CommentPreview"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{1}comments\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.postID) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.comments) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.postID.isEmpty {
+      try visitor.visitSingularStringField(value: self.postID, fieldNumber: 1)
+    }
+    if !self.comments.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.comments, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Comment_V1_CommentPreview, rhs: Comment_V1_CommentPreview) -> Bool {
+    if lhs.postID != rhs.postID {return false}
+    if lhs.comments != rhs.comments {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Comment_V1_ListPreviewsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListPreviewsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}previews\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.previews) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.previews.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.previews, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Comment_V1_ListPreviewsResponse, rhs: Comment_V1_ListPreviewsResponse) -> Bool {
+    if lhs.previews != rhs.previews {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

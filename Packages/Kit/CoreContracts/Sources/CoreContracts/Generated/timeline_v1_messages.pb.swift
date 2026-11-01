@@ -214,6 +214,10 @@ public nonisolated struct Timeline_V1_GetDiscoveryFeedRequest: Sendable {
   /// last TIMELINE_DISCOVERY_WINDOW_SECS (3 days): an older tag pages empty.
   public var hashtag: String = String()
 
+  /// Only posts of this kind (#949); UNSPECIFIED keeps all. A page can come
+  /// back short with a token: keep paging.
+  public var postKind: Timeline_V1_PostKindFilter = .unspecified
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -594,7 +598,7 @@ nonisolated extension Timeline_V1_GetAudioFeedResponse: SwiftProtobuf.Message, S
 
 nonisolated extension Timeline_V1_GetDiscoveryFeedRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".GetDiscoveryFeedRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}ranking\0\u{1}region\0\u{1}lat\0\u{1}lng\0\u{3}content_level\0\u{3}page_token\0\u{1}limit\0\u{3}profile_id\0\u{3}non_personalized\0\u{1}hashtag\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}ranking\0\u{1}region\0\u{1}lat\0\u{1}lng\0\u{3}content_level\0\u{3}page_token\0\u{1}limit\0\u{3}profile_id\0\u{3}non_personalized\0\u{1}hashtag\0\u{3}post_kind\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -612,6 +616,7 @@ nonisolated extension Timeline_V1_GetDiscoveryFeedRequest: SwiftProtobuf.Message
       case 8: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
       case 9: try { try decoder.decodeSingularBoolField(value: &self.nonPersonalized) }()
       case 10: try { try decoder.decodeSingularStringField(value: &self.hashtag) }()
+      case 11: try { try decoder.decodeSingularEnumField(value: &self.postKind) }()
       default: break
       }
     }
@@ -652,6 +657,9 @@ nonisolated extension Timeline_V1_GetDiscoveryFeedRequest: SwiftProtobuf.Message
     if !self.hashtag.isEmpty {
       try visitor.visitSingularStringField(value: self.hashtag, fieldNumber: 10)
     }
+    if self.postKind != .unspecified {
+      try visitor.visitSingularEnumField(value: self.postKind, fieldNumber: 11)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -666,6 +674,7 @@ nonisolated extension Timeline_V1_GetDiscoveryFeedRequest: SwiftProtobuf.Message
     if lhs.profileID != rhs.profileID {return false}
     if lhs.nonPersonalized != rhs.nonPersonalized {return false}
     if lhs.hashtag != rhs.hashtag {return false}
+    if lhs.postKind != rhs.postKind {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
