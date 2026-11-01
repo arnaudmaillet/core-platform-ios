@@ -91,10 +91,14 @@ final class PostDetailViewController: UIViewController {
     /// the opener's, or Recent's. Once there, it stays for the panel's life.
     private(set) var showsPopular = false
 
-    /// Whether the tab the panel opens on is decided: at the opener's count,
-    /// or at Recent's first answer. Later, Popular arriving leaves the viewer
-    /// where they are.
+    /// Whether the tab the panel opens on is decided: Popular came, or the
+    /// reader scrolled or changed tabs. Until then, Popular arriving — the
+    /// opener's count, or a first page past the threshold after a preview of
+    /// a few — opens on it; after, it leaves the reader where they are.
     private var hasChosenOpeningTab = false
+
+    /// The reader scrolled a stream: the opening tab is theirs now.
+    func readerDidScroll() { hasChosenOpeningTab = true }
 
     /// The tabs came (`true`), for a host that draws their selector.
     var onPopularTabChange: ((Bool) -> Void)?
@@ -110,9 +114,17 @@ final class PostDetailViewController: UIViewController {
     /// Shows `kind`'s tab — a selector's tap.
     func showStream(_ kind: CommentStream.Kind, animated: Bool) {
         guard showsPopular else { return }
-        pager.setActivePage(kind == .popular ? Self.popularPage : Self.recentPage, animated: animated)
-        if !animated { visibleStreamDidChange() }
+        hasChosenOpeningTab = true
+        let page = kind == .popular ? Self.popularPage : Self.recentPage
+        let changes = pager.activeIndex != page
+        pager.setActivePage(page, animated: animated)
+        // An unanimated page change settles off the pager's scroll, which a
+        // pager not laid out yet never runs: told here, once.
+        if !animated, changes, lastSettledStream !== stream { visibleStreamDidChange() }
     }
+
+    /// The stream `visibleStreamDidChange` last announced.
+    private weak var lastSettledStream: CommentStream?
 
     /// The pager, for a selector that scrubs it.
     var streamPager: HorizontalPagerView { pager }
@@ -132,15 +144,16 @@ final class PostDetailViewController: UIViewController {
         if opensOnPopular { showStream(.popular, animated: false) }
     }
 
-    /// Recent counted its comments for the first time, or again.
+    /// Recent counted its comments.
     private func recentDidCount(_ count: Int) {
         if CommentSortPolicy.isAvailable(commentCount: count) { popularBecameAvailable() }
-        hasChosenOpeningTab = true
     }
 
     /// The tab on screen changed: the way back, the day under the bar and the
     /// pull-down follow it.
     private func visibleStreamDidChange() {
+        guard lastSettledStream !== stream else { return }
+        lastSettledStream = stream
         applyRailWayBack()
         onScrollAwayChange?(stream.showsScrollAwayReturn)
         syncDayUnderHeader()

@@ -31,12 +31,18 @@ private func comment(_ index: Int, parent: String? = nil, by author: String = "o
 private actor PagedComments: CommentsProviding {
     let all: [CommentEntry]
     let pageSize: Int
+    /// What the opener already holds: a preview of the newest few (#2036).
+    nonisolated let cached: [CommentEntry]?
     private(set) var recentPagesAsked = 0
 
-    init(count: Int, pageSize: Int) {
-        all = (0..<count).map { comment($0) }
+    init(count: Int, pageSize: Int, cachedPreview: Int? = nil) {
+        let all = (0..<count).map { comment($0) }
+        self.all = all
         self.pageSize = pageSize
+        cached = cachedPreview.map { Array(all.prefix($0)) }
     }
+
+    nonisolated func cachedTopComments(for postID: PostID) -> [CommentEntry]? { cached }
 
     private func page(of list: [CommentEntry], after token: String?, prefix: String) -> CommentPage {
         let start = token.flatMap { Int($0.dropFirst(prefix.count)) } ?? 0
@@ -136,6 +142,15 @@ struct CommentTabsTests {
         #expect(controller.showsPopular)
         #expect(controller.visibleStreamKind == .popular)
         #expect(controller.streamPager.isPagingEnabled)
+    }
+
+    /// A preview of a few comments on screen first does not decide it: the
+    /// first page past the threshold still opens the panel on Popular.
+    @Test func aPreviewOfAFewDoesNotKeepThePanelOnRecent() async {
+        let (controller, window) = panel(PagedComments(count: 30, pageSize: 30, cachedPreview: 2))
+        defer { window.isHidden = true }
+        #expect(await settle { controller.showsPopular }, "Popular never came")
+        #expect(controller.visibleStreamKind == .popular)
     }
 
     /// The opener's count decides it before anything has loaded.

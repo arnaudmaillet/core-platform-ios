@@ -3732,10 +3732,9 @@ final class SnapFeedViewController: UIViewController {
         // begin-time veto can prevent a handoff on a pan that already
         // began. A disabled pan cannot receive the handoff, full stop.
         collectionView.isScrollEnabled = false
-        // The tabs follow the panel that holds the engagement (#2007).
-        // Already bound for a warm panel (see `installCommentsPanel`), so
-        // this is the fallback path's copy.
-        if !wasPrewarmed { commentTabs.bind(to: detail) }
+        // The tabs follow the panel that holds the engagement (#2007) — bound
+        // again here, warm or not: a later page's install binds its own.
+        commentTabs.bind(to: detail)
         syncCommentSortAvailability()
         setEngagedChrome(true, hasMedia: true, animated: animated)
         // LAYOUT FIRST, UNANIMATED. Inside the spring, `layoutIfNeeded`

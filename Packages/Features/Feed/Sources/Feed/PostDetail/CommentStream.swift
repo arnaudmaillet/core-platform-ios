@@ -532,7 +532,9 @@ final class CommentStream: NSObject {
         let viewport = collectionView.bounds.height - insets.top - insets.bottom
         let before = scrollAway.showsReturn
         scrollAway.update(distance: distance, viewport: viewport, isUserScroll: userScroll)
-        guard scrollAway.showsReturn != before else { return }
+        // Only the tab on screen speaks for the way back (#2007); the other
+        // is read when it comes in (`visibleStreamDidChange`).
+        guard scrollAway.showsReturn != before, host.stream === self else { return }
         host.onScrollAwayChange?(scrollAway.showsReturn)
         host.applyRailWayBack()
     }
@@ -1841,7 +1843,10 @@ extension CommentStream: UICollectionViewDelegate {
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         // The reader's own scroll decides whether the stream holds its
         // resting end (#2007): away from it, the rows stay where they are.
-        if scrollView.isTracking || scrollView.isDecelerating { holdsRest = isAtRest }
+        if scrollView.isTracking || scrollView.isDecelerating {
+            holdsRest = isAtRest
+            host.readerDidScroll()
+        }
         host.syncDayUnderHeader()
         // Only the reader's own scroll shows the way back; any move hides it
         // once the text is near again (#1929).
