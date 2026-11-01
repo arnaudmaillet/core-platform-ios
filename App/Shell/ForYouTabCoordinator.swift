@@ -100,6 +100,9 @@ final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
         ) { [weak sector] item in
             (sector as? (any HeaderAccessoryHosting))?.setTrailingAccessoryItem(item)
         }
+        #if DEBUG
+        walletBadge?.presentSheetIfAskedAtLaunch()
+        #endif
     }
 
     /// The tab item follows how much is waiting on the screen's rows — its
