@@ -1002,10 +1002,17 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     }
 
     public func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController, sourceIsComplete: Bool) {
+        pushSnapFeed(postIDs: postIDs, from: presenter, sourceIsComplete: sourceIsComplete, beneath: nil)
+    }
+
+    public func pushSnapFeed(
+        postIDs: [PostID], from presenter: UIViewController, sourceIsComplete: Bool,
+        beneath: ((UIViewController) -> UIViewController)?
+    ) {
         guard !postIDs.isEmpty, let nav = presenter.navigationController else { return }
         pushWithoutFlight(
             makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: true, sourceIsComplete: sourceIsComplete),
-            on: nav, reveal: nil
+            on: nav, reveal: nil, beneath: beneath
         )
     }
 
@@ -1151,6 +1158,15 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 origin: Self.withDockChoreography(reveal, on: nav),
                 pipeline: imagePipeline
             )
+        } else {
+            // ⚠️ A NATIVE PUSH CLOSES WITH THE NATIVE POP (#2015, the owner:
+            // "a screen closes the way it opened"), whatever page is on screen
+            // by then. The feed is a pager: page onto a photograph and its post
+            // reports `.hero`, and the slide would forward the chevron's pop to
+            // the delegate it displaced. Nothing here builds a flight for this
+            // feed, so the answer is nil — UIKit's slide — said explicitly, as
+            // the window's path says it. No `revealGeometry` either: no window.
+            dismissal.heroLandingAcceptsHero = { false }
         }
         // A place page beneath a semantic cluster's feed: the VERTICAL
         // dismissal's landing, slid under the feed at swipe-begin — the

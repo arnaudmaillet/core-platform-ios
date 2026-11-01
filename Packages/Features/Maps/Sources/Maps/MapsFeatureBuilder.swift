@@ -233,17 +233,13 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             // The same feed, arrived at by the platform's own slide — what a
             // marker opens with under Reduce Motion. A complete set too (#674):
             // every route a marker opens by knows its last post is the end.
-            pushPlainSnapFeed: { postIDs, presenter in
-                feedFeature().pushSnapFeed(postIDs: postIDs, from: presenter, sourceIsComplete: true)
-            },
-            // The same feed again, opened as a window growing out of a text
-            // marker's disc — what a marker with no cover to fly opens with now.
-            // `beneath` carries the semantic cluster's place page through, so a
-            // text-faced city or country dismisses into it like a media-faced
-            // one does.
-            revealSnapFeed: { postIDs, presenter, origin, beneath in
-                feedFeature().revealSnapFeed(
-                    postIDs: postIDs, from: presenter, origin: origin, beneath: beneath, sourceIsComplete: true
+            // Every non-media marker opens this way since #2015. `beneath`
+            // carries the semantic cluster's place page through, so a
+            // text-faced city or country dismisses downward into it like a
+            // media-faced one does.
+            pushPlainSnapFeed: { postIDs, presenter, beneath in
+                feedFeature().pushSnapFeed(
+                    postIDs: postIDs, from: presenter, sourceIsComplete: true, beneath: beneath
                 )
             },
             // The same window asked for at CLOSE time: a feed opened by a hero

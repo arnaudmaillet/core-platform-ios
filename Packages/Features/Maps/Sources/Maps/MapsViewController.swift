@@ -83,16 +83,10 @@ final class MapsViewController: UIViewController {
     /// refuses the stack's native edge pop, so the swipe-back has to be
     /// attached and retained with it, and that belongs where the other two
     /// surfaces already get it.
-    private let pushPlainSnapFeed: ([PostID], UIViewController) -> Void
-    /// Pushes the feed as a WINDOW growing out of a marker — the text pin's
-    /// path. Injected like its plain sibling, and for the same reason: the
-    /// pushed screen's gestures and its transition are the feed's own. The
-    /// last argument builds the screen a VERTICAL dismissal lands on (the
-    /// semantic cluster's place page), or `nil` for a plain marker.
-    private let revealSnapFeed: (
-        [PostID], UIViewController, TextRevealOrigin,
-        ((UIViewController) -> UIViewController)?
-    ) -> Void
+    /// The last argument builds the screen a VERTICAL dismissal lands on
+    /// (the semantic cluster's place page), or `nil` for a plain marker
+    /// (#2015: every non-media marker opens this way now).
+    private let pushPlainSnapFeed: ([PostID], UIViewController, ((UIViewController) -> UIViewController)?) -> Void
     /// The same window built for a CLOSE, pushing nothing — what a feed opened
     /// by a hero uses when the viewer has paged onto a post it cannot fly.
     /// Injected like its push-shaped sibling: Maps depends on FeedInterface and
@@ -419,11 +413,7 @@ final class MapsViewController: UIViewController {
         previewCatalog: AnimatedIconCatalog? = nil,
         videoPlayback: VideoPlaybackController,
         makeSnapFeed: @escaping ([PostID]) -> UIViewController,
-        pushPlainSnapFeed: @escaping ([PostID], UIViewController) -> Void,
-        revealSnapFeed: @escaping (
-            [PostID], UIViewController, TextRevealOrigin,
-            ((UIViewController) -> UIViewController)?
-        ) -> Void,
+        pushPlainSnapFeed: @escaping ([PostID], UIViewController, ((UIViewController) -> UIViewController)?) -> Void,
         makeRevealGeometry: @escaping
             (UIViewController, TextRevealOrigin, (() -> Void)?) -> RevealGeometry,
         makeClusterGallery: @escaping (
@@ -459,7 +449,6 @@ final class MapsViewController: UIViewController {
         self.videoPool = videoPlayback
         self.makeSnapFeed = makeSnapFeed
         self.pushPlainSnapFeed = pushPlainSnapFeed
-        self.revealSnapFeed = revealSnapFeed
         self.makeRevealGeometry = makeRevealGeometry
         self.makeClusterGallery = makeClusterGallery
         self.prewarm = prewarm
@@ -3012,30 +3001,37 @@ extension MapsViewController: MKMapViewDelegate {
         let face = Self.face(of: annotation)
         #if DEBUG
         // Which face a tapped marker wears decides its TRANSITION
-        // (`MapMarkerPresentation`: media flies, everything else reveals), and
-        // a reveal growing from a disc looks like a vertical capsule halfway
-        // through. Without this line, "the present animation is wrong" and
+        // (`MapMarkerPresentation`: media flies, everything else slides in,
+        // #2015). Without this line, "the present animation is wrong" and
         // "this marker is not the face you think" are indistinguishable from
         // outside.
         print("[maps] tap face=\(face) presentation=\(MapMarkerPresentation(face: face)) "
               + "posts=\(postIDs.count) first=\(postIDs.first?.rawValue ?? "-")")
         #endif
         switch MapMarkerPresentation(face: face, reducesMotion: HeroMotionPolicy.prefersNativePush) {
-        case .reveal where navigationController != nil:
-            // The disc IS the window. Same seam as the plain push below — the
-            // feed owns the pushed screen's gestures either way — with an
-            // origin that says where the marker is, what shape and colour it
-            // is, and what to draw in the window at each end.
-            guard openGate.openBegan(.reveal) else { return }
+        case .plainPush where navigationController != nil:
+            // ⚠️ EVERY NON-MEDIA MARKER (#2015, the owner 2026-11-01): a text
+            // post — a text marker, an avatar, an emote, a GIF — opens with
+            // the platform's own slide, and closes with it (the plain push
+            // pins its native close). It opened as a window growing out of
+            // the disc since #125. Through the feed's shared plain-push seam
+            // so this screen gets the same swipe-back it gets everywhere.
+            //
+            // The map's own chrome is left alone on purpose: the filter bars
+            // live in this view and slide out WITH it, where the flight has to
+            // hide them because the map stays visible under the card. The tab
+            // bar is hidden and restored by the seam, and previews stop and
+            // resume through the ordinary appearance callbacks — all of which
+            // are keyed on `activeTransition == nil`, which is exactly what
+            // this path is. The marker stays on the map under the push.
+            guard openGate.openBegan(.plainPush) else { return }
             // A HIERARCHY marker always offers its place page, whatever face
             // it wears (a city or country is a place before it is a
             // photograph): the same builder the hero's Case B uses, handed
-            // through the seam so the vertical dismissal lands on it. Same
-            // criterion as the hero path — `isHierarchyMarker` — so the two
-            // presentations answer "is this marker a city or a country?"
-            // alike, and an ordinary proximity cluster (leaf-shared or not)
-            // gets the plain feed on both. A band's group of one is its
-            // place's marker too (`hierarchyPlace(of:)`).
+            // through the seam so the DOWNWARD dismissal lands on it — the
+            // rightward one is the plain slide back to the map. Same
+            // criterion as the hero path — `isHierarchyMarker` — and a band's
+            // group of one is its place's marker too (`hierarchyPlace(of:)`).
             let hierarchyPlace = Self.hierarchyPlace(of: annotation)
             let placePage: ((UIViewController) -> UIViewController)? = hierarchyPlace.map { place in
                 let mapReturn = makeMapReturnSource(for: annotation)
@@ -3066,40 +3062,8 @@ extension MapsViewController: MKMapViewDelegate {
                 return
             }
             #endif
-            revealSnapFeed(
-                postIDs,
-                self,
-                MapPinRevealSource.origin(
-                    mapView: mapView,
-                    annotation: annotation,
-                    face: face,
-                    dress: dress(for: annotation),
-                    // Exactly what the hero does to the same marker
-                    // (`MapPinZoomSource.setZoomSourceHidden`), for the same
-                    // reason: while the window is elsewhere the disc must not
-                    // still be sitting on the map.
-                    concealMarker: { [weak mapView] concealed in
-                        mapView?.view(for: annotation)?.isHidden = concealed
-                    },
-                    depthView: { [weak self] in self?.view }
-                ),
-                placePage
-            )
-        case .plainPush where navigationController != nil:
-            // Nothing to fly (see `MapMarkerPresentation`): the platform's own
-            // slide, through the feed's shared plain-push seam so this screen
-            // gets the same swipe-back it gets from every other surface.
-            //
-            // The map's own chrome is left alone on purpose: the filter bars
-            // live in this view and slide out WITH it, where the flight has to
-            // hide them because the map stays visible under the card. The tab
-            // bar is hidden and restored by the seam, and previews stop and
-            // resume through the ordinary appearance callbacks — all of which
-            // are keyed on `activeTransition == nil`, which is exactly what
-            // this path is.
-            guard openGate.openBegan(.plainPush) else { return }
-            pushPlainSnapFeed(postIDs, self)
-        case .plainPush, .hero, .reveal:
+            pushPlainSnapFeed(postIDs, self, placePage)
+        case .plainPush, .hero:
             // No stack to push onto: the window has nowhere to open, so the
             // feed is presented instead — the same concession the plain push
             // already made.
