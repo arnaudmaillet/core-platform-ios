@@ -544,6 +544,9 @@ public final class HorizontalPagerScrollView: UIScrollView {
             return true
         }
         if yieldsDrag?(velocity) == true { return true }
+        // Something around this pager that holds horizontal drags right now —
+        // a side list open over the page — closes with this one (#2007).
+        if Self.ancestorClaimsHorizontalDrag(of: self, velocity: velocity) { return true }
         if let hit = hitTest(point, with: nil),
            Self.ownsHorizontalDrag(hit, within: self, velocity: velocity) {
             return true
@@ -573,11 +576,36 @@ public final class HorizontalPagerScrollView: UIScrollView {
         var node: UIView? = view
         while let current = node, current !== container {
             if current is HorizontalDragOwning { return true }
+            if Self.claims(current, velocity: velocity) { return true }
             if let scrollView = current as? UIScrollView,
                hasTravel(scrollView, towardsVelocityX: velocity.x) {
                 return true
             }
             node = current.superview
+        }
+        return false
+    }
+
+    /// Whether anything up `view`'s responder chain — a view, or the
+    /// controller that owns one — claims a horizontal drag heading the way
+    /// `velocity` says (`HorizontalDragClaiming`).
+    private static func ancestorClaimsHorizontalDrag(of view: UIView, velocity: CGPoint) -> Bool {
+        var responder: UIResponder? = view.next
+        while let current = responder {
+            if let claimer = current as? HorizontalDragClaiming, claimer.claimsHorizontalDrag(velocity: velocity) {
+                return true
+            }
+            responder = current.next
+        }
+        return false
+    }
+
+    /// Whether `view`, or the controller whose view it is, claims the drag.
+    private static func claims(_ view: UIView, velocity: CGPoint) -> Bool {
+        if let claimer = view as? HorizontalDragClaiming, claimer.claimsHorizontalDrag(velocity: velocity) { return true }
+        if let owner = view.next as? UIViewController, owner.viewIfLoaded === view,
+           let claimer = owner as? HorizontalDragClaiming, claimer.claimsHorizontalDrag(velocity: velocity) {
+            return true
         }
         return false
     }
@@ -606,6 +634,26 @@ public final class HorizontalPagerScrollView: UIScrollView {
         if velocityX < 0 { return offset < maximum - travelSlack }
         return true
     }
+}
+
+/// Something that holds horizontal drags for as long as a state of its own
+/// lasts — a side list open over a page, a drawer pulled out — so that every
+/// `HorizontalPagerView` around it or inside it gives its drag away meanwhile
+/// (#2007).
+///
+/// The nested-scrolling contract other platforms state outright (Android's
+/// `NestedScrollingParent.onNestedPreScroll`, Compose's
+/// `NestedScrollConnection.onPreScroll`): the surface holding the state has
+/// first refusal on a drag, before the scroller the finger is on. UIKit has no
+/// hand-off between two scroll views' pans mid-gesture, so here the question
+/// is asked once, as the pager's pan begins, of the responder chain above it
+/// (a view or a controller) and of the views between the touch and the pager.
+/// Adopted by the screen that owns the state; no pager needs to know it.
+@MainActor
+public protocol HorizontalDragClaiming: AnyObject {
+    /// Whether a horizontal drag beginning now, heading the way `velocity`
+    /// says, is this one's.
+    func claimsHorizontalDrag(velocity: CGPoint) -> Bool
 }
 
 /// A view that handles horizontal drags itself, without being a scroll view.

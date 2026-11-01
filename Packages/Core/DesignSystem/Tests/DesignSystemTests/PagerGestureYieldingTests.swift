@@ -218,6 +218,45 @@ struct PagerGestureYieldingTests {
         claimed = false
         #expect(shouldBegin(pager, at: point, velocity: Self.rightward))
     }
+
+    // MARK: - A claim around or inside the pager (#2007)
+
+    /// A view holding horizontal drags while a state of its own lasts.
+    private final class Claimer: UIView, HorizontalDragClaiming {
+        var claims = false
+        func claimsHorizontalDrag(velocity: CGPoint) -> Bool { claims }
+    }
+
+    /// ⚠️ A SIDE LIST OPEN OVER THE PAGE CLOSES WITH THE DRAG (#2007): the
+    /// screen holding it claims horizontal drags, and a pager inside it —
+    /// the comments' tabs — gives its own away, in both directions. Closed,
+    /// the pager is the pager again.
+    @Test func thePagerYieldsToAnAncestorThatClaimsTheDrag() {
+        let claimer = Claimer(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        let pager = pager(withNestedContentWidth: 350)
+        claimer.addSubview(pager)
+        let point = CGPoint(x: 200, y: 450)
+
+        claimer.claims = true
+        #expect(shouldBegin(pager, at: point, velocity: Self.rightward) == false)
+        #expect(shouldBegin(pager, at: point, velocity: Self.leftward) == false)
+        claimer.claims = false
+        #expect(shouldBegin(pager, at: point, velocity: Self.rightward))
+    }
+
+    /// The same claim from inside a page — a page holding a drawer open.
+    @Test func thePagerYieldsToAPageThatClaimsTheDrag() {
+        let claimer = Claimer()
+        let pager = HorizontalPagerView(pages: [claimer])
+        pager.frame = CGRect(x: 0, y: 0, width: 390, height: 600)
+        pager.layoutIfNeeded()
+        let point = CGPoint(x: 200, y: 300)
+
+        claimer.claims = true
+        #expect(shouldBegin(pager, at: point, velocity: Self.leftward) == false)
+        claimer.claims = false
+        #expect(shouldBegin(pager, at: point, velocity: Self.leftward))
+    }
 }
 
 /// A control that scrubs with a pan rather than by scrolling — the case the

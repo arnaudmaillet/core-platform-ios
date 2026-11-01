@@ -6,9 +6,10 @@ import UIKit
 ///
 /// The For You sector's capsule (#1703), the same `PagedTabBar` in a bar's
 /// container item (the bar contract, #1679), bound to one panel's pager: a
-/// tap shows the tab, a swipe of the streams moves the pill. One state with
-/// the pager — the pill follows its every frame, and the pager is the one
-/// that settles.
+/// tap scrolls the streams to the tab, as a swipe would (the owner,
+/// 2026-11-01), and a swipe of the streams moves the pill. One state with the
+/// pager — the pill follows its every frame, and the pager is the one that
+/// settles.
 ///
 /// Owned by the screen that draws the bar (the vertical feed, the published
 /// text post), and re-bound to whichever panel holds its comments.
@@ -33,7 +34,7 @@ final class CommentTabsSelector {
             guard let self, let panel else { return }
             panel.showStream(
                 tabBar.selectedIndex == PostDetailViewController.popularPage ? .popular : .recent,
-                animated: tabBar.animatesPageChanges
+                animated: true
             )
         }, for: .valueChanged)
     }

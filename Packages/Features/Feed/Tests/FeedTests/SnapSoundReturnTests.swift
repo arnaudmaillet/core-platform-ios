@@ -165,4 +165,22 @@ struct SnapSoundReturnTests {
         panel.debugScroll(to: 3000, userScroll: true)
         #expect(panel.debugRailFace == .noSlot)
     }
+
+    /// One glyph in the bubble's glass (#2007): Share, the way back up and the
+    /// way back down are one image view whose symbol changes — SF Symbols'
+    /// replace between them — and the record comes back when none shows.
+    @Test func theBubblesGlyphsAreOneSymbolReplaced() {
+        let bubble = SnapSoundBubbleButton()
+        bubble.setSharesPost(true)
+        #expect(bubble.debugGlyphSymbol == CommentsInputBar.shareRailSymbol)
+        bubble.setShowsReturn(true, down: false, animated: false)
+        #expect(bubble.debugGlyphSymbol == "chevron.up")
+        bubble.setShowsReturn(true, down: true, animated: false)
+        #expect(bubble.debugGlyphSymbol == "chevron.down")
+        #expect(bubble.debugReturnGlyphAlpha == 1 && bubble.debugShareGlyphAlpha == 0)
+        bubble.setShowsReturn(false, down: true, animated: false)
+        #expect(bubble.debugGlyphSymbol == CommentsInputBar.shareRailSymbol)
+        bubble.setSharesPost(false)
+        #expect(bubble.debugGlyphSymbol == nil)
+    }
 }

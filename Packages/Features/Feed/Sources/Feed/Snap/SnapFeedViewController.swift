@@ -8588,6 +8588,14 @@ extension SnapFeedViewController: ForYouSectorPage {
     /// The side list, open or on its way, is closed by the swipe — not left
     /// for Feed.
     func sectorPageOwnsHorizontalDrag(velocity: CGPoint) -> Bool {
+        claimsHorizontalDrag(velocity: velocity)
+    }
+}
+
+extension SnapFeedViewController: HorizontalDragClaiming {
+    /// The side list, open or on its way, is closed by the swipe: every pager
+    /// on the page — the comments' tabs (#2007) — gives the drag away.
+    func claimsHorizontalDrag(velocity: CGPoint) -> Bool {
         guard let sideList else { return false }
         return sideList.isOpen || sideList.isEngaged
     }

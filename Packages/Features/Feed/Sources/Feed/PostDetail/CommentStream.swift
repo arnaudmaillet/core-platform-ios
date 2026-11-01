@@ -174,6 +174,7 @@ final class CommentStream: NSObject {
         // A clean minimal stream: no indicator (engaged context only).
         collectionView.showsVerticalScrollIndicator = false
         collectionView.contentInset.bottom = bottom
+        restingBottomInset = bottom
         // On top of the engaged top, never instead of it (#1799): the slack
         // is measured against the settled room, and the stream lands at
         // `-(top + slack)`.
@@ -198,6 +199,37 @@ final class CommentStream: NSObject {
 
     /// Whether the way back shows now (#1929).
     var showsScrollAwayReturn: Bool { scrollAway.showsReturn }
+
+    /// The engaged bottom inset with the composer at rest (`applyEngagedInsets`).
+    private var restingBottomInset: CGFloat?
+
+    /// ⚠️ RECENT RIDES THE KEYBOARD, as a conversation does (the owner,
+    /// 2026-11-01): the composer's input row rising by `rise` lifts the
+    /// conversation with it — its newest row stays just above the field, and
+    /// a reader further up keeps the rows they were reading on screen. Popular
+    /// stays where it is, under the keyboard, as before. Each stream holds its
+    /// own inset, so the tabs change with the keyboard up and both stay right.
+    ///
+    /// Called from the panel's layout pass (`viewDidLayoutSubviews`), which a
+    /// keyboard runs inside its own animation: the inset and the offset land
+    /// in that block and ride the keyboard's curve. The offset is read before
+    /// the inset is written, which clamps it (`ConversationThreadViewController.syncBottomClearance`),
+    /// and a finger dragging the keyboard down owns the offset itself.
+    func syncKeyboardRise(_ rise: CGFloat) {
+        guard kind == .recent, let resting = restingBottomInset else { return }
+        let inset = resting + max(0, rise)
+        let delta = inset - collectionView.contentInset.bottom
+        guard abs(delta) > 0.5 else { return }
+        let offsetBefore = collectionView.contentOffset.y
+        collectionView.contentInset.bottom = inset
+        guard hasAppliedStream, !collectionView.isTracking else { return }
+        if holdsRest {
+            pinToTail()
+        } else {
+            let insets = collectionView.adjustedContentInset
+            collectionView.contentOffset.y = min(max(offsetBefore + delta, -insets.top), tailOffset)
+        }
+    }
 
     /// The stream moved to `offset` — by the reader, or not. Tests.
     func debugScroll(to offset: CGFloat, userScroll: Bool) {

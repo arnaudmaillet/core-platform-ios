@@ -307,4 +307,48 @@ struct CommentTabsTests {
         selector.tabBar.onScrub?(0.75)
         #expect(abs(pager.contentOffset.x - pager.bounds.width * 0.75) < 1, "the streams did not follow the pill")
     }
+
+    // MARK: - The keyboard
+
+    /// ⚠️ RECENT RIDES THE KEYBOARD, as a conversation does (the owner,
+    /// 2026-11-01): its newest row stays just above the risen field. Popular
+    /// stays where it is; and the two hold their own insets, so either tab is
+    /// right with the keyboard up.
+    @Test func recentRidesTheKeyboardAndPopularStays() async {
+        let (controller, window) = panel(PagedComments(count: 30, pageSize: 30))
+        defer { window.isHidden = true }
+        controller.setEngagedInsets(top: 100, bottomInset: 34)
+        #expect(await settle { Self.loaded(controller.popular) && Self.loaded(controller.recent) })
+        let popular = controller.popular.collectionView
+        let recent = controller.recent.collectionView
+        let popularBefore = (popular.contentInset.bottom, popular.contentOffset.y)
+        let recentInset = recent.contentInset.bottom
+        #expect(abs(recent.contentOffset.y - Self.tailOffset(recent)) < 1)
+
+        controller.recent.syncKeyboardRise(300)
+        controller.popular.syncKeyboardRise(300)
+        #expect(abs(recent.contentInset.bottom - (recentInset + 300)) < 0.5)
+        #expect(abs(recent.contentOffset.y - Self.tailOffset(recent)) < 1, "Recent's newest went under the keyboard")
+        #expect(popular.contentInset.bottom == popularBefore.0 && popular.contentOffset.y == popularBefore.1, "Popular moved")
+
+        controller.recent.syncKeyboardRise(0)
+        #expect(abs(recent.contentInset.bottom - recentInset) < 0.5)
+        #expect(abs(recent.contentOffset.y - Self.tailOffset(recent)) < 1)
+    }
+
+    /// A reader further up keeps the rows they were reading on screen as the
+    /// keyboard comes up: the offset rises by the same amount.
+    @Test func aReaderFurtherUpKeepsTheirRowsAsTheKeyboardRises() async {
+        let (controller, window) = panel(PagedComments(count: 30, pageSize: 30))
+        defer { window.isHidden = true }
+        controller.setEngagedInsets(top: 100, bottomInset: 34)
+        #expect(await settle { Self.loaded(controller.popular) && Self.loaded(controller.recent) })
+        controller.showStream(.recent, animated: false)
+        let recent = controller.recent.collectionView
+        controller.debugScroll(to: Self.tailOffset(recent) - 600, userScroll: true)
+        let before = recent.contentOffset.y
+
+        controller.recent.syncKeyboardRise(250)
+        #expect(abs(recent.contentOffset.y - (before + 250)) < 0.5)
+    }
 }

@@ -101,18 +101,15 @@ final class SnapSoundBubbleButton: UIButton {
     var onTap: (() -> Void)?
 
     private let record = SoundRecordGlass()
-    /// The way back's glyph, in the record's glass (#1929). The glass is
-    /// never faded: the record and the glyph cross-fade inside it.
-    /// The composer slot's glyph size (`CommentsInputBar`), so the two
-    /// chevrons read alike.
-    private let returnGlyph = UIImageView(image: SnapSoundBubbleButton.returnSymbol(down: false))
+    /// The glyph in the record's glass: the way back (#1929) or Share
+    /// (#1999). The glass is never faded: the record and the glyph cross-fade
+    /// inside it, and one glyph becoming another — Share and the way back, up
+    /// and down (#2007) — is SF Symbols' own replace (the owner, 2026-11-01).
+    private let glyph = UIImageView()
+    /// The symbol the glyph wears, nil while the record shows.
+    private var glyphSymbol: String?
     /// Whether the way back shows instead of the record.
     private(set) var showsReturn = false
-    /// Share's glyph, in the same glass (#1999): a pushed text page's
-    /// bubble is the post's Share, not its sound — a text post has none.
-    private let shareGlyph = UIImageView(
-        image: UIImage.symbol(named: CommentsInputBar.shareRailSymbol, configuration: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold))
-    )
     /// Whether the bubble is the post's Share instead of its sound (#1999).
     private(set) var sharesPost = false
     /// What the host last asked of the record, kept while the way back
@@ -141,16 +138,11 @@ final class SnapSoundBubbleButton: UIButton {
         config.background.backgroundColor = .clear
         configuration = config
         addSubview(record)
-        returnGlyph.tintColor = .label
-        returnGlyph.contentMode = .center
-        returnGlyph.alpha = 0
-        returnGlyph.isUserInteractionEnabled = false
-        addSubview(returnGlyph)
-        shareGlyph.tintColor = .label
-        shareGlyph.contentMode = .center
-        shareGlyph.alpha = 0
-        shareGlyph.isUserInteractionEnabled = false
-        addSubview(shareGlyph)
+        glyph.tintColor = .label
+        glyph.contentMode = .center
+        glyph.alpha = 0
+        glyph.isUserInteractionEnabled = false
+        addSubview(glyph)
 
         addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .primaryActionTriggered)
 
@@ -166,8 +158,7 @@ final class SnapSoundBubbleButton: UIButton {
     func setShowsReturn(_ shows: Bool, down: Bool = false, animated: Bool) {
         if down != returnPointsDown {
             returnPointsDown = down
-            returnGlyph.image = Self.returnSymbol(down: down)
-            if shows == showsReturn { applyFace(animated: false) }
+            if shows == showsReturn { applyFace(animated: animated) }
         }
         guard shows != showsReturn else { return }
         showsReturn = shows
@@ -177,11 +168,11 @@ final class SnapSoundBubbleButton: UIButton {
     /// Whether the way back points down (#2007).
     private(set) var returnPointsDown = false
 
-    private static func returnSymbol(down: Bool) -> UIImage? {
-        UIImage.symbol(
-            named: down ? "chevron.down" : "chevron.up",
-            configuration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
-        )
+    /// The glyph's symbol and its size: the composer slot's (`CommentsInputBar`),
+    /// so the two chevrons read alike.
+    private static func glyphImage(_ symbol: String) -> UIImage? {
+        let size: CGFloat = symbol == CommentsInputBar.shareRailSymbol ? 17 : 15
+        return UIImage.symbol(named: symbol, configuration: UIImage.SymbolConfiguration(pointSize: size, weight: .semibold))
     }
 
     /// The bubble as the post's Share (#1999), or back to its sound: Share's
@@ -205,11 +196,22 @@ final class SnapSoundBubbleButton: UIButton {
         // An unavailable sound stays greyed; the way back and Share always answer.
         isEnabled = shows || sharesPost || face?.isAvailable == true
         alpha = shows || sharesPost || face?.isAvailable != false ? 1 : 0.45
-        let sharing = sharesPost
+        let symbol: String? = shows
+            ? (returnPointsDown ? "chevron.down" : "chevron.up")
+            : sharesPost ? CommentsInputBar.shareRailSymbol : nil
+        if let symbol, symbol != glyphSymbol, let image = Self.glyphImage(symbol) {
+            // Glyph to glyph: the symbol's replace. From the record: the image
+            // is set, and the cross-fade below brings it in.
+            if glyphSymbol != nil, animated, !MotionPreference.reducesMotion {
+                glyph.setSymbolImage(image, contentTransition: .replace)
+            } else {
+                glyph.image = image
+            }
+        }
+        glyphSymbol = symbol
         let apply = {
-            self.record.recordAlpha = shows || sharing ? 0 : 1
-            self.returnGlyph.alpha = shows ? 1 : 0
-            self.shareGlyph.alpha = sharing && !shows ? 1 : 0
+            self.record.recordAlpha = symbol != nil ? 0 : 1
+            self.glyph.alpha = symbol != nil ? 1 : 0
         }
         // A cross-fade, not a motion: Reduce Motion keeps it.
         if animated {
@@ -236,12 +238,9 @@ final class SnapSoundBubbleButton: UIButton {
         record.bounds = CGRect(origin: .zero, size: bounds.size)
         record.center = CGPoint(x: bounds.midX, y: bounds.midY)
         bringSubviewToFront(record)
-        returnGlyph.bounds = record.bounds
-        returnGlyph.center = record.center
-        bringSubviewToFront(returnGlyph)
-        shareGlyph.bounds = record.bounds
-        shareGlyph.center = record.center
-        bringSubviewToFront(shareGlyph)
+        glyph.bounds = record.bounds
+        glyph.center = record.center
+        bringSubviewToFront(glyph)
     }
 
     /// Draws `face`; nil hides nothing by itself (the host decides visibility)
@@ -286,7 +285,9 @@ final class SnapSoundBubbleButton: UIButton {
     #if DEBUG
     var debugRecord: SoundRecordGlass { record }
     var debugCoverImage: UIImage? { coverView.image }
-    var debugReturnGlyphAlpha: CGFloat { returnGlyph.alpha }
-    var debugShareGlyphAlpha: CGFloat { shareGlyph.alpha }
+    var debugReturnGlyphAlpha: CGFloat { showsReturn ? glyph.alpha : 0 }
+    var debugShareGlyphAlpha: CGFloat { sharesPost && !showsReturn ? glyph.alpha : 0 }
+    /// The glyph's symbol now. Tests.
+    var debugGlyphSymbol: String? { glyphSymbol }
     #endif
 }

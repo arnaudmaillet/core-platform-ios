@@ -338,10 +338,20 @@ final class PostDetailViewController: UIViewController {
         refitEmptyPageOnHeightChange()
         syncDayUnderHeader()
         // Rows realised as the engaged stream grows into its room (#1799).
+        let rise = composerRise
         streams.forEach {
             $0.syncBottomAnchor()
+            $0.syncKeyboardRise(rise)
             $0.keepRestingEnd()
         }
+    }
+
+    /// How far the keyboard holds the composer's input row above the bar's
+    /// resting top: the room Recent gives up to ride it (#2007). Read off the
+    /// solved layout, as a conversation reads it.
+    private var composerRise: CGFloat {
+        guard composerTracksKeyboard, engagedStreamInsets != nil, !composeBar.isHidden else { return 0 }
+        return max(0, composeBar.frame.minY - composeBar.occupiedMinY)
     }
 
     /// This view's height as last laid out — see `refitEmptyPageOnHeightChange`.
