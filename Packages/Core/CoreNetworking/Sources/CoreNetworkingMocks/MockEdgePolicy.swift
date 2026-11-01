@@ -67,6 +67,8 @@ public enum MockEdgePolicy {
         "/profile.v1.ProfileService/GetProfileByHandle",
         "/comment.v1.CommentService/ListTopLevel",
         "/comment.v1.CommentService/ListReplies",
+        // A page of tiles' first comments (#976), read as ListTopLevel is.
+        "/comment.v1.CommentService/ListPreviews",
         "/counter.v1.CounterService/BatchGetCounters",
         // Like counts are `public_read` (#676); `mine` is 0 for a guest.
         "/engagement.v1.EngagementService/GetPostEngagement",

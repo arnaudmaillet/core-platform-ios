@@ -80,6 +80,21 @@ public protocol Chat_V1_ChatServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `listInbox`(request: Chat_V1_ListInboxRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_ListInboxResponse>
 
+    /// What changed in the caller's inbox since a watermark (#930): the
+    /// entries now (unread, muted, moved between folders, a new last message),
+    /// the conversations to drop, and the next watermark. A watermark lives 35
+    /// days (past the app's 30-day retention); an older one answers
+    /// OUT_OF_RANGE (CHT-2013): resync in full with ListInbox. Edge: the
+    /// caller's profile.
+    @available(iOS 13, *)
+    func `syncInbox`(request: Chat_V1_SyncInboxRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_SyncInboxResponse>
+
+    /// What is new in a conversation since a watermark (#930): its messages
+    /// after it, oldest first, and the members' read positions. Same audience
+    /// rules and watermark lifetime as SyncInbox. Edge: the caller's profile.
+    @available(iOS 13, *)
+    func `syncConversation`(request: Chat_V1_SyncConversationRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_SyncConversationResponse>
+
     /// The conversations a profile is a member of (member plane), paged by
     /// conversation id. Mesh only (never on the edge): the GDPR data export
     /// (#653) then reads each one's history as that member (GetHistory).
@@ -202,6 +217,16 @@ public final class Chat_V1_ChatServiceClient: Chat_V1_ChatServiceClientInterface
     }
 
     @available(iOS 13, *)
+    public func `syncInbox`(request: Chat_V1_SyncInboxRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Chat_V1_SyncInboxResponse> {
+        return await self.client.unary(path: "/chat.v1.ChatService/SyncInbox", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `syncConversation`(request: Chat_V1_SyncConversationRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Chat_V1_SyncConversationResponse> {
+        return await self.client.unary(path: "/chat.v1.ChatService/SyncConversation", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `listConversationsByMember`(request: Chat_V1_ListConversationsByMemberRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Chat_V1_ListConversationsByMemberResponse> {
         return await self.client.unary(path: "/chat.v1.ChatService/ListConversationsByMember", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -241,6 +266,8 @@ public final class Chat_V1_ChatServiceClient: Chat_V1_ChatServiceClientInterface
             public static let listMembers = Connect.MethodSpec(name: "ListMembers", service: "chat.v1.ChatService", type: .unary)
             public static let listSubscriptions = Connect.MethodSpec(name: "ListSubscriptions", service: "chat.v1.ChatService", type: .unary)
             public static let listInbox = Connect.MethodSpec(name: "ListInbox", service: "chat.v1.ChatService", type: .unary)
+            public static let syncInbox = Connect.MethodSpec(name: "SyncInbox", service: "chat.v1.ChatService", type: .unary)
+            public static let syncConversation = Connect.MethodSpec(name: "SyncConversation", service: "chat.v1.ChatService", type: .unary)
             public static let listConversationsByMember = Connect.MethodSpec(name: "ListConversationsByMember", service: "chat.v1.ChatService", type: .unary)
             public static let getFormerMemberHistory = Connect.MethodSpec(name: "GetFormerMemberHistory", service: "chat.v1.ChatService", type: .unary)
             public static let streamConversation = Connect.MethodSpec(name: "StreamConversation", service: "chat.v1.ChatService", type: .serverStream)

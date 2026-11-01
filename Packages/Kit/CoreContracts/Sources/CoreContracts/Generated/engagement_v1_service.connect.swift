@@ -12,6 +12,8 @@ import SwiftProtobuf
 public protocol Engagement_V1_EngagementServiceClientInterface: Sendable {
 
     /// Increments the view counter for a post. Fire-and-forget on the hot path.
+    /// With `account_id` and `profile_id` (a member, #944), the view also enters
+    /// the profile's viewing history (best effort: it never fails the count).
     @available(iOS 13, *)
     func `recordView`(request: Engagement_V1_RecordViewRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_CommandResponse>
 
@@ -70,6 +72,25 @@ public protocol Engagement_V1_EngagementServiceClientInterface: Sendable {
     /// (never on the edge): the GDPR data export (#872).
     @available(iOS 13, *)
     func `listSavedPostsByAccount`(request: Engagement_V1_ListSavedPostsByAccountRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_ListSavedPostsByAccountResponse>
+
+    /// A profile's viewing history (#944): the posts it viewed, most recently
+    /// viewed first, each once, kept 90 days. Owner only (the History tab):
+    /// anyone else is refused. Recorded by RecordView with the profile.
+    @available(iOS 13, *)
+    func `listViewHistory`(request: Engagement_V1_ListViewHistoryRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_ListViewHistoryResponse>
+
+    /// Takes one post out of it. Idempotent.
+    @available(iOS 13, *)
+    func `removeViewHistoryEntry`(request: Engagement_V1_RemoveViewHistoryEntryRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_RemoveViewHistoryEntryResponse>
+
+    /// Clears it. Idempotent.
+    @available(iOS 13, *)
+    func `clearViewHistory`(request: Engagement_V1_ClearViewHistoryRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_ClearViewHistoryResponse>
+
+    /// What an account viewed, with each post's profile, paged. Mesh only
+    /// (never on the edge): the GDPR data export (#944).
+    @available(iOS 13, *)
+    func `listViewHistoryByAccount`(request: Engagement_V1_ListViewHistoryByAccountRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_ListViewHistoryByAccountResponse>
 }
 
 /// Concrete implementation of `Engagement_V1_EngagementServiceClientInterface`.
@@ -135,6 +156,26 @@ public final class Engagement_V1_EngagementServiceClient: Engagement_V1_Engageme
         return await self.client.unary(path: "/engagement.v1.EngagementService/ListSavedPostsByAccount", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `listViewHistory`(request: Engagement_V1_ListViewHistoryRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Engagement_V1_ListViewHistoryResponse> {
+        return await self.client.unary(path: "/engagement.v1.EngagementService/ListViewHistory", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `removeViewHistoryEntry`(request: Engagement_V1_RemoveViewHistoryEntryRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Engagement_V1_RemoveViewHistoryEntryResponse> {
+        return await self.client.unary(path: "/engagement.v1.EngagementService/RemoveViewHistoryEntry", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `clearViewHistory`(request: Engagement_V1_ClearViewHistoryRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Engagement_V1_ClearViewHistoryResponse> {
+        return await self.client.unary(path: "/engagement.v1.EngagementService/ClearViewHistory", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listViewHistoryByAccount`(request: Engagement_V1_ListViewHistoryByAccountRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Engagement_V1_ListViewHistoryByAccountResponse> {
+        return await self.client.unary(path: "/engagement.v1.EngagementService/ListViewHistoryByAccount", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let recordView = Connect.MethodSpec(name: "RecordView", service: "engagement.v1.EngagementService", type: .unary)
@@ -148,6 +189,10 @@ public final class Engagement_V1_EngagementServiceClient: Engagement_V1_Engageme
             public static let unsavePost = Connect.MethodSpec(name: "UnsavePost", service: "engagement.v1.EngagementService", type: .unary)
             public static let listSavedPosts = Connect.MethodSpec(name: "ListSavedPosts", service: "engagement.v1.EngagementService", type: .unary)
             public static let listSavedPostsByAccount = Connect.MethodSpec(name: "ListSavedPostsByAccount", service: "engagement.v1.EngagementService", type: .unary)
+            public static let listViewHistory = Connect.MethodSpec(name: "ListViewHistory", service: "engagement.v1.EngagementService", type: .unary)
+            public static let removeViewHistoryEntry = Connect.MethodSpec(name: "RemoveViewHistoryEntry", service: "engagement.v1.EngagementService", type: .unary)
+            public static let clearViewHistory = Connect.MethodSpec(name: "ClearViewHistory", service: "engagement.v1.EngagementService", type: .unary)
+            public static let listViewHistoryByAccount = Connect.MethodSpec(name: "ListViewHistoryByAccount", service: "engagement.v1.EngagementService", type: .unary)
         }
     }
 }

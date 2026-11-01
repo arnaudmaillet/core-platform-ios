@@ -60,7 +60,8 @@ public nonisolated enum Comment_V1_CommentStatus: SwiftProtobuf.Enum, Swift.Case
 
 }
 
-/// The order of a thread's replies (#832).
+/// The order of a thread's replies (#832), and of a post's top-level
+/// comments (#977).
 public nonisolated enum Comment_V1_ReplySort: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
 

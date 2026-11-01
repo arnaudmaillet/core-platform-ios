@@ -209,6 +209,11 @@ public nonisolated enum Media_V1_RenditionKind: SwiftProtobuf.Enum, Swift.CaseIt
 
   /// The same with 256 px cells.
   case mediaRenditionKindSheetLarge // = 9
+
+  /// A VIDEO's short muted preview loop (#963): its first seconds, small
+  /// (an MP4 of at most ~300 KB), for a card that plays it in place, such
+  /// as a country's Shop cover. Absent when the video could not make one.
+  case mediaRenditionKindPreview // = 10
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -227,6 +232,7 @@ public nonisolated enum Media_V1_RenditionKind: SwiftProtobuf.Enum, Swift.CaseIt
     case 7: self = .mediaRenditionKindPoster
     case 8: self = .mediaRenditionKindSheetSmall
     case 9: self = .mediaRenditionKindSheetLarge
+    case 10: self = .mediaRenditionKindPreview
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -243,6 +249,7 @@ public nonisolated enum Media_V1_RenditionKind: SwiftProtobuf.Enum, Swift.CaseIt
     case .mediaRenditionKindPoster: return 7
     case .mediaRenditionKindSheetSmall: return 8
     case .mediaRenditionKindSheetLarge: return 9
+    case .mediaRenditionKindPreview: return 10
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -259,6 +266,7 @@ public nonisolated enum Media_V1_RenditionKind: SwiftProtobuf.Enum, Swift.CaseIt
     .mediaRenditionKindPoster,
     .mediaRenditionKindSheetSmall,
     .mediaRenditionKindSheetLarge,
+    .mediaRenditionKindPreview,
   ]
 
 }
@@ -316,7 +324,7 @@ nonisolated extension Media_V1_AssetState: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension Media_V1_RenditionKind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MEDIA_RENDITION_KIND_UNSPECIFIED\0\u{1}MEDIA_RENDITION_KIND_ORIGINAL\0\u{1}MEDIA_RENDITION_KIND_THUMBNAIL\0\u{1}MEDIA_RENDITION_KIND_SMALL\0\u{1}MEDIA_RENDITION_KIND_MEDIUM\0\u{1}MEDIA_RENDITION_KIND_LARGE\0\u{1}MEDIA_RENDITION_KIND_MANIFEST\0\u{1}MEDIA_RENDITION_KIND_POSTER\0\u{1}MEDIA_RENDITION_KIND_SHEET_SMALL\0\u{1}MEDIA_RENDITION_KIND_SHEET_LARGE\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MEDIA_RENDITION_KIND_UNSPECIFIED\0\u{1}MEDIA_RENDITION_KIND_ORIGINAL\0\u{1}MEDIA_RENDITION_KIND_THUMBNAIL\0\u{1}MEDIA_RENDITION_KIND_SMALL\0\u{1}MEDIA_RENDITION_KIND_MEDIUM\0\u{1}MEDIA_RENDITION_KIND_LARGE\0\u{1}MEDIA_RENDITION_KIND_MANIFEST\0\u{1}MEDIA_RENDITION_KIND_POSTER\0\u{1}MEDIA_RENDITION_KIND_SHEET_SMALL\0\u{1}MEDIA_RENDITION_KIND_SHEET_LARGE\0\u{1}MEDIA_RENDITION_KIND_PREVIEW\0")
 }
 
 nonisolated extension Media_V1_DeliveryVisibility: SwiftProtobuf._ProtoNameProviding {

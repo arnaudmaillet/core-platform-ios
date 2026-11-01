@@ -402,6 +402,102 @@ public nonisolated enum GeoDiscovery_V1_PlaceScale: SwiftProtobuf.Enum, Swift.Ca
 
 }
 
+/// Which posts a list keeps by kind (#949): the full-screen feed keeps the
+/// opening post's kind. A post whose kind the service has not recorded (one
+/// published before it did) passes every filter.
+public nonisolated enum GeoDiscovery_V1_PostKindFilter: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// Every post.
+  case unspecified // = 0
+
+  /// Photo, carousel and video posts.
+  case media // = 1
+
+  /// Text-only posts.
+  case textOnly // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .media
+    case 2: self = .textOnly
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .media: return 1
+    case .textOnly: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [GeoDiscovery_V1_PostKindFilter] = [
+    .unspecified,
+    .media,
+    .textOnly,
+  ]
+
+}
+
+/// What a country's Shop cover shows (#942).
+public nonisolated enum GeoDiscovery_V1_CoverKind: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+
+  /// A photo post: paint `poster_url`.
+  case mediaImage // = 1
+
+  /// A video post: paint `poster_url`, play `preview_url` when set.
+  case mediaVideo // = 2
+
+  /// A text-only post: a quote card of `caption`.
+  case text // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .mediaImage
+    case 2: self = .mediaVideo
+    case 3: self = .text
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .mediaImage: return 1
+    case .mediaVideo: return 2
+    case .text: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [GeoDiscovery_V1_CoverKind] = [
+    .unspecified,
+    .mediaImage,
+    .mediaVideo,
+    .text,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension GeoDiscovery_V1_ZoomBand: SwiftProtobuf._ProtoNameProviding {
@@ -430,4 +526,12 @@ nonisolated extension GeoDiscovery_V1_PlaceSort: SwiftProtobuf._ProtoNameProvidi
 
 nonisolated extension GeoDiscovery_V1_PlaceScale: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0PLACE_SCALE_UNSPECIFIED\0\u{1}PLACE_SCALE_CITY\0\u{1}PLACE_SCALE_DISTRICT\0\u{1}PLACE_SCALE_STREET\0")
+}
+
+nonisolated extension GeoDiscovery_V1_PostKindFilter: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0POST_KIND_FILTER_UNSPECIFIED\0\u{1}POST_KIND_FILTER_MEDIA\0\u{1}POST_KIND_FILTER_TEXT_ONLY\0")
+}
+
+nonisolated extension GeoDiscovery_V1_CoverKind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0COVER_KIND_UNSPECIFIED\0\u{1}COVER_KIND_MEDIA_IMAGE\0\u{1}COVER_KIND_MEDIA_VIDEO\0\u{1}COVER_KIND_TEXT\0")
 }

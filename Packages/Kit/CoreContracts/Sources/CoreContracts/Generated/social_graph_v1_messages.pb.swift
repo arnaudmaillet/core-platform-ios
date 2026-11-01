@@ -51,6 +51,12 @@ public nonisolated struct SocialGraph_V1_RelationStatusView: Sendable {
   /// The actor restricts the target.
   public var restricted: Bool = false
 
+  /// The actor has a pending follow request to the target (#972), whatever
+  /// the inbound edge: `status` says REQUESTED only when neither follows the
+  /// other, so a private target that already follows the actor reads
+  /// FOLLOWED_BY with this set.
+  public var requested: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -844,7 +850,7 @@ fileprivate nonisolated let _protobuf_package = "social_graph.v1"
 
 nonisolated extension SocialGraph_V1_RelationStatusView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".RelationStatusView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}actor_id\0\u{3}target_id\0\u{1}status\0\u{3}target_followers_count\0\u{3}target_following_count\0\u{1}muted\0\u{1}restricted\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}actor_id\0\u{3}target_id\0\u{1}status\0\u{3}target_followers_count\0\u{3}target_following_count\0\u{1}muted\0\u{1}restricted\0\u{1}requested\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -859,6 +865,7 @@ nonisolated extension SocialGraph_V1_RelationStatusView: SwiftProtobuf.Message, 
       case 5: try { try decoder.decodeSingularInt64Field(value: &self.targetFollowingCount) }()
       case 6: try { try decoder.decodeSingularMessageField(value: &self._muted) }()
       case 7: try { try decoder.decodeSingularBoolField(value: &self.restricted) }()
+      case 8: try { try decoder.decodeSingularBoolField(value: &self.requested) }()
       default: break
       }
     }
@@ -890,6 +897,9 @@ nonisolated extension SocialGraph_V1_RelationStatusView: SwiftProtobuf.Message, 
     if self.restricted != false {
       try visitor.visitSingularBoolField(value: self.restricted, fieldNumber: 7)
     }
+    if self.requested != false {
+      try visitor.visitSingularBoolField(value: self.requested, fieldNumber: 8)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -901,6 +911,7 @@ nonisolated extension SocialGraph_V1_RelationStatusView: SwiftProtobuf.Message, 
     if lhs.targetFollowingCount != rhs.targetFollowingCount {return false}
     if lhs._muted != rhs._muted {return false}
     if lhs.restricted != rhs.restricted {return false}
+    if lhs.requested != rhs.requested {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

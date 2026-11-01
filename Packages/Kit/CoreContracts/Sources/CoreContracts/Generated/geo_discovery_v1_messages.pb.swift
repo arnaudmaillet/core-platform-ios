@@ -262,6 +262,9 @@ public nonisolated struct GeoDiscovery_V1_ListPlacePostsRequest: Sendable {
   /// The previous response's `next_page_token`, with the same place and sort.
   public var pageToken: String = String()
 
+  /// Only posts of this kind (#949); UNSPECIFIED keeps all.
+  public var postKind: GeoDiscovery_V1_PostKindFilter = .unspecified
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Place: Equatable, Sendable {
@@ -362,6 +365,47 @@ public nonisolated struct GeoDiscovery_V1_CountryStanding: Sendable {
 
   /// What a 24 h visa to it costs, in gems (#910).
   public var visaPriceGems: Int64 = 0
+
+  /// Its Shop card's background (#942): the country's most liked post over
+  /// the window that anyone may see on the map. Unset when it has none: draw
+  /// the flag.
+  public var cover: GeoDiscovery_V1_CountryCover {
+    get {_cover ?? GeoDiscovery_V1_CountryCover()}
+    set {_cover = newValue}
+  }
+  /// Returns true if `cover` has been explicitly set.
+  public var hasCover: Bool {self._cover != nil}
+  /// Clears the value of `cover`. Subsequent reads from it will return its default value.
+  public mutating func clearCover() {self._cover = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _cover: GeoDiscovery_V1_CountryCover? = nil
+}
+
+/// A country's Shop cover (#942). Advertising, shown for locked countries
+/// too: no author, nothing to open.
+public nonisolated struct GeoDiscovery_V1_CountryCover: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var postID: String = String()
+
+  public var kind: GeoDiscovery_V1_CoverKind = .unspecified
+
+  /// A still to paint: the photo, or the video's poster. Empty for TEXT.
+  public var posterURL: String = String()
+
+  /// VIDEO only: a short muted preview loop (#963: media's PREVIEW, the
+  /// video's first 3 s, an MP4 of at most ~300 KB). Empty when the video has
+  /// none (older, or delivered SIGNED): paint the poster.
+  public var previewURL: String = String()
+
+  /// TEXT only: the caption, at most 200 characters.
+  public var caption: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -938,7 +982,7 @@ nonisolated extension GeoDiscovery_V1_PlacePoint: SwiftProtobuf.Message, SwiftPr
 
 nonisolated extension GeoDiscovery_V1_ListPlacePostsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ListPlacePostsRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}h3_cell\0\u{3}country_code\0\u{1}point\0\u{1}sort\0\u{1}limit\0\u{3}page_token\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}h3_cell\0\u{3}country_code\0\u{1}point\0\u{1}sort\0\u{1}limit\0\u{3}page_token\0\u{3}post_kind\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -978,6 +1022,7 @@ nonisolated extension GeoDiscovery_V1_ListPlacePostsRequest: SwiftProtobuf.Messa
       case 4: try { try decoder.decodeSingularEnumField(value: &self.sort) }()
       case 5: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
+      case 7: try { try decoder.decodeSingularEnumField(value: &self.postKind) }()
       default: break
       }
     }
@@ -1012,6 +1057,9 @@ nonisolated extension GeoDiscovery_V1_ListPlacePostsRequest: SwiftProtobuf.Messa
     if !self.pageToken.isEmpty {
       try visitor.visitSingularStringField(value: self.pageToken, fieldNumber: 6)
     }
+    if self.postKind != .unspecified {
+      try visitor.visitSingularEnumField(value: self.postKind, fieldNumber: 7)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1020,6 +1068,7 @@ nonisolated extension GeoDiscovery_V1_ListPlacePostsRequest: SwiftProtobuf.Messa
     if lhs.sort != rhs.sort {return false}
     if lhs.limit != rhs.limit {return false}
     if lhs.pageToken != rhs.pageToken {return false}
+    if lhs.postKind != rhs.postKind {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1146,7 +1195,7 @@ nonisolated extension GeoDiscovery_V1_GetCountryStandingsRequest: SwiftProtobuf.
 
 nonisolated extension GeoDiscovery_V1_CountryStanding: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CountryStanding"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}country_code\0\u{1}rank\0\u{1}likes\0\u{1}posts\0\u{3}price_gems\0\u{3}visa_price_gems\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}country_code\0\u{1}rank\0\u{1}likes\0\u{1}posts\0\u{3}price_gems\0\u{3}visa_price_gems\0\u{1}cover\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1160,12 +1209,17 @@ nonisolated extension GeoDiscovery_V1_CountryStanding: SwiftProtobuf.Message, Sw
       case 4: try { try decoder.decodeSingularInt64Field(value: &self.posts) }()
       case 5: try { try decoder.decodeSingularInt64Field(value: &self.priceGems) }()
       case 6: try { try decoder.decodeSingularInt64Field(value: &self.visaPriceGems) }()
+      case 7: try { try decoder.decodeSingularMessageField(value: &self._cover) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.countryCode.isEmpty {
       try visitor.visitSingularStringField(value: self.countryCode, fieldNumber: 1)
     }
@@ -1184,6 +1238,9 @@ nonisolated extension GeoDiscovery_V1_CountryStanding: SwiftProtobuf.Message, Sw
     if self.visaPriceGems != 0 {
       try visitor.visitSingularInt64Field(value: self.visaPriceGems, fieldNumber: 6)
     }
+    try { if let v = self._cover {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1194,6 +1251,57 @@ nonisolated extension GeoDiscovery_V1_CountryStanding: SwiftProtobuf.Message, Sw
     if lhs.posts != rhs.posts {return false}
     if lhs.priceGems != rhs.priceGems {return false}
     if lhs.visaPriceGems != rhs.visaPriceGems {return false}
+    if lhs._cover != rhs._cover {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GeoDiscovery_V1_CountryCover: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".CountryCover"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{1}kind\0\u{3}poster_url\0\u{3}preview_url\0\u{1}caption\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.postID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.kind) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.posterURL) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.previewURL) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.caption) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.postID.isEmpty {
+      try visitor.visitSingularStringField(value: self.postID, fieldNumber: 1)
+    }
+    if self.kind != .unspecified {
+      try visitor.visitSingularEnumField(value: self.kind, fieldNumber: 2)
+    }
+    if !self.posterURL.isEmpty {
+      try visitor.visitSingularStringField(value: self.posterURL, fieldNumber: 3)
+    }
+    if !self.previewURL.isEmpty {
+      try visitor.visitSingularStringField(value: self.previewURL, fieldNumber: 4)
+    }
+    if !self.caption.isEmpty {
+      try visitor.visitSingularStringField(value: self.caption, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GeoDiscovery_V1_CountryCover, rhs: GeoDiscovery_V1_CountryCover) -> Bool {
+    if lhs.postID != rhs.postID {return false}
+    if lhs.kind != rhs.kind {return false}
+    if lhs.posterURL != rhs.posterURL {return false}
+    if lhs.previewURL != rhs.previewURL {return false}
+    if lhs.caption != rhs.caption {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

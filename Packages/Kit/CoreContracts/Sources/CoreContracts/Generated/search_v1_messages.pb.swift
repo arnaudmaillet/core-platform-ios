@@ -204,6 +204,10 @@ public nonisolated struct Search_V1_SearchRequest: Sendable {
   /// the boundary that keeps personal block/mute OUT of the shared index.
   public var excludeAuthorIds: [String] = []
 
+  /// Post hits of this kind only (#949); UNSPECIFIED keeps all. Other
+  /// entity kinds are not filtered.
+  public var postKind: Search_V1_PostKindFilter = .unspecified
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -692,7 +696,7 @@ nonisolated extension Search_V1_ListTrendingHashtagsResponse: SwiftProtobuf.Mess
 
 nonisolated extension Search_V1_SearchRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SearchRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}query\0\u{3}entity_types\0\u{1}sort\0\u{3}page_size\0\u{3}page_token\0\u{3}exclude_author_ids\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}query\0\u{3}entity_types\0\u{1}sort\0\u{3}page_size\0\u{3}page_token\0\u{3}exclude_author_ids\0\u{3}post_kind\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -706,6 +710,7 @@ nonisolated extension Search_V1_SearchRequest: SwiftProtobuf.Message, SwiftProto
       case 4: try { try decoder.decodeSingularInt32Field(value: &self.pageSize) }()
       case 5: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
       case 6: try { try decoder.decodeRepeatedStringField(value: &self.excludeAuthorIds) }()
+      case 7: try { try decoder.decodeSingularEnumField(value: &self.postKind) }()
       default: break
       }
     }
@@ -730,6 +735,9 @@ nonisolated extension Search_V1_SearchRequest: SwiftProtobuf.Message, SwiftProto
     if !self.excludeAuthorIds.isEmpty {
       try visitor.visitRepeatedStringField(value: self.excludeAuthorIds, fieldNumber: 6)
     }
+    if self.postKind != .unspecified {
+      try visitor.visitSingularEnumField(value: self.postKind, fieldNumber: 7)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -740,6 +748,7 @@ nonisolated extension Search_V1_SearchRequest: SwiftProtobuf.Message, SwiftProto
     if lhs.pageSize != rhs.pageSize {return false}
     if lhs.pageToken != rhs.pageToken {return false}
     if lhs.excludeAuthorIds != rhs.excludeAuthorIds {return false}
+    if lhs.postKind != rhs.postKind {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

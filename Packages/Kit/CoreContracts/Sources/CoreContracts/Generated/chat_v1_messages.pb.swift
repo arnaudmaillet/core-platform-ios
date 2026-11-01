@@ -506,6 +506,53 @@ public nonisolated struct Chat_V1_GetHistoryResponse: Sendable {
 
   public var nextPageToken: String = String()
 
+  /// First page only (#930): the watermark SyncConversation takes once the
+  /// client holds the history it wants (taken before reading).
+  public var syncWatermark: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Chat_V1_SyncConversationRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var conversationID: String = String()
+
+  public var requesterID: String = String()
+
+  /// GetHistory's first-page `sync_watermark`, or a previous sync's.
+  public var watermark: String = String()
+
+  public var limit: Int32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Chat_V1_SyncConversationResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// The messages after the watermark, oldest first (messages are
+  /// append-only: nothing is edited or deleted).
+  public var messages: [Chat_V1_MessageView] = []
+
+  /// Each member's read position now (a direct or group conversation, to a
+  /// member; a member shares it only if they share read receipts, #661).
+  public var readReceipts: [Chat_V1_MemberView] = []
+
+  /// Where to sync from next.
+  public var watermark: String = String()
+
+  /// More messages wait: sync again at once from `watermark`.
+  public var hasMore_p: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -661,6 +708,73 @@ public nonisolated struct Chat_V1_ListInboxResponse: Sendable {
 
   /// Empty on the last page. A page may come back short, never skipping.
   public var nextPageToken: String = String()
+
+  /// First page only (#930): the watermark SyncInbox takes once every page
+  /// of every folder is read (taken before reading).
+  public var syncWatermark: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Chat_V1_SyncInboxRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var profileID: String = String()
+
+  /// ListInbox's first-page `sync_watermark`, or a previous sync's.
+  public var watermark: String = String()
+
+  public var limit: Int32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// A conversation whose entry changed (#930), as the caller sees it now, in its
+/// folder.
+public nonisolated struct Chat_V1_InboxChange: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var folder: Chat_V1_InboxFolder = .inbox
+
+  public var entry: Chat_V1_InboxEntryView {
+    get {_entry ?? Chat_V1_InboxEntryView()}
+    set {_entry = newValue}
+  }
+  /// Returns true if `entry` has been explicitly set.
+  public var hasEntry: Bool {self._entry != nil}
+  /// Clears the value of `entry`. Subsequent reads from it will return its default value.
+  public mutating func clearEntry() {self._entry = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _entry: Chat_V1_InboxEntryView? = nil
+}
+
+public nonisolated struct Chat_V1_SyncInboxResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var changed: [Chat_V1_InboxChange] = []
+
+  /// Conversations to drop from the inbox (left, declined, hidden by a
+  /// block or no longer shown).
+  public var removed: [String] = []
+
+  public var watermark: String = String()
+
+  /// More changes wait: sync again at once from `watermark`.
+  public var hasMore_p: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1866,7 +1980,7 @@ nonisolated extension Chat_V1_GetHistoryRequest: SwiftProtobuf.Message, SwiftPro
 
 nonisolated extension Chat_V1_GetHistoryResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".GetHistoryResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}messages\0\u{3}next_page_token\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}messages\0\u{3}next_page_token\0\u{3}sync_watermark\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1876,6 +1990,7 @@ nonisolated extension Chat_V1_GetHistoryResponse: SwiftProtobuf.Message, SwiftPr
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.messages) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.nextPageToken) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.syncWatermark) }()
       default: break
       }
     }
@@ -1888,12 +2003,106 @@ nonisolated extension Chat_V1_GetHistoryResponse: SwiftProtobuf.Message, SwiftPr
     if !self.nextPageToken.isEmpty {
       try visitor.visitSingularStringField(value: self.nextPageToken, fieldNumber: 2)
     }
+    if !self.syncWatermark.isEmpty {
+      try visitor.visitSingularStringField(value: self.syncWatermark, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Chat_V1_GetHistoryResponse, rhs: Chat_V1_GetHistoryResponse) -> Bool {
     if lhs.messages != rhs.messages {return false}
     if lhs.nextPageToken != rhs.nextPageToken {return false}
+    if lhs.syncWatermark != rhs.syncWatermark {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Chat_V1_SyncConversationRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SyncConversationRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}conversation_id\0\u{3}requester_id\0\u{1}watermark\0\u{1}limit\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.conversationID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.requesterID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.watermark) }()
+      case 4: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.conversationID.isEmpty {
+      try visitor.visitSingularStringField(value: self.conversationID, fieldNumber: 1)
+    }
+    if !self.requesterID.isEmpty {
+      try visitor.visitSingularStringField(value: self.requesterID, fieldNumber: 2)
+    }
+    if !self.watermark.isEmpty {
+      try visitor.visitSingularStringField(value: self.watermark, fieldNumber: 3)
+    }
+    if self.limit != 0 {
+      try visitor.visitSingularInt32Field(value: self.limit, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Chat_V1_SyncConversationRequest, rhs: Chat_V1_SyncConversationRequest) -> Bool {
+    if lhs.conversationID != rhs.conversationID {return false}
+    if lhs.requesterID != rhs.requesterID {return false}
+    if lhs.watermark != rhs.watermark {return false}
+    if lhs.limit != rhs.limit {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Chat_V1_SyncConversationResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SyncConversationResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}messages\0\u{3}read_receipts\0\u{1}watermark\0\u{3}has_more\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.messages) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.readReceipts) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.watermark) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.hasMore_p) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.messages.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.messages, fieldNumber: 1)
+    }
+    if !self.readReceipts.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.readReceipts, fieldNumber: 2)
+    }
+    if !self.watermark.isEmpty {
+      try visitor.visitSingularStringField(value: self.watermark, fieldNumber: 3)
+    }
+    if self.hasMore_p != false {
+      try visitor.visitSingularBoolField(value: self.hasMore_p, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Chat_V1_SyncConversationResponse, rhs: Chat_V1_SyncConversationResponse) -> Bool {
+    if lhs.messages != rhs.messages {return false}
+    if lhs.readReceipts != rhs.readReceipts {return false}
+    if lhs.watermark != rhs.watermark {return false}
+    if lhs.hasMore_p != rhs.hasMore_p {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2205,7 +2414,7 @@ nonisolated extension Chat_V1_InboxEntryView: SwiftProtobuf.Message, SwiftProtob
 
 nonisolated extension Chat_V1_ListInboxResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ListInboxResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}entries\0\u{3}next_page_token\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}entries\0\u{3}next_page_token\0\u{3}sync_watermark\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2215,6 +2424,7 @@ nonisolated extension Chat_V1_ListInboxResponse: SwiftProtobuf.Message, SwiftPro
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.entries) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.nextPageToken) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.syncWatermark) }()
       default: break
       }
     }
@@ -2227,12 +2437,140 @@ nonisolated extension Chat_V1_ListInboxResponse: SwiftProtobuf.Message, SwiftPro
     if !self.nextPageToken.isEmpty {
       try visitor.visitSingularStringField(value: self.nextPageToken, fieldNumber: 2)
     }
+    if !self.syncWatermark.isEmpty {
+      try visitor.visitSingularStringField(value: self.syncWatermark, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Chat_V1_ListInboxResponse, rhs: Chat_V1_ListInboxResponse) -> Bool {
     if lhs.entries != rhs.entries {return false}
     if lhs.nextPageToken != rhs.nextPageToken {return false}
+    if lhs.syncWatermark != rhs.syncWatermark {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Chat_V1_SyncInboxRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SyncInboxRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}watermark\0\u{1}limit\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.watermark) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.profileID.isEmpty {
+      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 1)
+    }
+    if !self.watermark.isEmpty {
+      try visitor.visitSingularStringField(value: self.watermark, fieldNumber: 2)
+    }
+    if self.limit != 0 {
+      try visitor.visitSingularInt32Field(value: self.limit, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Chat_V1_SyncInboxRequest, rhs: Chat_V1_SyncInboxRequest) -> Bool {
+    if lhs.profileID != rhs.profileID {return false}
+    if lhs.watermark != rhs.watermark {return false}
+    if lhs.limit != rhs.limit {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Chat_V1_InboxChange: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".InboxChange"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}folder\0\u{1}entry\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.folder) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._entry) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.folder != .inbox {
+      try visitor.visitSingularEnumField(value: self.folder, fieldNumber: 1)
+    }
+    try { if let v = self._entry {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Chat_V1_InboxChange, rhs: Chat_V1_InboxChange) -> Bool {
+    if lhs.folder != rhs.folder {return false}
+    if lhs._entry != rhs._entry {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Chat_V1_SyncInboxResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SyncInboxResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}changed\0\u{1}removed\0\u{1}watermark\0\u{3}has_more\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.changed) }()
+      case 2: try { try decoder.decodeRepeatedStringField(value: &self.removed) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.watermark) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.hasMore_p) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.changed.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.changed, fieldNumber: 1)
+    }
+    if !self.removed.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.removed, fieldNumber: 2)
+    }
+    if !self.watermark.isEmpty {
+      try visitor.visitSingularStringField(value: self.watermark, fieldNumber: 3)
+    }
+    if self.hasMore_p != false {
+      try visitor.visitSingularBoolField(value: self.hasMore_p, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Chat_V1_SyncInboxResponse, rhs: Chat_V1_SyncInboxResponse) -> Bool {
+    if lhs.changed != rhs.changed {return false}
+    if lhs.removed != rhs.removed {return false}
+    if lhs.watermark != rhs.watermark {return false}
+    if lhs.hasMore_p != rhs.hasMore_p {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

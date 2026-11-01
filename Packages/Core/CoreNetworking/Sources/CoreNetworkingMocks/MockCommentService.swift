@@ -103,18 +103,31 @@ public final class MockCommentService: @unchecked Sendable {
         bff.register(path: "/comment.v1.CommentService/ListTopLevel") { [self] (request: Comment_V1_ListTopLevelRequest, headers: Headers) in
             let readers = MockEdgePolicy.readers(from: headers, in: dataset)
             guard mayReadPost(readers, request.postID) else { return .success(Comment_V1_ListCommentsResponse()) }
-            let page = Self.page(
-                store.comments(for: request.postID, seed: seedComments(for: request.postID)),
-                limit: request.limit, token: request.pageToken
-            )
-            var response = Comment_V1_ListCommentsResponse()
-            // Each thread's reply count, held replies included (#637).
-            response.comments = visible(filtered(page.comments, postID: request.postID), readers: readers).map { comment in
-                var counted = comment
-                counted.replyCount = UInt64(replies(to: comment.commentID, postID: request.postID).count)
-                return counted
+            return .success(topLevel(
+                postID: request.postID, readers: readers, limit: request.limit, token: request.pageToken, sort: request.sort
+            ))
+        }
+        // The first top-level comments of many posts at once (#976): for each
+        // post the caller may read, a prefix of what its ListTopLevel's first
+        // page lists — the same order, the same read gate, reply counts
+        // filled. A post the caller may not read is left out.
+        bff.register(path: "/comment.v1.CommentService/ListPreviews") { [self] (request: Comment_V1_ListPreviewsRequest, headers: Headers) -> Result<Comment_V1_ListPreviewsResponse, ConnectError> in
+            var seen = Set<String>()
+            let postIDs = request.postIds.filter { seen.insert($0).inserted }
+            guard postIDs.count <= Self.maxPreviewPosts else {
+                return .failure(ConnectError(code: .invalidArgument, message: "CMT-9001: at most \(Self.maxPreviewPosts) posts"))
             }
-            response.nextToken = page.nextToken
+            let readers = MockEdgePolicy.readers(from: headers, in: dataset)
+            var response = Comment_V1_ListPreviewsResponse()
+            response.previews = postIDs.filter { mayReadPost(readers, $0) }.map { postID in
+                var preview = Comment_V1_CommentPreview()
+                preview.postID = postID
+                preview.comments = Array(
+                    topLevel(postID: postID, readers: readers, limit: 0, token: "", sort: .unspecified)
+                        .comments.prefix(Self.previewLimit(request.limit))
+                )
+                return preview
+            }
             return .success(response)
         }
         // The post's owner approves (it shows to everyone) or declines (it is
@@ -158,6 +171,32 @@ public final class MockCommentService: @unchecked Sendable {
             response.postID = created.postID
             return .success(response)
         }
+    }
+
+    /// One page of a post's top-level comments, as ListTopLevel answers
+    /// it: newest first, or ranked under `popularity` (#977) as replies are.
+    /// Each thread's reply count, held replies included (#637).
+    private func topLevel(
+        postID: String, readers: [String], limit: Int32, token: String, sort: Comment_V1_ReplySort
+    ) -> Comment_V1_ListCommentsResponse {
+        var comments = store.comments(for: postID, seed: seedComments(for: postID))
+        if sort == .popularity { comments = Self.sorted(comments, by: .popularity, likes: likeCount) }
+        let page = Self.page(comments, limit: limit, token: token)
+        var response = Comment_V1_ListCommentsResponse()
+        response.comments = visible(filtered(page.comments, postID: postID), readers: readers).map { comment in
+            var counted = comment
+            counted.replyCount = UInt64(replies(to: comment.commentID, postID: postID).count)
+            return counted
+        }
+        response.nextToken = page.nextToken
+        return response
+    }
+
+    /// `ListPreviews`' bounds (#976): at most 50 posts; comments per post,
+    /// 0 meaning 5, at most 10.
+    static let maxPreviewPosts = 50
+    static func previewLimit(_ limit: Int32) -> Int {
+        limit <= 0 ? 5 : Int(min(limit, 10))
     }
 
     private func replies(to commentID: String, postID: String) -> [Comment_V1_CommentView] {
