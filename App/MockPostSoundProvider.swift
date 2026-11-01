@@ -70,7 +70,8 @@ struct MockPostSoundProvider: PostSoundProviding {
                 }
                 continue
             }
-            guard index % 5 != 3 else { continue }
+            // ⚠️ A TEXT POST BORROWS NOTHING (#1999): it has no sound.
+            guard !pages.isEmpty, index % 5 != 3 else { continue }
             guard let sound = Self.borrowedSoundID(postID: post.postID, index: index, clips: clips, songs: songs)
             else { continue }
             borrowed[id] = sound
@@ -226,8 +227,8 @@ extension MockPostSoundProvider {
     /// silent): in the main timeline the hits land on 15, 8, 6, 5 and 4
     /// borrowers — plus, for the two clips, the clip's own post, and a few
     /// more among the just-arrived and the viewer's own posts (the top one
-    /// reads "23 posts") — photographs and text posts mixed, by every kind of
-    /// author. What is left (about a third) keeps the old spread, one or two
+    /// reads "23 posts") — photographs and collections mixed, by every kind of
+    /// author; text posts borrow nothing (#1999), so the counts are lower. What is left (about a third) keeps the old spread, one or two
     /// posts per sound. (Before this, no sound was used by more than two
     /// posts, and the sound sheet's first row and "View all" never showed on
     /// real mock data.)

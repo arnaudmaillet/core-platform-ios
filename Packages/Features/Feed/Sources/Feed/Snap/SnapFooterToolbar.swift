@@ -38,7 +38,13 @@ enum SnapFooterToolbar {
     static func items(
         leading: UIView, leadingID: String, actions: [UIBarButtonItem], more: UIBarButtonItem?
     ) -> [UIBarButtonItem] {
-        var items: [UIBarButtonItem] = [BarItems.container(id: leadingID, view: leading), .flexibleSpace()]
+        [BarItems.container(id: leadingID, view: leading)] + trailingItems(actions: actions, more: more)
+    }
+
+    /// The footer's trailing run alone, right-aligned: `actions`, then `more`
+    /// behind a separator. For a footer with nothing to lead with (#1999).
+    static func trailingItems(actions: [UIBarButtonItem], more: UIBarButtonItem?) -> [UIBarButtonItem] {
+        var items: [UIBarButtonItem] = [.flexibleSpace()]
         items += actions
         if let more {
             if !actions.isEmpty { items.append(BarItems.separator()) }

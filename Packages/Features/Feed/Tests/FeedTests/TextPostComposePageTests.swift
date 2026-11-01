@@ -361,38 +361,23 @@ struct TextPostComposePageTests {
         #expect(!(leading + trailing).contains { $0.customView is WalletBadgeButton })
     }
 
-    @Test func theFooterLeadsWithASoundToAdd() async throws {
-        let page = try await openPage()
-
-        let leading = try #require(page.composer.toolbarItems?.first?.customView)
-        // ⚠️ The subtitle went when the pill moved to DesignSystem as
-        // `SoundPillView` (2026-09-12), so the label is the title alone now. The
-        // name carries the whole assertion here — nothing else identifies the
-        // footer's leading slot.
-        #expect(leading.accessibilityLabel == "Add a sound")
-    }
-
-    /// While the keyboard is up it covers the footer, so the sound pill rides in
-    /// the top bar inboard of Drafts — and goes home with the keyboard.
-    @Test func theSoundPillFollowsTheKeyboard() async throws {
+    /// ⚠️ NO SOUND PILL (#1999, rewritten from #1790's footer tests): a text
+    /// post has no sound, so the writing footer is its trailing run alone,
+    /// right-aligned, and nothing rides into the top bar with the keyboard.
+    @Test func theFooterHasNoSoundToAdd() async throws {
         let page = try await openPage()
         let label = "Add a sound"
-        func onTop() -> Bool {
-            (page.composer.navigationItem.rightBarButtonItems ?? []).contains { $0.customView?.accessibilityLabel == label }
+        func anywhere() -> Bool {
+            let items = (page.composer.toolbarItems ?? []) + (page.composer.navigationItem.rightBarButtonItems ?? [])
+            return items.contains { $0.customView?.accessibilityLabel == label }
         }
-        func inFooter() -> Bool {
-            (page.composer.toolbarItems ?? []).contains { $0.customView?.accessibilityLabel == label }
-        }
-        #expect(!onTop() && inFooter())
+        #expect(!anywhere())
+        #expect(page.composer.toolbarItems?.first?.customView == nil, "the footer still leads with a view")
 
         NotificationCenter.default.post(name: UIResponder.keyboardWillShowNotification, object: nil)
-        try await settle { onTop() }
-        #expect(onTop() && !inFooter())
-        #expect(page.composer.navigationItem.rightBarButtonItems?.first?.title == "Drafts", "Drafts keeps the edge")
-
-        NotificationCenter.default.post(name: UIResponder.keyboardWillHideNotification, object: nil)
-        try await settle { inFooter() }
-        #expect(!onTop() && inFooter())
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!anywhere(), "a pill rode up with the keyboard")
+        #expect((page.composer.navigationItem.rightBarButtonItems ?? []).map(\.title) == ["Drafts"])
     }
 
     /// The boost's slot asks who will see the post; the star waits for a post.

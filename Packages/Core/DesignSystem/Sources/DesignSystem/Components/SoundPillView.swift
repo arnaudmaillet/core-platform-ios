@@ -3,18 +3,16 @@ import UIKit
 /// The pill that stands where a post's sound will be chosen: a disc with a plus,
 /// and a word.
 ///
-/// Shared by two screens. In the text-post composer it holds the footer's
-/// leading slot and rides up into the top bar while the keyboard covers its
-/// home; in the media editor it sits at the foot beside the editing categories.
-/// It was Feed's private `TextPostSoundPill` until the editor needed the same
-/// control — and features cannot import one another, so the only way to have ONE
-/// of it is here.
+/// Hosted by the media editor, at the foot beside the editing categories; it
+/// opens the song tools (`onTap`) and names the chosen song with
+/// `setTitle(_:)`. It was Feed's private `TextPostSoundPill` until the editor
+/// needed the same control, and features cannot import one another, so the
+/// only way to have ONE of it is here.
 ///
-/// ⚠️ **THE ACTION IS THE HOST'S, AND ONE HOST HAS NONE.** A tap calls `onTap`.
-/// The text-post composer sets nothing — there is no sound for a text post to
-/// take — so a tap there still does nothing, which is why the callback is
-/// optional rather than a required init argument. The media editor opens its
-/// song tools from it, and names the chosen song with `setTitle(_:)`.
+/// ⚠️ **THE TEXT-POST COMPOSER NO LONGER HOSTS IT** (#1999): a text post has
+/// no sound, so its inert pill left the composer's footer and top bar. `onTap`
+/// stays optional, and the width rules below still name the top bar the pill
+/// was measured in.
 ///
 /// ⚠️ **ITS TEXT DOES NOT GROW WITH DYNAMIC TYPE** — pinned at the default size.
 /// In a top bar it shares a run with titles that do not grow either, and a pill

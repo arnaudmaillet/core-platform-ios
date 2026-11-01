@@ -11,9 +11,9 @@ import Foundation
 ///   videos, each heard with its OWN audio, from its player. They have no
 ///   sound file, and their sound is never lent (`soundIsUnique`).
 /// - **The retired clips**, the corpus's first: no post draws them any more.
-///   Their sounds stay, and photo and text posts keep borrowing them. A few
-///   keep their video too, the ones the animated avatars and the video
-///   banners read (`--keep-video`).
+///   Their sounds stay, and photo and collection posts keep borrowing them
+///   (a text post has no sound, #1999). A few keep their video too, the
+///   ones the animated avatars and the video banners read (`--keep-video`).
 ///
 /// The dataset addresses a clip as `mock://video/<clip-id>?w=&h=` — still a
 /// `mock://video/` URL, so every rule that routes on it (the attachment's MIME,
