@@ -6,8 +6,8 @@ import UIKit
 
 /// The danmaku band: `laneCount` lanes of naked micro-reaction text conveying
 /// right-to-left over the page's media, directly above the caption. Text
-/// carries no capsule — legibility comes from the chrome's bottom scrim,
-/// which extends behind the whole band.
+/// carries no capsule, by the owner's decision (#1991); since #1983 the
+/// page's scrim stops at the caption and no longer reaches the band.
 ///
 /// # The conveyor
 /// Steady state is pure Core Animation. Each bubble's flight is one linear
@@ -17,8 +17,10 @@ import UIKit
 /// to main-thread hitches. Each lane runs at its own constant speed
 /// (staggered across lanes, never within one) and spawns its next bubble
 /// only once the previous one has fully entered plus a gap. Activation
-/// pre-fills every lane mid-stream, so the band lands populated; the first
-/// fresh spawn continues the fill's cadence seamlessly.
+/// starts every lane at its entry edge, staggered (`laneEntryDelays`): the
+/// band arrives EMPTY and fills from the right, as on Bilibili (#2000, the
+/// owner 2026-11-01). It used to pre-fill every lane mid-stream, so the band
+/// landed already full.
 ///
 /// # The scrub
 /// The band is directly manipulable: a horizontal pan freezes the conveyor
@@ -74,19 +76,14 @@ final class SnapCommentTickerView: UIView {
         restingBackdropOpacity = CGFloat(preferences.bandBackgroundOpacity)
         avoidsPeople = preferences.avoidsPeople
     }
-    /// Per-lane phase, in seconds of travel. The pre-fill shifts each lane's
-    /// bubble train left by `phase × speed` points — as if that lane had
-    /// entered the loop this much earlier — so the lanes land visibly out of
-    /// step instead of column-aligned at the left edge. (Sized for up to
-    /// three lanes; only the first `laneCount` entries are read.)
-    static let lanePhases: [TimeInterval] = [0.3, 1.5, 2.7]
+    /// When each lane's first bubble enters, from the start (#2000): lane 0
+    /// at once, the others after a stagger, so the lanes enter out of step.
+    /// The pre-fill's old phases (0.3, 1.5, 2.7 s) less the first. (Sized for
+    /// up to three lanes; only the first `laneCount` entries are read.)
+    static let laneEntryDelays: [TimeInterval] = [0, 1.2, 2.4]
     /// Minimum horizontal daylight between two bubbles in the same lane —
     /// generous, so the slow glide reads sparse rather than congested.
     static let interItemGap: CGFloat = 16
-    /// Next-turn attempts after a train that placed nothing — see
-    /// `startIfNeeded`.
-    private static let emptyTrainRetryLimit = 2
-    private var emptyTrainRetries = 0
     private static let laneSpacing: CGFloat = 3
 
     // MARK: Interaction tuning
@@ -167,7 +164,7 @@ final class SnapCommentTickerView: UIView {
     private var generation = 0
     private var spawnTimers: [Timer?] = Array(repeating: nil, count: SnapCommentTickerView.laneCount)
     private var pool: [TickerBubbleView] = []
-    /// Measures TEXT widths without touching the pool — pre-fill and backfill
+    /// Measures TEXT widths without touching the pool — spawns and backfill
     /// must know a bubble's width before deciding whether it is even on
     /// screen (the avatar column is a fixed addend, added in
     /// `measuredBubbleWidth`).
@@ -368,12 +365,9 @@ final class SnapCommentTickerView: UIView {
             laneNextIndex[lane] = 0
         }
         isHidden = (comments.isEmpty && !reservesBand) || MotionPreference.reducesMotion
+        // Data landing on a page already on screen (a slow network beat the
+        // prefetch) starts entering at the edge like any start: no pop.
         startIfNeeded()
-        // Data landing on a page that is ALREADY on screen (a slow network
-        // beat the prefetch): ease the pre-filled train in instead of popping
-        // it. Off-screen configuration (`window == nil`) skips this — the
-        // band is simply there when the page scrolls in.
-        if wasEmpty, !comments.isEmpty, window != nil, mode == .conveying { playEntrance() }
     }
 
     /// Visibility-scoped: any on-screen page streams — including one being
@@ -387,11 +381,9 @@ final class SnapCommentTickerView: UIView {
         #endif
         guard isActive != active else { return }
         isActive = active
-        emptyTrainRetries = 0
-        // Activation is the moment the page is shown: the train enters with
-        // the same lead-in and fade as the subtitle pill beside it, whether
-        // it was pre-filled now or laid earlier under a held chrome.
-        active ? startIfNeeded(fadingIn: true) : stopStream()
+        // Activation is the moment the page is shown: the lanes start
+        // entering at the edge (#2000).
+        active ? startIfNeeded() : stopStream()
     }
 
     /// Cell reuse: drop content, activation, and every in-flight bubble — a
@@ -399,19 +391,18 @@ final class SnapCommentTickerView: UIView {
     func reset() {
         stopStream()
         isActive = false
-        emptyTrainRetries = 0
         isHeldForFlight = false // a hold nobody released must not ride a recycled cell
         queue = []
         laneQueues = Array(repeating: [], count: Self.laneCount)
         laneNextIndex = Array(repeating: 0, count: Self.laneCount)
         isHidden = true
-        alpha = 1 // a reuse mid-entrance-fade must not strand a dim band
+        alpha = 1
     }
 
     #if DEBUG
-    /// How many trains this band has laid: one per start, so a second one
-    /// on a page that never left is a re-lay, the cut and the fade-in the
-    /// viewer sees (#1798).
+    /// How many times this band has started: one per start, so a second one
+    /// on a page that never left is a restart, the empty band the viewer
+    /// would see come back (#1798).
     private(set) var debugTrainsLaid = 0
     /// Whether the band conveys now.
     var debugIsConveying: Bool { mode == .conveying }
@@ -437,63 +428,45 @@ final class SnapCommentTickerView: UIView {
         }
         backdropView.frame = bounds
         blurBackdrop?.frame = bounds
-        // ⚠️ **A TRAIN LAID AT ONE WIDTH IS RE-LAID AT ANOTHER.** The pre-fill
-        // spreads the bubbles across `bounds.width` once, when the stream
-        // starts — and a page flying in, a cell being reused, a chrome
-        // re-inset can all start it at a width that is not the one the band
-        // keeps. Laid narrow, the band that lands wide is empty on the left
-        // with bubbles arriving from the right (filmed on a device and on
-        // the simulator, 25 September 2026). So the width the train was laid
-        // for is remembered, and a layout that changes it lays the train
-        // again, from the left, fading in.
-        if mode == .conveying, abs(bounds.width - laidWidth) > 1 {
-            stopStream()
-            startIfNeeded(fadingIn: true)
-        } else {
-            // Activation can precede first layout (configure → willBecomeActive
-            // before the cell is sized); spawning needs a real width.
-            startIfNeeded()
-        }
+        // Activation can precede first layout (configure → willBecomeActive
+        // before the cell is sized); spawning needs a real width. A width
+        // that changes mid-stream needs nothing: every spawn reads the band's
+        // width when it enters (there is no laid train any more, #2000).
+        startIfNeeded()
     }
-
-    /// The band width the current train was pre-filled for.
-    private var laidWidth: CGFloat = 0
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
         // Content and activation can both precede the window (a cell
         // configured and activated by the layout pass a presentation
-        // triggers, before the collection is on screen): the train is laid
-        // now, where its flights can run.
-        if window != nil { startIfNeeded(fadingIn: true) }
+        // triggers, before the collection is on screen): the lanes start now,
+        // where their flights can run.
+        if window != nil { startIfNeeded() }
     }
 
     // MARK: - Lane scheduling (steady conveyor)
 
-    /// ⚠️ **NO PRE-FILL WHILE THE PAGE IS FLYING IN.** The pre-fill lays the
-    /// bubble train across `bounds.width` — and during a hero flight the page
-    /// is laid out at the CARD's width first, so a train laid then holds one
-    /// or two bubbles, and the band that lands at full width is empty with
-    /// bubbles arriving from the right (filmed on a device, 25 September
-    /// 2026). Held, the ticker waits; released at landing, it pre-fills at the
-    /// width it will keep and fades in with the chrome.
+    /// ⚠️ **NOTHING ENTERS WHILE THE PAGE IS FLYING IN.** No bubble should
+    /// enter under the replica, at the card's width: held, the ticker waits;
+    /// released at landing, its lanes start entering at the edge (#2000).
     private var isHeldForFlight = false
 
     func setHeldForFlight(_ held: Bool) {
         guard held != isHeldForFlight else { return }
         isHeldForFlight = held
-        if !held { startIfNeeded(fadingIn: true) }
+        if !held { startIfNeeded() }
     }
 
     /// The page has just landed by a flight that never held the chrome (a
-    /// reveal): a train laid during the flight, unseen behind the replica,
-    /// enters now instead of standing there when the replica goes.
+    /// reveal): bubbles that entered during the flight, behind the replica,
+    /// go, and the band starts empty now, as every start does (#2000).
     func replayEntrance() {
         guard mode == .conveying, window != nil else { return }
-        playEntrance()
+        stopStream()
+        startIfNeeded()
     }
 
-    private func startIfNeeded(fadingIn: Bool = false) {
+    private func startIfNeeded() {
         Self.refreshAppearance(from: appearanceStore)
         showBackdrop(kineticFraction)
         #if DEBUG
@@ -503,58 +476,20 @@ final class SnapCommentTickerView: UIView {
         #endif
         // ⚠️ NEVER OFF-WINDOW. A bubble's flight is a CA animation, and one
         // added to a layer that is in no window is gone by the time the
-        // layer is: the model value rests at the exit, so the train laid
-        // here is nine bubbles already off the left edge (traced 25
-        // September 2026: `prefill … placed=4 … placed=5` at `window=N`, and
-        // a band that stayed empty until the first fresh spawn came in from
-        // the right). `didMoveToWindow` lays it once there is a window.
+        // layer is: the model value rests at the exit (traced 25 September
+        // 2026). `didMoveToWindow` starts the lanes once there is a window.
         guard isActive, mode == .parked, !queue.isEmpty, bounds.width > 0, !isHeldForFlight,
               window != nil, !MotionPreference.reducesMotion else { return }
         mode = .conveying
-        laidWidth = bounds.width
         #if DEBUG
         debugTrainsLaid += 1
         #endif
-        for lane in 0..<Self.laneCount {
-            prefillLane(lane)
+        // ⚠️ NO PRE-FILL (#2000, the owner): every lane's first bubble enters
+        // at the edge, lane 0 at once and the others staggered, and the steady
+        // loop takes it from there (`spawn(inLane:)`).
+        for lane in 0..<Self.laneCount where !laneQueues[lane].isEmpty {
+            armSpawn(lane: lane, after: Self.laneEntryDelays[lane])
         }
-        // A train that could place nothing (a band narrower than a bubble)
-        // is not a start: parked again, and tried once more on the next turn
-        // as well as on the next layout — the width it needs may already be
-        // there by then without any layout to say so.
-        //
-        // ⚠️ **A FEW TURNS, NOT EVERY TURN.** Unbounded, a band that STAYED
-        // narrower than a bubble (a transient layout mid-flight) rebuilt and
-        // tore down its train on every run-loop turn for as long as it lasted
-        // — and `stopStream` cycles the pan recognizer, cancelling any grab in
-        // progress, each time. The layout that widens the band still lays the
-        // train; these turns only cover a width that arrives without one.
-        if laneBubbles.allSatisfy(\.isEmpty) {
-            stopStream()
-            guard emptyTrainRetries < Self.emptyTrainRetryLimit else { return }
-            emptyTrainRetries += 1
-            DispatchQueue.main.async { [weak self] in self?.startIfNeeded(fadingIn: true) }
-            return
-        }
-        emptyTrainRetries = 0
-        if fadingIn, window != nil { playEntrance() }
-    }
-
-    /// The band's entrance: the pill's own lead-in and fade, so the two
-    /// zones arrive together rather than the band popping beside a pill
-    /// that fades. ⚠️ On a device the 0.3 s alone read as a pop (filmed 25
-    /// September 2026), for the same reason the pill's tenth of a second
-    /// did — the eye needs the dark beat before the ramp.
-    private func playEntrance() {
-        layer.removeAnimation(forKey: "ticker-entrance")
-        let entrance = CAKeyframeAnimation(keyPath: "opacity")
-        let lead = SnapSubtitleView.leadInDelay, fade = SnapSubtitleView.fadeDuration
-        let total = lead + fade
-        entrance.values = [0, 0, 1]
-        entrance.keyTimes = [0, NSNumber(value: lead / total), 1]
-        entrance.duration = total
-        layer.add(entrance, forKey: "ticker-entrance")
-        alpha = 1
     }
 
     private func stopStream() {
@@ -586,38 +521,36 @@ final class SnapCommentTickerView: UIView {
         spawnTimers[lane] = timer
     }
 
-    /// Populates one lane the way it would look mid-stream: a left-to-right
-    /// train at steady-state spacing, phase-shifted left so lanes don't
-    /// align, every bubble flying at the lane's constant speed over exactly
-    /// its remaining distance. The cursor's overshoot past the entry edge,
-    /// at lane speed, times the first fresh spawn — the loop continues the
-    /// fill's cadence without a seam.
-    private func prefillLane(_ lane: Int) {
-        guard !laneQueues[lane].isEmpty else { return }
+    #if DEBUG
+    /// Tests only: the band as it looks once it has filled, ~15 s in — a
+    /// train across every lane at steady spacing, the lanes out of step,
+    /// every bubble flying, the next spawn timed to continue it. Production
+    /// never lays one (#2000): the band arrives empty and fills from the
+    /// edge. The scrub's suites need a full band to grab.
+    func debugFillBand() {
+        guard mode == .conveying else { return }
+        for timer in spawnTimers { timer?.invalidate() }
+        let phases: [TimeInterval] = [0.3, 1.5, 2.7]
         let bandWidth = bounds.width
-        let speed = Self.laneSpeeds[lane]
-        var cursor = -CGFloat(Self.lanePhases[lane]) * speed
-        while cursor < bandWidth {
-            let itemIndex = laneNextIndex[lane]
-            let item = laneItem(lane, at: itemIndex)
-            laneNextIndex[lane] = wrapped(itemIndex + 1, laneQueues[lane].count)
-            let width = measuredBubbleWidth(for: item.text, in: bandWidth)
-            // A slot wholly left of the band is a bubble that "already
-            // exited": consume its queue slot but materialize nothing.
-            if cursor + width > 0 {
-                let bubble = materializeBubble(item, atIndex: itemIndex, lane: lane, leftEdge: cursor, width: width)
-                laneBubbles[lane].append(bubble)
-                animateToExit(bubble, lane: lane)
+        for lane in 0..<Self.laneCount where !laneQueues[lane].isEmpty {
+            let speed = Self.laneSpeeds[lane]
+            var cursor = -CGFloat(phases[lane]) * speed
+            while cursor < bandWidth {
+                let itemIndex = laneNextIndex[lane]
+                let item = laneItem(lane, at: itemIndex)
+                laneNextIndex[lane] = wrapped(itemIndex + 1, laneQueues[lane].count)
+                let width = measuredBubbleWidth(for: item.text, in: bandWidth)
+                if cursor + width > 0 {
+                    let bubble = materializeBubble(item, atIndex: itemIndex, lane: lane, leftEdge: cursor, width: width)
+                    laneBubbles[lane].append(bubble)
+                    animateToExit(bubble, lane: lane)
+                }
+                cursor += width + Self.interItemGap
             }
-            cursor += width + Self.interItemGap
+            armSpawn(lane: lane, after: TimeInterval((cursor - bandWidth) / speed))
         }
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
-            print(String(format: "[ticker] %.3f prefill lane=%d placed=%d bandWidth=%.0f", CACurrentMediaTime(), lane, laneBubbles[lane].count, bandWidth))
-        }
-        #endif
-        armSpawn(lane: lane, after: TimeInterval((cursor - bandWidth) / speed))
     }
+    #endif
 
     /// Seconds until the entry edge is clear given the rightmost bubble's
     /// current right edge; 0 when the gap is already open. Pure — this is
@@ -664,8 +597,8 @@ final class SnapCommentTickerView: UIView {
     }
 
     /// Places a label in the lane at `leftEdge` — model geometry only, no
-    /// motion. The one materialization path for pre-fill, steady spawns, and
-    /// scrub backfill.
+    /// motion. The one materialization path for steady spawns and scrub
+    /// backfill.
     private func materializeBubble(
         _ item: TickerCommentModel, atIndex itemIndex: Int, lane: Int, leftEdge: CGFloat, width: CGFloat
     ) -> Bubble {
@@ -684,8 +617,8 @@ final class SnapCommentTickerView: UIView {
     }
 
     /// Flies a bubble from wherever its model currently sits to the exit at
-    /// the lane's constant speed — the single flight path, so pre-filled,
-    /// entry-edge, and scrub-released bubbles cannot differ in velocity.
+    /// the lane's constant speed — the single flight path, so entry-edge and
+    /// scrub-released bubbles cannot differ in velocity.
     private func animateToExit(_ bubble: Bubble, lane: Int) {
         let layer = bubble.view.layer
         let startX = layer.position.x
