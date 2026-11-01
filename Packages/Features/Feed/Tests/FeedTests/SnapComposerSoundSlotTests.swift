@@ -62,30 +62,54 @@ struct SnapComposerSoundSlotTests {
         #expect(holds == 1)
     }
 
-    /// ⚠️ THE TEXT PAGE HAS NO SOUND SLOT (#1999, rewritten from #1929's
-    /// "the slot opens the sheet"): a text post has no sound, even one the
-    /// provider names, so its composer's slot goes and the field widens.
-    @Test func aTextPageHasNoSoundSlot() throws {
+    private func feed(root: Bool, model: FeedItemDisplayModel) -> SnapFeedViewController {
         let feed = SnapFeedViewController(
             viewModel: FeedViewModel(repository: SlotSilentProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             soundProvider: SlotSoundProvider()
         )
+        feed.isForYouRoot = root
         feed.loadViewIfNeeded()
-        feed.seedProjection([
-            FeedItemDisplayModel(
-                id: PostID("p"), authorID: ProfileID("a"), authorName: "Ava", metaText: "",
-                avatarURL: nil, caption: "A text page", mediaURL: nil, mediaKind: .image,
-                thumbnailURL: nil, audioText: nil, likeCount: 3
-            )
-        ])
+        feed.seedProjection([model])
+        return feed
+    }
+
+    private static let textPage = FeedItemDisplayModel(
+        id: PostID("p"), authorID: ProfileID("a"), authorName: "Ava", metaText: "",
+        avatarURL: nil, caption: "A text page", mediaURL: nil, mediaKind: .image,
+        thumbnailURL: nil, audioText: nil, likeCount: 3
+    )
+
+    private static let mediaPage = FeedItemDisplayModel(
+        id: PostID("p"), authorID: ProfileID("a"), authorName: "Ava", metaText: "",
+        avatarURL: nil, caption: "A photo", mediaURL: URL(string: "https://example.test/a.jpg"), mediaKind: .image,
+        thumbnailURL: nil, audioText: nil, likeCount: 3
+    )
+
+    /// ⚠️ THE SLOT'S ONE DECISION (#1999, `applyRailSlot`): a pushed text
+    /// page wears Share — never its sound, even one the provider names — a
+    /// text page of the For You root has no slot, and a media page wears its
+    /// sound. (Rewritten from #1929's "a text page's slot opens the sheet".)
+    @Test func theSlotIsShareOnAPushedTextPageNoneOnTheRootAndTheSoundOnMedia() throws {
         let (panel, window) = Layout.engagedPanel()
         defer { window.isHidden = true }
-        feed.applySoundRail(to: panel)
+
+        feed(root: false, model: Self.textPage).applyRailSlot(to: panel)
         let bar = try Layout.composerColumn(in: panel.view, space: window).bar
-        #expect(bar.railFace == .noSlot, "a text page kept a sound slot")
-        #expect(bar.debugRailSymbol == nil, "the text page's slot still wears a sound")
+        #expect(bar.railFace == .share, "a pushed text page's slot is not Share")
+        #expect(bar.debugRailButton.accessibilityLabel == "Share")
+        #expect(bar.debugRailButton.accessibilityIdentifier == SnapFooterToolbar.ID.share)
         #expect(bar.onRailLongPress == nil, "the slot's hold still does something")
+
+        feed(root: true, model: Self.textPage).applyRailSlot(to: panel)
+        #expect(bar.railFace == .noSlot, "a text page of the For You root kept a slot")
+
+        feed(root: false, model: Self.mediaPage).applyRailSlot(to: panel)
+        guard case .sound = bar.railFace else {
+            Issue.record("a media page's slot is not its sound: \(bar.railFace)")
+            return
+        }
+        #expect(bar.debugRailButton.accessibilityIdentifier == nil)
     }
 
     /// ⚠️ A TEXT PAGE'S RECORD TURNS (#692): the slot's cover turns while

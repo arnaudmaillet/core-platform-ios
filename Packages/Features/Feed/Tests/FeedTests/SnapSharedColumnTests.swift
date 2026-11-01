@@ -208,13 +208,13 @@ struct SnapSharedColumnTests {
 
         let (panel, window) = Layout.engagedPanel()
         defer { window.isHidden = true }
-        feed.applySoundRail(to: panel)
+        feed.applyRailSlot(to: panel)
         let bar = try Layout.composerColumn(in: panel.view, space: window).bar
         #expect(!bar.hostsActionColumn)
 
         let (loading, loadingWindow) = Layout.engagedPanel()
         defer { loadingWindow.isHidden = true }
-        feed.applySoundRail(to: loading, hostedByPage: false)
+        feed.applyRailSlot(to: loading, hostedByPage: false)
         #expect(try Layout.composerColumn(in: loading.view, space: loadingWindow).bar.hostsActionColumn)
     }
 }

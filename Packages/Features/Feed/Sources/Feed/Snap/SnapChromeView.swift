@@ -255,6 +255,8 @@ final class SnapChromeView: UIView {
     /// The sound bubble's way back was tapped (#1929): the stream goes back
     /// to its start.
     var onSoundReturnRequested: (() -> Void)?
+    /// The bubble wears the post's Share (#1999) and was tapped.
+    var onShareRequested: (() -> Void)?
     /// The way back's hold (#1929): the disc rises with the cover, and once
     /// full the sound sheet opens — the bubble's own tap action.
     private var soundHold: HoldToArmPresenter?
@@ -864,7 +866,13 @@ final class SnapChromeView: UIView {
         mountColumn(in: self)
         soundBubble.onTap = { [weak self] in
             guard let self else { return }
-            if soundBubble.showsReturn { onSoundReturnRequested?() } else { onSoundSheetRequested?() }
+            if soundBubble.showsReturn {
+                onSoundReturnRequested?()
+            } else if soundBubble.sharesPost {
+                onShareRequested?()
+            } else {
+                onSoundSheetRequested?()
+            }
         }
         // No hold of its own since #1931 (no in-app mute): only the way back
         // has one, arming the sheet (#1929).
@@ -886,14 +894,36 @@ final class SnapChromeView: UIView {
     /// The way back's hold, and VoiceOver's road to the sheet, as the
     /// bubble stands: only on the chevron, only for a sound the post plays.
     private func applySoundHold() {
-        let armsSheet = soundBubble.showsReturn && soundFace?.isAvailable == true
+        let returns = soundBubble.showsReturn
+        // Over Share (#1999) the hold arms nothing: a text post has no sound.
+        let armsSheet = returns && !soundBubble.sharesPost && soundFace?.isAvailable == true
         soundHold?.isEnabled = armsSheet
-        soundBubble.accessibilityCustomActions = armsSheet ? [
-            UIAccessibilityCustomAction(name: "Sound") { [weak self] _ in
-                self?.onSoundSheetRequested?()
-                return true
-            },
-        ] : nil
+        if armsSheet {
+            soundBubble.accessibilityCustomActions = [
+                UIAccessibilityCustomAction(name: "Sound") { [weak self] _ in
+                    self?.onSoundSheetRequested?()
+                    return true
+                },
+            ]
+        } else if returns, soundBubble.sharesPost {
+            // Share stays reachable with the chevron up: VoiceOver's road.
+            soundBubble.accessibilityCustomActions = [
+                UIAccessibilityCustomAction(name: "Share") { [weak self] _ in
+                    self?.onShareRequested?()
+                    return true
+                },
+            ]
+        } else {
+            soundBubble.accessibilityCustomActions = nil
+        }
+    }
+
+    /// The bubble as the post's Share (#1999): a pushed text page, whose
+    /// column is Share alone on the sound's frame — a text post has no sound.
+    func setSlotSharesPost(_ shares: Bool) {
+        soundBubble.setSharesPost(shares)
+        applySoundHold()
+        applySoundVisibility()
     }
 
     private func railBottomConstraint() -> NSLayoutConstraint {
@@ -931,12 +961,11 @@ final class SnapChromeView: UIView {
         setNeedsLayout()
     }
 
-    /// The sound bubble is MEDIA chrome, like the like pill above it: a text
-    /// page's engagement is its permanent layout, and its composer stands in
-    /// the column instead (its rail slot wears the sound). Shown for a post
-    /// with a face — every media post has one, greyed when it has no sound.
+    /// The sound bubble: shown for a post with a face — every media post has
+    /// one, greyed when it has no sound — or wearing a pushed text page's
+    /// Share (#1999), on the same frame.
     private func applySoundVisibility() {
-        soundBubble.isHidden = soundFace == nil
+        soundBubble.isHidden = soundFace == nil && !soundBubble.sharesPost
         // The post's actions (#1681) are media chrome too: a text page's
         // composer holds them.
         postActions.isHidden = !showsPostActions || soundFace == nil
@@ -2025,6 +2054,7 @@ final class SnapChromeView: UIView {
         soundFace = nil
         setSoundShowsReturn(false, animated: false)
         soundBubble.setFace(nil, pipeline: nil)
+        soundBubble.setSharesPost(false)
         soundBubble.isHidden = true
         // Back to the unwired default (enabled, nothing undoable) — the
         // next configure pushes the real context.

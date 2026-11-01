@@ -110,6 +110,13 @@ final class SnapSoundBubbleButton: UIButton {
     )
     /// Whether the way back shows instead of the record.
     private(set) var showsReturn = false
+    /// Share's glyph, in the same glass (#1999): a pushed text page's
+    /// bubble is the post's Share, not its sound — a text post has none.
+    private let shareGlyph = UIImageView(
+        image: UIImage.symbol(named: CommentsInputBar.shareRailSymbol, configuration: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold))
+    )
+    /// Whether the bubble is the post's Share instead of its sound (#1999).
+    private(set) var sharesPost = false
     /// What the host last asked of the record, kept while the way back
     /// hides it: the record turns again when it comes back (#692).
     private var wantsSpinning = false
@@ -141,6 +148,11 @@ final class SnapSoundBubbleButton: UIButton {
         returnGlyph.alpha = 0
         returnGlyph.isUserInteractionEnabled = false
         addSubview(returnGlyph)
+        shareGlyph.tintColor = .label
+        shareGlyph.contentMode = .center
+        shareGlyph.alpha = 0
+        shareGlyph.isUserInteractionEnabled = false
+        addSubview(shareGlyph)
 
         addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .primaryActionTriggered)
 
@@ -155,14 +167,33 @@ final class SnapSoundBubbleButton: UIButton {
     func setShowsReturn(_ shows: Bool, animated: Bool) {
         guard shows != showsReturn else { return }
         showsReturn = shows
-        accessibilityLabel = shows ? "Back to top" : "Sound"
-        accessibilityHint = shows ? nil : "Double-tap for the sound."
-        // An unavailable sound stays greyed; the way back always answers.
-        isEnabled = shows || face?.isAvailable == true
-        alpha = shows || face?.isAvailable != false ? 1 : 0.45
+        applyFace(animated: animated)
+    }
+
+    /// The bubble as the post's Share (#1999), or back to its sound: Share's
+    /// glyph in the glass where the record was, the way back cross-fading
+    /// with it as with the record.
+    func setSharesPost(_ shares: Bool) {
+        guard shares != sharesPost else { return }
+        sharesPost = shares
+        accessibilityIdentifier = shares ? SnapFooterToolbar.ID.share : nil
+        applyFace(animated: false)
+    }
+
+    /// Labels, enabled state and glyphs as the bubble stands: the way back,
+    /// Share, or the sound.
+    private func applyFace(animated: Bool) {
+        let shows = showsReturn
+        accessibilityLabel = shows ? "Back to top" : sharesPost ? "Share" : "Sound"
+        accessibilityHint = shows || sharesPost ? nil : "Double-tap for the sound."
+        // An unavailable sound stays greyed; the way back and Share always answer.
+        isEnabled = shows || sharesPost || face?.isAvailable == true
+        alpha = shows || sharesPost || face?.isAvailable != false ? 1 : 0.45
+        let sharing = sharesPost
         let apply = {
-            self.record.recordAlpha = shows ? 0 : 1
+            self.record.recordAlpha = shows || sharing ? 0 : 1
             self.returnGlyph.alpha = shows ? 1 : 0
+            self.shareGlyph.alpha = sharing && !shows ? 1 : 0
         }
         // A cross-fade, not a motion: Reduce Motion keeps it.
         if animated {
@@ -192,6 +223,9 @@ final class SnapSoundBubbleButton: UIButton {
         returnGlyph.bounds = record.bounds
         returnGlyph.center = record.center
         bringSubviewToFront(returnGlyph)
+        shareGlyph.bounds = record.bounds
+        shareGlyph.center = record.center
+        bringSubviewToFront(shareGlyph)
     }
 
     /// Draws `face`; nil hides nothing by itself (the host decides visibility)
@@ -201,8 +235,8 @@ final class SnapSoundBubbleButton: UIButton {
         let coverChanged = face?.coverURL != self.face?.coverURL || self.face == nil
             || face?.isAvailable != self.face?.isAvailable
         self.face = face
-        isEnabled = showsReturn || face?.isAvailable == true
-        alpha = showsReturn || face?.isAvailable != false ? 1 : 0.45
+        isEnabled = showsReturn || sharesPost || face?.isAvailable == true
+        alpha = showsReturn || sharesPost || face?.isAvailable != false ? 1 : 0.45
         accessibilityValue = face.map { $0.isAvailable ? nil : "No audio" } ?? nil
         // A face that loses its sound always counts as a cover change, so the
         // record stops here at once, not at the host's next look (#1871).
@@ -221,7 +255,7 @@ final class SnapSoundBubbleButton: UIButton {
     }
 
     private func applySpinning() {
-        guard let face, face.isAvailable, !showsReturn else { return record.setSpinning(false) }
+        guard let face, face.isAvailable, !showsReturn, !sharesPost else { return record.setSpinning(false) }
         record.setSpinning(wantsSpinning)
     }
 
@@ -237,5 +271,6 @@ final class SnapSoundBubbleButton: UIButton {
     var debugRecord: SoundRecordGlass { record }
     var debugCoverImage: UIImage? { coverView.image }
     var debugReturnGlyphAlpha: CGFloat { returnGlyph.alpha }
+    var debugShareGlyphAlpha: CGFloat { shareGlyph.alpha }
     #endif
 }
