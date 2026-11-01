@@ -44,8 +44,18 @@ import UIKit
 /// the whole navigation controller, stays above it too. Like the top band it
 /// belongs to no screen: pushes and pops slide the screens under it.
 ///
-/// Installed in the four tab stacks (`MainTabCoordinator`). Not in sheets or
-/// full-screen presentations, which draw their own bottom.
+/// Installed in the four tab stacks (`MainTabCoordinator`), the Rewards sheet
+/// (`WalletSheetViewController`) and the notifications drawer
+/// (`NotificationsDrawer`).
+///
+/// ## What may sit on it
+///
+/// ⚠️ CONTENT THAT MUST READ SHARP ENDS ABOVE THE BAND (#1995). A list that
+/// scrolls under it is its job; a FITTED height that stops on its last
+/// control is not — the Rewards sheet's collapsed detent left the Claim
+/// button's lower 20 pt in the blur. Whoever fits a height reads
+/// `bandHeight(in:)` and `clearance(band:bottomInset:gap:)`, the band's own
+/// measure, so the two can never disagree.
 ///
 /// ## Light and dark
 ///
@@ -87,6 +97,21 @@ public final class BottomEdgeBlurView: UIView {
     /// The height of UIKit's `.soft` bottom edge effect, whatever the
     /// pocket's height (measured on iOS 27, iPhone 18 Pro, 2026-10-12).
     static let softEdgeHeight: CGFloat = 60
+
+    /// The height the band draws in `window`: its status band — 62 pt on an
+    /// iPhone with a Dynamic Island, 20 pt on an SE, 0 with none (landscape).
+    /// `layoutSubviews` draws exactly this.
+    public static func bandHeight(in window: UIWindow?) -> CGFloat {
+        max(0, window?.safeAreaInsets.top ?? 0)
+    }
+
+    /// What a fitted height must leave under its last control so that the
+    /// control ends `gap` above the band: the band's part over the bottom
+    /// safe area (which a sheet's custom detent already excludes), plus the
+    /// gap.
+    public static func clearance(band: CGFloat, bottomInset: CGFloat, gap: CGFloat) -> CGFloat {
+        max(0, band - max(0, bottomInset)) + gap
+    }
 
     /// The vertical scale that makes the soft effect `statusBandHeight` tall.
     /// Zero hides the band (no status band: landscape).
@@ -167,7 +192,7 @@ public final class BottomEdgeBlurView: UIView {
 
     public override func layoutSubviews() {
         super.layoutSubviews()
-        let band = window?.safeAreaInsets.top ?? 0
+        let band = Self.bandHeight(in: window)
         // ⚠️ `softEdgeHeight` is measured on iOS 27 (iPhone 18 Pro); check
         // `-status-bar-blur-audit`'s `bottom=` against `h=` on a new OS or
         // device class.

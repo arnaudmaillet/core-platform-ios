@@ -501,13 +501,20 @@ final class WalletSheetViewController: UIViewController {
         let head = cell.frame.maxY + SectionTitleView.gapAbove(traits: traitCollection)
         if abs(head - headerHeight) > 0.5 { headerHeight = head }
         refillEmptyCard()
-        // ⚠️ A custom detent's height EXCLUDES the bottom safe area — the
-        // sheet adds it back: the margin is what is left of the band. Read
-        // from the PRESENTER's window too: this is measured in `viewDidLoad`,
-        // before the sheet has a window of its own.
+        // ⚠️ THE CLAIM ENDS ABOVE THE FOOT'S BLUR (#1995): the sheet wears
+        // `BottomEdgeBlurView`, as tall as the status band, and the margin
+        // only cleared the home indicator — the button's lower 20 pt sat in
+        // the blur. A custom detent's height EXCLUDES the bottom safe area
+        // (the sheet adds it back), so the margin is the band's part above
+        // it plus a small gap. Read from the PRESENTER's window too: this is
+        // measured in `viewDidLoad`, before the sheet has a window of its own.
         let window = view.window ?? presentingViewController?.view.window
-        let bottomInset = window?.safeAreaInsets.bottom ?? 0
-        let height = (barClearance() + Self.topInset + cell.frame.maxY + max(Spacing.sm, Spacing.lg - bottomInset)).rounded()
+        let margin = BottomEdgeBlurView.clearance(
+            band: BottomEdgeBlurView.bandHeight(in: window),
+            bottomInset: window?.safeAreaInsets.bottom ?? 0,
+            gap: Spacing.sm
+        )
+        let height = (barClearance() + Self.topInset + cell.frame.maxY + margin).rounded()
         guard force || abs(height - detentHeight) > 0.5 else { return }
         detentHeight = height
         sheet.animateChanges { sheet.invalidateDetents() }
