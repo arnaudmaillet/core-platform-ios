@@ -25,10 +25,16 @@ import Foundation
 ///
 /// **A queued id belongs to the surface that queued it:** when that surface
 /// goes, what it left in the queue is dropped when reached.
+///
+/// **A batch first (#2003):** what either queue claims is asked of
+/// `previews` in ONE call (`ListPreviews`), and only what that call did not
+/// cover — a failure, a link, a notification — warms on its own.
 @MainActor
 public final class PostOpenWarm {
     private let prefetch: @Sendable (PostID) async -> Void
     private let isHeld: (PostID) -> Bool
+    /// The batch: the posts it covered. Nil: every post on its own.
+    private let previews: (@Sendable ([PostID]) async -> Set<PostID>)?
     private var inFlight: Set<PostID> = []
     private var queue: [(id: PostID, owner: Owner)] = []
     private var isDraining = false
@@ -42,18 +48,43 @@ public final class PostOpenWarm {
 
     public init(
         prefetch: @escaping @Sendable (PostID) async -> Void,
-        isHeld: @escaping (PostID) -> Bool
+        isHeld: @escaping (PostID) -> Bool,
+        previews: (@Sendable ([PostID]) async -> Set<PostID>)? = nil
     ) {
         self.prefetch = prefetch
         self.isHeld = isHeld
+        self.previews = previews
     }
 
-    /// Warms `ids` now, one request each, in parallel.
+    /// Warms `ids` now: one batch for all of them, then, in parallel, one
+    /// request for each post the batch did not cover.
     public func warmNow(_ ids: [PostID]) {
-        for id in ids where claim(id) {
-            trace("asking", id)
-            Task { await self.run(id) }
+        let claimed = ids.filter(claim)
+        guard !claimed.isEmpty else { return }
+        guard let previews else {
+            for id in claimed {
+                trace("asking", id)
+                Task { await self.run(id) }
+            }
+            return
         }
+        Task {
+            let covered = await self.batch(claimed, through: previews)
+            for id in claimed where !covered.contains(id) {
+                self.trace("asking", id)
+                Task { await self.run(id) }
+            }
+        }
+    }
+
+    /// One `previews` call for `ids`, already claimed; the covered ones are
+    /// released, held from now on.
+    private func batch(_ ids: [PostID], through previews: @Sendable ([PostID]) async -> Set<PostID>) async -> Set<PostID> {
+        traceBatch("previews", ids.count)
+        let covered = await previews(ids)
+        traceBatch("previews covered", covered.count)
+        for id in ids where covered.contains(id) { inFlight.remove(id) }
+        return covered
     }
 
     /// Queues `ids` behind what is already queued, one request at a time.
@@ -71,10 +102,26 @@ public final class PostOpenWarm {
         isDraining = true
         Task {
             while !self.queue.isEmpty {
-                let next = self.queue.removeFirst()
-                guard !next.owner.isGone, self.claim(next.id) else { continue }
-                self.trace("queued", next.id)
-                await self.run(next.id)
+                guard let previews = self.previews else {
+                    let next = self.queue.removeFirst()
+                    guard !next.owner.isGone, self.claim(next.id) else { continue }
+                    self.trace("queued", next.id)
+                    await self.run(next.id)
+                    continue
+                }
+                // What the queue holds now, as one batch: claimed as it is
+                // reached, as a single post is.
+                var claimed: [PostID] = []
+                while claimed.count < Self.batchSize, !self.queue.isEmpty {
+                    let next = self.queue.removeFirst()
+                    if !next.owner.isGone, self.claim(next.id) { claimed.append(next.id) }
+                }
+                guard !claimed.isEmpty else { continue }
+                let covered = await self.batch(claimed, through: previews)
+                for id in claimed where !covered.contains(id) {
+                    self.trace("queued", id)
+                    await self.run(id)
+                }
             }
             self.isDraining = false
         }
@@ -93,6 +140,9 @@ public final class PostOpenWarm {
         trace("ready", id)
     }
 
+    /// `ListPreviews` takes at most 50 posts.
+    static let batchSize = 50
+
     #if DEBUG
     /// What is in flight and queued, for tests.
     var debugInFlight: Set<PostID> { inFlight }
@@ -105,6 +155,12 @@ public final class PostOpenWarm {
     private func trace(_ what: String, _ id: PostID) {
         #if DEBUG
         if Self.traces { print("[warm] \(what) \(id.rawValue)") }
+        #endif
+    }
+
+    private func traceBatch(_ what: String, _ count: Int) {
+        #if DEBUG
+        if Self.traces { print("[warm] \(what) \(count)") }
         #endif
     }
 

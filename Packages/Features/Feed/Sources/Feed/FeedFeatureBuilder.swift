@@ -160,7 +160,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         postOpenWarm = commentsProvider.map { provider in
             PostOpenWarm(
                 prefetch: { id in await provider.prefetchTopComments(for: id) },
-                isHeld: { id in provider.cachedTopComments(for: id) != nil }
+                isHeld: { id in provider.holdsComments(for: id) },
+                // One call per page of tiles first (#2003).
+                previews: { ids in await provider.prefetchPreviews(for: ids) }
             )
         }
         self.realtime = realtime
