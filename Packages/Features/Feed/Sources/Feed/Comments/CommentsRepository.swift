@@ -167,6 +167,15 @@ public protocol CommentsProviding: Sendable {
     /// mounts inside a layout pass, and anything it has to await it renders a
     /// skeleton for.
     nonisolated func cachedTopComments(for postID: PostID) -> [CommentEntry]?
+    /// The first comments of many posts in ONE call (#2003, `ListPreviews`),
+    /// held as seeds `cachedTopComments` answers with until a first page is
+    /// held. Returns the posts the call covered — those need no request of
+    /// their own; an empty set (a failure, or a provider with no batch) leaves
+    /// each to `prefetchTopComments`.
+    func prefetchPreviews(for postIDs: [PostID]) async -> Set<PostID>
+    /// Whether anything is held for `postID` — a first page, or a preview,
+    /// even an empty one: what a warm skips.
+    nonisolated func holdsComments(for postID: PostID) -> Bool
     /// Who the viewer is, for the composer's avatar. Nil when nobody is
     /// signed in or the profile can't be resolved — the composer then shows
     /// its neutral placeholder rather than someone else's face.
@@ -215,6 +224,9 @@ public extension CommentsProviding {
     /// panel awaits its load and shows a skeleton meanwhile.
     func prefetchTopComments(for postID: PostID) async {}
     nonisolated func cachedTopComments(for postID: PostID) -> [CommentEntry]? { nil }
+    /// Default: no batch — every post warms on its own.
+    func prefetchPreviews(for postIDs: [PostID]) async -> Set<PostID> { [] }
+    nonisolated func holdsComments(for postID: PostID) -> Bool { cachedTopComments(for: postID) != nil }
     /// Default: nothing held — the bars fill in when the identity resolves.
     nonisolated func cachedViewerIdentity() -> ViewerIdentity? { nil }
     /// Default: nowhere to put it; the panel loads as it always did.
@@ -256,6 +268,13 @@ public actor CommentsRepository: CommentsProviding {
     /// isolated for exactly that reason — an `await` here would put a
     /// skeleton on screen, which is the thing being removed.
     private nonisolated let topPages: TopCommentsCache
+    /// The previews (#2003): a page of tiles' first comments, one call per
+    /// page. Filtered for one viewer, so wiped on a viewer change, and never
+    /// written to the device.
+    private nonisolated let previews = CommentPreviewCache()
+    /// Bumped by every viewer change: a batch that left before it lands
+    /// nothing.
+    private var viewerGeneration = 0
 
     /// `localStore` keeps the first pages on the device too (#893): a post
     /// opened in an earlier session opens on its last comments. Nil keeps
@@ -294,8 +313,63 @@ public actor CommentsRepository: CommentsProviding {
         _ = try? await loadComments(for: postID)
     }
 
+    /// The first page when one is held, otherwise a NON-EMPTY preview: a
+    /// preview is a seed, never a page, so it never says "no comments" (#2003).
     public nonisolated func cachedTopComments(for postID: PostID) -> [CommentEntry]? {
-        topPages.value(for: postID)
+        if let page = topPages.value(for: postID) { return page }
+        guard let preview = previews.value(for: postID), !preview.isEmpty else { return nil }
+        return preview
+    }
+
+    public nonisolated func holdsComments(for postID: PostID) -> Bool {
+        topPages.value(for: postID) != nil || previews.value(for: postID) != nil
+    }
+
+    /// How many comments a preview carries per post (#2003): enough for the
+    /// subtitle zone's first cue and a text page's first rows.
+    static let previewLimit: Int32 = 5
+    /// `ListPreviews` takes at most this many posts.
+    static let previewBatch = 50
+
+    /// ⚠️ ONE CALL PER PAGE OF TILES (#2003), beside the posts and their
+    /// counters, instead of one request per tile racing the viewer's tap.
+    /// A post is covered when its preview decides the subtitle zone's first
+    /// cue (`SubtitleCommentBuilder.previewDecidesFirstCue`) — a post left
+    /// out of the answer is one the viewer may not read, an empty preview.
+    /// The others, and a failed batch, warm on their own.
+    public func prefetchPreviews(for postIDs: [PostID]) async -> Set<PostID> {
+        var seen = Set<PostID>()
+        let wanted = postIDs.filter { !holdsComments(for: $0) && seen.insert($0).inserted }
+        guard !wanted.isEmpty else { return [] }
+        let generation = viewerGeneration
+        var covered = Set<PostID>()
+        for start in stride(from: 0, to: wanted.count, by: Self.previewBatch) {
+            let batch = Array(wanted[start..<min(start + Self.previewBatch, wanted.count)])
+            var request = Comment_V1_ListPreviewsRequest()
+            request.postIds = batch.map(\.rawValue)
+            request.limit = Self.previewLimit
+            guard case .success(let body) = await commentClient.listPreviews(request: request, headers: [:]).result
+            else { continue }
+            await hydrateAuthors(for: body.previews.flatMap { $0.comments.map { ProfileID($0.authorID) } })
+            // A viewer change while it was out: the answer was filtered for
+            // someone else.
+            guard generation == viewerGeneration else { return [] }
+            let byPost = Dictionary(
+                body.previews.map { (PostID($0.postID), $0.comments.map(makeEntry)) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            for id in batch {
+                // A preview that cannot tell the zone's first cue is no seed:
+                // the post warms its first page on its own, as before.
+                let preview = byPost[id] ?? []
+                guard SubtitleCommentBuilder.previewDecidesFirstCue(
+                    preview, isWholeTopLevel: preview.count < Int(Self.previewLimit)
+                ) else { continue }
+                previews.set(preview, for: id)
+                covered.insert(id)
+            }
+        }
+        return covered
     }
 
     public func loadComments(for postID: PostID) async throws -> [CommentEntry] {
@@ -644,6 +718,17 @@ private final class TopCommentsCache: @unchecked Sendable {
     func waitForPendingWrites() { disk?.waitForPendingWrites() }
 }
 
+/// The previews a page of tiles brought (#2003), readable synchronously as
+/// the first pages are. Memory only, one viewer's.
+private final class CommentPreviewCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [PostID: [CommentEntry]] = [:]
+
+    func value(for postID: PostID) -> [CommentEntry]? { lock.withLock { entries[postID] } }
+    func set(_ preview: [CommentEntry], for postID: PostID) { lock.withLock { entries[postID] = preview } }
+    func removeAll() { lock.withLock { entries.removeAll() } }
+}
+
 extension CommentsRepository: HeldCommentReviewing {
     public func reviewHeldComment(_ commentID: String, approve: Bool) async throws {
         let owner = try await resolveViewerProfileID(forWrite: "reviewHeldComment")
@@ -677,5 +762,8 @@ extension CommentsRepository: ViewerScoped {
         viewerMirror.set(nil)
         topPages.removeAll()
         laterPages.removeAll()
+        // The previews were filtered for that viewer too (#2003).
+        previews.removeAll()
+        viewerGeneration += 1
     }
 }
