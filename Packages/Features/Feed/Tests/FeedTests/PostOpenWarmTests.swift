@@ -239,15 +239,36 @@ struct LandingKeepsTheWarmedPillTests {
         #expect(zone.debugGeneration == cycle, "the landing replayed a pill the flight already showed")
     }
 
-    /// Cues that landed during the flight (a cold open) still enter at the
-    /// landing, with their fade.
+    /// Cues that landed during the flight (a cold open) and whose entrance
+    /// is over, unseen under the hidden chrome, enter again at the landing,
+    /// with their fade.
     @Test func aColdPillEntersAtTheLanding() {
         let zone = SnapSubtitleView()
+        var clock: CFTimeInterval = 100
+        zone.now = { clock }
         zone.setActive(true)
         zone.setCues(cues)
+        clock += SnapSubtitleView.leadInDelay + SnapSubtitleView.fadeDuration
         let cycle = zone.debugGeneration
         zone.replayEntrance()
         #expect(zone.debugGeneration > cycle)
+        #expect(zone.debugIsCycling)
+    }
+
+    /// ⚠️ A COLD PILL STILL FADING IN AT THE LANDING FINISHES ITS ENTRANCE
+    /// (#2002, the owner's device): restarting it blinked the pill — shown,
+    /// gone, back after the lead-in.
+    @Test func aColdPillStillEnteringIsNotRestartedAtTheLanding() {
+        let zone = SnapSubtitleView()
+        var clock: CFTimeInterval = 100
+        zone.now = { clock }
+        zone.setActive(true)
+        zone.setCues(cues)
+        // The device's trace: the landing 414 ms after the cues, mid-fade.
+        clock += 0.414
+        let cycle = zone.debugGeneration
+        zone.replayEntrance()
+        #expect(zone.debugGeneration == cycle, "the landing restarted an entrance still running")
         #expect(zone.debugIsCycling)
     }
 }

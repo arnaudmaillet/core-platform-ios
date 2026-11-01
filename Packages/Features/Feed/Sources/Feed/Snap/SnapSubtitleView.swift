@@ -86,6 +86,11 @@ final class SnapSubtitleView: UIView {
     /// when it came on screen, which is when the flight's replica showed the
     /// same first cue (#2002).
     private var cycleStartedInstantly = false
+    /// When the running cycle's fade entrance ends — zero for an instant
+    /// one. A landing within it lets the entrance finish (`replayEntrance`).
+    private var entranceEndsAt: CFTimeInterval = 0
+    /// The clock entrances are timed on. Tests.
+    var now: () -> CFTimeInterval = CACurrentMediaTime
     /// Invalidates stale CA completions across stops — completions fire even
     /// for removed animations, and a stale one must not advance a cycle a
     /// newer owner already reset.
@@ -332,8 +337,16 @@ final class SnapSubtitleView: UIView {
     /// is already there, the same cue, so it stays: an entrance here would
     /// be a fade-out-and-in of what the flight just showed. Only cues that
     /// landed during the flight (a cold open) enter now.
+    ///
+    /// ⚠️ AND NOT WHILE THEIR ENTRANCE STILL RUNS (#2002, the owner's
+    /// device): cues that landed late in the flight start their fade under
+    /// the hidden chrome, and the landing caught it part way — the pill
+    /// showed, went to nothing, and came back after the lead-in, a blink
+    /// (traced: cues at +86 ms, the landing 414 ms later, mid-fade). That
+    /// entrance simply finishes on screen; only one already over, unseen,
+    /// is played again.
     func replayEntrance() {
-        guard isActive, !cues.isEmpty, !cycleStartedInstantly else { return }
+        guard isActive, !cues.isEmpty, !cycleStartedInstantly, now() >= entranceEndsAt else { return }
         stopCycle()
         nextIndex = (nextIndex + cues.count - 1) % cues.count
         startIfNeeded(fadingIn: true)
@@ -363,6 +376,7 @@ final class SnapSubtitleView: UIView {
         guard isActive, !cues.isEmpty, !isCycling else { return }
         isCycling = true
         cycleStartedInstantly = !fadingIn
+        entranceEndsAt = fadingIn ? now() + Self.leadInDelay + Self.fadeDuration : 0
         presentNextCue(fadingIn: fadingIn)
     }
 
