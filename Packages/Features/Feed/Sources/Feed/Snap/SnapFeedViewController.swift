@@ -5189,8 +5189,12 @@ final class SnapFeedViewController: UIViewController {
         refreshAudibleSurface()
         // The pill changes owner with the picture (#1791): one rule — the
         // page covering most of the screen — so the author and the clip
-        // change hands on the same frame, in either direction.
+        // change hands on the same frame, in either direction. ⚠️ AND A TEXT
+        // PAGE'S FOOTER LIKE WITH THEM (the owner's device, 2026-11-01): it
+        // waited for the settle, a beat after the author beside it. Drawn
+        // first, so the author's swap re-installs into the bar it set.
         if let owner, orderedIDs.indices.contains(owner), let model = modelsByID[orderedIDs[owner]] {
+            refreshFooterLike(for: model, animated: true)
             showAuthor(model)
         }
     }
