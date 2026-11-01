@@ -207,9 +207,10 @@ final class ProfileSwitcherMenuController: UIViewController, ProfileSwitcherTrac
             self.panel.alpha = 0
             self.panel.transform = CGAffineTransform(scaleX: 0.94, y: 0.94)
         }, completion: { _ in
-            self.dismiss(animated: false) {
-                if let item { self.onPick(item) }
-            }
+            let pick = { if let item { self.onPick(item) } }
+            // Through the guarded close (#1144): a switcher already gone
+            // closes nothing under it, and its pick still lands.
+            if !self.closePresentation(animated: false, completion: pick) { pick() }
         })
     }
 
