@@ -1211,20 +1211,26 @@ final class SnapChromeView: UIView {
     }
 
     /// The caption's register over the media, on every snap feed (#1697,
-    /// #1708, the owner): one text style below the body (`.subheadline`) in
-    /// a soft grey, the timestamp dimmer still — the picture is the page and
-    /// the words step back. ONE register: it was a per-screen variant (the
-    /// For You root's) until the owner gave it to every vertical feed.
+    /// #1708, the owner): one text style below the body (`.subheadline`).
+    /// ONE register: it was a per-screen variant (the For You root's) until
+    /// the owner gave it to every vertical feed.
+    ///
+    /// ⚠️ WHITE, NO GREY (#2012, the owner 2026-11-01): the app's standard
+    /// text white over media — the subtitle zone's, the band's, a card's —
+    /// FIXED, not the dynamic `.label` (black in light mode). The caption and
+    /// its timestamp alike; the timestamp is set apart by its smaller
+    /// `.footnote` alone. It was a 0.78 grey with a half-white timestamp
+    /// (#1697), 3.4 : 1 over a bright picture under the scrim — under AA's
+    /// 4.5 : 1, and dimmer than the comments around it.
     enum CaptionRegister {
         static let textStyle: UIFont.TextStyle = .subheadline
-        static let ink = UIColor(white: 0.78, alpha: 1)
-        static let timestampInk = UIColor.white.withAlphaComponent(0.5)
+        static let ink = UIColor.white
     }
 
     /// The caption typography — the shared attributes for the caption glyphs
     /// (`.body`) and, for `secondary`, the appended timestamp: a SMALLER
-    /// `.footnote` register, dimmed, so it reads as clean secondary metadata
-    /// distinctly lighter than the body text (the same footnote register the
+    /// `.footnote` register, in the same white (#2012), so it reads as clean
+    /// secondary metadata by its size alone (the same footnote register the
     /// engaged info card uses for the post age). Baked per-run so
     /// `boundingRect` measures each font's true footprint — the two-line
     /// truncation therefore accounts for the smaller timestamp automatically.
@@ -1241,7 +1247,7 @@ final class SnapChromeView: UIView {
         shadow.shadowOffset = .zero
         return [
             .font: UIFont.appFont(forTextStyle: secondary ? .footnote : CaptionRegister.textStyle),
-            .foregroundColor: secondary ? CaptionRegister.timestampInk : CaptionRegister.ink,
+            .foregroundColor: CaptionRegister.ink,
             .shadow: shadow,
             // GEOMETRY LOCK: every line takes the PRIMARY (body) line height —
             // identical on every run — so a line ending on the smaller

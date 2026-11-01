@@ -125,28 +125,30 @@ struct SnapChromeCaptionTests {
         #expect(SnapChromeView.composedCaption(caption, timestamp: timestamp, width: 0).string == caption)
     }
 
-    /// (#1697, #1708): every snap feed's caption is one text style below the
-    /// body (`.subheadline`) in a soft grey, its time still the smaller,
-    /// dimmer register — and the two-line contract holds at its size.
-    @Test func theCaptionIsSmallerAndGreyerAndKeepsTheContract() throws {
+    /// (#1697, #1708, #2012): every snap feed's caption is one text style
+    /// below the body (`.subheadline`) in the app's standard white — no grey
+    /// since #2012 — its time the smaller register, and the two-line
+    /// contract holds at its size.
+    @Test func theCaptionIsSmallerAndWhiteAndKeepsTheContract() throws {
         let caption = "Weekend build log: rebuilt the pipeline end to end, found two race conditions that only reproduce on cold caches, and learned more about backpressure than I ever wanted to."
         let soft = SnapChromeView.composedCaption(caption, timestamp: timestamp, width: width)
         let softFont = try #require(soft.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
         #expect(softFont.pointSize == UIFont.appFont(forTextStyle: .subheadline).pointSize, "not the subheadline register")
         #expect(softFont.pointSize < UIFont.appFont(forTextStyle: .body).pointSize, "the caption is not smaller than the body")
         let softInk = try #require(soft.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor)
-        var white: CGFloat = 0
-        softInk.getWhite(&white, alpha: nil)
-        #expect(white < 0.9, "the caption is not grey: \(white)")
+        var white: CGFloat = 0, alpha: CGFloat = 0
+        softInk.getWhite(&white, alpha: &alpha)
+        #expect(white == 1 && alpha == 1, "the caption is not white: \(white), \(alpha)")
         let timeFont = try #require(soft.attribute(.font, at: soft.length - 1, effectiveRange: nil) as? UIFont)
         #expect(timeFont.pointSize < softFont.pointSize, "the time is not the smaller register")
         #expect(SnapChromeView.captionLineCount(soft, width: width) <= 2)
         #expect(soft.string.hasSuffix(timestamp.replacingOccurrences(of: " ", with: "\u{00A0}")))
     }
 
-    /// The timestamp reads as SECONDARY metadata: both DIMMER and in a
-    /// SMALLER font register than the caption body, on every case.
-    @Test func timestampRendersDimmerAndSmallerThanTheCaption() throws {
+    /// The timestamp reads as SECONDARY metadata by its SMALLER font register
+    /// alone, in the caption's own white (#2012, the owner: no grey), on
+    /// every case. It used to be dimmer too.
+    @Test func timestampRendersSmallerInTheCaptionsWhite() throws {
         for caption in ["Golden hour.", // Case A
                         "Rebuilt the whole deploy pipeline over a slow rainy weekend.", // Case B
                         "Weekend build log: rebuilt the pipeline end to end, found two race conditions that only reproduce on cold caches, and learned more about backpressure than I ever wanted to."] { // Case C
@@ -161,10 +163,8 @@ struct SnapChromeCaptionTests {
                 composed.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor
             )
             let capFont = try #require(composed.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
-            var tsAlpha: CGFloat = 0, capAlpha: CGFloat = 0
-            tsColor.getWhite(nil, alpha: &tsAlpha)
-            capColor.getWhite(nil, alpha: &capAlpha)
-            #expect(tsAlpha < capAlpha)               // dimmer
+            #expect(tsColor == capColor, "the time is not the caption's white")
+            #expect(tsColor == .white)
             #expect(tsFont.pointSize < capFont.pointSize) // smaller register
         }
     }
