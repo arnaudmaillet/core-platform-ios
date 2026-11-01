@@ -46,22 +46,22 @@ struct SnapPageScrimTests {
     @Test func onAPushedPostTheScrimStartsAtTheCaptionLessTheFade() {
         let chrome = makeChrome()
         let caption = frame(of: chrome.debugCaptionLabel, in: chrome)
-        #expect(abs(scrimTop(chrome) - (caption.minY - SnapChromeView.scrimFade)) < 0.5)
+        #expect(abs(scrimTop(chrome) - (caption.minY - SnapChromeView.scrimLead)) < 0.5)
         #expect(frame(of: chrome.debugScrimView, in: chrome).maxY == chrome.bounds.maxY)
     }
 
     @Test func aTimestampAloneIsTheBlock() {
         let chrome = makeChrome(caption: nil)
         let caption = frame(of: chrome.debugCaptionLabel, in: chrome)
-        #expect(abs(scrimTop(chrome) - (caption.minY - SnapChromeView.scrimFade)) < 0.5)
+        #expect(abs(scrimTop(chrome) - (caption.minY - SnapChromeView.scrimLead)) < 0.5)
     }
 
     @Test func onShotsTheScrimStartsAtTheAuthorRowLessTheFade() {
         let chrome = makeChrome(showsAuthorRow: true)
         let author = frame(of: chrome.debugAuthorRow, in: chrome)
         #expect(!chrome.debugAuthorRow.isHidden)
-        #expect(abs(scrimTop(chrome) - (author.minY - SnapChromeView.scrimFade)) < 0.5)
-        #expect(scrimTop(chrome) < frame(of: chrome.debugCaptionLabel, in: chrome).minY - SnapChromeView.scrimFade)
+        #expect(abs(scrimTop(chrome) - (author.minY - SnapChromeView.scrimLead)) < 0.5)
+        #expect(scrimTop(chrome) < frame(of: chrome.debugCaptionLabel, in: chrome).minY - SnapChromeView.scrimLead)
     }
 
     /// The measurement in the issue: the middle of the screen read 0.80 of the
@@ -100,7 +100,7 @@ struct SnapPageScrimTests {
         let long = makeChrome(caption: String(repeating: "Golden hour at the pier, the light going amber. ", count: 4))
         #expect(scrimTop(long) < scrimTop(short))
         let caption = frame(of: long.debugCaptionLabel, in: long)
-        #expect(abs(scrimTop(long) - (caption.minY - SnapChromeView.scrimFade)) < 0.5)
+        #expect(abs(scrimTop(long) - (caption.minY - SnapChromeView.scrimLead)) < 0.5)
     }
 
     /// The flight's replica and the live page are two chromes configured
@@ -118,5 +118,19 @@ struct SnapPageScrimTests {
         #expect(abs((alphas.last ?? 0) - SnapChromeView.scrimEdgeAlpha) < 0.001)
         #expect(zip(alphas, alphas.dropFirst()).allSatisfy { $0 < $1 }, "\(alphas)")
         #expect(SnapChromeView.scrimLocations.first == 0 && SnapChromeView.scrimLocations.last == 1)
+    }
+
+    /// Nearly linear (the owner: a barely perceptible darkening): no stop
+    /// strays from the straight line by more than a tenth of the edge's
+    /// darkness, and the first step is no steeper than the line's.
+    @Test func theRampIsNearlyLinear() {
+        let alphas = SnapChromeView.scrimColors.map { $0.cgColor.alpha }
+        let edge = SnapChromeView.scrimEdgeAlpha
+        for (location, alpha) in zip(SnapChromeView.scrimLocations, alphas) {
+            let t = CGFloat(truncating: location)
+            #expect(abs(alpha - edge * t) <= edge * 0.1, "at \(t): \(alpha)")
+        }
+        let firstStep = CGFloat(truncating: SnapChromeView.scrimLocations[1])
+        #expect(alphas[1] <= edge * firstStep)
     }
 }

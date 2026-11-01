@@ -35,34 +35,36 @@ final class SnapChromeView: UIView {
     ///
     /// ONE progressive ramp, from clear at its top to `scrimEdgeAlpha` at the
     /// screen's bottom edge, darker all the way down (the owner, 2026-10-31,
-    /// on the device: no fade that stops on a plateau). Its top sits
-    /// `scrimFade` above the caption block and is pinned there, so it rides
+    /// on the device: no fade that stops on a plateau). Its top IS the
+    /// caption block's top (`scrimLead`, 0) and is pinned there, so it rides
     /// the block's animated frame with no jump; its stops are fractions of
     /// its height, so they stretch with it. The flight's replica builds the
     /// same constraints, so it lands pixel-identical.
     private let scrimView = GradientView(colors: SnapChromeView.scrimColors,
                                          locations: SnapChromeView.scrimLocations)
 
-    /// How far above the caption block the ramp begins: far enough that the
-    /// caption already sits on a fair part of its darkness. The card's scrim
-    /// starts 36 pt up (`PostCardCaptionOverlay`); the page's text is larger
-    /// and its ramp runs on to the screen's edge.
-    static let scrimFade: CGFloat = 120
+    /// How far above the caption block the ramp begins: the seam between the
+    /// block and the comment stream above it (`Spacing.md`, the stream's own
+    /// gap), so the ramp starts on the caption — the author row on Shots —
+    /// and never reaches the stream (the owner, 2026-11-01). It began 120 pt
+    /// up, which reached the top of the stream.
+    static let scrimLead: CGFloat = Spacing.md
     /// The darkness at the bottom edge, under the caption and the toolbar —
     /// what it was before #1983.
     static let scrimEdgeAlpha: CGFloat = 0.75
 
-    /// The ramp's stops, from clear to `scrimEdgeAlpha` on an ease-out curve:
-    /// it darkens fastest at its top, so the caption — a third of the way
-    /// down — already sits on about 0.45, and it keeps darkening, ever more
-    /// gently, to the bottom edge. A smoothstep left the caption on 0.26 and
-    /// it read poorly over a bright clip. The top's own slope is spread over
-    /// the whole ramp (about 0.005 a point): no visible edge.
+    /// The ramp's stops, from clear to `scrimEdgeAlpha`, NEARLY LINEAR (the
+    /// owner, 2026-11-01: the darkening should be barely perceptible, top to
+    /// bottom): seven tenths a straight line, three tenths a smoothstep, so
+    /// it starts with a gentle slope (no edge where it begins) and is never
+    /// steeper than a straight line by more than a fifth. The ease-out
+    /// curves tried before darkened visibly fast at the top.
     static let scrimLocations: [NSNumber] = (0...8).map { NSNumber(value: Double($0) / 8) }
     static var scrimColors: [UIColor] {
         scrimLocations.map { location in
             let t = CGFloat(truncating: location)
-            return UIColor.black.withAlphaComponent(scrimEdgeAlpha * (1 - (1 - t) * (1 - t)))
+            let smoothstep = t * t * (3 - 2 * t)
+            return UIColor.black.withAlphaComponent(scrimEdgeAlpha * (0.7 * t + 0.3 * smoothstep))
         }
     }
 
@@ -370,7 +372,7 @@ final class SnapChromeView: UIView {
             // Over the seam between the pill and the caption too.
             authorLane.bottomAnchor.constraint(equalTo: captionLabel.topAnchor),
         ])
-        scrimOverAuthor = scrimView.topAnchor.constraint(equalTo: authorRow.topAnchor, constant: -Self.scrimFade)
+        scrimOverAuthor = scrimView.topAnchor.constraint(equalTo: authorRow.topAnchor, constant: -Self.scrimLead)
     }
 
     @objc private func captionTapped() {
@@ -523,7 +525,7 @@ final class SnapChromeView: UIView {
         }
         // Its top: the caption block's, less the lead (`applyAuthorRowLayout`
         // picks the author row's while it shows).
-        scrimOverCaption = scrimView.topAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Self.scrimFade)
+        scrimOverCaption = scrimView.topAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Self.scrimLead)
 
         // Caption, over the scrim; its trailing edge stops one md short of the
         // sound bubble (`installSoundBubble`). The margins guide tracks the
