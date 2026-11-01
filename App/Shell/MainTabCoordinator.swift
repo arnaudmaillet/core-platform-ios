@@ -237,6 +237,12 @@ final class MainTabCoordinator: NSObject, Coordinator {
             self, selector: #selector(notificationsReadDidChange),
             name: .notificationsReadDidChange, object: nil
         )
+        // Back in front, the dots read again (#2034): another profile may
+        // have been notified meanwhile.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(appWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification, object: nil
+        )
         // A stake's final failure is told (#1775).
         observeLikesGivenBack()
         // Warm the switcher up front. `makeMenu` is synchronous by design — it
@@ -450,6 +456,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         guard isMember else {
             notificationsBell.setUnread(false)
             container.pushNotifications.setBadge(0)
+            profileTab?.setUnread(false)
             return
         }
         Task { [weak self] in
@@ -460,6 +467,17 @@ final class MainTabCoordinator: NSObject, Coordinator {
             // the count the bell reads is the one the icon wears (#651).
             container.pushNotifications.setBadge(count)
         }
+        // The Profile tab's dot (#2034): any profile of the account, the
+        // active one included — the switcher shows which.
+        Task { [weak self] in
+            guard let self, let switcher = profileSwitcher else { return }
+            await switcher.reloadUnreadCounts()
+            profileTab?.setUnread(switcher.hasUnreadNotifications)
+        }
+    }
+
+    @objc private func appWillEnterForeground() {
+        refreshUnreadBadge()
     }
 }
 

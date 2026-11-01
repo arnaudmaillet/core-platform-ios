@@ -117,7 +117,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     }
 
     private func makeSwitcherFactory() -> ProfileSwitcherMenuFactory? {
-        switching.map { ProfileSwitcherMenuFactory(switching: $0, imagePipeline: imagePipeline) }
+        switching.map {
+            ProfileSwitcherMenuFactory(switching: $0, imagePipeline: imagePipeline, unreadCount: unreadNotifications)
+        }
     }
 
     /// The counter row's destination, shared by both profile entry points —
@@ -507,6 +509,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// nil leaves the button unoffered rather than inert.
     public var mapPinning: (any MapProfilePinning)?
     public var videoPlayback: VideoPlaybackController?
+    /// One profile of the account's unread notifications (#2034), for the
+    /// switcher's rows and the Profile tab's dot. Notifications answers it;
+    /// the app wires it.
+    public var unreadNotifications: (@MainActor @Sendable (ProfileID) async -> Int?)?
     public var openFeedHero: (([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)?
     /// For You's grid page, built by the composition root (#1273): the pages
     /// the profile's posts are drawn on. `savesPosts` offers the save control.

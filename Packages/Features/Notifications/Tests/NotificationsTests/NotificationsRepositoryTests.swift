@@ -184,6 +184,26 @@ struct NotificationsRepositoryTests {
         }
     }
 
+    /// One profile of the account's unread count (#2034): `GetUnreadCount`
+    /// with that profile's id, not the active one's.
+    @Test func theUnreadCountOfAGivenProfile() async throws {
+        let dataset = MockSocialDataset()
+        let bff = MockBFF()
+        MockSocialServices(dataset: dataset).register(on: bff)
+        MockNotificationService(dataset: dataset).register(on: bff)
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let repository = NotificationsRepository(
+            notificationClient: Notification_V1_NotificationServiceClient(client: client),
+            profileClient: Profile_V1_ProfileServiceClient(client: client),
+            authSession: AuthenticatedSessionStub()
+        )
+        for (profile, count) in MockNotificationService.otherProfileUnread {
+            #expect(try await repository.unreadCount(forProfile: ProfileID(profile)) == Int(count), "\(profile)")
+        }
+        let active = try await repository.unreadCount()
+        #expect(try await repository.unreadCount(forProfile: ProfileID(MockSocialDataset.viewerProfileID)) == active)
+    }
+
     @Test func aSubjectTheServerNoLongerShowsKeepsItsRowWithoutAPreview() async throws {
         let dataset = MockSocialDataset()
         let bff = MockBFF()
