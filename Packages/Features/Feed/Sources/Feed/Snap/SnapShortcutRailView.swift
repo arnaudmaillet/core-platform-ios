@@ -74,11 +74,17 @@ import UIKit
 ///
 /// # Flight replica
 /// Populated from `configure` (static content, like the caption), so the
-/// transition's inert replica shows the same rail. The payload is therefore
-/// seeded per post id — shuffled across posts, but deterministic within a
-/// launch — and a still shortcut rests on its art's poster frame, so the
-/// live cell and its flight replica can never disagree. (A user-scrolled
-/// wheel snaps back to rest in the replica.)
+/// transition's inert replica shows the same rail. The payload is ONE order
+/// on every post (`reactionIDs`, #2004: it was shuffled per post id), and a
+/// still shortcut rests on its art's poster frame, so the live cell and its
+/// flight replica can never disagree. (A user-scrolled wheel snaps back to
+/// rest in the replica.)
+///
+/// The REPLICA's rail shows its shortcuts in the flight, still, on their
+/// poster frames — or their skeletons while the art loads
+/// (`isFlightReplica`, #2004). The LIVE rail sits the flight out (#1236:
+/// nothing laid out inside the zoom's block, nothing shown twice) and comes
+/// back at the landing with no bounce, under the replica that goes.
 final class SnapShortcutRailView: UIScrollView {
     /// A shortcut's side: 28pt (asked 2026-10-02: smaller). It was the
     /// feed's 36pt bar-bubble invariant while each shortcut wore a bubble;
@@ -315,7 +321,12 @@ final class SnapShortcutRailView: UIScrollView {
     /// cell awaiting configure) hides the rail entirely — the same
     /// empty-hides-the-surface doctrine as the ticker and subtitle zone.
     /// Always returns the wheel to its resting window, still.
-    func setEmotes(_ emotes: [Emote]) {
+    ///
+    /// `keepingIfUnchanged`: the same page configured again (it stays on
+    /// screen) with the same shortcuts changes nothing — a loop being
+    /// finished plays on (#2004). A new post always starts at rest.
+    func setEmotes(_ emotes: [Emote], keepingIfUnchanged: Bool = false) {
+        if keepingIfUnchanged, !emotes.isEmpty, emotes == self.emotes { return }
         detents.reset(to: nil)
         playback.stop()
         for tile in tiles { tile.clear() }
@@ -324,7 +335,15 @@ final class SnapShortcutRailView: UIScrollView {
         // Built OUTSIDE ANY ANIMATION: a page configured inside a flight's
         // block framed each new shortcut from a zero rect, growing it in.
         UIView.performWithoutAnimation {
-            tiles = emotes.map { _ in EmoteTileView() }
+            tiles = emotes.map { _ in
+                let tile = EmoteTileView()
+                // ⚠️ EVERY LOOP FINISHES (#2004): the rail dresses about
+                // three tiles at rest, so a scroll's end waits for any loop
+                // to end, however long — the strip's and the panel's 1.5 s
+                // cap froze a long emote mid-gesture here.
+                tile.finishWait = nil
+                return tile
+            }
             icons = zip(emotes, tiles).map(Self.makeIcon)
         }
         dressed = Array(repeating: false, count: emotes.count)
@@ -338,27 +357,36 @@ final class SnapShortcutRailView: UIScrollView {
 
     // MARK: - Flights
 
-    /// ⚠️ THE SHORTCUTS SIT OUT A FLIGHT (`FlightActivity`; the owner,
+    /// ⚠️ THE LIVE SHORTCUTS SIT OUT A FLIGHT (`FlightActivity`; the owner,
     /// 2026-10-15, on a device): the page's wheel was laid out inside the
     /// zoom's animation block, so its emotes grew in from the rail's corner
     /// and showed twice — once on the flying page, once at their resting
     /// place. Gone while any flight is in the air, back when the last one
-    /// lands.
+    /// lands. The REPLICA's rail does not sit out: it IS what the flight
+    /// shows (`isFlightReplica`, #2004).
     ///
-    /// ## Bounce in, bounce out (the owner, 2026-10-15)
+    /// ## Bounce out, no bounce in
     ///
     /// A flight taking off over a shown wheel — a grab's intent to dismiss,
     /// a close — sends the shown shortcuts out: each swells a touch, then
-    /// shrinks and fades, the TOP one first. A landing brings them in: each
-    /// bounces up from small as it fades in, the BOTTOM one first, the top
-    /// one last. A wheel that joins its window mid-flight (the page a zoom
-    /// opens) is simply out until the landing.
+    /// shrinks and fades, the TOP one first (the owner, 2026-10-15). A
+    /// landing brings them back AT ONCE (#2004): the replica showed them
+    /// still all through the flight, and the page under it shows the same
+    /// pixels when it goes — a bounce there would be a second arrival. A
+    /// wheel that joins its window mid-flight (the page a zoom opens) is
+    /// simply out until the landing.
     ///
     /// Posed on the TILES, not the buttons: the buttons' alpha and transform
     /// are the wheel's top exit, re-posed on every scrolled frame.
     @objc private func flightActivityChanged(_ note: Notification) {
         guard let window, note.object as? UIWindow === window else { return }
         concealForFlight(FlightActivity.isActive(for: self), animated: true)
+    }
+
+    /// This rail is the flight replica's: it shows its shortcuts during the
+    /// flight, still, instead of sitting it out (#2004).
+    var isFlightReplica = false {
+        didSet { concealForFlight(FlightActivity.isActive(for: self), animated: false) }
     }
 
     /// Whether the shortcuts are out for a flight.
@@ -377,13 +405,17 @@ final class SnapShortcutRailView: UIScrollView {
         }
     }
 
-    private func concealForFlight(_ concealed: Bool, animated: Bool) {
+    private func concealForFlight(_ wantsConcealed: Bool, animated: Bool) {
+        // The replica is the flight's picture: never concealed for it.
+        let concealed = wantsConcealed && !isFlightReplica
         let changed = concealed != isConcealedForFlight
         isConcealedForFlight = concealed
         // At rest before it comes in: in place, dressed for what it shows.
         if !concealed { UIView.performWithoutAnimation { layoutIfNeeded() } }
-        let shown = animated && changed && window != nil ? tiles.indices.filter { dressed[$0] } : []
-        let delays = Self.staggerDelays(count: shown.count, entering: !concealed)
+        // Only a take-off animates (the bounce out): a landing comes back at
+        // once, under the replica's identical picture (#2004).
+        let shown = animated && changed && concealed && window != nil ? tiles.indices.filter { dressed[$0] } : []
+        let delays = Self.staggerDelays(count: shown.count, entering: false)
         for (index, tile) in tiles.enumerated() {
             tile.layer.removeAllAnimations()
             guard let slot = shown.firstIndex(of: index) else {
@@ -393,11 +425,7 @@ final class SnapShortcutRailView: UIScrollView {
                 }
                 continue
             }
-            if concealed {
-                Self.bounceOut(tile, delay: delays[slot])
-            } else {
-                Self.bounceIn(tile, delay: delays[slot])
-            }
+            Self.bounceOut(tile, delay: delays[slot])
         }
     }
 
@@ -408,22 +436,6 @@ final class SnapShortcutRailView: UIScrollView {
         UIView.setAnimationsEnabled(true)
         body()
         UIView.setAnimationsEnabled(wereEnabled)
-    }
-
-    private static func bounceIn(_ tile: UIView, delay: TimeInterval) {
-        UIView.performWithoutAnimation {
-            tile.alpha = 0
-            tile.transform = CGAffineTransform(scaleX: outScale, y: outScale)
-        }
-        animating {
-            UIView.animate(
-                withDuration: 0.5, delay: delay, usingSpringWithDamping: 0.55, initialSpringVelocity: 0,
-                options: [.allowUserInteraction]
-            ) {
-                tile.alpha = 1
-                tile.transform = .identity
-            }
-        }
     }
 
     private static func bounceOut(_ tile: UIView, delay: TimeInterval) {
@@ -632,12 +644,14 @@ final class SnapShortcutRailView: UIScrollView {
 
     // MARK: - Payload
 
-    /// The shortcuts for one post: the reaction pool, shuffled by post id
-    /// (the ticker builder's RNG + hash, reused) — different across posts,
-    /// and the same for the live cell and its flight replica.
+    /// The shortcuts for one post: the reaction pool in ONE order, the same
+    /// on every post (#2004, the owner 2026-11-01: it was shuffled per post
+    /// id since #47). Change the order in `reactionIDs`; the resting window
+    /// shows its first three. The live cell and its flight replica agree by
+    /// construction. `id` stays in the signature: a per-post payload may
+    /// come back.
     static func payload(for id: PostID, catalog: EmoteCatalog = .shared) -> [Emote] {
-        var generator = SplitMix64(seed: CommentTickerBuilder.fnv1a(id.rawValue))
-        return reactionPool(in: catalog).shuffled(using: &generator)
+        reactionPool(in: catalog)
     }
 
     /// Reaction-shaped emotes only — the wheel reads as "react", not "menu":

@@ -6686,6 +6686,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         if commentsEngagedID != nil, !commentsEngagementIsResting { return nil }
         let chrome = SnapChromeView()
         chrome.isUserInteractionEnabled = false
+        chrome.markAsFlightReplica()
         // Captured, not ambient: the replica must render at the live cell's
         // exact insets even though it lives in the transition container.
         chrome.setFixedInsets(view.safeAreaInsets)

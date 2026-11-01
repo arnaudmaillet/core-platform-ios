@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import EmoteKit
+import MediaCore
 import PostGrid
 import Testing
 import UIKit
@@ -316,15 +317,15 @@ struct SnapShortcutRailViewTests {
         #expect(SnapFeedCollectionView.claimsTouches(caption) == false)
     }
 
-    @Test func payloadIsDeterministicPerPost() {
-        let id = PostID("0198c5f2-1111-7000-8000-000000000001")
-        // Same post → same wheel (the live cell and its flight replica must
-        // never disagree).
-        #expect(SnapShortcutRailView.payload(for: id).map(\.id)
-            == SnapShortcutRailView.payload(for: id).map(\.id))
-        // Full pool, no duplicates — it's a shuffle, not a sample.
-        let payload = SnapShortcutRailView.payload(for: id)
-        #expect(Set(payload.map(\.id)).count == SnapShortcutRailView.reactionPool().count)
+    /// ONE order on every post (#2004, the owner 2026-11-01): it was
+    /// shuffled per post id since #47. The live cell and its flight replica
+    /// agree by construction.
+    @Test func thePayloadIsTheSameOrderOnEveryPost() {
+        let one = SnapShortcutRailView.payload(for: PostID("0198c5f2-1111-7000-8000-000000000001"))
+        let other = SnapShortcutRailView.payload(for: PostID("post-0042"))
+        #expect(one.map(\.id) == other.map(\.id))
+        #expect(one.map(\.id) == SnapShortcutRailView.reactionPool().map(\.id), "not the pool's own order")
+        #expect(Set(one.map(\.id)).count == SnapShortcutRailView.reactionPool().count)
     }
 
     /// The chrome-level contract this feature is really about: the rail owns
@@ -743,6 +744,30 @@ struct SnapShortcutRailFlightTests {
         return (rail, window)
     }
 
+    /// The same page configured again with the same shortcuts changes
+    /// nothing: its tiles — and a loop being finished — stay (#2004). A new
+    /// set replaces them.
+    @Test func anIdenticalPayloadKeepsTheTiles() {
+        let (rail, window) = hostedRail()
+        defer { window.isHidden = true }
+        let before = rail.displayedTiles
+        #expect(!before.isEmpty)
+        rail.setEmotes(Array(SnapShortcutRailView.reactionPool().prefix(5)), keepingIfUnchanged: true)
+        #expect(rail.displayedTiles.elementsEqual(before, by: ===), "the same shortcuts were rebuilt")
+        rail.setEmotes(Array(SnapShortcutRailView.reactionPool().prefix(5)))
+        rail.layoutIfNeeded()
+        #expect(!rail.displayedTiles.elementsEqual(before, by: ===), "a new post kept the old tiles")
+    }
+
+    /// Every shortcut's loop finishes, however long (#2004): the rail's
+    /// tiles carry no finish cap; a tile anywhere else keeps it.
+    @Test func theRailsTilesFinishEveryLoop() {
+        let (rail, window) = hostedRail()
+        defer { window.isHidden = true }
+        #expect(rail.displayedTiles.allSatisfy { $0.finishWait == nil })
+        #expect(EmoteTileView().finishWait == AnimatedIconView.maxFinishWait)
+    }
+
     @Test func aFlightInItsWindowHidesTheShortcutsUntilItLands() {
         let (rail, window) = hostedRail()
         defer { window.isHidden = true }
@@ -767,9 +792,10 @@ struct SnapShortcutRailFlightTests {
         #expect(SnapShortcutRailView.staggerDelays(count: 0, entering: true).isEmpty)
     }
 
-    /// A grab over a shown wheel sends the shortcuts out, animated; the
-    /// landing bounces them back in, animated — the model at rest at once.
-    @Test func aFlightSendsTheShownShortcutsOutAndTheLandingBouncesThemIn() {
+    /// A grab over a shown wheel sends the shortcuts out, animated (#1236);
+    /// the landing brings them back AT ONCE, with no bounce (#2004): the
+    /// replica showed them still all through the flight.
+    @Test func aFlightSendsTheShownShortcutsOutAndTheLandingBringsThemBackAtOnce() {
         let (rail, window) = hostedRail()
         defer { window.isHidden = true }
         let layers = rail.debugDressedTileLayers
@@ -781,8 +807,27 @@ struct SnapShortcutRailFlightTests {
 
         flight.release()
         #expect(rail.debugTileAlphas.allSatisfy { $0 == 1 }, "a shortcut did not come back")
-        #expect(rail.debugDressedTileLayers.allSatisfy { !($0.animationKeys() ?? []).isEmpty },
-                "a shortcut came back without its bounce in")
+        #expect(rail.debugDressedTileLayers.allSatisfy { ($0.animationKeys() ?? []).isEmpty },
+                "a shortcut bounced in at the landing")
+    }
+
+    /// The flight REPLICA's rail shows its shortcuts during the flight —
+    /// still, dressed — where the live page's sits it out (#2004).
+    @Test func theReplicasRailShowsItsShortcutsInTheFlight() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let flight = FlightActivity.begin(in: window)
+        defer { flight.release() }
+        let replica = SnapShortcutRailView(frame: CGRect(x: 340, y: 100, width: 44, height: 520))
+        replica.isFlightReplica = true
+        replica.setEmotes(Array(SnapShortcutRailView.reactionPool().prefix(5)))
+        window.addSubview(replica)
+        replica.layoutIfNeeded()
+        #expect(!replica.debugConcealedForFlight)
+        #expect(!replica.displayedTiles.isEmpty, "the replica's shortcuts are not dressed")
+        #expect(replica.debugTileAlphas.allSatisfy { $0 == 1 })
+        #expect(!replica.isScrolling, "the replica's shortcuts play")
     }
 
     /// A page staged under a zoom joins the window mid-flight: hidden from
