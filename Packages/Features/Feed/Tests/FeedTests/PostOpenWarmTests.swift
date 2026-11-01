@@ -102,6 +102,36 @@ struct PostOpenWarmTests {
         _ = surface
     }
 
+    /// ⚠️ ONE BATCH FIRST (#2003): what either queue claims is asked of the
+    /// batch in one call, and only what it did not cover warms on its own.
+    @Test func theBatchGoesFirstAndOnlyTheUncoveredWarmAlone() async {
+        let recorder = Recorder()
+        var batches: [[PostID]] = []
+        let warm = PostOpenWarm(
+            prefetch: { id in await recorder.prefetch(id) },
+            isHeld: { recorder.held.contains($0) },
+            previews: { @MainActor batch in
+                batches.append(batch)
+                let covered = Set(batch.filter { $0 != ids[2] })
+                recorder.held.formUnion(covered)
+                return covered
+            }
+        )
+        warm.warmNow(ids)
+        #expect(await settle { recorder.waitingCount == 1 })
+        #expect(batches == [ids], "not one batch for the page")
+        #expect(recorder.asked == [ids[2]], "a covered post warmed on its own")
+        recorder.releaseAll()
+        #expect(await settle { warm.debugInFlight.isEmpty })
+
+        // The queue: one batch for what it holds, the same rule.
+        let more = (4..<8).map { PostID("post-\($0)") }
+        warm.warmLater(more)
+        #expect(await settle { batches.count == 2 && warm.debugQueued.isEmpty && warm.debugInFlight.isEmpty })
+        #expect(batches.last == more)
+        #expect(recorder.asked == [ids[2]])
+    }
+
     /// A post already held asks nothing, from either queue.
     @Test func aHeldPostAsksNothing() async {
         let recorder = Recorder()

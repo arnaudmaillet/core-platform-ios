@@ -96,6 +96,29 @@ public struct SubtitleCommentBuilder: Sendable {
         return Array(resolved.prefix(Self.maxItems))
     }
 
+    /// Whether `preview` — the first page's first TOP-LEVEL comments, without
+    /// the replies the page threads in after them (`ListPreviews`, #2003) —
+    /// picks the same first cue the page will, whether the band renders or
+    /// not. It does when it reaches a thought before any comment with
+    /// replies (those could come first on the page), or when it is the
+    /// page's whole top level, with no replies at all.
+    ///
+    /// ⚠️ A preview that cannot decide is no seed: its zone would open on a
+    /// cue the page replaces after the landing. A post whose comments open
+    /// on a train of reactions is the common case.
+    public static func previewDecidesFirstCue(_ preview: [CommentEntry], isWholeTopLevel: Bool) -> Bool {
+        func decides(tickerIsRendering: Bool) -> Bool {
+            for entry in preview {
+                let body = flattened(entry.body)
+                let candidate = !tickerIsRendering || !isClaimedByTicker(body)
+                if candidate, !body.isEmpty, isSemanticShaped(body) { return true }
+                if (entry.replyCount ?? 0) > 0 { return false }
+            }
+            return isWholeTopLevel
+        }
+        return decides(tickerIsRendering: true) && decides(tickerIsRendering: false)
+    }
+
     private func cues(from entries: [CommentEntry], requiringSemanticShape: Bool) -> [SubtitleCue] {
         var seenBodies = Set<String>()
         var cues: [SubtitleCue] = []

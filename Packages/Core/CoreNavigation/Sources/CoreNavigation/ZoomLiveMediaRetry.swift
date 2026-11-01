@@ -50,16 +50,19 @@ final class ZoomLiveMediaRetry: NSObject {
     private var liveMediaSize: CGSize = .zero
     private var hasAdopted = false
 
-    /// Runs `work` inside the flight's own animation, and says whether it took.
+    /// The card's surface the flight has been posing since take-off (#2033):
+    /// a surface acquired as THIS one is already on the card's curve, so it
+    /// only fills and fades up — no geometry is written to it, no animation
+    /// stripped, nothing followed.
     ///
-    /// ⚠️ THIS IS WHAT LETS A LATE SURFACE ARRIVE IN THE WINDOW. A surface
-    /// acquired mid-flight has missed the pose that ran inside the animator's
-    /// block, and the display link below is a frame behind by construction —
-    /// which is why it used to be held back until the landing and appear only
-    /// on the settled page. Handed the animator, the landing pose is added to
-    /// the animation that is already running: same curve, same frames, no
-    /// clock of its own. Nil (or a refusal) falls back to the hold.
-    var joinFlight: ((@escaping () -> Void) -> Bool)?
+    /// ⚠️ IT REPLACES A JOIN THAT DID NOT JOIN. The landing pose used to be
+    /// added to the running animator, which starts the timing curve again
+    /// from now and from rest over the time left: the surface lagged the card
+    /// from its adoption to the landing, a picture smaller than its window
+    /// and pinned to its top-left corner (#2033, filmed).
+    private weak var posedSurface: UIView?
+    /// Whether the adopted surface is the one the flight poses.
+    private var isPosedByFlight = false
     /// Set once the card's presentation has been seen AWAY from its model, so a
     /// flight sampled before its animation has started cannot read as landed.
     private var hasTravelled = false
@@ -134,6 +137,7 @@ final class ZoomLiveMediaRetry: NSObject {
         card: any ZoomFlightCard,
         pageSize: CGSize,
         mirroring destination: any ZoomTransitionDestination,
+        posed: UIView? = nil,
         window: CFTimeInterval = ZoomLiveMediaRetry.window
     ) -> ZoomLiveMediaRetry? {
         guard card.zoomLiveMediaSurface == nil else { return nil }
@@ -149,6 +153,7 @@ final class ZoomLiveMediaRetry: NSObject {
                 return card.zoomLiveMediaSurface
             }
         )
+        retry.posedSurface = posed
         retry.start()
         return retry
     }
@@ -236,7 +241,9 @@ final class ZoomLiveMediaRetry: NSObject {
         guard let card, card.window != nil else { return stop() }
 
         if hasAdopted {
-            follow(card)
+            // A surface the flight poses is on the card's curve already: a
+            // pose written here would only be a frame behind it.
+            if !isPosedByFlight { follow(card) }
             // ⚠️ THE ARRIVAL IS THE CARD STOPPING, NOT THE CLOCK RUNNING OUT.
             // This window is the spring's NOMINAL duration, and a spring is
             // visually still long before it is nominally over — releasing on
@@ -257,6 +264,16 @@ final class ZoomLiveMediaRetry: NSObject {
     }
 
     private func adopt(_ surface: UIView, on card: any ZoomFlightCard) {
+        if let posedSurface, surface === posedSurface {
+            // Laid out at take-off and posed by every pose block since
+            // (#2033): its contents arrive, nothing else.
+            hasAdopted = true
+            isPosedByFlight = true
+            hasArrived = true
+            if fadesIn { card.fadeInAdoptedLiveMedia(over: max(0.2, deadline - CACurrentMediaTime())) }
+            logAdoption(surface, posed: true)
+            return
+        }
         liveMediaSize = ZoomFlight.liveMediaLayoutSize(
             native: card.zoomLiveMediaNativeSize, page: pageSize
         )
@@ -286,32 +303,23 @@ final class ZoomLiveMediaRetry: NSObject {
         // saying plainly that nothing was driving it.
         card.prepareZoomLiveMediaForFlight(destinationSize: liveMediaSize)
         hasAdopted = true
-        // Where it is NOW, outside any animation, so the ramp below starts from
-        // the truth rather than from wherever the surface happened to be.
+        // Where it is NOW, outside any animation.
         follow(card)
-        // ⚠️ THE ARRIVAL BELONGS IN THE WINDOW, and it can be there whenever the
-        // flight will take the pose. Added to the running animator, the landing
-        // pose rides the card's own curve — so the picture is correctly framed
-        // at every intermediate size and fades up over the cover while the
-        // window is still travelling, which is what a hero flight is for.
-        let joined = joinFlight?({ [weak self, weak card] in
-            guard let self, let card else { return }
-            self.poseAtLanding(card)
-        }) ?? false
-        if joined {
-            hasArrived = true
-            if fadesIn { card.fadeInAdoptedLiveMedia(over: max(0.2, deadline - CACurrentMediaTime())) }
-        } else if fadesIn {
-            // No animation to join — the flight is over, or this leg poses by
-            // hand. The display link is all that is left and it is a frame
-            // behind, so the surface waits for the landing instead of showing a
-            // pose that arrived late.
+        if fadesIn {
+            // A surface the flight was not posing (a card that reserves none):
+            // the display link is all that drives it and it is a frame behind,
+            // so it waits for the landing instead of showing a pose that
+            // arrived late.
             card.holdAdoptedLiveMediaUntilLanding()
         }
+        logAdoption(surface, posed: false)
+    }
+
+    private func logAdoption(_ surface: UIView, posed: Bool) {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
-            print(String(format: "[zoom-live] %.3f retry ADOPTED mid-flight (%@)",
-                         CACurrentMediaTime(), String(describing: type(of: surface))))
+            print(String(format: "[zoom-live] %.3f retry ADOPTED mid-flight (%@)%@",
+                         CACurrentMediaTime(), String(describing: type(of: surface)), posed ? " posed by the flight" : ""))
         }
         #endif
     }

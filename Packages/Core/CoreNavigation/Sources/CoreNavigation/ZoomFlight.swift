@@ -245,6 +245,10 @@ struct ZoomFlight {
     /// against this, NOT against `pageFrame`, or the cover math would describe
     /// a surface that does not exist.
     let liveMediaSize: CGSize
+    /// The card's surface reserved for the arriving page's player (#2033),
+    /// posed with the card from take-off; nil when the card took off live,
+    /// on a dismissal, or for a card that reserves none.
+    var reservedLiveMediaSurface: UIView?
 
     /// Whether the flight is a page window around the picture's card.
     var isFramed: Bool { card !== mediaCard }
@@ -409,7 +413,12 @@ struct ZoomFlight {
             native: card.zoomLiveMediaNativeSize ?? card.zoomStillMediaNativeSize,
             page: fittedMedia.size
         )
-        if card.zoomLiveMediaSurface != nil {
+        // ⚠️ A PRESENT THAT TOOK OFF WITH NO PICTURE RESERVES ONE (#2033): the
+        // surface the arriving page will be mirrored onto is laid out and
+        // posed NOW, with everything else the card flies, so the frame that
+        // lands mid-flight lands on a surface already on the card's curve.
+        let reserved = presents && card.zoomLiveMediaSurface == nil ? card.zoomReservedLiveMediaSurface : nil
+        if card.zoomLiveMediaSurface != nil || reserved != nil {
             card.prepareZoomLiveMediaForFlight(destinationSize: liveMediaSize)
         }
         if card.zoomStillMediaSurface != nil {
@@ -496,7 +505,7 @@ struct ZoomFlight {
             card: window ?? card, mediaCard: card, framing: window == nil ? nil : framing,
             chrome: chrome, shadow: shadow,
             sourceFrame: sourceFrame, pageFrame: pageFrame, mediaFrame: fittedMedia,
-            liveMediaSize: liveMediaSize
+            liveMediaSize: liveMediaSize, reservedLiveMediaSurface: reserved
         )
     }
 
@@ -790,7 +799,10 @@ struct ZoomFlight {
     /// pose and stay registered whichever is showing.
     private var posedMediaSurfaces: [UIView] {
         var surfaces: [UIView] = []
-        if let live = mediaCard.zoomLiveMediaSurface, !mediaCard.zoomLiveMediaTracksCardBounds {
+        if !mediaCard.zoomLiveMediaTracksCardBounds,
+           let live = mediaCard.zoomLiveMediaSurface ?? reservedLiveMediaSurface {
+            // The reserved surface (#2033) is the live one before it has
+            // anything to show — the same view once it has.
             surfaces.append(live)
         }
         if let still = mediaCard.zoomStillMediaSurface { surfaces.append(still) }
