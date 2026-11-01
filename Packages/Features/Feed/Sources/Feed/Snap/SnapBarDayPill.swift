@@ -19,8 +19,8 @@ final class SnapBarDayPill: UIButton {
         var attributed = AttributedString(title)
         attributed.font = UIFont.scaledFont(forTextStyle: .footnote, weight: .semibold)
         config.attributedTitle = attributed
-        // Semantic, never `.white`: the bar carries the page's theme (see
-        // `SnapCommentSortButton`).
+        // Semantic, never `.white`: the bar carries the page's theme
+        // (`applyChromeTheme`) — dark over media, the system's on a text page.
         config.baseForegroundColor = .label
         config.titleLineBreakMode = .byTruncatingTail
         config.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: Spacing.sm, bottom: 0, trailing: Spacing.sm)

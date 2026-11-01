@@ -268,4 +268,28 @@ struct CommentTabsTests {
         #expect(controller.visibleStreamKind == .popular, "the tab changed")
         #expect(!controller.recent.debugLastApplyAnimated, "the tab off screen animated")
     }
+
+    // MARK: - The selector
+
+    /// The selector and the pager are one state (#2007): a tap shows the tab,
+    /// a swipe of the streams moves the pill, a scrub of the pill moves the
+    /// streams.
+    @Test func theSelectorAndThePagerStayInStep() async {
+        let (controller, window) = panel(PagedComments(count: 12, pageSize: 20))
+        defer { window.isHidden = true }
+        #expect(await settle { Self.loaded(controller.popular) })
+        let selector = CommentTabsSelector()
+        selector.bind(to: controller)
+        #expect(selector.tabBar.selectedIndex == PostDetailViewController.popularPage)
+
+        selector.tabBar.debugSimulateTap(at: PostDetailViewController.recentPage)
+        #expect(await settle { controller.visibleStreamKind == .recent }, "a tap did not show Recent")
+
+        let pager = controller.streamPager.pagingScrollView
+        pager.contentOffset.x = pager.bounds.width * 0.3
+        #expect(selector.tabBar.selectedIndex == PostDetailViewController.popularPage, "the pill did not follow the swipe")
+
+        selector.tabBar.onScrub?(0.75)
+        #expect(abs(pager.contentOffset.x - pager.bounds.width * 0.75) < 1, "the streams did not follow the pill")
+    }
 }

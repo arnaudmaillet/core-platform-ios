@@ -29,9 +29,6 @@ final class PostDetailViewController: UIViewController {
     /// The threads grouped under a day chip each, in Recent order (#757):
     /// every snap page's comments — media and text — not only a text page's.
     let groupsByDay: Bool
-    /// The order the engaged toolbar last chose; day grouping follows Recent
-    /// only — a Trending rank has no chronology to pin days over.
-    var commentSortOrder: SnapCommentSortButton.Order = .recent
     /// Builds the composer avatar's profile switcher menu. Nil wherever the
     /// app wires none — the face is then a plain, inert identity.
     private let profileSwitcher: (any ProfileSwitcherPresenting)?
@@ -812,10 +809,6 @@ final class PostDetailViewController: UIViewController {
         onPullDismissDrive = handler
     }
     var onPullDismissDrive: ((CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void)?
-
-    /// Closes a menu the host has on show over this list (the comments' sort
-    /// menu) and answers whether there was one (#759).
-    var closesMenuOnShow: (() -> Bool)?
 
     /// Wires the composer's INTERACTIVE page-swipe — the bar forwards each
     /// pan phase (began/changed/ended) with the raw vertical translation and
@@ -1646,7 +1639,7 @@ final class PostDetailViewController: UIViewController {
 
     /// The day of the last chip gone under the stream's top edge — what the
     /// host's bar shows left of the points — or nil before one has, or with
-    /// no days at all (Trending, a skeleton, an empty page).
+    /// no days at all (Popular, a skeleton, an empty page).
     var onDayUnderHeaderChange: ((Date?) -> Void)?
     private(set) var dayUnderHeader: Date?
 
@@ -1673,15 +1666,6 @@ final class PostDetailViewController: UIViewController {
     /// own answer, not this controller's record of it (#969).
     var debugComposerTracksKeyboard: Bool { composeBar.tracksKeyboard }
     #endif
-
-    /// The engaged toolbar's sort selector lands here — the view model
-    /// re-ranks the data and the diffable apply animates the moves.
-    func setCommentSortOrder(_ order: SnapCommentSortButton.Order) {
-        // Recorded BEFORE the view model re-emits: the re-render that follows
-        // decides from it whether days are pinned.
-        commentSortOrder = order
-        viewModel.setCommentSort(order == .trending ? .trending : .recent)
-    }
 
     /// Row tapped: the composer arms its reply state — placeholder names
     /// the tapped author, the payload binds to the THREAD parent, and the

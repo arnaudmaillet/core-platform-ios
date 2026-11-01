@@ -94,7 +94,6 @@ final class CommentStream: NSObject {
     private var keyboardLift: CGFloat { host.keyboardLift }
     private var composerTracksKeyboard: Bool { host.composerTracksKeyboard }
     private var captionLikeCount: Int64? { host.captionLikeCount }
-    private var commentSortOrder: SnapCommentSortButton.Order { host.commentSortOrder }
     private var seededCaption: (text: String, timestamp: String)? { host.seededCaption }
     private var seededAuthor: (name: String, monogram: String, avatarURL: URL?)? { host.seededAuthor }
     private var knownCommentCount: Int64? { host.knownCommentCount }
@@ -109,7 +108,6 @@ final class CommentStream: NSObject {
         host.restingComposerHeight(for: category)
     }
     private var isViewLoaded: Bool { host.isViewLoaded }
-    private var closesMenuOnShow: (() -> Bool)? { host.closesMenuOnShow }
     private var onPullDismissDrive: ((CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void)? {
         host.onPullDismissDrive
     }
@@ -477,7 +475,7 @@ final class CommentStream: NSObject {
     /// #1923): the caption and its comments are one block, the post its
     /// first message, resting just above the composer — the room above them
     /// (`StreamBottomAnchor`) worn in the top inset, ON TOP of the engaged
-    /// top. No order changes: Recent, Trending, replies under
+    /// top. No order changes: Recent, Popular, replies under
     /// their parent and downward paging are as before; expanding a thread's
     /// replies in a short stream grows the block upward.
     ///
@@ -1148,11 +1146,11 @@ final class CommentStream: NSObject {
     /// that a THREAD began on. A reply stays with its thread, under the day
     /// the thread started, so a thread never splits across two pills.
     ///
-    /// Only under Recent, with comments loaded and some to show: a Trending
+    /// Only under Recent, with comments loaded and some to show: a Popular
     /// rank, a skeleton and the empty page have no chronology to pin days over.
     private func streamSections() -> [(section: StreamSection, items: [StreamItem])] {
         let items = streamItems()
-        guard groupsByDay, kind == .recent, commentsLoaded, commentSortOrder == .recent, !latestComments.isEmpty else {
+        guard groupsByDay, kind == .recent, commentsLoaded, !latestComments.isEmpty else {
             return [(.main, items)]
         }
         let calendar = Calendar.current
@@ -1821,15 +1819,6 @@ extension CommentStream: UICollectionViewDelegate {
     /// top, so a drag anywhere else reports zero and drives nothing.
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         if threadChrome { rowContextMenu.endTextSelection() }
-        // ⚠️ A MENU ON SHOW TAKES THE GESTURE (#759): the drag closes it and
-        // ends there — it neither scrolls nor arms the pull-down close, whose
-        // animation fought the menu's own.
-        if closesMenuOnShow?() == true {
-            isPullDismissArmed = false
-            scrollView.panGestureRecognizer.isEnabled = false
-            scrollView.panGestureRecognizer.isEnabled = true
-            return
-        }
         // INTENT, decided once per drag: only a gesture that starts at the
         // top is a dismissal. A drag that begins mid-list and scrolls up
         // into the top is someone reading — it still bounces, because that

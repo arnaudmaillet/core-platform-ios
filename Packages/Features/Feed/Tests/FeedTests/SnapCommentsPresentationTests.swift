@@ -1085,27 +1085,6 @@ struct SnapCommentsPresentationTests {
     }
 
 
-    @Test func commentSortButtonKeepsHonestSelectionState() throws {
-        let button = SnapCommentSortButton()
-        #expect(button.order == .recent)
-        let titles = (button.menu?.children ?? []).compactMap { ($0 as? UIAction)?.title }
-        #expect(titles == SnapCommentSortButton.Order.allCases.map(\.rawValue))
-
-        var changes: [SnapCommentSortButton.Order] = []
-        button.onOrderChange = { changes.append($0) }
-        button.select(.trending)
-        #expect(button.order == .trending)
-        // Menu rebuilt around the new state: exactly one checkmark, on it.
-        let checked = (button.menu?.children ?? [])
-            .compactMap { $0 as? UIAction }.filter { $0.state == .on }
-        #expect(checked.map(\.title) == ["Trending"])
-        // Re-selection is not a change; reset restores the default silently.
-        button.select(.trending)
-        button.reset()
-        #expect(button.order == .recent)
-        #expect(changes == [.trending])
-    }
-
     /// The field button's two faces: the WAVEFORM over an empty field and
     /// SEND over a draft — the keyboard plays no part. There is no ✕ (the
     /// exit moved to the toolbar), no dismiss-keyboard chevron (a tap on the
@@ -1313,12 +1292,12 @@ struct SnapCommentsPresentationTests {
         #expect(feed.navigationItem.leftBarButtonItems ?? [] == [])
 
         // A thread long enough to sort (`CommentSortPolicy`).
-        feed.setCommentSortAvailable(true)
+        feed.setCommentTabsAvailable(true)
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
         let leading = feed.navigationItem.leftBarButtonItems ?? []
         #expect(leading.count == 3, "[✕][space][sort]: \(leading.count)")
         #expect(leading.first?.accessibilityLabel == "Close comments")
-        #expect(leading.last?.customView is SnapCommentSortButton)
+        #expect(leading.last?.customView is PagedTabBar)
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
         #expect(feed.navigationItem.leftBarButtonItems ?? [] == [])
@@ -1338,14 +1317,14 @@ struct SnapCommentsPresentationTests {
         let resting = feed.navigationItem.leftBarButtonItems ?? []
         #expect(resting.count == 1) // the back arrow alone
 
-        feed.setCommentSortAvailable(true)
+        feed.setCommentTabsAvailable(true)
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
         let engaged = feed.navigationItem.leftBarButtonItems ?? []
         #expect(engaged.count == 3)
         // The ✕ item takes the edge on a media post (#1197).
         #expect(engaged[0].accessibilityLabel == "Close comments")
         #expect(engaged[1].customView == nil)   // the fixed space
-        #expect(engaged[2].customView is SnapCommentSortButton)
+        #expect(engaged[2].customView is PagedTabBar)
         // …and the trailing run carries no ✕ (#1192).
         #expect(!(feed.navigationItem.rightBarButtonItems ?? []).contains {
             $0.accessibilityLabel == "Close comments"
@@ -1364,7 +1343,7 @@ struct SnapCommentsPresentationTests {
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
 
         #expect((feed.navigationItem.leftBarButtonItems ?? []).count == resting.count, "the edge item alone")
-        #expect(!(feed.navigationItem.leftBarButtonItems ?? []).contains { $0.customView is SnapCommentSortButton })
+        #expect(!(feed.navigationItem.leftBarButtonItems ?? []).contains { $0.customView is PagedTabBar })
         #expect(CommentSortPolicy.isAvailable(commentCount: 9) == false)
         #expect(CommentSortPolicy.isAvailable(commentCount: 10))
     }
@@ -1376,14 +1355,14 @@ struct SnapCommentsPresentationTests {
         let (_, feed) = Self.chromeHost()
         let resting = feed.navigationItem.leftBarButtonItems ?? []
 
-        feed.setCommentSortAvailable(true)
+        feed.setCommentTabsAvailable(true)
         #expect(feed.navigationItem.leftBarButtonItems ?? [] == resting, "a resting bar stays resting")
 
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
-        #expect((feed.navigationItem.leftBarButtonItems ?? []).contains { $0.customView is SnapCommentSortButton })
+        #expect((feed.navigationItem.leftBarButtonItems ?? []).contains { $0.customView is PagedTabBar })
 
-        feed.setCommentSortAvailable(false)
-        #expect(!(feed.navigationItem.leftBarButtonItems ?? []).contains { $0.customView is SnapCommentSortButton },
+        feed.setCommentTabsAvailable(false)
+        #expect(!(feed.navigationItem.leftBarButtonItems ?? []).contains { $0.customView is PagedTabBar },
                 "withdrawn from the engaged bar at once")
         #expect((feed.navigationItem.leftBarButtonItems ?? []).count == resting.count)
     }
@@ -1413,7 +1392,7 @@ struct SnapCommentsPresentationTests {
         feed.beginAppearanceTransition(true, animated: false)
         feed.endAppearanceTransition()
 
-        feed.setCommentSortAvailable(true)
+        feed.setCommentTabsAvailable(true)
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
 
         // LEADING, left to right: the ✕ (the arrow, morphed — #1192) then
@@ -1422,14 +1401,14 @@ struct SnapCommentsPresentationTests {
         #expect(leading.count == 3, "the leading group is [✕][space][sort]: \(leading.count)")
         #expect(leading[0].accessibilityLabel == "Close comments")
         #expect(leading[1].customView == nil) // the fixed space that keeps them two pills
-        #expect(leading[2].customView is SnapCommentSortButton)
+        #expect(leading[2].customView is PagedTabBar)
 
         // TRAILING: the balance alone — the exit moved to the leading edge.
         let trailing = feed.navigationItem.rightBarButtonItems ?? []
         #expect(trailing.count == 1, "the trailing run is [balance]: \(trailing.count)")
         #expect(trailing.first?.customView is WalletBadgeButton)
         // Nothing crossed between the groups.
-        #expect(trailing.contains { $0.customView is SnapCommentSortButton } == false)
+        #expect(trailing.contains { $0.customView is PagedTabBar } == false)
     }
 
     /// The author pill goes COMPACT so both pills fit the trailing run.
@@ -1508,36 +1487,6 @@ struct SnapCommentsPresentationTests {
             name.contentCompressionResistancePriority(for: .horizontal)
                 < meta.contentCompressionResistancePriority(for: .horizontal)
         )
-    }
-
-    /// Rung two: the sort pill trades its word for the glyph, and gives the
-    /// reserved width back with it — a pill that kept its footprint would
-    /// have bought the author nothing.
-    @Test func theSortPillCanSurrenderItsTitleForWidth() {
-        let button = SnapCommentSortButton()
-        button.setNeedsLayout()
-        button.layoutIfNeeded()
-        let titled = button.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
-        #expect(button.isTitleHidden == false)
-        #expect(button.configuration?.attributedTitle != nil)
-
-        button.setTitleHidden(true)
-        let glyphOnly = button.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
-        #expect(button.isTitleHidden)
-        #expect(button.configuration?.attributedTitle == nil)
-        #expect(glyphOnly < titled)
-        // The glyph alone still announces the control and its current order.
-        #expect(button.accessibilityLabel?.contains("Recent") == true)
-        // Selection still works, and still says so.
-        button.select(.trending)
-        #expect(button.accessibilityLabel?.contains("Trending") == true)
-        #expect(button.configuration?.attributedTitle == nil)
-
-        // Restored: the title is back AND so is the longest-title floor, so
-        // the wider "Trending" is not asked to fit a "Recent"-sized platter.
-        button.setTitleHidden(false)
-        #expect(button.configuration?.attributedTitle != nil)
-        #expect(button.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width >= titled - 0.5)
     }
 
     /// The bar's INPUT row and trailing COLUMN. The row: the viewer's AVATAR

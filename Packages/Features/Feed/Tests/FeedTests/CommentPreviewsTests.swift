@@ -84,7 +84,7 @@ struct CommentPreviewsTests {
     @Test func aRankedPageIsNotTheWarmedFirstPage() async throws {
         let repository = makeRepository()
         let post = PostID(MockCommentService.longConversationPostIDs.first!)
-        let ranked = try await repository.loadCommentsPage(for: post, after: nil, order: .trending)
+        let ranked = try await repository.loadCommentsPage(for: post, after: nil, order: .popular)
         #expect(!ranked.entries.isEmpty)
         #expect(!repository.holdsComments(for: post), "the ranked page was warmed as Recent's")
         _ = try await repository.loadCommentsPage(for: post, after: nil)

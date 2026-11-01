@@ -56,7 +56,7 @@ final class RankedCommentsStream {
         let asked = generation
         hasFailed = false
         load = Task { [weak self] in
-            let page = try? await provider.loadCommentsPage(for: postID, after: nil, order: .trending)
+            let page = try? await provider.loadCommentsPage(for: postID, after: nil, order: .popular)
             guard let self, self.generation == asked else { return }
             self.load = nil
             guard let page else {
@@ -76,7 +76,7 @@ final class RankedCommentsStream {
         guard load == nil, hasAnswered, let token = nextToken else { return }
         let asked = generation
         load = Task { [weak self] in
-            let page = try? await provider.loadCommentsPage(for: postID, after: token, order: .trending)
+            let page = try? await provider.loadCommentsPage(for: postID, after: token, order: .popular)
             guard let self, self.generation == asked else { return }
             self.load = nil
             guard let page else { return }

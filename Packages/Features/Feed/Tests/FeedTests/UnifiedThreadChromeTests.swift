@@ -216,14 +216,13 @@ struct UnifiedThreadChromeTests {
         #expect(stream.numberOfItems(inSection: 1) == 2, "yesterday's thread keeps its reply")
     }
 
-    @Test func trendingHasNoChronologyToPin() async throws {
-        let (controller, stream, _) = try await makeStream(Self.spreadAcrossDays)
-        controller.setCommentSortOrder(.trending)
-        try await settle { stream.numberOfSections == 1 }
-        #expect(stream.numberOfSections == 1)
-        controller.setCommentSortOrder(.recent)
-        try await settle { stream.numberOfSections == 4 }
-        #expect(stream.numberOfSections == 4)
+    /// Popular is a ranking: no chronology to pin days over (#2007).
+    @Test func popularHasNoChronologyToPin() async throws {
+        let (controller, recent, _) = try await makeStream(Self.longAcrossDays)
+        #expect(recent.numberOfSections > 1)
+        let popular = controller.popular
+        try await settle { popular.commentsLoaded }
+        #expect(popular.collectionView.numberOfSections == 1)
     }
 
     @Test func theStreamOwnsTheLongPressAndRowsCarryNone() async throws {

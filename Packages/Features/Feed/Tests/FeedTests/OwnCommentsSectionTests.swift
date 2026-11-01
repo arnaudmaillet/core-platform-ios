@@ -39,59 +39,6 @@ struct OwnCommentsSectionTests {
         entry("c", minutesAgo: 5),
     ]
 
-    private static func order(_ sort: CommentSortOrder, liked: Set<String> = [], pageStarts: Set<String> = [],
-                              viewer: ProfileID? = me, _ entries: [CommentEntry] = mixed) -> [String] {
-        PostDetailViewModel.sortedForDisplay(
-            entries, order: sort, liked: liked, pageStarts: pageStarts, viewer: viewer
-        ).map(\.id)
-    }
-
-    // MARK: - The order
-
-    /// Under each sort the viewer's threads come first, in their own
-    /// chronology, replies with them; the viewer's reply in someone else's
-    /// thread stays in that thread.
-    @Test func theViewersThreadsLeadUnderEverySort() {
-        #expect(Self.order(.recent) == ["m1", "m2", "m2-r1", "a", "b", "b-r1", "b-r2", "c"])
-        // Trending ranks the others (b has two replies, c is liked once).
-        #expect(Self.order(.trending, liked: ["c"]) == ["m1", "m2", "m2-r1", "b", "b-r1", "b-r2", "c", "a"])
-        // A like on the viewer's own thread does not move it among the others.
-        #expect(Self.order(.trending, liked: ["m2", "m2-r1"]).prefix(3) == ["m1", "m2", "m2-r1"])
-    }
-
-    /// Changing the sort reorders only the others: the viewer's section is
-    /// the same rows in the same order.
-    @Test func changingTheSortReordersOnlyTheOthers() {
-        let recent = Self.order(.recent)
-        let trending = Self.order(.trending, liked: ["c"])
-        #expect(Array(recent.prefix(3)) == Array(trending.prefix(3)))
-        #expect(Set(recent.dropFirst(3)) == Set(trending.dropFirst(3)))
-        #expect(Array(recent.dropFirst(3)) != Array(trending.dropFirst(3)), "the others did not reorder")
-    }
-
-    /// No viewer known: the stream is exactly what it was.
-    @Test func withNoViewerTheStreamIsUnchanged() {
-        #expect(Self.order(.recent, viewer: nil) == Self.mixed.map(\.id))
-        #expect(Self.order(.trending, viewer: nil) == PostDetailViewModel.sortedForDisplay(
-            Self.mixed, order: .trending, liked: []
-        ).map(\.id))
-    }
-
-    /// A page that began with one of the viewer's threads still begins a page
-    /// at the next thread: Trending never lifts a later page's thread above
-    /// rows already on screen.
-    @Test func aPageThatStartedWithTheViewersThreadStillStartsAPage() {
-        let entries = [
-            Self.entry("a"),
-            Self.entry("m", by: Self.me),
-            Self.entry("b"),
-            Self.entry("b-r", parent: "b"),
-        ]
-        // "m" opened the second page: "b" (one reply) must not outrank "a".
-        #expect(Self.order(.trending, pageStarts: ["m"], entries) == ["m", "a", "b", "b-r"])
-        #expect(Self.order(.trending, entries) == ["m", "b", "b-r", "a"])
-    }
-
     // MARK: - The view model
 
     private final class NoPostFeed: FeedProviding, @unchecked Sendable {

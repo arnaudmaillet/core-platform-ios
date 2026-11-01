@@ -733,38 +733,6 @@ struct SnapActionColumnLayoutTests {
         _ = window
     }
 
-    /// ⚠️ AN OPEN SORT MENU TAKES THE NEXT DRAG (#759). With the menu up, a
-    /// drag at the list's top closes the menu and drives nothing — the close
-    /// and the menu's own animation used to run together; with no menu, the
-    /// same drag drives the close.
-    @Test func anOpenSortMenuTakesThePullDownFirst() throws {
-        let (controller, window) = Self.engagedPanel()
-        var pulls: [CGFloat] = []
-        controller.setPullDismissDriveHandler { phase, translation, _ in
-            if phase == .changed { pulls.append(translation) }
-        }
-        let sort = SnapCommentSortButton()
-        controller.closesMenuOnShow = { sort.closeMenu() }
-        let stream = try #require(Self.firstView(UICollectionView.self, in: controller.view))
-        let top = -stream.contentInset.top
-        func pull() {
-            stream.contentOffset.y = top
-            stream.delegate?.scrollViewWillBeginDragging?(stream)
-            stream.contentOffset.y = top - 60
-            stream.delegate?.scrollViewDidScroll?(stream)
-        }
-
-        sort.debugMarkMenuVisible()
-        pull()
-        #expect(!sort.isMenuVisible, "the drag left the menu up")
-        #expect(pulls.allSatisfy { $0 == 0 }, "the drag drove the close under the menu: \(pulls)")
-
-        pulls.removeAll()
-        pull()
-        #expect(pulls.contains { abs($0 - 60) < 0.5 }, "with the menu closed the pull drove nothing: \(pulls)")
-        _ = window
-    }
-
     /// ⚠️ THE ENGAGED THREAD'S DAY RIDES THE BAR LEFT OF THE POINTS (#757):
     /// none until a chip has gone under the header; one item per day, each
     /// under its own identifier (the morph); held to the width the run leaves
