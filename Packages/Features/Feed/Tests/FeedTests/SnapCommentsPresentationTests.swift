@@ -933,7 +933,8 @@ struct SnapCommentsPresentationTests {
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
         detail.loadViewIfNeeded()
-        let stream = try #require(Self.firstView(UICollectionView.self, in: detail.view))
+        // The streams' pager (#2007): both tabs shrink as one.
+        let stream = try #require(Self.firstView(HorizontalPagerView.self, in: detail.view))
         detail.setStreamTransitionProgress(0)
         #expect(stream.transform == .identity)
         detail.setStreamTransitionProgress(1)

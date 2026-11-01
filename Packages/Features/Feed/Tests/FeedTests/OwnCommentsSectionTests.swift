@@ -5,11 +5,12 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// **The viewer's own comments lead the stream (#921).** Right under the
-/// caption, the threads the viewer started stand in their own section, in
-/// their own chronology, whatever the sort; the sort orders everyone else's.
-/// And a comment the viewer sends lands where they can see it: the list goes
-/// to its slot first, then the comment arrives there.
+/// **The viewer's own comments (#921, #2007).** They lead the ranked order —
+/// right under the caption, in their own chronology; the rank orders everyone
+/// else's — and Popular's stream with it. Recent is a conversation: there the
+/// viewer's threads stand in the chronology, the newest at its end. A comment
+/// the viewer sends lands where they can see it: the list goes to its slot
+/// first, then the comment arrives there.
 @MainActor
 struct OwnCommentsSectionTests {
     private static let me = ProfileID("me")
@@ -138,9 +139,10 @@ struct OwnCommentsSectionTests {
         return condition()
     }
 
-    /// The models carry who started each thread, and a comment the viewer
-    /// sends joins their section at its head — under any sort.
-    @Test func aSentCommentHeadsTheViewersSection() async {
+    /// The models carry who started each thread; Recent keeps the viewer's
+    /// in its chronology (#2007), and a comment the viewer sends is its newest
+    /// — the end of the conversation.
+    @Test func recentKeepsTheViewersThreadsInItsChronology() async {
         let viewModel = PostDetailViewModel(
             postID: PostID("p"), repository: NoPostFeed(), commentsProvider: MyComments(Self.mixed)
         )
@@ -148,15 +150,15 @@ struct OwnCommentsSectionTests {
         viewModel.onCommentsChange = { if case .loaded(let models) = $0 { latest = models } }
         viewModel.viewDidLoad()
         #expect(await settle { !latest.isEmpty })
-        #expect(latest.prefix(3).map(\.id) == ["m1", "m2", "m2-r1"])
+        #expect(latest.map(\.id) == Self.mixed.map(\.id), "Recent moved the viewer's threads")
         #expect(latest.filter(\.isOwnThread).map(\.id) == ["m1", "m2"], "only threads the viewer started")
 
-        viewModel.setCommentSort(.trending)
         viewModel.submitComment("Mine, newest")
         #expect(await settle { latest.count == Self.mixed.count + 1 })
+        // Newest first in the view model: the conversation's last message.
         #expect(latest.first?.body == "Mine, newest")
         #expect(latest.first?.isOwnThread == true)
-        #expect(latest.prefix(4).dropFirst().map(\.id) == ["m1", "m2", "m2-r1"])
+        #expect(latest.dropFirst().map(\.id) == Self.mixed.map(\.id))
     }
 
     // MARK: - The stream
@@ -177,10 +179,12 @@ struct OwnCommentsSectionTests {
         window.rootViewController = controller
         window.isHidden = false
         controller.seedCaption("A text post", timestamp: "2h", authorName: "Ava Moreau")
-        let stream = try #require(Self.firstView(UICollectionView.self, in: controller.view))
-        for _ in 0..<Self.looks where stream.visibleCells.compactMap(PostDetailViewController.commentRow(in:)).isEmpty {
+        // The tab on screen: Popular for a long thread, Recent for a short one.
+        for _ in 0..<Self.looks
+        where controller.stream.collectionView.visibleCells.compactMap(PostDetailViewController.commentRow(in:)).isEmpty {
             try await Task.sleep(for: .milliseconds(10))
         }
+        let stream = controller.stream.collectionView
         stream.layoutIfNeeded()
         return (controller, viewModel, stream, window)
     }
@@ -200,10 +204,9 @@ struct OwnCommentsSectionTests {
         }
     }
 
-    /// Grouped by day, the viewer's threads stay in the caption's section,
-    /// above every day's pill — a day does not gather the others up under
-    /// them.
-    @Test func groupedByDayTheViewersThreadsRideWithTheCaption() async throws {
+    /// Grouped by day, Recent's conversation keeps the viewer's threads under
+    /// the day they began, like everyone's (#2007): oldest day first.
+    @Test func groupedByDayTheViewersThreadsStayInTheirDay() async throws {
         let calendar = Calendar.current
         let noonYesterday = calendar.date(byAdding: .hour, value: -12, to: calendar.startOfDay(for: Date()))!
         func at(_ hoursBefore: Double) -> Double { Date().timeIntervalSince(noonYesterday) / 60 + hoursBefore * 60 }
@@ -214,14 +217,15 @@ struct OwnCommentsSectionTests {
         ]
         let (_, _, stream, window) = try await makeStream(entries, groupsByDay: true)
         defer { window.isHidden = true }
-        #expect(stream.numberOfSections >= 3, "caption + own, then one section per day: \(stream.numberOfSections)")
-        #expect(Self.rowBodies(in: stream, section: 0) == ["Comment m"], "the viewer's thread left the caption's section")
-        #expect(Self.rowBodies(in: stream, section: 1) == ["Comment a"])
+        #expect(stream.numberOfSections == 3, "the caption, then one section per day: \(stream.numberOfSections)")
+        #expect(Self.rowBodies(in: stream, section: 1) == ["Comment b"])
+        #expect(Self.rowBodies(in: stream, section: 2) == ["Comment m", "Comment a"], "the viewer's thread left its day")
     }
 
     /// Sent from deep in the list, a comment does not land off screen: the
-    /// list first goes to its slot under the caption, and only then is the
-    /// comment inserted — on screen — with its arrival.
+    /// list first goes to its slot — under the caption, on the Popular tab a
+    /// long thread opens on — and only then is the comment inserted, on
+    /// screen, with its arrival.
     @Test func aCommentSentFromDeepInTheListScrollsToItsSlotThenArrives() async throws {
         let others = (0..<30).map { Self.entry("o\($0)", minutesAgo: Double($0 + 1)) }
         let (controller, viewModel, stream, window) = try await makeStream(others)

@@ -77,8 +77,10 @@ struct UnifiedThreadChromeTests {
         window.rootViewController = controller
         window.isHidden = false
         controller.seedCaption("A text post", timestamp: "2h", authorName: "Ava Moreau")
-        let stream = try #require(Self.firstView(UICollectionView.self, in: controller.view))
+        // The days are Recent's (#2007): a long thread opens on Popular.
+        let stream = controller.recent.collectionView
         try await settle { stream.numberOfSections > 1 }
+        controller.showStream(.recent, animated: false)
         stream.layoutIfNeeded()
         return (controller, stream, window)
     }
@@ -155,12 +157,12 @@ struct UnifiedThreadChromeTests {
         let days = controller.debugStreamDays
         try #require(days.count == 3, "the premise: three days in the thread, none split at midnight: \(days.count)")
 
-        // From the end of the thread, where the oldest day is under the top.
+        // From the end of the conversation, where its newest day is under the top.
         let bottom = stream.contentSize.height + stream.adjustedContentInset.bottom - stream.bounds.height
         stream.setContentOffset(CGPoint(x: 0, y: bottom), animated: false)
         stream.layoutIfNeeded()
         controller.debugSyncDayUnderHeader()
-        #expect(controller.dayUnderHeader == days[days.count - 1].day, "the premise: the oldest day at the end")
+        #expect(controller.dayUnderHeader == days[days.count - 1].day, "the premise: the newest day at the end")
 
         // The middle day: its chip is above the top here, the next one too.
         let target = days[1]
@@ -201,6 +203,7 @@ struct UnifiedThreadChromeTests {
         #expect(controller.commentCount == 3)
     }
 
+    /// Oldest first (#2007): yesterday's thread, its reply under it, then today's.
     @Test func aReplyStaysUnderTheDayItsThreadBegan() async throws {
         let entries = [
             Self.entry("c1", ageInDays: 0),
@@ -210,7 +213,7 @@ struct UnifiedThreadChromeTests {
         ]
         let (_, stream, _) = try await makeStream(entries)
         #expect(stream.numberOfSections == 3)
-        #expect(stream.numberOfItems(inSection: 2) == 2, "yesterday's thread keeps its reply")
+        #expect(stream.numberOfItems(inSection: 1) == 2, "yesterday's thread keeps its reply")
     }
 
     @Test func trendingHasNoChronologyToPin() async throws {

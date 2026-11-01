@@ -57,8 +57,22 @@ final class CommentStream: NSObject {
     /// geometry they share. The panel owns the stream.
     unowned let host: PostDetailViewController
 
-    init(host: PostDetailViewController) {
+    /// Which of the panel's streams this is (#2007).
+    enum Kind {
+        /// The server's ranking: most liked first, the viewer's own leading.
+        /// It rests at its top and pages downward.
+        case popular
+        /// A conversation: oldest above, the newest just above the composer.
+        /// It rests at its end, and older pages land above it without moving
+        /// what is on screen.
+        case recent
+    }
+
+    let kind: Kind
+
+    init(host: PostDetailViewController, kind: Kind = .recent) {
         self.host = host
+        self.kind = kind
         super.init()
     }
 
@@ -73,7 +87,9 @@ final class CommentStream: NSObject {
     private var latestPost: PostDetailDisplayModel? { host.latestPost }
     private var engagedStreamInsets: (top: CGFloat, bottom: CGFloat)? { host.engagedStreamInsets }
     private var keyboardHeightFromBottom: CGFloat? { host.keyboardHeightFromBottom }
-    private var anchorsShortStream: Bool { host.anchorsShortStream }
+    /// A short Recent starts from the bottom (#1799); a short Popular rests
+    /// at its top, as a ranking does (#2007).
+    private var anchorsShortStream: Bool { kind == .recent && host.anchorsShortStream }
     private typealias EmptyPageCopy = PostDetailViewController.EmptyPageCopy
     private var keyboardLift: CGFloat { host.keyboardLift }
     private var composerTracksKeyboard: Bool { host.composerTracksKeyboard }
@@ -165,6 +181,7 @@ final class CommentStream: NSObject {
         // `-(top + slack)`.
         bottomAnchorSlack = 0
         syncBottomAnchor()
+        if holdsRest { pinToTail() }
     }
 
     /// The caption row's closing line changed: re-rendered in place.
@@ -187,8 +204,16 @@ final class CommentStream: NSObject {
     /// The stream moved to `offset` — by the reader, or not. Tests.
     func debugScroll(to offset: CGFloat, userScroll: Bool) {
         collectionView.contentOffset.y = offset
+        if userScroll { holdsRest = isAtRest }
         syncScrollAway(userScroll: userScroll)
     }
+
+    #if DEBUG
+    /// Whether the last apply animated. Tests.
+    private(set) var debugLastApplyAnimated = false
+    /// The comments the stream holds. Tests.
+    var debugCommentCount: Int { latestComments.count }
+    #endif
 
     #if DEBUG
     /// Whether the empty page's row says the first page is taking longer.
@@ -501,10 +526,11 @@ final class CommentStream: NSObject {
     /// the top: a tap goes there, a hold arms the sound sheet.
     private var scrollAway = ScrollAwayPolicy()
 
-    /// Feeds the way-back policy: the distance from the stream's start, its top.
+    /// Feeds the way-back policy: the distance from the stream's start —
+    /// Popular's top, Recent's newest (#2007).
     private func syncScrollAway(userScroll: Bool) {
         let insets = collectionView.adjustedContentInset
-        let distance = max(0, collectionView.contentOffset.y + insets.top)
+        let distance = abs(collectionView.contentOffset.y - restingOffset)
         let viewport = collectionView.bounds.height - insets.top - insets.bottom
         let before = scrollAway.showsReturn
         scrollAway.update(distance: distance, viewport: viewport, isUserScroll: userScroll)
@@ -513,11 +539,121 @@ final class CommentStream: NSObject {
         host.applyRailWayBack()
     }
 
-    /// Back to the post's text, animated: UIKit's animated offset runs in a
+    /// Back to the stream's start (#1929, #2007) — Popular's top, the post's
+    /// text; Recent's newest — animated: UIKit's animated offset runs in a
     /// fixed time whatever the distance, so a long way back never drags.
     func scrollToStart(animated: Bool) {
-        let top = -collectionView.adjustedContentInset.top
-        collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: top), animated: animated)
+        holdsRest = true
+        isScrollingProgrammatically = animated && abs(collectionView.contentOffset.y - restingOffset) > 0.5
+        collectionView.layoutIfNeeded()
+        collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: restingOffset), animated: animated)
+    }
+
+    /// Whether the way back points down: Recent's start is its end (#2007).
+    var returnsDown: Bool { kind == .recent }
+
+    // MARK: - Where the stream rests (#2007)
+
+    /// The offset that shows the stream's last row.
+    private var tailOffset: CGFloat {
+        let insets = collectionView.adjustedContentInset
+        return max(-insets.top, collectionView.contentSize.height + insets.bottom - collectionView.bounds.height)
+    }
+
+    /// Where the stream rests: Popular at its top, Recent at its end.
+    private var restingOffset: CGFloat {
+        kind == .recent ? tailOffset : -collectionView.adjustedContentInset.top
+    }
+
+    /// Whether the stream is at its resting end now.
+    private var isAtRest: Bool { abs(collectionView.contentOffset.y - restingOffset) <= 0.5 }
+
+    /// Whether the stream stays at its resting end as its content changes:
+    /// until the reader scrolls away from it, and again once they come back
+    /// (`scrollViewDidScroll`). Popular's top keeps itself (UIKit holds the
+    /// offset); Recent's end is held here (`keepRestingEnd`).
+    private var holdsRest = true
+
+    /// Set while the paging rows are being laid out at an offset the stream
+    /// is about to leave: they must not ask for a page then.
+    private var suppressesPaging = false
+
+    /// Recent back at its end, exactly — estimated heights refine as the rows
+    /// at the tail realise, so each pass lays out at the offset it just set,
+    /// until the content stops moving (bounded), as a conversation's tail pin
+    /// does (`ConversationThreadViewController.pinToTail`).
+    private func pinToTail(animated: Bool = false) {
+        guard kind == .recent, collectionView.bounds.height > 0 else { return }
+        suppressesPaging = true
+        defer { suppressesPaging = false }
+        guard !animated else {
+            collectionView.layoutIfNeeded()
+            collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: tailOffset), animated: true)
+            return
+        }
+        for _ in 0..<4 {
+            collectionView.layoutIfNeeded()
+            let height = collectionView.contentSize.height
+            collectionView.contentOffset.y = tailOffset
+            collectionView.layoutIfNeeded()
+            if abs(collectionView.contentSize.height - height) < 0.5 { break }
+        }
+    }
+
+    /// Recent kept at its end through a layout pass — the stream growing into
+    /// its room, a width change — unless a finger or a scroll animation has
+    /// the list.
+    func keepRestingEnd() {
+        guard kind == .recent, holdsRest, !isAtRest, !collectionView.isTracking,
+              !collectionView.isDecelerating, !isScrollingProgrammatically else { return }
+        pinToTail()
+    }
+
+    /// An animated scroll of the stream's own is on its way.
+    private var isScrollingProgrammatically = false
+
+    /// A scroll of the stream's own — a day's chip: where it ends decides
+    /// whether the stream still holds its resting end.
+    private func scrollProgrammatically(to y: CGFloat, animated: Bool) {
+        isScrollingProgrammatically = animated
+        collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: y), animated: animated)
+        if !animated { holdsRest = isAtRest }
+    }
+
+    /// The topmost row on screen and its distance from the viewport's top —
+    /// what an apply holds in place (`hold`).
+    private func visibleAnchor() -> (item: StreamItem, offset: CGFloat)? {
+        for indexPath in collectionView.indexPathsForVisibleItems.sorted() {
+            guard let item = streamDataSource.itemIdentifier(for: indexPath),
+                  let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame,
+                  frame.maxY > collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+            else { continue }
+            switch item {
+            case .comment, .seam, .caption: return (item, frame.minY - collectionView.contentOffset.y)
+            default: continue
+            }
+        }
+        return nil
+    }
+
+    /// Puts the anchored row back where it was on screen, once the rows above
+    /// it exist: older pages land above Recent, the viewer's own above
+    /// Popular, and nothing on screen moves.
+    ///
+    /// ⚠️ UNTIL IT STAYS, as `pinToTail`: the rows realised at the new offset
+    /// refine their estimated heights, and the first pass lands a few points
+    /// off (measured: 6.7 pt on an older page).
+    private func hold(_ anchor: (item: StreamItem, offset: CGFloat)) {
+        suppressesPaging = true
+        defer { suppressesPaging = false }
+        for _ in 0..<4 {
+            collectionView.layoutIfNeeded()
+            guard let indexPath = streamDataSource.indexPath(for: anchor.item),
+                  let frame = collectionView.layoutAttributesForItem(at: indexPath)?.frame else { return }
+            let target = frame.minY - anchor.offset
+            guard abs(target - collectionView.contentOffset.y) > 0.5 else { return }
+            collectionView.contentOffset.y = target
+        }
     }
 
     /// Where the caption bubble is drawn, in `space` — the reveal transition's
@@ -617,7 +753,7 @@ final class CommentStream: NSObject {
         // Bones were on screen and real rows are about to take their place.
         let replacesBones = !commentsLoaded && hasAppliedStream && !models.isEmpty
         commentsLoaded = true
-        host.noteCommentCount(models.count)
+        if kind == .recent { host.noteCommentCount(models.count) }
         if replacesBones {
             revealLoadedComments()
             return
@@ -641,6 +777,9 @@ final class CommentStream: NSObject {
     /// goes to its slot, then the comment arrives there with its effect — it
     /// is never inserted off screen. A slot already on screen skips the scroll.
     private func landPostedComment(_ id: String, reconfiguring: [StreamItem]) {
+        // Recent's newest is the viewer's now: the stream goes to its end and
+        // stays there (#2007), as a conversation does.
+        if kind == .recent { holdsRest = true }
         guard let target = landingOffset(for: id) else {
             insertPostedComment(id, reconfiguring: reconfiguring)
             return
@@ -662,6 +801,7 @@ final class CommentStream: NSObject {
             finishLanding(generation)
             return
         }
+        isScrollingProgrammatically = true
         collectionView.setContentOffset(target, animated: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + PostDetailViewController.landingScrollTimeout) { [weak self] in
             self?.finishLanding(generation)
@@ -1012,7 +1152,7 @@ final class CommentStream: NSObject {
     /// rank, a skeleton and the empty page have no chronology to pin days over.
     private func streamSections() -> [(section: StreamSection, items: [StreamItem])] {
         let items = streamItems()
-        guard groupsByDay, commentsLoaded, commentSortOrder == .recent, !latestComments.isEmpty else {
+        guard groupsByDay, kind == .recent, commentsLoaded, commentSortOrder == .recent, !latestComments.isEmpty else {
             return [(.main, items)]
         }
         let calendar = Calendar.current
@@ -1020,13 +1160,7 @@ final class CommentStream: NSObject {
         var indexByDay: [Date: Int] = [:]
         var current = 0
         for item in items {
-            if case .comment(let id) = item, let model = streamModels[id], model.isOwnThread {
-                // The viewer's own threads (#921) ride with the caption, in
-                // `.main`, above every day — they lead the stream, and a
-                // day's pill must not gather everyone else's comments of
-                // that day up under them.
-                current = 0
-            } else if case .comment(let id) = item, let model = streamModels[id], model.parentID == nil,
+            if case .comment(let id) = item, let model = streamModels[id], model.parentID == nil,
                let createdAt = model.createdAt {
                 let day = calendar.startOfDay(for: createdAt)
                 if let existing = indexByDay[day] {
@@ -1082,7 +1216,11 @@ final class CommentStream: NSObject {
         // The caption leads the stream — item #0, above the skeletons as well
         // as above the comments, so it is on screen from the first frame and
         // never pops in behind a shimmer.
-        if latestPost?.hasCaption == true || seededCaption != nil {
+        //
+        // Recent's caption is the oldest message (#2007): at the top of the
+        // history once there is nothing older to load.
+        if latestPost?.hasCaption == true || seededCaption != nil,
+           kind == .popular || !viewModel.hasOlderComments {
             items.append(.caption)
         }
         guard commentsLoaded else {
@@ -1119,7 +1257,8 @@ final class CommentStream: NSObject {
             items.append(.emptyState)
             return items
         }
-        for item in CommentThreadPresentation.items(from: latestComments, expanded: expandedReplyParents) {
+        let ordered = kind == .recent ? Self.conversationOrder(latestComments) : latestComments
+        for item in CommentThreadPresentation.items(from: ordered, expanded: expandedReplyParents) {
             switch item {
             case .comment(let model):
                 items.append(.comment(model.id))
@@ -1130,6 +1269,21 @@ final class CommentStream: NSObject {
             }
         }
         return items
+    }
+
+    /// Recent as a conversation (#2007): the view model's threads, newest
+    /// first, turned oldest first. A thread keeps its replies under it, in
+    /// their own order. Pure, for tests.
+    static func conversationOrder(_ comments: [CommentDisplayModel]) -> [CommentDisplayModel] {
+        var threads: [[CommentDisplayModel]] = []
+        for comment in comments {
+            if comment.parentID == nil || threads.isEmpty {
+                threads.append([comment])
+            } else {
+                threads[threads.count - 1].append(comment)
+            }
+        }
+        return threads.reversed().flatMap { $0 }
     }
 
     func applyStream(
@@ -1159,31 +1313,53 @@ final class CommentStream: NSObject {
            !rendered.matches(currentEmptyPageFit()) {
             snapshot.reconfigureItems([.emptyState])
         }
+        // ⚠️ WHERE IT STANDS STAYS (#2007): a stream at its resting end stays
+        // there, and one the reader scrolled keeps the rows on screen where
+        // they are — older pages land above Recent, the viewer's own above
+        // Popular, a stream off screen settles unseen.
+        let anchor = holdsRest || !hasAppliedStream ? nil : visibleAnchor()
+        // ⚠️ OFF SCREEN, NOTHING ANIMATES: the other tab settles unseen, ready
+        // when it comes in.
+        let animated = animated && host.stream === self
         hasAppliedStream = true
-        nearEndItems = Self.nearEndItems(of: snapshot.itemIdentifiers)
-        streamDataSource.apply(snapshot, animatingDifferences: animated) { completion?() }
+        pagingItems = pagingItems(of: snapshot.itemIdentifiers)
+        suppressesPaging = kind == .recent && holdsRest
+        #if DEBUG
+        debugLastApplyAnimated = animated && anchor == nil
+        #endif
+        streamDataSource.apply(snapshot, animatingDifferences: animated && anchor == nil) { completion?() }
+        suppressesPaging = false
         // The slack follows the content (#1799): a comment, a page of them,
         // a sort or a thread's replies only change its height.
         syncBottomAnchor(animated: animated)
+        if let anchor {
+            hold(anchor)
+        } else if holdsRest, kind == .recent {
+            pinToTail(animated: animated && collectionView.window != nil)
+        }
     }
 
-    /// The stream's last few rows: one of them coming on screen asks for the
-    /// next page of comments (#589), early enough that it usually lands
-    /// before the viewer reaches the end.
-    private var nearEndItems: Set<StreamItem> = []
+    /// The rows that ask for the next page when one of them comes on screen
+    /// (#589), early enough that it usually lands before the viewer gets
+    /// there: Popular's last few, Recent's first few — its older history is
+    /// above it (#2007).
+    private var pagingItems: Set<StreamItem> = []
 
-    private static func nearEndItems(of items: [StreamItem]) -> Set<StreamItem> {
-        Set(items.filter {
+    private func pagingItems(of items: [StreamItem]) -> Set<StreamItem> {
+        let rows = items.filter {
             switch $0 {
             case .comment, .seam: return true
             default: return false
             }
-        }.suffix(PostDetailViewController.nearEndRowCount))
+        }
+        let count = PostDetailViewController.nearEndRowCount
+        return Set(kind == .recent ? rows.prefix(count) : rows.suffix(count))
     }
 
     /// The empty page's Try Again: a failed first page, or one still out
     /// past 10 s (#1770) — which a new read supersedes.
     private func retryCommentsFromPage() {
+        guard kind == .recent else { return viewModel.retryPopularComments() }
         guard !commentsLoaded, commentsGate.isTakingLonger else { return viewModel.retryComments() }
         commentsGate.retry()
         applyStream(animated: false)
@@ -1521,7 +1697,7 @@ final class CommentStream: NSObject {
         let insets = collectionView.adjustedContentInset
         let maxOffset = max(-insets.top, collectionView.contentSize.height + insets.bottom - collectionView.bounds.height)
         let offset = min(max(chip.maxY - insets.top, -insets.top), maxOffset)
-        collectionView.setContentOffset(CGPoint(x: 0, y: offset), animated: animated)
+        scrollProgrammatically(to: offset, animated: animated)
     }
 
     /// The stream's days, in order, with the section each heads. Tests.
@@ -1559,6 +1735,7 @@ final class CommentStream: NSObject {
                 return false
             }), let indexPath = self.streamDataSource.indexPath(for: seam) else { return }
             if let attributes = self.collectionView.layoutAttributesForItem(at: indexPath) {
+                self.isScrollingProgrammatically = true
                 self.collectionView.scrollRectToVisible(
                     attributes.frame.insetBy(dx: 0, dy: -60), animated: true
                 )
@@ -1622,8 +1799,12 @@ extension CommentStream: UICollectionViewDelegate {
     /// Paging, not dismissal: one of the stream's last rows coming on screen
     /// asks for the next page of comments (#589).
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
-        guard let item = streamDataSource.itemIdentifier(for: indexPath), nearEndItems.contains(item) else { return }
-        viewModel.loadMoreComments()
+        guard !suppressesPaging, let item = streamDataSource.itemIdentifier(for: indexPath),
+              pagingItems.contains(item) else { return }
+        switch kind {
+        case .recent: viewModel.loadMoreComments()
+        case .popular: viewModel.loadMorePopularComments()
+        }
     }
 
     /// The list's OVERSHOOT past its top drives the collapse back to the
@@ -1669,6 +1850,9 @@ extension CommentStream: UICollectionViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        // The reader's own scroll decides whether the stream holds its
+        // resting end (#2007): away from it, the rows stay where they are.
+        if scrollView.isTracking || scrollView.isDecelerating { holdsRest = isAtRest }
         host.syncDayUnderHeader()
         // Only the reader's own scroll shows the way back; any move hides it
         // once the text is near again (#1929).
@@ -1701,6 +1885,8 @@ extension CommentStream: UICollectionViewDelegate {
 
     /// A posted comment's landing scroll arrived (#921).
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        isScrollingProgrammatically = false
+        holdsRest = isAtRest
         guard pendingLanding != nil else { return }
         finishLanding(landingGeneration)
     }

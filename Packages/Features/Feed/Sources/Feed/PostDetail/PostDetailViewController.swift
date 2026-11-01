@@ -39,17 +39,121 @@ final class PostDetailViewController: UIViewController {
     /// the profile header while the comments sit open underneath.
     private let activeProfileObservers = NotificationObserverTokenBag()
 
-    /// The post's comments, as a list (`CommentStream`).
-    private(set) lazy var stream = CommentStream(host: self)
+    // MARK: - The two streams (#2007)
+
+    /// The post's comments by the server's ranking (`CommentStream.Kind`):
+    /// the tab a panel opens on, once the post has enough comments to rank
+    /// (`CommentSortPolicy`; the owner, 2026-11-01).
+    private(set) lazy var popular = CommentStream(host: self, kind: .popular)
+    /// The post's comments as a conversation — the only stream below the
+    /// threshold.
+    private(set) lazy var recent = CommentStream(host: self, kind: .recent)
     /// Every stream the panel holds.
-    var streams: [CommentStream] { [stream] }
+    var streams: [CommentStream] { [popular, recent] }
+    /// The pager's pages: Popular first, the default (#2007).
+    static let popularPage = 0
+    static let recentPage = 1
+
+    /// The two streams side by side, swiped between (#2007). Each keeps its
+    /// own position; a switch moves them horizontally and nothing else.
+    /// Paging is off — Recent alone — until there is a Popular tab.
+    private lazy var pager: HorizontalPagerView = {
+        let pager = HorizontalPagerView(
+            pages: [popularPageView, recent.collectionView],
+            initialIndex: showsPopular ? Self.popularPage : Self.recentPage
+        )
+        // A drag past either end is the page's (the side list, the grab):
+        // the pager claims only the drags that change its tab (#2008).
+        pager.yieldsPastEnds = true
+        pager.isPagingEnabled = showsPopular
+        if showsPopular { mountPopular() }
+        pager.onSettled = { [weak self] _ in self?.visibleStreamDidChange() }
+        pager.onProgress = { [weak self] progress in self?.onStreamProgress?(progress) }
+        return pager
+    }()
+
+    /// Popular's page: empty, and off the hierarchy's work, until there is a
+    /// Popular tab — no bones shimmering where nobody can go.
+    private let popularPageView = UIView()
+
+    private func mountPopular() {
+        guard popular.collectionView.superview == nil else { return }
+        popular.collectionView.pin(to: popularPageView)
+    }
+
+    /// The stream on screen.
+    var stream: CommentStream {
+        guard showsPopular, isViewLoaded else { return showsPopular ? popular : recent }
+        return pager.activeIndex == Self.popularPage ? popular : recent
+    }
+
     /// What moves and hides as one: the streams.
-    private var streamSurface: UIView { stream.collectionView }
+    private var streamSurface: UIView { pager }
+
+    /// Whether the post has a Popular tab: its count reached the threshold —
+    /// the opener's, or Recent's. Once there, it stays for the panel's life.
+    private(set) var showsPopular = false
+
+    /// Whether the tab the panel opens on is decided: at the opener's count,
+    /// or at Recent's first answer. Later, Popular arriving leaves the viewer
+    /// where they are.
+    private var hasChosenOpeningTab = false
+
+    /// The tabs came (`true`), for a host that draws their selector.
+    var onPopularTabChange: ((Bool) -> Void)?
+    /// The pager's fractional position — 0 Popular, 1 Recent — for the
+    /// selector that follows it.
+    var onStreamProgress: ((CGFloat) -> Void)?
+    /// The tab on screen settled.
+    var onVisibleStreamChange: ((CommentStream.Kind) -> Void)?
+
+    /// The visible tab: Popular or Recent.
+    var visibleStreamKind: CommentStream.Kind { stream.kind }
+
+    /// Shows `kind`'s tab — a selector's tap.
+    func showStream(_ kind: CommentStream.Kind, animated: Bool) {
+        guard showsPopular else { return }
+        pager.setActivePage(kind == .popular ? Self.popularPage : Self.recentPage, animated: animated)
+        if !animated { visibleStreamDidChange() }
+    }
+
+    /// The pager, for a selector that scrubs it.
+    var streamPager: HorizontalPagerView { pager }
+
+    /// The count reached the threshold: the Popular tab comes in. Opened on
+    /// it when the opening tab is still to choose.
+    private func popularBecameAvailable() {
+        guard !showsPopular else { return }
+        showsPopular = true
+        let opensOnPopular = !hasChosenOpeningTab
+        hasChosenOpeningTab = true
+        guard isViewLoaded else { return }
+        mountPopular()
+        pager.isPagingEnabled = true
+        viewModel.loadPopularIfNeeded()
+        onPopularTabChange?(true)
+        if opensOnPopular { showStream(.popular, animated: false) }
+    }
+
+    /// Recent counted its comments for the first time, or again.
+    private func recentDidCount(_ count: Int) {
+        if CommentSortPolicy.isAvailable(commentCount: count) { popularBecameAvailable() }
+        hasChosenOpeningTab = true
+    }
+
+    /// The tab on screen changed: the way back, the day under the bar and the
+    /// pull-down follow it.
+    private func visibleStreamDidChange() {
+        applyRailWayBack()
+        onScrollAwayChange?(stream.showsScrollAwayReturn)
+        syncDayUnderHeader()
+        onVisibleStreamChange?(stream.kind)
+    }
 
     // MARK: - The stream, as the panel's
 
     // What a host asks of the panel's list (each documented on `CommentStream`).
-    func setEmptyRoomTapHandler(_ handler: (() -> Void)?) { stream.setEmptyRoomTapHandler(handler) }
+    func setEmptyRoomTapHandler(_ handler: (() -> Void)?) { streams.forEach { $0.setEmptyRoomTapHandler(handler) } }
     func emptyRoomContains(_ location: CGPoint) -> Bool { stream.emptyRoomContains(location) }
     var streamIsAtTop: Bool { stream.streamIsAtTop }
     var streamIsAtBottom: Bool { stream.streamIsAtBottom }
@@ -65,9 +169,9 @@ final class PostDetailViewController: UIViewController {
         #if DEBUG
         debugOnScrollToDay?(day)
         #endif
-        stream.scrollToDay(day, animated: animated)
+        recent.scrollToDay(day, animated: animated)
     }
-    var debugStreamDays: [(day: Date, section: Int)] { stream.debugStreamDays }
+    var debugStreamDays: [(day: Date, section: Int)] { recent.debugStreamDays }
     #if DEBUG
     var debugPlayedArrivals: [String] { stream.debugPlayedArrivals }
     var debugLandingEvents: [String] { stream.debugLandingEvents }
@@ -224,7 +328,10 @@ final class PostDetailViewController: UIViewController {
         refitEmptyPageOnHeightChange()
         syncDayUnderHeader()
         // Rows realised as the engaged stream grows into its room (#1799).
-        streams.forEach { $0.syncBottomAnchor() }
+        streams.forEach {
+            $0.syncBottomAnchor()
+            $0.keepRestingEnd()
+        }
     }
 
     /// This view's height as last laid out — see `refitEmptyPageOnHeightChange`.
@@ -258,7 +365,8 @@ final class PostDetailViewController: UIViewController {
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
         viewModel.onEngagementChange = { [weak self] state in self?.renderEngagement(state) }
-        viewModel.onCommentsChange = { [weak self] state in self?.stream.renderComments(state) }
+        viewModel.onCommentsChange = { [weak self] state in self?.recent.renderComments(state) }
+        viewModel.onPopularCommentsChange = { [weak self] state in self?.popular.renderComments(state) }
         viewModel.onComposingChange = { [weak self] composing in self?.renderComposing(composing) }
         viewModel.onViewerIdentityChange = { [weak self] identity in
             guard let self else { return }
@@ -287,6 +395,7 @@ final class PostDetailViewController: UIViewController {
         observeKeyboardForEmptyPage()
         render(.loading)
         viewModel.viewDidLoad()
+        if showsPopular { viewModel.loadPopularIfNeeded() }
     }
 
     /// Arms the composer avatar's profile switcher.
@@ -373,7 +482,7 @@ final class PostDetailViewController: UIViewController {
     // MARK: - Setup
 
     private func configureViews() {
-        stream.configure()
+        streams.forEach { $0.configure() }
         configureComposeBar()
         // Scroll view fills above the compose bar. The default bottom stops
         // at the bar's top at rest, and at its input row's top while the
@@ -381,7 +490,7 @@ final class PostDetailViewController: UIViewController {
         // the higher of the two, pulled down to the bar by a low-priority
         // reach. The engaged context swaps all three for a full-bleed bottom
         // so the stream glides BEHIND the footer.
-        let streamView = stream.collectionView
+        let streamView = pager
         let reach = streamView.bottomAnchor.constraint(equalTo: composeBar.topAnchor)
         reach.priority = .defaultLow
         scrollBottomDefault = [
@@ -438,6 +547,7 @@ final class PostDetailViewController: UIViewController {
 
     /// The stream counted its comments: reported on a change.
     func noteCommentCount(_ count: Int) {
+        recentDidCount(count)
         guard count != commentCount else { return }
         commentCount = count
         onCommentCountChange?(count)
@@ -1109,6 +1219,11 @@ final class PostDetailViewController: UIViewController {
         let waiting = streams.filter { !$0.commentsLoaded }
         guard !waiting.isEmpty, count != knownCommentCount else { return }
         knownCommentCount = count
+        // The opener's count decides the opening tab when it reaches the
+        // threshold: Popular from the first frame (#2007).
+        if !hasChosenOpeningTab, let count, CommentSortPolicy.isAvailable(commentCount: Int(count)) {
+            popularBecameAvailable()
+        }
         guard isViewLoaded else { return }
         waiting.forEach { $0.applyStream(animated: false) }
     }
@@ -1148,7 +1263,7 @@ final class PostDetailViewController: UIViewController {
         guard railShareAction != nil || railSoundFace != nil else { return .empty }
         // The way back (#1929), on a slot this composer draws; under a page's
         // column the page's own bubble wears it (`onScrollAwayChange`).
-        if stream.showsScrollAwayReturn, composeBar.hostsActionColumn { return .returnTo(down: false) }
+        if stream.showsScrollAwayReturn, composeBar.hostsActionColumn { return .returnTo(down: stream.returnsDown) }
         if railShareAction != nil { return .share }
         return railSoundFace.map { .sound($0) } ?? .empty
     }
@@ -1160,6 +1275,8 @@ final class PostDetailViewController: UIViewController {
     var onScrollAwayChange: ((Bool) -> Void)?
     /// Whether the way back shows now.
     var showsScrollAwayReturn: Bool { stream.showsScrollAwayReturn }
+    /// Whether it points down: Recent's start is its newest (#2007).
+    var scrollAwayReturnsDown: Bool { stream.returnsDown }
     /// The sound's tap action, the host's (`setRailSoundActions`).
     private var soundTapAction: (() -> Void)?
     /// The way back's hold on the composer's own slot.
@@ -1171,7 +1288,7 @@ final class PostDetailViewController: UIViewController {
     /// The composer's slot as the way back stands.
     func applyRailWayBack() {
         if !viewModel.isDraft { composeBar.railFace = publishedRailFace }
-        let returns = composeBar.railFace == .returnTo(down: false)
+        let returns = composeBar.railFace == .returnTo(down: stream.returnsDown)
         if !returns { composeBar.setRailSpinning(railSpinning) }
         // Over Share (#1999) the hold arms Share on a media page — the
         // slot's own action — and nothing on a text page.
@@ -1203,7 +1320,7 @@ final class PostDetailViewController: UIViewController {
     private func installRailWayBack() {
         composeBar.onRailAction = { [weak self] in
             guard let self else { return }
-            if composeBar.railFace == .returnTo(down: false) { return scrollToStart(animated: true) }
+            if case .returnTo = composeBar.railFace { return scrollToStart(animated: true) }
             if composeBar.railFace == .share {
                 railShareAction?()
             } else {

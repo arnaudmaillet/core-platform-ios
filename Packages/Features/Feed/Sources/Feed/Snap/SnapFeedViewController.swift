@@ -3640,10 +3640,12 @@ final class SnapFeedViewController: UIViewController {
         detail.setRailSoundActions(tap: { [weak self] in self?.presentSoundSheet() }, hold: nil)
         // Scrolled away from the text, the page's sound bubble offers the way
         // back (#1929) — the composer's own slot does, on the loading page.
-        detail.onScrollAwayChange = hostedByPage ? { [weak self] shows in
-            self?.setSoundShowsReturn(shows, for: id)
+        detail.onScrollAwayChange = hostedByPage ? { [weak self, weak detail] shows in
+            self?.setSoundShowsReturn(shows, down: detail?.scrollAwayReturnsDown ?? false, for: id)
         } : nil
-        if hostedByPage { setSoundShowsReturn(detail.showsScrollAwayReturn, for: id) }
+        if hostedByPage {
+            setSoundShowsReturn(detail.showsScrollAwayReturn, down: detail.scrollAwayReturnsDown, for: id)
+        }
     }
 
     /// The open comments panel showing `id`: the engagement's, or the
@@ -3655,9 +3657,9 @@ final class SnapFeedViewController: UIViewController {
     }
 
     /// The way back on every visible page showing `id` (#1929).
-    private func setSoundShowsReturn(_ shows: Bool, for id: PostID) {
+    private func setSoundShowsReturn(_ shows: Bool, down: Bool = false, for id: PostID) {
         for case let cell as SnapFeedCell in collectionView.visibleCells where cell.representedPostID == id {
-            cell.setSoundShowsReturn(shows)
+            cell.setSoundShowsReturn(shows, down: down)
         }
     }
 

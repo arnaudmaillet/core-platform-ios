@@ -105,9 +105,7 @@ final class SnapSoundBubbleButton: UIButton {
     /// never faded: the record and the glyph cross-fade inside it.
     /// The composer slot's glyph size (`CommentsInputBar`), so the two
     /// chevrons read alike.
-    private let returnGlyph = UIImageView(
-        image: UIImage.symbol(named: "chevron.up", configuration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
-    )
+    private let returnGlyph = UIImageView(image: SnapSoundBubbleButton.returnSymbol(down: false))
     /// Whether the way back shows instead of the record.
     private(set) var showsReturn = false
     /// Share's glyph, in the same glass (#1999): a pushed text page's
@@ -163,11 +161,27 @@ final class SnapSoundBubbleButton: UIButton {
     }
 
     /// The way back (#1929): the record cross-fades with `chevron.up`, the
-    /// glass standing still. The record stops while hidden.
-    func setShowsReturn(_ shows: Bool, animated: Bool) {
+    /// glass standing still — `chevron.down` when the stream's start is its
+    /// end (`down`: Recent's newest, #2007). The record stops while hidden.
+    func setShowsReturn(_ shows: Bool, down: Bool = false, animated: Bool) {
+        if down != returnPointsDown {
+            returnPointsDown = down
+            returnGlyph.image = Self.returnSymbol(down: down)
+            if shows == showsReturn { applyFace(animated: false) }
+        }
         guard shows != showsReturn else { return }
         showsReturn = shows
         applyFace(animated: animated)
+    }
+
+    /// Whether the way back points down (#2007).
+    private(set) var returnPointsDown = false
+
+    private static func returnSymbol(down: Bool) -> UIImage? {
+        UIImage.symbol(
+            named: down ? "chevron.down" : "chevron.up",
+            configuration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        )
     }
 
     /// The bubble as the post's Share (#1999), or back to its sound: Share's
@@ -184,7 +198,9 @@ final class SnapSoundBubbleButton: UIButton {
     /// Share, or the sound.
     private func applyFace(animated: Bool) {
         let shows = showsReturn
-        accessibilityLabel = shows ? "Back to top" : sharesPost ? "Share" : "Sound"
+        accessibilityLabel = shows
+            ? (returnPointsDown ? "Scroll to latest comment" : "Back to top")
+            : sharesPost ? "Share" : "Sound"
         accessibilityHint = shows || sharesPost ? nil : "Double-tap for the sound."
         // An unavailable sound stays greyed; the way back and Share always answer.
         isEnabled = shows || sharesPost || face?.isAvailable == true

@@ -125,8 +125,9 @@ struct SnapSoundReturnTests {
     }
 
     /// A composer that draws its own column (the loading page, a pushed
-    /// post): the slot becomes `chevron.up`, its tap goes back to the text,
-    /// and its hold arms the sound's tap action.
+    /// post): the slot becomes the way back — `chevron.down` on Recent, whose
+    /// start is its newest (#2007) — its tap goes back there, and its hold
+    /// arms the sound's tap action.
     @Test func aComposerDrawingItsColumnWearsTheWayBack() async throws {
         let (panel, window) = Layout.engagedPanel()
         defer { window.isHidden = true }
@@ -136,7 +137,7 @@ struct SnapSoundReturnTests {
         panel.setRailSoundActions(tap: { sheets += 1 }, hold: nil)
 
         panel.debugScroll(to: 3000, userScroll: true)
-        #expect(panel.debugRailFace == .returnTo(down: false))
+        #expect(panel.debugRailFace == .returnTo(down: true))
         let hold = try #require(panel.debugRailSoundHold)
         #expect(hold.isEnabled)
         hold.onFire?()

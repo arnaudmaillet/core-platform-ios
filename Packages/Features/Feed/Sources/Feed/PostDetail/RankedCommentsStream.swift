@@ -89,14 +89,15 @@ final class RankedCommentsStream {
 
     /// The viewer's comment: a top-level one leads the tab; a reply goes
     /// under its parent, wherever that is.
-    func addOwn(_ entry: CommentEntry) {
+    /// `notify` false for a caller that emits next anyway.
+    func addOwn(_ entry: CommentEntry, notify: Bool = true) {
         guard !own.contains(where: { $0.id == entry.id }), !ranked.contains(where: { $0.id == entry.id }) else { return }
         if entry.parentID == nil {
             own.insert(entry, at: 0)
         } else if ranked.contains(where: { $0.id == entry.parentID }) || own.contains(where: { $0.id == entry.parentID }) {
             ranked = PostDetailViewModel.inserting(entry, into: ranked)
         }
-        onChange?()
+        if notify { onChange?() }
     }
 
     /// One change to every comment held — a review, a delete — in both the

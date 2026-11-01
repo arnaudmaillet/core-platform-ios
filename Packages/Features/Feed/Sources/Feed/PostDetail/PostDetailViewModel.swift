@@ -463,8 +463,9 @@ public final class PostDetailViewModel {
                 // Only a row that is NEW arrives: a replay answered with a
                 // comment already on screen (#795) is not one.
                 if self.insertSubmitted(entry) { self.onCommentPosted?(entry.id) }
-                // At Popular's top too, as the viewer's own (#2007).
-                self.popular.addOwn(entry)
+                // At Popular's top too, as the viewer's own (#2007); the
+                // emission below renders both.
+                self.popular.addOwn(entry, notify: false)
                 self.emitComments()
                 self.setComposing(false)
             } catch {
@@ -761,6 +762,10 @@ public final class PostDetailViewModel {
     /// The viewer neared the end of the stream: the next page, if there is
     /// one and none is already on its way (#589). Appended, never reordering
     /// what is on screen; a failure is retried on the next approach.
+    /// Whether Recent has older comments still to load (#2007): its caption,
+    /// the post's first message, waits above them.
+    var hasOlderComments: Bool { nextPageToken != nil }
+
     func loadMoreComments() {
         guard let commentsProvider, let postID, pageLoad == nil else { return }
         guard let token = nextPageToken else {
@@ -934,10 +939,20 @@ public final class PostDetailViewModel {
 
     // MARK: - Popular (#2007)
 
-    private func loadPopularIfNeeded() {
+    /// Popular's first page, once — asked by the panel as it opens on the tab,
+    /// before Recent has answered, when the opener's count already reaches
+    /// the threshold.
+    func loadPopularIfNeeded() {
         guard let commentsProvider, let postID, !popular.hasAnswered else { return }
         if popular.onChange == nil { popular.onChange = { [weak self] in self?.emitPopular() } }
         popular.loadFirst(postID: postID, from: commentsProvider)
+    }
+
+    /// The Popular tab's first page again, after it failed.
+    public func retryPopularComments() {
+        guard popular.hasFailed else { return }
+        popular.reset()
+        loadPopularIfNeeded()
     }
 
     /// The viewer neared the end of the Popular tab: its next page.
@@ -968,8 +983,12 @@ public final class PostDetailViewModel {
     private func emitComments() {
         let now = now()
         let viewer = shownIdentity?.profileID
+        // ⚠️ RECENT IS A CONVERSATION (#2007): the viewer's threads stand in
+        // its chronology, their newest at its end — they lead Popular instead
+        // (`RankedCommentsStream`).
         let ordered = Self.sortedForDisplay(
-            comments, order: commentSort, liked: likedForRanking, pageStarts: pageStarts, viewer: viewer
+            comments, order: commentSort, liked: likedForRanking, pageStarts: pageStarts,
+            viewer: commentSort == .trending ? viewer : nil
         )
         let canReview = isViewerPostOwner && commentsProvider is any HeldCommentReviewing
         showsAnswer = true

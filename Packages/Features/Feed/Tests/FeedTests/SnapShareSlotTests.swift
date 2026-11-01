@@ -44,7 +44,8 @@ struct SnapShareSlotTests {
         #expect(sheets == 0, "Share opened the sound sheet")
 
         panel.debugScroll(to: 3000, userScroll: true)
-        #expect(panel.debugRailFace == .returnTo(down: false))
+        // Recent's way back points to its newest (#2007).
+        #expect(panel.debugRailFace == .returnTo(down: true))
         let hold = try #require(panel.debugRailSoundHold)
         #expect(!hold.isEnabled, "the way back's hold arms something on a text page")
         let action = try #require(panel.debugRailCustomActions?.first)
