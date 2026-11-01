@@ -161,6 +161,21 @@ struct AnimatedIconViewPauseTests {
         }
     }
 
+    /// With no cap (the feed's shortcut rail, #2004), the same long loop is
+    /// waited for: it plays on, finishing, and holds nothing yet.
+    @Test func anUncappedFinishWaitsForALongLoop() throws {
+        try atLoopTime(0.05, of: 10) { view in
+            let remaining = try #require(view.remainingLoopTime)
+            #expect(remaining > AnimatedIconView.maxFinishWait)
+            var finished = false
+            view.finishLoop(maxWait: nil) { finished = true }
+            #expect(!finished, "a long loop was cut short")
+            #expect(view.isFinishingLoop)
+            #expect(!view.isPaused)
+            view.cancelFinish()
+        }
+    }
+
     /// Over the whole cycle of a 10 s loop: with more than `maxFinishWait`
     /// left it holds at once; with less it plays out the loop first.
     @Test func aLongLoopFinishesByWhatIsLeftAcrossItsCycle() throws {

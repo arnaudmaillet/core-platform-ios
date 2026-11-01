@@ -301,13 +301,21 @@ public final class AnimatedIconView: UIView {
     /// The deadline comes from the same clock `displayedFrame` reads, keyed
     /// the same way (`keying`), so a Low Power decimated loop ends where its
     /// last key does.
-    public func finishLoop(completion: @escaping @MainActor () -> Void) {
+    ///
+    /// `maxWait` caps the wait: a loop with more left than that holds where
+    /// it is, now — what frees an engine slot quickly in a big grid. Nil
+    /// waits for any loop to end: the feed's shortcut rail, which dresses
+    /// about three tiles at rest (#2004).
+    public func finishLoop(
+        maxWait: TimeInterval? = AnimatedIconView.maxFinishWait,
+        completion: @escaping @MainActor () -> Void
+    ) {
         guard let remaining = remainingLoopTime else {
             completion()
             return
         }
         // A loop too long to wait for holds where it is, now.
-        guard remaining <= Self.maxFinishWait else {
+        if let maxWait, remaining > maxWait {
             pause()
             completion()
             return

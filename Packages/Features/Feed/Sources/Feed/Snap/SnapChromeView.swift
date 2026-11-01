@@ -1044,7 +1044,14 @@ final class SnapChromeView: UIView {
 
     // MARK: - Configuration
 
+    /// This chrome is a flight's replica: its shortcut rail shows its emotes
+    /// during the flight, still, where the live page's sits it out (#2004).
+    func markAsFlightReplica() {
+        shortcutRail.isFlightReplica = true
+    }
+
     func configure(with model: FeedItemDisplayModel) {
+        let isSamePost = representedID == model.id
         representedID = model.id
 
         // Text-only posts drop the MEDIA comment surfaces — the danmaku
@@ -1120,7 +1127,7 @@ final class SnapChromeView: UIView {
         // column. Static chrome, so it loads here (not via
         // `updateCommentStreams`) and the flight replica shows it too; the
         // seeded payload keeps both instances identical.
-        shortcutRail.setEmotes(SnapShortcutRailView.payload(for: model.id))
+        shortcutRail.setEmotes(SnapShortcutRailView.payload(for: model.id), keepingIfUnchanged: isSamePost)
         applyCareMode()
     }
 

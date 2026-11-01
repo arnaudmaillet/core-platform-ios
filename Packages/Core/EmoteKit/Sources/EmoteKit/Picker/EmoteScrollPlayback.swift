@@ -12,8 +12,8 @@ import UIKit
 /// drag's start to the end of its glide — and a tile scrolled in meanwhile
 /// plays from its first appearance. When the grid stops, each tile plays out
 /// its current loop and rests on its poster frame (#559) — never posed
-/// mid-gesture; a loop longer than `AnimatedIconView.maxFinishWait` holds
-/// where it is instead. A scroll that starts again before then just carries
+/// mid-gesture; a loop longer than its tile's `finishWait` (by default
+/// `AnimatedIconView.maxFinishWait`) holds where it is instead. A scroll that starts again before then just carries
 /// on. Leaving the window (`stop()`) is a hard stop: every tile holds at once. A still tile is a posed layer with no animation on
 /// it, so a grid at rest costs the render server nothing
 /// (`AnimatedIconView.pause` says why it is not a stopped layer clock).

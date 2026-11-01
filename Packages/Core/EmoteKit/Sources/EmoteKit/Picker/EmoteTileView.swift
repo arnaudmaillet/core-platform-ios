@@ -202,6 +202,11 @@ public final class EmoteTileView: UIView {
     /// `finishingLoop` (#559): the art plays out its current loop and rests
     /// on its poster frame instead of freezing mid-gesture; the engine slot
     /// is given back once it rests. Playing again before then just carries on.
+    /// The longest a scroll's end waits for this tile's loop to finish
+    /// (`AnimatedIconView.finishLoop`); nil waits for any loop. The strip and
+    /// the panel keep the cap; the feed's shortcut rail lifts it (#2004).
+    public var finishWait: TimeInterval? = AnimatedIconView.maxFinishWait
+
     public func setPlaying(_ playing: Bool, finishingLoop: Bool = false) {
         guard playing != isPlaying else { return }
         isPlaying = playing
@@ -239,7 +244,7 @@ public final class EmoteTileView: UIView {
             hold()
             return
         }
-        player.finishLoop { [weak self] in
+        player.finishLoop(maxWait: finishWait) { [weak self] in
             guard let self, !self.isPlaying else { return }
             self.releaseSlot()
         }
