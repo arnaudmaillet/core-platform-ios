@@ -71,7 +71,13 @@ struct SnapSoundState {
     /// (#1849): the provider's answer, or — with nobody to ask — a single
     /// clip's own "original sound", played from the clip itself when a player
     /// can open it. A carousel never takes a sound from one of its media.
+    ///
+    /// ⚠️ NIL FOR A TEXT POST, WHATEVER IT CARRIES (#1999, the owner
+    /// 2026-11-01): a text post has no sound. One a server or a cache sends
+    /// with an `audio_ref` is ignored, not played: no song, no track, no
+    /// face, no sheet.
     func sound(for model: FeedItemDisplayModel) -> PostSound? {
+        guard !Self.isText(model) else { return nil }
         if let known = provider?.sound(forPost: model.id) { return known }
         guard Self.isSingleClip(model), let url = model.mediaURL else { return nil }
         let playable = url.isFileURL || ["http", "https"].contains(url.scheme?.lowercased() ?? "")
@@ -129,22 +135,15 @@ struct SnapSoundState {
     /// (#671): the sound's cover — and for a MEDIA post
     /// with no sound, a greyed `music.note.slash` that keeps the slot (#683).
     ///
-    /// ⚠️ NIL FOR A TEXT POST WITH NO SOUND (#1790, the owner 2026-10-27):
-    /// such a post can have no sound at all, so the slot would carry nothing.
-    /// No slot, no bubble: the comment field widens into its place.
+    /// ⚠️ NIL FOR A TEXT POST (#1999): a text post has no sound, so it has
+    /// no sound slot. It used to keep one when it carried a song (#1790).
     func face(for model: FeedItemDisplayModel) -> SnapSoundFace? {
+        guard !Self.isText(model) else { return nil }
         let postSound = sound(for: model)
-        guard Self.hasSoundSlot(isText: Self.isText(model), sound: postSound) else { return nil }
         return SnapSoundFace(
             coverURL: SnapMediaAttributionView.coverURL(for: model, cover: Self.cover(for: postSound)),
             isAvailable: postSound != nil
         )
-    }
-
-    /// Whether a post keeps a sound slot (#1790): every media post does
-    /// (greyed with no sound, #683); a text post only with a sound. Pure.
-    static func hasSoundSlot(isText: Bool, sound: PostSound?) -> Bool {
-        !isText || sound != nil
     }
 
     /// A text post: no picture, no clip — the page draws it as a card.
@@ -160,7 +159,8 @@ struct SnapSoundState {
     ///   clips alike. ⚠️ Low Power Mode, followed, does NOT silence it (the
     ///   owner, 2026-10-28): it is the post's sound, as a clip's own is.
     /// - **A single clip**: nil. Its sound is its own player's.
-    /// - **A photograph, a text post**: its song, and ⚠️ NOTHING IN LOW POWER
+    /// - **A text post**: nil (#1999).
+    /// - **A photograph**: its song, and ⚠️ NOTHING IN LOW POWER
     ///   MODE, FOLLOWED (#580, #1808): a clip there does not start on its own,
     ///   and a photograph's song is the same thing without a picture.
     func song(for model: FeedItemDisplayModel) -> URL? {
@@ -174,7 +174,7 @@ struct SnapSoundState {
     }
 
     /// Whether `model` carries a track the song player plays when heard — a
-    /// carousel's sound, a photograph's or a text post's song. A single
+    /// carousel's sound or a photograph's song. A single
     /// clip's sound is its own player's (#1875).
     func hasTrack(for model: FeedItemDisplayModel) -> Bool {
         guard sound(for: model)?.previewURL != nil else { return false }

@@ -74,22 +74,40 @@ struct SnapSoundStateTests {
         #expect(sound.sheetInputs(for: page) == nil, "a sheet for nothing")
     }
 
-    /// ⚠️ A TEXT POST WITH NO SOUND HAS NO SLOT (#1790): no face at all, so
-    /// neither the composer's slot nor the page's bubble; a text post WITH a
-    /// sound, and every media post, keep theirs.
-    @Test func aTextPostWithNoSoundHasNoSlot() {
-        let sound = Self.state(Switches())
-        let text = FeedItemDisplayModel(
-            id: PostID("t1"), authorID: ProfileID("a"), authorName: "Ava", metaText: "",
+    private static func text(_ id: String = "t1") -> FeedItemDisplayModel {
+        FeedItemDisplayModel(
+            id: PostID(id), authorID: ProfileID("a"), authorName: "Ava", metaText: "",
             avatarURL: nil, caption: "words", mediaURL: nil, mediaKind: .image, thumbnailURL: nil, audioText: nil
         )
-        #expect(SnapSoundState.isText(text))
-        #expect(sound.face(for: text) == nil, "a text post with no sound kept a slot")
+    }
+
+    /// A text post with no sound has no slot (#1790, rewritten for #1999):
+    /// no face, so neither the composer's slot nor the page's bubble; every
+    /// media post keeps its own, greyed with no sound (#683).
+    @Test func aTextPostWithNoSoundHasNoSlot() {
+        let sound = Self.state(Switches())
+        #expect(SnapSoundState.isText(Self.text()))
+        #expect(sound.face(for: Self.text()) == nil, "a text post with no sound kept a slot")
         #expect(!SnapSoundState.isText(Self.photo()))
-        #expect(SnapSoundState.hasSoundSlot(isText: false, sound: nil), "a media post lost its greyed slot")
-        let song = PostSound(id: "s", title: "Song", artist: nil, previewURL: Self.songFile, artworkURL: nil, duration: nil)
-        #expect(SnapSoundState.hasSoundSlot(isText: true, sound: song), "a text post with a sound lost its record")
-        #expect(!SnapSoundState.hasSoundSlot(isText: true, sound: nil))
+        #expect(sound.face(for: Self.photo())?.isAvailable == false, "a media post lost its greyed slot")
+    }
+
+    /// ⚠️ A TEXT POST HAS NO SOUND, WHATEVER IT CARRIES (#1999): one a
+    /// server sends with an `audio_ref` is ignored, not played. It used to
+    /// keep its record and play its song.
+    @Test func aTextPostWithAnAudioRefHasNoSound() {
+        let song = PostSound(id: "s", title: "Song", artist: "A", previewURL: Self.songFile, artworkURL: nil, duration: nil)
+        let provider = FixedSoundProvider(sound: song, rankings: PostSoundRankings(popular: [], recent: [PostID("t1")]))
+        let sound = Self.state(Switches(), provider: provider)
+        let text = Self.text()
+        #expect(sound.sound(for: text) == nil)
+        #expect(sound.song(for: text) == nil)
+        #expect(!sound.hasTrack(for: text))
+        #expect(sound.face(for: text) == nil)
+        #expect(sound.sheetInputs(for: text) == nil)
+        #expect(sound.attribution(for: text).sound == SnapMediaAttributionView.SoundCredit.none)
+        // A photograph with the same answer keeps its song.
+        #expect(sound.song(for: Self.photo()) == Self.songFile)
     }
 
     // MARK: - Which sound
@@ -268,6 +286,29 @@ struct SnapSoundStateTests {
         #expect(inputs?.original == PostID("y"))
         #expect(inputs?.fallbackArtworkURL == nil, "a named song borrowed the post's photo")
         #expect(inputs?.offersUseSound == true)
+    }
+}
+
+/// The sound sheet's list (#1999): no text post, whatever the ranking says.
+struct SoundSheetExclusionsTests {
+    private let media = PostID("m"), text = PostID("t"), unknown = PostID("u"), current = PostID("c")
+
+    private func isMedia(_ id: PostID) -> Bool? {
+        switch id.rawValue {
+        case "m", "c": true
+        case "t": false
+        default: nil
+        }
+    }
+
+    @Test func aTextPostIsLeftOutAndAnUnknownOneWaits() {
+        let all: Set<PostID> = [media, text, unknown, current]
+        #expect(SnapFeedViewController.soundSheetExclusions(
+            all, current: current, droppingUnknown: false, isMedia: isMedia
+        ) == [text])
+        #expect(SnapFeedViewController.soundSheetExclusions(
+            all, current: current, droppingUnknown: true, isMedia: isMedia
+        ) == [text, unknown])
     }
 }
 

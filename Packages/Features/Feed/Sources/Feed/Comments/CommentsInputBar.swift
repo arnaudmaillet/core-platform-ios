@@ -101,7 +101,7 @@ final class CommentsInputBar: UIView {
         /// The post's sound (#671): the snap feed's sound bubble's cover, on
         /// that bubble's frame.
         case sound(SnapSoundFace)
-        /// No slot at all (#1790): a text post with no sound. Unlike `.empty`,
+        /// No slot at all (#1790): a text post, which has no sound (#1999). Unlike `.empty`,
         /// the field widens into the slot's place.
         case noSlot
         /// The way back to the stream's start (#1929): scrolled away from the

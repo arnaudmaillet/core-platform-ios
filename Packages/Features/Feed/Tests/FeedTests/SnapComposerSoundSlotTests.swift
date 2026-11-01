@@ -62,10 +62,10 @@ struct SnapComposerSoundSlotTests {
         #expect(holds == 1)
     }
 
-    /// ⚠️ THE TEXT PAGE: the snap feed wires its panel's slot's TAP to the
-    /// sound sheet; its hold mutes nothing since #1931 — the sound follows
-    /// the device.
-    @Test func aTextPagesSlotOpensTheSheetAndHoldsNothing() throws {
+    /// ⚠️ THE TEXT PAGE HAS NO SOUND SLOT (#1999, rewritten from #1929's
+    /// "the slot opens the sheet"): a text post has no sound, even one the
+    /// provider names, so its composer's slot goes and the field widens.
+    @Test func aTextPageHasNoSoundSlot() throws {
         let feed = SnapFeedViewController(
             viewModel: FeedViewModel(repository: SlotSilentProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
@@ -83,9 +83,8 @@ struct SnapComposerSoundSlotTests {
         defer { window.isHidden = true }
         feed.applySoundRail(to: panel)
         let bar = try Layout.composerColumn(in: panel.view, space: window).bar
-        #expect(bar.debugRailSymbol == CommentsInputBar.soundRailSymbol, "the text page's slot does not wear its sound")
-        #expect(bar.onRailAction != nil, "the tap is not wired to the sound sheet")
-
+        #expect(bar.railFace == .noSlot, "a text page kept a sound slot")
+        #expect(bar.debugRailSymbol == nil, "the text page's slot still wears a sound")
         #expect(bar.onRailLongPress == nil, "the slot's hold still does something")
     }
 

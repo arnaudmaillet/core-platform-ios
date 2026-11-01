@@ -63,8 +63,6 @@ final class TextPostComposerViewController: UIViewController {
     enum ItemID {
         static let cancel = "textpost.cancel"
         static let drafts = "textpost.drafts"
-        static let topSound = "textpost.sound.top"
-        static let footerSound = "textpost.sound"
         static let close = "textpost.close"
         static let sort = "textpost.sort"
         static let authorPill = "textpost.author-pill"
@@ -72,13 +70,6 @@ final class TextPostComposerViewController: UIViewController {
     }
 
     private var draftsItem: UIBarButtonItem?
-    /// The sound pill's two homes — see `placeSoundPill`. Two instances,
-    /// because a view lives in one bar at a time.
-    private let topSoundItem = BarItems.container(id: ItemID.topSound, view: SoundPillView())
-    private var footerSoundItem: UIBarButtonItem?
-    /// The writing footer without its leading pill: [🔖 ⇄] [⋯], right-aligned.
-    private var writingFooterTrailing: [UIBarButtonItem] = []
-    private var isSoundPillOnTop = false
 
     // MARK: The published post's chrome
 
@@ -276,35 +267,14 @@ final class TextPostComposerViewController: UIViewController {
         bookmarkItem.isEnabled = false
         let more = SnapFooterToolbar.makeMoreItem(menu: UIMenu(children: []))
         more.isEnabled = false
-        let footer = SnapFooterToolbar.items(
-            leading: SoundPillView(),
-            leadingID: ItemID.footerSound,
+        // ⚠️ NO SOUND PILL (#1999): a text post has no sound, so the footer
+        // has nothing to lead with — its trailing run alone, [🔖 ⇄] [⋯]. It
+        // used to lead with an inert pill that rode into the top bar while
+        // the keyboard was up. The published post's footer leads with its
+        // attribution, as before.
+        toolbarItems = SnapFooterToolbar.trailingItems(
             actions: [bookmarkItem, SnapFooterToolbar.makeRepostItem()],
             more: more
-        )
-        footerSoundItem = footer.first
-        writingFooterTrailing = Array(footer.dropFirst())
-        toolbarItems = footer
-    }
-
-    /// ⚠️ THE SOUND PILL FOLLOWS THE KEYBOARD. Its home is the footer's leading
-    /// slot, which the keyboard covers while the viewer writes — so while the
-    /// keyboard is up it rides in the top bar, just inboard of Drafts, where it
-    /// can still be reached, and it goes home when the keyboard does. Writing
-    /// only: the published post's footer leads with its own attribution.
-    private func placeSoundPill(onTop: Bool) {
-        guard publishedModel == nil, onTop != isSoundPillOnTop,
-              let draftsItem, let footerSoundItem else { return }
-        isSoundPillOnTop = onTop
-        // RIGHT TO LEFT: Drafts keeps the edge, the pill sits inboard of it,
-        // and the fixed space keeps them two bubbles rather than one platter.
-        setOwnTrailingBarItems(
-            onTop ? [draftsItem, .fixedSpace(Spacing.sm), topSoundItem] : [draftsItem],
-            animated: true
-        )
-        setToolbarItems(
-            onTop ? writingFooterTrailing : [footerSoundItem] + writingFooterTrailing,
-            animated: true
         )
     }
 
@@ -443,7 +413,6 @@ final class TextPostComposerViewController: UIViewController {
     /// It goes back down with the keyboard — if, and only if, it grew for it.
     private func keyboardWillShow() {
         guard view.window != nil, navigationController?.topViewController === self else { return }
-        placeSoundPill(onTop: true)
         guard let sheet = navigationController?.sheetPresentationController,
               sheet.selectedDetentIdentifier != .large else { return }
         expandedForKeyboard = true
@@ -453,10 +422,9 @@ final class TextPostComposerViewController: UIViewController {
 
     private func keyboardWillHide() {
         // Not for an alert or menu raised over the sheet: it takes the keyboard
-        // for a moment, and the sheet — and the pill — would move and come
+        // for a moment, and the sheet would move and come
         // back behind it.
         guard (navigationController ?? self).presentedViewController == nil else { return }
-        placeSoundPill(onTop: false)
         guard expandedForKeyboard, let sheet = navigationController?.sheetPresentationController else { return }
         expandedForKeyboard = false
         sheet.animateChanges { sheet.selectedDetentIdentifier = Self.restingDetentIdentifier }
@@ -762,12 +730,6 @@ extension TextPostComposerViewController: UIAdaptivePresentationControllerDelega
         confirmLeaving(from: nil)
     }
 }
-
-// The sound pill moved to DesignSystem as `SoundPillView` on 2026-09-12, when
-// the media editor needed the same control and features cannot import one
-// another. Its subtitle ("and a cover") went with the move, at Arnaud's
-// instruction — the word now centres on the disc. Everything else, including the
-// measured reason its text is pinned at `.large`, is recorded there.
 
 /// A resting height, and large for a thread or the keyboard (#1970): it
 /// covers the clips behind only at large. The default reads the detent; a

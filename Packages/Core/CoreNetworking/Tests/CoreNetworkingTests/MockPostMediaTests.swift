@@ -95,7 +95,7 @@ struct MockPostMediaTests {
 
     // MARK: - What keeps the old media
 
-    /// The sounds photo and text posts borrow are the retired clips', in the
+    /// The sounds photo and collection posts borrow are the retired clips', in the
     /// order they always had — so a borrowing post keeps its sound.
     @Test func theBorrowedSoundsAreUnchanged() {
         let before = [

@@ -3568,8 +3568,9 @@ final class SnapFeedViewController: UIViewController {
             hostedByPage, foldsIntoSlot: model.mediaURL != nil || footerCarriesTextLike
         )
         let face = soundFace(for: model)
-        // No face on a text post with no sound (#1790): no slot either.
-        detail.setRailSoundFace(face, keepsSlot: face != nil || !SnapSoundState.isText(model))
+        // No face on a text post, which has no sound (#1999): no slot
+        // either. Every media post has one, greyed with no sound (#683).
+        detail.setRailSoundFace(face, keepsSlot: face != nil)
         // The For You root's save and repost (#1681), in the composer's
         // column too — drawn on a text page, reserved under a media page's.
         detail.setPostActions(
@@ -5676,7 +5677,9 @@ final class SnapFeedViewController: UIViewController {
             return nil
         }
         let everyPost = Set(rankings.popular + rankings.recent + [original].compactMap { $0 })
-        let dropped = droppingUnknown ? Set(everyPost.filter { $0 != current && known($0) == nil }) : []
+        let dropped = Self.soundSheetExclusions(
+            everyPost, current: current, droppingUnknown: droppingUnknown, isMedia: { known($0)?.isMedia }
+        )
         let dealt = SoundSheetSections.make(
             rankings: rankings, current: current, original: original,
             isMedia: { known($0)?.isMedia }, excluding: dropped
@@ -5695,6 +5698,24 @@ final class SnapFeedViewController: UIViewController {
             )
         }
         return (dealt.sections, tiles)
+    }
+
+    /// The posts the sound sheet leaves out:
+    /// - ⚠️ every TEXT post (#1999): a text post has no sound, so none is set
+    ///   to this one, whatever an older post or a server still says;
+    /// - once the loading is over (`droppingUnknown`), every post still
+    ///   unknown, the page watched excepted.
+    /// `isMedia`: nil for a post not known yet.
+    nonisolated static func soundSheetExclusions(
+        _ posts: Set<PostID>, current: PostID, droppingUnknown: Bool, isMedia: (PostID) -> Bool?
+    ) -> Set<PostID> {
+        posts.filter { id in
+            switch isMedia(id) {
+            case false?: true
+            case nil: droppingUnknown && id != current
+            case true?: false
+            }
+        }
     }
 
     /// Brings `id` to the screen — a tile of the sound sheet.
