@@ -415,10 +415,10 @@ final class ProfileSetupViewController: SignUpStepViewController {
         onCreate?(handle, name)
     }
 
-    /// The account already exists: there is no way back past it, working or
-    /// not.
-    override func setWorking(_ working: Bool) {
-        super.setWorking(working)
-        navigationItem.hidesBackButton = true
-    }
+}
+
+/// The account already exists: there is no way back past it, working or not —
+/// the form's bar leads with ? there (#2022).
+extension ProfileSetupViewController: AuthFormStep {
+    var offersWayBack: Bool { false }
 }

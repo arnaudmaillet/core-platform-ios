@@ -39,12 +39,9 @@ final class OTPVerificationViewController: UITableViewController {
         // A titled header: the soft blur covers the bar (#1591) — see
         // `applyTopEdge(for:)`.
         tableView.applyTopEdge(for: .titled)
+        // Verify; the form lays × outboard of it and the back on the left
+        // (#2022) — Cancel gave way to ×.
         setOwnTrailingBarItems([verifyButton], animated: false)
-        navigationItem.leftBarButtonItem = UIBarButtonItem(
-            systemItem: .cancel,
-            primaryAction: UIAction { [weak self] _ in self?.closePresentation() }
-        )
-        navigationItem.leftBarButtonItem?.identifier = "auth.otp.cancel"
         verifyButton.isEnabled = false
 
         let field = codeCell.textField

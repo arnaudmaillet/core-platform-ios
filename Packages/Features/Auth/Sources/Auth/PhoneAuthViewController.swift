@@ -180,12 +180,13 @@ final class PhoneAuthViewController: AuthStepTableViewController {
     /// Whether the code is being sent (#827).
     private(set) var isWorking = false
 
-    /// Spinner on Continue, back hidden, inputs locked — while the code is
-    /// sent. The sign-up steps' `setWorking`, on this screen's own button.
+    /// Spinner on Continue, × and back disabled, inputs locked — while the
+    /// code is sent. The sign-up steps' `setWorking`, on this screen's own
+    /// button.
     func setWorking(_ working: Bool) {
         isWorking = working
         continueButton.configuration?.showsActivityIndicator = working
-        navigationItem.hidesBackButton = working
+        (navigationController as? ContentFittingNavigationController)?.setFormWorking(working)
         view.isUserInteractionEnabled = !working
         if working {
             continueButton.isEnabled = false

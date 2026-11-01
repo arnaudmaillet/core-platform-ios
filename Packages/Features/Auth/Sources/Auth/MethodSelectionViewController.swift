@@ -28,25 +28,14 @@ final class MethodSelectionViewController: AuthStepTableViewController {
     static let helpItemIdentifier = "auth.methods.help"
     static let closeItemIdentifier = "auth.methods.close"
 
-    private lazy var helpItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(image: UIImage(systemName: "questionmark"), primaryAction: UIAction { [weak self] _ in
-            self?.onHelp?()
-        })
-        item.identifier = Self.helpItemIdentifier
-        item.accessibilityIdentifier = Self.helpItemIdentifier
-        item.accessibilityLabel = "Help"
-        return item
-    }()
+    // The form's steps wear the same two (`AuthFormBar`, #2022).
+    private lazy var helpItem = AuthFormBar.makeHelpItem(identifier: Self.helpItemIdentifier) { [weak self] in
+        self?.onHelp?()
+    }
 
-    private lazy var closeItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
-            self?.onClose?()
-        })
-        item.identifier = Self.closeItemIdentifier
-        item.accessibilityIdentifier = Self.closeItemIdentifier
-        item.accessibilityLabel = "Close"
-        return item
-    }()
+    private lazy var closeItem = AuthFormBar.makeCloseItem(identifier: Self.closeItemIdentifier) { [weak self] in
+        self?.onClose?()
+    }
 
     private static let methodCornerRadius: CGFloat = 12
 

@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// The sign-in flow's navigation stacks, and the sheets they are presented
@@ -87,6 +88,8 @@ public final class ContentFittingNavigationController: UINavigationController, U
     public override func viewDidLoad() {
         super.viewDidLoad()
         observeContent(of: topViewController)
+        // The root's bar now: `willShow` may come after its first frame.
+        if let root = viewControllers.first { applyFormBar(to: root) }
     }
 
     /// The sheet height the top step needs, excluding the bottom safe area
@@ -200,6 +203,75 @@ public final class ContentFittingNavigationController: UINavigationController, U
         leave()
     }
 
+    // MARK: - The form's bar (#2022)
+
+    /// The form's ? was tapped. Not wired yet, as on the method list (#1969).
+    var onHelp: (() -> Void)?
+    /// Whether a step's call runs: × and the back are disabled, never hidden.
+    private(set) var isFormWorking = false
+
+    /// The form's × — the swipe's exit, behind the swipe's own guard: once a
+    /// code is sent (`protectsInput`), one confirmation first; before, the
+    /// form closes at once, back to the method list.
+    func closeForm() {
+        if let top = topViewController, protectsInput?(top) == true {
+            confirmLeaving()
+        } else {
+            leave()
+        }
+    }
+
+    /// One bar on every form step: × on the right (inboard of nothing; a
+    /// step's own items, Verify, stand inboard of it); on the left ? on the
+    /// root and on a step with no way back, else the native back chevron.
+    /// Native items only (#1679).
+    func applyFormBar(to step: UIViewController, isRoot: Bool? = nil) {
+        guard isForm else { return }
+        // Its own items first, set in `viewDidLoad`: the bar is laid over them.
+        step.loadViewIfNeeded()
+        let item = step.navigationItem
+        let isRoot = isRoot ?? (viewControllers.first === step)
+        let offersWayBack = (step as? AuthFormStep)?.offersWayBack ?? true
+        item.hidesBackButton = !offersWayBack
+        item.leftBarButtonItem = AuthFormBar.leadsWithHelp(isRoot: isRoot, offersWayBack: offersWayBack)
+            ? AuthFormBar.makeHelpItem { [weak self] in self?.onHelp?() }
+            : nil
+        // Through the screen's OWN trailing list, which bar toasts share.
+        let own = step.ownTrailingBarItems.filter { $0.identifier != AuthFormBar.closeIdentifier }
+        let close = AuthFormBar.makeCloseItem { [weak self] in self?.closeForm() }
+        close.isEnabled = !isFormWorking
+        step.setOwnTrailingBarItems([close] + own, animated: false)
+        // The back the NEXT step shows is this step's: a chevron alone, kept
+        // so a call can disable it (`setFormWorking`).
+        if item.backBarButtonItem == nil {
+            item.backBarButtonItem = UIBarButtonItem(title: "", style: .plain, target: nil, action: nil)
+        }
+    }
+
+    /// A pushed step arrives wearing the form's bar: laid before the push,
+    /// so the transition carries it (`willShow` comes too late for the first
+    /// frame, and not at all off screen).
+    public override func pushViewController(_ viewController: UIViewController, animated: Bool) {
+        if isForm, !viewControllers.isEmpty {
+            applyFormBar(to: viewController, isRoot: false)
+        }
+        super.pushViewController(viewController, animated: animated)
+    }
+
+    /// A step's call runs or ends (#2022): × and the back chevron are
+    /// disabled, NOT hidden — the bar keeps its shape — and the edge swipe
+    /// waits too. ? stays enabled.
+    func setFormWorking(_ working: Bool) {
+        guard isForm else { return }
+        isFormWorking = working
+        topViewController?.ownTrailingBarItems
+            .first { $0.identifier == AuthFormBar.closeIdentifier }?.isEnabled = !working
+        if viewControllers.count >= 2 {
+            viewControllers[viewControllers.count - 2].navigationItem.backBarButtonItem?.isEnabled = !working
+        }
+        interactivePopGestureRecognizer?.isEnabled = !working
+    }
+
     /// VoiceOver's escape, the only non-visual way out with no close button:
     /// the same rule as the swipe.
     public override func accessibilityPerformEscape() -> Bool {
@@ -246,6 +318,7 @@ public final class ContentFittingNavigationController: UINavigationController, U
         animated: Bool
     ) {
         observeContent(of: viewController)
+        applyFormBar(to: viewController)
         moveSheet(to: viewController)
         // A step already laid out (a pop) reports at once, alongside the
         // transition; a new one reports when its first layout sizes it.
