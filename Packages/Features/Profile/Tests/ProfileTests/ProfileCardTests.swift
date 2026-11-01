@@ -175,6 +175,29 @@ struct ProfileCardTests {
         #expect(card.toolbarItems?.map(\.identifier) == identities)
     }
 
+    /// THE CARD READS THE PROFILE'S RELATION (#2014): the avatar's mark is
+    /// the profile's mapping, whatever the card's toolbar shows.
+    @Test func theCardsAvatarWearsTheProfilesRelation() async throws {
+        let host = Host()
+        let card = try await makeCard(following: false, host: host)
+        for state in [ProfileViewModel.FollowButton.follow, .requested, .following, .unavailable] {
+            card.debugApplyFollowButton(state)
+            let expected = ProfileHeaderView.avatarMark(for: state, mutual: false, blocked: false, isGuest: false)
+            #expect(card.headerView.relationMark == expected, "\(state)")
+        }
+    }
+
+    /// The card's avatar wears no "+": followed, the check comes.
+    @Test func theCardsAvatarWearsNoPlus() async throws {
+        let host = Host()
+        let card = try await makeCard(following: false, host: host)
+        #expect(card.headerView.relationMark == .none, "a + on the card's avatar")
+        card.debugApplyFollowButton(.following)
+        #expect(card.headerView.relationMark == .following)
+        card.debugApplyFollowButton(.requested)
+        #expect(card.headerView.relationMark == .pending, "the card's avatar lost the pending clock")
+    }
+
     /// Followed, the bell comes in and Message takes the free width — Follow
     /// is never matched with the bell (#1678, the owner's recording).
     @Test func followToFollowingBringsTheBellAndStretchesMessage() async throws {

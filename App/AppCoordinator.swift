@@ -604,6 +604,17 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
                 stub: ProfileIdentityStub(handle: arguments[index + 2], displayName: arguments[index + 3])
             ))
         }
+        // `-open-profile-card <id>` presents the profile CARD (the sheet a
+        // bottom toolbar's author pill opens, #1524) over the launch screen,
+        // a beat after the shell is up, so the card's header is verifiable
+        // without a tap (#2014).
+        if let index = arguments.firstIndex(of: "-open-profile-card"), index + 1 < arguments.count {
+            let id = ProfileID(arguments[index + 1])
+            let router = container.router
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                router.route(to: .profileCard(id, stub: nil))
+            }
+        }
         if let index = arguments.firstIndex(of: "-open-post"), index + 1 < arguments.count {
             container.router.route(to: .post(PostID(arguments[index + 1])))
         }

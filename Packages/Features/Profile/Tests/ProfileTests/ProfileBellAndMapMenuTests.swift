@@ -445,6 +445,58 @@ extension ProfileBellAndMapMenuTests {
         #expect(ProfileViewController.barBadge(for: .hidden, mutual: false) == nil)
     }
 
+    // MARK: - The avatar's relation mark (#2014)
+
+    /// ⚠️ NO "+" ON THE AVATAR (the owner, 2026-11-01): following,
+    /// friends and the pending clock, as the bar maps them; nothing for
+    /// someone blocked or for a guest.
+    @Test func theAvatarWearsNoPlus() {
+        typealias Header = ProfileHeaderView
+        #expect(Header.avatarMark(for: .following, mutual: false, blocked: false, isGuest: false) == .following)
+        #expect(Header.avatarMark(for: .following, mutual: true, blocked: false, isGuest: false) == .friends)
+        #expect(Header.avatarMark(for: .requested, mutual: false, blocked: false, isGuest: false) == .pending)
+        for state in [ProfileViewModel.FollowButton.following] {
+            #expect(Header.avatarMark(for: state, mutual: true, blocked: true, isGuest: false) == PersonPill.Badge.none)
+            #expect(Header.avatarMark(for: state, mutual: true, blocked: false, isGuest: true) == PersonPill.Badge.none)
+        }
+        for state in [ProfileViewModel.FollowButton.follow, .edit, .hidden, .unavailable] {
+            #expect(Header.avatarMark(for: state, mutual: false, blocked: false, isGuest: false) == PersonPill.Badge.none,
+                    "\(state)")
+        }
+    }
+
+    /// Friends on the avatar, as in the bar: the two people and the accent
+    /// ring.
+    @Test func theProfilesAvatarWearsTheRelation() async throws {
+        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: true, isMutual: true, isBlocked: false))
+        try #require(await settle { screen.headerView.relationMark == .friends })
+        screen.debugSetTrayScrolledAway(true)
+        #expect(try pill(screen).followBadge == .friends, "the bar and the avatar disagree")
+    }
+
+    /// The viewer's own profile: no mark, the grey rim.
+    @Test func theViewersOwnAvatarWearsNoMark() async throws {
+        let (screen, _, _) = makeScreen(relationship: .me, own: true)
+        try #require(await settle { screen.followButtonState == .edit })
+        #expect(screen.headerView.relationMark == .none)
+        #expect(screen.headerView.debugRelationSymbol == nil)
+        #expect(screen.headerView.debugAvatarRingWidth == 3)
+    }
+
+    /// Not followed, the avatar is bare; the tray's Follow brings the check,
+    /// as it turns the bar's pill.
+    @Test func theTraysFollowBringsTheAvatarsCheck() async throws {
+        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .follow })
+        #expect(screen.headerView.relationMark == .none, "a + on the profile's avatar")
+        #expect(screen.headerView.debugRelationSymbol == nil)
+        #expect(screen.headerView.debugTapFollow())
+        try #require(await settle { screen.followButtonState == .following }, "the tray did not follow")
+        #expect(screen.headerView.relationMark == .following, "the tray's Follow left the avatar behind")
+        screen.debugSetTrayScrolledAway(true)
+        #expect(try pill(screen).followBadge == .following)
+    }
+
     /// The "+" follows, through the tray's own path: the badge turns.
     @Test func thePlusFollows() async throws {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
