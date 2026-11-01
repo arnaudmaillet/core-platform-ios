@@ -99,7 +99,7 @@ struct SnapBarPillWidthsTests {
         }
     }
 
-    /// A text post's footer (#1924): `[author] [♥ n] [☆] [↪]` fits at the
+    /// A text post's footer (#1924, #1999): `[author] [♥ n] [☆]` fits at the
     /// default size and at XXXL's glyphs, the pill at its face when the
     /// room is short — never folding into `•••`.
     @Test(arguments: phoneWidths)
@@ -113,9 +113,23 @@ struct SnapBarPillWidthsTests {
                 navBarWidth: width, toolbarWidth: width, walletWidth: Self.wallet, sort: nil,
                 toolbarIcon: icon, toolbarLike: like
             ).toolbarAuthorBesideLike
-            let run = 27.5 + (pill + 10) + 12.5 + like + 12.5 + 48 + 12.5 + 48 + 27.5
+            let run = 27.5 + (pill + 10) + 12.5 + like + 12.5 + 48 + 27.5
             #expect(run <= width, "\(width)pt, \(icon)pt glyphs: the text footer is \(run) — it folds into •••")
         }
+    }
+
+    /// ⚠️ THE PILL TAKES THE ROOM SHARE LEFT (#1999, the owner 2026-11-01):
+    /// at the default size its budget clears the face-only threshold on
+    /// every phone, so the name shows, truncated — no face alone with a hole
+    /// before the heart. (`PersonPill.faceOnlyThreshold`: the face, its
+    /// badge's overhang, the gaps and a few letters — about 100 pt.)
+    @Test(arguments: phoneWidths)
+    func theTextFootersPillShowsItsName(_ width: CGFloat) {
+        let pill = SnapBarPillWidths.resolve(
+            navBarWidth: width, toolbarWidth: width, walletWidth: Self.wallet, sort: nil,
+            toolbarIcon: SnapBarPillWidths.defaultToolbarIcon, toolbarLike: 121
+        ).toolbarAuthorBesideLike
+        #expect(pill >= 100, "\(width)pt: the text footer's pill is \(pill) — its face alone")
     }
 
     /// What a pill's width depends on is the bars — and the one input that

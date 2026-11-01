@@ -47,8 +47,9 @@ struct SnapBarPillWidths: Equatable {
     /// footer's stock items leave (`toolbarReserve(icon:)`), capped, so the
     /// run never folds into `•••`.
     var toolbarAuthor: CGFloat
-    /// The same on a text post's footer (#1924): `[author] [♥ n] [☆] [↪]`,
-    /// the like in repost's place (`textToolbarReserve`).
+    /// The same on a text post's footer (#1924): `[author] [♥ n] [☆]`, the
+    /// like in repost's place and Share in the comment field's slot (#1999,
+    /// `textToolbarReserve`).
     var toolbarAuthorBesideLike: CGFloat
     /// Whether the comments sort shows its word; false without a sort.
     var sortShowsTitle: Bool
@@ -109,11 +110,17 @@ struct SnapBarPillWidths: Equatable {
 
     /// A text post's footer (#1924): the margins and the pill's glass as
     /// above, the like's `like`-wide bubble, ☆ alone in its own (its glyph
-    /// and the bar's 10), ↪'s 48, the 13pt gaps between, and the slack.
-    /// Repost lives in the share sheet there: with it, the run folded ⇄ and
-    /// ↪ into `•••` on an iPhone SE (the owner, 2026-10-30).
+    /// and the bar's 10), the 13pt gaps between, and the slack. Repost lives
+    /// in the share sheet there: with it, the run folded ⇄ and ↪ into `•••`
+    /// on an iPhone SE (the owner, 2026-10-30).
+    ///
+    /// ⚠️ NO ↪ ANY MORE (#1999): Share moved to the comment field's slot.
+    /// Its 48 + 13 stayed in this sum for a while, and the pill's budget fell
+    /// under `PersonPill`'s face-only threshold on every phone — the owner
+    /// saw a face alone and a hole before the heart. The pill takes the
+    /// room back: its name shows, truncated.
     static func textToolbarReserve(icon: CGFloat, like: CGFloat) -> CGFloat {
-        28 + 10 + 13 + like + 13 + (icon + 10) + 13 + 48 + 28 + slack
+        28 + 10 + 13 + like + 13 + (icon + 10) + 28 + slack
     }
 
     /// A stock glyph item's width at `traits`' text size.
