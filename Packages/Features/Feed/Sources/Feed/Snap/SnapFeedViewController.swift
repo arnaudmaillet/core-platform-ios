@@ -1815,6 +1815,7 @@ final class SnapFeedViewController: UIViewController {
                 // The comments engagement's two verbs, cell → screen: the
                 // pill opens the panel, a strip tap while engaged closes it.
                 cell.onRequestComments = { [weak self] id in self?.presentComments(for: id) }
+                cell.onReactionsRunningLow = { [weak self] id in self?.viewModel.bandRanLow(for: id) }
                 // With the side list open, a tap on the card closes it
                 // (#1550): the clip pauses from its tile instead.
                 cell.interceptsMediaTap = { [weak self] in

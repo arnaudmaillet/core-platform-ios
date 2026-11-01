@@ -306,6 +306,9 @@ public actor CommentsRepository: CommentsProviding {
     /// after reading it (blocks, hidden words, held comments), so a page can
     /// come back short, or empty, with more behind it.
     public func loadCommentsPage(for postID: PostID, after pageToken: String?) async throws -> CommentPage {
+        // ⚠️ ONE PAGINATION FOR THE BAND AND THE PANEL (#2005): a page past
+        // the first that either already loaded is not asked for again.
+        if let pageToken, let kept = laterPages[Self.laterPageKey(postID, pageToken)] { return kept }
         // Whose page this is, asked before the fetch (#893).
         let writer = topPages.viewer
         var request = Comment_V1_ListTopLevelRequest()
@@ -363,9 +366,20 @@ public actor CommentsRepository: CommentsProviding {
         // prefetch: a page opened once and returned to should render
         // instantly the second time for the same reason it should the first.
         if pageToken == nil { topPages.set(entries, for: postID, persistingAs: writer) }
-        return CommentPage(
+        let page = CommentPage(
             entries: entries, nextPageToken: nextToken.isEmpty ? nil : nextToken, replyTokens: replyTokens
         )
+        // Kept for this viewer's session, for whichever surface asks next —
+        // and only while the viewer that asked is still the one signed in.
+        if let pageToken, writer == topPages.viewer { laterPages[Self.laterPageKey(postID, pageToken)] = page }
+        return page
+    }
+
+    /// Pages past the first, by post and token, for this viewer (#2005).
+    private var laterPages: [String: CommentPage] = [:]
+
+    private static func laterPageKey(_ postID: PostID, _ token: String) -> String {
+        "\(postID.rawValue)|\(token)"
     }
 
     /// ⚠️ THE ORDER IS READ AGAIN PER PAGE (comment.v1): a reply whose likes
@@ -662,5 +676,6 @@ extension CommentsRepository: ViewerScoped {
     public func viewerDidChange(_ state: ViewerState) async {
         viewerMirror.set(nil)
         topPages.removeAll()
+        laterPages.removeAll()
     }
 }

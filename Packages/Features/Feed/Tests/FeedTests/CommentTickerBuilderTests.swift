@@ -107,20 +107,26 @@ struct CommentTickerBuilderTests {
         #expect(!ids.contains("plain-phrase"))
     }
 
-    @Test func capsQueueAtMaxItems() {
-        let queue = builder.build(shortEntries(CommentTickerBuilder.maxItems + 10), postID: PostID("post-1"))
-        #expect(queue.count == CommentTickerBuilder.maxItems)
+    /// The pool is capped at a cycle per page the band may fetch, not at one
+    /// cycle (#2005).
+    @Test func capsThePoolAtMaxPoolItems() {
+        let queue = builder.build(shortEntries(CommentTickerBuilder.maxPoolItems + 10), postID: PostID("post-1"))
+        #expect(queue.count == CommentTickerBuilder.maxPoolItems)
+        #expect(CommentTickerBuilder.maxPoolItems == CommentTickerBuilder.maxItems * (1 + FeedViewModel.maxExtraReactionPages))
     }
 
-    @Test func queueIsDeterministicPerPostAndVariesAcrossPosts() {
-        let entries = shortEntries(12)
-        let first = builder.build(entries, postID: PostID("post-1"))
-        let again = CommentTickerBuilder().build(entries, postID: PostID("post-1"))
-        #expect(first == again) // same post → identical stream, across instances
-
-        let other = builder.build(entries, postID: PostID("post-2"))
-        #expect(Set(first.map(\.id)) == Set(other.map(\.id)))
-        #expect(first != other) // different seed → different mix (deterministic, so stable to assert)
+    /// In the order the comments came (#2005): deterministic, and a page that
+    /// lands later only APPENDS to the pool — so the band merges it without
+    /// a restart. The mix is the tape's, per cycle.
+    @Test func thePoolKeepsTheCommentsOrderAndALaterPageOnlyAppends() {
+        let first = shortEntries(12)
+        let pool = builder.build(first, postID: PostID("post-1"))
+        #expect(pool == CommentTickerBuilder().build(first, postID: PostID("post-1")))
+        #expect(pool.map(\.id) == first.map(\.id))
+        let more = (0..<8).map { entry("p2-\($0)", "W \($0)") }
+        let grown = builder.build(first + more, postID: PostID("post-1"))
+        #expect(Array(grown.prefix(pool.count)) == pool, "a later page reordered the pool")
+        #expect(grown.count == pool.count + more.count)
     }
 }
 

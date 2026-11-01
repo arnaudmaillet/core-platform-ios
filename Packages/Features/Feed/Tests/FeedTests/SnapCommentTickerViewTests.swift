@@ -79,9 +79,23 @@ struct SnapCommentTickerViewTests {
         ticker.subviews.filter { view in view.subviews.contains { $0 is UILabel } }
     }
 
-    /// Lets the band's spawn timers fire: `seconds` of the main run loop.
+    /// Lets the band's spawn timers fire: `seconds` of the main run loop —
+    /// for checking that nothing comes.
     private func run(_ seconds: TimeInterval) {
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+    }
+
+    /// Runs the main run loop until `condition` holds, for at most `looks`
+    /// turns of 10 ms; true when it held.
+    /// ⚠️ A LOOK BUDGET, NOT A WALL-CLOCK DEADLINE: a starved runner can spend
+    /// seconds before a spawn timer fires, and a deadline counts those
+    /// seconds against the test (#1979, #1985).
+    private func run(until condition: () -> Bool, looks: Int = 6_000) -> Bool {
+        for _ in 0..<looks {
+            if condition() { return true }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        return condition()
     }
 
     /// ⚠️ THE BAND ARRIVES EMPTY (#2000, the owner 2026-11-01): activation
@@ -93,7 +107,7 @@ struct SnapCommentTickerViewTests {
             ticker.setActive(true)
             #expect(bubbleViews(ticker).isEmpty, "the band was pre-filled")
 
-            run(0.1)
+            #expect(run(until: { !bubbleViews(ticker).isEmpty }))
             let first = bubbleViews(ticker)
             #expect(first.count == 1, "lane 0 alone enters first: \(first.count)")
             let flight = first.first?.layer.animation(forKey: "flight") as? CABasicAnimation
@@ -112,7 +126,7 @@ struct SnapCommentTickerViewTests {
         hosting { window in
             let ticker = makeTicker(in: window)
             ticker.setActive(true)
-            run(0.1)
+            #expect(run(until: { !bubbleViews(ticker).isEmpty }))
             let lanes = Set(bubbleViews(ticker).map { Int($0.frame.minY.rounded()) })
             #expect(lanes.count == 1, "more than one lane entered at once")
         }
@@ -146,7 +160,7 @@ struct SnapCommentTickerViewTests {
 
             window.addSubview(ticker)
             #expect(bubbleViews(ticker).isEmpty, "it arrived pre-filled")
-            run(0.1)
+            #expect(run(until: { !bubbleViews(ticker).isEmpty }))
             #expect(bubbleViews(ticker).count == 1)
             #expect(bubbleViews(ticker).allSatisfy { $0.layer.animation(forKey: "flight") != nil })
         }
@@ -164,7 +178,7 @@ struct SnapCommentTickerViewTests {
 
             ticker.setHeldForFlight(false)
             #expect(bubbleViews(ticker).isEmpty, "the landing pre-filled the band")
-            run(0.1)
+            #expect(run(until: { !bubbleViews(ticker).isEmpty }))
             #expect(bubbleViews(ticker).count == 1)
         }
     }
@@ -178,6 +192,36 @@ struct SnapCommentTickerViewTests {
             ticker.debugFillBand()
             ticker.replayEntrance()
             #expect(bubbleViews(ticker).isEmpty)
+        }
+    }
+
+    /// ⚠️ A PAGE THAT LANDS JOINS THE POOL (#2005): comments that keep every
+    /// old one merge into the tape; nothing on screen moves or restarts.
+    @Test func aLandedPageMergesWithoutARestart() {
+        hosting { window in
+            let ticker = makeTicker(in: window)
+            ticker.setActive(true)
+            ticker.debugFillBand()
+            let before = positions(ticker)
+            #expect(!before.isEmpty)
+
+            ticker.setComments((0..<24).map { TickerCommentModel(id: "r\($0)", text: "GG 🔥 \($0)") })
+            let after = positions(ticker)
+            #expect(Set(after.keys) == Set(before.keys), "the band restarted on a merge")
+        }
+    }
+
+    /// The band asks for more once two thirds of its pool were shown, and not
+    /// again on the very next reads (#2005).
+    @Test func twoThirdsShownAsksOnce() {
+        hosting { window in
+            let ticker = makeTicker(in: window)
+            var asks = 0
+            ticker.onRunningLow = { asks += 1 }
+            ticker.setActive(true)
+            ticker.debugFillBand()
+            #expect(run(until: { asks > 0 }))
+            #expect(asks == 1)
         }
     }
 

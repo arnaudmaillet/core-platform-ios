@@ -581,6 +581,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The user asked for the comments surface (the empty-state pill today;
     /// more entry points later). Carries the represented post.
     var onRequestComments: ((PostID) -> Void)?
+    /// The page's band ran low on reactions: the screen may fetch the post's
+    /// next page of comments (#2005).
+    var onReactionsRunningLow: ((PostID) -> Void)?
     /// The rail's boost anchor asked to spend on the represented post (an
     /// amount, or one ×100 shot). The owning VC answers through the wallet and
     /// calls back `playBoostConfirmation` / `playBoostDenied` — the cell
@@ -1876,6 +1879,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.onCommentsTapped = { [weak self] in
             guard let self, let id = self.representedID, !self.isCommentsEngaged else { return }
             self.onRequestComments?(id)
+        }
+        chrome.onReactionsRunningLow = { [weak self] in
+            guard let self, let id = self.representedID else { return }
+            self.onReactionsRunningLow?(id)
         }
         chrome.onBoostRequested = { [weak self] spend in
             guard let self, let id = self.representedID else { return }
@@ -3447,6 +3454,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         setCommentsEngaged(false)
         clearComments()
         onRequestComments = nil
+        onReactionsRunningLow = nil
         onPostTrackTap = nil
         onPostTrackHold = nil
         onRequestBoost = nil
