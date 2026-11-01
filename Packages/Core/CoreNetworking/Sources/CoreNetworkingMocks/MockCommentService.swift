@@ -179,8 +179,12 @@ public final class MockCommentService: @unchecked Sendable {
     private func topLevel(
         postID: String, readers: [String], limit: Int32, token: String, sort: Comment_V1_ReplySort
     ) -> Comment_V1_ListCommentsResponse {
-        var comments = store.comments(for: postID, seed: seedComments(for: postID))
-        if sort == .popularity { comments = Self.sorted(comments, by: .popularity, likes: likeCount) }
+        // ⚠️ SORTED EITHER WAY (#2007): the seeds are written oldest first,
+        // and Recent, a conversation read from this order, came out upside
+        // down. Newest first, as the server answers.
+        let comments = Self.sorted(
+            store.comments(for: postID, seed: seedComments(for: postID)), by: sort, likes: likeCount
+        )
         let page = Self.page(comments, limit: limit, token: token)
         var response = Comment_V1_ListCommentsResponse()
         response.comments = visible(filtered(page.comments, postID: postID), readers: readers).map { comment in
