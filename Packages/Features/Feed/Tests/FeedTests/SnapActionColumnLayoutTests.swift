@@ -717,9 +717,9 @@ struct SnapActionColumnLayoutTests {
         let top = -stream.contentInset.top
         func pull() {
             stream.contentOffset.y = top
-            controller.scrollViewWillBeginDragging(stream)
+            stream.delegate?.scrollViewWillBeginDragging?(stream)
             stream.contentOffset.y = top - 60
-            controller.scrollViewDidScroll(stream)
+            stream.delegate?.scrollViewDidScroll?(stream)
         }
 
         bar.setKeyboardOpen(true)
@@ -749,9 +749,9 @@ struct SnapActionColumnLayoutTests {
         let top = -stream.contentInset.top
         func pull() {
             stream.contentOffset.y = top
-            controller.scrollViewWillBeginDragging(stream)
+            stream.delegate?.scrollViewWillBeginDragging?(stream)
             stream.contentOffset.y = top - 60
-            controller.scrollViewDidScroll(stream)
+            stream.delegate?.scrollViewDidScroll?(stream)
         }
 
         sort.debugMarkMenuVisible()
