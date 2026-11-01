@@ -168,6 +168,17 @@ public final class FeedViewModel {
     /// The loaded comments behind each built stream, so a preference change
     /// rebuilds every stream in place instead of waiting for a reload.
     private var entriesByPost: [PostID: [CommentEntry]] = [:]
+    /// Where each post's comments continue, from its last page (#2005).
+    private var nextCommentTokens: [PostID: String] = [:]
+    /// The band's extra pages, per post: in flight, fetched, and when.
+    private var reactionPageLoads: [PostID: Task<Void, Never>] = [:]
+    private var reactionPagesFetched: [PostID: Int] = [:]
+    private var lastReactionPageAt: [PostID: Date] = [:]
+    /// The band fetches at most this many pages past the first, per post per
+    /// session; then it loops on what it has (#2005).
+    nonisolated public static let maxExtraReactionPages = 5
+    /// The least time between two of a post's band pages.
+    nonisolated public static let reactionPageInterval: TimeInterval = 10
     /// Unregisters itself when the view model goes: a block observer's
     /// token is not `Sendable`, so the nonisolated `deinit` can't touch it.
     private let preferencesObservation = NotificationObservation()
@@ -497,7 +508,9 @@ public final class FeedViewModel {
         #endif
         // Silent on failure: the load slot frees up, so the next activation
         // of this page retries.
-        guard let entries = try? await commentsProvider.loadComments(for: id) else { return }
+        guard let page = try? await commentsProvider.loadCommentsPage(for: id, after: nil) else { return }
+        let entries = page.entries
+        nextCommentTokens[id] = page.nextPageToken
         // ORDER MATTERS inside `makeStreams`: the band resolves first, and
         // whether it came back with a queue is what tells the zone how much
         // of the post it has to speak for. A band below its engagement gate
@@ -510,6 +523,40 @@ public final class FeedViewModel {
         streamsByPost[id] = streams
         onCommentStreamsChange?(id, streams)
     }
+
+    /// The band ran low on reactions (#2005): fetch the post's next page of
+    /// comments, into the same pool. Guards: a next page exists; one in
+    /// flight per post; at least `reactionPageInterval` since the last; at
+    /// most `maxExtraReactionPages` per post. The band only asks while its
+    /// page is active and it is on screen, and asks again later when refused.
+    public func bandRanLow(for id: PostID) {
+        guard reactionPageLoads[id] == nil, let token = nextCommentTokens[id],
+              reactionPagesFetched[id, default: 0] < Self.maxExtraReactionPages else { return }
+        if let last = lastReactionPageAt[id], now().timeIntervalSince(last) < Self.reactionPageInterval { return }
+        lastReactionPageAt[id] = now()
+        reactionPageLoads[id] = Task { [weak self] in await self?.loadReactionPage(for: id, after: token) }
+    }
+
+    private func loadReactionPage(for id: PostID, after token: String) async {
+        defer { reactionPageLoads[id] = nil }
+        guard let commentsProvider,
+              let page = try? await commentsProvider.loadCommentsPage(for: id, after: token) else { return }
+        reactionPagesFetched[id, default: 0] += 1
+        nextCommentTokens[id] = page.nextPageToken
+        let known = Set((entriesByPost[id] ?? []).map(\.id))
+        let entries = (entriesByPost[id] ?? []) + page.entries.filter { !known.contains($0.id) }
+        entriesByPost[id] = entries
+        let streams = makeStreams(from: entries, for: id)
+        streamsByPost[id] = streams
+        onCommentStreamsChange?(id, streams)
+    }
+
+    #if DEBUG
+    /// Whether a band page is in flight for `id`, and how many were fetched.
+    func debugReactionPages(for id: PostID) -> (inFlight: Bool, fetched: Int) {
+        (reactionPageLoads[id] != nil, reactionPagesFetched[id, default: 0])
+    }
+    #endif
 
     /// Called by the view for every cell about to display: pagination
     /// trigger, and the last-resort ticker prefetch (the collection view's

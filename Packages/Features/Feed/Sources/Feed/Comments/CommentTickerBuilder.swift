@@ -22,9 +22,11 @@ public struct TickerCommentModel: Equatable, Sendable, Identifiable {
     }
 }
 
-/// Distills a post's comments into the ticker's wrap-around queue. Pure and
-/// deterministic: the same comments for the same post always produce the same
-/// queue, so re-activating a page resumes an identical stream.
+/// Distills a post's comments into the band's POOL of reactions. Pure and
+/// deterministic: the same comments always produce the same pool, in the
+/// order they came — so a page that lands later only ADDS to it, and the
+/// band keeps running (#2005). The band's tape shuffles each cycle
+/// (`ReactionTape`).
 ///
 /// The band is a micro-reaction dump, not a comment stream: it exists to
 /// offload "GG 🔥🔥"-class reactions from the primary comment sheet. The
@@ -41,8 +43,12 @@ public struct CommentTickerBuilder: Sendable {
     /// empty queue and the band stays hidden — three lanes fed by a sparse
     /// loop read as a glitch, not a stream.
     public static let minTickerCount = 6
-    /// Queue cap; the conveyor wraps around, so it never needs more.
+    /// One cycle of the band's tape (`ReactionTape.cycleSize`). It capped
+    /// the whole queue until #2005, when the conveyor looped on it.
     public static let maxItems = 30
+    /// The pool's cap: a cycle per page, the first and the band's extra ones
+    /// (`FeedViewModel.maxExtraReactionPages`).
+    public static let maxPoolItems = maxItems * 6
 
     public init() {}
 
@@ -64,12 +70,11 @@ public struct CommentTickerBuilder: Sendable {
             ))
         }
         guard qualifying.count >= Self.minTickerCount else { return [] }
-
-        // Shuffle so recency order doesn't cluster similar comments, but
-        // seeded per post so the mix is stable across re-activations.
-        var generator = SplitMix64(seed: Self.fnv1a(postID.rawValue))
-        qualifying.shuffle(using: &generator)
-        return Array(qualifying.prefix(Self.maxItems))
+        // ⚠️ IN THE ORDER THEY CAME, NOT SHUFFLED (#2005): a later page then
+        // only appends, and the band merges it without a restart. The mix —
+        // recency order would cluster similar comments — is the tape's, a
+        // new shuffle per cycle.
+        return Array(qualifying.prefix(Self.maxPoolItems))
     }
 
     /// Reaction shape: any emoji-bearing body qualifies outright (dense emoji
