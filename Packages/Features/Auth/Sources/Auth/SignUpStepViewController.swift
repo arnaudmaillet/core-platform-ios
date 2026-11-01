@@ -59,10 +59,12 @@ class SignUpStepViewController: AuthStepTableViewController {
     func primaryTapped() {}
 
     /// Spinner on the button, back disabled, inputs locked — while a call runs.
+    /// The form's × and back are DISABLED, not hidden (#2022): the bar keeps
+    /// its shape (`ContentFittingNavigationController.setFormWorking`).
     func setWorking(_ working: Bool) {
         primaryButton.configuration?.showsActivityIndicator = working
         primaryButton.isEnabled = !working && canContinue
-        navigationItem.hidesBackButton = working
+        (navigationController as? ContentFittingNavigationController)?.setFormWorking(working)
         view.isUserInteractionEnabled = !working
         if working {
             Haptics.prepare(.error)

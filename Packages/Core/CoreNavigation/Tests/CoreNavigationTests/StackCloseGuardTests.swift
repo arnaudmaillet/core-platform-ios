@@ -24,6 +24,9 @@ struct StackCloseGuardTests {
         // arbiter: the override, and its `super` call.
         "ArbitratedNavigationController.swift": "routes popViewController through the arbiter",
         "UploadNavigationController.swift": "routes popViewController through the arbiter",
+        // The sign-in form's stack (#2022): the override, and its `super`
+        // call — it only refuses UIKit's pop while a call runs.
+        "ContentFittingNavigationController.swift": "holds UIKit's pop while a sign-in call runs",
         "PresentationClose.swift": "the guarded presentation close",
         // Not UIKit's `dismiss(animated:)`: a toast's own, on a view.
         "ToastView.swift": "the toast's own dismiss",
