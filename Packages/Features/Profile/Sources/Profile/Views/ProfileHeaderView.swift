@@ -213,6 +213,50 @@ final class ProfileHeaderView: HeroHeaderView {
         }
     }
 
+    // MARK: - The relation mark (#2014)
+
+    /// THE ONE MAPPING from the relationship to the badge, for the bar's
+    /// pill (#1451) and the avatar (#2014), on the profile and its card:
+    /// "+" while not followed, pending while asked, following, friends when
+    /// mutual. Nil for a profile with no relation to show: the viewer's own,
+    /// one the viewer cannot follow, one not read yet.
+    static func relationBadge(for state: ProfileViewModel.FollowButton, mutual: Bool) -> PersonPill.Badge? {
+        switch state {
+        case .follow: .follow
+        case .requested: .pending
+        case .following: mutual ? .friends : .following
+        default: nil
+        }
+    }
+
+    /// The avatar's mark (#2014): ⚠️ NEVER THE "+" (the owner, 2026-11-01)
+    /// — following and friends, the check and the two people with their
+    /// ring, and a pending request's clock. The tray (the card's toolbar)
+    /// offers the follow. None at all for someone blocked or for a guest.
+    /// Pure, for tests.
+    static func avatarMark(
+        for state: ProfileViewModel.FollowButton, mutual: Bool, blocked: Bool, isGuest: Bool
+    ) -> PersonPill.Badge {
+        guard !blocked, !isGuest else { return .none }
+        switch relationBadge(for: state, mutual: mutual) {
+        case .following: return .following
+        case .friends: return .friends
+        case .pending: return .pending
+        default: return .none
+        }
+    }
+
+    /// Wears the relationship on the avatar — through the badge's replace
+    /// and the ring's fade once on screen; the header never moves for it.
+    func configureRelationMark(
+        _ state: ProfileViewModel.FollowButton, mutual: Bool, blocked: Bool, isGuest: Bool
+    ) {
+        setRelationMark(
+            Self.avatarMark(for: state, mutual: mutual, blocked: blocked, isGuest: isGuest),
+            animated: window != nil
+        )
+    }
+
     /// Shows or hides one of the tray's buttons — through its own motion when
     /// the tray changes on screen, at once otherwise.
     private func show(_ button: AppControl, _ shown: Bool, animated: Bool) {

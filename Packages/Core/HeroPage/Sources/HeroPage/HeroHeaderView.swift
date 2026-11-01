@@ -206,6 +206,12 @@ open class HeroHeaderView: UIView {
     private let avatar: AvatarView?
     /// A `.custom` disc's view (a place's flag), filling it.
     private let customAvatar: UIView?
+    /// The relation's badge on a person's disc (#2014), the author pill's at
+    /// the disc's size; nil on a `.custom` one. A sibling of the disc, never
+    /// inside it: the disc clips its own bounds.
+    private let relationBadge: RelationBadgeView?
+    /// The disc's mask while a badge is drawn: the badge's cutout.
+    private let avatarCutout = CAShapeLayer()
     private let nameLabel = UILabel()
     private let verifiedBadge = UIImageView(image: UIImage(systemName: "checkmark.seal.fill"))
     private let handleLabel = UILabel()
@@ -881,9 +887,11 @@ open class HeroHeaderView: UIView {
         case .person:
             avatar = AvatarView(diameter: Metrics.avatarSize, size: .px512)
             customAvatar = nil
+            relationBadge = RelationBadgeView(metrics: RelationMarkMetrics(faceDiameter: Metrics.avatarSize))
         case .custom(let view):
             avatar = nil
             customAvatar = view
+            relationBadge = nil
         }
         bannerView = HeroBannerView(imagePipeline: imagePipeline)
         super.init(frame: .zero)
@@ -1194,9 +1202,14 @@ open class HeroHeaderView: UIView {
             }
             areCountersRedacted = true
             bannerView.setRedacted(true)
+            // The skeleton wears no relation (#2014).
+            applyRelationMark(animated: false)
             return
         }
         areCountersRedacted = false
+        // The relation comes in with the content: the badge's replace and
+        // the ring's fade, under the reveal.
+        applyRelationMark(animated: animated)
 
         // Alpha-only choreography: `configure(with:)` has already committed
         // the real content (and any structural truth like a hidden website
@@ -1298,6 +1311,135 @@ open class HeroHeaderView: UIView {
         avatar?.setPicture(url, pipeline: imagePipeline)
     }
 
+    // MARK: - The relation mark (#2014)
+
+    /// The relation the host asked for — what is drawn once the header is
+    /// not a skeleton.
+    public private(set) var relationMark: PersonPill.Badge = .none
+    /// The relation drawn now: none under the bones.
+    public private(set) var shownRelationMark: PersonPill.Badge = .none
+
+    /// The person's relation to the viewer, worn on the disc as the author
+    /// pill wears it (#2014): the badge on its rim at 45°, and the ring in
+    /// the rim's place while there is one. `.none` draws neither, and the
+    /// grey rim stays. A `.custom` disc wears none. The disc offers no
+    /// follow of its own: the profile wears only a relation that exists
+    /// (the owner, 2026-11-01), and every tap on the disc stays the disc's.
+    public func setRelationMark(_ mark: PersonPill.Badge, animated: Bool) {
+        relationMark = mark
+        applyRelationMark(animated: animated)
+    }
+
+    private func applyRelationMark(animated: Bool) {
+        guard let relationBadge else { return }
+        let mark = isRedacted ? .none : relationMark
+        guard mark != shownRelationMark else { return }
+        shownRelationMark = mark
+        let onScreen = animated && window != nil
+        relationBadge.show(mark, animated: onScreen)
+        applyRim(animated: onScreen)
+        applyAvatarCutout()
+    }
+
+    /// The disc's edge for `relation`: the relation's ring, at its width,
+    /// while there is one — otherwise the quiet grey rim (#1792), which
+    /// defines the disc over the banner. Pure, for tests.
+    public static func rim(
+        for relation: PersonPill.Badge, metrics: RelationMarkMetrics
+    ) -> (ink: UIColor, width: CGFloat) {
+        RelationMark.hasRing(relation)
+            ? (RelationMark.ringInk(for: relation), metrics.ringWidth)
+            : (Surface.avatarRim, Metrics.avatarRingWidth)
+    }
+
+    /// Draws the disc's edge — fading between the rim and a ring on screen.
+    private func applyRim(animated: Bool) {
+        let metrics = relationBadge?.metrics ?? RelationMarkMetrics(faceDiameter: Metrics.avatarSize)
+        let rim = Self.rim(for: shownRelationMark, metrics: metrics)
+        let color = rim.ink.resolvedColor(with: traitCollection).cgColor
+        let layer = avatarView.layer
+        if animated {
+            let ink = CABasicAnimation(keyPath: "borderColor")
+            ink.fromValue = layer.presentation()?.borderColor ?? layer.borderColor
+            ink.toValue = color
+            let width = CABasicAnimation(keyPath: "borderWidth")
+            width.fromValue = layer.presentation()?.borderWidth ?? layer.borderWidth
+            width.toValue = rim.width
+            for fade in [ink, width] {
+                fade.duration = 0.25
+                layer.add(fade, forKey: fade.keyPath)
+            }
+        }
+        layer.borderColor = color
+        layer.borderWidth = rim.width
+    }
+
+    /// The badge's offsets from the disc's trailing and bottom edges.
+    private var relationBadgeOffsets: [NSLayoutConstraint] = []
+
+    /// On the disc's circle, 45° below its trailing side (#1793), above the
+    /// identity row: it reaches no further than the disc's own square at the
+    /// header's sizes (`cornerOffset` is about zero), so nothing beside it
+    /// moves.
+    private func installRelationBadge() {
+        guard let relationBadge else { return }
+        let offset = relationBadge.metrics.cornerOffset
+        // Edge to edge, never centre to trailing: only an edge offset mirrors
+        // under right-to-left.
+        let trailing = relationBadge.trailingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: offset)
+        let bottom = relationBadge.bottomAnchor.constraint(equalTo: avatarView.bottomAnchor, constant: offset)
+        relationBadge.constrain(in: self) { _ in
+            trailing
+            bottom
+        }
+        relationBadgeOffsets = [trailing, bottom]
+    }
+
+    /// The mark follows the disc's resolved side (Dynamic Type, 96 to 110 pt).
+    private func sizeRelationMark(toSide side: CGFloat) {
+        guard let relationBadge else { return }
+        let metrics = RelationMarkMetrics(faceDiameter: side)
+        if metrics != relationBadge.metrics {
+            relationBadge.setMetrics(metrics)
+            for offset in relationBadgeOffsets { offset.constant = metrics.cornerOffset }
+            applyRim(animated: false)
+        }
+        applyAvatarCutout()
+    }
+
+    /// The disc loses the badge's disc and its gap (#1912), as the pill's
+    /// face does: whatever is behind the header shows round the badge. Cut
+    /// from the disc's own side, never the badge's frame, which may not be
+    /// laid out yet.
+    private func applyAvatarCutout() {
+        guard let relationBadge, shownRelationMark != .none, avatarView.bounds.width > 0 else {
+            avatarView.layer.mask = nil
+            return
+        }
+        let centre = relationBadge.metrics.badgeCentre(
+            inFaceOfSide: avatarView.bounds.width,
+            rightToLeft: effectiveUserInterfaceLayoutDirection == .rightToLeft
+        )
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        avatarCutout.fillRule = .evenOdd
+        avatarCutout.frame = avatarView.bounds
+        avatarCutout.path = RelationMark.faceMaskPath(cutout: RelationMark.cutout(centre: centre, metrics: relationBadge.metrics))
+        CATransaction.commit()
+        avatarView.layer.mask = avatarCutout
+    }
+
+    #if DEBUG
+    /// The badge's symbol as drawn — nil for none. Tests.
+    public var debugRelationSymbol: String? { relationBadge?.drawn.symbolName }
+    /// The badge, for its frame. Tests.
+    public var debugRelationBadge: RelationBadgeView? { relationBadge }
+    /// The disc's edge's width as drawn.
+    public var debugAvatarRingWidth: CGFloat { avatarView.layer.borderWidth }
+    /// Whether the disc has the badge's cutout taken out.
+    public var debugAvatarIsCutOut: Bool { avatarView.layer.mask === avatarCutout }
+    #endif
+
     // MARK: - Layout
 
     @objc private func avatarTapped() {
@@ -1310,16 +1452,16 @@ open class HeroHeaderView: UIView {
         // media, above the fade.
         avatarView.backgroundColor = Surface.mediaGround
         avatarView.clipsToBounds = true
-        avatarView.layer.borderWidth = Metrics.avatarRingWidth
         // ⚠️ ONE QUIET GREY (#1792, the owner 2026-10-27), not the page's
         // tone: over raw banner media the page's white or black read as a
-        // halo that flipped with the theme. A `CGColor`, so re-resolved on a
-        // style or contrast change.
-        avatarView.layer.borderColor = Surface.avatarRim.resolvedColor(with: traitCollection).cgColor
+        // halo that flipped with the theme — unless a relation ring takes
+        // its place (#2014, `rim(for:)`). A `CGColor`, so re-resolved on a
+        // style, contrast or accent change.
+        applyRim(animated: false)
         registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]
+            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, AccentThemeTrait.self]
         ) { (self: HeroHeaderView, _) in
-            self.avatarView.layer.borderColor = Surface.avatarRim.resolvedColor(with: self.traitCollection).cgColor
+            self.applyRim(animated: false)
         }
 
         if let avatar {
@@ -1351,6 +1493,9 @@ open class HeroHeaderView: UIView {
             guard let self, side > 0 else { return }
             // The disc (initials and face) follows the frame's side.
             self.avatar?.setDiameter(side)
+            // So does the relation mark (#2014), and its cutout is cut from
+            // the final side.
+            self.sizeRelationMark(toSide: side)
             // The disc's frame is final here — see `placeBannerFade`.
             self.placeBannerFade()
         }
@@ -1579,6 +1724,7 @@ open class HeroHeaderView: UIView {
             columnSpansAvatar,
             identityColumn.heightAnchor.constraint(greaterThanOrEqualTo: avatarView.heightAnchor)
         ])
+        installRelationBadge()
     }
 
     public override func layoutSubviews() {

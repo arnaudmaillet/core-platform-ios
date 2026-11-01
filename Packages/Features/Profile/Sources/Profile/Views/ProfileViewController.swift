@@ -387,6 +387,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             HeroScreenCost.measure("landing.relationship") {
                 self.followButtonState = state
                 self.headerView.configureAction(state)
+                self.applyRelationMark()
                 // Whose posts these are just changed: on the viewer's own
                 // profile the rows gain Edit and Delete, drawn now rather
                 // than once each row is configured again.
@@ -529,6 +530,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // Mirror the (possibly stub-seeded) relationship into the header's
         // tray, so Message visibility agrees with the toolbar from the start.
         headerView.configureAction(followButtonState)
+        applyRelationMark()
         render(.loading)
         viewModel.viewDidLoad()
     }
@@ -541,6 +543,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         let isTabRoot = navigationController?.viewControllers.first === self
         galleryPager.leadingPullTarget = isTabRoot ? DrawerPull.shared : nil
         galleryPager.reservesLeadingEdge = !isTabRoot
+        // A guest is known only once a gate is up the chain (#2014).
+        applyRelationMark()
         Task { [weak self] in await self?.viewModel.refreshShareToken() }
         // ⚠️ **AS EARLY AS THE TRANSITION ALLOWS, AND `viewDidAppear` IS NOT
         // EARLY.** Measured on a tab switch, headless: `viewWillAppear` at
@@ -1599,6 +1603,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             Feedback.success(message, symbol: "hand.raised.fill", from: navigationController ?? self)
         case .unblocked(let handle):
             Feedback.success("Unblocked \(handle)", symbol: "hand.raised.slash.fill", from: self)
+            // Unblocked, the "+" is back (#2014): the button never moved.
+            applyRelationMark()
         case .muteChanged(let handle, let scopes):
             #if DEBUG
             debugMuteToastsShown += 1
@@ -2195,16 +2201,20 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         return barIdentityItem
     }
 
-    /// The badge for the relation (#1451) — the post page's states: "+"
-    /// while not followed, pending while asked, following, friends when
-    /// mutual. Nil: no pill (a profile the viewer cannot follow).
+    /// The badge for the relation (#1451) — the avatar's own mapping
+    /// (`ProfileHeaderView.relationBadge`, #2014). Nil: no pill (a profile
+    /// the viewer cannot follow).
     static func barBadge(for state: ProfileViewModel.FollowButton, mutual: Bool) -> PersonPill.Badge? {
-        switch state {
-        case .follow: .follow
-        case .requested: .pending
-        case .following: mutual ? .friends : .following
-        default: nil
-        }
+        ProfileHeaderView.relationBadge(for: state, mutual: mutual)
+    }
+
+    /// Wears the relationship on the header's avatar (#2014), as the bar's
+    /// pill does.
+    private func applyRelationMark() {
+        headerView.configureRelationMark(
+            followButtonState, mutual: viewModel.isMutualFollow, blocked: viewModel.isBlocked,
+            isGuest: MemberGates.isGuest(self)
+        )
     }
 
     /// The bar's width less the back button and the trailing group — the

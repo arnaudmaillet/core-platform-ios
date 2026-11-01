@@ -29,6 +29,9 @@ import UIKit
 public final class PersonPill: UIView {
     /// The bar's item wrapper height on iOS 26 — the box the face centres in.
     public static let wrapperHeight: CGFloat = 36
+    /// The relation mark's sizes on the pill's face (#2014): a 2 pt ring and
+    /// a 20 pt badge.
+    nonisolated static let markMetrics = RelationMarkMetrics(faceDiameter: RelationMarkMetrics.pillFace)
 
     /// What the badge says about the viewer and the person.
     ///
@@ -123,7 +126,7 @@ public final class PersonPill: UIView {
     private let handleLabel = UILabel()
     /// The relation's mark, centred on the face's edge — nil when the pill
     /// carries none (the profile).
-    private let statusBadge: PersonPillBadgeView?
+    private let statusBadge: RelationBadgeView?
     /// The relation's ring around the face (#1298): grey while the viewer
     /// follows, pink once they are friends, none otherwise. A view for its
     /// place in the row; the ring itself is `ringShape`.
@@ -169,7 +172,7 @@ public final class PersonPill: UIView {
         self.ceiling = ceiling
         self.coldWidth = coldWidth
         avatar = AvatarView(diameter: AvatarImageView.bubbleDiameter, size: faceSize)
-        statusBadge = carriesBadge ? PersonPillBadgeView() : nil
+        statusBadge = carriesBadge ? RelationBadgeView(metrics: Self.markMetrics) : nil
         super.init(frame: .zero)
 
         // Clear: with no picture (yet) the initials behind show through.
@@ -204,7 +207,7 @@ public final class PersonPill: UIView {
         // #1277): the name starts clear of it, whatever the relation — a
         // constant, so a badge arriving never moves the pill's width.
         if statusBadge != nil {
-            row.setCustomSpacing(PersonPillBadgeView.overhang + Spacing.xs, after: avatar)
+            row.setCustomSpacing(Self.markMetrics.overhang + Spacing.xs, after: avatar)
         }
         // The face's leading inset matches its breathing in the wrapper, so it
         // sits evenly in the glass on three sides; the labels end the pill.
@@ -251,7 +254,7 @@ public final class PersonPill: UIView {
         // after the face (`overhang`). Edge to edge, never centre to trailing:
         // only an edge offset mirrors under right-to-left.
         if let statusBadge {
-            let offset = PersonPillBadgeView.cornerOffset(faceDiameter: AvatarImageView.bubbleDiameter)
+            let offset = Self.markMetrics.cornerOffset
             statusBadge.constrain(in: self) { _ in
                 statusBadge.trailingAnchor.constraint(equalTo: avatar.trailingAnchor, constant: offset)
                 statusBadge.bottomAnchor.constraint(equalTo: avatar.bottomAnchor, constant: offset)
@@ -348,7 +351,7 @@ public final class PersonPill: UIView {
     /// gap past it and the pill's end, and room for a few letters. Squeezed
     /// below it, the row crushed the face into an oval.
     static var faceOnlyThreshold: CGFloat {
-        faceOnlyWidth + PersonPillBadgeView.overhang + Spacing.xs + Spacing.md + 32
+        faceOnlyWidth + markMetrics.overhang + Spacing.xs + Spacing.md + 32
     }
 
     /// Whether the pill shows its face alone, its cap too narrow for a name.
@@ -403,7 +406,7 @@ public final class PersonPill: UIView {
     public func setRing(_ relation: Badge, animated: Bool) {
         guard statusBadge != nil, relation != ringRelation else { return }
         ringRelation = relation
-        ringInk = PersonPillRing.ink(for: relation)
+        ringInk = RelationMark.ringInk(for: relation)
         let target = ringInk.resolvedColor(with: traitCollection).cgColor
         if animated, window != nil {
             let fade = CABasicAnimation(keyPath: "fillColor")
@@ -435,7 +438,7 @@ public final class PersonPill: UIView {
     /// pill shows round the badge — the system's idiom for a status mark on
     /// a face. A true cutout, never a stroke in a guessed colour: the pill
     /// is glass over moving video.
-    public static let cutoutGap: CGFloat = 1.5
+    public static let cutoutGap = RelationMarkMetrics.cutoutGap
     private let faceCutout = CAShapeLayer()
     /// The row holding the face, laid out before the cutout is measured.
     private weak var faceRow: UIStackView?
@@ -455,9 +458,8 @@ public final class PersonPill: UIView {
     /// drawn.
     private func cutoutCircle(in view: UIView) -> UIBezierPath? {
         guard let statusBadge, badge != .none, !statusBadge.isHidden, statusBadge.bounds.width > 0 else { return nil }
-        let radius = PersonPillBadgeView.diameter / 2 + Self.cutoutGap
         let centre = statusBadge.convert(CGPoint(x: statusBadge.bounds.midX, y: statusBadge.bounds.midY), to: view)
-        return UIBezierPath(arcCenter: centre, radius: radius, startAngle: 0, endAngle: 2 * .pi, clockwise: true)
+        return RelationMark.cutout(centre: centre, metrics: Self.markMetrics)
     }
 
     /// The face's mask. Everything the face draws is a layer's content or a
@@ -468,15 +470,11 @@ public final class PersonPill: UIView {
             avatar.layer.mask = nil
             return
         }
-        // Everything but the badge's disc, whatever the face's size: the mask
-        // never depends on bounds that might not be final.
-        let path = UIBezierPath(rect: Self.faceMaskReach)
-        path.append(circle)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         faceCutout.fillRule = .evenOdd
         faceCutout.frame = avatar.bounds
-        faceCutout.path = path.cgPath
+        faceCutout.path = RelationMark.faceMaskPath(cutout: circle)
         CATransaction.commit()
         avatar.layer.mask = faceCutout
     }
@@ -512,9 +510,6 @@ public final class PersonPill: UIView {
         return ring.bounds.contains(centre) && !path.contains(centre)
     }
 
-    /// The face's mask reaches far past any face: only the cutout is out.
-    static let faceMaskReach = CGRect(x: -500, y: -500, width: 1000, height: 1000)
-
     /// Whether the face's mask lets `point` (in the face's space) show.
     /// Tests.
     public func faceShows(at point: CGPoint) -> Bool {
@@ -526,7 +521,7 @@ public final class PersonPill: UIView {
     /// Tests.
     public var drawnCutoutRadius: CGFloat? {
         guard avatar.layer.mask === faceCutout, faceCutout.path != nil else { return nil }
-        return PersonPillBadgeView.diameter / 2 + Self.cutoutGap
+        return Self.markMetrics.cutoutRadius
     }
 
     /// The symbol the badge draws now — nil for none. Tests.
@@ -594,122 +589,6 @@ public final class PersonPill: UIView {
     #endif
 }
 
-/// The person pill's relation badge (#925): a disc centred on the face's edge
-/// wearing the relation's symbol.
-///
-/// ONE CIRCLED SF SYMBOL in a palette (#1199): the disc and the mark are one
-/// symbol, so a change of relation is ONE replace — and to or from no badge
-/// the same symbol in clear ink, so appearing and disappearing are replaces
-/// too. The badge is never faded, scaled or hidden by hand.
-///
-/// ⚠️ FIXED INK, and a disc that is a SYMBOL, not a background. On glass a
-/// semantic ink pair draws vibrant and an inverted badge vanishes in dark mode
-/// (memory `sheet-glass-vibrancy-ink`), and the glass repaints a subview's
-/// `backgroundColor` with its own corner (`glass-paints-background-color`).
-final class PersonPillBadgeView: UIButton {
-    /// The disc's side — larger than the 16pt it was (the owner, 2026-10-16,
-    /// #1277).
-    static let diameter: CGFloat = 20
-    /// The room the row keeps past the face for the badge: half its side,
-    /// the most it could reach (#1277). On the corner it reaches less
-    /// (`cornerOffset`), so the pill's width does not change.
-    static var overhang: CGFloat { diameter / 2 }
-
-    /// How far the badge's trailing and bottom edges sit past the face's
-    /// (#1793): its centre on the face's circle at 45°, `r·cos 45°` from the
-    /// face's centre on both axes. Pure, for tests.
-    static func cornerOffset(faceDiameter: CGFloat) -> CGFloat {
-        let radius = faceDiameter / 2
-        return diameter / 2 - radius * (1 - cos(.pi / 4))
-    }
-    /// The touch area around the disc: a 20pt disc is still too small a target.
-    private static let touchOutset: CGFloat = 8
-
-    private let glyph = UIImageView()
-    /// The badge on screen.
-    private(set) var drawn: PersonPill.Badge = .none
-    /// Changes drawn through the replace transition.
-    private(set) var replaceCount = 0
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        glyph.isUserInteractionEnabled = false
-        glyph.contentMode = .center
-        glyph.constrain(in: self) { parent in
-            glyph.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            glyph.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-        }
-        // Its size is its own and never the pill's to negotiate.
-        NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: Self.diameter),
-            heightAnchor.constraint(equalToConstant: Self.diameter),
-        ])
-        glyph.image = Self.glyphImage(.none)
-        apply(interactionFor: .none)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        bounds.insetBy(dx: -Self.touchOutset, dy: -Self.touchOutset).contains(point)
-    }
-
-    var glyphImage: UIImage? { glyph.image }
-
-    func show(_ badge: PersonPill.Badge, animated: Bool) {
-        guard badge != drawn else { return }
-        drawn = badge
-        apply(interactionFor: badge)
-        let image = Self.glyphImage(badge)
-        guard animated else {
-            glyph.image = image
-            return
-        }
-        replaceCount += 1
-        glyph.setSymbolImage(image, contentTransition: .replace)
-    }
-
-    /// Only the "+" takes touches — a state mark lets them through to the
-    /// pill's own tap. The pill is the one accessibility element.
-    private func apply(interactionFor badge: PersonPill.Badge) {
-        isUserInteractionEnabled = badge == .follow
-        isAccessibilityElement = false
-    }
-
-    /// The disc's ink for a badge (#1197, the owner 2026-10-15): the "+"
-    /// black; a FOLLOWED check and a pending request grey, their mark pink;
-    /// FRIENDS pink, their mark white; clear for none.
-    static func discInk(for badge: PersonPill.Badge) -> UIColor {
-        switch badge {
-        case .none: .clear
-        case .follow: PersonPillBadgeInks.restingDisc
-        case .following, .pending: PersonPillBadgeInks.quietDisc
-        case .friends: PersonPillBadgeInks.accent
-        }
-    }
-
-    /// The glyph's ink for a badge: pink on the grey discs, white elsewhere.
-    static func glyphInk(for badge: PersonPill.Badge) -> UIColor {
-        switch badge {
-        case .none: .clear
-        case .following, .pending: PersonPillBadgeInks.accent
-        case .follow, .friends: PersonPillBadgeInks.glyph
-        }
-    }
-
-    /// ⚠️ A palette is fixed ink already (no tint reaches it), and must NOT
-    /// be re-marked `.alwaysOriginal`: that drops the palette and draws the
-    /// whole symbol in the view's tint (measured: the system blue).
-    private static func glyphImage(_ badge: PersonPill.Badge) -> UIImage {
-        let configuration = UIImage.SymbolConfiguration(pointSize: diameter - 3, weight: .semibold)
-            .applying(UIImage.SymbolConfiguration(paletteColors: [glyphInk(for: badge), discInk(for: badge)]))
-        return UIImage(systemName: badge.circledSymbolName)?
-            .applyingSymbolConfiguration(configuration)
-            ?? UIImage()
-    }
-}
-
 /// The person pill badge's fixed inks (#968, #1197): one value in either
 /// appearance — black disc and white glyph at rest.
 public enum PersonPillBadgeInks {
@@ -726,16 +605,12 @@ public enum PersonPillBadgeInks {
 /// The face's relation ring (#1298, the owner 2026-10-16): the badge's own
 /// inks, so the ring and the badge say the same thing in the same colour.
 public enum PersonPillRing {
-    /// The ring's thickness, outside the face.
-    public static let width: CGFloat = 2
+    /// The ring's thickness on the pill's face, outside it.
+    public static let width = PersonPill.markMetrics.ringWidth
 
     /// Grey (the badge's quiet disc) while the viewer follows, pink (the
-    /// accent) once they are friends, clear otherwise.
+    /// accent) once they are friends, clear otherwise (`RelationMark`).
     public static func ink(for relation: PersonPill.Badge) -> UIColor {
-        switch relation {
-        case .following: PersonPillBadgeInks.quietDisc
-        case .friends: PersonPillBadgeInks.accent
-        case .none, .follow, .pending: .clear
-        }
+        RelationMark.ringInk(for: relation)
     }
 }

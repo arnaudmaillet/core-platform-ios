@@ -140,6 +140,7 @@ final class ProfileCardViewController: UIViewController {
         statusView.pin(to: headerClip)
         render(.loading)
         applyBars()
+        applyRelationMark()
         viewModel.viewDidLoad()
         NotificationCenter.default.addObserver(
             self, selector: #selector(decorativeMotionDidChange), name: .decorativeMotionDidChange, object: nil
@@ -159,6 +160,12 @@ final class ProfileCardViewController: UIViewController {
 
     @objc private func decorativeMotionDidChange() {
         updateBannerVideo()
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // A guest is known only once the presenter's gate is up the chain.
+        applyRelationMark()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -288,6 +295,7 @@ final class ProfileCardViewController: UIViewController {
         viewModel.onFollowButtonChange = { [weak self] state in
             self?.followButtonState = state
             self?.applyBars()
+            self?.applyRelationMark()
         }
         viewModel.onMuteScopesChange = { [weak self] _ in self?.applyBars() }
         viewModel.onActionResult = { [weak self] result in self?.render(result) }
@@ -348,6 +356,7 @@ final class ProfileCardViewController: UIViewController {
             Feedback.success(message, symbol: "hand.raised.fill", from: presentingViewController ?? self)
         case .unblocked(let handle):
             Feedback.success("Unblocked \(handle)", symbol: "hand.raised.slash.fill", from: self)
+            applyRelationMark()
         case .muteChanged(let handle, let scopes):
             Feedback.success(
                 ProfileViewModel.muteMessage(handle: handle, scopes: scopes),
@@ -602,6 +611,7 @@ final class ProfileCardViewController: UIViewController {
     func debugApplyFollowButton(_ state: ProfileViewModel.FollowButton) {
         followButtonState = state
         applyBars()
+        applyRelationMark()
     }
 
     /// The ••• menu's rows, flattened. Tests.
@@ -642,6 +652,14 @@ final class ProfileCardViewController: UIViewController {
                 confirmBlock: { [weak self] in self?.confirmBlock() },
                 clearHistory: {}
             )
+        )
+    }
+
+    /// Wears the relationship on the header's avatar (#2014): the
+    /// profile's own mapping (`ProfileHeaderView.avatarMark`).
+    private func applyRelationMark() {
+        headerView.configureRelationMark(
+            followButtonState, mutual: viewModel.isMutualFollow, blocked: viewModel.isBlocked, isGuest: isGuest
         )
     }
 
