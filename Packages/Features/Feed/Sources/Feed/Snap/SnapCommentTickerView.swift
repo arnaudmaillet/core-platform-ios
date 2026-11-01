@@ -1106,9 +1106,9 @@ final class SnapCommentTickerView: UIView {
         let textWidth = measuringLabel.sizeThatFits(
             CGSize(width: .greatestFiniteMagnitude, height: bubbleHeight)
         ).width
-        // The capsule's ends and the avatar column (circle + gap) are fixed
-        // addends; the text takes whatever remains up to the band cap.
-        let full = TickerBubbleView.width(forTextWidth: ceil(textWidth), height: bubbleHeight)
+        // The avatar column (circle + gap) is a fixed leading addend; the
+        // text takes whatever remains up to the band cap.
+        let full = TickerBubbleView.avatarDiameter + TickerBubbleView.avatarGap + ceil(textWidth)
         return min(full, bandWidth * 0.9)
     }
 
@@ -1160,20 +1160,18 @@ private final class DisplayLinkProxy: NSObject {
     }
 }
 
-/// A pooled danmaku bubble: a compact author avatar leading semibold caption
-/// text, on a dark CAPSULE — a `[avatar] [text]` row. The whole bubble is ONE
-/// view whose layer the conveyor animates on `position.x`; the avatar and
-/// text ride it as a unit.
+/// A pooled danmaku bubble: a compact author avatar leading naked semibold
+/// caption text — a `[avatar] [text]` row. The whole bubble is ONE view
+/// whose layer the conveyor animates on `position.x`; the avatar and text
+/// ride it as a unit.
 ///
-/// ⚠️ THE CAPSULE IS THE BUBBLE'S ONLY CONTRAST (#1987). It used to be naked
-/// text over the page's scrim, which reached the band; since #1983 the scrim
-/// stops at the caption block, and white text over a white picture could not
-/// be read. The capsule is the layer's own `backgroundColor` and
-/// `cornerRadius`: no `masksToBounds`, no `layer.shadow*`, no blur — each of
-/// those costs an offscreen pass or a blur per frame per bubble over a
-/// playing video. Its fill is the subtitle pill's (`SubtitlePillLabel
-/// .fillOpacity`, the viewer's setting), so the two comment surfaces read
-/// alike.
+/// ⚠️ NO CAPSULE, BY THE OWNER'S DECISION (2026-11-01). Since #1983 the
+/// page's scrim stops at the caption block and no longer reaches the band,
+/// so over a white picture the text reads poorly — accepted. A capsule was
+/// tried (#1988) and taken out: making it roomier grew the band, and with
+/// it the whole corner sized from the band (#1990, declined). And
+/// deliberately NOT `layer.shadow*` either: a shadow on a moving layer
+/// forces an offscreen render pass per frame per bubble over the video.
 final class TickerBubbleView: UIView {
     /// Sized to fit within the lane (the band height is derived from the
     /// caption line + text insets, so a compact circle sits centered without
@@ -1182,20 +1180,6 @@ final class TickerBubbleView: UIView {
     static let avatarGap: CGFloat = 6
     static let textInsets = UIEdgeInsets(top: 3, left: 0, bottom: 3, right: 0)
     static let font = UIFont.scaledFont(forTextStyle: .caption1, weight: .semibold)
-    /// The room after the text, to the capsule's end.
-    static let capsuleTrailingPadding: CGFloat = 8
-
-    /// The room before the avatar: what nests its circle concentric in the
-    /// capsule's rounded end, at a bubble `height` tall.
-    static func capsuleLeadingInset(height: CGFloat) -> CGFloat {
-        max(0, (height - avatarDiameter) / 2)
-    }
-
-    /// A bubble's width for `textWidth` of text, at `height`: the capsule's
-    /// ends, the avatar and its gap, and the text.
-    static func width(forTextWidth textWidth: CGFloat, height: CGFloat) -> CGFloat {
-        capsuleLeadingInset(height: height) + avatarDiameter + avatarGap + textWidth + capsuleTrailingPadding
-    }
 
     /// THE app's avatar (#1308): the author's initials as a permanent floor,
     /// the picture dissolved over them when it lands. The bubble used to load
@@ -1217,13 +1201,6 @@ final class TickerBubbleView: UIView {
         label.textColor = .white
         label.lineBreakMode = .byTruncatingTail
         addSubview(label)
-        applyFill()
-    }
-
-    /// The capsule's fill: the subtitle pill's, read again at every
-    /// configure so a pooled bubble follows the viewer's setting.
-    private func applyFill() {
-        layer.backgroundColor = UIColor.black.withAlphaComponent(SubtitlePillLabel.fillOpacity).cgColor
     }
 
     @available(*, unavailable)
@@ -1231,20 +1208,15 @@ final class TickerBubbleView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        layer.cornerRadius = bounds.height / 2
         let diameter = Self.avatarDiameter
-        let inset = Self.capsuleLeadingInset(height: bounds.height)
-        avatarView.frame = CGRect(x: inset, y: (bounds.height - diameter) / 2, width: diameter, height: diameter)
-        let textX = inset + diameter + Self.avatarGap
-        label.frame = CGRect(
-            x: textX, y: 0, width: max(0, bounds.width - textX - Self.capsuleTrailingPadding), height: bounds.height
-        )
+        avatarView.frame = CGRect(x: 0, y: (bounds.height - diameter) / 2, width: diameter, height: diameter)
+        let textX = diameter + Self.avatarGap
+        label.frame = CGRect(x: textX, y: 0, width: max(0, bounds.width - textX), height: bounds.height)
     }
 
     /// Sets the text, the author's initials, and their picture over them —
     /// a missing url or pipeline leaves the initials, never an empty disc.
     func configure(text: String, avatarURL: URL?, monogram: String, pipeline: ImagePipeline?) {
-        applyFill()
         label.text = text
         avatarView.setMonogram(monogram)
         avatarView.setPicture(avatarURL, pipeline: pipeline)
