@@ -79,50 +79,105 @@ struct SnapCommentTickerViewTests {
         ticker.subviews.filter { view in view.subviews.contains { $0 is UILabel } }
     }
 
-    /// The cold-start contract: the instant the band activates, every lane is
-    /// already populated and every bubble is in flight — no empty first
-    /// seconds, no one-by-one crawl-in from the right edge.
-    @Test func activationPrefillsTheVisibleBand() {
+    /// Lets the band's spawn timers fire: `seconds` of the main run loop.
+    private func run(_ seconds: TimeInterval) {
+        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+    }
+
+    /// ⚠️ THE BAND ARRIVES EMPTY (#2000, the owner 2026-11-01): activation
+    /// places no bubble; lane 0's first one enters at the entry edge at once,
+    /// as on Bilibili. It used to pre-fill every lane mid-stream.
+    @Test func activationStartsEmptyAndEntersAtTheEdge() {
         hosting { window in
             let ticker = makeTicker(in: window)
             ticker.setActive(true)
+            #expect(bubbleViews(ticker).isEmpty, "the band was pre-filled")
 
-            let labels = bubbleViews(ticker)
-            #expect(labels.count >= SnapCommentTickerView.laneCount)
-            #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
+            run(0.1)
+            let first = bubbleViews(ticker)
+            #expect(first.count == 1, "lane 0 alone enters first: \(first.count)")
+            let flight = first.first?.layer.animation(forKey: "flight") as? CABasicAnimation
+            let startX = (flight?.fromValue as? CGFloat) ?? 0
+            let width = first.first?.bounds.width ?? 0
+            #expect(abs(startX - (bandWidth + width / 2)) < 0.5, "it did not enter at the edge")
+        }
+    }
+
+    /// The lanes enter out of step: each one's first bubble after its own
+    /// stagger (`laneEntryDelays`), never all at once.
+    @Test func theLanesEnterStaggered() {
+        let delays = SnapCommentTickerView.laneEntryDelays.prefix(SnapCommentTickerView.laneCount)
+        #expect(delays.first == 0)
+        #expect(zip(delays, delays.dropFirst()).allSatisfy { $0 < $1 })
+        hosting { window in
+            let ticker = makeTicker(in: window)
+            ticker.setActive(true)
+            run(0.1)
+            let lanes = Set(bubbleViews(ticker).map { Int($0.frame.minY.rounded()) })
+            #expect(lanes.count == 1, "more than one lane entered at once")
+        }
+    }
+
+    /// Paged back to, the app back in front: a page activated again starts
+    /// empty, as every start does.
+    @Test func aReactivationStartsEmpty() {
+        hosting { window in
+            let ticker = makeTicker(in: window)
+            ticker.setActive(true)
+            ticker.debugFillBand()
+            #expect(!bubbleViews(ticker).isEmpty)
+            ticker.setActive(false)
+            ticker.setActive(true)
+            #expect(bubbleViews(ticker).isEmpty)
         }
     }
 
     /// A page can be configured and activated by the layout pass a
     /// presentation triggers, before its collection is in any window. A
-    /// train laid then is nine bubbles whose flights completed at once — an
-    /// empty band with fresh spawns from the right (traced on a finger's
-    /// tap, 25 September 2026). So the band lays nothing until it has a
-    /// window, and lays the train the moment it gets one.
-    @Test func activationBeforeTheWindowLaysTheTrainOnArrival() {
+    /// flight laid then completes at once (traced 25 September 2026). So the
+    /// band starts nothing until it has a window, and starts the moment it
+    /// gets one.
+    @Test func activationBeforeTheWindowStartsOnArrival() {
         hosting { window in
             let ticker = makeTicker(in: nil)
             ticker.setActive(true)
+            run(0.1)
             #expect(bubbleViews(ticker).isEmpty)
 
             window.addSubview(ticker)
-            let labels = bubbleViews(ticker)
-            #expect(labels.count >= SnapCommentTickerView.laneCount)
-            #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
+            #expect(bubbleViews(ticker).isEmpty, "it arrived pre-filled")
+            run(0.1)
+            #expect(bubbleViews(ticker).count == 1)
+            #expect(bubbleViews(ticker).allSatisfy { $0.layer.animation(forKey: "flight") != nil })
         }
     }
 
-    /// Held for a flight, an active band with content lays nothing; the
-    /// release lays it, at the width the band then has.
-    @Test func aHeldBandLaysItsTrainAtTheRelease() {
+    /// Held for a flight, an active band with content starts nothing: no
+    /// bubble enters under the replica. The landing starts it, empty.
+    @Test func aHeldBandStartsEmptyAtTheRelease() {
         hosting { window in
             let ticker = makeTicker(in: window)
             ticker.setHeldForFlight(true)
             ticker.setActive(true)
+            run(0.1)
             #expect(bubbleViews(ticker).isEmpty)
 
             ticker.setHeldForFlight(false)
-            #expect(bubbleViews(ticker).count >= SnapCommentTickerView.laneCount)
+            #expect(bubbleViews(ticker).isEmpty, "the landing pre-filled the band")
+            run(0.1)
+            #expect(bubbleViews(ticker).count == 1)
+        }
+    }
+
+    /// A reveal's landing (a flight that never held the chrome): what entered
+    /// behind the replica goes, and the band starts empty.
+    @Test func aRevealLandingStartsEmpty() {
+        hosting { window in
+            let ticker = makeTicker(in: window)
+            ticker.setActive(true)
+            ticker.debugFillBand()
+            ticker.replayEntrance()
+            #expect(bubbleViews(ticker).isEmpty)
         }
     }
 
@@ -130,6 +185,7 @@ struct SnapCommentTickerViewTests {
         hosting { window in
             let ticker = makeTicker(in: window)
             ticker.setActive(true)
+            ticker.debugFillBand()
             #expect(!bubbleViews(ticker).isEmpty)
 
             ticker.setActive(false)
@@ -154,6 +210,7 @@ struct SnapCommentTickerViewTests {
         hosting { window in
             let ticker = makeTicker(in: window)
             ticker.setActive(true)
+            ticker.debugFillBand()
 
             ticker.beginScrub()
 
@@ -172,6 +229,7 @@ struct SnapCommentTickerViewTests {
         hosting { window in
             let ticker = makeTicker(in: window)
             ticker.setActive(true)
+            ticker.debugFillBand()
             ticker.beginScrub()
 
             // Only mid-band labels: ones near the left edge retire under the
@@ -220,12 +278,14 @@ struct SnapCommentTickerViewTests {
         hosting { window in
             let untouched = makeTicker(in: window)
             untouched.setActive(true)
+            untouched.debugFillBand()
             untouched.beginScrub()
             let expected = positions(untouched)
             untouched.removeFromSuperview()
 
             let starved = makeTicker(in: window)
             starved.setActive(true)
+            starved.debugFillBand()
             // What a starved runner did between the two calls: a commit (the
             // presentation exists) and media time running on.
             let committed = CACurrentMediaTime()
@@ -266,6 +326,7 @@ struct SnapCommentTickerViewTests {
         let ticker = makeTicker(in: window)
 
         ticker.setActive(true)
+        ticker.debugFillBand()
         ticker.beginScrub()
         ticker.applyScrubTranslation(-60)
 
@@ -341,6 +402,7 @@ struct SnapCommentTickerViewTests {
         try hosting { window in
             let ticker = makeTicker(in: window)
             ticker.setActive(true)
+            ticker.debugFillBand()
             ticker.beginScrub()
             ticker.applyScrubTranslation(-40)
             ticker.endScrub(releaseVelocity: 1200)
@@ -375,12 +437,14 @@ struct SnapCommentTickerViewTests {
             let bare = makeTicker(in: window)
             bare.appearanceStore = store
             bare.setActive(true)
+            bare.debugFillBand()
             #expect(bare.currentBackdropOpacity == 0)
 
             store.update { $0.bandBackgroundOpacity = 0.3 }
             let ticker = makeTicker(in: window)
             ticker.appearanceStore = store
             ticker.setActive(true)
+            ticker.debugFillBand()
             #expect(abs(ticker.currentBackdropOpacity - 0.3) < 0.001)
 
             ticker.beginScrub()
@@ -414,6 +478,7 @@ struct SnapCommentTickerViewTests {
         hosting { window in
             let ticker = makeTicker(in: window)
             ticker.setActive(true)
+            ticker.debugFillBand()
             ticker.beginScrub()
             ticker.applyScrubTranslation(-200)
             ticker.applyScrubTranslation(200) // net translation: zero
