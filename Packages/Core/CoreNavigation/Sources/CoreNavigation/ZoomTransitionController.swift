@@ -153,6 +153,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
             to: view, source: source, destination: destination, axes: axes,
             onBeginDismiss: onDismiss
         )
+        subordinateNativePops()
     }
 
     /// A SECOND grab on the same view, flying `towards` a different source
@@ -182,6 +183,18 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
             onBeginDismiss: onDismiss
         )
         extraInteractions.append(driver)
+        subordinateNativePops()
+    }
+
+    /// ⚠️ UIKIT'S POPS WAIT FOR THE GRAB (#1144): a hero grab is a back
+    /// popper of its own, and a native pop beginning beside it is a second
+    /// close on one swipe. Made once the feed is on a stack — at its showing,
+    /// or at an attach after it — and idempotent.
+    private func subordinateNativePops() {
+        guard let nav = feedViewController?.navigationController else { return }
+        for pan in ([interaction] + extraInteractions).compactMap(\.pan) {
+            NativePopSubordination.subordinate(nativePopsOf: nav, to: pan)
+        }
     }
 
     #if DEBUG
@@ -408,6 +421,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         if animated { UIAccessibility.post(notification: .screenChanged, argument: nil) }
         if viewController === feedViewController {
             hasSeenFeedOnStack = true
+            subordinateNativePops()
             onDestinationShown?()
             return
         }

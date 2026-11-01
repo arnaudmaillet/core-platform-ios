@@ -264,7 +264,7 @@ public final class InteractiveSlideDismissal: NSObject {
         guard self.feedViewController == nil else { return }
         self.feedViewController = feedViewController
         self.axes = axes
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
+        let pan = SlideDismissalPan(target: self, action: #selector(handlePan))
         pan.maximumNumberOfTouches = 1
         pan.delegate = self
         feedViewController.view.addGestureRecognizer(pan)
@@ -372,10 +372,7 @@ public final class InteractiveSlideDismissal: NSObject {
     /// everywhere else.
     private func subordinateNativePops(on nav: UINavigationController) {
         guard let pan = dismissalPan else { return }
-        nav.interactivePopGestureRecognizer?.require(toFail: pan)
-        if #available(iOS 26.0, *) {
-            nav.interactiveContentPopGestureRecognizer?.require(toFail: pan)
-        }
+        NativePopSubordination.subordinate(nativePopsOf: nav, to: pan)
     }
 
     /// Whether one of UIKit's own pop gestures is driving a pop right now — a
@@ -1084,3 +1081,6 @@ struct LayerCornerStyle: Equatable {
         CATransaction.commit()
     }
 }
+
+/// The slide's pan, marked as a custom back popper (`NativePopSubordination`).
+final class SlideDismissalPan: UIPanGestureRecognizer, CustomBackPopper {}

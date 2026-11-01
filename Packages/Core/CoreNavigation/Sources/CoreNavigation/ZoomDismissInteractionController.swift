@@ -47,6 +47,9 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     /// Kicks off `dismiss(animated:)` on the presented feed when a grab begins.
     private var onBeginDismiss: (() -> Void)?
     private weak var pannedView: UIView?
+    /// The grab's pan, which UIKit's own pops wait on
+    /// (`NativePopSubordination`).
+    private(set) weak var pan: ZoomDismissPan?
 
     // Live-transition state, populated by startInteractiveTransition and
     // cleared when the release animation completes.
@@ -181,6 +184,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         pan.maximumNumberOfTouches = 1
         pan.delegate = self
         view.addGestureRecognizer(pan)
+        self.pan = pan
     }
 
     /// Removes every dismissal pan on `view` whose driver is gone.
@@ -1148,6 +1152,6 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
 /// The grab's pan, marked so a reused view can tell its dead ones from the
 /// pans other code put there. A recognizer does not retain its target, so
 /// `driver` going nil is exactly "nothing will ever handle this pan again".
-final class ZoomDismissPan: UIPanGestureRecognizer {
+final class ZoomDismissPan: UIPanGestureRecognizer, CustomBackPopper {
     weak var driver: ZoomDismissInteractionController?
 }
