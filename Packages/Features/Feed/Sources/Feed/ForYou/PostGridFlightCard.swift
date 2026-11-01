@@ -789,6 +789,15 @@ extension PostGridFlightCard: ZoomFlightCard {
         return videoRenderView
     }
 
+    /// The card's own render view while it carries nothing (#2033): where a
+    /// present that flies no player (a friend's face) mirrors the arriving
+    /// page's — posed with the card from take-off, hidden until the mirror
+    /// fills it.
+    var zoomReservedLiveMediaSurface: UIView? {
+        guard !hasAdoptedLiveMedia, videoRenderView.isDescendant(of: self) else { return nil }
+        return videoRenderView
+    }
+
     var zoomLiveMediaNativeSize: CGSize? { videoRenderView.nativeVideoSize }
 
     /// The tile's own cover — see `ZoomFlightCard.zoomCoverSurface`.

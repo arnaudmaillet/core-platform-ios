@@ -1716,6 +1716,14 @@ extension PinCardView: ZoomFlightCard {
         return videoRenderView.isHidden ? nil : videoRenderView
     }
 
+    /// The card's own render view while it carries nothing (#2033): a
+    /// marker flies no player, so this is where a present mirrors the
+    /// arriving page's — posed with the card from take-off, hidden until the
+    /// mirror fills it.
+    var zoomReservedLiveMediaSurface: UIView? {
+        donatedSurface == nil && zoomLiveMediaSurface == nil ? videoRenderView : nil
+    }
+
     var zoomLiveMediaNativeSize: CGSize? {
         (donatedSurface ?? videoRenderView).nativeVideoSize
     }

@@ -135,6 +135,20 @@ public protocol ZoomFlightCard: UIView {
     /// playback-agnostic; the card owns the concrete render type.
     var zoomLiveMediaSurface: UIView? { get }
 
+    /// The surface a present will mirror the ARRIVING page's player onto,
+    /// while it carries nothing yet (#2033) — nil once it carries media.
+    ///
+    /// ⚠️ POSED FROM TAKE-OFF, BEFORE IT HAS ANYTHING TO SHOW. The page's
+    /// first frame lands mid-flight, after the pose blocks ran; a surface
+    /// posed then (a display link a frame behind, or an animation added to
+    /// the running animator, which starts the curve again from rest) lags
+    /// the card all the way down — filmed as a picture smaller than its
+    /// window, pinned to its top-left corner. Reserved, it rides the card's
+    /// own animation from the first frame, invisible, and only its contents
+    /// arrive late. Not "drawing": the landing gate still reads
+    /// `zoomLiveMediaIsDrawing`.
+    var zoomReservedLiveMediaSurface: UIView? { get }
+
     /// Offers the card a chance to adopt live media, by handing its own
     /// surface to `mirror` and showing it if the mirror took. Called once when
     /// the flight is built, and only when the card is not already live.
@@ -310,6 +324,7 @@ public extension ZoomFlightCard {
     var zoomLiveMediaContentRect: CGRect? { nil }
     var zoomLiveMediaNativeSize: CGSize? { nil }
     var zoomLiveMediaSurface: UIView? { nil }
+    var zoomReservedLiveMediaSurface: UIView? { nil }
     func adoptZoomLiveMedia(_ mirror: (UIView) -> Bool) {}
     func adoptZoomLiveMediaView(_ view: UIView) {}
     func fadeInAdoptedLiveMedia(over duration: TimeInterval) {}
