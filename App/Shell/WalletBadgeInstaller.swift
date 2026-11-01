@@ -176,6 +176,37 @@ final class WalletBadgeInstaller: NSObject {
         claimUnlockTimer = timer
     }
 
+    #if DEBUG
+    /// `-open-wallet`: presents the sheet ~1.5 s after launch — the badge
+    /// opens it on tap, which the simulator can't deliver. Pair with
+    /// `-wallet-claim-ready` (claimable state) or `-wallet-demo-claim` (fires
+    /// the claim itself).
+    ///
+    /// ⚠️ FROM THE TAB ON SCREEN (#1998). Every root with a badge asks, and
+    /// only the one whose presenter is in the window answers: the hook lived
+    /// on Explore's badge alone, and once the app launched on Shots (#1765)
+    /// it presented from a tab nobody saw — `WalletSheetUITests` found no
+    /// sheet.
+    ///
+    /// After `-switch-tab`, which selects its tab at 2.5 s, it waits for the
+    /// tab to be on screen; and it opens one sheet per process, whichever
+    /// root answers first.
+    func presentSheetIfAskedAtLaunch() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard arguments.contains("-open-wallet") else { return }
+        let delay: TimeInterval = arguments.contains("-switch-tab") ? 3.5 : 1.5
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, !Self.didOpenAtLaunch, let presenter, presenter.viewIfLoaded?.window != nil,
+                  presenter.presentedViewController == nil else { return }
+            Self.didOpenAtLaunch = true
+            presentSheet()
+        }
+    }
+
+    /// Latches `-open-wallet` to one sheet per process.
+    private static var didOpenAtLaunch = false
+    #endif
+
     func presentSheet() {
         presenter?.present(makeSheet(), animated: true)
     }

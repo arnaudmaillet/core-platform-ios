@@ -113,20 +113,8 @@ final class ExploreTabCoordinator: TabCoordinator {
         installBarItems()
 
         #if DEBUG
-        // `-open-wallet`: presents the wallet sheet ~1s after launch — the
-        // badge opens it on tap, which the sim can't deliver. Pair with
-        // `-wallet-claim-ready` (claimable state) or `-wallet-demo-claim`
-        // (fires the claim itself).
-        if ProcessInfo.processInfo.arguments.contains("-open-wallet") {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                self?.presentWalletSheet()
-            }
-        }
+        walletBadge?.presentSheetIfAskedAtLaunch()
         #endif
-    }
-
-    private func presentWalletSheet() {
-        walletBadge?.presentSheet()
     }
 
     /// The header for the viewer now: a member's `[bell] … [likes][search]`,

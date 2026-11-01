@@ -146,8 +146,13 @@ final class WalletSheetUITests: XCTestCase {
 
         // …a drag down stops at the collapsed height first (#1732: the
         // halfway detent is back)…
-        rewards.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
-            forDuration: 0.05, thenDragTo: rewards.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 3)),
+        // ⚠️ DRAGGED BY THE MEASURED GAP between the two heights, not by a
+        // fixed three bar heights (#1998): ~150 pt was about half the gap,
+        // and a slow release there left the sheet large — the hook that
+        // opens the sheet was broken, so nothing ran this until now.
+        let start = rewards.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(
+            forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: smallTop - close.frame.minY)),
             withVelocity: .slow, thenHoldForDuration: 0
         )
         let collapsed = NSPredicate { _, _ in abs(close.frame.minY - smallTop) < 2 }
