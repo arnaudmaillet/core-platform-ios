@@ -48,6 +48,11 @@ final class PlaceProfileViewController: HeroPageViewController<PlaceProfileTab> 
     /// bespoke list: a place's activity is posts, and a viewer who reads them
     /// as For You's cards must read them as the same cards here.
     private let activityPage: ForYouGridPage
+    /// The page's warm of its visible posts' first comments (#2002).
+    var postOpenWarm: PostOpenWarm? {
+        get { activityPage.postOpenWarm }
+        set { activityPage.postOpenWarm = newValue }
+    }
     /// The list's leading header (#1271): a shelf of posts — "Popular" here —
     /// and the list's title, "Recent", under it (the hashtag page's
     /// arrangement, `PostSetSurfaceViewController`).

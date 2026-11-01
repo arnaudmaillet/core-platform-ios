@@ -75,11 +75,15 @@ public enum PostGridPages {
     @MainActor
     public static func make(
         style: PostGridPageStyle, imagePipeline: ImagePipeline,
-        videoPlayback: VideoPlaybackController?, savesPosts: Bool
+        videoPlayback: VideoPlaybackController?, savesPosts: Bool,
+        postOpenWarm: PostOpenWarm? = nil
     ) -> any PostGridPage {
-        ForYouGridPage(
+        let page = ForYouGridPage(
             imagePipeline: imagePipeline, style: ForYouGridPage.Style(style),
             videoPlayback: videoPlayback, bookmarks: savesPosts ? .shared : nil
         )
+        // A profile's tiles warm their posts' first comments (#2002).
+        page.postOpenWarm = postOpenWarm
+        return page
     }
 }

@@ -105,15 +105,12 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     private var pendingLead: ForYouViewModel.Rails?
     private static let presenceScreen = "foryou"
     private let prewarm: ([PostID]) async -> Void
-    /// Loads a post's first page of comments into the panel's synchronous
-    /// cache. Optional so the other entry points need not supply one.
-    private let prefetchTopComments: ((PostID) async -> Void)?
+    /// Warms a post's first page of comments into the panel's synchronous
+    /// cache, shared by every surface that opens a post (#2002). Optional so
+    /// the other entry points need not supply one.
+    private let postOpenWarm: PostOpenWarm?
     /// A text post's prefetched top comments, for its long-press preview (#1498).
     private let cachedTopComments: ((PostID) -> [CommentEntry]?)?
-    /// Posts whose first page of comments has been asked for. A set, because
-    /// the reconcile that feeds it runs at ~30Hz while a finger is moving and
-    /// the same three cards are on screen for most of it.
-    private var warmedComments: Set<PostID> = []
     /// How this screen leaves itself. Weak, and held by the composition root —
     /// the screen never builds a destination, it names one.
     private weak var router: (any Router)?
@@ -203,7 +200,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         makeSnapFeed: @escaping ([PostID], SnapFeedContinuation?) -> UIViewController,
         openPostHero: ((UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void)? = nil,
         prewarm: @escaping ([PostID]) async -> Void,
-        prefetchTopComments: ((PostID) async -> Void)? = nil,
+        postOpenWarm: PostOpenWarm? = nil,
         cachedTopComments: ((PostID) -> [CommentEntry]?)? = nil,
         router: (any Router)? = nil,
         reporting: (any ContentReporting)? = nil,
@@ -225,7 +222,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         self.imagePipeline = imagePipeline
         self.videoPlayback = videoPlayback
         self.prewarm = prewarm
-        self.prefetchTopComments = prefetchTopComments
+        self.postOpenWarm = postOpenWarm
         self.cachedTopComments = cachedTopComments
         self.router = router
         self.reporting = reporting
@@ -472,9 +469,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             self?.page.invalidateIncrementalUpdates()
             self?.followingList?.invalidateIncrementalUpdates()
             self?.friendsList?.invalidateIncrementalUpdates()
-            // A new corpus is new posts under old ids' places; what was warmed
-            // says nothing about what is on screen now.
-            self?.warmedComments.removeAll()
         }
         // A refresh that failed over content the viewer can still see (#798):
         // the content stays, the toast says the refresh did not happen. From
@@ -1286,6 +1280,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             staking: staking,
             openPost: openPostHero
         )
+        gallery.postOpenWarm = postOpenWarm
         // Its posts open onto the vertical feed's own list too (#1343).
         gallery.ownFeed = viewModel.ownFeed
         gallery.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded(.discover) }
@@ -2441,52 +2436,12 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         warm(posts.map(\.id), immediate: true)
     }
 
-    /// ⚠️ TWO QUEUES, AND THE DIFFERENCE IS THE WHOLE FEATURE.
-    ///
-    /// `immediate` is what the viewer is LOOKING AT: one task per post, started
-    /// now. Serial is wrong here — the first version ran every warm through one
-    /// `for` loop, so the post whose card filled the screen waited behind
-    /// eleven others down the page and was still fetching when the chip was
-    /// pressed. The trace says it plainly: `asking [… post-new-04]` with the
-    /// opened post LAST.
-    ///
-    /// Everything else is a queue, and it claims an id only when it REACHES
-    /// it. Claiming the whole batch up front is how the ahead-of-time pass
-    /// starved the visible one: it had already put its name on every post on
-    /// the page, so when a card came into view there was nothing left to ask
-    /// for and nothing to jump the queue with.
+    /// What is on screen now, or ahead of time down the page — see
+    /// `PostOpenWarm`'s two queues. What this screen queued is dropped when
+    /// it goes.
     private func warm(_ ids: [PostID], immediate: Bool) {
-        guard let prefetchTopComments else { return }
-        #if DEBUG
-        // `-warm-log`: what was asked for and when it answered. It exists to
-        // tell "the warm never ran" from "the warm ran and the tap beat it" —
-        // two failures that look identical on screen, both a skeleton.
-        let trace = ProcessInfo.processInfo.arguments.contains("-warm-log")
-        #endif
-        guard immediate else {
-            let queued = ids.filter { !warmedComments.contains($0) }
-            guard !queued.isEmpty else { return }
-            Task { @MainActor in
-                for id in queued where self.warmedComments.insert(id).inserted {
-                    #if DEBUG
-                    if trace { print("[warm] queued \(id.rawValue)") }
-                    #endif
-                    await prefetchTopComments(id)
-                }
-            }
-            return
-        }
-        for id in ids where warmedComments.insert(id).inserted {
-            #if DEBUG
-            if trace { print("[warm] asking \(id.rawValue)") }
-            #endif
-            Task {
-                await prefetchTopComments(id)
-                #if DEBUG
-                if trace { print("[warm] ready \(id.rawValue)") }
-                #endif
-            }
-        }
+        guard let postOpenWarm else { return }
+        if immediate { postOpenWarm.warmNow(ids) } else { postOpenWarm.warmLater(ids, owner: self) }
     }
 
     #if DEBUG

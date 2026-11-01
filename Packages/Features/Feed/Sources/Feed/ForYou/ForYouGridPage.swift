@@ -128,6 +128,11 @@ final class ForYouGridPage: UIView {
     /// `ForYouGridAutoplayDriver.maximumStartVelocity` stops the warm above
     /// it, and the two can never drift apart because they are one decision.
     var onWarmRequested: (([GalleryPost]) -> Void)?
+    /// Where a page with no `onWarmRequested` of its own warms what is on
+    /// screen (#2002): every surface that opens a post full screen — a
+    /// profile's grid, search, a place, a cluster's gallery — warms its
+    /// visible posts' first comments, so the flight carries them.
+    var postOpenWarm: PostOpenWarm?
     /// The page scrolled near its end and wants another page.
     var onNearEnd: (() -> Void)?
     /// A post's cell is about to display: its page, fetched ahead of the
@@ -3797,14 +3802,14 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     /// silent while the page is showing skeletons — there is nothing on screen
     /// then but the shape of what is coming.
     private func requestWarm(_ allowing: Bool) {
-        guard allowing, !showsSkeleton, onWarmRequested != nil else { return }
+        guard allowing, !showsSkeleton, onWarmRequested != nil || postOpenWarm != nil else { return }
         // At most the driver's `warmWindow` — see the ⚠️ there.
         let visible = ForYouGridAutoplayDriver.warmIndices(
             visibleFlatIndices: collectionView.indexPathsForVisibleItems.sorted().map(flatIndex(for:)),
             postCount: posts.count
         ).map { posts[$0] }
         guard !visible.isEmpty else { return }
-        onWarmRequested?(visible)
+        if let onWarmRequested { onWarmRequested(visible) } else { postOpenWarm?.warmNow(visible.map(\.id)) }
     }
 
     /// The cadence and the fling gate are the driver's

@@ -84,6 +84,11 @@ final class ForYouPostListViewController: UIViewController {
 
     let kind: Kind
     private let page: ForYouGridPage
+    /// The page's warm of its visible posts' first comments (#2002).
+    var postOpenWarm: PostOpenWarm? {
+        get { page.postOpenWarm }
+        set { page.postOpenWarm = newValue }
+    }
     private let header: PushedScreenHeader
     /// Opens a post WITH a flight — see the type's note. Nil leaves a tap
     /// doing nothing, which is only the case in a test.

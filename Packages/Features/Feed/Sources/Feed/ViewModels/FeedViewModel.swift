@@ -558,6 +558,12 @@ public final class FeedViewModel {
     }
     #endif
 
+    /// The post's first page of comments as the warm holds it, synchronously
+    /// (#2002): what a text page's stand-in draws as rows during the flight.
+    public func heldTopComments(for id: PostID) -> [CommentEntry] {
+        commentsProvider?.cachedTopComments(for: id) ?? []
+    }
+
     /// Called by the view for every cell about to display: pagination
     /// trigger, and the last-resort ticker prefetch (the collection view's
     /// prefetcher usually got there earlier).

@@ -19,6 +19,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     private let repository: any FeedProviding
     private let engagementProvider: (any EngagementProviding)?
     private let commentsProvider: (any CommentsProviding)?
+    /// Every surface's warm of a post's first comments, before it is opened
+    /// (#2002): one instance, so nothing is asked twice across surfaces.
+    /// A class, so every copy of this builder shares it.
+    let postOpenWarm: PostOpenWarm?
     private let realtime: (any FeedRealtimeSubscribing)?
     private let composedPosts: ComposedPostChannel?
     private let router: (any Router)?
@@ -153,6 +157,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         self.repository = repository
         self.engagementProvider = engagementProvider
         self.commentsProvider = commentsProvider
+        postOpenWarm = commentsProvider.map { provider in
+            PostOpenWarm(
+                prefetch: { id in await provider.prefetchTopComments(for: id) },
+                isHeld: { id in provider.cachedTopComments(for: id) != nil }
+            )
+        }
         self.realtime = realtime
         self.composedPosts = composedPosts
         self.router = router
@@ -383,6 +393,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // accident on a slow machine.
         guard !Self.isColdOpenForced else { return }
         #endif
+        // The map's visible pins and the sound sheet's posts warm their first
+        // comments too, queued behind what is on screen elsewhere (#2002).
+        postOpenWarm?.warmLater(ids)
         await repository.prewarm(ids)
     }
 
@@ -460,12 +473,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
             },
             prewarm: { ids in await repository.prewarm(ids) },
-            // Text posts open straight into comment layout, so their first
-            // page is warmed while the grid is still on screen — see
-            // `prewarmVisible`.
-            prefetchTopComments: { [commentsProvider] id in
-                await commentsProvider?.prefetchTopComments(for: id)
-            },
+            // A post's first comments are warmed while its tile is on screen,
+            // so the flight carries them (#2002) — see `prewarmVisible`.
+            postOpenWarm: postOpenWarm,
             // …and read back by a text card's long press (#1498).
             cachedTopComments: { [commentsProvider] id in
                 commentsProvider?.cachedTopComments(for: id)
@@ -746,7 +756,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     public func makePostGridPage(style: PostGridPageStyle, savesPosts: Bool) -> any PostGridPage {
         // The app's one pool, the same instance For You's tabs borrow from.
         PostGridPages.make(
-            style: style, imagePipeline: imagePipeline, videoPlayback: videoPlayback, savesPosts: savesPosts
+            style: style, imagePipeline: imagePipeline, videoPlayback: videoPlayback, savesPosts: savesPosts,
+            postOpenWarm: postOpenWarm
         )
     }
 
@@ -802,7 +813,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // "View all" on a discover page: For You's own media gallery, with the
         // header For You's pushed screens wear (#629).
         surface.makeGallery = { [self] in
-            DiscoverGalleryViewController(
+            let gallery = DiscoverGalleryViewController(
                 imagePipeline: imagePipeline, videoPlayback: videoPlayback,
                 header: PushedScreenHeader(wallet: balanceWallet, makeWalletSheet: makeWalletSheet, router: router),
                 // The same binding as the results it was pushed from.
@@ -811,7 +822,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                     presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
                 }
             )
+            gallery.postOpenWarm = postOpenWarm
+            return gallery
         }
+        // Its tiles warm their posts' first comments (#2002).
+        surface.postOpenWarm = postOpenWarm
         return surface
     }
 
@@ -913,21 +928,28 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
         }
         gallery.makePostList = { [self] in
-            ForYouPostListViewController(
+            let list = ForYouPostListViewController(
                 kind: .popular, imagePipeline: imagePipeline, videoPlayback: videoPlayback,
                 staking: staking,
                 header: PushedScreenHeader(wallet: balanceWallet, makeWalletSheet: makeWalletSheet, router: router),
                 openPost: openHero
             )
+            list.postOpenWarm = postOpenWarm
+            return list
         }
         gallery.makeGallery = { [self] in
-            DiscoverGalleryViewController(
+            let pushed = DiscoverGalleryViewController(
                 imagePipeline: imagePipeline, videoPlayback: videoPlayback,
                 header: PushedScreenHeader(wallet: balanceWallet, makeWalletSheet: makeWalletSheet, router: router),
                 staking: staking,
                 openPost: openHero
             )
+            pushed.postOpenWarm = postOpenWarm
+            return pushed
         }
+        // A place's tiles, and a cluster's, warm their posts' first comments
+        // (#2002).
+        gallery.postOpenWarm = postOpenWarm
         return gallery
     }
 
@@ -1497,6 +1519,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         continuation: SnapFeedContinuation?,
         isCompleteSet: Bool = false
     ) -> UIViewController {
+        // ⚠️ THE LAST RESORT (#2002): every opener builds its feed here, so a
+        // post whose tile never warmed it (a link, a notification, a tap
+        // that beat the warm) asks for its first comments now. Late for the
+        // flight, early for the landing; a post already held asks nothing.
+        if let opened = postIDs.first { postOpenWarm?.warmNow([opened]) }
         let feed = makeSnapFeed(
             viewModel: FeedViewModel(
                 // One kind per feed (#1421): the opening post's, through the
@@ -1648,6 +1675,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             if let cached = await source.cachedFirstPage(), !cached.isEmpty { return cached }
             return (try? await source.loadFirstPage())?.entries ?? []
         }
+        // The side list's and the sound sheet's posts warm their first
+        // comments (#2002).
+        feed.postOpenWarm = postOpenWarm
         return feed
     }
 
