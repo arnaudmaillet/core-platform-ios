@@ -734,7 +734,23 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         // release animation's clock under the nav pipeline: the completion
         // arrived seconds late, and if a new grab had started by then, the
         // stale completion tore down the NEW grab's transition.
-        commit ? context.finishInteractiveTransition() : context.cancelInteractiveTransition()
+        //
+        // ⚠️ A COMMIT IS REPORTED ONE TURN LATER (#1950, measured on the
+        // owner's device): finishing in the release's own turn ran UIKit's
+        // alongside blocks — the bars' glass coming back, ~25 ms — in the
+        // release's frame, the 61–65 ms hitch of most grabs. A turn later
+        // the release spring has its first frame. Still the same transition
+        // (checked by identity), still long before the spring ends; a cancel
+        // stays immediate.
+        if commit {
+            let releasing = context
+            DispatchQueue.main.async { [weak self] in
+                guard let self, let current = self.context, current === releasing else { return }
+                current.finishInteractiveTransition()
+            }
+        } else {
+            context.cancelInteractiveTransition()
+        }
 
         // Read once more at release, through the same function the drag used, so
         // the spring starts from the card's current shape and ends on the rect

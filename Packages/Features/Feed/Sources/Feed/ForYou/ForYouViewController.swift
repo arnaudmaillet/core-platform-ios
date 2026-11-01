@@ -1975,8 +1975,15 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // ⚠️ MEASURED WHILE THE BAR IS UP, because the one moment the reveal
         // needs the number is the one moment it cannot read it: a push takes
         // the bar down, and `applyPendingReveal` runs on the way out.
-        tabBarController?.view.layoutIfNeeded()
-        page.footChromeCover = floatingBarCover
+        //
+        // ⚠️ READ ON THE NEXT TURN (#1950, measured on the owner's device):
+        // forcing a layout of the whole tab bar controller here cost ~8 ms of
+        // a grab's landing turn. A turn later that layout has run on its own,
+        // the bar still up, and the cover is only read by the next opening.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, view.window != nil else { return }
+            page.footChromeCover = floatingBarCover
+        }
         sweepAbandonedTransition()
         // ⚠️ NOTHING ON THIS SCREEN MAY BE INVISIBLE ONCE IT IS BACK.
         //
