@@ -667,6 +667,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func setPostLikeCount(_ count: Int64?) { chrome.setPostLikeCount(count) }
     /// The sound bubble's face (#671) — see `SnapChromeView.setSoundFace`.
     func setSoundFace(_ face: SnapSoundFace?) { chrome.setSoundFace(face) }
+    /// The bubble as the post's Share (#1999) — see `SnapChromeView.setSlotSharesPost`.
+    func setSlotSharesPost(_ shares: Bool) { chrome.setSlotSharesPost(shares) }
     /// Turns the sound bubble's cover while the post plays (#671).
     func setSoundSpinning(_ spinning: Bool) { chrome.setSoundSpinning(spinning) }
     /// The sound bubble was tapped: the screen opens the sound sheet (#671).
@@ -1894,6 +1896,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         chrome.onSoundSheetRequested = { [weak self] in self?.onRequestSoundSheet?() }
         chrome.onSoundReturnRequested = { [weak self] in self?.onRequestSoundReturn?() }
+        chrome.onShareRequested = { [weak self] in self?.onRequestShare?() }
         chrome.postActions.onSave = { [weak self] in self?.onRequestSave?() }
         chrome.postActions.onShare = { [weak self] in self?.onRequestShare?() }
         representedAuthorID = model.authorID

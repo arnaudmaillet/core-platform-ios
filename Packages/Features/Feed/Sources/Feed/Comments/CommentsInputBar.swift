@@ -104,6 +104,9 @@ final class CommentsInputBar: UIView {
         /// No slot at all (#1790): a text post, which has no sound (#1999). Unlike `.empty`,
         /// the field widens into the slot's place.
         case noSlot
+        /// The post's Share (#1999): a pushed text page's slot, in the
+        /// sound's old place. The toolbar's glyph, label and identifier.
+        case share
         /// The way back to the stream's start (#1929): scrolled away from the
         /// newest message (`down`), or from a post's text. The slot's own
         /// action moves to a hold (`HoldToArmPresenter`).
@@ -1851,6 +1854,9 @@ final class CommentsInputBar: UIView {
         case .returnTo(let down):
             symbol = down ? "chevron.down" : "chevron.up"
             railButton.accessibilityLabel = down ? "Scroll to latest message" : "Back to top"
+        case .share:
+            symbol = Self.shareRailSymbol
+            railButton.accessibilityLabel = "Share"
         case .sound(let face):
             // The cover as a disc, the bubble's size less the sound bubble's
             // inset, so the two read as one (#671). Not a symbol: no replace.
@@ -1875,6 +1881,9 @@ final class CommentsInputBar: UIView {
         }
         railButton.alpha = 1
         railButton.isHidden = symbol == nil
+        // Share answers to the toolbar's identifier, which the page no longer
+        // shows (#1999); every other face, none.
+        railButton.accessibilityIdentifier = railFace == .share ? SnapFooterToolbar.ID.share : nil
         railRecord.isHidden = true
         railRecord.setSpinning(false)
         if let glass = railGlassConfiguration {
@@ -1931,6 +1940,9 @@ final class CommentsInputBar: UIView {
             self?.railRecord.setPressed(button.isHighlighted && !(self?.railRecord.isHidden ?? true))
         }
     }
+
+    /// The share face's glyph: the toolbar's Share (`SnapFooterToolbar`).
+    static let shareRailSymbol = "arrowshape.turn.up.right"
 
     /// What `debugRailSymbol` reads while the slot wears the sound's cover.
     static let soundRailSymbol = "sound.cover"

@@ -151,6 +151,10 @@ struct SnapTextFooterLikeTests {
         // Repost is the share sheet's there, or an SE folds the run into •••.
         #expect(!items.contains { $0.identifier == SnapFooterToolbar.ID.repost }, "repost is still on the footer")
         #expect(feed.shareSheetActions(for: PostID("a")).contains { $0.title == "Repost" }, "no repost in the sheet")
+        // Share is the slot's, right of the comment field (#1999): the
+        // footer reads [author] [♥ count] [☆], and ends on the star.
+        #expect(!items.contains { $0.identifier == SnapFooterToolbar.ID.share }, "Share is still on a text page's footer")
+        #expect(items.last?.identifier == SnapFooterToolbar.ID.save, "the footer does not end on the star")
 
         // A media page: its pill, no footer like.
         try settle(feed, on: 1)
@@ -161,6 +165,8 @@ struct SnapTextFooterLikeTests {
         #expect(feed.toolbarItems?.contains { $0.identifier == SnapFooterToolbar.ID.repost } == true,
                 "a media page's footer lost repost")
         #expect(!feed.shareSheetActions(for: PostID("b")).contains { $0.title == "Repost" })
+        #expect(feed.toolbarItems?.contains { $0.identifier == SnapFooterToolbar.ID.share } == true,
+                "a media page's footer lost Share")
         withExtendedLifetime(feed) {}
     }
 

@@ -1865,6 +1865,7 @@ final class SnapFeedViewController: UIViewController {
                 // The sound bubble (#671): its face, and its tap. No hold since
                 // #1931: the sound follows the device.
                 cell.setSoundFace(self.soundFace(for: model))
+                cell.setSlotSharesPost(self.slotSharesPost(model))
                 cell.onRequestSoundSheet = { [weak self] in self?.presentSoundSheet() }
                 // Its way back, while the comments are scrolled away (#1929).
                 cell.onRequestSoundReturn = { [weak self, weak cell] in
@@ -2680,7 +2681,7 @@ final class SnapFeedViewController: UIViewController {
         // separator gives Share its own (#1679). The toolbar is STATE-INVARIANT:
         // the comments exit is the nav bar's ✕, and the sort selector is the
         // nav bar's too (`setEngagedChrome`).
-        defaultToolbarItems = [authorItem, footerFlexibleSpace, bookmarkItem, repost, BarItems.separator(), share]
+        defaultToolbarItems = [authorItem, footerFlexibleSpace, bookmarkItem, repost, shareSeparator, share]
         // The For You root wears no toolbar (#1681): the tab bar holds the
         // bottom, the pill is the top bar's, save and repost are the action
         // column's.
@@ -3447,12 +3448,13 @@ final class SnapFeedViewController: UIViewController {
     /// The footer as it stands. On a text page the like follows the author,
     /// in a bubble of its own, and repost moves into the share sheet — as on
     /// Shots (`shareSheetActions`) — or the run folds into `•••` on an
-    /// iPhone SE (the owner, 2026-10-30): `[author] [♥ 382] [☆] [↪]`.
+    /// iPhone SE (the owner, 2026-10-30). ⚠️ Share leaves it for the slot
+    /// right of the comment field (#1999): `[author] [♥ 382] [☆]`.
     private func footerToolbarItems() -> [UIBarButtonItem] {
         var items = defaultToolbarItems
         guard let like = footerLikeItem,
               let flexible = items.firstIndex(where: { $0 === footerFlexibleSpace }) else { return items }
-        items.removeAll { $0 === repostToolbarItem }
+        items.removeAll { $0 === repostToolbarItem || $0 === shareToolbarItem || $0 === shareSeparator }
         items.insert(contentsOf: [like, footerLikeSeparator], at: flexible + 1)
         return items
     }
@@ -3461,6 +3463,8 @@ final class SnapFeedViewController: UIViewController {
     /// in its place.
     private let footerFlexibleSpace = UIBarButtonItem.flexibleSpace()
     private let footerLikeSeparator = BarItems.separator()
+    /// Share's own bubble, kept so a text page's footer drops it with Share.
+    private let shareSeparator = BarItems.separator()
 
     /// A tap on the footer's heart: the page's pill's tap, on the active
     /// text page.
@@ -3544,15 +3548,23 @@ final class SnapFeedViewController: UIViewController {
                   let model = modelsByID[orderedIDs[indexPath.item]],
                   let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { continue }
             cell.setSoundFace(soundFace(for: model))
+            cell.setSlotSharesPost(slotSharesPost(model))
         }
-        applySoundRail(to: commentsContentVC)
-        applySoundRail(to: previewRestingVC)
+        applyRailSlot(to: commentsContentVC)
+        applyRailSlot(to: previewRestingVC)
     }
 
-    /// The composer's rail slot wears the sound's cover (#671) — on the sound
-    /// bubble's frame — and answers as the bubble does: a tap opens the sound
-    /// sheet, a hold mutes (#683). Internal for tests.
-    func applySoundRail(to panel: UIViewController?, hostedByPage: Bool = true) {
+    /// Whether `model`'s slot is its Share (#1999): a pushed text page. On
+    /// the For You root its column already carries Share (#1681).
+    func slotSharesPost(_ model: FeedItemDisplayModel) -> Bool {
+        SnapSoundState.isText(model) && !isForYouRoot
+    }
+
+    /// The composer's rail slot, decided in one place (#1999): Share on a
+    /// pushed text page, the sound's cover on a media page (#671) — on the
+    /// sound bubble's frame, a tap opening the sound sheet — no slot on a
+    /// text page of the For You root. Internal for tests.
+    func applyRailSlot(to panel: UIViewController?, hostedByPage: Bool = true) {
         guard let detail = panel as? PostDetailViewController else { return }
         // Every panel this screen mounts passes here: the one place it learns
         // that the panel's post turned out unavailable (#1409).
@@ -3567,10 +3579,17 @@ final class SnapFeedViewController: UIViewController {
         detail.setActionColumnHostedByPage(
             hostedByPage, foldsIntoSlot: model.mediaURL != nil || footerCarriesTextLike
         )
+        // ⚠️ THE SLOT'S ONE DECISION (#1999), for every page:
+        //   - a media page: the sound, greyed with none (#683);
+        //   - a pushed text page: Share, the toolbar's (a text post has no
+        //     sound), which leaves the footer;
+        //   - a text page on the For You root: no slot, the field widens —
+        //     its column already carries Share (#1681);
+        //   - scrolled away, any: the way back (#1929), the panel's call.
         let face = soundFace(for: model)
-        // No face on a text post, which has no sound (#1999): no slot
-        // either. Every media post has one, greyed with no sound (#683).
-        detail.setRailSoundFace(face, keepsSlot: face != nil)
+        let sharesInSlot = slotSharesPost(model)
+        detail.setRailShare(sharesInSlot ? { [weak self] in self?.presentShareSheet(for: id) } : nil)
+        detail.setRailSoundFace(face, keepsSlot: face != nil || sharesInSlot)
         // The For You root's save and repost (#1681), in the composer's
         // column too — drawn on a text page, reserved under a media page's.
         detail.setPostActions(
@@ -3796,7 +3815,7 @@ final class SnapFeedViewController: UIViewController {
               let makeCommentsPanelContent else { return }
         discardPrewarmedResting()
         let content = (makeRestingCommentsPanelContent ?? makeCommentsPanelContent)(id)
-        applySoundRail(to: content)
+        applyRailSlot(to: content)
         content.view.backgroundColor = .clear
         // ⚠️ IN THE DEVICE'S THEME, not `.unspecified`.
         //
@@ -4152,7 +4171,7 @@ final class SnapFeedViewController: UIViewController {
             return warmed
         }
         let panel = (makeRestingCommentsPanelContent ?? makeCommentsPanelContent)?(id)
-        applySoundRail(to: panel)
+        applyRailSlot(to: panel)
         return panel
     }
 
@@ -4295,7 +4314,7 @@ final class SnapFeedViewController: UIViewController {
     ) -> PostDetailViewController? {
         guard commentsContentVC == nil, let makeCommentsPanelContent else { return nil }
         let content = makeCommentsPanelContent(id)
-        applySoundRail(to: content)
+        applyRailSlot(to: content)
         content.view.backgroundColor = .clear
         // No style of its own: the panel is hosted INSIDE the cell and
         // inherits the page's theme from it (see `SnapChromeTheme`).
@@ -5374,7 +5393,8 @@ final class SnapFeedViewController: UIViewController {
         applyToolbarPostActions(for: model.id)
         // The page's sound bubble and the panel's rail slot (#671).
         activeSnapCell?.setSoundFace(soundFace(for: model))
-        applySoundRail(to: commentsContentVC)
+        activeSnapCell?.setSlotSharesPost(slotSharesPost(model))
+        applyRailSlot(to: commentsContentVC)
     }
 
     /// What the attribution draws for `model`: the sound's line, and a cover
@@ -7031,7 +7051,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         else { return }
 
         let panel = (makeRestingCommentsPanelContent ?? makeCommentsPanelContent)(id)
-        applySoundRail(to: panel, hostedByPage: false)
+        applyRailSlot(to: panel, hostedByPage: false)
         // Transparent, so the lent ground is still what is on screen — and so a
         // flight that clears both floors is not lidded by this.
         panel.view.backgroundColor = .clear
@@ -7727,6 +7747,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // And the sound bubble, so it flies in with the page rather than
         // appearing at the landing (#683).
         chrome.setSoundFace(soundFace(for: model))
+        // …or the post's Share, a pushed text page's (#1999).
+        chrome.setSlotSharesPost(slotSharesPost(model))
         // The replica's boost anchor wears the same face as the live one —
         // a boosted post must not flash back to the glyph mid-flight.
         chrome.setBoostTotal(boost.boostTotal(on: model.id) ?? 0)
