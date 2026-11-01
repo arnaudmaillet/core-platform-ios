@@ -7,16 +7,29 @@ import Testing
 ///
 /// The rule is one line, and it is worth a test because it is the only thing
 /// standing between a text post and a hero flight about nothing — a card
-/// carrying a symbol the destination will never show. It sent text markers to
-/// a plain push for a long time and sends them to the WINDOW now: the disc is
-/// not a card to fly, it is a hole to grow, so the objection never applied to
-/// it. The view controller that applies the rule needs a live `MKMapView` to
-/// exist (see `MapAnnotationPopTests`), so the decision lives in a pure type
-/// and this asserts it there.
+/// carrying a symbol the destination will never show. Text markers opened as
+/// a window growing out of the disc from #125, and with the platform's push
+/// again since #2015 (the owner). The view controller that applies the rule
+/// needs a live `MKMapView` to exist (see `MapAnnotationPopTests`), so the
+/// decision lives in a pure type and this asserts it there.
 struct MapMarkerPresentationTests {
-    @Test("A text marker opens as a window, not a flight — there is no cover to fly")
-    func aTextMarkerOpensAsAWindow() {
-        #expect(MapMarkerPresentation(face: .text) == .reveal)
+    /// ⚠️ EVERY NON-MEDIA FACE IS PUSHED (#2015): a text marker, an avatar,
+    /// an emote, a GIF — every face but `.media`, so a face added later gets
+    /// the push by default. (Rewritten from `aTextMarkerOpensAsAWindow`.)
+    @Test("Every non-media marker opens with the native push")
+    func everyNonMediaMarkerIsPushed() {
+        for face in PinCardView.Face.allCases where face != .media {
+            #expect(MapMarkerPresentation(face: face) == .plainPush, "\(face) is not pushed")
+        }
+    }
+
+    /// Reduce Motion pushes every face, media included.
+    @Test("Reduce Motion pushes every marker")
+    func reduceMotionPushesEveryMarker() {
+        for face in PinCardView.Face.allCases {
+            #expect(MapMarkerPresentation(face: face, reducesMotion: true) == .plainPush)
+        }
+        #expect(MapMarkerPresentation(face: .media, reducesMotion: false) == .hero)
     }
 
     /// The control. Without it, "always reveal" would pass the test above and
@@ -57,12 +70,12 @@ struct MapMarkerPresentationTests {
             return MapMarkerPresentation(face: representative.isText ? .text : .media)
         }
 
-        // Mixed, text first → the window. This is the case the media
+        // Mixed, text first → the push (#2015). This is the case the media
         // preference made unreachable: any photo in the group forced a flight.
-        #expect(presentation(of: [pin("p-1", .text), pin("p-2", .photo)]) == .reveal)
+        #expect(presentation(of: [pin("p-1", .text), pin("p-2", .photo)]) == .plainPush)
         // Mixed, media first → flown.
         #expect(presentation(of: [pin("p-1", .photo), pin("p-2", .text)]) == .hero)
-        #expect(presentation(of: [pin("p-1", .text), pin("p-2", .text)]) == .reveal)
+        #expect(presentation(of: [pin("p-1", .text), pin("p-2", .text)]) == .plainPush)
         #expect(presentation(of: [pin("p-1", .photo), pin("p-2", .video)]) == .hero)
     }
 }

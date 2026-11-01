@@ -150,6 +150,14 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
     /// source has — a map marker's — so the feed's last post is the end and a
     /// swipe up there grabs the window (#628).
     func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController, sourceIsComplete: Bool)
+    /// The same push with a page BENEATH the feed (#2015): what a downward
+    /// dismissal lands on — a city's or a country's place page, for a map
+    /// marker that opens with the plain push. The rightward close is the
+    /// platform's slide, back to the presenter.
+    func pushSnapFeed(
+        postIDs: [PostID], from presenter: UIViewController, sourceIsComplete: Bool,
+        beneath: ((UIViewController) -> UIViewController)?
+    )
     /// The same push, opened as a WINDOW growing out of `origin` rather than as
     /// a slide from the edge.
     ///
@@ -558,6 +566,14 @@ extension FeedFeatureBuilding {
     /// The same safe answer for the plain push.
     public func pushSnapFeed(postIDs: [PostID], from presenter: UIViewController, sourceIsComplete: Bool) {
         pushSnapFeed(postIDs: postIDs, from: presenter)
+    }
+
+    /// …and with a page beneath: none, the plain push.
+    public func pushSnapFeed(
+        postIDs: [PostID], from presenter: UIViewController, sourceIsComplete: Bool,
+        beneath: ((UIViewController) -> UIViewController)?
+    ) {
+        pushSnapFeed(postIDs: postIDs, from: presenter, sourceIsComplete: sourceIsComplete)
     }
 
     /// And for the window.

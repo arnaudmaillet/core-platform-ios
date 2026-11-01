@@ -233,6 +233,54 @@ struct PlainPushDismissalTests {
         #expect(!(stack.nav.leasedDelegate is ZoomTransitionController))
     }
 
+    /// ⚠️ A NATIVE PUSH CLOSES WITH THE NATIVE POP (#2015, the owner: a
+    /// screen closes the way it opened): whatever page is on screen at the
+    /// close — a photograph's `.hero` page included — no flight takes the
+    /// pop, and no window either.
+    @Test func anOriginLessPushNeverHandsItsPopToAFlight() throws {
+        let stack = Stack()
+        stack.builder.pushSnapFeed(postIDs: [PostID("t1")], from: stack.presenter)
+        let slide = try #require(stack.nav.leasedDelegate as? InteractiveSlideDismissal)
+        #expect(slide.heroLandingAcceptsHero?() == false, "a hero page could take this push's close")
+        #expect(slide.revealGeometry == nil, "a plain push closes as a window")
+        #expect(!slide.revealPresents)
+    }
+
+    /// A map marker's place page BENEATH a plain push (#2015): built at once
+    /// (its hydration starts), slid under the feed for a DOWNWARD close only;
+    /// the rightward close is the plain slide back to the map.
+    @Test func aPlainPushCarriesItsPageBeneathForTheDownwardCloseOnly() throws {
+        let stack = Stack()
+        let place = UIViewController()
+        var built = 0
+        stack.builder.pushSnapFeed(
+            postIDs: [PostID("t1")], from: stack.presenter, sourceIsComplete: true,
+            beneath: { _ in
+                built += 1
+                return place
+            }
+        )
+        #expect(built == 1, "the page beneath was not built at the push")
+        // The push's own animation first: UIKit defers a stack rewrite while
+        // a transition runs, as a swipe never begins mid-push.
+        for _ in 0..<300 where stack.nav.transitionCoordinator != nil {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        let slide = try #require(stack.nav.leasedDelegate as? InteractiveSlideDismissal)
+        #expect(slide.heroLandingAcceptsHero?() == false)
+        #expect(slide.fallbackSlideAxis == .horizontal)
+
+        slide.prepareForDismissal?(.horizontal)
+        #expect(slide.revealGeometry == nil, "the rightward close is not the plain slide")
+        slide.onWillBeginPop?(.horizontal)
+        #expect(!stack.nav.viewControllers.contains(place), "a rightward close inserted the place page")
+
+        slide.onWillBeginPop?(.vertical)
+        let feed = try #require(stack.nav.viewControllers.last)
+        let index = try #require(stack.nav.viewControllers.firstIndex(of: place), "a downward close did not insert it")
+        #expect(stack.nav.viewControllers[index + 1] === feed, "the place page is not right under the feed")
+    }
+
     @Test func anOriginLessPushHidesTheTabBar() {
         let stack = Stack()
         #expect(stack.tabs.isTabBarHidden == false, "precondition")

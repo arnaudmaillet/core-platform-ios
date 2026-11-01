@@ -8,30 +8,28 @@
 /// watches the photograph they tapped become the page — that is the whole
 /// argument for a hero, and it needs a photograph to make it.
 ///
-/// A text marker has no cover at either end of a FLIGHT, and flying a symbol on
-/// a tinted circle was a hero animation about nothing: the card carried no
-/// content the destination would show, so it read as a graphic effect rather
-/// than as continuity. That argument sent it to the platform's own push for a
-/// long time, and the note here said so.
+/// A text marker has no cover at either end of a flight, and flying a symbol
+/// on a tinted circle was a hero animation about nothing.
 ///
-/// It opens as a WINDOW now. The disc is not a card to fly, it is a hole to
-/// grow: the real page is installed at full size behind it and the disc sweeps
-/// open to the screen, wearing the marker's own glyph and tint until it has
-/// somewhere to hand them to. Nothing impersonates anything, which is exactly
-/// why the objection above does not apply — see `RevealGeometry`. The same
-/// post opened from For You or a profile gets the same window from its row, so
-/// one post still does not arrive three ways.
+/// ⚠️ IT OPENS WITH THE PLATFORM'S PUSH (#2015, the owner 2026-11-01): a text
+/// marker, an avatar, an emote, a GIF — the page slides in from the right and
+/// goes back the native way, uncovering the map. It opened as a window growing
+/// out of the disc from #125 (2026-08-21) until then. The map pushes ON
+/// PURPOSE: For You and the profile keep the window for their text rows, so
+/// one post can arrive two ways — the owner asked for the map only.
+///
+/// "A screen closes the way it opened": a plain-pushed feed closes with the
+/// native pop whatever page is on screen by then (the plain push pins it), and
+/// a flight-opened feed paged onto a text post still closes as the marker's
+/// window (`makeRevealGeometry`) — a custom opening, a custom close.
 ///
 /// Pure and marker-shaped so the decision can be pinned by a test: the view
 /// controller needs a live `MKMapView` to exist at all, and the rule does not.
 enum MapMarkerPresentation: Equatable {
     /// The custom zoom flight, card and all.
     case hero
-    /// The clip-window reveal, opened from the marker's own disc.
-    case reveal
-    /// A standard push: right-to-left slide in, swipe or chevron back. The
-    /// fallback for a marker the reveal cannot describe — one that has scrolled
-    /// off, or a build with the window turned off.
+    /// A standard push: right-to-left slide in, swipe or chevron back. Every
+    /// non-media marker (#2015), and every marker under Reduce Motion.
     case plainPush
 
     /// Decided by the face the marker is WEARING — which, for a cluster, is its
@@ -44,16 +42,16 @@ enum MapMarkerPresentation: Equatable {
     /// landing page are the same post. The rest of the group (photos included)
     /// is a swipe away either way.
     /// With `reducesMotion` (`HeroMotionPolicy`), every face opens with the
-    /// plain push: no zoom, no growing window.
+    /// plain push: no zoom.
     init(face: PinCardView.Face, reducesMotion: Bool) {
         self = reducesMotion ? .plainPush : MapMarkerPresentation(face: face)
     }
 
     init(face: PinCardView.Face) {
         // ⚠️ Written as "is it media" rather than "is it text", so a face
-        // added later routes to the REVEAL by default. An icon pin is a text
+        // added later gets the PLAIN PUSH by default. An icon pin is a text
         // post — its page is a text page — and the old form would silently have
         // flown it as a photograph.
-        self = face == .media ? .hero : .reveal
+        self = face == .media ? .hero : .plainPush
     }
 }
