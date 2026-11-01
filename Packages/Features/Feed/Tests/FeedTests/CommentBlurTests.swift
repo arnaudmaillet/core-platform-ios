@@ -44,9 +44,6 @@ struct CommentBlurTests {
         #expect(abs(CommentBlur.bandStrength(fraction: 0.2, resting: 0.39, ceiling: ceiling) - 0.6) < 0.001,
                 "the resting level wins when it is higher")
         #expect(CommentBlur.bandStrength(fraction: 2, resting: 0, ceiling: ceiling) == 1)
-        #expect(CommentBlur.pillStrength(fill: 0) == 0)
-        #expect(abs(CommentBlur.pillStrength(fill: 0.45) - 0.5) < 0.001)
-        #expect(CommentBlur.pillStrength(fill: 0.9) == 1)
     }
 
     /// Off: the black wash, exactly as before, and no blur view at all.
@@ -106,37 +103,6 @@ struct CommentBlurTests {
             }
             // The bag finishes orphaned animators on the next main turn.
             try await Task.sleep(for: .milliseconds(100))
-        }
-    }
-
-    /// The pill reads on a blur at the viewer's fill strength, its own black
-    /// fill cleared, and the blur goes with the cue cycle.
-    @Test func withTheFlagOnThePillReadsOnABlur() async throws {
-        await hosting { window in
-            let view = SnapSubtitleView(frame: CGRect(x: 0, y: 0, width: 350, height: 50))
-            view.usesBlur = true
-            window.addSubview(view)
-            view.setCues([SubtitleCue(id: "a", text: "A longer semantic thought worth reading.", at: nil)])
-            view.setActive(true) // an instant entrance: no fade, so no ramp
-            #expect(abs(view.pillBlurStrength - CommentBlur.pillStrength(fill: SubtitlePillLabel.fillOpacity)) < 0.001)
-            let label = view.subviews.compactMap { $0 as? SubtitlePillLabel }.first
-            #expect(label?.layer.backgroundColor == UIColor.clear.cgColor, "the black fill is gone")
-
-            view.setActive(false)
-            #expect(view.pillBlurStrength == 0)
-        }
-    }
-
-    /// Off: the pill keeps its black fill and has no blur.
-    @Test func withTheFlagOffThePillIsUnchanged() async {
-        await hosting { window in
-            let view = SnapSubtitleView(frame: CGRect(x: 0, y: 0, width: 350, height: 50))
-            view.usesBlur = false
-            window.addSubview(view)
-            view.setCues([SubtitleCue(id: "a", text: "A longer semantic thought worth reading.", at: nil)])
-            view.setActive(true)
-            #expect(view.pillBlurStrength == 0)
-            #expect(!view.subviews.contains { $0.accessibilityIdentifier == "subtitle-pill-blur" })
         }
     }
 }

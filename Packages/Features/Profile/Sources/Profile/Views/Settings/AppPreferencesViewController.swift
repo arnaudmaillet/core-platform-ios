@@ -23,7 +23,7 @@ final class AppPreferencesViewController: UIViewController {
         case animatedEmojis
         case bandSwitch, opacity, bandBackground, speed, dontCoverPeople
         case mutedWords, mutedAccounts
-        case subtitlesSwitch, subtitleBackground
+        case subtitlesSwitch
         case commentsBackdrop
         case appLanguage
     }
@@ -276,7 +276,7 @@ final class AppPreferencesViewController: UIViewController {
         case .emojis: [.animatedEmojis]
         case .band: [.bandSwitch, .opacity, .bandBackground, .speed, .dontCoverPeople]
         case .muted: [.mutedWords, .mutedAccounts]
-        case .subtitles: [.subtitlesSwitch, .subtitleBackground]
+        case .subtitles: [.subtitlesSwitch]
         case .commentsScreen: [.commentsBackdrop]
         case .language: [.appLanguage]
         }
@@ -394,12 +394,6 @@ final class AppPreferencesViewController: UIViewController {
                 value: preferences.bandBackgroundOpacity, isEnabled: preferences.showsReactionBand,
                 symbols: ("checkerboard.rectangle", "rectangle.fill")
             ) { $0.bandBackgroundOpacity = $1 }
-        case .subtitleBackground:
-            installSlider(
-                in: cell, title: "Background", range: MediaCommentPreferences.subtitleBackgroundRange,
-                value: preferences.subtitleBackgroundOpacity, isEnabled: preferences.showsSubtitles,
-                symbols: ("checkerboard.rectangle", "rectangle.fill")
-            ) { $0.subtitleBackgroundOpacity = $1 }
         case .commentsBackdrop:
             installSlider(
                 in: cell, title: "Background", range: MediaCommentPreferences.commentsBackdropRange,
@@ -433,7 +427,6 @@ final class AppPreferencesViewController: UIViewController {
             cell.contentConfiguration = Self.label("Show Subtitles", symbol: "captions.bubble")
             cell.accessories = [switchAccessory(isOn: preferences.showsSubtitles) { [weak self] isOn in
                 self?.store.update { $0.showsSubtitles = isOn }
-                self?.reconfigure([.subtitleBackground])
             }]
         }
     }

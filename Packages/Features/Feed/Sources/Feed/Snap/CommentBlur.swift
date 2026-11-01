@@ -29,14 +29,6 @@ enum CommentBlur {
         guard ceiling > 0 else { return 0 }
         return min(1, max(0, max(fraction, resting)) / ceiling)
     }
-
-    /// The fill setting's top (Settings: 0…0.9).
-    static let pillFillCeiling: CGFloat = 0.9
-
-    /// A pill's blur strength (0…1) for the viewer's fill setting.
-    static func pillStrength(fill: CGFloat) -> CGFloat {
-        min(1, max(0, fill) / pillFillCeiling)
-    }
 }
 
 /// A blur whose strength is a fraction of its material: a paused

@@ -98,13 +98,10 @@ struct CommentPreferencesStreamTests {
     @Test func backgroundsDefaultToTodaysLookAndAreClamped() {
         var preferences = MediaCommentPreferences()
         #expect(preferences.bandBackgroundOpacity == 0)
-        #expect(preferences.subtitleBackgroundOpacity == 0.45)
         #expect(preferences.commentsBackdropOpacity == 0.8)
         preferences.bandBackgroundOpacity = 5
-        preferences.subtitleBackgroundOpacity = -1
         preferences.commentsBackdropOpacity = 0.1
         #expect(preferences.bandBackgroundOpacity == MediaCommentPreferences.bandBackgroundRange.upperBound)
-        #expect(preferences.subtitleBackgroundOpacity == 0)
         #expect(preferences.commentsBackdropOpacity == MediaCommentPreferences.commentsBackdropRange.lowerBound)
     }
 
@@ -113,7 +110,7 @@ struct CommentPreferencesStreamTests {
     /// and resetting everything.
     @Test func preferencesFromAnOlderBuildStillDecode() throws {
         let legacy = Data("""
-        {"showsReactionBand":false,"bandOpacity":0.5,"bandSpeed":"fast","showsSubtitles":true,"mutedKeywords":["spoiler"],"mutedHandles":["troll"]}
+        {"showsReactionBand":false,"bandOpacity":0.5,"bandSpeed":"fast","showsSubtitles":true,"subtitleBackgroundOpacity":0.3,"mutedKeywords":["spoiler"],"mutedHandles":["troll"]}
         """.utf8)
         let decoded = try JSONDecoder().decode(MediaCommentPreferences.self, from: legacy)
         #expect(!decoded.showsReactionBand)
@@ -125,20 +122,16 @@ struct CommentPreferencesStreamTests {
         #expect(roundTrip == decoded)
     }
 
-    @Test func theSubtitlePillAndTheCommentsWashReadTheStore() {
+    @Test func theCommentsWashReadsTheStore() {
         let store = MediaCommentPreferencesStore(defaults: UserDefaults(suiteName: "fills-\(UUID().uuidString)")!)
         store.update {
-            $0.subtitleBackgroundOpacity = 0.2
             $0.commentsBackdropOpacity = 0.95
         }
         let reset = MediaCommentPreferencesStore(defaults: UserDefaults(suiteName: "reset-\(UUID().uuidString)")!)
         defer {
-            SubtitlePillLabel.refreshFill(from: reset)
             SnapCommentsLayout.refreshBackdrop(from: reset)
         }
-        SubtitlePillLabel.refreshFill(from: store)
         SnapCommentsLayout.refreshBackdrop(from: store)
-        #expect(abs(SubtitlePillLabel.fillOpacity - 0.2) < 0.001)
         #expect(abs(SnapCommentsLayout.backdropDimOpacity - 0.95) < 0.001)
         let backdrop = SnapMediaBackdropView()
         backdrop.setActive(true)

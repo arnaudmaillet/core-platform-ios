@@ -114,35 +114,6 @@ struct SnapCommentZoneLayoutTests {
         return label
     }
 
-    /// A one-line pill is a CAPSULE. The zone renders reaction-shaped
-    /// comments now, and a fixed 12pt corner on a ~30pt pill reads as a
-    /// clipped rectangle rather than the chip the rest of this corner
-    /// speaks in (the band's own clip, the count badge).
-    @Test func shortCuesRenderAsCapsules() {
-        for text in ["W", "GG", "🔥🔥", "so clean"] {
-            let label = Self.pill(text)
-            #expect(
-                abs(label.layer.cornerRadius - label.bounds.height / 2) < 0.01,
-                "\(text) should be a capsule"
-            )
-        }
-    }
-
-    /// A wrapped block keeps the softer block corner — a capsule there would
-    /// bow away from the glyphs and read as a speech balloon.
-    @Test func wrappedCuesKeepTheBlockCorner() {
-        let label = SubtitlePillLabel()
-        label.numberOfLines = 2
-        label.font = UIFont.preferredFont(forTextStyle: .footnote).withWeight(.medium)
-        label.text = "A sentence long enough that it certainly has to wrap onto a second line here."
-        let fitted = label.sizeThatFits(CGSize(width: 200, height: CGFloat.greatestFiniteMagnitude))
-        label.frame = CGRect(x: 0, y: 0, width: 200, height: fitted.height)
-        label.layoutIfNeeded()
-
-        #expect(label.bounds.height > 40) // genuinely two lines
-        #expect(label.layer.cornerRadius == SubtitlePillLabel.blockCornerRadius)
-    }
-
     /// A pill is never narrower than it is tall: a one-grapheme cue would
     /// otherwise be a sliver beside the 28pt avatar. Same min-width-equals-
     /// height rule the count badge uses to keep a single digit circular.
