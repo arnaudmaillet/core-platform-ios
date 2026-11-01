@@ -107,13 +107,19 @@ struct SnapCommentTickerViewTests {
             ticker.setActive(true)
             #expect(bubbleViews(ticker).isEmpty, "the band was pre-filled")
 
+            // Lane 0 is armed to enter at once, the others later: read from
+            // the armed delays, not by counting bubbles after wall time — a
+            // stalled runner fires two lanes' timers in one turn.
+            let armed = ticker.debugArmedSpawnDelays
+            #expect(armed.first == 0, "lane 0 does not enter at once")
+            #expect(armed.dropFirst().allSatisfy { ($0 ?? 0) > 0 }, "another lane enters at once too")
+
             #expect(run(until: { !bubbleViews(ticker).isEmpty }))
-            let first = bubbleViews(ticker)
-            #expect(first.count == 1, "lane 0 alone enters first: \(first.count)")
-            let flight = first.first?.layer.animation(forKey: "flight") as? CABasicAnimation
-            let startX = (flight?.fromValue as? CGFloat) ?? 0
-            let width = first.first?.bounds.width ?? 0
-            #expect(abs(startX - (bandWidth + width / 2)) < 0.5, "it did not enter at the edge")
+            for bubble in bubbleViews(ticker) {
+                let flight = bubble.layer.animation(forKey: "flight") as? CABasicAnimation
+                let startX = (flight?.fromValue as? CGFloat) ?? 0
+                #expect(abs(startX - (bandWidth + bubble.bounds.width / 2)) < 0.5, "it did not enter at the edge")
+            }
         }
     }
 
@@ -126,9 +132,10 @@ struct SnapCommentTickerViewTests {
         hosting { window in
             let ticker = makeTicker(in: window)
             ticker.setActive(true)
-            #expect(run(until: { !bubbleViews(ticker).isEmpty }))
-            let lanes = Set(bubbleViews(ticker).map { Int($0.frame.minY.rounded()) })
-            #expect(lanes.count == 1, "more than one lane entered at once")
+            // Each lane armed with its own stagger: deterministic, unlike
+            // counting the lanes on screen after a wait.
+            let armed = ticker.debugArmedSpawnDelays.compactMap { $0 }
+            #expect(armed == Array(delays), "the lanes were not armed out of step: \(armed)")
         }
     }
 
@@ -160,8 +167,11 @@ struct SnapCommentTickerViewTests {
 
             window.addSubview(ticker)
             #expect(bubbleViews(ticker).isEmpty, "it arrived pre-filled")
+            // Armed from the edge, lane 0 at once and the others later (not
+            // a count of bubbles after wall time: a stalled runner fires two
+            // lanes in one turn).
+            #expect(ticker.debugArmedSpawnDelays.map { $0 ?? -1 } == Array(SnapCommentTickerView.laneEntryDelays.prefix(SnapCommentTickerView.laneCount)))
             #expect(run(until: { !bubbleViews(ticker).isEmpty }))
-            #expect(bubbleViews(ticker).count == 1)
             #expect(bubbleViews(ticker).allSatisfy { $0.layer.animation(forKey: "flight") != nil })
         }
     }
@@ -178,8 +188,11 @@ struct SnapCommentTickerViewTests {
 
             ticker.setHeldForFlight(false)
             #expect(bubbleViews(ticker).isEmpty, "the landing pre-filled the band")
+            // Armed from the edge, lane 0 at once and the others later (not
+            // a count of bubbles after wall time: a stalled runner fires two
+            // lanes in one turn).
+            #expect(ticker.debugArmedSpawnDelays.map { $0 ?? -1 } == Array(SnapCommentTickerView.laneEntryDelays.prefix(SnapCommentTickerView.laneCount)))
             #expect(run(until: { !bubbleViews(ticker).isEmpty }))
-            #expect(bubbleViews(ticker).count == 1)
         }
     }
 

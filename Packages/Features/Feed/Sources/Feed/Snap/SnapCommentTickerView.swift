@@ -525,7 +525,7 @@ final class SnapCommentTickerView: UIView {
         generation += 1
         mode = .parked
         for timer in spawnTimers { timer?.invalidate() }
-        spawnTimers = Array(repeating: nil, count: Self.laneCount)
+        spawnTimers = Array(repeating: nil, count: SnapCommentTickerView.laneCount)
         stopCoast()
         setKineticIntensity(0)
         // Cancel any in-progress grab (a page can deactivate mid-touch).
@@ -548,9 +548,17 @@ final class SnapCommentTickerView: UIView {
         // cheap while video plays.
         timer.tolerance = max(0.05, delay * 0.1)
         spawnTimers[lane] = timer
+        #if DEBUG
+        debugArmedSpawnDelays[lane] = delay
+        #endif
     }
 
     #if DEBUG
+    /// Tests only: the delay each lane's next spawn was last armed with.
+    /// What a test reads instead of counting bubbles after wall time, which
+    /// a stalled runner turns into two lanes entering in one turn.
+    private(set) var debugArmedSpawnDelays: [TimeInterval?] = Array(repeating: nil, count: SnapCommentTickerView.laneCount)
+
     /// Tests only: the band as it looks once it has filled, ~15 s in — a
     /// train across every lane at steady spacing, the lanes out of step,
     /// every bubble flying, the next spawn timed to continue it. Production
@@ -720,7 +728,7 @@ final class SnapCommentTickerView: UIView {
         case .conveying:
             generation += 1
             for timer in spawnTimers { timer?.invalidate() }
-            spawnTimers = Array(repeating: nil, count: Self.laneCount)
+            spawnTimers = Array(repeating: nil, count: SnapCommentTickerView.laneCount)
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             for lane in 0..<Self.laneCount {
