@@ -17,6 +17,12 @@ public protocol NotificationsFeatureBuilding {
     /// The viewer's unread count for the tab badge. Best-effort: returns 0 when
     /// it can't be read, so the badge never blocks or errors.
     func unreadCount() async -> Int
+
+    /// One profile of the viewer's account's unread count (#2034), for the
+    /// Profile tab's dot and the switcher's rows — `GetUnreadCount` takes
+    /// any profile the account owns. Nil when it can't be read: a count not
+    /// known is drawn as none, never as zero.
+    func unreadCount(forProfile profileID: String) async -> Int?
 }
 
 extension Notification.Name {

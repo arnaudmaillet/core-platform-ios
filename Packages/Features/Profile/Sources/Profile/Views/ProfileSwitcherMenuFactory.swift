@@ -17,6 +17,10 @@ import UIKit
 final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
     private let switching: any ProfileSwitching
     private let imagePipeline: ImagePipeline
+    /// One profile's unread notifications (#2034), nil when it can't be read.
+    private let unreadCount: (@MainActor @Sendable (ProfileID) async -> Int?)?
+    /// Every profile's, as last read.
+    private(set) var unreadCounts: [ProfileID: Int] = [:]
 
     /// A pre-built row: nothing here is computed at menu-build time.
     private struct Row {
@@ -27,9 +31,14 @@ final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
     }
     private var rows: [Row] = []
 
-    init(switching: any ProfileSwitching, imagePipeline: ImagePipeline) {
+    init(
+        switching: any ProfileSwitching,
+        imagePipeline: ImagePipeline,
+        unreadCount: (@MainActor @Sendable (ProfileID) async -> Int?)? = nil
+    ) {
         self.switching = switching
         self.imagePipeline = imagePipeline
+        self.unreadCount = unreadCount
     }
 
     /// Fetches the account's profiles and pre-builds every row (strings + rounded
@@ -37,6 +46,8 @@ final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
     func reload() async {
         let profiles = (try? await switching.accountProfiles()) ?? []
         let activeID = await switching.activeProfileID()
+        // The counts with the avatars, in parallel (#2034).
+        async let counts = Self.counts(for: profiles.map(\.id), reading: unreadCount)
         var loaded: [Row] = []
         for profile in profiles {
             loaded.append(Row(
@@ -47,6 +58,31 @@ final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
             ))
         }
         rows = loaded
+        unreadCounts = await counts
+    }
+
+    func reloadUnreadCounts() async {
+        let ids: [ProfileID]
+        if rows.isEmpty {
+            ids = ((try? await switching.accountProfiles()) ?? []).map(\.id)
+        } else {
+            ids = rows.map(\.id)
+        }
+        unreadCounts = await Self.counts(for: ids, reading: unreadCount)
+    }
+
+    /// Every profile's unread count at once; the ones that could not be read
+    /// are left out.
+    private static func counts(
+        for ids: [ProfileID], reading read: (@MainActor @Sendable (ProfileID) async -> Int?)?
+    ) async -> [ProfileID: Int] {
+        guard let read else { return [:] }
+        return await withTaskGroup(of: (ProfileID, Int?).self) { group in
+            for id in ids { group.addTask { (id, await read(id)) } }
+            var counts: [ProfileID: Int] = [:]
+            for await (id, count) in group { if let count { counts[id] = count } }
+            return counts
+        }
     }
 
     /// A synchronous switcher `UIMenu` from the pre-built rows, in the Telegram

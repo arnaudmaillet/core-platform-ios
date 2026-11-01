@@ -1,3 +1,4 @@
+import CoreModels
 import CoreNavigation
 import LocalStore
 import MediaCore
@@ -59,5 +60,9 @@ public struct NotificationsFeatureBuilder: NotificationsFeatureBuilding {
 
     public func unreadCount() async -> Int {
         (try? await repository.unreadCount()) ?? 0
+    }
+
+    public func unreadCount(forProfile profileID: String) async -> Int? {
+        try? await repository.unreadCount(forProfile: ProfileID(profileID))
     }
 }

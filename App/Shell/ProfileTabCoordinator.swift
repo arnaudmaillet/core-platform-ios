@@ -152,8 +152,29 @@ final class ProfileTabCoordinator: TabCoordinator {
     /// colour — the photo is there and invisible, which reads as a broken image
     /// rather than a wrong render mode.
     func setAvatar(_ image: UIImage?) {
+        avatar = image
+        applyAvatar()
+    }
+
+    /// Whether a profile of the account has an unread notification (#2034):
+    /// the bar's dot, cut into the avatar as the glyph tabs wear theirs.
+    func setUnread(_ unread: Bool) {
+        guard unread != hasUnread else { return }
+        hasUnread = unread
+        applyAvatar()
+    }
+
+    /// The avatar as the bar last received it, circular and `avatarSide` across.
+    private var avatar: UIImage?
+    private var hasUnread = false
+
+    private func applyAvatar() {
         // A guest's tab is Settings: its gear is not an avatar placeholder.
         guard !showsGuestSettings else { return }
-        tab.image = image ?? Self.placeholder
+        // ⚠️ ONE BOX FOR BOTH STATES (#2034): the avatar is drawn into the
+        // badged box whether the dot shows or not, so it never moves.
+        tab.image = avatar.map { TabAvatarBadge.image(avatar: $0, badged: hasUnread) } ?? Self.placeholder
+        // What VoiceOver hears with the dot, as the glyph tabs (#1196).
+        tab.accessibilityValue = hasUnread && avatar != nil ? "New notifications" : nil
     }
 }

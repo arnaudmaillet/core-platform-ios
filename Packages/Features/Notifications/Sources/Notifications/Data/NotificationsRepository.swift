@@ -194,6 +194,10 @@ public protocol NotificationsProviding: Sendable {
     func markRead(_ items: [NotificationItem]) async throws
     /// The viewer's unread notification count, for the tab badge.
     func unreadCount() async throws -> Int
+    /// The unread count of one profile of the viewer's account (#2034): the
+    /// server authorizes it against the account's profiles, not only the
+    /// active one.
+    func unreadCount(forProfile profileID: ProfileID) async throws -> Int
     /// Deletes the viewer's notifications up to `bound` on the server
     /// (#1574): the trash's commit, once its Undo toast has run out.
     func clearAll(through bound: NotificationsClearBound) async throws
@@ -206,6 +210,8 @@ public protocol NotificationsProviding: Sendable {
 extension NotificationsProviding {
     /// A provider with no per-row read (a test's fake) marks nothing.
     public func markRead(_ items: [NotificationItem]) async throws {}
+    /// A provider with no per-profile read (a test's fake) counts nothing.
+    public func unreadCount(forProfile profileID: ProfileID) async throws -> Int { 0 }
     /// A provider with no clear (a test's fake) clears nothing.
     public func clearAll(through bound: NotificationsClearBound) async throws {}
     /// A provider with no preferences (a test's fake) never pauses.
@@ -369,9 +375,12 @@ public actor NotificationsRepository: NotificationsProviding, ViewerScoped {
     }
 
     public func unreadCount() async throws -> Int {
-        let viewer = try await resolveViewerProfileID()
+        try await unreadCount(forProfile: try await resolveViewerProfileID())
+    }
+
+    public func unreadCount(forProfile profileID: ProfileID) async throws -> Int {
         var request = Notification_V1_GetUnreadCountRequest()
-        request.profileID = viewer.rawValue
+        request.profileID = profileID.rawValue
         let response = await notificationClient.getUnreadCount(request: request, headers: [:])
         switch response.result {
         case .success(let body): return Int(body.unreadCount)

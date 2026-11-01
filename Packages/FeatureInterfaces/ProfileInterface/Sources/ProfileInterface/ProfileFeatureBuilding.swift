@@ -163,9 +163,20 @@ public protocol ProfileSwitcherPresenting: AnyObject {
         onSwitch: @escaping () -> Void,
         onAddProfile: @escaping () -> Void
     ) -> UIMenu
+    /// Each profile's unread notifications as the last `reload` (or
+    /// `reloadUnreadCounts`) read them (#2034); a profile whose count could
+    /// not be read is absent.
+    var unreadCounts: [ProfileID: Int] { get }
+    /// Reads every profile's unread count again, without the avatars: the
+    /// Profile tab's dot refreshes on every tab switch.
+    func reloadUnreadCounts() async
 }
 
 public extension ProfileSwitcherPresenting {
+    /// Whether any profile of the account, the active one included, has an
+    /// unread notification: the Profile tab's dot (#2034).
+    var hasUnreadNotifications: Bool { unreadCounts.values.contains { $0 > 0 } }
+
     /// The full menu, add-profile row included — what the profile header
     /// wants, and the shape this protocol had before switch-only surfaces
     /// existed.

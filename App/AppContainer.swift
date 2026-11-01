@@ -1507,6 +1507,11 @@ final class AppContainer {
         // The same pool every other surface draws on, so a profile's video
         // competes for the same slots rather than opening a second one.
         builder.videoPlayback = videoPlayback
+        // The switcher's counts and the Profile tab's dot (#2034): each
+        // profile's unread notifications, from the feature that holds them.
+        builder.unreadNotifications = { [unowned self] id in
+            await self.notificationsFeature.unreadCount(forProfile: id.rawValue)
+        }
         // The gallery cards' like chips stake from the app's one wallet.
         builder.wallet = walletStore
         // Settings → Wallet and Purchases: the server wallet's history (#400).

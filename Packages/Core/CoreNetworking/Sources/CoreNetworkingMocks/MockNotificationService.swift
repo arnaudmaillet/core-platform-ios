@@ -202,14 +202,25 @@ public final class MockNotificationService: @unchecked Sendable {
             response.success = true
             return .success(response)
         }
-        bff.register(path: "/notification.v1.NotificationService/GetUnreadCount") { [self] (_: Notification_V1_GetUnreadCountRequest) in
+        bff.register(path: "/notification.v1.NotificationService/GetUnreadCount") { [self] (request: Notification_V1_GetUnreadCountRequest) in
             var response = Notification_V1_GetUnreadCountResponse()
+            // The account's other profiles (#2034) — the server answers for
+            // any profile the account owns: fixed counts, one at zero, one
+            // past 99, so the switcher's badges show every case.
+            if let other = Self.otherProfileUnread[request.profileID] {
+                response.unreadCount = other
+                return .success(response)
+            }
             response.unreadCount = readState.allRead ? 0 : Int64(Self.specs.enumerated().filter { offset, spec in
                 !spec.isRead && !readState.isRead("notif-\(offset)") && !readState.isCleared("notif-\(offset)")
             }.count)
             return .success(response)
         }
     }
+
+    /// The unread counts of the viewer account's other profiles (prof-0 and
+    /// prof-2, `MockSocialDataset.accountID(for:)`), for the switcher (#2034).
+    public static let otherProfileUnread: [String: Int64] = ["prof-0": 0, "prof-2": 128]
 
     private final class ReadState: @unchecked Sendable {
         private let lock = NSLock()
