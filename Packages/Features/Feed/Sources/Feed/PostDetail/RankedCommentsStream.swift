@@ -100,6 +100,24 @@ final class RankedCommentsStream {
         if notify { onChange?() }
     }
 
+    /// A thread's newly loaded replies, under its parent wherever it stands:
+    /// the viewer's own threads keep their replies in the ranking, which
+    /// `shown` reads them from. Returns whether anything changed; nothing is
+    /// announced — the caller emits.
+    @discardableResult
+    func insertReplies(_ fresh: [CommentEntry], under parentID: String, exhausted: Bool) -> Bool {
+        let before = shown
+        if let ownIndex = own.firstIndex(where: { $0.id == parentID }) {
+            ranked = Self.appending(fresh, to: ranked)
+            if exhausted {
+                own[ownIndex].replyCount = ranked.filter { $0.parentID == parentID }.count
+            }
+        } else {
+            ranked = PostDetailViewModel.insertingReplies(fresh, under: parentID, exhausted: exhausted, into: ranked)
+        }
+        return shown != before
+    }
+
     /// One change to every comment held — a review, a delete — in both the
     /// ranking and the viewer's own.
     func update(_ transform: ([CommentEntry]) -> [CommentEntry]) {
