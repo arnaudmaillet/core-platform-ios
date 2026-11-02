@@ -347,7 +347,23 @@ struct CommentTiersTests {
         attributes.frame = CGRect(x: 0, y: 0, width: 370, height: 44)
         let fitted = cell.preferredLayoutAttributesFitting(attributes).frame.height
         let oneLine = UIFont.appFont(forTextStyle: .body).lineHeight
-        #expect(cell.row.bodyTextLabel.bounds.height > oneLine * 1.5 || fitted > 70,
-                "the two-line body measured \(fitted) (label \(cell.row.bodyTextLabel.bounds.height))")
+        #expect(fitted > 70, "the two-line body measured \(fitted)")
+        // ⚠️ AND DRAWN WHOLE where it lands (the owner's device, 2026-11-02):
+        // laid out at the measured frame, the body is two lines — never one
+        // line under an ellipsis in a row two lines tall.
+        cell.frame = CGRect(x: 0, y: 0, width: 370, height: fitted)
+        cell.setNeedsLayout()
+        cell.layoutIfNeeded()
+        let label = cell.row.bodyTextLabel
+        #expect(label.bounds.height > oneLine * 1.5, "the body drew \(label.bounds.height) in a row of \(fitted)")
+        #expect(abs(label.preferredMaxLayoutWidth - label.bounds.width) < 1,
+                "the body was told \(label.preferredMaxLayoutWidth) for a width of \(label.bounds.width)")
+    }
+
+    /// The body's width comes from the row's: less the indent, the disc and
+    /// the gap — never the label's frame from a previous pass.
+    @Test func theBodyWidthIsTheRowsLessItsColumn() {
+        #expect(CommentRowView.bodyWidth(rowWidth: 370, indent: 0, avatar: 39) == 370 - 39 - Spacing.sm)
+        #expect(CommentRowView.bodyWidth(rowWidth: 370, indent: 47, avatar: 39) == 370 - 47 - 39 - Spacing.sm)
     }
 }

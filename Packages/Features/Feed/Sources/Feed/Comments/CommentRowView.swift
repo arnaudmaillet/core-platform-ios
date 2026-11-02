@@ -446,12 +446,28 @@ final class CommentRowView: UIView {
     /// 56). Told its real width, the body answers its real height on the first
     /// pass — the standard idiom, and `SnapPostInfoCardView`'s fix for the
     /// caption.
+    ///
+    /// ⚠️ FROM THE ROW'S OWN WIDTH, never the label's frame (the owner's
+    /// device, 2026-11-02): the label sits in two nested stacks, which lay
+    /// out after this pass, so its frame here is the PREVIOUS pass's — a
+    /// stale width told back to it kept a two-line comment one line, cut by
+    /// an ellipsis in a row two lines tall, and the next measure closed the
+    /// row up: the tier's last comment jumped on "More". The body's width
+    /// is the row's less the indent, the disc and the gap.
     override func layoutSubviews() {
+        let width = Self.bodyWidth(
+            rowWidth: bounds.width, indent: rowLeading?.constant ?? 0,
+            avatar: Self.avatarSize(for: traitCollection)
+        )
+        if width > 0, abs(bodyLabel.preferredMaxLayoutWidth - width) > 0.5 {
+            bodyLabel.preferredMaxLayoutWidth = width
+        }
         super.layoutSubviews()
-        let width = bodyLabel.bounds.width
-        guard width > 0, abs(bodyLabel.preferredMaxLayoutWidth - width) > 0.5 else { return }
-        bodyLabel.preferredMaxLayoutWidth = width
-        super.layoutSubviews()
+    }
+
+    /// The body's width in a row `rowWidth` wide. Pure, for tests.
+    static func bodyWidth(rowWidth: CGFloat, indent: CGFloat, avatar: CGFloat) -> CGFloat {
+        rowWidth - indent - avatar - Metrics.avatarGap
     }
 
     // MARK: - The time, or the loader in its place (#719, #725, #919)
