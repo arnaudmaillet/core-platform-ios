@@ -27,7 +27,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         if ProcessInfo.processInfo.arguments.contains(where: { $0.hasSuffix("-log") }) {
             setvbuf(stdout, nil, _IONBF, 0)
         }
-        // The accent's rule flags (#1169: `-theme-rings`, `-theme-hero`…),
+        // The accent's rule flags (#1169: `-theme-rings`, `-theme-counters`…),
         // before any screen reads a palette rule. Release runs the decided
         // rules, with no switch.
         Palette.configure(arguments: ProcessInfo.processInfo.arguments)

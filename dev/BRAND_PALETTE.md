@@ -1,10 +1,10 @@
 # Brand palette
 
-The app's colours are one **theme**: a pink primary and a violet secondary, from the icon (#1169, #1176, #1190). Code reads **roles** (`Palette`), never hex values or system hues picked on the spot.
+The app's colours are one **theme**: **raspberry**, used almost everywhere, with a violet for the gems and a raspberry → violet → mint signature gradient (#2062, the owner, 2026-11-02). Code reads **roles** (`Palette`), never hex values or system hues picked on the spot.
 
-- The raw colours live in **one file**: `Packages/Core/DesignSystem/Sources/DesignSystem/Tokens/BrandTheme.swift` (#2062).
+- The raw colours live in **one file**: `Packages/Core/DesignSystem/Sources/DesignSystem/Tokens/BrandTheme.swift`.
 - The roles live in `Palette.swift` beside it, and every role derives from `BrandTheme.current`.
-- The decisions are recorded on #1124, #1169, #1178, #1190 and #2062.
+- The decisions are recorded on #1124, #1169, #1178, #1190 and #2062. The pink and violet palette that came before (#1169–#1190: `F37AB4`, the violet `7C5CF0` / `6852C6` / `A78BFA`) is history.
 
 ## Rules
 - **Neutrals stay the system's.** Labels, backgrounds, fills, separators and `Surface` already adapt to dark mode, Increased Contrast and glass. `Palette` holds only the hues.
@@ -12,34 +12,50 @@ The app's colours are one **theme**: a pink primary and a violet secondary, from
 - **The primary marks what matters**:
   - a screen's one primary action;
   - the system controls, through the app's tint (`AccentColor` and the main window's `tintColor`);
-  - the unseen-story ring and the hearts.
-- **Unread counts and the bell's dot are the violet `counter`** (#1178). The system red is for errors and destruction only.
-- **A filled button wears white** (`onPrimary`) in the light, and a dark ink on the dark-mode fill.
-- **Violet is secondary**: gems, secondary emphasis, the gradients' far stop and, greyed, the ink of links and tokens (`entityInk`).
-- **The signature gradient is for brand moments only**: splash, the Shop's hero art, the wallet's hero rule and the profile switcher's counts (#2034). It is never used on recurring chrome.
+  - the unseen-story ring, the hearts, and every unread mark.
+- **Every pill and badge is the solid primary** (`counter`), never a gradient, under a white count: the tab bar's badges, the bell's dot, the Messages selector's badges, the inbox's unread pills, the profile switcher's counts.
+- **There is no secondary colour.** The violet is the gems' alone, and otherwise appears only inside the signature gradient, as the mint does.
+- **Links, `@mentions` and `#hashtags` are a neutral grey** (`entityInk`), set apart by the semibold.
+- **A filled button wears white** (`onPrimary`) in both appearances.
+- **The signature gradient** (`brandGradient`) is for the launch logo and the unseen-story ring. **White text never sits over its mint half** (1.5:1), so no button wears it.
+- **The system red is for errors and destruction only.**
 - **A warning is a yellow glyph with neutral words** (`Warning`).
 - **Dark mode is not an inversion.** Roles near the contrast line have Increased Contrast values.
 - **One theme only** (the owner, 2026-11-02). The Shop's paid accent themes (#1379) are retired.
+- **The yellow `FFE600` is recorded, not drawn** (`BrandTheme.crownYellow`): the crowns' colour, when crowns replace the gems.
 
 ## Roles
 
 | Role (`BrandTheme`) | Used for | Light | Dark | IC light / dark |
 |---|---|---|---|---|
-| `primary` → `tint`, `brandText` | interactive glyphs, text buttons, switches, selection | `F37AB4` | `F37AB4` | `B0256A` / `F8ABCF` |
-| `primarySolid` → `primaryFill`, `prominentGlassTint` | the prominent fill and the prominent glass's tint | `F37AB4` | `F37AB4` | — |
-| `onPrimary` | the label on the fill | `FFFFFF` | `2B0716` | — |
-| `primaryPressed` | the pressed fill | `E86AA6` | `E86AA6` | `9C1F5E` / `E86AA6` |
-| `primaryContainer` / `onPrimaryContainer` | soft selected grounds | `FDE3EF` / `B8296C` | `3A0A22` / `F8ABCF` | — |
-| `counter` | unread marks, the bell's dot | `7C5CF0` | `7C5CF0` | — |
-| `accentGradient` | the story ring, the inbox's unread pills | `F37AB4` → `A78BFA` | same | — |
-| `secondary` | secondary emphasis | `6852C6` | `A78BFA` | `5C44B7` / `B59EFF` |
-| `secondaryContainer` / `onSecondaryContainer` | gem grounds and badges | `EFEEFF` / `6852C6` | `211944` / `A78BFA` | — |
-| `entityInk` | `@mentions`, `#hashtags`, links | `645A82` | `AFA3CC` | `4F4669` / `C3B9DD` |
-| `likes` | the likes' heart, glyph and coin | `F37AB4` | `F37AB4` | `B0256A` / `F8ABCF` |
-| `gem` | the gems | `6852C6` | `A78BFA` | `5C44B7` / `B59EFF` |
+| `primary` → `tint`, `brandText` | interactive glyphs, text buttons, switches, selection | `EC1C75` | `EC1C75` | `C2105F` / `F25C9A` |
+| `primaryFill` | a filled button's ground | `EC1C75` | `EC1C75` | `C2105F` / `C2105F` |
+| `primarySolid` → `prominentFill`, `prominentGlassTint` | the prominent fill and the prominent glass's tint | `EC1C75` | `EC1C75` | — |
+| `onPrimary` | the label on the fill | `FFFFFF` | `FFFFFF` | — |
+| `primaryPressed` | the pressed fill | `D41868` | `D41868` | `A80D52` / `D41868` |
+| `primaryContainer` / `onPrimaryContainer` | soft selected grounds, the streak chip | `FDE3EE` / `B00E57` | `3D0A20` / `F57BAE` | — |
+| `counter` | every unread mark, pill and badge | `EC1C75` | `EC1C75` | `C2105F` / `C2105F` |
+| `entityInk` | `@mentions`, `#hashtags`, links | `5E5E66` | `AEAEB4` | `48484F` / `C8C8CD` |
+| `likes` | the likes' heart, glyph and coin | `EC1C75` | `EC1C75` | `C2105F` / `F25C9A` |
+| `gem` → `gemViolet`, `GemSymbol.tint` | the gems' glyph | `9B5CFF` | `9B5CFF` | `7A3FE0` / `B48AFF` |
+| `gemText` → `GemSymbol.textColor` | a gem amount or price as text | `7A3FE0` | `A97AFF` | `6E33D6` / `B48AFF` |
 | `saveGold` | the saved star | `FFC53D` | `FFC53D` | — |
-| `signatureGradient` → `brandGradient` | brand moments | `E0559A` → `7C5CF0` | same | — |
-| `loaderTones` | the branded loader's pills | `F37AB4`, `D98AD0`, `A78BFA` | same | — |
+| `signatureGradient` → `brandGradient` | the launch logo, the story ring | `EC1C75` 0 · `9B5CFF` 0.5 · `2EF0A8` 1 | same | — |
+| `loaderTones` | the branded loader's pills | `EC1C75`, `9B5CFF`, `2EF0A8` | same | — |
+
+### Measured contrast (WCAG 2.x)
+| Pair | Light | Dark | IC light | IC dark |
+|---|---|---|---|---|
+| `tint` on the page (white / black) | 4.21 | 4.99 | 5.94 | 6.77 |
+| `tint` on the raised ground (`F2F2F7` / `1C1C1E`) | 3.77 | 4.04 | 5.33 | 5.49 |
+| white on `primaryFill` | 4.21 | 4.21 | 5.94 | 5.94 |
+| white on `counter` | 4.21 | 4.21 | 5.94 | 5.94 |
+| `onPrimaryContainer` on `primaryContainer` | 5.71 | 6.59 | — | — |
+| `entityInk` on the page | 6.42 | 9.51 | 9.07 | 12.60 |
+| `gemViolet` (glyph) on the page | 3.91 | 5.37 | 5.81 | 8.02 |
+| `gemText` on the page / the card | 5.81 / 5.81 | 6.91 / 5.60 | 6.76 | 8.02 / 6.50 |
+
+The raspberry is 4.21:1 as text on white: the owner's base 500. Text in the accent reaches 4.5:1 under Increased Contrast.
 
 Status colours stay the system's:
 - success: `systemGreen`;
@@ -66,8 +82,8 @@ Three assets hold the brand outside the code. `BrandAssetsGuardTests` (DesignSys
    - `AccentColor`'s four values;
    - the launch logo's stops;
    - the icon, redone in Icon Composer. Copy its `.icon` byte for byte, then copy its fill strings into `iconGradient`.
-3. **Check the contrast.** `PaletteTests` and `PaletteThemeTests` measure every role where it is used. Update the values they pin to the new ones.
-4. **Update this document's table.**
+3. **Check the contrast.** `PaletteTests` and `PaletteThemeTests` measure every role where it is used, and `PaletteTests.everyRoleIsTheThemes` checks each role against `BrandTheme.current`. Update the table above.
+4. **Update this document's tables.**
 5. **Run the full suite and a Release build.** `Palette` is read everywhere.
 
 If paid themes come back one day, a theme is a second `BrandTheme` value plus a trait that picks one.

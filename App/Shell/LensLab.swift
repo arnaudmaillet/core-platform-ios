@@ -45,7 +45,6 @@ private final class LensLabTabBarController: UITabBarController {
         guard accessory == nil else { return }
         let bar = PagedTabBar(titles: ["Chats", "Requests", "Suggestions"], style: .navigationTitle)
         bar.badgeTint = Palette.counter
-        bar.badgeGradient = Palette.accentGradient
         bar.setBadge(22, at: 0)
         bar.setBadge(10, at: 1)
         let accessory = SelectorAccessory(strip: bar)

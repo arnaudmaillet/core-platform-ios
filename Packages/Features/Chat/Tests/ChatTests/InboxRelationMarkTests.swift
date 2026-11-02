@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import EntityStore
 import Foundation
 import MediaCore
@@ -91,6 +92,15 @@ struct InboxRelationMarkTests {
         #expect(UnreadCountPill.text(for: 1) == "1")
         #expect(UnreadCountPill.text(for: 12) == "12")
         #expect(UnreadCountPill.text(for: 120) == "99+")
+    }
+
+    /// The pill is the solid unread mark, as every pill and badge, ringed or
+    /// not (#2062, the owner: never a gradient).
+    @Test(arguments: [false, true])
+    func thePillIsTheSolidMark(_ ringed: Bool) {
+        let pill = UnreadCountPill(ringed: ringed)
+        #expect(pill.backgroundColor == Palette.counter)
+        #expect(!(pill.layer.sublayers ?? []).contains { $0 is CAGradientLayer })
     }
 
     /// The count sits under the time, at the row's trailing edge, and the

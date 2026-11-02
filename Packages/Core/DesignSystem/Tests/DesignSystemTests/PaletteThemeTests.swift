@@ -2,9 +2,9 @@ import Testing
 import UIKit
 @testable import DesignSystem
 
-/// The accent (#1169, pink, chosen 2026-10-14): every role resolves in light,
-/// dark and Increased Contrast and holds the contrast its use needs — and a
-/// launch with no flag runs the decided neutral-first rules.
+/// The theme (#2062, raspberry): every role resolves in light, dark and
+/// Increased Contrast and holds the contrast its use needs — and a launch
+/// with no flag runs the decided neutral-first rules.
 @MainActor
 struct PaletteThemeTests {
     private static let traits: [UITraitCollection] = [
@@ -36,13 +36,13 @@ struct PaletteThemeTests {
         return (high + 0.05) / (low + 0.05)
     }
 
-    /// The owner's value, exactly: the dark theme's pink in both
-    /// appearances since #1190.
-    @Test func theAccentIsTheChosenPink() {
+    /// The owner's value, exactly: base 500 in both appearances (#2062).
+    @Test func theAccentIsTheChosenRaspberry() {
         let light = Palette.tint.resolvedColor(with: Self.traits[0])
         let dark = Palette.tint.resolvedColor(with: Self.traits[1])
-        #expect(light == Palette.rgb(0xF37AB4))
-        #expect(dark == Palette.rgb(0xF37AB4))
+        #expect(light == Palette.rgb(BrandTheme.current.primary.light))
+        #expect(dark == Palette.rgb(BrandTheme.current.primary.dark))
+        #expect(BrandTheme.current.primary.light == 0xEC1C75)
     }
 
     /// Every role, every appearance, opaque.
@@ -56,68 +56,57 @@ struct PaletteThemeTests {
         }
     }
 
-    /// Text in the accent reads (4.5:1) on black, and on white under
-    /// Increased Contrast — the light pink is a mark by the owner's choice
-    /// (#1190); Increased Contrast never lowers it, and a filled button's
-    /// label passes where the fill is deep enough to carry it.
+    /// The raspberry reads at 4.2:1 on white and on black — the owner's base
+    /// 500 — and Increased Contrast takes it past 4.5:1 on either, never
+    /// lower; a filled button's white label reads at 4.2:1, and 4.5:1 under
+    /// Increased Contrast.
     @Test func theAccentReads() {
         let (light, dark, lightIC, darkIC) = (Self.traits[0], Self.traits[1], Self.traits[2], Self.traits[3])
         let tintLight = Self.contrast(Palette.tint.resolvedColor(with: light), .white)
         let tintDark = Self.contrast(Palette.tint.resolvedColor(with: dark), .black)
+        #expect(tintLight >= 4.2, "tint \(tintLight):1 on white")
         #expect(tintDark >= 4.5, "tint \(tintDark):1 on black")
         #expect(Self.contrast(Palette.tint.resolvedColor(with: lightIC), .white) >= 4.5)
-        #expect(Self.contrast(Palette.brandText.resolvedColor(with: lightIC), .white) >= 4.5)
-        #expect(Self.contrast(Palette.brandText.resolvedColor(with: dark), .black) >= 4.5)
+        #expect(Self.contrast(Palette.tint.resolvedColor(with: darkIC), .black) >= 4.5)
         #expect(Self.contrast(Palette.tint.resolvedColor(with: lightIC), .white) >= tintLight)
         #expect(Self.contrast(Palette.tint.resolvedColor(with: darkIC), .black) >= tintDark)
-        for traits in [lightIC, dark] {
-            let onFill = Self.contrast(
-                Palette.onPrimary.resolvedColor(with: traits), Palette.primaryFill.resolvedColor(with: traits)
-            )
-            #expect(onFill >= 4.5, "onPrimary \(onFill):1 in \(traits.userInterfaceStyle.rawValue)")
+        for traits in [light, dark] {
+            let onFill = Self.contrast(Palette.onPrimary.resolvedColor(with: traits), Palette.primaryFill.resolvedColor(with: traits))
+            #expect(onFill >= 4.2, "onPrimary \(onFill):1")
+        }
+        for traits in [lightIC, darkIC] {
+            let onFill = Self.contrast(Palette.onPrimary.resolvedColor(with: traits), Palette.primaryFill.resolvedColor(with: traits))
+            #expect(onFill >= 4.5, "onPrimary \(onFill):1 under Increased Contrast")
         }
     }
 
-    /// The icon's gradient on the unread pills and the story ring: pink →
-    /// violet since the icon was redrawn (#1176), in the icon's tone — the
-    /// owner's call over 3:1. A white count still stands out (≥ 1.8:1).
-    @Test func theAccentGradientRunsPinkToVioletInTheIconsTone() {
-        let pink = Self.traits[0]
-        let accent = Palette.accentGradient.map { $0.resolvedColor(with: pink) }
-        #expect(accent == [Palette.rgb(0xF37AB4), Palette.rgb(0xA78BFA)])
-        #expect(Palette.brandGradient == [Palette.rgb(0xE0559A), Palette.rgb(0x7C5CF0)])
-        for gradient in [accent, Palette.brandGradient] {
-            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-            gradient[0].getRed(&r, green: &g, blue: &b, alpha: &a)
-            #expect(r > b, "the start is pink")
-            gradient[1].getRed(&r, green: &g, blue: &b, alpha: &a)
-            #expect(b > r, "the end is violet")
-        }
-        for stop in accent {
-            #expect(Self.contrast(.white, stop) >= 1.8, "white on a stop is \(Self.contrast(.white, stop)):1")
-        }
-        #expect(Palette.accentGradientStart == CGPoint(x: 0, y: 1), "pink starts at the bottom-left, as the icon")
+    /// The signature gradient (#2062): raspberry at 0, violet at 0.5, mint at
+    /// 1, bottom-left to top-right. ⚠️ No white text over it: its mint half
+    /// is 1.5:1 under white.
+    @Test func theSignatureRunsRaspberryVioletMint() {
+        #expect(Palette.brandGradient == BrandTheme.current.signatureGradient.map(Palette.rgb))
+        #expect(Palette.brandGradientLocations == [0, 0.5, 1])
+        #expect(Self.contrast(.white, Palette.brandGradient[2]) < 2, "the mint carries no white words")
+        #expect(Palette.brandGradientStart == CGPoint(x: 0, y: 1), "it starts at the bottom-left, as the icon")
     }
 
     @Test func aLaunchWithNoFlagRunsTheDecidedRules() {
         let rules = Palette.resolve(arguments: [])
         #expect(rules == Palette.Rules())
         #expect(rules.selectedTabIsNeutral)
-        #expect(rules.counters == .violet, "unread marks are the violet (decided, #1178)")
-        let violet = Palette.counterViolet.resolvedColor(with: Self.traits[0])
-        #expect(Palette.rgb(0x7C5CF0) == violet)
-        #expect(Self.contrast(.white, violet) >= 4.5, "a white count on the violet")
-        #expect(rules.storyRing == .gradient, "the ring wears the icon's gradient (decided)")
-        #expect(rules.heroButton == .accent)
+        #expect(rules.counters == .accent, "unread marks are the raspberry (#2062)")
+        let mark = Palette.counterMark.resolvedColor(with: Self.traits[0])
+        #expect(Self.contrast(.white, mark) >= 4.2, "a white count on the mark")
+        #expect(rules.storyRing == .gradient, "the ring wears the signature gradient (decided)")
     }
 
     @Test func theFlagsPickTheRules() {
         let rules = Palette.resolve(arguments: [
-            "-theme-tab", "accent", "-theme-counters", "accent", "-theme-rings", "accent", "-theme-hero", "gradient",
+            "-theme-tab", "accent", "-theme-counters", "red", "-theme-rings", "accent",
         ])
         #expect(!rules.selectedTabIsNeutral)
-        #expect(rules.counters == .accent)
+        #expect(rules.counters == .red)
         #expect(rules.storyRing == .accent)
-        #expect(rules.heroButton == .gradient)
+        #expect(Palette.resolve(arguments: ["-theme-counters", "violet"]).counters == .accent, "the violet case is gone")
     }
 }

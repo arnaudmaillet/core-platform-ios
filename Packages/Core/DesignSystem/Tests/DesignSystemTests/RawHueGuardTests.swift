@@ -100,7 +100,7 @@ struct RawHueGuardTests {
     /// is one file. Anywhere else, read a `Palette` role.
     static let hexHome: Set<String> = ["BrandTheme.swift"]
 
-    /// Whether `text` writes a colour as a hex literal (`0xF37AB4`).
+    /// Whether `text` writes a colour as a hex literal (`0xEC1C75`).
     static func writesAHex(_ text: String) -> Bool {
         text.range(of: "0x[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?(?![0-9A-Fa-f])", options: .regularExpression) != nil
     }
@@ -125,8 +125,8 @@ struct RawHueGuardTests {
     }
 
     @Test func theHexPatternFindsTheShape() {
-        #expect(Self.writesAHex("Palette.rgb(0xF37AB4)"))
-        #expect(Self.writesAHex("let ink: UInt32 = 0xF37AB4CC"))
+        #expect(Self.writesAHex("Palette.rgb(0xEC1C75)"))
+        #expect(Self.writesAHex("let ink: UInt32 = 0xEC1C75CC"))
         #expect(!Self.writesAHex("value >> 16 & 0xFF"), "a mask is not a colour")
         #expect(!Self.writesAHex("let big = 0x1234567"), "seven digits are not a colour")
     }

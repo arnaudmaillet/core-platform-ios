@@ -352,7 +352,7 @@ class WalletStakeCell: UICollectionViewListCell {
             spoken = [staked, "settles in \(remaining)"]
         case .gems(let earned):
             result.append(walletAmount(
-                "+\(earned)", glyph: GemSymbol.glyphImage(), font: resultFont, color: GemSymbol.tint
+                "+\(earned)", glyph: GemSymbol.glyphImage(), font: resultFont, color: GemSymbol.textColor
             ))
             detailLabel.attributedText = detail(" staked · \(ago)")
             spoken = [staked, ago, earned == 1 ? "earned 1 gem" : "earned \(earned) gems"]

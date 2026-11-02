@@ -1452,15 +1452,6 @@ public final class PagedTabBar: UIControl {
         }
     }
 
-    /// A gradient for every badge on this bar instead of `badgeTint` — the
-    /// conversation avatars' (`Palette.accentGradient`, #1190), which the
-    /// Messages selector wears. Nil keeps the solid tint.
-    public var badgeGradient: [UIColor]? {
-        didSet {
-            for segment in segments { segment.setBadgeGradient(badgeGradient) }
-        }
-    }
-
     /// The count beside a segment's title; 0 hides it. Numeric by definition —
     /// the convenience for hosts that count things.
     public func setBadge(_ count: Int, at index: Int) {
@@ -1545,13 +1536,6 @@ public final class PagedTabBar: UIControl {
     public func debugBadgeSize(at index: Int) -> CGSize? {
         guard segments.indices.contains(index) else { return nil }
         return segments[index].badgeSize
-    }
-
-    /// The gradient a segment's badge is filled with, nil when it is the
-    /// solid `badgeTint` (#1190).
-    public func debugBadgeGradient(at index: Int) -> [CGColor]? {
-        guard segments.indices.contains(index) else { return nil }
-        return segments[index].badgeGradientColours
     }
 
     /// How many points of segment strip the capsule cannot show at its current
@@ -2184,7 +2168,6 @@ public final class PagedTabBar: UIControl {
             // whole rest (~1 s, owner's device recording).
             segment.onAppearanceChange = { [weak self] in self?.pillLens.titlesChanged() }
             segment.setBadgeTint(badgeTint)
-            segment.setBadgeGradient(badgeGradient)
             row.addArrangedSubview(segment)
             return segment
         }
@@ -2742,12 +2725,6 @@ private final class SegmentView: UIButton {
         badge.setTint(color)
     }
 
-    func setBadgeGradient(_ colours: [UIColor]?) {
-        badge.setGradient(colours)
-    }
-
-    var badgeGradientColours: [CGColor]? { badge.gradientColours }
-
     func setBadge(_ style: PagedTabBar.BadgeStyle) {
         badge.apply(style)
         badge.isHidden = !style.isVisible
@@ -2901,47 +2878,7 @@ private final class BadgeView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         layer.cornerRadius = bounds.height / 2
-        gradientLayer?.frame = bounds
-        gradientLayer?.cornerRadius = bounds.height / 2
     }
-
-    /// The gradient the fill is, when the host states one (`badgeGradient`).
-    private var gradientLayer: CAGradientLayer?
-    /// Its stops as stated, re-resolved on an appearance or contrast change:
-    /// a layer holds CGColors and re-resolves nothing itself.
-    private var gradientStops: [UIColor]?
-    private var observesGradientTraits = false
-
-    func setGradient(_ colours: [UIColor]?) {
-        gradientStops = colours
-        guard let colours else {
-            gradientLayer?.removeFromSuperlayer()
-            gradientLayer = nil
-            applyFill()
-            return
-        }
-        if !observesGradientTraits {
-            observesGradientTraits = true
-            registerForTraitChanges(
-                [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]
-            ) { (badge: Self, _: UITraitCollection) in
-                guard let stops = badge.gradientStops else { return }
-                badge.gradientLayer?.colors = stops.map { $0.resolvedColor(with: badge.traitCollection).cgColor }
-            }
-        }
-        let gradient = gradientLayer ?? CAGradientLayer()
-        gradient.colors = colours.map { $0.resolvedColor(with: traitCollection).cgColor }
-        gradient.startPoint = Palette.accentGradientStart
-        gradient.endPoint = Palette.accentGradientEnd
-        gradient.cornerCurve = .continuous
-        if gradientLayer == nil { layer.insertSublayer(gradient, at: 0) }
-        gradientLayer = gradient
-        setNeedsLayout()
-        applyFill()
-    }
-
-    /// The gradient's stops as drawn — tests.
-    var gradientColours: [CGColor]? { gradientLayer?.colors as? [CGColor] }
 
     /// The style currently rendered, because the FILL depends on it and the
     /// fill is also re-derived on every selection change.
@@ -3016,7 +2953,7 @@ private final class BadgeView: UIView {
     /// away, not a quieter thing — so there is one statement rather than a
     /// switch whose arms had become identical.
     private func applyFill() {
-        backgroundColor = gradientLayer == nil ? tint : .clear
+        backgroundColor = tint
     }
 }
 

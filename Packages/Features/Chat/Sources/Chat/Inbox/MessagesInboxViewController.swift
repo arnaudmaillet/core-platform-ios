@@ -93,11 +93,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         )
         initialIndex = surfaces.firstIndex { $0.category == initialCategory } ?? 0
         super.init(nibName: nil, bundle: nil)
-        // One colour for the solid unread marks (#1169): the tab bar's and
-        // the bell's too. The rows' avatars wear the icon's gradient.
+        // One colour for every unread mark (#1169, #2062: solid, never a
+        // gradient): the tab bar's, the bell's and the rows' too.
         categoryBar.badgeTint = Palette.counter
-        // The selector's badges wear the conversation avatars' gradient (#1190).
-        categoryBar.badgeGradient = Palette.accentGradient
     }
 
     private let initialIndex: Int

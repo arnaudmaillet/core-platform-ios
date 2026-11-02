@@ -68,14 +68,11 @@ struct SymbolContractTests {
         #expect(ToastView.glyphTint(symbol: LikesSymbol.glyph, style: .failure) == .systemRed)
     }
 
-    /// The selector's badges can wear a gradient (#1190).
-    @Test func aSelectorBadgeWearsTheGradient() {
+    /// The selector's badges are the solid unread mark, never a gradient
+    /// (#2062).
+    @Test func aSelectorBadgeIsTheSolidMark() {
         let bar = PagedTabBar(titles: ["All", "Requests"], style: .navigationTitle)
         bar.setBadge(3, at: 0)
-        #expect(bar.debugBadgeGradient(at: 0) == nil, "solid by default")
-        bar.badgeGradient = Palette.accentGradient
-        #expect(bar.debugBadgeGradient(at: 0) == Palette.accentGradient.map(\.cgColor))
-        bar.badgeGradient = nil
-        #expect(bar.debugBadgeGradient(at: 0) == nil)
+        #expect(bar.badgeTint == Palette.counter)
     }
 }

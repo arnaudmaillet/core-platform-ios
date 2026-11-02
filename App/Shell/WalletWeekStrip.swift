@@ -3,8 +3,9 @@ import DesignSystem
 import UIKit
 
 /// The Claim sheet's week (#1479): seven dots for the current UTC week,
-/// Monday first — a claimed day filled in the streak's violet (#1494, the
-/// owner 2026-10-21), today ringed —
+/// Monday first — a claimed day filled in the streak's colour (the violet
+/// of #1494, the primary since #2062 gave the violet to the gems), today
+/// ringed —
 /// and, at the trailing end, what the streak pays next as a chip
 /// ("×1.3 tomorrow").
 ///
@@ -44,9 +45,9 @@ final class WalletWeekStrip: UIView {
 
         chip.font = .scaledMonospacedDigitSystemFont(ofSize: 13, weight: .semibold, relativeTo: .footnote, maximumPointSize: 17)
         chip.adjustsFontForContentSizeCategory = true
-        chip.textColor = WalletWeekStrip.ink
+        chip.textColor = WalletWeekStrip.chipInk
         chip.setContentCompressionResistancePriority(.required, for: .horizontal)
-        chipGround.backgroundColor = WalletWeekStrip.ink.withAlphaComponent(0.14)
+        chipGround.backgroundColor = Palette.primaryContainer
         chip.translatesAutoresizingMaskIntoConstraints = false
         chipGround.addSubview(chip)
 
@@ -72,8 +73,12 @@ final class WalletWeekStrip: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// The streak's colour (#1494): the brand's violet, the flame's too.
-    static let ink: UIColor = Palette.gemViolet
+    /// The streak's colour (#1494): the primary — the violet is the gems'
+    /// alone since #2062, and a streak earns likes.
+    static let ink: UIColor = Palette.tint
+    /// The streak chip's words, on the primary's soft ground: the tint's
+    /// 4.2:1 is short of text strength.
+    static let chipInk: UIColor = Palette.onPrimaryContainer
 
     func configure(with snapshot: WalletSnapshot, now: Date = Date()) {
         let claimedToday = snapshot.claimedToday > 0

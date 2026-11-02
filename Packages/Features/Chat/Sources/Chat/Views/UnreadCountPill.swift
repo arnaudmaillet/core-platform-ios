@@ -1,8 +1,9 @@
 import DesignSystem
 import UIKit
 
-/// The inbox's unread pill: the count in white on the accent gradient
-/// (#1169), "99+" past 99, a circle for one digit and a capsule beyond.
+/// The inbox's unread pill: the count in white on the solid unread mark
+/// (#2062, never a gradient), "99+" past 99, a circle for one digit and a
+/// capsule beyond.
 ///
 /// Worn in two places, the same pill: on a request's avatar (with a ring in
 /// the list's own colour, so it reads as sitting ON the face), and under a
@@ -35,8 +36,6 @@ final class UnreadCountPill: UIView {
         static let ringWidth: CGFloat = 2.5
     }
 
-    /// The pill's fill: the icon's gradient (#1169).
-    private let gradient = CAGradientLayer()
     private let label = UILabel()
     private var width: NSLayoutConstraint!
     private let ringed: Bool
@@ -46,16 +45,13 @@ final class UnreadCountPill: UIView {
     init(ringed: Bool) {
         self.ringed = ringed
         super.init(frame: .zero)
-        gradient.colors = Palette.accentGradient.map { $0.resolvedColor(with: traitCollection).cgColor }
-        gradient.startPoint = Palette.accentGradientStart
-        gradient.endPoint = Palette.accentGradientEnd
-        gradient.cornerCurve = .continuous
-        layer.insertSublayer(gradient, at: 0)
+        // The solid unread mark, as every pill and badge (#2062).
+        backgroundColor = Palette.counter
         clipsToBounds = true
         layer.cornerCurve = .continuous
         if ringed { layer.borderWidth = Metrics.ringWidth }
-        // The gradient's stops follow the appearance and the contrast, and so
-        // does the ring: a layer holds CGColors and re-resolves nothing itself.
+        // The ring follows the appearance and the contrast: a layer holds
+        // CGColors and re-resolves nothing itself.
         applyColours()
         registerForTraitChanges(
             [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]
@@ -71,7 +67,7 @@ final class UnreadCountPill: UIView {
         // The same trap `PagedTabBar.BadgeView` documents: a semantic colour
         // can resolve to the wrong end of the spectrum over a tinted fill, so
         // the count's colour is stated outright. White in both appearances:
-        // the gradient does not flip with them.
+        // the fill does not flip with them.
         label.textColor = .white
         label.isHidden = true
         label.pin(to: self, insets: NSDirectionalEdgeInsets(
@@ -93,11 +89,9 @@ final class UnreadCountPill: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         layer.cornerRadius = bounds.height / 2
-        gradient.frame = bounds
     }
 
     private func applyColours() {
-        gradient.colors = Palette.accentGradient.map { $0.resolvedColor(with: traitCollection).cgColor }
         if ringed { layer.borderColor = UIColor.systemBackground.resolvedColor(with: traitCollection).cgColor }
     }
 
