@@ -24,6 +24,9 @@ let package = Package(
         .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Core/EmoteKit"),
         .package(path: "../../Core/MediaCore"),
+        // Where the viewer stands with each person, the app's one copy
+        // (#2049): the rows' relation marks read and write it.
+        .package(path: "../../Core/EntityStore"),
         // The conversation is drawn by Feed's text-post screen. The INTERFACE
         // only — features never import each other — the same edge Maps and
         // Profile already have.
@@ -45,7 +48,8 @@ let package = Package(
                 "DesignSystem",
                 "EmoteKit",
                 "FeedInterface",
-                "MediaCore"
+                "MediaCore",
+                "EntityStore"
             ]
         ),
         .testTarget(
@@ -55,8 +59,8 @@ let package = Package(
                 "CoreNavigation",
                 "CoreNetworking",
                 "FeedInterface",
-                // `InboxRelationMarkTests` changes the viewer (#2049).
-                "AuthInterface",
+                // `InboxRelationMarkTests` (#2049).
+                "EntityStore",
                 // `ChatMediaTests` builds an uploader and a transport (#681).
                 "MediaCore",
                 // `ChatLocalCacheTests` opens a store in a temporary folder.

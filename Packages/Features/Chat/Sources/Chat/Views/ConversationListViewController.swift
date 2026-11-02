@@ -289,10 +289,11 @@ final class ConversationListViewController: UIViewController {
     }
 
     /// The faces on screen whose peer's relation changed.
-    private func applyRelations(of peers: Set<ProfileID>) {
+    /// `peers` nil: every row (a viewer change).
+    private func applyRelations(of peers: Set<ProfileID>?) {
         guard let relations else { return }
         for case let cell as ConversationCell in tableView.visibleCells {
-            guard let peer = cell.peerID, peers.contains(peer) else { continue }
+            guard let peer = cell.peerID, peers?.contains(peer) ?? true else { continue }
             cell.setRelationMark(relations.mark(for: peer), animated: true)
         }
     }

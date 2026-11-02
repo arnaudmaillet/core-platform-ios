@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import CoreStorage
 import DesignSystem
+import EntityStore
 import FeedInterface
 import MediaCore
 import UIKit
@@ -202,6 +203,12 @@ final class ConversationThreadViewController: UIViewController {
     /// "+" (a tap follows), following, friends. Nil graphs draw none.
     private let socialGraph: (any SocialGraphWriting)?
     private let followRelations: (any SocialGraphReading)?
+    /// Where the viewer stands with each person, the app's one copy
+    /// (#2049): the pill starts from what is known there — the inbox row
+    /// that opened the thread knew it — and follows every change to it, a
+    /// follow from a profile card included.
+    private let entities: EntityStore?
+    private var peerObservation: EntityObservation?
     private var peerRelation: FollowRelation?
     /// Whom `peerRelation` was asked for, so a peer is asked once.
     private var relationAskedFor: ProfileID?
@@ -280,8 +287,10 @@ final class ConversationThreadViewController: UIViewController {
         prefill: String,
         imagePipeline: ImagePipeline,
         socialGraph: (any SocialGraphWriting)? = nil,
-        followRelations: (any SocialGraphReading)? = nil
+        followRelations: (any SocialGraphReading)? = nil,
+        entities: EntityStore? = nil
     ) {
+        self.entities = entities
         self.driver = driver
         self.mode = mode
         self.prefill = prefill
@@ -1408,7 +1417,7 @@ final class ConversationThreadViewController: UIViewController {
         peerPill.setPerson(
             id: person.id, name: person.name, meta: meta, avatarURL: person.avatarURL, pipeline: imagePipeline
         )
-        if person.id != relationAskedFor { setPeerRelation(nil) }
+        if person.id != relationAskedFor { startFromKnownRelation(of: person.id) }
         resolvePeerRelation()
         fitTrailingRun()
         if hasRenderedContent { applySnapshot(animated: false) }
@@ -1843,8 +1852,36 @@ extension ConversationThreadViewController {
         Task { [weak self] in
             guard let relation = try? await followRelations.followRelation(to: id) else { return }
             guard let self, self.peer.id == id, !self.followInFlight, self.relationGeneration == generation else { return }
+            // The graph's answer, for every surface showing them (#2049).
+            self.entities?.setRelation(relation, for: id)
             self.setPeerRelation(relation)
         }
+    }
+
+    /// A new correspondent: the relation already known for them, drawn at
+    /// once, from the first frame — no wait for the read, which then only
+    /// confirms it (#2049, the owner 2026-11-02: the inbox row knew it). And
+    /// from now on, every change to it in the store: a follow made from a
+    /// profile card over the thread, from their profile, anywhere.
+    private func startFromKnownRelation(of id: ProfileID?) {
+        let known = id.flatMap { entities?.relation(to: $0) }
+        peerRelation = known
+        peerPill.setFollowBadge(Self.badge(for: known), animated: false)
+        peerObservation?.cancel()
+        peerObservation = id.flatMap { id in
+            entities?.observeProfile(id) { [weak self] _ in self?.knownRelationDidChange(for: id) }
+        }
+    }
+
+    /// The store's relation for the correspondent moved — a follow, a
+    /// request, an unfollow made elsewhere, or a viewer change. The thread's
+    /// own follow in flight draws its own answer.
+    private func knownRelationDidChange(for id: ProfileID) {
+        guard peer.id == id, !followInFlight, let entities else { return }
+        let known = entities.relation(to: id)
+        guard known != peerRelation else { return }
+        relationGeneration += 1
+        setPeerRelation(known)
     }
 
     /// Either way the badge's symbol is replaced and nothing else moves
@@ -1909,7 +1946,10 @@ extension ConversationThreadViewController {
         let message = PlusFollow.failureMessage(handle: peer.handle, name: peer.name)
         // The inbox's "+" follows the same way (#2049): one seam, `PlusFollow`.
         PlusFollow.commit(id, from: before, through: socialGraph, apply: { [weak self] relation in
-            guard let self, self.peer.id == id else { return }
+            guard let self else { return }
+            // Every surface showing them follows the tap (#2049).
+            self.entities?.setRelation(relation, for: id)
+            guard self.peer.id == id else { return }
             self.setPeerRelation(relation, tapped: true)
         }, completion: { [weak self] failed in
             guard let self else { return }

@@ -1,7 +1,7 @@
-import AuthInterface
 import CoreModels
 import CoreNavigation
 import DesignSystem
+import EntityStore
 import MediaCore
 import UIKit
 
@@ -16,14 +16,20 @@ import UIKit
 /// screen, ten ahead). A batched read (`BatchGetRelationStatus`) would make
 /// it one.
 ///
-/// VIEWER-SCOPED (`ViewerScoped`, registered in
-/// `AppContainer.observeViewerTransitions`): a sign-out or a profile switch
-/// drops every answer, so a mark never outlives the viewer it was read for.
+/// ⚠️ THE ANSWERS LIVE IN THE APP'S ONE PLACE FOR THEM, `EntityStore` (the
+/// owner, 2026-11-02: one state per person, everywhere). The thread opened
+/// from a row starts from what the row knew instead of loading it again; a
+/// follow made anywhere — the thread's "+", a profile card, a profile, the
+/// feed — reaches the store through the follow channel and every mark
+/// follows. The store's viewer facts are wiped on a sign-out or a profile
+/// switch (the cache coordinator), so a mark never outlives the viewer it
+/// was read for; reads in flight then are dropped (`generation`).
 @MainActor
-public final class InboxRelations: ViewerScoped {
+public final class InboxRelations {
     private let reader: (any SocialGraphReading)?
     private let writer: (any SocialGraphWriting)?
-    private var known: [ProfileID: FollowRelation] = [:]
+    private let entities: EntityStore
+    private var observation: EntityObservation?
     private var lookups: Set<ProfileID> = []
     /// Peers with a follow on its way: a read that lands meanwhile is older
     /// than the tap and is dropped.
@@ -33,14 +39,17 @@ public final class InboxRelations: ViewerScoped {
     private var generation = 0
     private struct Observer {
         weak var owner: AnyObject?
-        let handler: @MainActor (Set<ProfileID>) -> Void
+        /// The peers that changed; nil for every one (a viewer change).
+        let handler: @MainActor (Set<ProfileID>?) -> Void
     }
     private var observers: [Observer] = []
 
     /// Nil `reader` or `writer`: no mark at all — the "+" would mean nothing.
-    public init(reader: (any SocialGraphReading)?, writer: (any SocialGraphWriting)?) {
+    public init(entities: EntityStore, reader: (any SocialGraphReading)?, writer: (any SocialGraphWriting)?) {
+        self.entities = entities
         self.reader = reader
         self.writer = writer
+        observation = entities.observeProfiles { [weak self] change in self?.entitiesDidChange(change) }
     }
 
     /// Whether the rows wear a mark at all.
@@ -48,12 +57,12 @@ public final class InboxRelations: ViewerScoped {
 
     /// The answer for `peer`, nil while it is not known.
     func relation(for peer: ProfileID) -> FollowRelation? {
-        known[peer]
+        entities.relation(to: peer)
     }
 
     /// Tells `handler` the peers whose answer changed, for as long as
     /// `owner` lives — a list goes with its screen, unregistered by nobody.
-    func observe(by owner: AnyObject, _ handler: @escaping @MainActor (Set<ProfileID>) -> Void) {
+    func observe(by owner: AnyObject, _ handler: @escaping @MainActor (Set<ProfileID>?) -> Void) {
         observers.removeAll { $0.owner == nil }
         observers.append(Observer(owner: owner, handler: handler))
     }
@@ -62,7 +71,7 @@ public final class InboxRelations: ViewerScoped {
     /// not known yet, or no graph.
     func mark(for peer: ProfileID?) -> PersonPill.Badge {
         guard isEnabled, let peer else { return .none }
-        return PersonPill.Badge(relation: known[peer])
+        return PersonPill.Badge(relation: entities.relation(to: peer))
     }
 
     /// The row's "+", from `host`: through the member gate, then `follow`;
@@ -84,7 +93,7 @@ public final class InboxRelations: ViewerScoped {
     func resolve(_ peers: [ProfileID], refresh: Bool = false) {
         guard isEnabled, let reader else { return }
         let generation = generation
-        for peer in Set(peers) where (refresh || known[peer] == nil) && !lookups.contains(peer) && !follows.contains(peer) {
+        for peer in Set(peers) where (refresh || relation(for: peer) == nil) && !lookups.contains(peer) && !follows.contains(peer) {
             lookups.insert(peer)
             Task { [weak self] in
                 let relation = try? await reader.followRelation(to: peer)
@@ -101,7 +110,7 @@ public final class InboxRelations: ViewerScoped {
     /// failure, then a fresh read. `failed` is told when the graph refused.
     /// Does nothing unless the "+" is what `peer` shows.
     func follow(_ peer: ProfileID, failed: @escaping @MainActor () -> Void) {
-        guard let writer, let before = known[peer], before.offersFollow, !follows.contains(peer) else { return }
+        guard let writer, let before = relation(for: peer), before.offersFollow, !follows.contains(peer) else { return }
         follows.insert(peer)
         let generation = generation
         PlusFollow.commit(peer, from: before, through: writer, apply: { [weak self] relation in
@@ -117,30 +126,29 @@ public final class InboxRelations: ViewerScoped {
         })
     }
 
+    /// Written to the store: every surface showing `peer` hears it, these
+    /// rows through `entitiesDidChange`.
     private func set(_ relation: FollowRelation, for peer: ProfileID) {
-        guard known[peer] != relation else { return }
-        known[peer] = relation
-        notify([peer])
+        entities.setRelation(relation, for: peer)
     }
 
-    /// Drops every answer, and every read in flight (`generation`).
-    func reset() {
-        generation += 1
-        let peers = Set(known.keys)
-        known = [:]
-        lookups = []
-        follows = []
-        guard !peers.isEmpty else { return }
-        notify(peers)
+    /// The store moved: the rows showing those people re-read their mark. A
+    /// viewer change wiped every answer — reads in flight for the previous
+    /// viewer are dropped, and every row is told.
+    private func entitiesDidChange(_ change: EntityChange<ProfileID>) {
+        switch change {
+        case .some(let peers): notify(peers)
+        case .everything:
+            generation += 1
+            lookups = []
+            follows = []
+            notify(nil)
+        }
     }
 
-    private func notify(_ peers: Set<ProfileID>) {
+    private func notify(_ peers: Set<ProfileID>?) {
         observers.removeAll { $0.owner == nil }
         for observer in observers { observer.handler(peers) }
-    }
-
-    public func viewerDidChange(_ state: ViewerState) async {
-        reset()
     }
 
     #if DEBUG

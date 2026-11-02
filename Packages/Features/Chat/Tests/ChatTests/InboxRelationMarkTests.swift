@@ -1,5 +1,5 @@
-import AuthInterface
 import CoreModels
+import EntityStore
 import Foundation
 import MediaCore
 import Testing
@@ -162,7 +162,7 @@ struct InboxRelationMarkTests {
 
     /// Before its relation is known, a one-to-one row wears nothing.
     @Test func noMarkBeforeTheRelationIsKnown() {
-        let relations = InboxRelations(reader: Graph([:]), writer: Graph([:]))
+        let relations = InboxRelations(entities: EntityStore(), reader: Graph([:]), writer: Graph([:]))
         #expect(relations.mark(for: Self.peer) == .none)
     }
 
@@ -203,7 +203,7 @@ struct InboxRelationMarkTests {
     /// The "+": the check at once, then the graph's answer.
     @Test func thePlusFlipsAtOnce() async throws {
         let graph = Graph([Self.peer: .notFollowing])
-        let relations = InboxRelations(reader: graph, writer: graph)
+        let relations = InboxRelations(entities: EntityStore(), reader: graph, writer: graph)
         relations.resolve([Self.peer])
         try #require(await settle { await relations.relation(for: Self.peer) == .notFollowing })
         await graph.set(.following, for: Self.peer)
@@ -219,7 +219,7 @@ struct InboxRelationMarkTests {
     /// A private person: the clock.
     @Test func aRequestGivesTheClock() async throws {
         let graph = Graph([Self.peer: .notFollowing], outcome: .requested)
-        let relations = InboxRelations(reader: graph, writer: graph)
+        let relations = InboxRelations(entities: EntityStore(), reader: graph, writer: graph)
         relations.resolve([Self.peer])
         try #require(await settle { await relations.relation(for: Self.peer) == .notFollowing })
         await graph.set(.requested, for: Self.peer)
@@ -230,7 +230,7 @@ struct InboxRelationMarkTests {
     /// A refusal puts the "+" back and is said.
     @Test func aRefusalPutsThePlusBack() async throws {
         let graph = Graph([Self.peer: .notFollowing], outcome: nil)
-        let relations = InboxRelations(reader: graph, writer: graph)
+        let relations = InboxRelations(entities: EntityStore(), reader: graph, writer: graph)
         relations.resolve([Self.peer])
         try #require(await settle { await relations.relation(for: Self.peer) == .notFollowing })
         var failed = false
@@ -240,25 +240,41 @@ struct InboxRelationMarkTests {
         #expect(relations.mark(for: Self.peer) == .follow, "the + did not come back")
     }
 
-    /// A viewer change drops every answer, and a read for the previous
-    /// viewer that lands afterwards is dropped too.
+    /// A viewer change wipes the store's answers, and the rows are told —
+    /// every one.
     @Test func aViewerChangeDropsTheAnswers() async throws {
         let graph = Graph([Self.peer: .following])
-        let relations = InboxRelations(reader: graph, writer: graph)
-        var changed: Set<ProfileID> = []
-        relations.observe(by: graph) { changed.formUnion($0) }
+        let entities = EntityStore()
+        let relations = InboxRelations(entities: entities, reader: graph, writer: graph)
+        var toldEveryone = false
+        relations.observe(by: graph) { peers in if peers == nil { toldEveryone = true } }
         relations.resolve([Self.peer])
         try #require(await settle { await relations.relation(for: Self.peer) == .following })
-        changed = []
-        await relations.viewerDidChange(.guest)
+        entities.viewerDidChange()
         #expect(relations.relation(for: Self.peer) == nil)
-        #expect(changed == [Self.peer], "the rows were not told")
+        try #require(await settle { toldEveryone }, "the rows were not told")
+    }
+
+    /// ONE STATE PER PERSON (#2049): the answers are the app's `EntityStore`
+    /// — what the inbox read, a thread opened from it starts from; a follow
+    /// made elsewhere (the follow channel moves the store) reaches the row.
+    @Test func theAnswersAreTheAppsOneCopy() async throws {
+        let graph = Graph([Self.peer: .notFollowing])
+        let entities = EntityStore()
+        let relations = InboxRelations(entities: entities, reader: graph, writer: graph)
+        var told: Set<ProfileID> = []
+        relations.observe(by: graph) { told.formUnion($0 ?? []) }
+        relations.resolve([Self.peer])
+        try #require(await settle { await entities.relation(to: Self.peer) == .notFollowing }, "not written to the store")
+        entities.applyFollowChange(FollowChange(profileID: Self.peer, isFollowing: true))
+        try #require(await settle { told.contains(Self.peer) })
+        #expect(relations.mark(for: Self.peer) == .following, "a follow made elsewhere did not reach the row")
     }
 
     /// Back on screen, the inbox asks again: a follow made elsewhere shows.
     @Test func aRefreshAsksAgain() async throws {
         let graph = Graph([Self.peer: .notFollowing])
-        let relations = InboxRelations(reader: graph, writer: graph)
+        let relations = InboxRelations(entities: EntityStore(), reader: graph, writer: graph)
         relations.resolve([Self.peer])
         try #require(await settle { await relations.relation(for: Self.peer) == .notFollowing })
         relations.resolve([Self.peer])

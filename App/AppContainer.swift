@@ -218,9 +218,7 @@ final class AppContainer {
             // What notification lookups answered, missing posts included (#978).
             notificationsRepository,
             // A teen's time not yet reported is that account's (#417).
-            supervisedScreenTime,
-            // The inbox rows' relation marks (#2049).
-            inboxRelations
+            supervisedScreenTime
         ]
         viewerTransitionsTask = Task {
             for await state in await viewer.transitions() {
@@ -1804,8 +1802,11 @@ final class AppContainer {
     )
 
     /// Where the viewer stands with each inbox peer, for the rows' mark and
-    /// its "+" (#2049): one read per peer, viewer-scoped.
-    private lazy var inboxRelations = InboxRelations(reader: profileRepository, writer: profileRepository)
+    /// its "+" (#2049): one read per peer, kept in `entityStore` — the one
+    /// copy every surface reads, wiped with the viewer's facts.
+    private lazy var inboxRelations = InboxRelations(
+        entities: entityStore, reader: profileRepository, writer: profileRepository
+    )
 
     private(set) lazy var chatFeature: any ChatFeatureBuilding = ChatFeatureBuilder(
         repository: chatRepository,

@@ -192,7 +192,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             prefill: prefill,
             imagePipeline: imagePipeline,
             socialGraph: socialGraph,
-            followRelations: followRelations
+            followRelations: followRelations,
+            entities: entities
         )
     }
 

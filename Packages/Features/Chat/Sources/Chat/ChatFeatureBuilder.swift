@@ -38,8 +38,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     private let mediaPicker: ChatMediaPickerFactory?
     /// The inbox and the last conversations on the device (#897).
     private let deviceCache: ChatLocalCache?
-    /// The peers' relations, for the rows' mark and its "+" (#2049): one
-    /// cache for the inbox and its search, viewer-scoped by the container.
+    /// The peers' relations, for the rows' mark and its "+" (#2049): the
+    /// inbox's and its search's, over the app's `EntityStore`.
     private let relations: InboxRelations?
 
     /// `localStore`: the inbox opens on its last rows and a conversation on
@@ -84,7 +84,6 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
 
     public func forgetViewer() {
         catalog.reset()
-        relations?.reset()
         directory.forgetAll()
     }
 
