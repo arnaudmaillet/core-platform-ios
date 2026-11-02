@@ -22,7 +22,7 @@ The app's colours are one **theme**: **raspberry**, used almost everywhere, a go
 - **A warning is a yellow glyph with neutral words** (`Warning`).
 - **Dark mode is not an inversion.** Roles near the contrast line have Increased Contrast values.
 - **One theme only** (the owner, 2026-11-02). The Shop's paid accent themes (#1379) are retired.
-- **The gems wear the crown's yellow** (#2071): `FFE600` wherever it reads (dark grounds, the washes), a deep gold on light grounds, where the yellow is 1.27:1. The violet now lives only in the signature gradient. The saved star keeps its own gold (`FFC53D`), apart from the crowns.
+- **The gems wear the crown's yellow** (#2071): `FFE600` wherever it reads (dark grounds, the washes), a bright gold `F5C000` on light grounds (the owner's pick, 2026-11-03), where the yellow is 1.27:1. The bright gold is under a glyph's 3:1 there, so the crown always stands beside its amount; Increased Contrast takes it to `A87C00`. The violet now lives only in the signature gradient. The saved star keeps its own gold (`FFC53D`), apart from the crowns.
 
 ## Roles
 
@@ -37,8 +37,8 @@ The app's colours are one **theme**: **raspberry**, used almost everywhere, a go
 | `counter` | every unread mark, pill and badge | `EC1C75` | `EC1C75` | `C2105F` / `C2105F` |
 | `entityInk` | `@mentions`, `#hashtags`, links | `5E5E66` | `AEAEB4` | `48484F` / `C8C8CD` |
 | `likes` | the likes' heart, glyph and coin | `EC1C75` | `EC1C75` | `C2105F` / `F25C9A` |
-| `gem` → `Palette.gem`, `GemSymbol.tint` | the gems' glyph, the crown | `9E8A00` | `FFE600` | `857300` / `FFE600` |
-| `gemText` → `GemSymbol.textColor` | a gem amount or price as text | `7A6A00` | `FFE600` | `6B5D00` / `FFE600` |
+| `gem` → `Palette.gem`, `GemSymbol.tint` | the gems' glyph, the crown | `F5C000` | `FFE600` | `A87C00` / `FFE600` |
+| `gemText` → `GemSymbol.textColor` | a gem amount or price as text | `8A6400` | `FFE600` | `7A5800` / `FFE600` |
 | `gemGround` → `GemSymbol.ground` | the wash under a price or a claim, at the reader's alpha | `FFE600` | `FFE600` | — |
 | `saveGold` | the saved star | `FFC53D` | `FFC53D` | — |
 | `signatureGradient` → `brandGradient` | the launch logo, the story ring | `EC1C75` 0 · `9B5CFF` 0.5 · `2EF0A8` 1 | same | — |
@@ -53,9 +53,9 @@ The app's colours are one **theme**: **raspberry**, used almost everywhere, a go
 | white on `counter` | 4.21 | 4.21 | 5.94 | 5.94 |
 | `onPrimaryContainer` on `primaryContainer` | 5.71 | 6.59 | — | — |
 | `entityInk` on the page | 6.42 | 9.51 | 9.07 | 12.60 |
-| `gem` (glyph) on the page / the raised ground | 3.45 / 3.09 | 16.57 / 13.43 | 4.72 | 16.57 |
-| `gemText` on the page / the raised ground | 5.40 / 4.84 | 16.57 / 13.43 | 6.58 | 16.57 |
-| `gemText` on a price bubble (`gemGround` at 0.16 / 0.35, on white) | 5.15 / 4.88 | 8.82 (at 0.16, on the card) | — | — |
+| `gem` (glyph) on the page / the raised ground | 1.69 / 1.51 | 16.57 / 13.43 | 3.79 / 3.39 | 16.57 |
+| `gemText` on the page / the raised ground | 5.38 / 4.82 | 16.57 / 13.43 | 6.51 / 5.84 | 16.57 |
+| `gemText` on a price bubble (`gemGround` at 0.16 / 0.35, on white) | 5.13 / 4.86 | 8.82 (at 0.16, on the card) | — | — |
 
 The raspberry is 4.21:1 as text on white: the owner's base 500. Text in the accent reaches 4.5:1 under Increased Contrast.
 

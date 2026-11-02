@@ -8,9 +8,10 @@ import UIKit
 public enum GemSymbol {
     /// The owner's crown, filled (#2071).
     public static let glyph = AppSymbol.crownFilled.rawValue
-    /// The crown's colour (`Palette.gem`), a GLYPH colour (3:1): a deep gold
-    /// on light grounds, the brand's yellow on dark ones. One colour, so a
-    /// reader that tints the symbol draws it right.
+    /// The crown's colour (`Palette.gem`): a bright gold on light grounds,
+    /// the brand's yellow on dark ones. One colour, so a reader that tints
+    /// the symbol draws it right. In the light it is under a glyph's 3:1:
+    /// draw the crown beside its amount, in `textColor`.
     public static let tint: UIColor = Palette.gem
     /// The same gold as TEXT — "+N", a price, a balance: a deeper step in
     /// the light, where the glyph's gold is under 4.5:1.

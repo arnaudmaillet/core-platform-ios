@@ -23,9 +23,12 @@ The owner's crown replaces the side-view gem (#1128) as the gems' glyph. It is t
    - Its box's middle sits on the cap height's middle, as `gen.swift` places the set.
    - The template is the set's: head, three masters with one outline, and a 4-unit side margin (#1566).
 
-## The colour on light grounds: (a) or (b)
+## The colour on light grounds
+The owner first saw (b) in a deep gold `9E8A00` and found it too dark (2026-11-03). Of six candidates (`previews/light-candidates.png`) they picked a bright gold, `F5C000`: 1.69:1 on white, so the crown always stands beside its amount, and Increased Contrast takes it to `A87C00` (3.79:1). The price text follows the same hue, `8A6400` (5.38:1).
+
+The first round, for the record:
 The yellow `FFE600` is 1.27:1 on white, so it cannot be the glyph there alone.
-- **(b), shipped:** one colour, `Palette.gem`. It is a deep gold `9E8A00` on light grounds (3.45:1 on white) and `FFE600` on dark ones. Every reader that tints the symbol draws it right with no change.
+- **(b), shipped (now in the bright gold):** one colour, `Palette.gem`. It is a deep gold `9E8A00` on light grounds (3.45:1 on white) and `FFE600` on dark ones. Every reader that tints the symbol draws it right with no change.
 - **(a):** the yellow crown with a deep-gold rim. It is the same symbol, drawn with a palette `[FFE600, 9E8A00]`, since the rim is layer 1. Shipping it means each reader draws `GemSymbol`'s palette instead of a tint.
 
 `previews/rendered-compiled-a-b.png` shows both beside a price at 13, 17 and 22 pt, in light and dark, with a saved star beside a crown. It is rendered from the compiled catalogue by `source/render-compiled.swift`.

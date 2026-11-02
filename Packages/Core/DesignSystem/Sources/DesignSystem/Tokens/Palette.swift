@@ -16,8 +16,8 @@ import UIKit
 ///   primaryContainer    FDE3EE     3D0A20     (text B00E57 / F57BAE)
 ///   counter             EC1C75     EC1C75     C2105F     C2105F
 ///   entityInk           5E5E66     AEAEB4     48484F     C8C8CD
-///   gem                 9E8A00     FFE600     857300     FFE600
-///   gemText             7A6A00     FFE600     6B5D00     FFE600
+///   gem                 F5C000     FFE600     A87C00     FFE600
+///   gemText             8A6400     FFE600     7A5800     FFE600
 ///   gemGround           FFE600     FFE600     (a wash, at the bubble's alpha)
 ///   saveGold            FFC53D     FFC53D     (one gold, #1190)
 ///   brandGradient       EC1C75 0 · 9B5CFF 0.5 · 2EF0A8 1
@@ -214,14 +214,17 @@ public enum Palette {
     /// The likes' colour: the heart, the likes glyph and coin.
     public static let likesPink = dynamic(theme.likes)
 
-    /// The gems' glyph, the crown (`GemSymbol.tint`, #2071): a deep gold on
-    /// light grounds, 3.45:1 on white — a glyph's 3:1, the yellow being
-    /// 1.27:1 there — and the brand's yellow on dark ones, 13.4:1.
+    /// The gems' glyph, the crown (`GemSymbol.tint`, #2071): a bright gold on
+    /// light grounds, the owner's pick (2026-11-03) over a deep gold that
+    /// read khaki. It is 1.69:1 on white, under a glyph's 3:1, because the
+    /// crown always stands beside its amount in `gemText`; Increased
+    /// Contrast brings 3:1 back (3.79:1). The brand's yellow on dark
+    /// grounds, 13.4:1.
     public static let gem = dynamic(theme.gem)
 
     /// The gems as TEXT (`GemSymbol.textColor`): a price, a balance, "+N
-    /// gems". 5.4:1 on white, 4.8:1 on the grouped grey; the yellow in the
-    /// dark.
+    /// gems", in the bright gold's hue. 5.38:1 on white, 4.82:1 on the
+    /// grouped grey; the yellow in the dark.
     public static let gemText = dynamic(theme.gemText)
 
     /// The gems' wash (`GemSymbol.ground`): the yellow, at a price bubble's

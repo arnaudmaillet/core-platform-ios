@@ -42,13 +42,26 @@ struct PaletteTests {
     /// raspberry (#2062) holds it without Increased Contrast, unlike the
     /// light pink it replaced.
     @Test(arguments: [
-        ("tint", Palette.tint), ("likes", Palette.likesPink), ("gem", Palette.gem),
+        ("tint", Palette.tint), ("likes", Palette.likesPink),
     ])
     func aGlyphRoleReadsOnEveryGround(_ role: (String, UIColor)) {
         for traits in [Self.light, Self.dark, Self.traits(.light, high: true), Self.traits(.dark, high: true)] {
             for ground in [UIColor.systemBackground, .secondarySystemBackground] {
                 let ratio = Self.contrast(role.1, on: ground, traits)
                 #expect(ratio >= 3, "\(role.0) is \(ratio):1 in \(traits.userInterfaceStyle == .dark ? "dark" : "light")")
+            }
+        }
+    }
+
+    /// The crown (#2071) is the owner's bright gold in the light (2026-11-03),
+    /// under a glyph's 3:1 there, since it always stands beside its amount;
+    /// it holds 3:1 in the dark and under Increased Contrast in both.
+    @Test func theCrownReadsWhereItMust() {
+        #expect(Self.hex(Palette.gem, Self.light) == 0xF5C000)
+        for traits in [Self.dark, Self.traits(.light, high: true), Self.traits(.dark, high: true)] {
+            for ground in [UIColor.systemBackground, .secondarySystemBackground] {
+                let ratio = Self.contrast(Palette.gem, on: ground, traits)
+                #expect(ratio >= 3, "gem is \(ratio):1 in \(traits.userInterfaceStyle == .dark ? "dark" : "light")")
             }
         }
     }
@@ -130,7 +143,6 @@ struct PaletteTests {
         #expect(Self.hex(Palette.tint, Self.light) == 0xEC1C75)
         #expect(Self.hex(Palette.tint, Self.dark) == 0xEC1C75)
         #expect(Self.hex(Palette.counter, Self.light) == 0xEC1C75, "unread marks are the raspberry, no longer violet")
-        #expect(Self.hex(Palette.gem, Self.light) == 0x9E8A00)
         #expect(Palette.brandGradient.map { Self.hex($0, Self.light) } == [0xEC1C75, 0x9B5CFF, 0x2EF0A8])
         #expect(Self.hex(Palette.saveGold, Self.light) == 0xFFC53D, "the saved star keeps its gold")
     }
@@ -154,9 +166,9 @@ struct PaletteTests {
         }
     }
 
-    /// The gems wear the violet — the glyph, and a deeper step where it is a
-    /// price — and a warning's glyph is yellow.
-    @Test func gemsAreVioletAndWarningsYellow() {
+    /// The gems wear the crown's gold — the glyph, and a deeper step where it
+    /// is a price — and a warning's glyph is yellow.
+    @Test func gemsAreGoldAndWarningsYellow() {
         #expect(GemSymbol.tint === Palette.gem)
         #expect(GemSymbol.textColor === Palette.gemText)
         #expect(ToastView.Style.warning.glyphTint == .systemYellow)

@@ -72,8 +72,9 @@ public struct BrandTheme: Sendable, Equatable {
 
     /// The likes' heart, glyph and coin.
     public let likes: Shade
-    /// The gems' glyph, the crown (#2071): the brand's yellow where it reads
-    /// (dark grounds), a deep gold on light ones, where the yellow is 1.27:1.
+    /// The gems' glyph, the crown (#2071): the brand's yellow on dark
+    /// grounds, a bright gold on light ones (the owner's pick, 2026-11-03),
+    /// with a deeper gold under Increased Contrast.
     public let gem: Shade
     /// The gems as TEXT — a price, a balance, "+N": a deeper gold in the
     /// light, for 4.5:1 where the glyph's 3:1 is not.
@@ -120,8 +121,8 @@ public struct BrandTheme: Sendable, Equatable {
         counter: Shade(0xEC1C75, 0xEC1C75, ic: (0xC2105F, 0xC2105F)),
         entityInk: Shade(0x5E5E66, 0xAEAEB4, ic: (0x48484F, 0xC8C8CD)),
         likes: Shade(0xEC1C75, 0xEC1C75, ic: (0xC2105F, 0xF25C9A)),
-        gem: Shade(0x9E8A00, 0xFFE600, ic: (0x857300, 0xFFE600)),
-        gemText: Shade(0x7A6A00, 0xFFE600, ic: (0x6B5D00, 0xFFE600)),
+        gem: Shade(0xF5C000, 0xFFE600, ic: (0xA87C00, 0xFFE600)),
+        gemText: Shade(0x8A6400, 0xFFE600, ic: (0x7A5800, 0xFFE600)),
         gemGround: Shade(0xFFE600, 0xFFE600),
         saveGold: 0xFFC53D,
         signatureGradient: [0xEC1C75, 0x9B5CFF, 0x2EF0A8],
