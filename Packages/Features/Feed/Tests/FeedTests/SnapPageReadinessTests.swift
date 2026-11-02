@@ -291,6 +291,21 @@ struct SnapPageReadinessTests {
         #expect(panels.count("c") == 1)
     }
 
+    /// ⚠️ THE PREVIOUS PAGE IS READY TOO (#2059): the feed pages back
+    /// (#2056), so the text page just left keeps its panel as its warm —
+    /// ready for the way back, and never built a second time.
+    @Test func thePageJustLeftStaysReadyForTheWayBack() {
+        let panels = Panels()
+        let feed = feed([text("a"), text("b"), text("c")], panels: panels)
+
+        advance(feed, from: 0)
+        #expect(feed.isPageReady(0), "the page just left is not ready for the way back")
+        advance(feed, from: 1)
+        #expect(feed.isPageReady(1), "the page just left is not ready for the way back")
+        #expect(feed.isPageReady(0) == false, "two pages back is past the window")
+        #expect(panels.count("a") == 1 && panels.count("b") == 1, "a page was built twice")
+    }
+
     /// A media page in the middle does not cost a panel, and does not stop the
     /// text page after it from getting one.
     @Test func aMediaPageBetweenTwoTextPagesCostsNothing() {
