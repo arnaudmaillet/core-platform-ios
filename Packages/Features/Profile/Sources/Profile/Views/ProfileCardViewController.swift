@@ -241,6 +241,8 @@ final class ProfileCardViewController: UIViewController {
         headerClip.addGestureRecognizer(infoTap)
         headerView.onRelationshipsTapped = { [weak self] direction in self?.openRelationships(direction) }
         headerView.onWebsiteTapped = { url in UIApplication.shared.open(url) }
+        // The avatar's "+" (#2050): the toolbar's Follow, exactly.
+        headerView.onFollowTapped = { [weak self] in self?.followTapped() }
         // The header re-measures itself when its content changes.
         headerView.onPicturesSettled = { [weak self] in self?.remeasure() }
         // And when the text size changes under it: at XXXL the bio grew under
@@ -659,7 +661,7 @@ final class ProfileCardViewController: UIViewController {
     /// profile's own mapping (`ProfileHeaderView.avatarMark`).
     private func applyRelationMark() {
         headerView.configureRelationMark(
-            followButtonState, mutual: viewModel.isMutualFollow, blocked: viewModel.isBlocked, isGuest: isGuest
+            followButtonState, mutual: viewModel.isMutualFollow, blocked: viewModel.isBlocked
         )
     }
 

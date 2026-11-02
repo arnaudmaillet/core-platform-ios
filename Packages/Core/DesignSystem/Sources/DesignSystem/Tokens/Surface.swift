@@ -37,12 +37,16 @@ public enum Surface {
     public static let page: UIColor = .systemGroupedBackground
 
     /// The ring around a profile's avatar where it floats over the banner
-    /// (#1792): one quiet grey that barely changes with the theme. The page's
-    /// tone it used to wear read as a white halo in the light and a black one
-    /// in the dark over raw banner media; the system grey (#8E8E93 in both
-    /// styles) stays the same quiet edge on any picture. Dynamic all the
-    /// same — a contrast setting darkens it — so a holder re-resolves it.
-    public static let avatarRim: UIColor = .systemGray
+    /// (#1792): the LIGHT grey, in both styles (the owner, 2026-11-02: "the
+    /// rim is light grey or pink, never dark grey"). The light appearance's
+    /// `systemGray5`, resolved once — the grey of the following ring and the
+    /// badge's quiet disc; the friends' ring is the accent. It was the system
+    /// grey (#8E8E93), which read as a dark grey edge round the face. The
+    /// page's tone before that read as a white halo in the light and a black
+    /// one in the dark over raw banner media.
+    public static let avatarRim: UIColor = UIColor.systemGray5.resolvedColor(
+        with: UITraitCollection(userInterfaceStyle: .light)
+    )
 
     /// A card, one step up from the page. Also the ground a media carousel's
     /// gutter shows and the floor a skeleton shimmers on, because they are
