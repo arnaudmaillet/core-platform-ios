@@ -222,6 +222,23 @@ struct SnapPageDisplaySpecTests {
         #expect(feed.zoomVerticalDismissalPermitted(at: middle, in: feed.view))
     }
 
+    /// ⚠️ A TEXT PAGE AFTER THE FIRST PAGES BACK (#2058, the owner
+    /// 2026-11-02): its downward drag is the drive's — the composer, the
+    /// header band, the stream's top edge — and the screen's close stands
+    /// aside. The first text page keeps its close.
+    @Test func aLaterTextPagePagesBackAndTheFirstKeepsItsClose() {
+        let panels = Panels()
+        let feed = feed([text("a"), text("b")], panels: panels)
+        let middle = CGPoint(x: 195, y: 400)
+        #expect(feed.downwardDragOwner == .dismissal, "the first text page lost its close")
+
+        scroll(feed, toPageFraction: 1)
+        settle(feed, onPage: 1)
+
+        #expect(feed.downwardDragOwner == .pager, "a later text page does not page back")
+        #expect(!feed.zoomVerticalDismissalPermitted(at: middle, in: feed.view), "the close claims it too")
+    }
+
     // MARK: - What the pager allows
 
     /// A text page owns the vertical axis — its thread scrolls — so the pager

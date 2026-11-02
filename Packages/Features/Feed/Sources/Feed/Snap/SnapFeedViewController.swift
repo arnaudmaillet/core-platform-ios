@@ -4261,9 +4261,9 @@ final class SnapFeedViewController: UIViewController {
         detail?.seedCommentCount(modelsByID[id]?.cardMetrics?.comments)
         // No close handler — a resting page is undismissable; the swipe
         // handler pages the feed (the only way off a text post).
-        detail?.setEngagedPageSwipeHandler { [weak self] phase, translation, velocity in
+        detail?.setEngagedPageSwipeHandler({ [weak self] phase, translation, velocity in
             self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
-        }
+        }, pagesBack: { [weak self] in self?.downwardDragOwner == .pager })
         observeCommentCount(of: detail)
         observeCommentsDay(of: detail)
         // INSTANT: composer already onstage, cell engaged synchronously —
@@ -4382,9 +4382,9 @@ final class SnapFeedViewController: UIViewController {
             // same: back to the media, as the ✕ (#1926, the owner).
             detail?.setEmptyRoomTapHandler { [weak self] in self?.dismissComments() }
         }
-        detail?.setEngagedPageSwipeHandler { [weak self] phase, translation, velocity in
+        detail?.setEngagedPageSwipeHandler({ [weak self] phase, translation, velocity in
             self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
-        }
+        }, pagesBack: { [weak self] in self?.downwardDragOwner == .pager })
         observeCommentCount(of: detail)
         observeCommentsDay(of: detail)
         detail?.setComposerEntranceState(offstage: true)
@@ -8247,10 +8247,10 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             settledIndex: index,
             isAtRestOnPage: atRest,
             sideListOpen: sideList?.isOpen == true,
-            // The pager pages this page: a media page. A text page (or a
-            // page whose comments hold the scroll) keeps its close until the
-            // direction-aware drive pages it back (#2058).
-            pagerPagesHere: collectionView?.isScrollEnabled == true
+            // The pager pages a media page; the drive, a page whose comments
+            // hold the scroll — a text page, an open panel (#2058).
+            pagerPagesHere: collectionView?.isScrollEnabled == true,
+            drivePagesHere: commentsEngagedID != nil
         )
     }
 

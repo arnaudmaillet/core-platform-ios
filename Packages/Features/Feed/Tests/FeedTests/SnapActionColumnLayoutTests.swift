@@ -154,7 +154,7 @@ struct SnapActionColumnLayoutTests {
         window.rootViewController = controller
         window.isHidden = false
         controller.view.frame = Self.screen
-        controller.setEngagedPageSwipeHandler { _, _, _ in }
+        controller.setEngagedPageSwipeHandler({ _, _, _ in }, pagesBack: { false })
         controller.setEngagedInsets(top: 200, bottomInset: Self.insets.bottom)
         controller.setComposerEntranceState(offstage: false)
         controller.view.layoutIfNeeded()
