@@ -752,6 +752,10 @@ public final class PostDetailViewModel {
     /// The viewer neared the end of the stream: the next page, if there is
     /// one and none is already on its way (#589). Appended, never reordering
     /// what is on screen; a failure is retried on the next approach.
+    /// Whether Popular has another ranked page to load (#2042: the next tier
+    /// is loaded ahead).
+    var hasMorePopularComments: Bool { popular.hasMore }
+
     /// Whether Recent has older comments still to load (#2007): its caption,
     /// the post's first message, waits above them.
     var hasOlderComments: Bool { nextPageToken != nil }

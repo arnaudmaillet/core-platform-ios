@@ -438,7 +438,19 @@ final class CommentRowView: UIView {
         likeButton.configuration = config
     }
 
+    /// ⚠️ THE BODY'S WIDTH, TOLD TO IT (#2042). A multi-line label with no
+    /// `preferredMaxLayoutWidth` reports a one-line intrinsic height, and Auto
+    /// Layout measures it against whatever width it was last laid out at — a
+    /// reused cell asked its height measured a two-line comment as one, and
+    /// the end of it went under an ellipsis (logged: the same row 78 pt, then
+    /// 56). Told its real width, the body answers its real height on the first
+    /// pass — the standard idiom, and `SnapPostInfoCardView`'s fix for the
+    /// caption.
     override func layoutSubviews() {
+        super.layoutSubviews()
+        let width = bodyLabel.bounds.width
+        guard width > 0, abs(bodyLabel.preferredMaxLayoutWidth - width) > 0.5 else { return }
+        bodyLabel.preferredMaxLayoutWidth = width
         super.layoutSubviews()
     }
 
@@ -922,24 +934,7 @@ final class CaptionBubbleCell: UICollectionViewCell {
     override func preferredLayoutAttributesFitting(
         _ layoutAttributes: UICollectionViewLayoutAttributes
     ) -> UICollectionViewLayoutAttributes {
-        let targetWidth = layoutAttributes.frame.width
-        guard targetWidth > 0 else {
-            return super.preferredLayoutAttributesFitting(layoutAttributes)
-        }
-        if abs(bounds.width - targetWidth) > 0.5 {
-            bounds.size.width = targetWidth
-        }
-        contentView.setNeedsLayout()
-        contentView.layoutIfNeeded()
-        let fitted = contentView.systemLayoutSizeFitting(
-            CGSize(width: targetWidth, height: 0),
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel
-        )
-        // Ceil, not round: half a point short of the caption is a clipped
-        // descender on the last line.
-        layoutAttributes.frame.size.height = ceil(fitted.height)
-        return layoutAttributes
+        fittedAtLayoutWidth(layoutAttributes) ?? super.preferredLayoutAttributesFitting(layoutAttributes)
     }
 
     /// Renders from what the FEED already knows, before this screen's own post
@@ -1018,6 +1013,36 @@ final class CommentCell: UICollectionViewCell {
         contentView.layer.removeAllAnimations()
         contentView.transform = .identity
         contentView.alpha = 1
+    }
+
+    override func preferredLayoutAttributesFitting(
+        _ layoutAttributes: UICollectionViewLayoutAttributes
+    ) -> UICollectionViewLayoutAttributes {
+        fittedAtLayoutWidth(layoutAttributes) ?? super.preferredLayoutAttributesFitting(layoutAttributes)
+    }
+}
+
+extension UICollectionViewCell {
+    /// A comment row measured at the width the layout is going to give it,
+    /// laid out there first — the caption cell's fix (`CaptionBubbleCell`),
+    /// for the comments: a reused cell asked its height is measured against
+    /// the width it last carried, and a multi-line body measured too wide
+    /// keeps a one-line height, its end cut by an ellipsis (filmed on a tier
+    /// coming in, #2042). Nil without a width to measure at.
+    func fittedAtLayoutWidth(_ layoutAttributes: UICollectionViewLayoutAttributes) -> UICollectionViewLayoutAttributes? {
+        let width = layoutAttributes.frame.width
+        guard width > 0 else { return nil }
+        if abs(bounds.width - width) > 0.5 { bounds.size.width = width }
+        contentView.setNeedsLayout()
+        contentView.layoutIfNeeded()
+        let fitted = contentView.systemLayoutSizeFitting(
+            CGSize(width: width, height: 0),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        // Ceil, not round: half a point short is a clipped descender.
+        layoutAttributes.frame.size.height = ceil(fitted.height)
+        return layoutAttributes
     }
 }
 
