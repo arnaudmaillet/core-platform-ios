@@ -13,7 +13,7 @@ import Foundation
 public enum WalletGemGoal {
     /// A Shop item as the goal weighs it.
     public struct Item: Equatable, Sendable {
-        /// The catalogue's id (`theme.violet`, `video-banner`).
+        /// The catalogue's id (`frame.gold`, `video-banner`).
         public let id: String
         /// Its name in a sentence: "the video banner".
         public let name: String

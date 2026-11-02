@@ -73,10 +73,10 @@ struct ServerWalletTests {
         let gems = store.snapshot().gems
         #expect(gems > 0, "the premise: gems to spend")
 
-        let item = await store.purchaseItem("theme.violet", price: 50, idempotencyKey: "teen-item-0001")
+        let item = await store.purchaseItem("frame.gold", price: 60, idempotencyKey: "teen-item-0001")
         #expect(item == .unavailable, "the refusal was not the outcome: \(item)")
         #expect(store.snapshot().gems == gems, "gems were debited")
-        #expect(store.ownedItems?.contains("theme.violet") != true, "the refused item is owned")
+        #expect(store.ownedItems?.contains("frame.gold") != true, "the refused item is owned")
 
         let tier = try #require(store.stakePackTiers.first)
         let pack = await store.buyStakePack(tier, idempotencyKey: "teen-pack-0001")

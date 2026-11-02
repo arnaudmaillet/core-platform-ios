@@ -350,9 +350,9 @@ final class MainTabCoordinator: NSObject, Coordinator {
         tabBarController.memberGate = container.memberGate
         // The badged bell and tabs are bitmaps baked for the window's traits
         // (#1178, #1501): a light/dark switch — iOS's or the app's own —
-        // bakes them again, and so does an accent theme change (#1379).
+        // bakes them again, and so does a contrast setting.
         tabBarController.view.registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self, AccentThemeTrait.self]
+            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]
         ) { [weak self] (_: UIView, _) in
             self?.notificationsBell.repaint()
             self?.refreshTabGlyphs()

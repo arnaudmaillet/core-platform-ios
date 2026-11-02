@@ -54,12 +54,11 @@ final class UnreadCountPill: UIView {
         clipsToBounds = true
         layer.cornerCurve = .continuous
         if ringed { layer.borderWidth = Metrics.ringWidth }
-        // The gradient's stops follow the accent theme (#1379) and the
-        // appearance, and so does the ring: a layer holds CGColors and
-        // re-resolves nothing itself.
+        // The gradient's stops follow the appearance and the contrast, and so
+        // does the ring: a layer holds CGColors and re-resolves nothing itself.
         applyColours()
         registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, AccentThemeTrait.self]
+            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]
         ) { (view: UnreadCountPill, _: UITraitCollection) in
             view.applyColours()
         }

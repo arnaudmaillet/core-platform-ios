@@ -295,9 +295,10 @@ public final class MockWalletService: @unchecked Sendable {
         ("shots_3", 3, 50), ("shots_10", 10, 150), ("shots_25", 25, 325),
     ]
     /// The gem catalogue (#892): the wallet service's default
-    /// `WALLET_CATALOG`, in display order; 0 = free, owned by everyone.
+    /// `WALLET_CATALOG`, in display order; 0 = free, owned by everyone. The
+    /// accent themes (`theme.*`) are retired (#2062): one theme, sold by no
+    /// one.
     static let catalog: [(id: String, price: Int64)] = [
-        ("theme.pink", 0), ("theme.violet", 50), ("theme.red", 50),
         ("frame.gold", 60), ("frame.neon", 60), ("frame.aurora", 60),
         ("banner.animated", 500),
         ("card.paper", 80), ("card.night", 80), ("card.mint", 80),

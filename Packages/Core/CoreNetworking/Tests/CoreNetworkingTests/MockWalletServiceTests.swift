@@ -176,27 +176,33 @@ struct MockWalletServiceTests {
     }
 
     /// A catalogue item: bought once at its price, then owned; another price
-    /// or too few gems charge nothing; free ones are owned by everyone.
+    /// or too few gems charge nothing.
     @Test func aCatalogueItemIsBoughtOnceAndOwned() async throws {
         let (wallet, _, _) = make()
-        #expect(try await purchase(wallet, item: "theme.violet", price: 40).outcome == .priceChanged)
+        #expect(try await purchase(wallet, item: "frame.gold", price: 50).outcome == .priceChanged)
         #expect(try await purchase(wallet, item: "banner.animated", price: 500).outcome == .insufficientGems)
-        #expect(try await purchase(wallet, item: "theme.pink", price: 0).outcome == .alreadyOwned)
-        #expect(try await purchase(wallet, item: "theme.teal", price: 50).outcome == .unknownItem)
+        #expect(try await purchase(wallet, item: "frame.teal", price: 60).outcome == .unknownItem)
         let key = newKey()
-        let bought = try await purchase(wallet, item: "theme.violet", price: 50, key: key)
+        let bought = try await purchase(wallet, item: "frame.gold", price: 60, key: key)
         #expect(bought.outcome == .purchased)
-        #expect(bought.wallet.gems == 50)
-        #expect(try await purchase(wallet, item: "theme.violet", price: 50, key: key).wallet.gems == 50, "a retry charges once")
-        #expect(try await purchase(wallet, item: "theme.violet", price: 50).outcome == .alreadyOwned)
+        #expect(bought.wallet.gems == 40)
+        #expect(try await purchase(wallet, item: "frame.gold", price: 60, key: key).wallet.gems == 40, "a retry charges once")
+        #expect(try await purchase(wallet, item: "frame.gold", price: 60).outcome == .alreadyOwned)
 
         var owned = Wallet_V1_ListOwnedItemsRequest()
         owned.accountID = MockAuthService.accountID
         let items = try #require(await wallet.listOwnedItems(request: owned, headers: [:]).message).items.map(\.itemID)
-        #expect(items == ["theme.pink", "theme.violet"])
+        #expect(items == ["frame.gold"])
         let catalog = try #require(await wallet.listCatalog(request: Wallet_V1_ListCatalogRequest(), headers: [:]).message)
         #expect(catalog.items.first { $0.itemID == "banner.animated" }?.price == 500)
-        #expect(catalog.items.first { $0.itemID == "theme.red" }?.family == .theme)
+        #expect(catalog.items.first { $0.itemID == "frame.neon" }?.family == .avatarFrame)
+    }
+
+    /// The accent themes are retired (#2062): the catalogue sells none.
+    @Test func theCatalogueSellsNoTheme() async throws {
+        let (wallet, _, _) = make()
+        let catalog = try #require(await wallet.listCatalog(request: Wallet_V1_ListCatalogRequest(), headers: [:]).message)
+        #expect(!catalog.items.contains { $0.family == .theme })
     }
 
     /// ⚠️ GEMS ARE ADULTS ONLY (#1475, #1495): a supervised teen's pack and
@@ -215,8 +221,8 @@ struct MockWalletServiceTests {
 
         var item = Wallet_V1_PurchaseItemRequest()
         item.accountID = MockAuthService.accountID
-        item.itemID = "theme.violet"
-        item.expectedPrice = 50
+        item.itemID = "frame.gold"
+        item.expectedPrice = 60
         item.idempotencyKey = newKey()
         let itemError = try #require(await wallet.purchaseItem(request: item, headers: [:]).error)
         #expect(itemError.code == .permissionDenied)
@@ -231,7 +237,7 @@ struct MockWalletServiceTests {
         var owned = Wallet_V1_ListOwnedItemsRequest()
         owned.accountID = MockAuthService.accountID
         let items = try #require(await wallet.listOwnedItems(request: owned, headers: [:]).message).items.map(\.itemID)
-        #expect(items == ["theme.pink"], "the refused item is owned")
+        #expect(items.isEmpty, "the refused item is owned")
     }
 
     /// An adult's wallet is not restricted.

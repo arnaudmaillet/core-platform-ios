@@ -15,16 +15,12 @@ enum ShopPurchaseFeedback {
         PendingFeedback("Buying \(title)…", from: presenter)
     }
 
-    /// The toast for buying `title`, in `pending`'s place; `action` rides a
-    /// success ("Apply").
-    static func show(
-        _ outcome: ProfileItemPurchase, title: String, pending: PendingFeedback,
-        action: ToastView.Action? = nil
-    ) {
+    /// The toast for buying `title`, in `pending`'s place.
+    static func show(_ outcome: ProfileItemPurchase, title: String, pending: PendingFeedback) {
         switch outcome {
         // One haptic per outcome: the toast's (#1884).
         case .bought:
-            pending.succeed("\(title) unlocked", action: action)
+            pending.succeed("\(title) unlocked")
         case .alreadyOwned:
             pending.end()
         case .insufficientGems(let needed, let have):

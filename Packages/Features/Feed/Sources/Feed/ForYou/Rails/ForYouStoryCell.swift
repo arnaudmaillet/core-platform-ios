@@ -87,7 +87,7 @@ final class ForYouStoryCell: UICollectionViewCell {
         contentView.addSubview(disc)
         applyRingColors()
         registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, AccentThemeTrait.self]
+            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]
         ) { (cell: Self, _: UITraitCollection) in
             cell.applyRingColors()
         }

@@ -13,6 +13,8 @@ import Testing
 /// until #1128), `systemGreen` (success) and `systemYellow` (warnings, via
 /// `Warning`) are the system's status colours and are not scanned.
 ///
+/// The second scan keeps every hex colour in `BrandTheme.swift` (#2062).
+///
 /// CI only runs this in DesignSystem's lane, which a change elsewhere does
 /// not select: touching colours anywhere, run DesignSystem's tests too.
 struct RawHueGuardTests {
@@ -91,6 +93,42 @@ struct RawHueGuardTests {
         #expect(unexplained.isEmpty, "read the hue from Palette (or argue the case here): \(unexplained.sorted())")
         let stale = Set(Self.allowed.keys).subtracting(found)
         #expect(stale.isEmpty, "these no longer pick a raw hue — drop them from the list: \(stale.sorted())")
+    }
+
+    /// ⚠️ ONE PLACE FOR THE BRAND'S HEX (#2062): a 6- or 8-digit hex literal
+    /// is a colour, and colours live in `BrandTheme.swift`, so a theme change
+    /// is one file. Anywhere else, read a `Palette` role.
+    static let hexHome: Set<String> = ["BrandTheme.swift"]
+
+    /// Whether `text` writes a colour as a hex literal (`0xF37AB4`).
+    static func writesAHex(_ text: String) -> Bool {
+        text.range(of: "0x[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?(?![0-9A-Fa-f])", options: .regularExpression) != nil
+    }
+
+    @Test func everyHexLivesInTheBrandTheme() {
+        var found: Set<String> = []
+        for folder in ["App", "Packages"] {
+            let enumerator = FileManager.default.enumerator(
+                at: Self.root.appendingPathComponent(folder), includingPropertiesForKeys: nil
+            )
+            while let url = enumerator?.nextObject() as? URL {
+                let path = url.path
+                guard url.pathExtension == "swift", !path.contains("/.build/"), !path.contains("/Tests/"),
+                      !path.contains("/Generated/") else { continue }
+                let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+                if Self.writesAHex(text) { found.insert(url.lastPathComponent) }
+            }
+        }
+        #expect(found.contains("BrandTheme.swift"), "the scan did not find the theme: \(Self.root.path)")
+        let stray = found.subtracting(Self.hexHome)
+        #expect(stray.isEmpty, "a hex colour outside BrandTheme.swift — add it to the theme: \(stray.sorted())")
+    }
+
+    @Test func theHexPatternFindsTheShape() {
+        #expect(Self.writesAHex("Palette.rgb(0xF37AB4)"))
+        #expect(Self.writesAHex("let ink: UInt32 = 0xF37AB4CC"))
+        #expect(!Self.writesAHex("value >> 16 & 0xFF"), "a mask is not a colour")
+        #expect(!Self.writesAHex("let big = 0x1234567"), "seven digits are not a colour")
     }
 
     /// The scan cannot pass by matching nothing.

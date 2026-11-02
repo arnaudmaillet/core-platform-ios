@@ -62,7 +62,7 @@ final class RelationMarkedAvatarView: UIView {
             onFollowTapped?()
         }, for: .primaryActionTriggered)
         registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, AccentThemeTrait.self]
+            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]
         ) { (view: RelationMarkedAvatarView, _: UITraitCollection) in
             view.drawRing()
         }
