@@ -2215,8 +2215,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// pill does.
     private func applyRelationMark() {
         headerView.configureRelationMark(
-            followButtonState, mutual: viewModel.isMutualFollow, blocked: viewModel.isBlocked,
-            isGuest: MemberGates.isGuest(self)
+            followButtonState, mutual: viewModel.isMutualFollow, blocked: viewModel.isBlocked
         )
     }
 

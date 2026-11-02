@@ -445,23 +445,27 @@ extension ProfileBellAndMapMenuTests {
         #expect(ProfileViewController.barBadge(for: .hidden, mutual: false) == nil)
     }
 
-    // MARK: - The avatar's relation mark (#2014)
+    // MARK: - The avatar's relation mark (#2014, #2050)
 
-    /// ⚠️ NO "+" ON THE AVATAR (the owner, 2026-11-01): following,
-    /// friends and the pending clock, as the bar maps them; nothing for
-    /// someone blocked or for a guest.
-    @Test func theAvatarWearsNoPlus() {
+    /// ONE MARK EVERYWHERE, THE "+" INCLUDED (#2050, the owner 2026-11-02,
+    /// reversing #2014's "no '+'"): the bar's own mapping, whole — "+",
+    /// the clock, the check, friends. Nothing for someone blocked, the
+    /// viewer's own profile, one not read yet or not followable. A guest
+    /// is not an exception: their relation reads as not followed, so the
+    /// "+" (behind the member gate), as the author pill shows a guest.
+    @Test func theAvatarWearsTheWholeMark() {
         typealias Header = ProfileHeaderView
-        #expect(Header.avatarMark(for: .following, mutual: false, blocked: false, isGuest: false) == .following)
-        #expect(Header.avatarMark(for: .following, mutual: true, blocked: false, isGuest: false) == .friends)
-        #expect(Header.avatarMark(for: .requested, mutual: false, blocked: false, isGuest: false) == .pending)
-        for state in [ProfileViewModel.FollowButton.following] {
-            #expect(Header.avatarMark(for: state, mutual: true, blocked: true, isGuest: false) == PersonPill.Badge.none)
-            #expect(Header.avatarMark(for: state, mutual: true, blocked: false, isGuest: true) == PersonPill.Badge.none)
+        #expect(Header.avatarMark(for: .follow, mutual: false, blocked: false) == .follow)
+        #expect(Header.avatarMark(for: .requested, mutual: false, blocked: false) == .pending)
+        #expect(Header.avatarMark(for: .following, mutual: false, blocked: false) == .following)
+        #expect(Header.avatarMark(for: .following, mutual: true, blocked: false) == .friends)
+        for state in [ProfileViewModel.FollowButton.follow, .requested, .following] {
+            #expect(Header.avatarMark(for: state, mutual: true, blocked: true) == PersonPill.Badge.none, "\(state)")
+            #expect(Header.avatarMark(for: state, mutual: false, blocked: false)
+                    == ProfileViewController.barBadge(for: state, mutual: false), "the avatar and the bar disagree")
         }
-        for state in [ProfileViewModel.FollowButton.follow, .edit, .hidden, .unavailable] {
-            #expect(Header.avatarMark(for: state, mutual: false, blocked: false, isGuest: false) == PersonPill.Badge.none,
-                    "\(state)")
+        for state in [ProfileViewModel.FollowButton.edit, .hidden, .unavailable] {
+            #expect(Header.avatarMark(for: state, mutual: false, blocked: false) == PersonPill.Badge.none, "\(state)")
         }
     }
 
@@ -483,18 +487,70 @@ extension ProfileBellAndMapMenuTests {
         #expect(screen.headerView.debugAvatarRingWidth == 3)
     }
 
-    /// Not followed, the avatar is bare; the tray's Follow brings the check,
-    /// as it turns the bar's pill.
+    /// Not followed, the avatar wears the "+"; the tray's Follow brings the
+    /// check, as it turns the bar's pill.
     @Test func theTraysFollowBringsTheAvatarsCheck() async throws {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
         try #require(await settle { screen.followButtonState == .follow })
-        #expect(screen.headerView.relationMark == .none, "a + on the profile's avatar")
-        #expect(screen.headerView.debugRelationSymbol == nil)
+        #expect(screen.headerView.relationMark == .follow, "no + on the profile's avatar")
+        #expect(screen.headerView.debugRelationSymbol == PersonPill.Badge.follow.symbolName)
         #expect(screen.headerView.debugTapFollow())
         try #require(await settle { screen.followButtonState == .following }, "the tray did not follow")
         #expect(screen.headerView.relationMark == .following, "the tray's Follow left the avatar behind")
         screen.debugSetTrayScrolledAway(true)
         #expect(try pill(screen).followBadge == .following)
+    }
+
+    /// THE AVATAR'S "+" IS THE TRAY'S FOLLOW (#2050): the check comes, and
+    /// the tray's capsule turns to Following with it — one relationship,
+    /// two places.
+    @Test func theAvatarsPlusFollows() async throws {
+        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .follow })
+        let badge = try #require(screen.headerView.debugRelationBadge)
+        #expect(badge.isUserInteractionEnabled, "the + takes no touches")
+        badge.sendActions(for: .primaryActionTriggered)
+        try #require(await settle { screen.followButtonState == .following }, "the avatar's + did not follow")
+        #expect(screen.headerView.relationMark == .following)
+        #expect(screen.headerView.debugFollowTitle == "Following", "the tray was left behind")
+        #expect(!badge.isUserInteractionEnabled, "the check takes touches")
+    }
+
+    /// Refused, the "+" comes back, as the tray's Follow does.
+    @Test func aRefusedPlusComesBack() async throws {
+        let (screen, _, repository) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .follow })
+        repository.refusesFollowChange = true
+        screen.headerView.debugRelationBadge?.sendActions(for: .primaryActionTriggered)
+        try #require(await settle { screen.followButtonState == .following }, "no optimistic flip")
+        try #require(await settle { screen.followButtonState == .follow }, "the refusal was not put back")
+        #expect(screen.headerView.relationMark == .follow, "the + did not come back")
+    }
+
+    /// Only the "+" calls the follow: the check, friends and the clock do
+    /// nothing — unfollowing stays in the tray. VoiceOver reads the badge as
+    /// a button, "Follow", only while it is the "+".
+    @Test func onlyThePlusCallsTheFollow() throws {
+        let header = ProfileHeaderView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
+        var follows = 0
+        header.onFollowTapped = { follows += 1 }
+        let badge = try #require(header.debugRelationBadge)
+        for mark in [PersonPill.Badge.following, .friends, .pending, .none] {
+            header.setRelationMark(mark, animated: false)
+            badge.sendActions(for: .primaryActionTriggered)
+            #expect(follows == 0, "\(mark) called the follow")
+            #expect(!badge.accessibilityTraits.contains(.button), "\(mark) reads as a button")
+        }
+        #expect(badge.accessibilityLabel == nil && !badge.isAccessibilityElement, "none is read")
+        header.setRelationMark(.friends, animated: false)
+        #expect(badge.accessibilityLabel == "Friends")
+        header.setRelationMark(.pending, animated: false)
+        #expect(badge.accessibilityLabel == "Requested")
+        header.setRelationMark(.follow, animated: false)
+        badge.sendActions(for: .primaryActionTriggered)
+        #expect(follows == 1, "the + did not call the follow")
+        #expect(badge.isAccessibilityElement && badge.accessibilityTraits.contains(.button))
+        #expect(badge.accessibilityLabel == "Follow")
     }
 
     /// The "+" follows, through the tray's own path: the badge turns.
