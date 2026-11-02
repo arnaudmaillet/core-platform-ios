@@ -113,7 +113,12 @@ struct MockViewerAwareFinishTests {
     @Test func aCommenterHiddenFromTheReaderIsDropped() async throws {
         let post = try firstPost(of: "prof-4")
         let before = try await comments(on: post, as: member)
-        let commenter = try #require(before.first { $0.authorID != MockSocialDataset.viewerProfileID && $0.authorID != "prof-4" }?.authorID)
+        // Someone else's: not one of the viewer's own profiles (prof-0, prof-2
+        // share its account, and a block of oneself does nothing).
+        let own = backend.dataset.accountID(for: MockSocialDataset.viewerProfileID)
+        let commenter = try #require(before.first {
+            backend.dataset.accountID(for: $0.authorID) != own && $0.authorID != "prof-4"
+        }?.authorID)
         await block(MockSocialDataset.viewerProfileID, commenter)
         let after = try await comments(on: post, as: member)
         #expect(!after.contains { $0.authorID == commenter })

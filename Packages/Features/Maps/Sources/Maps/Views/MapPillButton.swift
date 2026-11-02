@@ -363,7 +363,8 @@ final class MapPillButton: UIButton {
         let contentColor: UIColor = selected ? Palette.tint : .secondaryLabel
         let groundDisc = awaitsAvatar
             ? Surface.groundDisc(diameter: avatarDiameter)
-                .withTintColor(Surface.mediaGround.resolvedColor(with: traitCollection), renderingMode: .alwaysOriginal)
+                // The avatar's fixed light ground (#2051).
+                .withTintColor(Surface.avatarGround, renderingMode: .alwaysOriginal)
             : nil
         config.image = avatarImage ?? groundDisc ?? UIImage(
             systemName: selected ? content.selectedSymbolName : content.symbolName

@@ -18,7 +18,9 @@ import UIKit
 /// because that is its `backgroundView` and spans the accessory strip; the list
 /// cell keeps nothing at all.
 final class ConversationRowView: UIView {
-    private let avatarView = BadgedAvatarView()
+    /// The face, wearing the relation mark (#2049): the unread count left it
+    /// for the trailing column (`unreadPill`).
+    private let avatarView = RelationMarkedAvatarView()
     private var avatarTask: Task<Void, Never>?
     /// The peer this row is currently showing. A reused row can outlive its own
     /// fetch, so the late result is checked against this before it draws —
@@ -30,6 +32,16 @@ final class ConversationRowView: UIView {
     private let timeLabel = UILabel()
     private let mutedIcon = UIImageView(image: UIImage(systemName: "bell.slash.fill"))
     private let pinnedIcon = UIImageView(image: UIImage(systemName: "pin.fill"))
+    /// The unread count, under the time at the row's trailing edge (#2049):
+    /// the avatar badge's pill, with no ring — it sits on the row, not on a
+    /// face.
+    private let unreadPill = UnreadCountPill(ringed: false)
+
+    /// Told when the face's "+" is tapped — never the row's own tap.
+    var onFollowTapped: (() -> Void)? {
+        get { avatarView.onFollowTapped }
+        set { avatarView.onFollowTapped = newValue }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -45,6 +57,8 @@ final class ConversationRowView: UIView {
         avatarTask = nil
         avatarPeerID = nil
         avatarView.setPicture(nil, pipeline: nil)
+        avatarView.setMark(.none, animated: false)
+        onFollowTapped = nil
     }
 
     /// The row draws immediately from `model`; the picture, if there is one,
@@ -57,14 +71,20 @@ final class ConversationRowView: UIView {
     /// is the rendered state, and the picture is an enhancement that may never
     /// come.
     ///
+    /// `mark`: the relation the face wears (#2049) — `.none` for a group, a
+    /// relation not known yet, or a host with no graph.
+    ///
     /// Returns the row's accessibility label, which the host owns.
     @discardableResult
     func configure(
         with model: ConversationDisplayModel,
         imagePipeline: ImagePipeline? = nil,
-        avatars: (any PeerAvatarProviding)? = nil
+        avatars: (any PeerAvatarProviding)? = nil,
+        mark: PersonPill.Badge = .none
     ) -> String {
         avatarView.setMonogram(model.monogram)
+        // A group keeps its initials, with no mark.
+        avatarView.setMark(model.peerID == nil ? .none : mark, animated: false)
         loadAvatar(for: model, imagePipeline: imagePipeline, avatars: avatars)
         titleLabel.text = model.title
         previewLabel.text = model.preview.isEmpty ? "No messages yet" : model.preview
@@ -73,19 +93,62 @@ final class ConversationRowView: UIView {
         applyUnreadStyle(model.isUnread)
         // The COUNT, not just presence — `chat.v1` still serves no
         // `unread_count`, so this is counted from the history tail the inbox
-        // already fetches (`Conversation.unreadCount`).
-        avatarView.setBadge(model.isUnread ? .count(model.unreadCount) : .none)
+        // already fetches (`Conversation.unreadCount`). Never at zero.
+        if model.isUnread, model.unreadCount > 0 {
+            unreadPill.show(count: model.unreadCount)
+        } else {
+            unreadPill.hide()
+        }
         pinnedIcon.isHidden = !model.isPinned
 
         let states: [String?] = [
             model.title,
-            model.isUnread ? "Unread" : nil,
+            Self.unreadWords(model),
             model.isPinned ? "Pinned" : nil,
             model.isMuted ? "Muted" : nil,
             model.timeText,
             model.preview
         ]
         return states.compactMap(\.self).filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
+    /// "3 unread"; "Unread" when there is no count; nil when read.
+    static func unreadWords(_ model: ConversationDisplayModel) -> String? {
+        guard model.isUnread else { return nil }
+        return model.unreadCount > 0 ? "\(model.unreadCount) unread" : "Unread"
+    }
+
+    /// The relation the face wears, through the badge's replace and the
+    /// ring's fade on screen — the row draws first and the mark arrives,
+    /// moving nothing (#2049).
+    func setRelationMark(_ mark: PersonPill.Badge, animated: Bool) {
+        avatarView.setMark(mark, animated: animated)
+    }
+
+    /// The mark on show.
+    var relationMark: PersonPill.Badge { avatarView.mark }
+
+    /// VoiceOver's way to the "+" (the row is the element, and its tap
+    /// opens the conversation): a "Follow" action while the face shows it.
+    var followAccessibilityActions: [UIAccessibilityCustomAction]? {
+        guard relationMark == .follow, onFollowTapped != nil else { return nil }
+        return [UIAccessibilityCustomAction(name: "Follow") { [weak self] _ in
+            self?.onFollowTapped?()
+            return true
+        }]
+    }
+
+    /// ⚠️ THE "+" IS ASKED FIRST. Its touch area (grown by 8 pt) reaches past
+    /// the 48 pt disc, and past the stack the disc is laid out in, which
+    /// would refuse the touch before the badge saw it. Within the row, a
+    /// touch on the "+" is the badge's; everything else stays the row's (its
+    /// tap, swipe actions and context menu).
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if let badge = avatarView.tappableBadge, !isHidden, alpha > 0.01,
+           badge.point(inside: convert(point, to: badge), with: event) {
+            return badge
+        }
+        return super.hitTest(point, with: event)
     }
 
     /// The pin glyph alone; the band belongs to the host that has a background.
@@ -167,20 +230,39 @@ final class ConversationRowView: UIView {
         textColumn.axis = .vertical
         textColumn.spacing = 2
 
-        // `[mute][pin]`, in that order, reading toward the row's edge — mute is
-        // the quieter statement and sits inboard of the pin, which is the one
-        // that also tints the whole row.
+        // `[mute][pin][count]`, in that order, reading toward the row's edge —
+        // mute is the quieter statement and sits inboard of the pin, which is
+        // the one that also tints the whole row; the count (#2049) takes the
+        // trailing edge, under the time's.
         //
         // Center, not firstBaseline: the glyph image views have no baseline.
-        let glyphRow = UIStackView(arrangedSubviews: [mutedIcon, pinnedIcon])
+        let glyphRow = UIStackView(arrangedSubviews: [mutedIcon, pinnedIcon, unreadPill])
         glyphRow.axis = .horizontal
         glyphRow.alignment = .center
         glyphRow.spacing = Spacing.xs
 
-        // Time over the glyphs, pushed to the row's trailing edge. The stack
-        // keeps its width when a glyph hides, so toggling either can never
-        // reflow the title/preview column beside it.
-        let statusColumn = UIStackView(arrangedSubviews: [timeLabel, glyphRow])
+        // ⚠️ THE SECOND LINE KEEPS ITS HEIGHT, pill or not (#2049): at least
+        // the pill's, so an unread row and a read one put the time at the
+        // same height, and a count arriving moves nothing.
+        let secondLine = UIView()
+        secondLine.addSubview(glyphRow)
+        glyphRow.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            secondLine.heightAnchor.constraint(greaterThanOrEqualToConstant: UnreadCountPill.Metrics.height),
+            glyphRow.topAnchor.constraint(greaterThanOrEqualTo: secondLine.topAnchor),
+            glyphRow.bottomAnchor.constraint(lessThanOrEqualTo: secondLine.bottomAnchor),
+            glyphRow.centerYAnchor.constraint(equalTo: secondLine.centerYAnchor),
+            glyphRow.leadingAnchor.constraint(equalTo: secondLine.leadingAnchor),
+            glyphRow.trailingAnchor.constraint(equalTo: secondLine.trailingAnchor)
+        ])
+        let collapse = secondLine.heightAnchor.constraint(equalToConstant: 0)
+        collapse.priority = .defaultLow
+        collapse.isActive = true
+
+        // Time over the second line, pushed to the row's trailing edge. The
+        // stack keeps its width when a glyph hides, so toggling either can
+        // never reflow the title/preview column beside it.
+        let statusColumn = UIStackView(arrangedSubviews: [timeLabel, secondLine])
         statusColumn.axis = .vertical
         statusColumn.alignment = .trailing
         statusColumn.spacing = Spacing.xs
@@ -202,6 +284,19 @@ final class ConversationRowView: UIView {
         ))
     }
 }
+
+#if DEBUG
+extension ConversationRowView {
+    /// The count's pill. Tests.
+    var debugUnreadPill: UnreadCountPill? { unreadPill }
+    /// The time. Tests.
+    var debugTimeLabel: UILabel { timeLabel }
+    /// The muted and pinned glyphs on show. Tests.
+    var debugGlyphs: [UIImageView] { [mutedIcon, pinnedIcon].filter { !$0.isHidden } }
+    /// The face's badge. Tests.
+    var debugBadge: RelationBadgeView? { avatarView.badge }
+}
+#endif
 
 private extension UIFont {
     static func preferredFont(forTextStyle style: TextStyle, weight: Weight) -> UIFont {

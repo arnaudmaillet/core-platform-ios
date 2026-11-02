@@ -37,12 +37,16 @@ public enum Surface {
     public static let page: UIColor = .systemGroupedBackground
 
     /// The ring around a profile's avatar where it floats over the banner
-    /// (#1792): one quiet grey that barely changes with the theme. The page's
-    /// tone it used to wear read as a white halo in the light and a black one
-    /// in the dark over raw banner media; the system grey (#8E8E93 in both
-    /// styles) stays the same quiet edge on any picture. Dynamic all the
-    /// same — a contrast setting darkens it — so a holder re-resolves it.
-    public static let avatarRim: UIColor = .systemGray
+    /// (#1792): the LIGHT grey, in both styles (the owner, 2026-11-02: "the
+    /// rim is light grey or pink, never dark grey"). The light appearance's
+    /// `systemGray5`, resolved once — the grey of the following ring and the
+    /// badge's quiet disc; the friends' ring is the accent. It was the system
+    /// grey (#8E8E93), which read as a dark grey edge round the face. The
+    /// page's tone before that read as a white halo in the light and a black
+    /// one in the dark over raw banner media.
+    public static let avatarRim: UIColor = UIColor.systemGray5.resolvedColor(
+        with: UITraitCollection(userInterfaceStyle: .light)
+    )
 
     /// A card, one step up from the page. Also the ground a media carousel's
     /// gutter shows and the floor a skeleton shimmers on, because they are
@@ -76,6 +80,36 @@ public enum Surface {
     /// The media ground on a surface that is dark whatever the appearance
     /// (map pins, the shop's posters, the snap feed): `skeletonOnDark`.
     public static let mediaGroundOnDark: UIColor = skeletonOnDark
+
+    /// THE AVATAR'S GROUND (#2051, the owner 2026-11-02): a face's place is
+    /// ALWAYS the light grey, whatever the device's appearance. "The dark
+    /// grey must not exist." The light appearance's `systemGray5`, resolved
+    /// once and never again — the floor a picture loads on, the avatar's
+    /// bone, the ground a host paints behind a face, the following ring and
+    /// the badge's quiet disc.
+    ///
+    /// ⚠️ NOT THE MEDIA GROUND, which follows the appearance (#1771): an
+    /// avatar is drawn on chrome that is dark whatever the device says (the
+    /// snap feed's media page) and moves between bars in a push, so a
+    /// dynamic grey resolved light in one place and dark in the next — the
+    /// same person, two discs, on the owner's device. Posts, banners and
+    /// tiles keep `mediaGround`.
+    public static let avatarGround: UIColor = lightValue(of: .systemGray5)
+
+    /// The plate under FINAL initials (no picture, or a failed one, #1912):
+    /// the light appearance's `systemGray4`, a step darker than
+    /// `avatarGround`, so the face stands apart from the ring and the
+    /// badge's disc. Fixed, as `avatarGround` is.
+    public static let avatarInitialsGround: UIColor = lightValue(of: .systemGray4)
+
+    /// The initials' ink: the light appearance's `secondaryLabel`, a dark
+    /// grey, chosen for contrast on both plates. Fixed — white initials on
+    /// `systemGray4` read at about 1.4:1.
+    public static let avatarInitials: UIColor = lightValue(of: .secondaryLabel)
+
+    private static func lightValue(of color: UIColor) -> UIColor {
+        color.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+    }
 
     /// A patch of the media ground (#1772): the place of a picture still on
     /// its way where the host draws it as an IMAGE — a list row's, a

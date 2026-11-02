@@ -177,12 +177,32 @@ public final class RelationBadgeView: UIButton {
         glyph.setSymbolImage(image, contentTransition: .replace)
     }
 
+    /// Whether the badge is its own accessibility element (#2050): a
+    /// button, "Follow", while it shows the "+"; the state read as words
+    /// otherwise. False where the host speaks for it — the pill says the
+    /// relation, and offers the follow as a custom action.
+    public var speaksForItself = false {
+        didSet { apply(interactionFor: drawn) }
+    }
+
     /// Only the "+" takes touches — a state mark lets them through to its
-    /// host's own tap. The host is the accessibility element (the pill says
-    /// the relation, and offers the follow as a custom action).
+    /// host's own tap.
     private func apply(interactionFor badge: PersonPill.Badge) {
         isUserInteractionEnabled = badge == .follow
-        isAccessibilityElement = false
+        isAccessibilityElement = speaksForItself && badge != .none
+        accessibilityLabel = speaksForItself ? Self.spokenState(badge) : nil
+        accessibilityTraits = speaksForItself && badge == .follow ? .button : .none
+    }
+
+    /// The badge's words for VoiceOver. Nil for none.
+    static func spokenState(_ badge: PersonPill.Badge) -> String? {
+        switch badge {
+        case .none: nil
+        case .follow: "Follow"
+        case .following: "Following"
+        case .friends: "Friends"
+        case .pending: "Requested"
+        }
     }
 
     /// The disc's ink for a badge (#1197, the owner 2026-10-15): the "+"

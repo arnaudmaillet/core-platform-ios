@@ -16,17 +16,19 @@ import DesignSystem
 /// a control joining the bar (below). Never with a name or a sound.
 ///
 /// THE AUTHOR PILL takes what the bar's OTHER ITEMS leave it: the back arrow,
-/// the wallet badge, and the comments sort while a thread that has one holds
-/// the bar (a text page past `CommentSortPolicy`'s threshold). So its width
+/// the wallet badge, and the comments' Popular | Recent selector while a
+/// thread that has the tabs holds the bar (past `CommentSortPolicy`'s
+/// threshold, #2007). So its width
 /// changes when the bar gains or loses a control — in the same turn, under the
 /// bar's own item animation — and never when a name does. Reserving the sort
 /// on every page was weighed and rejected: measured on the iPhone 18 Pro
 /// (402pt, a "250" balance), it would cost the pill 66pt on EVERY media page
 /// — 193 → 127, the name gone after a few letters — to spare the few text
 /// pages whose thread is long enough to sort. (Passing the sort on every page
-/// below is the one-line switch, should that trade be wanted.) The sort shows its word only when the word leaves the pill
-/// `comfortableAuthor` wide (`sortShowsTitle`) — the bar's geometry again,
-/// not the author's handle, which is what used to decide it.
+/// below is the one-line switch, should that trade be wanted.) The selector
+/// has no smaller face, as the sort's glyph was: what gives way first is the
+/// day pill beside it (it takes what the run leaves), then the author pill,
+/// which truncates its name.
 ///
 /// THE TOOLBAR'S AUTHOR PILL (#671) takes what the footer's stock items
 /// leave it — `[pill] —— [☆ ⇄] [⋯]` — and those GROW WITH DYNAMIC TYPE: a
@@ -51,8 +53,6 @@ struct SnapBarPillWidths: Equatable {
     /// like in repost's place and Share in the comment field's slot (#1999,
     /// `textToolbarReserve`).
     var toolbarAuthorBesideLike: CGFloat
-    /// Whether the comments sort shows its word; false without a sort.
-    var sortShowsTitle: Bool
 
     // MARK: - Navigation bar (measured, iOS 26/27)
 
@@ -132,30 +132,17 @@ struct SnapBarPillWidths: Equatable {
     /// The toolbar author's cap: past it a short name floats in glass.
     static let toolbarAuthorCap: CGFloat = 220
 
-    /// The narrowest the author pill is left for the sort's WORD: below it the
-    /// sort drops to its glyph and gives the pill the difference — the old
-    /// compact pill's width, where a name still reads.
-    static let comfortableAuthor: CGFloat = 150
-
     /// The smallest a pill is ever made: one bubble, the avatar and its
     /// breathing. Not a floor that keeps text readable — only one that keeps
     /// a pathological input (an accessibility-size wallet on a narrow bar)
     /// from asking for a negative width.
     static let minimum: CGFloat = 36
 
-    /// The comments sort's two widths, when it is on the bar.
-    struct Sort: Equatable {
-        /// Without its word.
-        var glyph: CGFloat
-        /// With its longest word.
-        var titled: CGFloat
-    }
-
     /// - Parameters:
     ///   - navBarWidth: the navigation bar's width.
     ///   - toolbarWidth: the toolbar's (the screen's, on a phone).
     ///   - walletWidth: the wallet badge's fitted width, nil without a wallet.
-    ///   - sort: the comments sort's widths while it is on the bar, else nil.
+    ///   - tabs: the comments' selector's width while it is on the bar, else nil.
     ///   - toolbarIcon: a stock glyph item's width at the screen's text size.
     ///   - toolbarLike: a text post's footer like, its bubble's width
     ///     (`SnapFooterToolbar.likeBubbleWidth`); nil with no such footer.
@@ -163,34 +150,31 @@ struct SnapBarPillWidths: Equatable {
         navBarWidth: CGFloat,
         toolbarWidth: CGFloat,
         walletWidth: CGFloat?,
-        sort: Sort?,
+        tabs: CGFloat?,
         toolbarIcon: CGFloat = defaultToolbarIcon,
         toolbarLike: CGFloat? = nil
     ) -> SnapBarPillWidths {
-        // Everything on the nav bar but the author pill, the sort (if any)
-        // `sortWidth` points wide. The back arrow is always paid for: whether
+        // Everything on the nav bar but the author pill, the selector (if any)
+        // `tabsWidth` points wide. The back arrow is always paid for: whether
         // the screen has one is known only at its appearance, and a width
         // that moved then would be a width that moved.
-        func room(sortWidth: CGFloat?) -> CGFloat {
+        func room(tabsWidth: CGFloat?) -> CGFloat {
             var leading = backButtonWidth + navItemPadding
-            if let sortWidth { leading += pillSpacing + sortWidth + navItemPadding }
+            if let tabsWidth { leading += pillSpacing + tabsWidth + navItemPadding }
             let wallet = walletWidth.map { $0 + navItemPadding + pillSpacing } ?? 0
             return navBarWidth - navBarMargin * 2 - leading - wallet - navItemPadding - slack
         }
         func clamp(_ width: CGFloat, cap: CGFloat) -> CGFloat {
             max(minimum, min(cap, width)).rounded(.down)
         }
-        let showsTitle = sort.map { room(sortWidth: $0.titled) >= comfortableAuthor } ?? false
-        let sortWidth = sort.map { showsTitle ? $0.titled : $0.glyph }
         return SnapBarPillWidths(
-            author: clamp(room(sortWidth: sortWidth), cap: authorCap),
+            author: clamp(room(tabsWidth: tabs), cap: authorCap),
             toolbarAuthor: clamp(toolbarWidth - toolbarReserve(icon: toolbarIcon), cap: toolbarAuthorCap),
             toolbarAuthorBesideLike: clamp(
                 toolbarWidth - (toolbarLike.map { textToolbarReserve(icon: toolbarIcon, like: $0) }
                     ?? toolbarReserve(icon: toolbarIcon)),
                 cap: toolbarAuthorCap
-            ),
-            sortShowsTitle: showsTitle
+            )
         )
     }
 }

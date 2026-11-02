@@ -895,9 +895,9 @@ final class SnapChromeView: UIView {
     /// Scrolled away from the comments' start (#1929): the sound bubble
     /// offers the way back to the top, and its sheet moves to a hold — kept
     /// for VoiceOver as a custom action.
-    func setSoundShowsReturn(_ shows: Bool, animated: Bool = true) {
-        guard shows != soundBubble.showsReturn else { return }
-        soundBubble.setShowsReturn(shows, animated: animated)
+    func setSoundShowsReturn(_ shows: Bool, down: Bool = false, animated: Bool = true) {
+        guard shows != soundBubble.showsReturn || down != soundBubble.returnPointsDown else { return }
+        soundBubble.setShowsReturn(shows, down: down, animated: animated)
         applySoundHold()
     }
 

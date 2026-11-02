@@ -38,6 +38,9 @@ final class ProfileHeaderView: HeroHeaderView {
         // "Views" total until 2026-09-30.
         super.init(imagePipeline: imagePipeline, counters: ["Followers", "Following", "Likes"])
         configureTray()
+        // The avatar's "+" is the tray's Follow, exactly (#2050): one
+        // relationship, two places.
+        onRelationBadgeTapped = { [weak self] in self?.onFollowTapped?() }
         // Followers and Following open the relationship lists; Likes is a
         // total with nothing behind it.
         for (stat, direction) in zip(counters, [RelationshipDirection.followers, .following]) {
@@ -229,32 +232,28 @@ final class ProfileHeaderView: HeroHeaderView {
         }
     }
 
-    /// The avatar's mark (#2014): ⚠️ NEVER THE "+" (the owner, 2026-11-01)
-    /// — following and friends, the check and the two people with their
-    /// ring, and a pending request's clock. The tray (the card's toolbar)
-    /// offers the follow. None at all for someone blocked or for a guest.
-    /// Pure, for tests.
+    /// The avatar's mark (#2014, #2050): the one mapping, WHOLE — "+",
+    /// the pending clock, the check and the two people with their ring, as
+    /// the author pill and the inbox wear it (the owner, 2026-11-02,
+    /// reversing 2026-11-01's "never the '+'" to avoid exceptions). The "+"
+    /// follows, through the tray's own Follow.
+    ///
+    /// None for the viewer's own profile, one not read yet (the mapping's
+    /// nil) and someone blocked. A guest wears what the author pill shows a
+    /// guest: the "+" (their relation reads as not followed, #442), behind
+    /// the member gate the tray's Follow already goes through. Pure, for
+    /// tests.
     static func avatarMark(
-        for state: ProfileViewModel.FollowButton, mutual: Bool, blocked: Bool, isGuest: Bool
+        for state: ProfileViewModel.FollowButton, mutual: Bool, blocked: Bool
     ) -> PersonPill.Badge {
-        guard !blocked, !isGuest else { return .none }
-        switch relationBadge(for: state, mutual: mutual) {
-        case .following: return .following
-        case .friends: return .friends
-        case .pending: return .pending
-        default: return .none
-        }
+        guard !blocked else { return .none }
+        return relationBadge(for: state, mutual: mutual) ?? .none
     }
 
     /// Wears the relationship on the avatar — through the badge's replace
     /// and the ring's fade once on screen; the header never moves for it.
-    func configureRelationMark(
-        _ state: ProfileViewModel.FollowButton, mutual: Bool, blocked: Bool, isGuest: Bool
-    ) {
-        setRelationMark(
-            Self.avatarMark(for: state, mutual: mutual, blocked: blocked, isGuest: isGuest),
-            animated: window != nil
-        )
+    func configureRelationMark(_ state: ProfileViewModel.FollowButton, mutual: Bool, blocked: Bool) {
+        setRelationMark(Self.avatarMark(for: state, mutual: mutual, blocked: blocked), animated: window != nil)
     }
 
     /// Shows or hides one of the tray's buttons — through its own motion when

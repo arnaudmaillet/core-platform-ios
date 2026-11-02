@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import EntityStore
 import FeedInterface
 import Foundation
 import MediaCore
@@ -689,18 +690,82 @@ struct ConversationThreadSendAndMuteTests {
         }
     }
 
-    private func makeScreen(graph: Graph) -> (ConversationThreadViewController, Driver, UIWindow) {
+    private func makeScreen(
+        graph: Graph, entities: EntityStore? = nil
+    ) -> (ConversationThreadViewController, Driver, UIWindow) {
         let driver = Driver(initial: .content([Self.message("m1", mine: false, minutes: 1)]), muted: false)
         let screen = ConversationThreadViewController(
             driver: driver, mode: .full, prefill: "",
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            socialGraph: graph, followRelations: graph
+            socialGraph: graph, followRelations: graph, entities: entities
         )
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = UINavigationController(rootViewController: screen)
         window.isHidden = false
         screen.view.layoutIfNeeded()
         return (screen, driver, window)
+    }
+
+    /// KNOWN FIRST (#2049, the owner 2026-11-02): a relation the app
+    /// already holds — the inbox row that opened the thread read it — is on
+    /// the pill at once, before the read; the read then confirms it.
+    @Test func thePillStartsFromTheKnownRelation() async {
+        let graph = Graph(.following)
+        graph.holdsReads = true
+        let entities = EntityStore()
+        entities.setRelation(.following, for: ProfileID("them"))
+        let (screen, driver, window) = makeScreen(graph: graph, entities: entities)
+        defer { window.isHidden = true; graph.releaseReads() }
+        driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava", avatarURL: nil))
+        #expect(screen.debugPeerFollowBadge == .following, "the pill waited for the read")
+    }
+
+    /// KNOWN FIRST, WHOLE (#2049, the owner's device 2026-11-02): the
+    /// @handle the inbox taught the app is on the pill from its first frame —
+    /// no line filling in under the push — and the pill is laid out before
+    /// the bar takes it.
+    @Test func thePillComesInWhole() async {
+        let graph = Graph(.following)
+        let entities = EntityStore()
+        entities.upsert(AuthorSummary(id: ProfileID("them"), handle: "ava.moreau", displayName: "Ava Moreau", avatarURL: nil))
+        let (screen, driver, window) = makeScreen(graph: graph, entities: entities)
+        defer { window.isHidden = true }
+        driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava Moreau", avatarURL: nil))
+        window.layoutIfNeeded()
+        #expect(screen.debugPeerPillLines == ["Ava Moreau", "@ava.moreau"], "\(screen.debugPeerPillLines)")
+    }
+
+    /// Laid out at its own size, outside any animation: what a push takes
+    /// already has its face and lines in place.
+    @Test func aSettledPillHasItsLayout() {
+        let pill = SnapAuthorIdentityView()
+        pill.setPerson(
+            id: ProfileID("them"), name: "Ava Moreau", meta: "@ava.moreau", avatarURL: nil,
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), animated: false
+        )
+        pill.settleLayout()
+        #expect(pill.bounds.width > 0 && pill.bounds.height > 0)
+        #expect(pill.debugContentFrame == pill.bounds, "the content is not laid out at the pill's size")
+    }
+
+    /// ONE STATE PER PERSON (#2049): a follow made elsewhere — a profile
+    /// card over the thread moves the app's store through the follow
+    /// channel — reaches the pill; and the thread's own follow is written
+    /// there for every other surface.
+    @Test func thePillFollowsTheAppsOneCopy() async {
+        let graph = Graph(.notFollowing)
+        let entities = EntityStore()
+        let (screen, driver, window) = makeScreen(graph: graph, entities: entities)
+        defer { window.isHidden = true }
+        driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava", avatarURL: nil))
+        #expect(await settle { screen.debugPeerFollowBadge == .follow })
+        #expect(entities.relation(to: ProfileID("them")) == .notFollowing, "the read was not written to the store")
+        entities.applyFollowChange(FollowChange(profileID: ProfileID("them"), isFollowing: true))
+        #expect(await settle { screen.debugPeerFollowBadge == .following }, "a follow made elsewhere left the pill behind")
+        entities.applyFollowChange(FollowChange(profileID: ProfileID("them"), isFollowing: false))
+        #expect(await settle { screen.debugPeerFollowBadge == .follow })
+        screen.followPeer(ProfileID("them"))
+        #expect(entities.relation(to: ProfileID("them")) == .following, "the thread's follow was not written to the store")
     }
 
     /// ⚠️ A READ SENT BEFORE A FOLLOW NEVER UNDOES IT (#752): the screen

@@ -598,8 +598,9 @@ public enum PersonPillBadgeInks {
     public static let accent = UIColor { traits in
         Palette.tint.resolvedColor(with: traits.modifyingTraits { $0.userInterfaceStyle = .light })
     }
-    /// A quiet grey disc.
-    public static let quietDisc = UIColor.systemGray5.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+    /// A quiet grey disc: the avatar's own fixed ground (#2051), the one
+    /// grey a loading face, the following ring and this disc share.
+    public static let quietDisc = Surface.avatarGround
 }
 
 /// The face's relation ring (#1298, the owner 2026-10-16): the badge's own

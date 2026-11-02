@@ -159,7 +159,14 @@ struct PersonPillTests {
         #expect(plate.cgColor != quiet.cgColor, "the initials' grey is the ring's in \(style.rawValue)")
     }
 
-    /// A loading face keeps the media ground; only final initials change.
+    /// The badge's quiet disc and the following ring are the avatar's own
+    /// fixed ground (#2051), not a copy of it.
+    @Test func theQuietDiscIsTheAvatarsGround() {
+        #expect(PersonPillBadgeInks.quietDisc == Surface.avatarGround)
+        #expect(RelationMark.ringInk(for: .following) == Surface.avatarGround)
+    }
+
+    /// A loading face keeps the avatar's ground; only final initials change.
     @Test func onlyFinalInitialsWearTheirGrey() {
         let monogram = MonogramAvatarView(diameter: 36)
         let ground = monogram.drawnPlateColor.cgColor

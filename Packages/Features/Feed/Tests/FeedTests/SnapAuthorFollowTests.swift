@@ -366,7 +366,7 @@ struct SnapAuthorFollowTests {
     func aStateMarkTakesNoTap(_ badge: SnapAuthorIdentityView.FollowBadge) throws {
         let host = SnapAuthorIdentityView()
         host.setPerson(id: ProfileID("prof-2"), name: "Ava Moreau", meta: "@ava", avatarURL: nil,
-                       pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+                       pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), animated: true)
         host.setFollowBadge(badge)
         let glyph = try #require(Self.badgeButton(in: host))
         let pill = try #require(Self.personPill(in: host))

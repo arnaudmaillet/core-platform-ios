@@ -63,7 +63,7 @@ struct HeroHeaderViewTests {
         let avatar = try #require(first(AvatarView.self, in: header))
         let disc = try #require(avatar.superview)
         #expect(disc.subviews.filter { $0 is SkeletonBoneView }.isEmpty, "a redaction bone over the avatar's own")
-        #expect(disc.backgroundColor == Surface.mediaGround)
+        #expect(disc.backgroundColor == Surface.avatarGround)
         // The avatar waits for its picture under its skeleton.
         for _ in 0..<100 where avatar.skeleton.alpha == 0 || avatar.skeleton.isHidden {
             try? await Task.sleep(for: .milliseconds(10))

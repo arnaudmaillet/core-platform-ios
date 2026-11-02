@@ -686,11 +686,12 @@ final class MapSubFilterRowCell: UICollectionViewListCell {
         content.text = option.sheetTitle
         content.secondaryText = option.sheetSubtitle
         content.secondaryTextProperties.color = .secondaryLabel
-        // A face on its way holds its place on the media ground (#1772); the
-        // glyph is for a person with no picture at all.
+        // A face on its way holds its place on the avatar's ground (#1772,
+        // #2051: fixed light, whatever the appearance); the glyph is for a
+        // person with no picture at all.
         let awaitsFace = avatar == nil && option.favorite?.avatarURL != nil
         content.image = avatar ?? (awaitsFace ? Surface.groundDisc(diameter: 32) : UIImage(systemName: option.content.symbolName))
-        content.imageProperties.tintColor = awaitsFace ? Surface.mediaGround : .label
+        content.imageProperties.tintColor = awaitsFace ? Surface.avatarGround : .label
         // Reserve the avatar's slot from the first layout so a late arrival
         // can't reflow the row.
         content.imageProperties.maximumSize = CGSize(width: 32, height: 32)

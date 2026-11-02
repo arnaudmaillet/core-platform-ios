@@ -38,6 +38,9 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     private let mediaPicker: ChatMediaPickerFactory?
     /// The inbox and the last conversations on the device (#897).
     private let deviceCache: ChatLocalCache?
+    /// The peers' relations, for the rows' mark and its "+" (#2049): the
+    /// inbox's and its search's, over the app's `EntityStore`.
+    private let relations: InboxRelations?
 
     /// `localStore`: the inbox opens on its last rows and a conversation on
     /// its last 200 messages, offline and at a cold start (#897). Nil keeps
@@ -51,9 +54,11 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         recentSearches: RecentSearchStore? = nil,
         mediaPicker: ChatMediaPickerFactory? = nil,
         localStore: LocalStore? = nil,
+        relations: InboxRelations? = nil,
         threadScreens: @escaping () -> any ConversationThreadScreenBuilding
     ) {
         self.threadScreens = threadScreens
+        self.relations = relations
         self.mediaPicker = mediaPicker
         let directory = ConversationDirectory()
         self.directory = directory
@@ -92,7 +97,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             // The suggestions repository doubles as the avatar source: it
             // already caches the profiles these rows need, and the two
             // surfaces are one tab apart.
-            avatars: connections as? any PeerAvatarProviding
+            avatars: connections as? any PeerAvatarProviding,
+            relations: relations
         )
         // Context-menu previews show the real thread screen in `.preview`
         // mode: same transcript construction as the router's `.conversation`
@@ -151,7 +157,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         let searchResults = InboxSearchResultsViewController(
             viewModel: searchViewModel,
             imagePipeline: imagePipeline,
-            avatars: connections as? any PeerAvatarProviding
+            avatars: connections as? any PeerAvatarProviding,
+            relations: relations
         )
         // A target, not a conversation — the same seam the compose picker rides,
         // so a result opens by exactly the path a picked contact does and neither

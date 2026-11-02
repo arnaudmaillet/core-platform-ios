@@ -59,6 +59,29 @@ private actor FewComments: CommentsProviding {
     }
 }
 
+/// Recent's first page is the twelve newest; Popular ranks an OLDER thread
+/// first — one Recent has not paged in — with three replies to load.
+private actor OlderRankedThread: CommentsProviding {
+    func loadComments(for postID: PostID) async throws -> [CommentEntry] {
+        (0..<12).map { comment("n\($0)") }
+    }
+    func loadCommentsPage(for postID: PostID, after pageToken: String?) async throws -> CommentPage {
+        CommentPage(entries: try await loadComments(for: postID), nextPageToken: "older")
+    }
+    func loadCommentsPage(for postID: PostID, after pageToken: String?, order: CommentSortOrder) async throws -> CommentPage {
+        guard order != .recent else { return try await loadCommentsPage(for: postID, after: pageToken) }
+        var old = comment("old")
+        old.replyCount = 3
+        return CommentPage(entries: [old, comment("n0")], nextPageToken: nil)
+    }
+    func loadReplies(for postID: PostID, to parentID: String, after pageToken: String?) async throws -> CommentPage {
+        CommentPage(entries: (0..<3).map { comment("\(parentID)-r\($0)", parent: parentID) }, nextPageToken: nil)
+    }
+    func addComment(_ body: String, to postID: PostID, parentID: String?, commentID: String) async throws -> CommentEntry {
+        comment(commentID)
+    }
+}
+
 /// The Popular tab's stream (#2007): the server's ranking beside Recent's.
 @MainActor
 struct PopularCommentsStreamTests {
@@ -140,5 +163,24 @@ struct PopularCommentsStreamTests {
     @Test func aRepeatedRankingIsDropped() {
         let merged = RankedCommentsStream.appending([comment("b"), comment("c")], to: [comment("a"), comment("b")])
         #expect(merged.map(\.id) == ["a", "b", "c"])
+    }
+
+    /// ⚠️ A POPULAR THREAD'S "VIEW MORE" LOADS ITS REPLIES (the owner,
+    /// 2026-11-02): the thread can be one Recent has not paged in, and the
+    /// replies landed only in Recent — the tap did nothing.
+    @Test func aPopularThreadRecentHasNotLoadedGetsItsReplies() async {
+        let viewModel = PostDetailViewModel(
+            postID: PostID("post-1"), repository: PopularFeedProvider(), commentsProvider: OlderRankedThread()
+        )
+        let shown = Shown()
+        viewModel.onCommentsChange = { if case .loaded(let models) = $0 { shown.recent = models.map(\.id) } }
+        viewModel.onPopularCommentsChange = { if case .loaded(let models) = $0 { shown.popular = models.map(\.id) } }
+        viewModel.viewDidLoad()
+        #expect(await settle { shown.popular?.first == "old" })
+        #expect(!shown.recent.contains("old"), "the premise: Recent has not paged the thread in")
+
+        viewModel.loadMoreReplies(parentID: "old")
+        #expect(await settle { shown.popular?.prefix(4) == ["old", "old-r0", "old-r1", "old-r2"] },
+                "\(String(describing: shown.popular))")
     }
 }

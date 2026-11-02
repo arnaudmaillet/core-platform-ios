@@ -2194,13 +2194,18 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
               makeEditViewController == nil else { return nil }
         guard let badge = Self.barBadge(for: state, mutual: viewModel.isMutualFollow),
               let profile = viewModel.profile, let barIdentityPill, let barIdentityItem else { return nil }
+        // Known as the pill comes in: drawn as it is, never faded over its
+        // bars (`setPerson`).
         barIdentityPill.setPerson(
             id: profile.id, name: profile.displayName, meta: "@\(profile.handle)",
-            avatarURL: profile.avatarURL, pipeline: imagePipeline
+            avatarURL: profile.avatarURL, pipeline: imagePipeline, animated: barIdentityPill.view.window != nil
         )
         barIdentityPill.setFollowBadge(badge, animated: barIdentityPill.view.window != nil)
         // Never narrower than its face.
         barIdentityPill.setWidthBudget(max(PersonPill.wrapperHeight, floor(barIdentityWidthBudget())))
+        // Coming into the bar: laid out first, so the bar's animation fades
+        // it in and nothing inside it slides (`settleLayout`).
+        if barIdentityPill.view.window == nil { barIdentityPill.settleLayout() }
         return barIdentityItem
     }
 
@@ -2215,8 +2220,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// pill does.
     private func applyRelationMark() {
         headerView.configureRelationMark(
-            followButtonState, mutual: viewModel.isMutualFollow, blocked: viewModel.isBlocked,
-            isGuest: MemberGates.isGuest(self)
+            followButtonState, mutual: viewModel.isMutualFollow, blocked: viewModel.isBlocked
         )
     }
 

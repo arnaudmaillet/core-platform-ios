@@ -182,20 +182,33 @@ struct ProfileCardTests {
         let card = try await makeCard(following: false, host: host)
         for state in [ProfileViewModel.FollowButton.follow, .requested, .following, .unavailable] {
             card.debugApplyFollowButton(state)
-            let expected = ProfileHeaderView.avatarMark(for: state, mutual: false, blocked: false, isGuest: false)
+            let expected = ProfileHeaderView.avatarMark(for: state, mutual: false, blocked: false)
             #expect(card.headerView.relationMark == expected, "\(state)")
         }
     }
 
-    /// The card's avatar wears no "+": followed, the check comes.
-    @Test func theCardsAvatarWearsNoPlus() async throws {
+    /// The card's avatar wears the "+" too (#2050): followed, the check
+    /// comes.
+    @Test func theCardsAvatarWearsThePlus() async throws {
         let host = Host()
         let card = try await makeCard(following: false, host: host)
-        #expect(card.headerView.relationMark == .none, "a + on the card's avatar")
+        #expect(card.headerView.relationMark == .follow, "no + on the card's avatar")
         card.debugApplyFollowButton(.following)
         #expect(card.headerView.relationMark == .following)
         card.debugApplyFollowButton(.requested)
         #expect(card.headerView.relationMark == .pending, "the card's avatar lost the pending clock")
+    }
+
+    /// The card's "+" is its toolbar's Follow (#2050): the relation turns,
+    /// and the toolbar's Follow leaves with it.
+    @Test func theCardsPlusFollows() async throws {
+        let host = Host()
+        let card = try await makeCard(following: false, host: host)
+        let badge = try #require(card.headerView.debugRelationBadge)
+        badge.sendActions(for: .primaryActionTriggered)
+        try #require(await settle { card.followButtonState == .following }, "the card's + did not follow")
+        #expect(card.headerView.relationMark == .following)
+        #expect(!(card.toolbarItems ?? []).compactMap(\.identifier).contains("profileCard.follow"))
     }
 
     /// Followed, the bell comes in and Message takes the free width — Follow

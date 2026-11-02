@@ -677,7 +677,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     var onRequestSoundSheet: (() -> Void)?
     /// The sound bubble's way back (#1929): shown while the comments are
     /// scrolled away from their start.
-    func setSoundShowsReturn(_ shows: Bool) { chrome.setSoundShowsReturn(shows) }
+    func setSoundShowsReturn(_ shows: Bool, down: Bool = false) { chrome.setSoundShowsReturn(shows, down: down) }
     /// The way back was tapped: the screen scrolls the comments to the top.
     var onRequestSoundReturn: (() -> Void)?
 

@@ -1322,9 +1322,10 @@ open class HeroHeaderView: UIView {
     /// The person's relation to the viewer, worn on the disc as the author
     /// pill wears it (#2014): the badge on its rim at 45°, and the ring in
     /// the rim's place while there is one. `.none` draws neither, and the
-    /// grey rim stays. A `.custom` disc wears none. The disc offers no
-    /// follow of its own: the profile wears only a relation that exists
-    /// (the owner, 2026-11-01), and every tap on the disc stays the disc's.
+    /// grey rim stays. A `.custom` disc wears none. The "+" follows
+    /// (`onRelationBadgeTapped`, #2050, the owner 2026-11-02, reversing
+    /// #2014's "never the '+'"): the one mark is the same everywhere. Every
+    /// other tap on the disc stays the disc's.
     public func setRelationMark(_ mark: PersonPill.Badge, animated: Bool) {
         relationMark = mark
         applyRelationMark(animated: animated)
@@ -1342,8 +1343,9 @@ open class HeroHeaderView: UIView {
     }
 
     /// The disc's edge for `relation`: the relation's ring, at its width,
-    /// while there is one — otherwise the quiet grey rim (#1792), which
-    /// defines the disc over the banner. Pure, for tests.
+    /// while there is one — otherwise the light grey rim (#1792, never a
+    /// dark grey: the owner, 2026-11-02), which defines the disc over the
+    /// banner. Pure, for tests.
     public static func rim(
         for relation: PersonPill.Badge, metrics: RelationMarkMetrics
     ) -> (ink: UIColor, width: CGFloat) {
@@ -1374,6 +1376,12 @@ open class HeroHeaderView: UIView {
         layer.borderWidth = rim.width
     }
 
+    /// Told when the badge's "+" is tapped (#2050) — and only then: a state
+    /// mark takes no touches, so check, friends and the clock pass through
+    /// to the disc. The badge sits over the disc, so where their touch
+    /// areas overlap (its 8 pt outset) the "+" wins.
+    public var onRelationBadgeTapped: (() -> Void)?
+
     /// The badge's offsets from the disc's trailing and bottom edges.
     private var relationBadgeOffsets: [NSLayoutConstraint] = []
 
@@ -1393,6 +1401,11 @@ open class HeroHeaderView: UIView {
             bottom
         }
         relationBadgeOffsets = [trailing, bottom]
+        relationBadge.speaksForItself = true
+        relationBadge.addAction(UIAction { [weak self] _ in
+            guard let self, shownRelationMark == .follow else { return }
+            onRelationBadgeTapped?()
+        }, for: .primaryActionTriggered)
     }
 
     /// The mark follows the disc's resolved side (Dynamic Type, 96 to 110 pt).
@@ -1450,7 +1463,8 @@ open class HeroHeaderView: UIView {
         // Avatar: a filled circle with a monogram, overlaid by the image once
         // loaded. The ring keeps it defined while it floats over raw banner
         // media, above the fade.
-        avatarView.backgroundColor = Surface.mediaGround
+        // The avatar's fixed light ground (#2051), never the appearance's.
+        avatarView.backgroundColor = Surface.avatarGround
         avatarView.clipsToBounds = true
         // ⚠️ ONE QUIET GREY (#1792, the owner 2026-10-27), not the page's
         // tone: over raw banner media the page's white or black read as a

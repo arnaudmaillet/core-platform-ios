@@ -74,6 +74,22 @@ struct HeroHeaderRelationMarkTests {
         #expect(frame.maxX <= disc.maxX + 0.5 && frame.maxY <= disc.maxY + 0.5)
     }
 
+    /// ⚠️ THE RIM IS LIGHT GREY OR PINK, NEVER A DARK GREY (the owner,
+    /// 2026-11-02): light grey with no relation, "+" or the clock, and
+    /// while following; the accent for friends — in both styles.
+    @Test(arguments: [UIUserInterfaceStyle.light, .dark])
+    func theRimIsLightGreyOrPink(_ style: UIUserInterfaceStyle) {
+        let traits = UITraitCollection(userInterfaceStyle: style)
+        let light = UIColor.systemGray5.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+        let metrics = RelationMarkMetrics(faceDiameter: 96)
+        for relation in [PersonPill.Badge.none, .follow, .pending, .following] {
+            let ink = HeroHeaderView.rim(for: relation, metrics: metrics).ink.resolvedColor(with: traits)
+            #expect(ink.cgColor == light.cgColor, "\(relation)'s rim is not the light grey")
+        }
+        let friends = HeroHeaderView.rim(for: .friends, metrics: metrics).ink.resolvedColor(with: traits)
+        #expect(friends == RelationMark.ringInk(for: .friends).resolvedColor(with: traits))
+    }
+
     /// None: no badge, the grey rim, no cutout.
     @Test func noRelationKeepsTheRim() throws {
         let header = makeHeader()
@@ -111,14 +127,35 @@ struct HeroHeaderRelationMarkTests {
         #expect(header.debugRelationSymbol == "plus")
     }
 
-    /// A state mark takes no tap: it falls through to the disc's own.
-    @Test(arguments: [PersonPill.Badge.following, .friends])
+    /// A state mark takes no tap: it falls through to the disc's own, and
+    /// is read as its state, not as a button (#2050).
+    @Test(arguments: [PersonPill.Badge.following, .friends, .pending])
     func aStateMarkTakesNoTap(_ relation: PersonPill.Badge) throws {
         let header = makeHeader()
+        var taps = 0
+        header.onRelationBadgeTapped = { taps += 1 }
         header.setRelationMark(relation, animated: false)
         let badge = try #require(header.debugRelationBadge)
         #expect(!badge.isUserInteractionEnabled)
-        #expect(!badge.isAccessibilityElement)
+        badge.sendActions(for: .primaryActionTriggered)
+        #expect(taps == 0, "a state mark followed")
+        #expect(!badge.accessibilityTraits.contains(.button))
+        #expect(badge.accessibilityLabel != nil)
+    }
+
+    /// The "+" is the header's follow (#2050): a button, "Follow", that
+    /// tells `onRelationBadgeTapped`.
+    @Test func thePlusTellsTheFollow() throws {
+        let header = makeHeader()
+        var taps = 0
+        header.onRelationBadgeTapped = { taps += 1 }
+        header.setRelationMark(.follow, animated: false)
+        let badge = try #require(header.debugRelationBadge)
+        #expect(badge.isUserInteractionEnabled)
+        badge.sendActions(for: .primaryActionTriggered)
+        #expect(taps == 1)
+        #expect(badge.isAccessibilityElement && badge.accessibilityTraits.contains(.button))
+        #expect(badge.accessibilityLabel == "Follow")
     }
 
     /// A place's disc wears no relation.
