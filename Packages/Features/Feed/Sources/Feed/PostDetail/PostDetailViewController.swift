@@ -56,7 +56,7 @@ final class PostDetailViewController: UIViewController {
     /// Paging is off — Recent alone — until there is a Popular tab.
     private lazy var pager: HorizontalPagerView = {
         let pager = HorizontalPagerView(
-            pages: [popularPageView, recent.collectionView],
+            pages: [popularPageView, recent.pageView],
             initialIndex: showsPopular ? Self.popularPage : Self.recentPage
         )
         // A drag past either end is the page's (the side list, the grab):
@@ -74,8 +74,8 @@ final class PostDetailViewController: UIViewController {
     private let popularPageView = UIView()
 
     private func mountPopular() {
-        guard popular.collectionView.superview == nil else { return }
-        popular.collectionView.pin(to: popularPageView)
+        guard popular.pageView.superview == nil else { return }
+        popular.pageView.pin(to: popularPageView)
     }
 
     /// The stream on screen.
@@ -841,6 +841,9 @@ final class PostDetailViewController: UIViewController {
         _ handler: @escaping (CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void
     ) {
         composeBar.onPageSwipe = handler
+        // A page in a vertical feed: its comments read in tiers, the edge of
+        // what is shown handing the swipe to the feed (#2042).
+        streams.forEach { $0.readsInTiers = true }
     }
 
     /// The STREAM's shrink for the engagement, 0 (engaged) → 1 (dismissed).
@@ -1641,6 +1644,7 @@ final class PostDetailViewController: UIViewController {
         streams.forEach {
             $0.refitEmptyPage()
             $0.syncBottomAnchor(animated: true)
+            $0.syncMoreButton()
         }
     }
 
@@ -1650,6 +1654,7 @@ final class PostDetailViewController: UIViewController {
         streams.forEach {
             $0.refitEmptyPage()
             $0.syncBottomAnchor(animated: true)
+            $0.syncMoreButton()
         }
     }
 
