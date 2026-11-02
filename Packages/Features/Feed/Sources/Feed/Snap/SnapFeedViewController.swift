@@ -1188,6 +1188,16 @@ final class SnapFeedViewController: UIViewController {
                 self?.debugDrivePageSwipe()
             }
         }
+        // `-snap-page-back-demo [delay]`: the same drive downward — the
+        // previous post (#2058). Pair with `-snap-start-index N`.
+        if !didDebugPageSwipe, let position = arguments.firstIndex(of: "-snap-page-back-demo") {
+            didDebugPageSwipe = true
+            let delay = arguments.indices.contains(position + 1)
+                ? (Double(arguments[position + 1]) ?? 3.0) : 3.0
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.debugDrivePageSwipe(distance: -520)
+            }
+        }
         // `-snap-fling [pages]`: scrolls the pager one page at a time the way a
         // FLICK does — a stream of small offset changes, each with its own
         // delegate callback, then a settle.
@@ -3902,13 +3912,16 @@ final class SnapFeedViewController: UIViewController {
     /// here, the half-second while the settle animates and the model has
     /// already arrived at the destination, had no scripted route at all. Every
     /// defect reported inside it had to be found by watching a recording.
+    /// A positive `distance` drives up (the next post); a negative one
+    /// drives down (the previous post, #2058).
     func debugDrivePageSwipe(steps: Int = 12, distance: CGFloat = 520) {
+        let velocity: CGFloat = distance >= 0 ? -900 : 900
         drivePageSwipe(.began, translation: 0, velocity: 0)
         for step in 1...max(1, steps) {
             let dy = -distance * CGFloat(step) / CGFloat(max(1, steps))
-            drivePageSwipe(.changed, translation: dy, velocity: -900)
+            drivePageSwipe(.changed, translation: dy, velocity: velocity)
         }
-        drivePageSwipe(.ended, translation: -distance, velocity: -900)
+        drivePageSwipe(.ended, translation: -distance, velocity: velocity)
     }
 
     /// The ceiling the pager actually clamps to — prepares, then answers.
@@ -4749,13 +4762,17 @@ final class SnapFeedViewController: UIViewController {
             pageDriveStartOffset = nil
             return
         }
-        // Drag up (dy < 0) advances toward the next post (offset grows).
-        // FORWARD-ONLY: downward travel rubber-bands against the drive's own
-        // origin page rather than previewing the previous post — the floor is
-        // the page this drive would settle back to, so a re-grab mid-settle
-        // can still be dragged home, but never past it.
+        // Drag up (dy < 0) advances toward the next post (offset grows);
+        // drag down previews the PREVIOUS one (#2058), down to the first post,
+        // past which the drive rubber-bands (`SnapPageDrive.floorIndex`).
         let page = collectionView.bounds.height
-        let floor = page > 0 ? (start / page).rounded() * page : 0
+        let origin = page > 0 ? Int((start / page).rounded()) : 0
+        let floor = CGFloat(SnapPageDrive.floorIndex(origin: origin)) * page
+        // The previous page made ready as the finger heads to it: the warm
+        // holds one panel, the next page's until now (`reachableCeiling`).
+        if dy > 0, origin > 0, !isPageReady(origin - 1) {
+            prewarmRestingComments(for: orderedIDs[origin - 1])
+        }
         collectionView.contentOffset.y = rubberBandedOffset(start - dy, floor: floor)
     }
 
@@ -4765,8 +4782,8 @@ final class SnapFeedViewController: UIViewController {
         let page = collectionView.bounds.height
         guard page > 0 else { return }
         let startIndex = Int((start / page).rounded())
-        let step = Self.pageDriveStep(translation: dy, velocity: vy, page: page)
-        let target = max(0, min(orderedIDs.count - 1, startIndex + step))
+        let step = SnapPageDrive.step(translation: dy, velocity: vy, page: page)
+        let target = SnapPageDrive.target(origin: startIndex, step: step, ceiling: orderedIDs.count - 1)
         let targetOffset = CGFloat(target) * page
         // FOOTER MORPH, timed with the settle: if this drive commits to a
         // page that will NOT re-engage into the sort toolbar — i.e. a media
@@ -4822,21 +4839,9 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
-    /// The engaged drive's commit rule: a decisive drag OR a fling commits;
-    /// the projected motion (drag + a slice of velocity) picks the direction —
-    /// up pages next. FORWARD-ONLY: a downward projection settles home (step
-    /// 0), never to the previous post. Internal statics for the pure-logic
-    /// test, same as `rubberBand`.
-    static func pageDriveStep(translation dy: CGFloat, velocity vy: CGFloat, page: CGFloat) -> Int {
-        let committed = abs(dy) > page * 0.18 || abs(vy) > 500
-        guard committed else { return 0 }
-        return (dy + vy * 0.2) < 0 ? 1 : 0
-    }
-
     /// UIScrollView-style rubber-band past `floor`/last page: the drive
-    /// resists beyond the ends so you cannot fling off the feed — and, with
-    /// the feed forward-only, `floor` is the drive's own origin page rather
-    /// than offset zero.
+    /// resists beyond the ends so you cannot fling off the feed — `floor` is
+    /// the previous post (`SnapPageDrive.floorIndex`), the first one at most.
     /// The full-screen rule's loader (the owner, 2026-10-27) for a feed with no
     /// post yet: at the centre, after `SnapMediaWait.grace`, so a page the
     /// device already holds never flashes it.
