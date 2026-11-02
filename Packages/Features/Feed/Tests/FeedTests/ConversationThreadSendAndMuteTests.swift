@@ -720,6 +720,34 @@ struct ConversationThreadSendAndMuteTests {
         #expect(screen.debugPeerFollowBadge == .following, "the pill waited for the read")
     }
 
+    /// KNOWN FIRST, WHOLE (#2049, the owner's device 2026-11-02): the
+    /// @handle the inbox taught the app is on the pill from its first frame —
+    /// no line filling in under the push — and the pill is laid out before
+    /// the bar takes it.
+    @Test func thePillComesInWhole() async {
+        let graph = Graph(.following)
+        let entities = EntityStore()
+        entities.upsert(AuthorSummary(id: ProfileID("them"), handle: "ava.moreau", displayName: "Ava Moreau", avatarURL: nil))
+        let (screen, driver, window) = makeScreen(graph: graph, entities: entities)
+        defer { window.isHidden = true }
+        driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava Moreau", avatarURL: nil))
+        window.layoutIfNeeded()
+        #expect(screen.debugPeerPillLines == ["Ava Moreau", "@ava.moreau"], "\(screen.debugPeerPillLines)")
+    }
+
+    /// Laid out at its own size, outside any animation: what a push takes
+    /// already has its face and lines in place.
+    @Test func aSettledPillHasItsLayout() {
+        let pill = SnapAuthorIdentityView()
+        pill.setPerson(
+            id: ProfileID("them"), name: "Ava Moreau", meta: "@ava.moreau", avatarURL: nil,
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), animated: false
+        )
+        pill.settleLayout()
+        #expect(pill.bounds.width > 0 && pill.bounds.height > 0)
+        #expect(pill.debugContentFrame == pill.bounds, "the content is not laid out at the pill's size")
+    }
+
     /// ONE STATE PER PERSON (#2049): a follow made elsewhere — a profile
     /// card over the thread moves the app's store through the follow
     /// channel — reaches the pill; and the thread's own follow is written

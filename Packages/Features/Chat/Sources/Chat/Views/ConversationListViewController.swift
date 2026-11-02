@@ -121,7 +121,8 @@ final class ConversationListViewController: UIViewController {
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
-        self.avatars = avatars
+        // The faces the rows read are kept for the thread they open (#2049).
+        self.avatars = relations?.recording(avatars) ?? avatars
         self.relations = relations
         super.init(nibName: nil, bundle: nil)
         // The chrome is the container's, and the container reads it before
@@ -308,6 +309,7 @@ final class ConversationListViewController: UIViewController {
     }
 
     private func configure(_ cell: ConversationCell, with model: ConversationDisplayModel) {
+        relations?.saw(model)
         cell.configure(
             with: model, imagePipeline: imagePipeline, avatars: avatars,
             mark: relations?.mark(for: model.peerID) ?? .none, onFollow: followHandler(for: model)

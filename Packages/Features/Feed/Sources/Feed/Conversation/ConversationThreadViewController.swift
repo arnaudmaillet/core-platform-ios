@@ -339,6 +339,9 @@ final class ConversationThreadViewController: UIViewController {
         // Before the bars first lay it out, not only after: a budget that
         // arrives late is a bar that has already collapsed into a `•••`.
         fitTrailingRun()
+        // And laid out at that width before the push's animation takes it:
+        // the push fades the pill in, nothing inside it moves.
+        peerPill.settleLayout()
         // Back from their profile, the relation may have moved.
         resolvePeerRelation(refresh: true)
     }
@@ -1408,15 +1411,32 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     private func adoptPeer(_ person: ConversationThreadPerson) {
+        // KNOWN FIRST (#2049): what the app already holds for them — the
+        // inbox row taught it their @handle and face — fills what the driver
+        // has not read yet, so the pill comes in whole instead of filling in.
+        let known = person.id.flatMap { entities?.knownIdentity(of: $0, stub: nil) }
+        let person = ConversationThreadPerson(
+            id: person.id,
+            name: person.name.isEmpty ? known?.displayName ?? "" : person.name,
+            avatarURL: person.avatarURL ?? known?.avatarURL,
+            handle: person.handle ?? known?.handle.flatMap { $0.isEmpty ? nil : $0 }
+        )
         peer = person
         // Named for VoiceOver, not drawn: no title in the bar.
         view.accessibilityLabel = person.name.isEmpty ? nil : "Conversation with \(person.name)"
         // The @handle under the name once known (#752), as a vertical post's
         // author pill wears it.
         let meta = person.handle.map { "@\($0)" } ?? ""
+        // Only a change on a pill on screen and settled moves: what arrives
+        // while the push brings it in is drawn as it is (`setPerson`).
+        let settled = view.window != nil && transitionCoordinator == nil
         peerPill.setPerson(
-            id: person.id, name: person.name, meta: meta, avatarURL: person.avatarURL, pipeline: imagePipeline
+            id: person.id, name: person.name, meta: meta, avatarURL: person.avatarURL, pipeline: imagePipeline,
+            animated: settled
         )
+        // Not on screen yet, or a push bringing it in: laid out now, so the
+        // push only fades it in (`settleLayout`).
+        if !settled { peerPill.settleLayout() }
         if person.id != relationAskedFor { startFromKnownRelation(of: person.id) }
         resolvePeerRelation()
         fitTrailingRun()

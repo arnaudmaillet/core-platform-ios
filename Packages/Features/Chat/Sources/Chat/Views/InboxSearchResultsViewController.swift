@@ -69,7 +69,8 @@ final class InboxSearchResultsViewController: UIViewController {
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
-        self.avatars = avatars
+        // The faces the rows read are kept for the thread they open (#2049).
+        self.avatars = relations?.recording(avatars) ?? avatars
         self.relations = relations
         super.init(nibName: nil, bundle: nil)
     }
@@ -130,6 +131,7 @@ final class InboxSearchResultsViewController: UIViewController {
             ConversationResultCell, ConversationID
         > { [weak self] cell, _, id in
             guard let self, let model = self.viewModel.conversationModels[id] else { return }
+            self.relations?.saw(model)
             cell.configure(
                 with: model, imagePipeline: self.imagePipeline, avatars: self.avatars,
                 mark: self.relations?.mark(for: model.peerID) ?? .none, onFollow: self.followHandler(for: model)

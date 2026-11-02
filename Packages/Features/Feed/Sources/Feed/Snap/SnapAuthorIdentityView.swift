@@ -258,7 +258,18 @@ final class SnapAuthorIdentityView: UIView {
     /// to its width, the face fades in on the avatar alone. Only a
     /// DIFFERENT person (or the first one over the redaction bars) cross-
     /// fades the whole pill, as `setAuthor` does.
-    func setPerson(id: ProfileID?, name: String, meta: String, avatarURL: URL?, pipeline: ImagePipeline) {
+    ///
+    /// ⚠️ KNOWN, IT IS DRAWN AS IT IS (the owner, 2026-11-02): `animated`
+    /// false — or a pill off screen — draws the person at once, with its
+    /// width, no fade and no glide. What a host already knows when the pill
+    /// comes in is its first frame; only a change on a pill that is on
+    /// screen and settled moves. Animated while a push brought the pill in,
+    /// the bar item laid out under the glide: the name faded over the bars,
+    /// the @handle widened letter by letter, the badge slid down the face.
+    func setPerson(
+        id: ProfileID?, name: String, meta: String, avatarURL: URL?, pipeline: ImagePipeline, animated: Bool
+    ) {
+        let moves = animated && window != nil
         let faceChanged = id != authorID || avatarURL != personAvatarURL
         guard faceChanged || name != pill.name || meta != pill.handle else { return }
         // Someone else than the person drawn: an id that replaces another
@@ -268,7 +279,7 @@ final class SnapAuthorIdentityView: UIView {
         authorID = id
         let urlChanged = avatarURL != personAvatarURL
         personAvatarURL = avatarURL
-        defer { BarItemRemeasure.run(self, duration: 0.22) }
+        defer { BarItemRemeasure.run(self, duration: moves ? 0.22 : nil) }
 
         let draw = {
             self.pill.setName(name, handle: meta)
@@ -277,7 +288,7 @@ final class SnapAuthorIdentityView: UIView {
                 name: name, handle: Self.handle(fromMeta: meta)
             ))
         }
-        if personChanged {
+        if personChanged, moves {
             personFades += 1
             UIView.transition(with: self, duration: 0.18,
                               options: [.transitionCrossDissolve, .allowUserInteraction],
@@ -291,6 +302,27 @@ final class SnapAuthorIdentityView: UIView {
         // initials again); the avatar fades it in on the disc alone.
         pill.avatar.setPicture(avatarURL, pipeline: pipeline)
     }
+
+    /// ⚠️ LAID OUT BEFORE THE BAR TAKES IT, outside any animation (the
+    /// owner's device, 2026-11-02). A bar item whose content first lays out
+    /// inside a push lays out UNDER the push's animation: the face slid in
+    /// from the pill's corner, out of the glass, the name opened from its
+    /// centre, the badge slid down the face. Laid out at its own size first,
+    /// the push only moves it and fades it in — the bar sets the same size,
+    /// so nothing inside moves.
+    func settleLayout() {
+        UIView.performWithoutAnimation {
+            let size = systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+            if size.width > 0, size.height > 0, bounds.size != size { bounds.size = size }
+            setNeedsLayout()
+            layoutIfNeeded()
+        }
+    }
+
+    #if DEBUG
+    /// The pill's content frames, for tests.
+    var debugContentFrame: CGRect { pill.frame }
+    #endif
 
     /// What the pill's second line says for a post's meta ("@handle · 3m"):
     /// the "@handle" alone — never the age, which is the post's, not the

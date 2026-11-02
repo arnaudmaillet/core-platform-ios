@@ -126,6 +126,25 @@ public final class InboxRelations {
         })
     }
 
+    // MARK: - Who the peer is (#2049)
+
+    /// What a row knows of its peer — the name and the @handle — kept in
+    /// the store, never over what it holds (`ifUnknown`): a thread opened
+    /// from the row starts whole instead of filling in under its push.
+    func saw(_ model: ConversationDisplayModel) {
+        guard let peer = model.peerID else { return }
+        entities.upsert(
+            AuthorSummary(id: peer, handle: model.peerHandle ?? "", displayName: model.title, avatarURL: nil),
+            freshness: .ifUnknown
+        )
+    }
+
+    /// `avatars`, its answers kept in the store as they land — the face a
+    /// row read is the face the thread opens with.
+    func recording(_ avatars: (any PeerAvatarProviding)?) -> (any PeerAvatarProviding)? {
+        avatars.map { StoreRecordingAvatars(base: $0, entities: entities) }
+    }
+
     /// Written to the store: every surface showing `peer` hears it, these
     /// rows through `entitiesDidChange`.
     private func set(_ relation: FollowRelation, for peer: ProfileID) {
@@ -157,4 +176,23 @@ public final class InboxRelations {
         set(relation, for: peer)
     }
     #endif
+}
+
+/// A face source whose answers are kept in the app's `EntityStore`, never
+/// over what it holds (#2049).
+private struct StoreRecordingAvatars: PeerAvatarProviding {
+    let base: any PeerAvatarProviding
+    let entities: EntityStore
+
+    func avatarURLs(for ids: [ProfileID]) async -> [ProfileID: URL] {
+        let urls = await base.avatarURLs(for: ids)
+        for (id, url) in urls {
+            entities.upsert(AuthorSummary(id: id, handle: "", displayName: "", avatarURL: url), freshness: .ifUnknown)
+        }
+        return urls
+    }
+
+    func handles(for ids: [ProfileID]) async -> [ProfileID: String] {
+        await base.handles(for: ids)
+    }
 }

@@ -19,8 +19,15 @@ public protocol PersonBarItem: AnyObject {
     /// What the badge says now.
     var followBadge: PersonPill.Badge { get }
     /// Shows `name` and `meta` (the @handle), and the face at `avatarURL`.
-    /// The same person again changes in place.
-    func setPerson(id: ProfileID?, name: String, meta: String, avatarURL: URL?, pipeline: ImagePipeline)
+    /// The same person again changes in place. `animated` false — or a pill
+    /// off screen — draws them at once: what is known as the pill comes in
+    /// is its first frame, never a fade over its bars.
+    func setPerson(
+        id: ProfileID?, name: String, meta: String, avatarURL: URL?, pipeline: ImagePipeline, animated: Bool
+    )
+    /// Lays the pill out at its own size now, outside any animation — before
+    /// a bar takes it, so the bar's own animation only moves and fades it.
+    func settleLayout()
     /// The relation; a change on screen is an SF Symbols replace.
     func setFollowBadge(_ badge: PersonPill.Badge, animated: Bool)
     /// The widest the pill is drawn: the room its bar leaves it.
