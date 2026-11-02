@@ -58,20 +58,23 @@ final class ForYouStoryCell: UICollectionViewCell {
         }
     }
 
-    /// The ring a face wears while there is something unseen: the icon's
-    /// gradient, pink → orange (#1169, the owner's call 2026-10-14 — it was
-    /// #1124's solid tint). `-theme-rings accent` compares the solid accent.
+    /// The ring a face wears while there is something unseen: the signature
+    /// gradient, raspberry → violet → mint (#1169, #2062 — a ring, not a
+    /// pill, so it keeps a gradient). `-theme-rings accent` compares the
+    /// solid accent.
     /// A gradient layer either way, so the mask and geometry are untouched;
     /// re-resolved on a style flip.
     private func applyRingColors() {
         // #1169 compares the solid accent with the brand's gradient on the
         // device (`Palette.rules.storyRing`).
         if Palette.rules.storyRing == .gradient {
-            ring.colors = Palette.accentGradient.map { $0.resolvedColor(with: traitCollection).cgColor }
+            ring.colors = Palette.brandGradient.map { $0.resolvedColor(with: traitCollection).cgColor }
+            ring.locations = Palette.brandGradientLocations
             return
         }
         let tint = Palette.tint.resolvedColor(with: traitCollection).cgColor
         ring.colors = [tint, tint]
+        ring.locations = nil
     }
 
     private let disc = UIView()
@@ -91,8 +94,8 @@ final class ForYouStoryCell: UICollectionViewCell {
         ) { (cell: Self, _: UITraitCollection) in
             cell.applyRingColors()
         }
-        ring.startPoint = CGPoint(x: 0, y: 1)
-        ring.endPoint = CGPoint(x: 1, y: 0)
+        ring.startPoint = Palette.brandGradientStart
+        ring.endPoint = Palette.brandGradientEnd
         ringMask.fillColor = UIColor.clear.cgColor
         ringMask.strokeColor = UIColor.black.cgColor
         ringMask.lineWidth = Metrics.ringWidth

@@ -38,16 +38,14 @@ struct PaletteTests {
     }
 
     /// Glyph and control roles: 3:1 (WCAG 1.4.11) on the page and on the
-    /// raised ground, in both appearances. ⚠️ The light pink and the save gold
-    /// are lighter than that BY CHOICE (#1190, the owner, 2026-10-15): the
-    /// pink holds the line under Increased Contrast instead
-    /// (`theAccentHoldsTheLineUnderIncreasedContrast`), the gold is a mark.
+    /// raised ground, in both appearances and both contrasts — the
+    /// raspberry (#2062) holds it without Increased Contrast, unlike the
+    /// light pink it replaced.
     @Test(arguments: [
-        ("tint", Palette.tint), ("secondary", Palette.secondary),
+        ("tint", Palette.tint), ("likes", Palette.likesPink), ("gem", Palette.gemViolet),
     ])
     func aGlyphRoleReadsOnEveryGround(_ role: (String, UIColor)) {
-        let appearances = role.0 == "tint" ? [Self.traits(.light, high: true), Self.dark] : [Self.light, Self.dark]
-        for traits in appearances {
+        for traits in [Self.light, Self.dark, Self.traits(.light, high: true), Self.traits(.dark, high: true)] {
             for ground in [UIColor.systemBackground, .secondarySystemBackground] {
                 let ratio = Self.contrast(role.1, on: ground, traits)
                 #expect(ratio >= 3, "\(role.0) is \(ratio):1 in \(traits.userInterfaceStyle == .dark ? "dark" : "light")")
@@ -56,12 +54,16 @@ struct PaletteTests {
     }
 
     /// Text roles: 4.5:1 on the grounds body text lies on — the page and a
-    /// card — in both appearances.
-    @Test(arguments: [("brandText", Palette.brandText), ("secondary", Palette.secondary)])
-    func aTextRoleReadsAsText(_ role: (String, UIColor)) {
-        // The light pink is a mark, not text strength (#1190): its text role
-        // reads under Increased Contrast.
-        let appearances = role.0 == "brandText" ? [Self.traits(.light, high: true), Self.dark] : [Self.light, Self.dark]
+    /// card. The accent's text reaches it under Increased Contrast (the
+    /// raspberry itself is 4.2:1 on white, the owner's base 500, #2062); the
+    /// gems' price and the links in every appearance.
+    @Test(arguments: [
+        ("brandText", Palette.brandText, true), ("gemText", Palette.gemText, false),
+        ("entityInk", Palette.entityInk, false),
+    ])
+    func aTextRoleReadsAsText(_ role: (String, UIColor, Bool)) {
+        let highOnly = [Self.traits(.light, high: true), Self.traits(.dark, high: true)]
+        let appearances = role.2 ? highOnly : [Self.light, Self.dark] + highOnly
         for traits in appearances {
             for ground in [UIColor.systemBackground, .secondarySystemGroupedBackground] {
                 let ratio = Self.contrast(role.1, on: ground, traits)
@@ -70,91 +72,93 @@ struct PaletteTests {
         }
     }
 
-    /// The text that sits on a brand ground: 4.5:1 on it.
-    @Test func theLabelsOnBrandGroundsReadAsText() {
-        let pairs: [(String, UIColor, UIColor)] = [
-            ("onPrimary", Palette.onPrimary, Palette.primaryFill),
-            ("onPrimary pressed", Palette.onPrimary, Palette.primaryFillPressed),
-            ("onPrimaryContainer", Palette.onPrimaryContainer, Palette.primaryContainer),
-            ("onSecondaryContainer", Palette.onSecondaryContainer, Palette.secondaryContainer),
+    /// The text that sits on a brand ground: a white label on the fill at
+    /// 4.2:1 (the raspberry's own, #2062) and 4.5:1 under Increased
+    /// Contrast; the soft container's text at 4.5:1 everywhere.
+    @Test func theLabelsOnBrandGroundsRead() {
+        let normal = [Self.light, Self.dark]
+        let high = [Self.traits(.light, high: true), Self.traits(.dark, high: true)]
+        let pairs: [(String, UIColor, UIColor, CGFloat)] = [
+            ("onPrimary", Palette.onPrimary, Palette.primaryFill, 4.2),
+            ("onPrimary pressed", Palette.onPrimary, Palette.primaryFillPressed, 4.5),
+            ("onPrimaryContainer", Palette.onPrimaryContainer, Palette.primaryContainer, 4.5),
+            ("a count on the unread mark", .white, Palette.counter, 4.2),
         ]
-        for (name, text, ground) in pairs {
-            // The light pink fill under white is the owner's call (#1190);
-            // Increased Contrast keeps it legible.
-            let lightTraits = name.hasPrefix("onPrimary ") || name == "onPrimary" ? Self.traits(.light, high: true) : Self.light
-            for traits in [lightTraits, Self.dark] {
+        for (name, text, ground, floor) in pairs {
+            for traits in normal {
                 let ratio = Self.contrast(text, on: ground, traits)
-                #expect(ratio >= 4.5, "\(name) is \(ratio):1")
+                #expect(ratio >= floor, "\(name) is \(ratio):1")
+            }
+            for traits in high {
+                let ratio = Self.contrast(text, on: ground, traits)
+                #expect(ratio >= 4.5, "\(name) is \(ratio):1 under Increased Contrast")
             }
         }
     }
 
-    /// The pink fill wears a WHITE label in the light; the light pink is
-    /// the owner's (#1190), and Increased Contrast deepens the fill so the
-    /// label reads at 4.5:1.
-    @Test func whiteReadsOnTheFillInTheLight() {
-        #expect(Self.hex(Palette.primaryFill, Self.light) == 0xF37AB4)
-        #expect(Self.contrast(.white, on: Palette.primaryFill, Self.traits(.light, high: true)) >= 4.5)
-        #expect(Self.hex(Palette.onPrimary, Self.light) == 0xFFFFFF)
-    }
-
-    /// The light pink is the dark theme's (#1190); Increased Contrast keeps a
-    /// deep pink that reads as a glyph and as text.
-    @Test func theAccentHoldsTheLineUnderIncreasedContrast() {
-        #expect(Self.hex(Palette.tint, Self.light) == 0xF37AB4)
-        for ground in [UIColor.systemBackground, .secondarySystemBackground] {
-            #expect(Self.contrast(Palette.tint, on: ground, Self.traits(.light, high: true)) >= 4.5)
+    /// Every role resolves to `BrandTheme.current`'s values, per appearance
+    /// and contrast: no role holds a value of its own.
+    @Test func everyRoleIsTheThemes() {
+        let theme = BrandTheme.current
+        let roles: [(String, UIColor, BrandTheme.Shade)] = [
+            ("tint", Palette.tint, theme.primary), ("brandText", Palette.brandText, theme.primary),
+            ("primaryFill", Palette.primaryFill, theme.primaryFill),
+            ("onPrimary", Palette.onPrimary, theme.onPrimary),
+            ("primaryFillPressed", Palette.primaryFillPressed, theme.primaryPressed),
+            ("prominentFill", Palette.prominentFill, theme.primarySolid),
+            ("prominentGlassTint", Palette.prominentGlassTint, theme.primarySolid),
+            ("primaryContainer", Palette.primaryContainer, theme.primaryContainer),
+            ("onPrimaryContainer", Palette.onPrimaryContainer, theme.onPrimaryContainer),
+            ("counter", Palette.counter, theme.counter), ("entityInk", Palette.entityInk, theme.entityInk),
+            ("likes", Palette.likesPink, theme.likes), ("gem", Palette.gemViolet, theme.gem),
+            ("gemText", Palette.gemText, theme.gemText),
+        ]
+        for (name, colour, shade) in roles {
+            #expect(Self.hex(colour, Self.traits(.light)) == shade.light, "\(name) light")
+            #expect(Self.hex(colour, Self.traits(.dark)) == shade.dark, "\(name) dark")
+            #expect(Self.hex(colour, Self.traits(.light, high: true)) == shade.lightIC, "\(name) IC light")
+            #expect(Self.hex(colour, Self.traits(.dark, high: true)) == shade.darkIC, "\(name) IC dark")
         }
+        #expect(Self.hex(Palette.saveGold, Self.light) == theme.saveGold)
+        #expect(Palette.brandGradient.map { Self.hex($0, Self.light) } == theme.signatureGradient)
+        #expect(Palette.brandGradientLocations.map(\.doubleValue) == theme.signatureLocations)
+        #expect(Palette.loaderTones.map { Self.hex($0, Self.light) } == theme.loaderTones)
     }
 
-    /// Increased Contrast resolves to the IC values.
-    @Test func increasedContrastResolvesToItsOwnValues() {
-        #expect(Self.hex(Palette.tint, Self.traits(.light)) == 0xF37AB4)
-        #expect(Self.hex(Palette.tint, Self.traits(.dark)) == 0xF37AB4)
-        #expect(Self.hex(Palette.tint, Self.traits(.light, high: true)) == 0xB0256A)
-        #expect(Self.hex(Palette.tint, Self.traits(.dark, high: true)) == 0xF8ABCF)
-        #expect(Self.hex(Palette.secondary, Self.traits(.light, high: true)) == 0x5C44B7)
-        #expect(Self.hex(Palette.secondary, Self.traits(.dark, high: true)) == 0xB59EFF)
-        // The fill deepens under Increased Contrast (#1190); a role without
-        // IC values keeps its ordinary one.
-        #expect(Self.hex(Palette.primaryFill, Self.traits(.light, high: true)) == 0xB0256A)
-        #expect(Self.hex(Palette.saveGold, Self.traits(.light, high: true)) == 0xFFC53D)
+    /// The owner's values (#2062), as asked.
+    @Test func theThemeIsRaspberry() {
+        #expect(Self.hex(Palette.tint, Self.light) == 0xEC1C75)
+        #expect(Self.hex(Palette.tint, Self.dark) == 0xEC1C75)
+        #expect(Self.hex(Palette.counter, Self.light) == 0xEC1C75, "unread marks are the raspberry, no longer violet")
+        #expect(Self.hex(Palette.gemViolet, Self.light) == 0x9B5CFF)
+        #expect(Palette.brandGradient.map { Self.hex($0, Self.light) } == [0xEC1C75, 0x9B5CFF, 0x2EF0A8])
+        #expect(Self.hex(Palette.saveGold, Self.light) == 0xFFC53D, "the saved star keeps its gold")
     }
 
-    /// The heart is the pink, solid (#1178) — two equal stops, so the
-    /// gradient layer still draws — the light pink in both appearances since
-    /// #1190; under Increased Contrast it reads at 3:1 on the page.
-    @Test func theLikesHeartIsThePink() {
-        #expect(LikesSymbol.gradient(for: Self.light).map { Self.hex($0, Self.light) } == [0xF37AB4, 0xF37AB4])
-        #expect(LikesSymbol.gradient(for: Self.dark).map { Self.hex($0, Self.dark) } == [0xF37AB4, 0xF37AB4])
-        for traits in [Self.traits(.light, high: true), Self.dark] {
-            for stop in LikesSymbol.gradient(for: traits) {
-                #expect(Self.contrast(stop, on: .systemBackground, traits) >= 3)
-            }
+    /// The heart is the primary, solid (#1178) — two equal stops, so the
+    /// gradient layer still draws.
+    @Test func theLikesHeartIsThePrimary() {
+        for traits in [Self.light, Self.dark] {
+            let stops = LikesSymbol.gradient(for: traits).map { Self.hex($0, traits) }
+            #expect(stops == [0xEC1C75, 0xEC1C75])
         }
         #expect(LikesSymbol.tint === Palette.likesPink)
     }
 
-    /// Links and tokens in text (#1174): a greyed violet (#1176) — blue over
-    /// green, little chroma — that reads at 4.5:1 on the page and on the
-    /// grouped grey, in every appearance and contrast.
-    @Test func theEntityInkIsAGreyedVioletThatReadsAsText() {
+    /// Links and tokens in text (#2062): a grey with no cast.
+    @Test func theEntityInkIsANeutralGrey() {
         for traits in [Self.light, Self.dark, Self.traits(.light, high: true), Self.traits(.dark, high: true)] {
-            for ground in [UIColor.systemBackground, .secondarySystemBackground] {
-                let ratio = Self.contrast(Palette.entityInk, on: ground, traits)
-                #expect(ratio >= 4.5, "\(ratio):1 in \(traits.userInterfaceStyle.rawValue)")
-            }
             var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
             Palette.entityInk.resolvedColor(with: traits).getRed(&r, green: &g, blue: &b, alpha: &a)
-            #expect(b > r && r > g, "violet: blue, then red, over green")
-            #expect(max(r, g, b) - min(r, g, b) < 0.25, "greyed: little chroma")
+            #expect(max(r, g, b) - min(r, g, b) < 0.04, "a grey: next to no chroma")
         }
     }
 
-    /// The hues the palette took over (#1124): gems are violet, a warning's
-    /// glyph is yellow — orange is the tint's now.
+    /// The gems wear the violet — the glyph, and a deeper step where it is a
+    /// price — and a warning's glyph is yellow.
     @Test func gemsAreVioletAndWarningsYellow() {
         #expect(GemSymbol.tint === Palette.gemViolet)
+        #expect(GemSymbol.textColor === Palette.gemText)
         #expect(ToastView.Style.warning.glyphTint == .systemYellow)
     }
 
@@ -172,11 +176,11 @@ struct PaletteTests {
         #expect(note.string.hasSuffix("Full"))
     }
 
-    /// A prominent glass button wears the primary pink in both appearances
-    /// (#1190) — the glass draws its label white whatever the ink.
-    @Test func theProminentGlassTintIsThePrimaryPink() {
+    /// A prominent glass button wears the primary in both appearances —
+    /// the glass draws its label white whatever the ink.
+    @Test func theProminentGlassTintIsThePrimary() {
         for traits in [Self.light, Self.dark] {
-            #expect(Self.hex(Palette.prominentGlassTint, traits) == 0xF37AB4)
+            #expect(Self.hex(Palette.prominentGlassTint, traits) == 0xEC1C75)
         }
     }
 }

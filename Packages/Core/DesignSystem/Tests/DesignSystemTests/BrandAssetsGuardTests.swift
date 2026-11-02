@@ -28,9 +28,9 @@ struct BrandAssetsGuardTests {
 
     private static let theme = BrandTheme.current
 
-    /// `AccentColor`'s four values are the primary's: light, dark, and the
-    /// Increased Contrast pair.
-    @Test func theAccentColorIsThePrimary() throws {
+    /// A colorset's values by appearance: "light", "dark", "lightIC",
+    /// "darkIC".
+    static func accentColorValues(_ data: Data) throws -> [String: UInt32] {
         struct Colorset: Decodable {
             struct Entry: Decodable {
                 struct Colour: Decodable {
@@ -45,11 +45,8 @@ struct BrandAssetsGuardTests {
             }
             let colors: [Entry]
         }
-        let set = try JSONDecoder().decode(
-            Colorset.self, from: Self.read("App/Resources/Assets.xcassets/AccentColor.colorset/Contents.json")
-        )
         var found: [String: UInt32] = [:]
-        for entry in set.colors {
+        for entry in try JSONDecoder().decode(Colorset.self, from: data).colors {
             let appearances = entry.appearances ?? []
             let dark = appearances.contains { $0.appearance == "luminosity" && $0.value == "dark" }
             let high = appearances.contains { $0.appearance == "contrast" && $0.value == "high" }
@@ -57,19 +54,37 @@ struct BrandAssetsGuardTests {
                 let text = entry.color.components[name] ?? ""
                 return UInt32(text.replacingOccurrences(of: "0x", with: ""), radix: 16) ?? .max
             }
-            let value = channel("red") << 16 | channel("green") << 8 | channel("blue")
-            found[(dark ? "dark" : "light") + (high ? "IC" : "")] = value
+            found[(dark ? "dark" : "light") + (high ? "IC" : "")] = channel("red") << 16 | channel("green") << 8 | channel("blue")
         }
-        let primary = Self.theme.primary
-        #expect(found == ["light": primary.light, "dark": primary.dark, "lightIC": primary.lightIC, "darkIC": primary.darkIC])
+        return found
+    }
+
+    /// What `AccentColor` must hold: the primary's four values.
+    static func expectedAccentColor(_ theme: BrandTheme) -> [String: UInt32] {
+        ["light": theme.primary.light, "dark": theme.primary.dark,
+         "lightIC": theme.primary.lightIC, "darkIC": theme.primary.darkIC]
+    }
+
+    /// An SVG's gradient stops, first to last, as upper-case hex.
+    static func svgStops(_ svg: String) -> [String] {
+        svg.components(separatedBy: "stop-color=\"#").dropFirst().map { String($0.prefix(6)).uppercased() }
+    }
+
+    static func hex(_ value: UInt32) -> String { String(format: "%06X", value) }
+
+    /// `AccentColor`'s four values are the primary's: light, dark, and the
+    /// Increased Contrast pair.
+    @Test func theAccentColorIsThePrimary() throws {
+        let found = try Self.accentColorValues(
+            Self.read("App/Resources/Assets.xcassets/AccentColor.colorset/Contents.json")
+        )
+        #expect(found == Self.expectedAccentColor(Self.theme))
     }
 
     /// The launch logo's gradient stops, first to last.
     @Test func theLaunchLogoWearsTheThemesStops() throws {
         let svg = String(decoding: try Self.read("App/Resources/Assets.xcassets/LaunchLogo.imageset/LaunchLogo.svg"), as: UTF8.self)
-        let stops = svg.components(separatedBy: "stop-color=\"#").dropFirst().map { String($0.prefix(6)) }
-        let expected = Self.theme.launchLogoStops.map { String(format: "%06X", $0) }
-        #expect(stops.map { $0.uppercased() } == expected)
+        #expect(Self.svgStops(svg) == Self.theme.launchLogoStops.map(Self.hex))
     }
 
     /// The icon's blob fill, exactly as Icon Composer writes it.
@@ -78,6 +93,21 @@ struct BrandAssetsGuardTests {
         for stop in Self.theme.iconGradient {
             #expect(json.contains("\"\(stop)\""), "icon.json has no \(stop)")
         }
+    }
+
+    /// The guard cannot pass by reading nothing: an asset one value out of
+    /// step fails it.
+    @Test func anAssetOutOfStepFails() throws {
+        var colorset = String(decoding: try Self.read("App/Resources/Assets.xcassets/AccentColor.colorset/Contents.json"), as: UTF8.self)
+        let red = String(format: "\"0x%02X\"", Self.theme.primary.light >> 16 & 0xFF)
+        let range = try #require(colorset.range(of: red))
+        colorset.replaceSubrange(range, with: "\"0x01\"")
+        #expect(try Self.accentColorValues(Data(colorset.utf8)) != Self.expectedAccentColor(Self.theme))
+
+        let svg = String(decoding: try Self.read("App/Resources/Assets.xcassets/LaunchLogo.imageset/LaunchLogo.svg"), as: UTF8.self)
+        let first = Self.hex(Self.theme.launchLogoStops[0])
+        let wrong = svg.replacingOccurrences(of: "#\(first)", with: "#010203", options: .caseInsensitive)
+        #expect(Self.svgStops(wrong) != Self.theme.launchLogoStops.map(Self.hex))
     }
 }
 

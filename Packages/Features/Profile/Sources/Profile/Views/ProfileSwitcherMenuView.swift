@@ -301,11 +301,11 @@ final class ProfileSwitcherRowView: UIView {
     }
 }
 
-/// A profile's count on its row (#2034): a capsule of the brand gradient,
-/// pink to violet, the count in white bold at the row's footnote size.
+/// A profile's count on its row (#2034): a capsule of the solid unread mark
+/// (#2062, the owner: a pill is never a gradient — the brand gradient it
+/// wore is gone), the count in white bold at the row's footnote size.
 final class ProfileSwitcherCountBadge: UIView {
     let text: String
-    private let gradient = BrandGradientView()
     private let label = UILabel()
     private var height: CGFloat = 0
 
@@ -325,8 +325,7 @@ final class ProfileSwitcherCountBadge: UIView {
     init(text: String) {
         self.text = text
         super.init(frame: .zero)
-        gradient.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(gradient)
+        backgroundColor = Palette.counter
         let font = UIFont.appFont(forTextStyle: .footnote)
         label.font = UIFont.systemFont(ofSize: font.pointSize, weight: .bold)
         label.textColor = .white
@@ -339,10 +338,6 @@ final class ProfileSwitcherCountBadge: UIView {
         layer.cornerCurve = .continuous
         clipsToBounds = true
         NSLayoutConstraint.activate([
-            gradient.topAnchor.constraint(equalTo: topAnchor),
-            gradient.bottomAnchor.constraint(equalTo: bottomAnchor),
-            gradient.leadingAnchor.constraint(equalTo: leadingAnchor),
-            gradient.trailingAnchor.constraint(equalTo: trailingAnchor),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
             label.centerXAnchor.constraint(equalTo: centerXAnchor),
         ])

@@ -92,22 +92,14 @@ final class WalletTitleGauge: UIView {
 
 // MARK: - Claim button
 
-/// The Claim capsule's look: the brand's ONE pink action (#1124) —
-/// prominent glass in the brand's tint, or the brand's gradient where the
-/// palette's rules ask for it.
+/// The Claim capsule's look: the brand's ONE primary action (#1124) —
+/// prominent glass in the brand's tint. (The signature gradient it could
+/// wear under a DEBUG rule went with #2062: white words over its mint half
+/// read at 1.5:1.)
 enum WalletClaimButtonStyle {
     static func apply(to button: UIButton) {
         button.configuration?.cornerStyle = .capsule
         button.tintColor = Palette.prominentGlassTint
-        guard Palette.rules.heroButton == .gradient else { return }
-        var gradient = UIButton.Configuration.filled()
-        gradient.cornerStyle = .capsule
-        gradient.background.customView = BrandGradientView()
-        gradient.baseForegroundColor = .white
-        button.configuration = gradient
-        button.configurationUpdateHandler = { button in
-            button.configuration?.background.customView?.alpha = button.isEnabled ? 1 : 0.4
-        }
     }
 }
 

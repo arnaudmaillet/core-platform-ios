@@ -1075,19 +1075,6 @@ final class SelectorLiquidLens {
             context.fillPath()
             context.restoreGState()
         }
-        // A gradient fill (a badge's `badgeGradient`) is a sublayer, not a
-        // background colour; it holds no vibrant content, so it renders as is.
-        for case let gradient as CAGradientLayer in view.layer.sublayers ?? [] where !gradient.isHidden {
-            let frame = root.convert(gradient.frame, from: view)
-            let radius = min(gradient.cornerRadius, min(frame.width, frame.height) / 2)
-            context.saveGState()
-            context.setAlpha(alpha * CGFloat(gradient.opacity))
-            context.addPath(UIBezierPath(roundedRect: frame, cornerRadius: radius).cgPath)
-            context.clip()
-            context.translateBy(x: frame.minX, y: frame.minY)
-            gradient.render(in: context)
-            context.restoreGState()
-        }
         if let label = view as? UILabel, let text = label.text, !text.isEmpty {
             let font = label.font ?? UIFont.appFont(forTextStyle: .body)
             let paragraph = NSMutableParagraphStyle()

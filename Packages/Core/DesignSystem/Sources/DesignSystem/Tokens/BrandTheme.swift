@@ -41,6 +41,10 @@ public struct BrandTheme: Sendable, Equatable {
     /// The app's tint, the accent's text, the primary fill — with its
     /// Increased Contrast pair. `AccentColor` carries these four values.
     public let primary: Shade
+    /// The primary filled button's ground: the primary, deepened under
+    /// Increased Contrast in BOTH appearances, so its white label reads —
+    /// the tint's lifted dark IC value would carry it at 3.1:1.
+    public let primaryFill: Shade
     /// The same colour as a solid ground with no contrast step: the
     /// prominent fill and the prominent glass's tint.
     public let primarySolid: Shade
@@ -54,73 +58,78 @@ public struct BrandTheme: Sendable, Equatable {
 
     // MARK: - Marks
 
-    /// Every solid unread mark: badges, the bell's dot, counts.
+    /// Every unread mark, pill and badge: solid, never a gradient (the
+    /// owner, 2026-11-02), under a white count.
     public let counter: Shade
-    /// The gradient a few marks wear (the unseen-story ring, the inbox's
-    /// unread pills), first stop to last.
-    public let accentGradient: [UInt32]
-
-    // MARK: - Secondary
-
-    public let secondary: Shade
-    public let secondaryContainer: Shade
-    public let onSecondaryContainer: Shade
 
     // MARK: - Text
 
-    /// `@mentions`, `#hashtags` and links.
+    /// `@mentions`, `#hashtags` and links: a grey with no cast, set apart
+    /// by the semibold.
     public let entityInk: Shade
 
     // MARK: - The economy
 
     /// The likes' heart, glyph and coin.
     public let likes: Shade
-    /// The gems.
+    /// The gems' glyph. The violet is the gems' alone, outside the signature
+    /// gradient.
     public let gem: Shade
+    /// The gems' violet as TEXT — a price, a balance: deep enough for
+    /// 4.5:1 where the glyph's 3:1 is not.
+    public let gemText: Shade
     /// The saved star: one gold.
     public let saveGold: UInt32
+    /// Recorded, not drawn: the crowns' colour, when the crowns replace the
+    /// gems. It becomes a role only then.
+    public let crownYellow: UInt32
 
     // MARK: - Brand moments
 
-    /// The brand's signature gradient, first stop to last (splash, the
-    /// Shop's hero art, the wallet's hero rule, the profile switcher's
-    /// counts).
+    /// The brand's signature gradient, first stop to last, and where each
+    /// stop sits (0…1): the launch logo, the story ring.
     public let signatureGradient: [UInt32]
+    public let signatureLocations: [Double]
     /// The branded loader's three pills, left to right.
     public let loaderTones: [UInt32]
 
     // MARK: - The assets (checked by `BrandAssetsGuardTests`)
 
-    /// `LaunchLogo.svg`'s gradient stops, first to last.
+    /// `LaunchLogo.svg`'s gradient stops, first to last: the signature's,
+    /// made pale.
     public let launchLogoStops: [UInt32]
     /// `AppIcon.icon/icon.json`'s blob fill, exactly as Icon Composer writes
     /// it, first stop to last.
     public let iconGradient: [String]
 
     /// The theme the app draws in.
-    public static let current = pink
+    public static let current = raspberry
 
-    /// Pink (#1169, #1190): the palette before #2062's raspberry.
-    public static let pink = BrandTheme(
-        name: "pink",
-        primary: Shade(0xF37AB4, 0xF37AB4, ic: (0xB0256A, 0xF8ABCF)),
-        primarySolid: Shade(0xF37AB4, 0xF37AB4),
-        onPrimary: Shade(0xFFFFFF, 0x2B0716),
-        primaryPressed: Shade(0xE86AA6, 0xE86AA6, ic: (0x9C1F5E, 0xE86AA6)),
-        primaryContainer: Shade(0xFDE3EF, 0x3A0A22),
-        onPrimaryContainer: Shade(0xB8296C, 0xF8ABCF),
-        counter: Shade(0x7C5CF0, 0x7C5CF0),
-        accentGradient: [0xF37AB4, 0xA78BFA],
-        secondary: Shade(0x6852C6, 0xA78BFA, ic: (0x5C44B7, 0xB59EFF)),
-        secondaryContainer: Shade(0xEFEEFF, 0x211944),
-        onSecondaryContainer: Shade(0x6852C6, 0xA78BFA),
-        entityInk: Shade(0x645A82, 0xAFA3CC, ic: (0x4F4669, 0xC3B9DD)),
-        likes: Shade(0xF37AB4, 0xF37AB4, ic: (0xB0256A, 0xF8ABCF)),
-        gem: Shade(0x6852C6, 0xA78BFA, ic: (0x5C44B7, 0xB59EFF)),
+    /// Raspberry (#2062, the owner 2026-11-02): the primary almost
+    /// everywhere, the violet for the gems, the signature running raspberry →
+    /// violet → mint.
+    public static let raspberry = BrandTheme(
+        name: "raspberry",
+        primary: Shade(0xEC1C75, 0xEC1C75, ic: (0xC2105F, 0xF25C9A)),
+        primaryFill: Shade(0xEC1C75, 0xEC1C75, ic: (0xC2105F, 0xC2105F)),
+        primarySolid: Shade(0xEC1C75, 0xEC1C75),
+        onPrimary: Shade(0xFFFFFF, 0xFFFFFF),
+        primaryPressed: Shade(0xD41868, 0xD41868, ic: (0xA80D52, 0xD41868)),
+        primaryContainer: Shade(0xFDE3EE, 0x3D0A20),
+        onPrimaryContainer: Shade(0xB00E57, 0xF57BAE),
+        counter: Shade(0xEC1C75, 0xEC1C75, ic: (0xC2105F, 0xC2105F)),
+        entityInk: Shade(0x5E5E66, 0xAEAEB4, ic: (0x48484F, 0xC8C8CD)),
+        likes: Shade(0xEC1C75, 0xEC1C75, ic: (0xC2105F, 0xF25C9A)),
+        gem: Shade(0x9B5CFF, 0x9B5CFF, ic: (0x7A3FE0, 0xB48AFF)),
+        gemText: Shade(0x7A3FE0, 0xA97AFF, ic: (0x6E33D6, 0xB48AFF)),
         saveGold: 0xFFC53D,
-        signatureGradient: [0xE0559A, 0x7C5CF0],
-        loaderTones: [0xF37AB4, 0xD98AD0, 0xA78BFA],
-        launchLogoStops: [0xEDAACB, 0xD0CCFC],
+        crownYellow: 0xFFE600,
+        signatureGradient: [0xEC1C75, 0x9B5CFF, 0x2EF0A8],
+        signatureLocations: [0, 0.5, 1],
+        loaderTones: [0xEC1C75, 0x9B5CFF, 0x2EF0A8],
+        launchLogoStops: [0xF699C1, 0xD2B6FF, 0xA1F8D8],
+        // The icon is redone in #2062's third pull request: until then, its
+        // fill as it stands.
         iconGradient: [
             "display-p3:0.85622,0.33380,0.59312,0.50000",
             "extended-srgb:0.38039,0.33333,0.96078,0.30000",

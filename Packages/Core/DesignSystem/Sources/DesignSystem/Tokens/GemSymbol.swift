@@ -6,9 +6,12 @@ import UIKit
 /// told apart at a glance: a red heart you commit, a violet diamond you earn.
 public enum GemSymbol {
     public static let glyph = AppSymbol.gemFilled.rawValue
-    /// The brand's secondary, violet (#1124): it was the system cyan, which
-    /// clashed with nothing but said nothing either.
+    /// The palette's violet (#2062), the gems' alone: a GLYPH colour (3:1).
+    /// It was the system cyan once (#1124), which said nothing.
     public static let tint: UIColor = Palette.gemViolet
+    /// The same violet as TEXT — "+N", a price, a balance: a deeper step in
+    /// the light, where the glyph's violet is under 4.5:1.
+    public static let textColor: UIColor = Palette.gemText
     /// The display name.
     public static let name = "Gems"
 
