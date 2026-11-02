@@ -55,6 +55,8 @@ let package = Package(
                 "CoreNavigation",
                 "CoreNetworking",
                 "FeedInterface",
+                // `InboxRelationMarkTests` changes the viewer (#2049).
+                "AuthInterface",
                 // `ChatMediaTests` builds an uploader and a transport (#681).
                 "MediaCore",
                 // `ChatLocalCacheTests` opens a store in a temporary folder.

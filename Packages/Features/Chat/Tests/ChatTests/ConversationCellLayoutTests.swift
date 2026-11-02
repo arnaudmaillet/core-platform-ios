@@ -47,6 +47,8 @@ struct ConversationCellLayoutTests {
     private func glyphs(in cell: ConversationCell) -> [(view: UIImageView, frame: CGRect)] {
         var found: [(UIImageView, CGRect)] = []
         func walk(_ view: UIView) {
+            // The face (and its relation badge's glyph, #2049) is not a mark.
+            if view is RelationMarkedAvatarView { return }
             if let image = view as? UIImageView, !image.isHidden, image.image != nil,
                image.bounds.width > 0 {
                 found.append((image, image.convert(image.bounds, to: cell)))

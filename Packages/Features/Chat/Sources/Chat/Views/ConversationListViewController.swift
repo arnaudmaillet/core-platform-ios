@@ -109,15 +109,20 @@ final class ConversationListViewController: UIViewController {
     /// wire neither still render initials.
     private let imagePipeline: ImagePipeline?
     private let avatars: (any PeerAvatarProviding)?
+    /// The peers' relations, for the faces' mark and its "+" (#2049). Nil:
+    /// no mark.
+    private let relations: InboxRelations?
 
     init(
         viewModel: ConversationListViewModel,
         imagePipeline: ImagePipeline? = nil,
-        avatars: (any PeerAvatarProviding)? = nil
+        avatars: (any PeerAvatarProviding)? = nil,
+        relations: InboxRelations? = nil
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.avatars = avatars
+        self.relations = relations
         super.init(nibName: nil, bundle: nil)
         // The chrome is the container's, and the container reads it before
         // this view exists: the inbox no longer loads every surface's view up
@@ -138,6 +143,7 @@ final class ConversationListViewController: UIViewController {
     /// its own after a beat.
     private func pullToRefresh() {
         viewModel.refresh()
+        resolveRelations(refresh: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             self?.refreshControl.endRefreshing()
         }
@@ -150,6 +156,8 @@ final class ConversationListViewController: UIViewController {
         configureStatusViews()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        // A relation that changed: the faces on screen take it, animated.
+        relations?.observe(by: self) { [weak self] peers in self?.applyRelations(of: peers) }
         // Pull to refresh, with the app's loader (#1901, the owner 2026-10-30):
         // the pull came back when search moved into the stacked field.
         refreshControl.addAction(UIAction { [weak self] _ in self?.pullToRefresh() }, for: .valueChanged)
@@ -253,6 +261,56 @@ final class ConversationListViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         viewModel.viewWillAppear()
+        // Back from a thread or a profile: a follow made there shows.
+        if hasRenderedContent { resolveRelations(refresh: true) }
+    }
+
+    // MARK: - The relation mark (#2049)
+
+    /// The peers to ask about: the rows on screen and the next page's —
+    /// as many again below the last one shown. Before the first layout, the
+    /// first two screens' worth.
+    private func peersToResolve() -> [ProfileID] {
+        let ids = adapter.allIdentifiers
+        let visible = (tableView.indexPathsForVisibleRows ?? []).compactMap { adapter.itemIdentifier(for: $0) }
+        let range: Range<Int>
+        if let first = visible.first.flatMap({ ids.firstIndex(of: $0) }),
+           let last = visible.last.flatMap({ ids.firstIndex(of: $0) }) {
+            range = first..<min(ids.count, last + 1 + visible.count)
+        } else {
+            range = 0..<min(ids.count, InboxPaging.relationLookahead)
+        }
+        return ids[range].compactMap { modelsByID[$0]?.peerID }
+    }
+
+    private func resolveRelations(refresh: Bool = false) {
+        guard let relations, relations.isEnabled else { return }
+        relations.resolve(peersToResolve(), refresh: refresh)
+    }
+
+    /// The faces on screen whose peer's relation changed.
+    private func applyRelations(of peers: Set<ProfileID>) {
+        guard let relations else { return }
+        for case let cell as ConversationCell in tableView.visibleCells {
+            guard let peer = cell.peerID, peers.contains(peer) else { continue }
+            cell.setRelationMark(relations.mark(for: peer), animated: true)
+        }
+    }
+
+    /// The "+" on `model`'s face.
+    private func followHandler(for model: ConversationDisplayModel) -> (() -> Void)? {
+        guard let relations, relations.isEnabled, let peer = model.peerID else { return nil }
+        return { [weak self, weak relations] in
+            guard let self else { return }
+            relations?.follow(peer, handle: model.peerHandle, name: model.title, from: self)
+        }
+    }
+
+    private func configure(_ cell: ConversationCell, with model: ConversationDisplayModel) {
+        cell.configure(
+            with: model, imagePipeline: imagePipeline, avatars: avatars,
+            mark: relations?.mark(for: model.peerID) ?? .none, onFollow: followHandler(for: model)
+        )
     }
 
     private func configureTableView() {
@@ -290,7 +348,7 @@ final class ConversationListViewController: UIViewController {
                 withIdentifier: ConversationCell.reuseIdentifier, for: indexPath
             ) as! ConversationCell
             if let self, let model = self.modelsByID[id] {
-                cell.configure(with: model, imagePipeline: self.imagePipeline, avatars: self.avatars)
+                self.configure(cell, with: model)
             }
             return cell
         }
@@ -304,7 +362,7 @@ final class ConversationListViewController: UIViewController {
                   let cell = tableView.cellForRow(at: indexPath) as? ConversationCell,
                   let model = modelsByID[id]
             else { continue }
-            cell.configure(with: model, imagePipeline: imagePipeline, avatars: avatars)
+            configure(cell, with: model)
         }
     }
 
@@ -362,6 +420,9 @@ final class ConversationListViewController: UIViewController {
             // come back in reach before it turns again.
             pagingFooter.setSpinning(false)
             revealContent()
+            // The rows draw now; their marks arrive as the relations land.
+            // Next turn, once the table has laid the rows out.
+            DispatchQueue.main.async { [weak self] in self?.resolveRelations() }
         case .empty:
             statusView.configure(
                 symbol: "bubble.left.and.bubble.right",
@@ -426,6 +487,7 @@ extension ConversationListViewController: UITableViewDelegate {
     /// Paging: one of the last rows coming on screen asks for the next page
     /// (#593), early enough that it usually lands before the end does.
     func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        resolveRelations()
         guard viewModel.hasMore, let id = adapter.itemIdentifier(for: indexPath),
               adapter.allIdentifiers.suffix(InboxPaging.nearEndRowCount).contains(id) else { return }
         pagingFooter.setSpinning(true)

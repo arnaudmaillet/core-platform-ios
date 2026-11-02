@@ -1905,31 +1905,20 @@ extension ConversationThreadViewController {
               SnapAuthorIdentityView.FollowBadge(before) == .follow else { return }
         followInFlight = true
         relationGeneration += 1
-        setPeerRelation(before.settingFollow(true), tapped: true)
-        // On at the optimistic flip (#1886).
-        Haptics.play(.toggleOn)
         // Named now: the peer can change before the graph answers.
-        let name = peer.handle.map { "@" + $0 } ?? (peer.name.isEmpty ? nil : peer.name)
-        Task { [weak self] in
-            let outcome = try? await socialGraph.follow(id)
+        let message = PlusFollow.failureMessage(handle: peer.handle, name: peer.name)
+        // The inbox's "+" follows the same way (#2049): one seam, `PlusFollow`.
+        PlusFollow.commit(id, from: before, through: socialGraph, apply: { [weak self] relation in
+            guard let self, self.peer.id == id else { return }
+            self.setPeerRelation(relation, tapped: true)
+        }, completion: { [weak self] failed in
             guard let self else { return }
             self.followInFlight = false
-            // A private correspondent was asked, not followed (#968): the
-            // followed mark becomes the pending one.
-            if outcome == .requested, self.peer.id == id { self.setPeerRelation(.requested, tapped: true) }
-            if outcome == nil {
-                if self.peer.id == id { self.setPeerRelation(before, tapped: true) }
-                // Said either way (#802): a "+" that comes back without a
-                // word reads as a glitch. Over the composer, as the mute's is.
-                Feedback.failure(
-                    name.map { "Couldn't follow \($0)" } ?? "Couldn't follow",
-                    from: self,
-                    above: self.composeBar.inputRowView
-                )
-            }
+            // Said either way (#802), over the composer, as the mute's is.
+            if failed { Feedback.failure(message, from: self, above: self.composeBar.inputRowView) }
             // The peer changed mid-follow: its relation was never asked.
             if self.peer.id != id { self.resolvePeerRelation() }
-        }
+        })
     }
 
     /// The pill's relation badge. Tests.

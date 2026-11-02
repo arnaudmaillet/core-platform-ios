@@ -218,7 +218,9 @@ final class AppContainer {
             // What notification lookups answered, missing posts included (#978).
             notificationsRepository,
             // A teen's time not yet reported is that account's (#417).
-            supervisedScreenTime
+            supervisedScreenTime,
+            // The inbox rows' relation marks (#2049).
+            inboxRelations
         ]
         viewerTransitionsTask = Task {
             for await state in await viewer.transitions() {
@@ -1801,6 +1803,10 @@ final class AppContainer {
         searchClient: Search_V1_SearchServiceClient(client: authenticatedRPCClient)
     )
 
+    /// Where the viewer stands with each inbox peer, for the rows' mark and
+    /// its "+" (#2049): one read per peer, viewer-scoped.
+    private lazy var inboxRelations = InboxRelations(reader: profileRepository, writer: profileRepository)
+
     private(set) lazy var chatFeature: any ChatFeatureBuilding = ChatFeatureBuilder(
         repository: chatRepository,
         connections: socialConnectionsRepository,
@@ -1813,6 +1819,7 @@ final class AppContainer {
         mediaPicker: chatMediaPicker,
         // The inbox and the last 50 conversations × 200 messages (#897).
         localStore: localStore,
+        relations: inboxRelations,
         // A conversation is drawn by the feed's text-post screen. Lazy, like
         // every feature here: the feed builder reaches the router, and the
         // router reaches this.

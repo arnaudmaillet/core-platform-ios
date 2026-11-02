@@ -13,6 +13,9 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
     /// The other member, when there is exactly one — what an avatar is fetched
     /// for. `nil` for a group, which keeps its initials.
     public let peerID: ProfileID?
+    /// The peer's handle, for what a failed follow says (#2049). Nil for a
+    /// group, or when the conversation does not carry it.
+    public let peerHandle: String?
     public let isPinned: Bool
     public let isMuted: Bool
     /// Drives the row's whole unread treatment — bold text and a badge — rather
@@ -37,6 +40,7 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
         timeText = conversation.lastActivityAt.map { RelativeAgeFormatter.short(from: $0, to: now) } ?? ""
         monogram = MonogramAvatarView.monogram(name: conversation.title, handle: "")
         peerID = conversation.otherMemberIDs.count == 1 ? conversation.otherMemberIDs.first : nil
+        peerHandle = peerID == nil ? nil : conversation.directPeerHandle
         self.isPinned = isPinned
         self.isMuted = isMuted
         self.isUnread = isUnread
