@@ -16,7 +16,7 @@ import UIKit
 ///  writing     [Cancel] ———————————————————— [Drafts]
 ///              [+ Add a sound] ——————— [🔖 ⇄] [⋯]
 ///
-///  published   [✕] [⇅ sort] ——————— [◎ balance] [author]
+///  published   [✕] [Popular | Recent] ——— [◎ balance] [author]
 ///              [attribution] ————————— [🔖 ⇄] [⋯]
 /// ```
 ///
@@ -64,7 +64,7 @@ final class TextPostComposerViewController: UIViewController {
         static let cancel = "textpost.cancel"
         static let drafts = "textpost.drafts"
         static let close = "textpost.close"
-        static let sort = "textpost.sort"
+        static let commentTabs = "textpost.commentTabs"
         static let authorPill = "textpost.author-pill"
         static let attribution = "textpost.attribution"
     }
@@ -77,10 +77,11 @@ final class TextPostComposerViewController: UIViewController {
     private var publishedEntry: FeedEntry?
     private let authorPill = SnapAuthorIdentityView()
     private let attribution = SnapMediaAttributionView()
-    private let sortButton = SnapCommentSortButton()
+    /// The comments' Popular | Recent selector (#2007), bound to the panel.
+    private let commentTabs = CommentTabsSelector()
     private var closeItem: UIBarButtonItem?
     private var sortItem: UIBarButtonItem?
-    /// The sort waits for a thread worth ranking — see `CommentSortPolicy`.
+    /// The selector waits for a thread worth ranking — see `CommentSortPolicy`.
     private var isSortAvailable = false
     private let walletBadge = WalletBadgeButton()
     private var walletBadgeItem: UIBarButtonItem?
@@ -528,9 +529,8 @@ final class TextPostComposerViewController: UIViewController {
         closeItem = BarItems.icon(id: ItemID.close, image: UIImage(systemName: "xmark"), label: "Close") { [weak self] in
             self?.close()
         }
-        sortButton.reset()
-        sortButton.onOrderChange = { [weak panel] order in panel?.setCommentSortOrder(order) }
-        sortItem = BarItems.container(id: ItemID.sort, view: sortButton)
+        commentTabs.bind(to: panel)
+        sortItem = BarItems.container(id: ItemID.commentTabs, view: commentTabs.tabBar)
         applyLeadingItems(animated: true)
 
         // Your own post: there is nobody to follow.
@@ -566,7 +566,7 @@ final class TextPostComposerViewController: UIViewController {
         fitTrailingRun()
     }
 
-    /// [✕], and the sort beside it once the thread is worth sorting — the
+    /// [✕], and the Popular | Recent selector beside it once the thread has its tabs — the
     /// text page's leading group, with the fixed space that keeps two pills.
     private func applyLeadingItems(animated: Bool) {
         guard let closeItem else { return }
@@ -577,7 +577,7 @@ final class TextPostComposerViewController: UIViewController {
     }
 
     private func commentCountDidChange(_ count: Int) {
-        let available = CommentSortPolicy.isAvailable(commentCount: count)
+        let available = panel.showsPopular
         guard available != isSortAvailable else { return }
         isSortAvailable = available
         applyLeadingItems(animated: true)
@@ -596,7 +596,7 @@ final class TextPostComposerViewController: UIViewController {
         // The ✕ is a stock item now (#1679): a bar bubble, 44 wide.
         var budget = bar - 16 * 2 - (44 + pad) - pad
         if isSortAvailable {
-            budget -= sortButton.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + pad + Spacing.sm
+            budget -= commentTabs.width + pad + Spacing.sm
         }
         if walletBadgeItem != nil {
             budget -= walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + pad + Spacing.sm

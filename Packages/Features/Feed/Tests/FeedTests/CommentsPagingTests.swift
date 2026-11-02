@@ -518,22 +518,6 @@ struct CommentsPagingTests {
         #expect(merged.map(\.id) == ["new", "a", "b", "b-r", "c"])
     }
 
-    /// Trending ranks threads within their page: a busy thread arriving with
-    /// a later page stays below the rows already on screen.
-    @Test func trendingRanksThreadsWithinTheirPage() {
-        let entries = [
-            entry("a"),
-            entry("b"), entry("b-r0", parent: "b"),
-            entry("c"), entry("c-r0", parent: "c"), entry("c-r1", parent: "c"),
-        ]
-
-        let acrossPages = PostDetailViewModel.sortedForDisplay(entries, order: .trending, liked: [])
-        let withinPages = PostDetailViewModel.sortedForDisplay(entries, order: .trending, liked: [], pageStarts: ["c"])
-
-        #expect(acrossPages.filter { $0.parentID == nil }.map(\.id) == ["c", "b", "a"])
-        #expect(withinPages.filter { $0.parentID == nil }.map(\.id) == ["b", "a", "c"])
-    }
-
     // MARK: - The repository, against the mock
 
     /// The first request sends a page size, the next ones the token the

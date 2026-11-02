@@ -418,7 +418,7 @@ struct TextPostComposePageTests {
         let leading = page.composer.navigationItem.leftBarButtonItems ?? []
         #expect(leading.first?.accessibilityLabel == "Close")
         #expect(leading.first?.customView == nil, "the ✕ is a button in a custom view (#1679)")
-        #expect(!leading.contains { $0.customView is SnapCommentSortButton }, "no sort for a thread of none")
+        #expect(!leading.contains { $0.customView is PagedTabBar }, "no sort for a thread of none")
         #expect((page.composer.navigationItem.rightBarButtonItems ?? []).contains { $0.customView is SnapAuthorIdentityView })
         #expect(page.composer.toolbarItems?.first?.customView is SnapMediaAttributionView)
         let bar = try #require(Self.all(CommentsInputBar.self, in: page.panel.view).first)

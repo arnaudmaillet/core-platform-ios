@@ -167,28 +167,6 @@ struct CommentLikesTests {
         #expect(shown.model("a")?.isLiked == false)
     }
 
-    /// Trending does not re-rank on a tap — the row stays under the finger —
-    /// but the next sort change counts the like.
-    @Test func aTapDoesNotMoveTheRowUntilTheSortChanges() async {
-        let likes = FakeCommentLikes([:])
-        let (viewModel, shown) = await load(
-            [comment("a", at: 20), comment("b", at: 10), comment("b-r0", parent: "b", at: 11), comment("c", at: 0)],
-            likes: likes
-        )
-        viewModel.setCommentSort(.trending)
-        #expect(shown.ids == ["b", "b-r0", "a", "c"])
-
-        viewModel.likeComment(commentID: "c")
-        viewModel.likeComment(commentID: "c")
-        #expect(shown.ids == ["b", "b-r0", "a", "c"], "the row stays where it was tapped")
-        #expect(await settle { likes.calls.count == 1 })
-
-        viewModel.setCommentSort(.recent)
-        viewModel.setCommentSort(.trending)
-        // c: 1 (liked) ties b: 1 (a reply), and passes a: 0.
-        #expect(shown.ids == ["b", "b-r0", "c", "a"])
-    }
-
     /// Likes are read once per comment, and again for the comments a later
     /// emission brings.
     @Test func eachCommentsLikesAreReadOnce() async {
@@ -196,8 +174,6 @@ struct CommentLikesTests {
         let (viewModel, shown) = await load([comment("a"), comment("b")], likes: likes)
         #expect(await settle { shown.model("a")?.likeCount == 1 })
 
-        viewModel.setCommentSort(.trending)
-        viewModel.setCommentSort(.recent)
         try? await Task.sleep(for: .milliseconds(50))
 
         #expect(likes.reads.count == 1)
