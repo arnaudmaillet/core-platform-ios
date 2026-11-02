@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import CoreStorage
 import DesignSystem
+import EntityStore
 import FeedInterface
 import MediaCore
 import UIKit
@@ -202,6 +203,12 @@ final class ConversationThreadViewController: UIViewController {
     /// "+" (a tap follows), following, friends. Nil graphs draw none.
     private let socialGraph: (any SocialGraphWriting)?
     private let followRelations: (any SocialGraphReading)?
+    /// Where the viewer stands with each person, the app's one copy
+    /// (#2049): the pill starts from what is known there — the inbox row
+    /// that opened the thread knew it — and follows every change to it, a
+    /// follow from a profile card included.
+    private let entities: EntityStore?
+    private var peerObservation: EntityObservation?
     private var peerRelation: FollowRelation?
     /// Whom `peerRelation` was asked for, so a peer is asked once.
     private var relationAskedFor: ProfileID?
@@ -280,8 +287,10 @@ final class ConversationThreadViewController: UIViewController {
         prefill: String,
         imagePipeline: ImagePipeline,
         socialGraph: (any SocialGraphWriting)? = nil,
-        followRelations: (any SocialGraphReading)? = nil
+        followRelations: (any SocialGraphReading)? = nil,
+        entities: EntityStore? = nil
     ) {
+        self.entities = entities
         self.driver = driver
         self.mode = mode
         self.prefill = prefill
@@ -303,6 +312,7 @@ final class ConversationThreadViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         configureCollectionView()
+        observeContentSize()
         if mode == .full {
             configureComposer()
             configureToolbar()
@@ -330,8 +340,20 @@ final class ConversationThreadViewController: UIViewController {
         // Before the bars first lay it out, not only after: a budget that
         // arrives late is a bar that has already collapsed into a `•••`.
         fitTrailingRun()
+        // And laid out at that width before the push's animation takes it:
+        // the push fades the pill in, nothing inside it moves.
+        peerPill.settleLayout()
         // Back from their profile, the relation may have moved.
         resolvePeerRelation(refresh: true)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !hasAppeared else { return }
+        hasAppeared = true
+        // The rows that came on screen with it have sized themselves by now;
+        // a turn later, the tail is the conversation's own again.
+        DispatchQueue.main.async { [weak self] in self?.holdsTail = false }
     }
 
     override func viewIsAppearing(_ animated: Bool) {
@@ -362,15 +384,25 @@ final class ConversationThreadViewController: UIViewController {
             }
             return
         }
-        syncBottomClearance()
-        // In the same pass as the clearance (#1799): a composer the keyboard
-        // or a growing field moves carries a short transcript with it, the
-        // slack absorbing the travel. A finger scrubbing the keyboard down
-        // owns the offset; the bounce back puts it where it rests.
-        syncBottomAnchor(movesOffset: !collectionView.isTracking)
-        syncDayItem()
-        // After the clearance, in the same pass: see `pinToTail`.
-        if owesTailPin { pinToTail() }
+        // ⚠️ NOT UNDER A PUSH'S ANIMATION (the owner's device, 2026-11-02):
+        // the push lays the screen out inside its own animation block, and the
+        // offset set here rode it — the conversation came in high and
+        // scrolled down to its place. Under a transition it is simply where
+        // it rests from the first frame; the keyboard's travel keeps riding
+        // the keyboard (no transition then).
+        let layOut = {
+            self.syncBottomClearance()
+            // In the same pass as the clearance (#1799): a composer the
+            // keyboard or a growing field moves carries a short transcript
+            // with it, the slack absorbing the travel. A finger scrubbing the
+            // keyboard down owns the offset; the bounce back puts it where it
+            // rests.
+            self.syncBottomAnchor(movesOffset: !self.collectionView.isTracking)
+            self.syncDayItem()
+            // After the clearance, in the same pass: see `pinToTail`.
+            if self.owesTailPin { self.pinToTail() }
+        }
+        if transitionCoordinator != nil { UIView.performWithoutAnimation(layOut) } else { layOut() }
     }
 
     /// Where a day's first message rests after a tap on the bar's day,
@@ -496,6 +528,7 @@ final class ConversationThreadViewController: UIViewController {
     /// Scrolls to the start of the bar's day — its chip in the flow, then
     /// its first message — landing just below the bar (#750, #755).
     private func scrollToDayStart() {
+        holdsTail = false
         guard let day = dayShown,
               let section = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .day(day)),
               collectionView.numberOfItems(inSection: section) > 0
@@ -1146,7 +1179,11 @@ final class ConversationThreadViewController: UIViewController {
         // `deliveredIDs`: a delivery that landed mid-rise plays on the
         // pending row and never enters `deliveredIDs` — and its swap
         // cross-faded, a dim on the row and its avatar (#756).
+        // ⚠️ AND NOT WHILE THE SCREEN IS COMING IN: a refresh landing under the
+        // push re-laid the rows out animated, so the conversation moved as it
+        // arrived. Nothing the viewer has seen changes then.
         let animatedApply = hasRenderedContent && anchor == nil && swappedIDs.isEmpty
+            && transitionCoordinator == nil
         applySnapshot(animated: animatedApply)
         // The slack follows the content (#1799): a message arriving or deleted
         // in a short transcript slides the others in the apply's animation.
@@ -1167,7 +1204,7 @@ final class ConversationThreadViewController: UIViewController {
         if isFirstContent {
             pinToTail()
         } else if newestChanged, !newestSwapped, newest?.isMine == true || isNearBottom {
-            scrollToBottom(animated: true)
+            if transitionCoordinator == nil { scrollToBottom(animated: true) } else { pinToTail() }
         }
     }
 
@@ -1399,16 +1436,33 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     private func adoptPeer(_ person: ConversationThreadPerson) {
+        // KNOWN FIRST (#2049): what the app already holds for them — the
+        // inbox row taught it their @handle and face — fills what the driver
+        // has not read yet, so the pill comes in whole instead of filling in.
+        let known = person.id.flatMap { entities?.knownIdentity(of: $0, stub: nil) }
+        let person = ConversationThreadPerson(
+            id: person.id,
+            name: person.name.isEmpty ? known?.displayName ?? "" : person.name,
+            avatarURL: person.avatarURL ?? known?.avatarURL,
+            handle: person.handle ?? known?.handle.flatMap { $0.isEmpty ? nil : $0 }
+        )
         peer = person
         // Named for VoiceOver, not drawn: no title in the bar.
         view.accessibilityLabel = person.name.isEmpty ? nil : "Conversation with \(person.name)"
         // The @handle under the name once known (#752), as a vertical post's
         // author pill wears it.
         let meta = person.handle.map { "@\($0)" } ?? ""
+        // Only a change on a pill on screen and settled moves: what arrives
+        // while the push brings it in is drawn as it is (`setPerson`).
+        let settled = view.window != nil && transitionCoordinator == nil
         peerPill.setPerson(
-            id: person.id, name: person.name, meta: meta, avatarURL: person.avatarURL, pipeline: imagePipeline
+            id: person.id, name: person.name, meta: meta, avatarURL: person.avatarURL, pipeline: imagePipeline,
+            animated: settled
         )
-        if person.id != relationAskedFor { setPeerRelation(nil) }
+        // Not on screen yet, or a push bringing it in: laid out now, so the
+        // push only fades it in (`settleLayout`).
+        if !settled { peerPill.settleLayout() }
+        if person.id != relationAskedFor { startFromKnownRelation(of: person.id) }
         resolvePeerRelation()
         fitTrailingRun()
         if hasRenderedContent { applySnapshot(animated: false) }
@@ -1525,6 +1579,36 @@ final class ConversationThreadViewController: UIViewController {
         collectionView.contentOffset.y = frame.minY - anchor.offset
     }
 
+    /// ⚠️ THE TAIL HOLDS WHILE THE ROWS SIZE THEMSELVES (the owner's device,
+    /// 2026-11-02). A long conversation is pinned on estimated heights; its
+    /// rows then size for real as they come on screen — under the push — and
+    /// each one moved the content under a fixed offset: the conversation came
+    /// in high and slid down to its place. A short one, all on screen at the
+    /// pin, never moved. Until the reader scrolls (or the screen scrolls to a
+    /// day or a quote), every change of the content's height keeps the
+    /// newest message where it rests, at once.
+    private var holdsTail = false
+    /// Once the screen has come in: the tail is held for its arrival only —
+    /// a message landing while the reader reads keeps its own animated scroll.
+    private var hasAppeared = false
+    private var contentSizeObservation: NSKeyValueObservation?
+
+    private func observeContentSize() {
+        contentSizeObservation = collectionView.observe(\.contentSize, options: [.old, .new]) { [weak self] _, change in
+            guard change.oldValue?.height != change.newValue?.height else { return }
+            MainActor.assumeIsolated { self?.keepTail() }
+        }
+    }
+
+    private func keepTail() {
+        guard holdsTail, hasRenderedContent, !owesTailPin, !collectionView.isTracking,
+              !collectionView.isDecelerating else { return }
+        let insets = collectionView.adjustedContentInset
+        let tail = max(-insets.top, collectionView.contentSize.height + insets.bottom - collectionView.bounds.height)
+        guard abs(collectionView.contentOffset.y - tail) > 0.5 else { return }
+        UIView.performWithoutAnimation { collectionView.contentOffset.y = tail }
+    }
+
     private var isNearBottom: Bool {
         let insets = collectionView.adjustedContentInset
         let visibleBottom = collectionView.contentOffset.y + collectionView.bounds.height - insets.bottom
@@ -1562,11 +1646,16 @@ final class ConversationThreadViewController: UIViewController {
             return
         }
         owesTailPin = false
-        for _ in 0..<4 {
-            let heightBefore = collectionView.contentSize.height
-            scrollToBottom(animated: false)
-            collectionView.layoutIfNeeded()
-            if abs(collectionView.contentSize.height - heightBefore) < 0.5 { break }
+        if !hasAppeared { holdsTail = true }
+        // Never animated, whatever block it runs in: the tail is where the
+        // conversation IS, not somewhere it travels to.
+        UIView.performWithoutAnimation {
+            for _ in 0..<4 {
+                let heightBefore = collectionView.contentSize.height
+                scrollToBottom(animated: false)
+                collectionView.layoutIfNeeded()
+                if abs(collectionView.contentSize.height - heightBefore) < 0.5 { break }
+            }
         }
     }
 
@@ -1581,6 +1670,7 @@ final class ConversationThreadViewController: UIViewController {
     /// computed here, so the method knows which of the two cases it is in.
     private func scrollToMessage(_ messageID: String) {
         guard let indexPath = dataSource.indexPath(for: .message(messageID)) else { return }
+        holdsTail = false
         pendingFlashID = messageID
         collectionView.layoutIfNeeded()
         guard let row = collectionView.layoutAttributesForItem(at: indexPath)?.frame else { return }
@@ -1803,6 +1893,8 @@ extension ConversationThreadViewController: UICollectionViewDelegate {
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // The reader's own scroll: the conversation no longer holds its tail.
+        holdsTail = false
         contextMenu.endTextSelection()
         // The reader took over: a flash landing after their own scroll would
         // point at something they have moved away from.
@@ -1843,8 +1935,36 @@ extension ConversationThreadViewController {
         Task { [weak self] in
             guard let relation = try? await followRelations.followRelation(to: id) else { return }
             guard let self, self.peer.id == id, !self.followInFlight, self.relationGeneration == generation else { return }
+            // The graph's answer, for every surface showing them (#2049).
+            self.entities?.setRelation(relation, for: id)
             self.setPeerRelation(relation)
         }
+    }
+
+    /// A new correspondent: the relation already known for them, drawn at
+    /// once, from the first frame — no wait for the read, which then only
+    /// confirms it (#2049, the owner 2026-11-02: the inbox row knew it). And
+    /// from now on, every change to it in the store: a follow made from a
+    /// profile card over the thread, from their profile, anywhere.
+    private func startFromKnownRelation(of id: ProfileID?) {
+        let known = id.flatMap { entities?.relation(to: $0) }
+        peerRelation = known
+        peerPill.setFollowBadge(Self.badge(for: known), animated: false)
+        peerObservation?.cancel()
+        peerObservation = id.flatMap { id in
+            entities?.observeProfile(id) { [weak self] _ in self?.knownRelationDidChange(for: id) }
+        }
+    }
+
+    /// The store's relation for the correspondent moved — a follow, a
+    /// request, an unfollow made elsewhere, or a viewer change. The thread's
+    /// own follow in flight draws its own answer.
+    private func knownRelationDidChange(for id: ProfileID) {
+        guard peer.id == id, !followInFlight, let entities else { return }
+        let known = entities.relation(to: id)
+        guard known != peerRelation else { return }
+        relationGeneration += 1
+        setPeerRelation(known)
     }
 
     /// Either way the badge's symbol is replaced and nothing else moves
@@ -1905,31 +2025,23 @@ extension ConversationThreadViewController {
               SnapAuthorIdentityView.FollowBadge(before) == .follow else { return }
         followInFlight = true
         relationGeneration += 1
-        setPeerRelation(before.settingFollow(true), tapped: true)
-        // On at the optimistic flip (#1886).
-        Haptics.play(.toggleOn)
         // Named now: the peer can change before the graph answers.
-        let name = peer.handle.map { "@" + $0 } ?? (peer.name.isEmpty ? nil : peer.name)
-        Task { [weak self] in
-            let outcome = try? await socialGraph.follow(id)
+        let message = PlusFollow.failureMessage(handle: peer.handle, name: peer.name)
+        // The inbox's "+" follows the same way (#2049): one seam, `PlusFollow`.
+        PlusFollow.commit(id, from: before, through: socialGraph, apply: { [weak self] relation in
+            guard let self else { return }
+            // Every surface showing them follows the tap (#2049).
+            self.entities?.setRelation(relation, for: id)
+            guard self.peer.id == id else { return }
+            self.setPeerRelation(relation, tapped: true)
+        }, completion: { [weak self] failed in
             guard let self else { return }
             self.followInFlight = false
-            // A private correspondent was asked, not followed (#968): the
-            // followed mark becomes the pending one.
-            if outcome == .requested, self.peer.id == id { self.setPeerRelation(.requested, tapped: true) }
-            if outcome == nil {
-                if self.peer.id == id { self.setPeerRelation(before, tapped: true) }
-                // Said either way (#802): a "+" that comes back without a
-                // word reads as a glitch. Over the composer, as the mute's is.
-                Feedback.failure(
-                    name.map { "Couldn't follow \($0)" } ?? "Couldn't follow",
-                    from: self,
-                    above: self.composeBar.inputRowView
-                )
-            }
+            // Said either way (#802), over the composer, as the mute's is.
+            if failed { Feedback.failure(message, from: self, above: self.composeBar.inputRowView) }
             // The peer changed mid-follow: its relation was never asked.
             if self.peer.id != id { self.resolvePeerRelation() }
-        }
+        })
     }
 
     /// The pill's relation badge. Tests.

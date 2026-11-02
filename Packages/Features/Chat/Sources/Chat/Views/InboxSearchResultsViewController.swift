@@ -57,14 +57,21 @@ final class InboxSearchResultsViewController: UIViewController {
     /// these rows drew initials only, never a face).
     private var avatarLookups: [ObjectIdentifier: (id: ProfileID, task: Task<Void, Never>)] = [:]
 
+    /// The peers' relations, for the conversation rows' mark (#2049) — the
+    /// inbox's own cache, so a follow made in one shows in the other.
+    private let relations: InboxRelations?
+
     init(
         viewModel: InboxSearchViewModel,
         imagePipeline: ImagePipeline? = nil,
-        avatars: (any PeerAvatarProviding)? = nil
+        avatars: (any PeerAvatarProviding)? = nil,
+        relations: InboxRelations? = nil
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
-        self.avatars = avatars
+        // The faces the rows read are kept for the thread they open (#2049).
+        self.avatars = relations?.recording(avatars) ?? avatars
+        self.relations = relations
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -80,6 +87,7 @@ final class InboxSearchResultsViewController: UIViewController {
         configureStatusView()
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        relations?.observe(by: self) { [weak self] peers in self?.applyRelations(of: peers) }
         viewModel.onPeoplePagingChange = { [weak self] paging in self?.setPeoplePaging(paging) }
         render(.prompt)
     }
@@ -123,7 +131,11 @@ final class InboxSearchResultsViewController: UIViewController {
             ConversationResultCell, ConversationID
         > { [weak self] cell, _, id in
             guard let self, let model = self.viewModel.conversationModels[id] else { return }
-            cell.configure(with: model, imagePipeline: self.imagePipeline, avatars: self.avatars)
+            self.relations?.saw(model)
+            cell.configure(
+                with: model, imagePipeline: self.imagePipeline, avatars: self.avatars,
+                mark: self.relations?.mark(for: model.peerID) ?? .none, onFollow: self.followHandler(for: model)
+            )
         }
 
         let personRegistration = UICollectionView.CellRegistration<
@@ -305,6 +317,27 @@ final class InboxSearchResultsViewController: UIViewController {
         collectionView.setContentOffset(CGPoint(x: 0, y: target), animated: true)
     }
 
+    // MARK: - The relation mark (#2049)
+
+    /// The conversation rows on screen whose peer's relation changed.
+    /// `peers` nil: every row (a viewer change).
+    private func applyRelations(of peers: Set<ProfileID>?) {
+        guard let relations else { return }
+        for case let cell as ConversationResultCell in collectionView.visibleCells {
+            guard let peer = cell.peerID, peers?.contains(peer) ?? true else { continue }
+            cell.setRelationMark(relations.mark(for: peer), animated: true)
+        }
+    }
+
+    /// The "+" on `model`'s face.
+    private func followHandler(for model: ConversationDisplayModel) -> (() -> Void)? {
+        guard let relations, relations.isEnabled, let peer = model.peerID else { return nil }
+        return { [weak self, weak relations] in
+            guard let self else { return }
+            relations?.follow(peer, handle: model.peerHandle, name: model.title, from: self)
+        }
+    }
+
     private func showStatus(
         symbol: String, title: String, message: String,
         actionTitle: String? = nil, action: (() -> Void)? = nil
@@ -321,6 +354,12 @@ extension InboxSearchResultsViewController: UICollectionViewDelegate {
     /// the next page. The view model ignores it when there is none, or one is
     /// already on its way.
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        // A conversation row's peer: its relation, for the face's mark
+        // (#2049). Asked once; the cache dedups.
+        if case .conversation(let id) = dataSource.itemIdentifier(for: indexPath),
+           let peer = viewModel.conversationModels[id]?.peerID {
+            relations?.resolve([peer])
+        }
         guard case .person = dataSource.itemIdentifier(for: indexPath),
               visibleSections[safe: indexPath.section] == .people,
               indexPath.item >= collectionView.numberOfItems(inSection: indexPath.section) - Self.nearEndRowCount

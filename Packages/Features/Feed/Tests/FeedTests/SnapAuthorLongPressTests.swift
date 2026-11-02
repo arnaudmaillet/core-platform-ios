@@ -22,7 +22,7 @@ struct SnapAuthorLongPressTests {
     @Test func aHoldHandsOverTheShownAuthor() {
         let pill = SnapAuthorIdentityView()
         let ada = ProfileID("prof-ada")
-        pill.setPerson(id: ada, name: "Ada", meta: "@ada", avatarURL: nil, pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        pill.setPerson(id: ada, name: "Ada", meta: "@ada", avatarURL: nil, pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), animated: true)
         var held: [ProfileID] = []
         var tapped: [ProfileID] = []
         pill.onAuthorLongPressed = { held.append($0) }

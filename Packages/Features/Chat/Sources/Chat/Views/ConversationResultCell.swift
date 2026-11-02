@@ -32,21 +32,46 @@ final class ConversationResultCell: UICollectionViewListCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         rowView.prepareForReuse()
+        peerID = nil
     }
 
-    /// Same contract as the inbox rows: initials now, picture when it lands.
+    /// The peer this cell shows, for a relation that changes (#2049).
+    private(set) var peerID: ProfileID?
+
+    /// Same contract as the inbox rows: initials now, picture when it lands,
+    /// and the face's relation mark with its "+" (#2049).
     func configure(
         with model: ConversationDisplayModel,
         imagePipeline: ImagePipeline? = nil,
-        avatars: (any PeerAvatarProviding)? = nil
+        avatars: (any PeerAvatarProviding)? = nil,
+        mark: PersonPill.Badge = .none,
+        onFollow: (() -> Void)? = nil
     ) {
+        peerID = model.peerID
         accessibilityLabel = rowView.configure(
-            with: model, imagePipeline: imagePipeline, avatars: avatars
+            with: model, imagePipeline: imagePipeline, avatars: avatars, mark: mark
         )
+        rowView.onFollowTapped = onFollow
         // ⚠️ No accessories. The row draws its own time and glyphs in its
         // trailing column now, and a list cell's accessories sit OUTSIDE
         // `contentView` — leaving one here would put a second time label beside
         // the row's own and shorten the content by its width.
         accessories = []
+    }
+
+    /// VoiceOver's actions: the system's own (a table's swipe actions) and,
+    /// while the face shows the "+", "Follow" (#2049) — added, never in
+    /// their place.
+    override var accessibilityCustomActions: [UIAccessibilityCustomAction]? {
+        get {
+            let actions = (super.accessibilityCustomActions ?? []) + (rowView.followAccessibilityActions ?? [])
+            return actions.isEmpty ? nil : actions
+        }
+        set { super.accessibilityCustomActions = newValue }
+    }
+
+    /// The face's relation, changed on screen (#2049).
+    func setRelationMark(_ mark: PersonPill.Badge, animated: Bool) {
+        rowView.setRelationMark(mark, animated: animated)
     }
 }

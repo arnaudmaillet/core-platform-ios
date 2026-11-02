@@ -1801,6 +1801,13 @@ final class AppContainer {
         searchClient: Search_V1_SearchServiceClient(client: authenticatedRPCClient)
     )
 
+    /// Where the viewer stands with each inbox peer, for the rows' mark and
+    /// its "+" (#2049): one read per peer, kept in `entityStore` — the one
+    /// copy every surface reads, wiped with the viewer's facts.
+    private lazy var inboxRelations = InboxRelations(
+        entities: entityStore, reader: profileRepository, writer: profileRepository
+    )
+
     private(set) lazy var chatFeature: any ChatFeatureBuilding = ChatFeatureBuilder(
         repository: chatRepository,
         connections: socialConnectionsRepository,
@@ -1813,6 +1820,7 @@ final class AppContainer {
         mediaPicker: chatMediaPicker,
         // The inbox and the last 50 conversations × 200 messages (#897).
         localStore: localStore,
+        relations: inboxRelations,
         // A conversation is drawn by the feed's text-post screen. Lazy, like
         // every feature here: the feed builder reaches the router, and the
         // router reaches this.

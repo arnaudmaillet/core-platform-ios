@@ -31,8 +31,7 @@ struct FeedHapticRolesTests {
         let pill = SnapAuthorIdentityView()
         pill.setPerson(
             id: ProfileID("prof-ada"), name: "Ada", meta: "@ada", avatarURL: nil,
-            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
-        )
+            pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), animated: true)
         pill.onAuthorLongPressed = { _ in }
         let played = recorded { _ in pill.debugLongPress() }
         #expect(played == [.held])
