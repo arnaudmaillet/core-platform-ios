@@ -355,7 +355,7 @@ class WalletStakeCell: UICollectionViewListCell {
                 "+\(earned)", glyph: GemSymbol.glyphImage(), font: resultFont, color: GemSymbol.textColor
             ))
             detailLabel.attributedText = detail(" staked · \(ago)")
-            spoken = [staked, ago, earned == 1 ? "earned 1 gem" : "earned \(earned) gems"]
+            spoken = [staked, ago, "earned \(GemSymbol.amount(earned))"]
         case .noReward, .notRewarded:
             result.append(words("No reward"))
             detailLabel.attributedText = detail(" staked · \(ago)")
@@ -525,7 +525,7 @@ final class WalletEmptyStakesCell: UICollectionViewListCell {
         title.textAlignment = .center
         let body = UILabel()
         let hours = Int(WalletStore.Policy.settlementDelay / 3600)
-        body.text = "Stake likes on a post you believe in. Each stake settles \(hours) hours later — and may earn gems."
+        body.text = "Stake likes on a post you believe in. Each stake settles \(hours) hours later — and may earn crowns."
         body.font = .scaledSystemFont(ofSize: 13, relativeTo: .footnote)
         body.adjustsFontForContentSizeCategory = true
         body.textColor = .secondaryLabel

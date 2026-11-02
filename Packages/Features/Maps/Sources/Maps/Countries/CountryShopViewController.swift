@@ -394,7 +394,7 @@ public final class CountryShopViewController: UIViewController {
             cell.accessories = [accessory]
         }
         cell.accessibilityLabel = "\(country.name), rank \(standing.rank), \(standing.likes) likes"
-            + (access.isUnlocked(code) ? ", unlocked" : ", \(standing.price) gems")
+            + (access.isUnlocked(code) ? ", unlocked" : ", \(GemSymbol.amount(standing.price))")
     }
 
     /// "◆ 50", the tap opening the offer. Out of reach it is the button's
@@ -402,7 +402,7 @@ public final class CountryShopViewController: UIViewController {
     /// and it comes back the moment the balance covers it (the shop
     /// reconfigures its rows on every balance change).
     private func priceButton(for country: CountryAtlas.Country, price: Int) -> AppButton {
-        let button = priceButton(price: price, accessibilityLabel: "Unlock \(country.name) for \(price) gems")
+        let button = priceButton(price: price, accessibilityLabel: "Unlock \(country.name) for \(GemSymbol.amount(price))")
         button.isEnabled = access.gems >= price
         button.addAction(UIAction { [weak self] _ in self?.offer(country) }, for: .primaryActionTriggered)
         return button
@@ -462,7 +462,7 @@ public final class CountryShopViewController: UIViewController {
             cell.accessories = [button.cellAccessory()]
         }
         cell.accessibilityLabel = "\(StakePackRowCell.title(offer)), \(StakePackRowCell.detail(offer))"
-        cell.accessibilityValue = offer.isActive ? Self.activeText(offer) : "\(offer.price) gems"
+        cell.accessibilityValue = offer.isActive ? Self.activeText(offer) : GemSymbol.amount(offer.price)
     }
 
     /// "Active — 7 left".
@@ -489,7 +489,7 @@ public final class CountryShopViewController: UIViewController {
     ) -> AppButton {
         let gems = access.gems
         let buy = UIAction(
-            title: "Buy for \(offer.price) gems",
+            title: "Buy for \(GemSymbol.amount(offer.price))",
             image: GemSymbol.glyphImage()
         ) { _ in confirmed() }
         if access.purchasesRestricted {
@@ -497,14 +497,14 @@ public final class CountryShopViewController: UIViewController {
             buy.subtitle = PurchaseRestriction.message
         } else if gems < offer.price {
             buy.attributes = .disabled
-            buy.subtitle = "\(offer.price - gems) more gems needed"
+            buy.subtitle = "\(GemSymbol.more(offer.price - gems)) needed"
         }
         let menu = UIMenu(
             title: "\(StakePackRowCell.title(offer)) — \(StakePackRowCell.detail(offer))", children: [buy]
         )
         let button = priceButton(
             price: offer.price,
-            accessibilityLabel: "Buy \(StakePackRowCell.title(offer)) for \(offer.price) gems",
+            accessibilityLabel: "Buy \(StakePackRowCell.title(offer)) for \(GemSymbol.amount(offer.price))",
             menu: menu
         )
         button.isEnabled = access.purchasesRestricted || gems >= offer.price
@@ -559,7 +559,7 @@ public final class CountryShopViewController: UIViewController {
             return "Your pack is still active, \(shotsLeft) left"
         case .insufficientGems(let needed, let have):
             let missing = max(needed - have, 1)
-            return missing == 1 ? "1 more gem needed" : "\(missing) more gems needed"
+            return "\(GemSymbol.more(missing)) needed"
         case .unavailable:
             return ShopPurchaseFeedback.unreachable
         }
@@ -678,11 +678,11 @@ public final class CountryShopViewController: UIViewController {
         balance.isLayoutMarginsRelativeArrangement = true
         balance.directionalLayoutMargins = .init(top: 0, leading: Spacing.sm, bottom: 0, trailing: Spacing.sm)
         balance.isAccessibilityElement = true
-        balance.accessibilityLabel = "\(gems) gems"
+        balance.accessibilityLabel = GemSymbol.amount(gems)
         let fitted = balance.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
         balance.frame.size = CGSize(width: ceil(fitted.width), height: 36)
         let item = BarItems.container(id: balanceItemIdentifier, view: balance)
-        item.accessibilityLabel = "\(gems) gems"
+        item.accessibilityLabel = GemSymbol.amount(gems)
         return item
     }
 

@@ -87,7 +87,7 @@ struct CountryUnlockToolbarTests {
         #expect(!unlock.isEnabled)
         #expect(unlock.accessibilityTraits.contains(.notEnabled))
         let labels = Self.descendants(of: sheet.view).compactMap { ($0 as? UILabel)?.text }
-        #expect(labels.contains("You need 40 more gems"))
+        #expect(labels.contains("You need 40 more crowns"))
     }
 
     /// Holds its unlock until the test lets it answer, then fails it.

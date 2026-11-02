@@ -123,7 +123,7 @@ final class WalletSheetUITests: XCTestCase {
         let smallTop = close.frame.minY
         XCTAssertGreaterThan(smallTop, app.windows.firstMatch.frame.height / 4, "Rewards did not open collapsed")
         app.buttons["wallet.activity"].tap()
-        let gems = app.segmentedControls.buttons["Gems"]
+        let gems = app.segmentedControls.buttons["Crowns"]
         XCTAssertTrue(gems.waitForExistence(timeout: 8), "the Activity door did not push the history")
         XCTAssertFalse(app.navigationBars["Wallet and Purchases"].exists, "the history kept its title")
         app.navigationBars.firstMatch.buttons.element(boundBy: 0).tap()

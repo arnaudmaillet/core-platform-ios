@@ -368,6 +368,6 @@ final class WalletActionTile: UIControl {
         top.attributedText = line
         title.text = "Shop"
         accessibilityLabel = "Shop"
-        accessibilityValue = "\(gems.formatted()) gems"
+        accessibilityValue = GemSymbol.amount(gems)
     }
 }

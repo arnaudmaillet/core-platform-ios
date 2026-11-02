@@ -294,11 +294,11 @@ final class CountryUnlockSheetViewController: UIViewController {
     private func refreshBalance(price: Int) {
         let gems = access.gems
         if gems >= price {
-            balanceLabel.text = "You have \(gems) gems"
+            balanceLabel.text = "You have \(GemSymbol.amount(gems))"
             balanceLabel.textColor = .secondaryLabel
             unlockControl?.isEnabled = true
         } else {
-            balanceLabel.text = "You need \(price - gems) more gems"
+            balanceLabel.text = "You need \(GemSymbol.more(price - gems))"
             balanceLabel.textColor = .systemRed
             unlockControl?.isEnabled = false
         }
@@ -327,7 +327,7 @@ final class CountryUnlockSheetViewController: UIViewController {
             refreshBalance(price: needed)
         case .priceChanged(let price):
             // The new price, to confirm again (#1475): nothing was charged.
-            Feedback.failure("The price changed: now \(price) gems. Nothing was charged.", from: self)
+            Feedback.failure("The price changed: now \(GemSymbol.amount(price)). Nothing was charged.", from: self)
             installUnlock(price: price)
         case .failed:
             Feedback.failure(ShopPurchaseFeedback.unreachable, from: self)

@@ -203,7 +203,7 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
                        symbol: "hourglass", section: .activity),
             Protection(title: "Quiet Hours", detail: "No notifications from 22:00 to 07:00.",
                        symbol: "moon", section: .notifications),
-            Protection(title: "Purchases", detail: "Off until 18: gems can't be bought or spent.",
+            Protection(title: "Purchases", detail: "Off until 18: crowns can't be bought or spent.",
                        symbol: "cart.badge.minus", section: nil),
         ]
     }

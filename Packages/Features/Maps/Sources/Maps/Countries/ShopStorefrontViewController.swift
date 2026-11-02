@@ -305,7 +305,7 @@ public final class ShopStorefrontViewController: UIViewController {
     /// with why, out of reach, while another pack is loaded, or for an
     /// account that may not buy.
     func packMenu(_ offer: StakePackOffer, blockedBy loaded: StakePackOffer?) -> UIMenu {
-        let buy = UIAction(title: "Buy for \(offer.price) gems", image: GemSymbol.glyphImage()) { [weak self] _ in
+        let buy = UIAction(title: "Buy for \(GemSymbol.amount(offer.price))", image: GemSymbol.glyphImage()) { [weak self] _ in
             guard let self else { return }
             MemberGates.perform(.shop, from: self) { [weak self] in
                 Task { [weak self] in await self?.buyStakePack(offer) }
@@ -321,7 +321,7 @@ public final class ShopStorefrontViewController: UIViewController {
                 : "Packs don't stack: \(loaded.shotsLeft) shots left in yours"
         } else if access.gems < offer.price {
             buy.attributes = .disabled
-            buy.subtitle = "\(offer.price - access.gems) more gems needed"
+            buy.subtitle = "\(GemSymbol.more(offer.price - access.gems)) needed"
         }
         return UIMenu(title: "\(ShopPackCardView.shotsTitle(offer)) — \(ShopPackCardView.shotsDetail(offer))", children: [buy])
     }
@@ -359,7 +359,7 @@ public final class ShopStorefrontViewController: UIViewController {
             return UIMenu(title: item.shopTitle, children: [used])
         }
         let price = profileItems?.price(of: item) ?? item.gemPrice
-        let buy = UIAction(title: "Buy for \(price) gems", image: GemSymbol.glyphImage()) { [weak self] _ in
+        let buy = UIAction(title: "Buy for \(GemSymbol.amount(price))", image: GemSymbol.glyphImage()) { [weak self] _ in
             guard let self else { return }
             MemberGates.perform(.shop, from: self) { [weak self] in
                 Task { [weak self] in await self?.buyItem(item) }
@@ -370,7 +370,7 @@ public final class ShopStorefrontViewController: UIViewController {
             buy.subtitle = PurchaseRestriction.message
         } else if access.gems < price {
             buy.attributes = .disabled
-            buy.subtitle = "\(price - access.gems) more gems needed"
+            buy.subtitle = "\(GemSymbol.more(price - access.gems)) needed"
         }
         return UIMenu(title: "\(item.shopTitle) — yours for good", children: [buy])
     }
@@ -429,7 +429,7 @@ public final class ShopStorefrontViewController: UIViewController {
     }
 
     /// Where gems come from — the Shop never sells them (charter §26, §34).
-    static let earnGemsText = "Gems are earned: stake likes on posts, and win when they're rewarded."
+    static let earnGemsText = "Crowns are earned: stake likes on posts, and win when they're rewarded."
 
     /// The Countries shelf: LOCKED countries only (unlocked ones are on the
     /// map and in See all) — the one the device is in first, then by rank,
@@ -460,7 +460,7 @@ public final class ShopStorefrontViewController: UIViewController {
             backdropFlag: CountryShopViewController.flagImage(for: country, pointSize: 160)
         )
         card.onOpen = { [weak self] in self?.openCountry(country) }
-        card.accessibilityLabel = "\(country.name), rank \(standing.rank), \(standing.likes) likes, \(standing.price) gems"
+        card.accessibilityLabel = "\(country.name), rank \(standing.rank), \(standing.likes) likes, \(GemSymbol.amount(standing.price))"
         if let images = media?.images { card.loadPoster(with: images) }
         return card
     }
@@ -1422,7 +1422,7 @@ final class ShopPackCardView: ShopCardView {
             badgeLabel.leadingAnchor.constraint(equalTo: chip.leadingAnchor, constant: 6),
             badgeLabel.trailingAnchor.constraint(equalTo: chip.trailingAnchor, constant: -6),
         ])
-        let state = offer.isActive ? CountryShopViewController.activeText(offer) : "\(offer.price) gems"
+        let state = offer.isActive ? CountryShopViewController.activeText(offer) : GemSymbol.amount(offer.price)
         accessibilityLabel = [Self.shotsTitle(offer), Self.shotsDetail(offer), bestValue && !offer.isActive ? "best value" : nil, state]
             .compactMap { $0 }.joined(separator: ", ")
     }
@@ -1543,7 +1543,7 @@ final class ShopProfileItemCardView: ShopCardView {
             foot.topAnchor.constraint(greaterThanOrEqualTo: priceBubble.topAnchor, constant: 6),
         ])
         accessibilityLabel = "\(item.shopTitle). \(item.shopDetail)"
-        accessibilityValue = owned ? "Owned" : "\(price) gems"
+        accessibilityValue = owned ? "Owned" : GemSymbol.amount(price)
     }
 
     @available(*, unavailable)

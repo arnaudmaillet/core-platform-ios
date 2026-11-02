@@ -1,6 +1,8 @@
 # Wallet: likes, gems, the hourly claim and stakes (`wallet.v1`)
 
 > The app's currency A is **likes** (#1397). The wire keeps its field names (`points`, `points_cap`, `points_per_shot`, `points_earned`/`_spent`): they are the backend's contract, renamed only by a backend change.
+>
+> Currency B, **gems** on the wire and in the code, is shown to the user as **Crowns** since #2072. The contract keeps its names.
 
 **Status (2026-10-31, #841):** the backend wallet exists, and a member's wallet is the server's end to end — balance, claim, stakes, their list and history, the stake packs and the gem catalogue. Only gem *minting* is still shadow (§7). It is `wallet.v1` on the client edge (backend #665 and the follow-ups below), published on `buf.build/core-platform/contracts`. This document used to be the iOS team's *request* for that service. It now records **what the app binds to**, and what the client still keeps locally.
 

@@ -168,7 +168,7 @@ final class EditProfileViewController: UIViewController {
             content.image = UIImage(systemName: "play.rectangle")
             switch self?.viewModel.videoBannerRow {
             case .locked(let price)?:
-                content.secondaryText = "\(price) gems"
+                content.secondaryText = GemSymbol.amount(price)
                 cell.accessories = [.customView(configuration: .init(
                     customView: UIImageView(image: UIImage(systemName: "lock.fill")), placement: .trailing()
                 )), .disclosureIndicator()]
@@ -604,9 +604,9 @@ extension EditProfileViewController {
     private func presentVideoBannerOffer(price: Int) {
         let gems = viewModel.gems
         var message = "A muted loop from one of your own videos plays at the top of your profile. Bought once, yours for good."
-        if gems < price { message += "\n\nYou have \(gems) gems: \(price - gems) more needed." }
+        if gems < price { message += "\n\nYou have \(GemSymbol.amount(gems)): \(GemSymbol.more(price - gems)) needed." }
         let sheet = UIAlertController(title: "Video Banner", message: message, preferredStyle: .actionSheet)
-        let buy = UIAlertAction(title: "Buy for \(price) gems", style: .default) { [weak self] _ in
+        let buy = UIAlertAction(title: "Buy for \(GemSymbol.amount(price))", style: .default) { [weak self] _ in
             Task { [weak self] in await self?.buyVideoBanner() }
         }
         buy.isEnabled = gems >= price
@@ -629,12 +629,12 @@ extension EditProfileViewController {
             pending.succeed("Video banner unlocked")
             pushVideoBannerPicker()
         case .insufficientGems(let needed, let have):
-            pending.warn("\(needed - have) more gems needed")
+            pending.warn("\(GemSymbol.more(needed - have)) needed")
         case .unavailable:
             pending.warn("Not available on this account")
         // The server's answers (#1475): nothing was charged.
         case .priceChanged(let price):
-            pending.warn(price.map { "The price changed: now \($0) gems" } ?? "The price changed")
+            pending.warn(price.map { "The price changed: now \(GemSymbol.amount($0))" } ?? "The price changed")
         case .failed:
             pending.warn("Couldn't reach the Shop. Nothing was charged — try again.")
         }
