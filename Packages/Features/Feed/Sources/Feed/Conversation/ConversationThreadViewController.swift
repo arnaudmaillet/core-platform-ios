@@ -374,15 +374,25 @@ final class ConversationThreadViewController: UIViewController {
             }
             return
         }
-        syncBottomClearance()
-        // In the same pass as the clearance (#1799): a composer the keyboard
-        // or a growing field moves carries a short transcript with it, the
-        // slack absorbing the travel. A finger scrubbing the keyboard down
-        // owns the offset; the bounce back puts it where it rests.
-        syncBottomAnchor(movesOffset: !collectionView.isTracking)
-        syncDayItem()
-        // After the clearance, in the same pass: see `pinToTail`.
-        if owesTailPin { pinToTail() }
+        // ⚠️ NOT UNDER A PUSH'S ANIMATION (the owner's device, 2026-11-02):
+        // the push lays the screen out inside its own animation block, and the
+        // offset set here rode it — the conversation came in high and
+        // scrolled down to its place. Under a transition it is simply where
+        // it rests from the first frame; the keyboard's travel keeps riding
+        // the keyboard (no transition then).
+        let layOut = {
+            self.syncBottomClearance()
+            // In the same pass as the clearance (#1799): a composer the
+            // keyboard or a growing field moves carries a short transcript
+            // with it, the slack absorbing the travel. A finger scrubbing the
+            // keyboard down owns the offset; the bounce back puts it where it
+            // rests.
+            self.syncBottomAnchor(movesOffset: !self.collectionView.isTracking)
+            self.syncDayItem()
+            // After the clearance, in the same pass: see `pinToTail`.
+            if self.owesTailPin { self.pinToTail() }
+        }
+        if transitionCoordinator != nil { UIView.performWithoutAnimation(layOut) } else { layOut() }
     }
 
     /// Where a day's first message rests after a tap on the bar's day,
@@ -1158,7 +1168,11 @@ final class ConversationThreadViewController: UIViewController {
         // `deliveredIDs`: a delivery that landed mid-rise plays on the
         // pending row and never enters `deliveredIDs` — and its swap
         // cross-faded, a dim on the row and its avatar (#756).
+        // ⚠️ AND NOT WHILE THE SCREEN IS COMING IN: a refresh landing under the
+        // push re-laid the rows out animated, so the conversation moved as it
+        // arrived. Nothing the viewer has seen changes then.
         let animatedApply = hasRenderedContent && anchor == nil && swappedIDs.isEmpty
+            && transitionCoordinator == nil
         applySnapshot(animated: animatedApply)
         // The slack follows the content (#1799): a message arriving or deleted
         // in a short transcript slides the others in the apply's animation.
@@ -1179,7 +1193,7 @@ final class ConversationThreadViewController: UIViewController {
         if isFirstContent {
             pinToTail()
         } else if newestChanged, !newestSwapped, newest?.isMine == true || isNearBottom {
-            scrollToBottom(animated: true)
+            if transitionCoordinator == nil { scrollToBottom(animated: true) } else { pinToTail() }
         }
     }
 
@@ -1591,11 +1605,15 @@ final class ConversationThreadViewController: UIViewController {
             return
         }
         owesTailPin = false
-        for _ in 0..<4 {
-            let heightBefore = collectionView.contentSize.height
-            scrollToBottom(animated: false)
-            collectionView.layoutIfNeeded()
-            if abs(collectionView.contentSize.height - heightBefore) < 0.5 { break }
+        // Never animated, whatever block it runs in: the tail is where the
+        // conversation IS, not somewhere it travels to.
+        UIView.performWithoutAnimation {
+            for _ in 0..<4 {
+                let heightBefore = collectionView.contentSize.height
+                scrollToBottom(animated: false)
+                collectionView.layoutIfNeeded()
+                if abs(collectionView.contentSize.height - heightBefore) < 0.5 { break }
+            }
         }
     }
 
