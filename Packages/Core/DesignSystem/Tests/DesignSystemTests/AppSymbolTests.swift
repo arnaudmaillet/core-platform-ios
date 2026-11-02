@@ -38,7 +38,7 @@ struct AppSymbolTests {
 
     /// A filled glyph paints more than its outline.
     @Test func theFilledGlyphsAreFilled() throws {
-        for (outline, filled) in [(AppSymbol.like, AppSymbol.liked), (.save, .saved), (.comment, .commentFilled), (.gem, .gemFilled)] {
+        for (outline, filled) in [(AppSymbol.like, AppSymbol.liked), (.save, .saved), (.comment, .commentFilled), (.crown, .crownFilled)] {
             let a = inked(try #require(outline.image(AppSymbol.fixed(20))))
             let b = inked(try #require(filled.image(AppSymbol.fixed(20))))
             #expect(b > a, "\(filled) (\(b)) is not fuller than \(outline) (\(a))")
@@ -72,7 +72,7 @@ struct AppSymbolTests {
 struct AppSymbolSizeTests {
     @Test(arguments: [
         (AppSymbol.liked, "heart.fill"), (.save, "star"), (.comment, "ellipsis.message"),
-        (.repost, "arrow.trianglehead.2.clockwise.rotate.90"), (.gemFilled, "diamond.fill"),
+        (.repost, "arrow.trianglehead.2.clockwise.rotate.90"), (.crownFilled, "crown.fill"),
         (.share, "square.and.arrow.up"),
     ])
     func aGlyphIsAsTallAsTheSystemsOwn(_ pair: (AppSymbol, String)) throws {

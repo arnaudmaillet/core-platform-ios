@@ -16,8 +16,9 @@ import UIKit
 ///   primaryContainer    FDE3EE     3D0A20     (text B00E57 / F57BAE)
 ///   counter             EC1C75     EC1C75     C2105F     C2105F
 ///   entityInk           5E5E66     AEAEB4     48484F     C8C8CD
-///   gemViolet           9B5CFF     9B5CFF     7A3FE0     B48AFF
-///   gemText             7A3FE0     A97AFF     6E33D6     B48AFF
+///   gem                 9E8A00     FFE600     857300     FFE600
+///   gemText             7A6A00     FFE600     6B5D00     FFE600
+///   gemGround           FFE600     FFE600     (a wash, at the bubble's alpha)
 ///   saveGold            FFC53D     FFC53D     (one gold, #1190)
 ///   brandGradient       EC1C75 0 · 9B5CFF 0.5 · 2EF0A8 1
 /// ```
@@ -39,9 +40,9 @@ import UIKit
 /// - **Every pill and badge is the solid primary** (the owner, 2026-11-02):
 ///   never a gradient, under a white count.
 /// - **A filled button wears white** (`onPrimary`) in both appearances.
-/// - **There is no secondary colour any more** (#2062). The violet is the
-///   gems' (`gemViolet`, and `gemText` where it is a price), and otherwise
-///   appears only inside the signature gradient, as the mint does. Links,
+/// - **There is no secondary colour any more** (#2062). The violet appears
+///   only inside the signature gradient, as the mint does (#2071: the gems
+///   wear the crown's yellow — `gem`, `gemText`, `gemGround`). Links,
 ///   mentions and hashtags are a neutral grey (`entityInk`).
 /// - **Dark mode is not an inversion.** Every role has an Increased
 ///   Contrast value where its contrast is close to the line.
@@ -213,13 +214,19 @@ public enum Palette {
     /// The likes' colour: the heart, the likes glyph and coin.
     public static let likesPink = dynamic(theme.likes)
 
-    /// The gems' glyph, fixed (`GemSymbol.tint`): the palette's violet,
-    /// 3.9:1 on white and 5.4:1 on black — a glyph's 3:1.
-    public static let gemViolet = dynamic(theme.gem)
+    /// The gems' glyph, the crown (`GemSymbol.tint`, #2071): a deep gold on
+    /// light grounds, 3.45:1 on white — a glyph's 3:1, the yellow being
+    /// 1.27:1 there — and the brand's yellow on dark ones, 13.4:1.
+    public static let gem = dynamic(theme.gem)
 
-    /// The gems' violet as TEXT (`GemSymbol.textColor`): a price, a balance,
-    /// "+N gems". 5.8:1 on white, 5.6:1 on the dark card.
+    /// The gems as TEXT (`GemSymbol.textColor`): a price, a balance, "+N
+    /// gems". 5.4:1 on white, 4.8:1 on the grouped grey; the yellow in the
+    /// dark.
     public static let gemText = dynamic(theme.gemText)
+
+    /// The gems' wash (`GemSymbol.ground`): the yellow, at a price bubble's
+    /// or a claim's alpha, under `gemText`.
+    public static let gemGround = dynamic(theme.gemGround)
 
     /// THE SIGNATURE GRADIENT (#2062): raspberry → violet → mint, for brand
     /// moments only (the launch logo, the unseen-story ring), bottom-left

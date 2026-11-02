@@ -881,7 +881,7 @@ class ShopCardView: UIView {
     }
 }
 
-/// A price as text: the diamond and the number, in the gems' cyan when in
+/// A price as text: the crown and the number, in the gems' gold when in
 /// reach, grey out of it. No container: the card is the button.
 final class ShopPriceLabel: UIStackView {
     let inReach: Bool
@@ -896,20 +896,20 @@ final class ShopPriceLabel: UIStackView {
         )
         let dim: UIColor = onDark ? UIColor.white.withAlphaComponent(0.45) : .tertiaryLabel
         let color: UIColor = inReach ? GemSymbol.tint : dim
-        let diamond = UIImageView(image: UIImage.symbol(named: GemSymbol.glyph)?
+        let crown = UIImageView(image: UIImage.symbol(named: GemSymbol.glyph)?
             .applyingSymbolConfiguration(.init(pointSize: 11, weight: .bold)))
-        diamond.tintColor = color
+        crown.tintColor = color
         let number = UILabel()
         number.text = price.formatted()
         number.font = font
         number.textColor = inReach ? (onDark ? .white : .label) : dim
         number.adjustsFontForContentSizeCategory = true
         // Both at their own size: in a row, the name gives way, not these.
-        for view in [diamond, number] as [UIView] {
+        for view in [crown, number] as [UIView] {
             view.setContentHuggingPriority(.required, for: .horizontal)
             view.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
-        addArrangedSubview(diamond)
+        addArrangedSubview(crown)
         addArrangedSubview(number)
         spacing = 4
         alignment = .center
@@ -1090,7 +1090,7 @@ final class ShopCountryCardView: ShopCardView {
 
         priceBubble.layer.cornerRadius = ShopPackCardView.bubbleRadius
         priceBubble.layer.cornerCurve = .continuous
-        priceBubble.backgroundColor = inReach ? GemSymbol.tint.withAlphaComponent(0.35) : UIColor.white.withAlphaComponent(0.16)
+        priceBubble.backgroundColor = inReach ? GemSymbol.ground.withAlphaComponent(0.35) : UIColor.white.withAlphaComponent(0.16)
         priceBubble.isUserInteractionEnabled = false
         priceBubble.translatesAutoresizingMaskIntoConstraints = false
         price.translatesAutoresizingMaskIntoConstraints = false
@@ -1357,7 +1357,7 @@ final class ShopPackCardView: ShopCardView {
         if offer.isActive {
             priceBubble.backgroundColor = LikesSymbol.tint.withAlphaComponent(0.14)
         } else if affordable && !otherLoaded {
-            priceBubble.backgroundColor = GemSymbol.tint.withAlphaComponent(0.16)
+            priceBubble.backgroundColor = GemSymbol.ground.withAlphaComponent(0.16)
         } else {
             priceBubble.backgroundColor = .quaternarySystemFill
         }
@@ -1518,7 +1518,7 @@ final class ShopProfileItemCardView: ShopCardView {
             priceBubble.backgroundColor = .quaternarySystemFill
         } else {
             foot = ShopPriceLabel(price: price, inReach: affordable)
-            priceBubble.backgroundColor = affordable ? GemSymbol.tint.withAlphaComponent(0.16) : .quaternarySystemFill
+            priceBubble.backgroundColor = affordable ? GemSymbol.ground.withAlphaComponent(0.16) : .quaternarySystemFill
         }
         priceBubble.layer.cornerRadius = ShopPackCardView.bubbleRadius
         priceBubble.layer.cornerCurve = .continuous

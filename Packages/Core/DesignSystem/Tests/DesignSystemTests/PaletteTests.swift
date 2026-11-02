@@ -42,7 +42,7 @@ struct PaletteTests {
     /// raspberry (#2062) holds it without Increased Contrast, unlike the
     /// light pink it replaced.
     @Test(arguments: [
-        ("tint", Palette.tint), ("likes", Palette.likesPink), ("gem", Palette.gemViolet),
+        ("tint", Palette.tint), ("likes", Palette.likesPink), ("gem", Palette.gem),
     ])
     func aGlyphRoleReadsOnEveryGround(_ role: (String, UIColor)) {
         for traits in [Self.light, Self.dark, Self.traits(.light, high: true), Self.traits(.dark, high: true)] {
@@ -110,7 +110,7 @@ struct PaletteTests {
             ("primaryContainer", Palette.primaryContainer, theme.primaryContainer),
             ("onPrimaryContainer", Palette.onPrimaryContainer, theme.onPrimaryContainer),
             ("counter", Palette.counter, theme.counter), ("entityInk", Palette.entityInk, theme.entityInk),
-            ("likes", Palette.likesPink, theme.likes), ("gem", Palette.gemViolet, theme.gem),
+            ("likes", Palette.likesPink, theme.likes), ("gem", Palette.gem, theme.gem),
             ("gemText", Palette.gemText, theme.gemText),
         ]
         for (name, colour, shade) in roles {
@@ -130,7 +130,7 @@ struct PaletteTests {
         #expect(Self.hex(Palette.tint, Self.light) == 0xEC1C75)
         #expect(Self.hex(Palette.tint, Self.dark) == 0xEC1C75)
         #expect(Self.hex(Palette.counter, Self.light) == 0xEC1C75, "unread marks are the raspberry, no longer violet")
-        #expect(Self.hex(Palette.gemViolet, Self.light) == 0x9B5CFF)
+        #expect(Self.hex(Palette.gem, Self.light) == 0x9E8A00)
         #expect(Palette.brandGradient.map { Self.hex($0, Self.light) } == [0xEC1C75, 0x9B5CFF, 0x2EF0A8])
         #expect(Self.hex(Palette.saveGold, Self.light) == 0xFFC53D, "the saved star keeps its gold")
     }
@@ -157,7 +157,7 @@ struct PaletteTests {
     /// The gems wear the violet — the glyph, and a deeper step where it is a
     /// price — and a warning's glyph is yellow.
     @Test func gemsAreVioletAndWarningsYellow() {
-        #expect(GemSymbol.tint === Palette.gemViolet)
+        #expect(GemSymbol.tint === Palette.gem)
         #expect(GemSymbol.textColor === Palette.gemText)
         #expect(ToastView.Style.warning.glyphTint == .systemYellow)
     }

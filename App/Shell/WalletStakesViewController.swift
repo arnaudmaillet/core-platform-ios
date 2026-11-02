@@ -12,7 +12,7 @@ import UIKit
 ///
 /// A row reads like a position: the post leads (thumbnail and caption), the
 /// author follows; an active stake's ring fills toward its settlement, and a
-/// settled one always carries its outcome as a chip — violet only for gems
+/// settled one always carries its outcome as a chip — the yellow only for gems
 /// (`WalletStakeCell`).
 ///
 /// The stakes are the wallet's (`WalletStore.stakes()`, the server's

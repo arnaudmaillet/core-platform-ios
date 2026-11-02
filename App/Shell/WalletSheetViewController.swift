@@ -51,7 +51,7 @@ import UIKit
 /// # The economy it shows (`dev/economy/`, charter V5.3)
 ///   • **Likes** (currency A, the heart) — curation capacity: claimed, spent
 ///     by STAKING on posts;
-///   • **Gems** (currency B, the diamond) — earned-only: what a stake pays
+///   • **Gems** (currency B, the crown, #2071) — earned-only: what a stake pays
 ///     once it SETTLES, if it turned out to carry information.
 /// What is past — the settled stakes, the history — is behind a door; what
 /// is current — the active stakes — is on the page.
