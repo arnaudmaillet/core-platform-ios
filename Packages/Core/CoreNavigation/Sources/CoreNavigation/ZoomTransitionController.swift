@@ -141,8 +141,9 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
 
     /// Installs the grab-to-dismiss gesture on the pushed feed's view. Called
     /// by the presenter once it holds the feed VC. `axes` arms the grab's
-    /// directions — both by default, the forward-only feed's contract: a
-    /// rightward or a downward grab flies the card home identically.
+    /// directions — both by default, the feed's contract: a rightward or a
+    /// downward grab flies the card home identically (downward from the first
+    /// post only, where the feed's gate permits it, #2056).
     public func attachInteractiveDismissal(
         to view: UIView,
         axes: Set<ZoomDismissAxis> = [.horizontal, .vertical],
@@ -212,7 +213,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     /// from its 2D position), then one past it (completes the clip-morph
     /// home). Exercises the exact begin/update/release path a finger does.
     /// With `-zoom-demo-grab-vertical` alongside, the same script drives the
-    /// VERTICAL grab (forward-only milestone) instead of the horizontal one.
+    /// VERTICAL grab (from the first post) instead of the horizontal one.
     public func debugScriptedGrab() {
         debugScriptedGrab(
             axis: ProcessInfo.processInfo.arguments.contains("-zoom-demo-grab-vertical")

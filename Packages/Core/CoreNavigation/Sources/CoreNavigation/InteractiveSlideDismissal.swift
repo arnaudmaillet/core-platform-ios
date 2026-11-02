@@ -241,9 +241,9 @@ public final class InteractiveSlideDismissal: NSObject {
     ///
     /// Horizontal-only by default — the historical behaviour, and the right
     /// one for surfaces that own their vertical axis (a profile scrolls).
-    /// The FEED surfaces opt into `.vertical` too now that the pager is
-    /// forward-only: a text page dismisses downward the way a media page's
-    /// hero does, so the two page kinds feel the same in the hand.
+    /// The FEED surfaces opt into `.vertical` too: on the first post a text
+    /// page dismisses downward the way a media page's hero does, so the two
+    /// page kinds feel the same in the hand (later posts page back, #2056).
     private var axes: Set<ZoomDismissAxis> = [.horizontal]
     private var activeAxis: ZoomDismissAxis = .horizontal
 
@@ -915,8 +915,8 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
 // MARK: - Animator
 
 /// The pop leg the swipe scrubs: a native-style slide — the feed exits along
-/// the swipe's axis (rightward, or downward for the forward-only feed's
-/// vertical swipe) at 1:1 while the underlying screen advances from its
+/// the swipe's axis (rightward, or downward for the feed's vertical swipe
+/// from its first post) at 1:1 while the underlying screen advances from its
 /// parallax offset under a fading dim. Scrubbed linearly, so progress tracks
 /// the finger; the release springs the remainder (`releaseSpring`).
 final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimatedTransitioning {

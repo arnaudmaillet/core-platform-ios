@@ -2,9 +2,10 @@ import CoreGraphics
 
 /// The axis a grab-to-dismiss travels along. Historically there was exactly
 /// one — horizontal, because the feed owned the whole vertical axis (paging +
-/// pull-to-refresh). With the feed forward-only (cluster-gallery milestone),
-/// the downward direction is free, and a dismissal may be armed on either
-/// axis or both: the axis selects the progress component, the drift
+/// pull-to-refresh). Since the cluster-gallery milestone the downward
+/// direction is free on the feed's FIRST post (later posts page back, #2056),
+/// and a dismissal may be armed on either axis or both: the axis selects the
+/// progress component, the drift
 /// component, the span, and the velocity the release contract reads —
 /// nothing else about the grab differs.
 ///
@@ -31,9 +32,10 @@ public enum ZoomDismissAxis: Hashable, CaseIterable, Sendable {
     /// be outbound (rightward / downward / upward) and predominantly along
     /// exactly one enabled axis. A diagonal that favors neither, an inbound
     /// movement, or a movement along a disarmed axis matches nothing — which
-    /// is what lets the pager keep upward drags and the (forward-only) pager's
-    /// decline hand downward ones here with no gesture-graph edges: each side
-    /// of the split tests the mirror of the other's rule.
+    /// is what lets the pager keep upward drags, and its decline on the first
+    /// post hand downward ones here, with no gesture-graph edges: each side
+    /// of the split tests the mirror of the other's rule, and the feed's
+    /// router says which side a downward drag is (#2056).
     public static func match(
         velocity: CGPoint, axes: Set<ZoomDismissAxis>
     ) -> ZoomDismissAxis? {
