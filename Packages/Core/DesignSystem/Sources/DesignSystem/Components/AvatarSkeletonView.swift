@@ -6,7 +6,13 @@ import UIKit
 /// `SkeletonBoneView`, so it sweeps in phase with every other bone on screen
 /// and rests still when decoration does.
 public final class AvatarSkeletonView: UIView {
-    private let bone = SkeletonBoneView(rounding: .fixed(0))
+    /// ⚠️ THE AVATAR'S GROUND, NOT THE SKELETON'S (#2051): the bone wears
+    /// `Surface.avatarGround`, the plate's own fixed light grey, so two greys
+    /// never meet under a loading face (#1771's rule, kept for avatars).
+    private let bone = SkeletonBoneView(rounding: .fixed(0), fill: Surface.avatarGround)
+
+    /// The bone's ground as drawn now. Tests.
+    public var drawnGround: CGColor? { bone.drawnGround }
 
     /// The outline, the avatar's own.
     public var shape: AvatarShape = .circle {
@@ -19,6 +25,9 @@ public final class AvatarSkeletonView: UIView {
     public override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
+        // Its sweep too: the light appearance's band, on any chrome, so a
+        // dark trait never lays the dark band over the light ground.
+        bone.overrideUserInterfaceStyle = .light
         bone.translatesAutoresizingMaskIntoConstraints = false
         addSubview(bone)
         NSLayoutConstraint.activate([

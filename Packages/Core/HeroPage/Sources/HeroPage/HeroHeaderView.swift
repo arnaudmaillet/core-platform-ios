@@ -1450,7 +1450,8 @@ open class HeroHeaderView: UIView {
         // Avatar: a filled circle with a monogram, overlaid by the image once
         // loaded. The ring keeps it defined while it floats over raw banner
         // media, above the fade.
-        avatarView.backgroundColor = Surface.mediaGround
+        // The avatar's fixed light ground (#2051), never the appearance's.
+        avatarView.backgroundColor = Surface.avatarGround
         avatarView.clipsToBounds = true
         // ⚠️ ONE QUIET GREY (#1792, the owner 2026-10-27), not the page's
         // tone: over raw banner media the page's white or black read as a

@@ -95,7 +95,7 @@ struct MediaGroundGuardTests {
         "SnapMediaCardView.swift": "full screen: no bone, the centred loader on black (#1764)",
         // The wrappers themselves.
         "CoverSlot.swift": "the cover's slot",
-        "AvatarView.swift": "the disc's slot; its plate is the media ground",
+        "AvatarView.swift": "the disc's slot; its plate is the avatar's fixed ground (#2051)",
         "ImageContentView.swift": "the view's own slot",
     ]
 
@@ -118,13 +118,15 @@ struct MediaGroundGuardTests {
         #expect(stale.isEmpty, "no longer builds a bare slot — drop it: \(stale.sorted())")
     }
 
-    /// A face that never arrives sits on the bone's grey: the initials'
-    /// plate is the media ground.
-    @Test func anAvatarsPlateIsTheMediaGround() throws {
+    /// A face that never arrives sits on its bone's grey: the initials'
+    /// plate and the avatar's bone are the avatar's ground — fixed light, not
+    /// the media ground, which follows the appearance (#2051).
+    @Test func anAvatarsPlateIsItsBonesGround() throws {
         let avatar = AvatarView(diameter: 40, size: .avatar)
         let plate = try #require(avatar.monogram.layer.sublayers?.compactMap { $0 as? CAShapeLayer }.first)
-        let expected = Surface.mediaGround.resolvedColor(with: avatar.monogram.traitCollection).cgColor
-        #expect(plate.fillColor == expected)
+        #expect(plate.fillColor == Surface.avatarGround.cgColor)
+        avatar.skeleton.layoutIfNeeded()
+        #expect(avatar.skeleton.drawnGround == Surface.avatarGround.cgColor)
     }
 
     @Test func thePatternFindsTheShape() {
