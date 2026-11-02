@@ -53,12 +53,7 @@ extension TabGlyph {
     /// box's — the bottom-left corner — as a template.
     @MainActor
     static func template(_ glyph: UIImage, inBoxOf box: UIImage) -> UIImage {
-        let image = UIGraphicsImageRenderer(size: box.size).image { _ in
-            glyph.draw(at: CGPoint(x: 0, y: box.size.height - glyph.size.height))
-        }
-        return image
-            .withBaselineOffset(fromBottom: box.baselineOffsetFromBottom ?? 0)
-            .withRenderingMode(.alwaysTemplate)
+        TabFaces.template(glyph, inBox: box.size, baseline: box.baselineOffsetFromBottom ?? 0)
     }
 }
 

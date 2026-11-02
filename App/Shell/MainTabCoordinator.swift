@@ -639,10 +639,8 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// VoiceOver as the tab's value (#1196). Run on an unread or
     /// appearance change only, never on a selection: the bar owns that.
     ///
-    /// ⚠️ `selectedImage` IS SET BY NAME. `UITab.selectedImage` (iOS 26.1)
-    /// failed to compile on CI's Xcode 26 SDK even behind `#available`, so it
-    /// is reached through KVC, guarded by `responds(to:)`; a system without it
-    /// shows the outline in both states.
+    /// Both faces through `UITab.setFaces`, which a guest's Settings gear
+    /// wears too (#2073).
     func refreshTabGlyphs() {
         for (_, coordinator) in orderedTabs {
             guard let glyphTab = coordinator as? any GlyphTab else { continue }
@@ -650,14 +648,12 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
             // Baked for the BAR's traits (#1501): the app's appearance, or the
             // dark Shots gives the bar (#1697).
             let traits = barTraits
-            tab.image = glyphTab.glyph.image(selected: false, badged: glyphTab.hasUnread, traits: traits)
+            tab.setFaces(
+                outline: glyphTab.glyph.image(selected: false, badged: glyphTab.hasUnread, traits: traits),
+                fill: glyphTab.glyph.image(selected: true, badged: glyphTab.hasUnread, traits: traits)
+            )
             // The badge said aloud (#1196): an image tells VoiceOver nothing.
             tab.accessibilityValue = glyphTab.hasUnread ? glyphTab.glyph.unreadAccessibilityValue : nil
-            if tab.responds(to: NSSelectorFromString("setSelectedImage:")) {
-                tab.setValue(
-                    glyphTab.glyph.image(selected: true, badged: glyphTab.hasUnread, traits: traits), forKey: "selectedImage"
-                )
-            }
         }
     }
 

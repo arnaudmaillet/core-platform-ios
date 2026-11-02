@@ -45,16 +45,23 @@ final class ProfileTabCoordinator: TabCoordinator {
     private let onLogout: () -> Void
     private let onSignIn: () -> Void
 
-    private(set) lazy var tab = UITab(
-        title: "Profile",
-        image: Self.placeholder,
-        identifier: AppTab.profile.rawValue
-    ) { [navigationController] _ in navigationController }
+    private(set) lazy var tab: UITab = {
+        let tab = UITab(
+            title: "Profile",
+            image: nil,
+            identifier: AppTab.profile.rawValue
+        ) { [navigationController] _ in navigationController }
+        tab.setFaces(outline: Self.placeholder?.outline, fill: Self.placeholder?.fill)
+        return tab
+    }()
 
-    private static let placeholder = UIImage(systemName: "person.crop.circle")
+    /// ⚠️ OUTLINE AND FILL, AS THE GLYPH TABS (#2073): a plain symbol image
+    /// on a tab is drawn filled in both states by the bar. The person until
+    /// the avatar arrives.
+    private static let placeholder = TabFaces.system(outline: "person.crop.circle", fill: "person.crop.circle.fill")
     /// A guest's tab: Settings, wearing the gear the guest Profile page used to
-    /// carry in its header (#626).
-    private static let guestSettingsImage = UIImage(systemName: "gearshape")
+    /// carry in its header (#626) — its outline, and its fill when selected.
+    private static let guestSettingsFaces = TabFaces.system(outline: "gearshape", fill: "gearshape.fill")
     /// Whether the tab is a guest's Settings — so an avatar reset cannot put
     /// the person glyph back over the gear.
     private var showsGuestSettings = false
@@ -89,7 +96,7 @@ final class ProfileTabCoordinator: TabCoordinator {
             tab.title = "Settings"
             // Said outright — see `CreateTabItem.showSignIn`.
             tab.accessibilityLabel = "Settings"
-            tab.image = Self.guestSettingsImage
+            tab.setFaces(outline: Self.guestSettingsFaces?.outline, fill: Self.guestSettingsFaces?.fill)
             let settings = container.profileFeature.makeGuestSettingsViewController(onSignIn: onSignIn)
             // ⚠️ THE BAR STAYS. The screen asks to hide it when PUSHED ("not a
             // fifth tab"), and here it is a tab's root: the bar is how a guest
@@ -101,7 +108,10 @@ final class ProfileTabCoordinator: TabCoordinator {
         showsGuestSettings = false
         tab.title = "Profile"
         tab.accessibilityLabel = "Profile"
-        tab.image = Self.placeholder
+        // The person until this viewer's avatar arrives (`setAvatar`), and
+        // never the gear's fill left behind as the selected face.
+        avatar = nil
+        applyAvatar()
         // `.aboveBottomSafeArea` is the whole difference between a tab root and
         // a pushed profile, and it settles both halves at once: the tray is
         // hosted in the screen's own view above the bottom safe area (the top of
@@ -173,7 +183,12 @@ final class ProfileTabCoordinator: TabCoordinator {
         guard !showsGuestSettings else { return }
         // ⚠️ ONE BOX FOR BOTH STATES (#2034): the avatar is drawn into the
         // badged box whether the dot shows or not, so it never moves.
-        tab.image = avatar.map { TabAvatarBadge.image(avatar: $0, badged: hasUnread) } ?? Self.placeholder
+        if let avatar {
+            // The avatar in both states: no selected face.
+            tab.setFaces(outline: TabAvatarBadge.image(avatar: avatar, badged: hasUnread), fill: nil)
+        } else {
+            tab.setFaces(outline: Self.placeholder?.outline, fill: Self.placeholder?.fill)
+        }
         // What VoiceOver hears with the dot, as the glyph tabs (#1196).
         tab.accessibilityValue = hasUnread && avatar != nil ? "New notifications" : nil
     }
