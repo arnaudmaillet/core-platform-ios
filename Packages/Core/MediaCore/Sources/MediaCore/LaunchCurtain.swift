@@ -93,11 +93,24 @@ public final class LaunchCurtain {
     /// What the curtain waits for: the first Shots page having what it shows.
     /// Settable for tests, which use a milestone of their own.
     let readyMilestone: String
+    /// The longest this curtain holds: `LaunchCurtain.cap` in the app.
+    ///
+    /// ⚠️ SETTABLE FOR TESTS (#2069). A test host never marks
+    /// `app.didFinishLaunching`, so the cap there runs from `hold(over:)`; a
+    /// test that waits for the signal on a loaded CI runner could see the
+    /// 2 s cap fire before the signal's committed frame, and read `.capped`.
+    /// Such a test holds far longer than it waits; one that checks the cap
+    /// holds for none.
+    let holdCap: TimeInterval
 
-    public init(curtain: UIView, owner: AnyObject, readyMilestone: String = "shots.firstPageReady") {
+    public init(
+        curtain: UIView, owner: AnyObject, readyMilestone: String = "shots.firstPageReady",
+        cap: TimeInterval = LaunchCurtain.cap
+    ) {
         self.curtain = curtain
         self.owner = owner
         self.readyMilestone = readyMilestone
+        self.holdCap = cap
     }
 
     /// Puts the curtain over `window`'s new root and waits for the signal.
@@ -113,7 +126,7 @@ public final class LaunchCurtain {
         LaunchTimeline.whenReached(readyMilestone) { [weak self] in self?.pageIsReady() }
         let since = LaunchTimeline.time(of: "app.didFinishLaunching")
             .flatMap { start in LaunchTimeline.sinceProcessStart().map { $0 - start } } ?? 0
-        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, Self.cap - since)) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0, holdCap - since)) { [weak self] in
             self?.lift(.capped)
         }
     }

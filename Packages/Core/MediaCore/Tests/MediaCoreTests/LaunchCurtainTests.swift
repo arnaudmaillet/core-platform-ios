@@ -46,11 +46,14 @@ struct LaunchCurtainTests {
     /// The curtain covers the shell — which keeps rendering under it, never
     /// hidden — until the page's signal; a committed frame later it lifts, and
     /// once faded it is gone from the window.
+    ///
+    /// ⚠️ A CAP FAR PAST THE WAIT (#2069): with the app's 2 s, a loaded runner
+    /// saw the cap fire before the signal's frame and read `.capped`.
     @Test func theCurtainLiftsOnTheSignalAndIsRemovedAfterTheFade() async {
         let (window, root) = shell()
         defer { window.isHidden = true }
         let milestone = "test.curtain.\(UUID().uuidString)"
-        let curtain = LaunchCurtain(curtain: UIView(), owner: NSObject(), readyMilestone: milestone)
+        let curtain = LaunchCurtain(curtain: UIView(), owner: NSObject(), readyMilestone: milestone, cap: 600)
 
         curtain.hold(over: window, opensElsewhere: false)
         #expect(curtain.isUp && curtain.curtainIsShown)
@@ -60,6 +63,20 @@ struct LaunchCurtainTests {
         #expect(await settle { !curtain.isUp }, "the signal never lifted the curtain")
         #expect(curtain.revealed == .ready)
         #expect(await settle { !curtain.curtainIsShown }, "the curtain stayed in the window after its fade")
+    }
+
+    /// The signal never comes: the cap lifts the curtain, and says so.
+    @Test func theCapLiftsWhenTheSignalNeverComes() async {
+        let (window, _) = shell()
+        defer { window.isHidden = true }
+        let curtain = LaunchCurtain(
+            curtain: UIView(), owner: NSObject(), readyMilestone: "test.never.\(UUID().uuidString)", cap: 0
+        )
+
+        curtain.hold(over: window, opensElsewhere: false)
+
+        #expect(await settle { !curtain.isUp }, "the cap never lifted the curtain")
+        #expect(curtain.revealed == .capped)
     }
 
     /// A launch that opens somewhere else does not wait for Shots.
