@@ -163,10 +163,11 @@ struct CommentTiersTests {
     private static func room(_ stream: CommentStream) -> CGFloat { stream.debugTierRoom }
 
     /// The content height of the comment rows shown (the caption and the end
-    /// room included).
+    /// room included) — what the reader can reach: the next tier, drawn
+    /// behind the chrome past the tier's end, is not part of it.
     private static func content(_ stream: CommentStream) -> CGFloat {
         stream.collectionView.layoutIfNeeded()
-        return stream.collectionView.contentSize.height
+        return stream.collectionView.contentSize.height - stream.tierOverscan
     }
 
     /// ⚠️ TIER 0 FITS ONE ROOM, on the iPhone 18 Pro and on the iPhone SE
@@ -179,9 +180,41 @@ struct CommentTiersTests {
         let stream = controller.popular
         #expect(await settle { Self.laidOut(stream) && stream.revealedThreadCount > 0 })
         #expect(stream.hiddenThreadCount > 0, "the premise: more than one tier")
+        // The next tier drawn behind the chrome, its bound taken once the
+        // rows have sized themselves.
+        #expect(await settle { stream.tierOverscan > 0 })
         let content = Self.content(stream)
         #expect(content <= Self.room(stream) + 1, "\(size): tier 0 is \(content) in a room of \(Self.room(stream))")
         #expect(Self.showsMore(stream, controller), "at tier 0's end the button shows: \(Self.geometry(stream))")
+    }
+
+    /// ⚠️ THE LIST GOES ON BEHIND THE CHROME (the owner, 2026-11-02): past
+    /// the tier's end the next tier is drawn — under the "More" button and
+    /// the composer for Popular, under the top bar for Recent — while the
+    /// scroll still stops at the tier's end, the button showing there.
+    @Test(arguments: [CommentStream.Kind.popular, .recent])
+    func theNextTierShowsBehindTheChrome(_ kind: CommentStream.Kind) async {
+        let (controller, window) = panel(TieredComments(count: 40, pageSize: 40))
+        defer { window.isHidden = true }
+        let stream = kind == .popular ? controller.popular : controller.recent
+        if kind == .recent { controller.showStream(.recent, animated: false) }
+        #expect(await settle { Self.laidOut(stream) && stream.hiddenThreadCount > 0 })
+        #expect(await settle { stream.tierOverscan > 0 }, "nothing drawn past the tier's end")
+        let view = stream.collectionView
+        view.layoutIfNeeded()
+        // Rows exist past the reachable end, inside the view's frame.
+        let insets = view.adjustedContentInset
+        let beyond = view.indexPathsForVisibleItems.compactMap { view.layoutAttributesForItem(at: $0)?.frame }.filter { frame in
+            kind == .popular
+                ? frame.minY > view.contentSize.height - stream.tierOverscan - 1
+                : frame.maxY < stream.tierOverscan + 1
+        }
+        #expect(!beyond.isEmpty, "no row drawn behind the chrome")
+        // The reader's end is the tier's: scrolled there, the button shows.
+        view.contentOffset.y = kind == .popular
+            ? max(-insets.top, view.contentSize.height + insets.bottom - view.bounds.height)
+            : -insets.top
+        #expect(await settle { Self.showsMore(stream, controller) }, "at the tier's end the button does not show: \(Self.geometry(stream))")
     }
 
     /// "More" adds a tier of 1.5 to 2 rooms (give or take a thread), and the
@@ -190,7 +223,7 @@ struct CommentTiersTests {
         let (controller, window) = panel(TieredComments(count: 60, pageSize: 60))
         defer { window.isHidden = true }
         let stream = controller.popular
-        #expect(await settle { Self.laidOut(stream) && stream.hiddenThreadCount > 0 })
+        #expect(await settle { Self.laidOut(stream) && stream.hiddenThreadCount > 0 && stream.tierOverscan > 0 })
         let before = Self.content(stream)
         let room = Self.room(stream)
 
@@ -218,6 +251,7 @@ struct CommentTiersTests {
         let stream = controller.recent
         #expect(await settle { Self.laidOut(stream) && stream.hiddenThreadCount > 0 })
         controller.showStream(.recent, animated: false)
+        #expect(await settle { stream.tierOverscan > 0 })
         #expect(Self.content(stream) <= Self.room(stream) + 1)
         let bodies = stream.collectionView.indexPathsForVisibleItems.sorted().compactMap {
             stream.collectionView.cellForItem(at: $0).flatMap(PostDetailViewController.commentRow(in:))?.bodyTextLabel.text

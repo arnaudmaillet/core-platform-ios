@@ -193,7 +193,7 @@ final class CommentStream: NSObject {
         collectionView.contentOffset = CGPoint(x: 0, y: -top)
         // A clean minimal stream: no indicator (engaged context only).
         collectionView.showsVerticalScrollIndicator = false
-        collectionView.contentInset.bottom = bottom
+        collectionView.contentInset.bottom = bottom - (kind == .popular ? tierOverscan : 0)
         restingBottomInset = bottom
         // On top of the engaged top, never instead of it (#1799): the slack
         // is measured against the settled room, and the stream lands at
@@ -629,17 +629,20 @@ final class CommentStream: NSObject {
         let standsAlone = emptyPageStandsAlone
         guard !standsAlone || bottomAnchorSlack != 0 else { return }
         if !standsAlone { collectionView.layoutIfNeeded() }
+        // What the reader can reach: the rows past the tier's end, drawn
+        // behind the chrome, are not part of it (`tierOverscan`).
         let slack = standsAlone
             ? 0
-            : StreamBottomAnchor.slack(viewport: room, contentHeight: collectionView.contentSize.height)
-        guard abs(slack - bottomAnchorSlack) > 0.5 || abs(collectionView.contentInset.top - (engaged.top + slack)) > 0.5
+            : StreamBottomAnchor.slack(viewport: room, contentHeight: collectionView.contentSize.height - tierOverscan)
+        let top = engaged.top + slack - topOverscan
+        guard abs(slack - bottomAnchorSlack) > 0.5 || abs(collectionView.contentInset.top - top) > 0.5
         else { return }
         let wasResting = collectionView.contentOffset.y <= -collectionView.contentInset.top + 0.5
         bottomAnchorSlack = slack
         let apply = {
-            self.collectionView.contentInset.top = engaged.top + slack
-            self.collectionView.verticalScrollIndicatorInsets.top = engaged.top + slack
-            if wasResting { self.collectionView.contentOffset.y = -(engaged.top + slack) }
+            self.collectionView.contentInset.top = top
+            self.collectionView.verticalScrollIndicatorInsets.top = top
+            if wasResting { self.collectionView.contentOffset.y = -top }
         }
         if animated, view.window != nil {
             UIView.animate(
@@ -755,6 +758,7 @@ final class CommentStream: NSObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
             followsContentSizeSoon = false
+            syncTierOverscan()
             syncBottomAnchor()
             keepRestingEnd()
             syncMoreButton()
@@ -1515,12 +1519,65 @@ final class CommentStream: NSObject {
         revealedThreadCount = revealed
         hiddenHeight = heights.dropFirst(revealed).reduce(0, +)
         let shown = fromStart.prefix(revealed)
-        let end: [StreamItem] = hiddenThreadCount > 0 || sourceHasMore ? [.tierEnd] : []
+        // ⚠️ THE STREAM GOES ON BEHIND THE CHROME (the owner, 2026-11-02):
+        // the next tier — loaded ahead — is drawn past the tier's end, under
+        // the "More" button and the composer (Popular) or the top bar
+        // (Recent), so the list reads as continuing; the reader's scroll
+        // still stops at the tier's end (`tierOverscan`). Nothing hidden
+        // yet but more on its way: the end's room alone.
+        let hiddenHeights = Array(heights.dropFirst(revealed))
+        let behindCount = hiddenHeights.isEmpty
+            ? 0
+            : max(1, CommentTiers.nextTierCount(heights: hiddenHeights, viewport: tierViewport))
+        let behind = fromStart.dropFirst(revealed).prefix(behindCount)
+        let end: [StreamItem] = behind.isEmpty && (hiddenThreadCount > 0 || sourceHasMore) ? [.tierEnd] : []
         switch kind {
         case .popular:
-            return lead + shown.flatMap { $0 } + end
+            tierBoundary = behind.isEmpty ? nil : (shown.last?.last ?? lead.last)
+            return lead + shown.flatMap { $0 } + end + behind.flatMap { $0 }
         case .recent:
-            return (end.isEmpty && hiddenThreadCount == 0 ? lead : end) + shown.reversed().flatMap { $0 }
+            tierBoundary = behind.isEmpty ? nil : shown.last?.first
+            let top = behind.isEmpty ? (end.isEmpty && hiddenThreadCount == 0 ? lead : end) : behind.reversed().flatMap { $0 }
+            return top + shown.reversed().flatMap { $0 }
+        }
+    }
+
+    /// The tier's last row on the side the stream grows to — Popular's
+    /// lowest, Recent's topmost — when rows are drawn past it.
+    private var tierBoundary: StreamItem?
+
+    /// How far the rows drawn past the tier's end reach beyond its room:
+    /// taken off the inset on that side (Popular's bottom, Recent's top), so
+    /// the reader's scroll stops where the tier ends, with its end's room
+    /// for the "More" button, while those rows show behind the chrome.
+    private(set) var tierOverscan: CGFloat = 0
+    private var topOverscan: CGFloat { kind == .recent ? tierOverscan : 0 }
+
+    /// Measures `tierOverscan` from the tier's boundary row, and moves the
+    /// inset with it.
+    private func syncTierOverscan() {
+        var overscan: CGFloat = 0
+        if readsTiersNow, let boundary = tierBoundary, let path = streamDataSource.indexPath(for: boundary) {
+            collectionView.layoutIfNeeded()
+            if let frame = collectionView.layoutAttributesForItem(at: path)?.frame {
+                overscan = kind == .popular
+                    ? collectionView.contentSize.height - frame.maxY - Self.tierEndHeight
+                    : frame.minY - Self.tierEndHeight
+                overscan = max(0, overscan)
+            }
+        }
+        guard abs(overscan - tierOverscan) > 0.5 else { return }
+        let wasAtTop = collectionView.contentOffset.y <= -collectionView.contentInset.top + 0.5
+        tierOverscan = overscan
+        switch kind {
+        case .popular:
+            if let resting = restingBottomInset { collectionView.contentInset.bottom = resting - overscan }
+        case .recent:
+            guard let engaged = engagedStreamInsets else { return }
+            let top = engaged.top + bottomAnchorSlack - overscan
+            collectionView.contentInset.top = top
+            collectionView.verticalScrollIndicatorInsets.top = top
+            if wasAtTop { collectionView.contentOffset.y = -top }
         }
     }
 
@@ -1752,8 +1809,10 @@ final class CommentStream: NSObject {
         #endif
         streamDataSource.apply(snapshot, animatingDifferences: animated && anchor == nil) { completion?() }
         suppressesPaging = false
-        // The slack follows the content (#1799): a comment, a page of them,
-        // a sort or a thread's replies only change its height.
+        // The tier's bound follows its rows, and the slack follows the
+        // content (#1799): a comment, a page of them, a sort or a thread's
+        // replies only change its height.
+        syncTierOverscan()
         syncBottomAnchor(animated: animated)
         if let anchor {
             hold(anchor)
