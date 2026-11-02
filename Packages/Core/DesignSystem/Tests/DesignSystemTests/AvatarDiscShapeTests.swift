@@ -24,12 +24,12 @@ struct AvatarDiscShapeTests {
     @Test func aCoveredDiscDrawsNothing() throws {
         let monogram = MonogramAvatarView(diameter: 32)
         monogram.setMonogram("MH")
-        let label = try #require(monogram.subviews.compactMap { $0 as? UILabel }.first)
-        #expect(!monogram.plate.isHidden && !label.isHidden)
+        let initials = monogram.initials
+        #expect(!monogram.plate.isHidden && !initials.isHidden)
         monogram.isCovered = true
-        #expect(monogram.plate.isHidden && label.isHidden)
+        #expect(monogram.plate.isHidden && initials.isHidden)
         monogram.isCovered = false
-        #expect(!monogram.plate.isHidden && !label.isHidden)
+        #expect(!monogram.plate.isHidden && !initials.isHidden)
     }
 
     /// The plate is an oval PATH with a plain resolved colour, never the view's

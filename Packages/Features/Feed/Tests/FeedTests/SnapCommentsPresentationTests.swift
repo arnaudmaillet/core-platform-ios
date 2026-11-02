@@ -2030,8 +2030,8 @@ struct SnapCommentsPresentationTests {
     }
 
     private static func monogramText(in root: UIView) -> String? {
-        firstView(MonogramAvatarView.self, in: root)?
-            .subviews.compactMap { $0 as? UILabel }.first?.text
+        // The initials are a bitmap, not a label (#2051): read what it says.
+        firstView(MonogramAvatarView.self, in: root)?.debugMonogramText
     }
 
     private static func avatarImage(in root: UIView) -> UIImage? {
@@ -2149,8 +2149,8 @@ struct SnapCommentsPresentationTests {
     private func monogramText(in row: CommentRowView) -> String? {
         var stack: [UIView] = [row]
         while let view = stack.popLast() {
-            if view is MonogramAvatarView {
-                return view.subviews.compactMap { $0 as? UILabel }.first?.text
+            if let disc = view as? MonogramAvatarView {
+                return disc.debugMonogramText
             }
             stack.append(contentsOf: view.subviews)
         }

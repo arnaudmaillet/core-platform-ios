@@ -77,6 +77,36 @@ public enum Surface {
     /// (map pins, the shop's posters, the snap feed): `skeletonOnDark`.
     public static let mediaGroundOnDark: UIColor = skeletonOnDark
 
+    /// THE AVATAR'S GROUND (#2051, the owner 2026-11-02): a face's place is
+    /// ALWAYS the light grey, whatever the device's appearance. "The dark
+    /// grey must not exist." The light appearance's `systemGray5`, resolved
+    /// once and never again — the floor a picture loads on, the avatar's
+    /// bone, the ground a host paints behind a face, the following ring and
+    /// the badge's quiet disc.
+    ///
+    /// ⚠️ NOT THE MEDIA GROUND, which follows the appearance (#1771): an
+    /// avatar is drawn on chrome that is dark whatever the device says (the
+    /// snap feed's media page) and moves between bars in a push, so a
+    /// dynamic grey resolved light in one place and dark in the next — the
+    /// same person, two discs, on the owner's device. Posts, banners and
+    /// tiles keep `mediaGround`.
+    public static let avatarGround: UIColor = lightValue(of: .systemGray5)
+
+    /// The plate under FINAL initials (no picture, or a failed one, #1912):
+    /// the light appearance's `systemGray4`, a step darker than
+    /// `avatarGround`, so the face stands apart from the ring and the
+    /// badge's disc. Fixed, as `avatarGround` is.
+    public static let avatarInitialsGround: UIColor = lightValue(of: .systemGray4)
+
+    /// The initials' ink: the light appearance's `secondaryLabel`, a dark
+    /// grey, chosen for contrast on both plates. Fixed — white initials on
+    /// `systemGray4` read at about 1.4:1.
+    public static let avatarInitials: UIColor = lightValue(of: .secondaryLabel)
+
+    private static func lightValue(of color: UIColor) -> UIColor {
+        color.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+    }
+
     /// A patch of the media ground (#1772): the place of a picture still on
     /// its way where the host draws it as an IMAGE — a list row's, a
     /// button's — and a slot cannot stand. A template: the host tints it
