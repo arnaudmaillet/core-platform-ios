@@ -58,7 +58,7 @@ private actor TieredComments: CommentsProviding {
 }
 
 /// **Comments read in tiers (#2042).** The first tier is never taller than
-/// the stream's room; each "More" adds about 1.5 to 2 rooms; the next tier is
+/// the stream's room; each "More" adds about 2 to 3 rooms; the next tier is
 /// loaded ahead; at the bottom edge of what is shown, an upward drag goes to
 /// the next post.
 @MainActor
@@ -71,11 +71,11 @@ struct CommentTiersTests {
         #expect(CommentTiers.firstTierCount(heights: [700], viewport: 600) == 0, "a thread taller than the room fits nothing")
     }
 
-    @Test func aLaterTierIsOneAndAHalfToTwoRooms() {
-        // Stops once it reaches 1.5 rooms (900 of 600).
-        #expect(CommentTiers.nextTierCount(heights: Array(repeating: 200, count: 10), viewport: 600) == 5)
-        // Never past 2 rooms: a thread that would cross 1200 waits.
-        #expect(CommentTiers.nextTierCount(heights: [800, 500, 100], viewport: 600) == 1)
+    @Test func aLaterTierIsTwoToThreeRooms() {
+        // Stops once it reaches 2 rooms (1200 of 600).
+        #expect(CommentTiers.nextTierCount(heights: Array(repeating: 200, count: 10), viewport: 600) == 6)
+        // Never past 3 rooms: a thread that would cross 1800 waits.
+        #expect(CommentTiers.nextTierCount(heights: [800, 1100, 100], viewport: 600) == 1)
         // Always one, however tall.
         #expect(CommentTiers.nextTierCount(heights: [2000], viewport: 600) == 1)
         #expect(CommentTiers.nextTierCount(heights: [], viewport: 600) == 0)
@@ -217,9 +217,9 @@ struct CommentTiersTests {
         #expect(await settle { Self.showsMore(stream, controller) }, "at the tier's end the button does not show: \(Self.geometry(stream))")
     }
 
-    /// "More" adds a tier of 1.5 to 2 rooms (give or take a thread), and the
+    /// "More" adds a tier of 2 to 3 rooms (give or take a thread), and the
     /// stream scrolls into it.
-    @Test func moreAddsATierOfOneAndAHalfToTwoRooms() async {
+    @Test func moreAddsATierOfTwoToThreeRooms() async {
         let (controller, window) = panel(TieredComments(count: 60, pageSize: 60))
         defer { window.isHidden = true }
         let stream = controller.popular
@@ -229,7 +229,7 @@ struct CommentTiersTests {
 
         stream.revealNextTier(animated: false)
         let added = Self.content(stream) - before
-        #expect(added >= room * 1.3 && added <= room * 2.1, "the tier added \(added) to a room of \(room): \(Self.geometry(stream))")
+        #expect(added >= room * 1.8 && added <= room * 3.1, "the tier added \(added) to a room of \(room): \(Self.geometry(stream))")
         #expect(stream.collectionView.contentOffset.y > -stream.collectionView.contentInset.top,
                 "the stream did not scroll into the new tier")
     }

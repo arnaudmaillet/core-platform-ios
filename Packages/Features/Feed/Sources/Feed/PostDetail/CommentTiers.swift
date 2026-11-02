@@ -2,7 +2,8 @@ import CoreGraphics
 
 /// The tiers a full-screen post's comments read in (#2042, the owner
 /// 2026-11-02): the stream shows its first tier — never taller than one
-/// screen — and each "More" adds the next, about 1.5 to 2 screens tall. The
+/// screen — and each "More" adds the next, about 2 to 3 screens tall (the
+/// owner, 2026-11-02: a reader who asked for more wants to read on). The
 /// edge of what is shown is where the screen's own swipe takes over (the next
 /// post, the close).
 ///
@@ -10,9 +11,10 @@ import CoreGraphics
 /// its fold), counted from the stream's start: Popular's top, Recent's
 /// newest. Pure arithmetic on measured heights, for tests.
 enum CommentTiers {
-    /// The most a later tier adds, in viewports, and the least it aims for.
-    static let laterTierCeiling: CGFloat = 2
-    static let laterTierFloor: CGFloat = 1.5
+    /// The most a later tier adds, in viewports, and the least it aims for:
+    /// 2 to 3 (the owner, 2026-11-02; it was 1.5 to 2).
+    static let laterTierCeiling: CGFloat = 3
+    static let laterTierFloor: CGFloat = 2
 
     /// How many threads, from the stream's start, fit one viewport after
     /// `lead` (the caption, on Popular): every thread whose whole height
