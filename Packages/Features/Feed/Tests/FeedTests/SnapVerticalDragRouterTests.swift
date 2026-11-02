@@ -9,9 +9,12 @@ struct SnapVerticalDragRouterTests {
     private typealias Router = SnapVerticalDragRouter
 
     private func owner(
-        index: Int, atRest: Bool = true, sideList: Bool = false, pager: Bool = true
+        index: Int, atRest: Bool = true, sideList: Bool = false, pager: Bool = true, drive: Bool = false
     ) -> Router.DownwardOwner {
-        Router.downwardOwner(.init(settledIndex: index, isAtRestOnPage: atRest, sideListOpen: sideList, pagerPagesHere: pager))
+        Router.downwardOwner(.init(
+            settledIndex: index, isAtRestOnPage: atRest, sideListOpen: sideList,
+            pagerPagesHere: pager, drivePagesHere: drive
+        ))
     }
 
     /// The first post, at rest: the dismissal's — as today.
@@ -38,8 +41,16 @@ struct SnapVerticalDragRouterTests {
     }
 
     /// A page the pager does not page (a text page, comments holding the
-    /// scroll) keeps its close until the direction-aware drive (#2058).
-    @Test func aPageThePagerDoesNotPageKeepsItsClose() {
+    /// scroll) pages back through the drive on a later post (#2058) — the
+    /// composer, the header band, the stream's top edge — and keeps its close
+    /// on the first.
+    @Test func aPageTheDrivePagesGoesBackOnALaterPostOnly() {
+        #expect(owner(index: 4, pager: false, drive: true) == .pager)
+        #expect(owner(index: 0, pager: false, drive: true) == .dismissal)
+    }
+
+    /// Neither the pager nor the drive: nothing pages it, the close keeps it.
+    @Test func aPageNothingPagesKeepsItsClose() {
         #expect(owner(index: 4, pager: false) == .dismissal)
     }
 
