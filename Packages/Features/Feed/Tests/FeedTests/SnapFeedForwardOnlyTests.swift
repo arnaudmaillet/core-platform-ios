@@ -2,13 +2,13 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// The pager's downward axis test and the engaged page-drive's step rule.
+/// The pager's downward axis test.
 ///
 /// The feed was forward-only (cluster-gallery milestone, #114). Since #2057
 /// a downward drag on a later post pages back through the pager — who owns
 /// it is `SnapVerticalDragRouter`'s (`SnapVerticalDragRouterTests`). The
-/// drive (text pages, engaged comments) still steps forward only until
-/// #2058.
+/// drive (text pages, engaged comments) steps both ways since #2058
+/// (`SnapPageDriveTests`).
 struct SnapFeedForwardOnlyTests {
     // MARK: - The pager's per-touch decline
 
@@ -35,30 +35,5 @@ struct SnapFeedForwardOnlyTests {
         #expect(!SnapFeedCollectionView.declinesDownwardPagingTouch(velocity: .zero))
     }
 
-    // MARK: - The engaged page-drive's step rule
-
-    private let page: CGFloat = 800
-
-    @Test func aDecisiveUpwardDriveAdvances() {
-        #expect(SnapFeedViewController.pageDriveStep(translation: -200, velocity: 0, page: page) == 1)
-        #expect(SnapFeedViewController.pageDriveStep(translation: -40, velocity: -600, page: page) == 1)
-    }
-
-    /// The forward-only change: this used to answer -1 (previous post).
-    @Test func aDecisiveDownwardDriveSettlesHomeInsteadOfPagingBack() {
-        #expect(SnapFeedViewController.pageDriveStep(translation: 200, velocity: 0, page: page) == 0)
-        #expect(SnapFeedViewController.pageDriveStep(translation: 40, velocity: 600, page: page) == 0)
-    }
-
-    @Test func anIndecisiveDriveSettlesHome() {
-        #expect(SnapFeedViewController.pageDriveStep(translation: -40, velocity: -100, page: page) == 0)
-        #expect(SnapFeedViewController.pageDriveStep(translation: 40, velocity: 100, page: page) == 0)
-    }
-
-    /// A decisive drag whose velocity has already reversed projects HOME, not
-    /// forward — the finger changed its mind and the projection (drag + a
-    /// slice of velocity) is what decides.
-    @Test func aReversedProjectionSettlesHome() {
-        #expect(SnapFeedViewController.pageDriveStep(translation: -150, velocity: 800, page: page) == 0)
-    }
+    // The engaged page-drive's step rule moved to `SnapPageDriveTests` (#2058).
 }
