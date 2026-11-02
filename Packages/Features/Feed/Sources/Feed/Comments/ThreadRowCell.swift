@@ -78,6 +78,14 @@ final class ThreadRowCell: UICollectionViewCell {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// Measured at the layout's width (`fittedAtLayoutWidth`): a message or a
+    /// comment's body never keeps a height measured too wide.
+    override func preferredLayoutAttributesFitting(
+        _ layoutAttributes: UICollectionViewLayoutAttributes
+    ) -> UICollectionViewLayoutAttributes {
+        fittedAtLayoutWidth(layoutAttributes) ?? super.preferredLayoutAttributesFitting(layoutAttributes)
+    }
+
     override func prepareForReuse() {
         super.prepareForReuse()
         // Back to a comment, with nothing pending — see the row's own.

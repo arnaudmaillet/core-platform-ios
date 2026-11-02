@@ -49,6 +49,9 @@ enum StreamItem: Hashable {
     case skeletonPlaceholder(Int)
     case comment(String)
     case seam(CommentThreadToggleRow.Kind, parentID: String)
+    /// The room at a tier's end where the "More" button stands (#2042):
+    /// the last row read never goes under it.
+    case tierEnd
 }
 
 @MainActor
@@ -114,6 +117,23 @@ final class CommentStream: NSObject {
 
     /// Builds the list: its bounce, its taps, its menus and its rows.
     func configure() {
+        collectionView.translatesAutoresizingMaskIntoConstraints = false
+        pageView.addSubview(collectionView)
+        moreButton.translatesAutoresizingMaskIntoConstraints = false
+        pageView.addSubview(moreButton)
+        let edge = kind == .popular
+            ? moreButton.bottomAnchor.constraint(equalTo: pageView.bottomAnchor)
+            : moreButton.topAnchor.constraint(equalTo: pageView.topAnchor)
+        moreButtonEdge = edge
+        NSLayoutConstraint.activate([
+            collectionView.topAnchor.constraint(equalTo: pageView.topAnchor),
+            collectionView.bottomAnchor.constraint(equalTo: pageView.bottomAnchor),
+            collectionView.leadingAnchor.constraint(equalTo: pageView.leadingAnchor),
+            collectionView.trailingAnchor.constraint(equalTo: pageView.trailingAnchor),
+            moreButton.centerXAnchor.constraint(equalTo: pageView.centerXAnchor),
+            edge,
+        ])
+        observeContentSize()
         // The comment list BOUNCES, and the bounce is the transition's
         // driver: past the top, `contentOffset` IS the pull, rubber-banded
         // by UIKit's own curve, so the fade and the overscroll cannot drift
@@ -173,7 +193,7 @@ final class CommentStream: NSObject {
         collectionView.contentOffset = CGPoint(x: 0, y: -top)
         // A clean minimal stream: no indicator (engaged context only).
         collectionView.showsVerticalScrollIndicator = false
-        collectionView.contentInset.bottom = bottom
+        collectionView.contentInset.bottom = bottom - (kind == .popular ? tierOverscan : 0)
         restingBottomInset = bottom
         // On top of the engaged top, never instead of it (#1799): the slack
         // is measured against the settled room, and the stream lands at
@@ -181,7 +201,86 @@ final class CommentStream: NSObject {
         bottomAnchorSlack = 0
         syncBottomAnchor()
         if holdsRest { pinToTail() }
+        // The "More" button stands where the stream's rows end: just above
+        // the composer under Popular, just below the top bar over Recent.
+        moreButtonEdge?.constant = kind == .popular
+            ? -(bottom + streamSectionVerticalInsets) - (Self.tierEndHeight - Self.moreButtonHeight) / 2
+            : top + (Self.tierEndHeight - Self.moreButtonHeight) / 2
     }
+
+    // MARK: - The "More" button (#2042)
+
+    /// The stream's page in the panel's pager: the list, and the "More"
+    /// button over it.
+    let pageView = UIView()
+
+    /// The button's constraint to its edge, placed with the engaged insets.
+    private var moreButtonEdge: NSLayoutConstraint?
+    /// The button's height, as its configuration draws it at the default size.
+    static let moreButtonHeight: CGFloat = 36
+
+    /// "More comments": a small Liquid Glass capsule at the end of a tier,
+    /// with its chevron pointing where the next tier comes in.
+    private lazy var moreButton: UIButton = {
+        var config = UIButton.Configuration.glass()
+        config.attributedTitle = AttributedString("More comments", attributes: AttributeContainer([
+            .font: UIFont.scaledFont(forTextStyle: .footnote, weight: .semibold),
+        ]))
+        config.image = UIImage(
+            systemName: kind == .popular ? "chevron.down" : "chevron.up",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .bold)
+        )
+        config.imagePlacement = .trailing
+        config.imagePadding = Spacing.xs
+        config.cornerStyle = .capsule
+        config.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 14, bottom: 8, trailing: 14)
+        let button = UIButton(configuration: config)
+        button.accessibilityIdentifier = "comments.moreTier"
+        button.addAction(UIAction { [weak self] _ in self?.revealNextTier(animated: true) }, for: .primaryActionTriggered)
+        button.alpha = 0
+        button.isHidden = true
+        return button
+    }()
+
+    /// Whether the "More" button shows: reading in tiers, at the end of the
+    /// tier — Popular's bottom, Recent's top — with a next tier to show, and
+    /// the keyboard down.
+    var showsMoreButton: Bool {
+        guard hasNextTier, !composeBar.isKeyboardOpen else { return false }
+        // Once the tier's end room is mostly in sight, not at the edge to the
+        // point: a tier a few points taller than its room still shows it.
+        let reach = Self.tierEndHeight / 2
+        let insets = collectionView.adjustedContentInset
+        return kind == .popular
+            ? collectionView.contentOffset.y >= tailOffset - reach
+            : collectionView.contentOffset.y <= -insets.top + reach
+    }
+
+    /// The button as the stream stands, faded in or out.
+    func syncMoreButton() {
+        let shows = showsMoreButton
+        guard shows == moreButton.isHidden else { return }
+        if shows { moreButton.isHidden = false }
+        let button = moreButton
+        let apply = { button.alpha = shows ? 1 : 0 }
+        guard collectionView.window != nil else {
+            apply()
+            button.isHidden = !shows
+            return
+        }
+        // Weak: the stream reads its host, which may be gone by the fade's end.
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction], animations: apply) { [weak self] _ in
+            guard let self, showsMoreButton == shows else { return }
+            button.isHidden = !shows
+        }
+    }
+
+    #if DEBUG
+    /// The button, for tests.
+    var debugMoreButton: UIButton { moreButton }
+    /// The room a tier is measured against, its section insets included.
+    var debugTierRoom: CGFloat { availableStreamHeight }
+    #endif
 
     /// The caption row's closing line changed: re-rendered in place.
     ///
@@ -530,17 +629,20 @@ final class CommentStream: NSObject {
         let standsAlone = emptyPageStandsAlone
         guard !standsAlone || bottomAnchorSlack != 0 else { return }
         if !standsAlone { collectionView.layoutIfNeeded() }
+        // What the reader can reach: the rows past the tier's end, drawn
+        // behind the chrome, are not part of it (`tierOverscan`).
         let slack = standsAlone
             ? 0
-            : StreamBottomAnchor.slack(viewport: room, contentHeight: collectionView.contentSize.height)
-        guard abs(slack - bottomAnchorSlack) > 0.5 || abs(collectionView.contentInset.top - (engaged.top + slack)) > 0.5
+            : StreamBottomAnchor.slack(viewport: room, contentHeight: collectionView.contentSize.height - tierOverscan)
+        let top = engaged.top + slack - topOverscan
+        guard abs(slack - bottomAnchorSlack) > 0.5 || abs(collectionView.contentInset.top - top) > 0.5
         else { return }
         let wasResting = collectionView.contentOffset.y <= -collectionView.contentInset.top + 0.5
         bottomAnchorSlack = slack
         let apply = {
-            self.collectionView.contentInset.top = engaged.top + slack
-            self.collectionView.verticalScrollIndicatorInsets.top = engaged.top + slack
-            if wasResting { self.collectionView.contentOffset.y = -(engaged.top + slack) }
+            self.collectionView.contentInset.top = top
+            self.collectionView.verticalScrollIndicatorInsets.top = top
+            if wasResting { self.collectionView.contentOffset.y = -top }
         }
         if animated, view.window != nil {
             UIView.animate(
@@ -635,6 +737,34 @@ final class CommentStream: NSObject {
     /// Recent kept at its end through a layout pass — the stream growing into
     /// its room, a width change — unless a finger or a scroll animation has
     /// the list.
+    /// ⚠️ THE SLACK FOLLOWS THE ROWS' OWN SIZING TOO: rows that size
+    /// themselves as the stream first comes on screen grow its content with
+    /// no apply and no layout of the panel's — a slack measured before them
+    /// left Recent resting past its top, under the bar (and its "More" out of
+    /// reach).
+    private var contentSizeObservation: NSKeyValueObservation?
+    private var followsContentSizeSoon = false
+
+    private func observeContentSize() {
+        contentSizeObservation = collectionView.observe(\.contentSize, options: [.new]) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.followContentSizeSoon() }
+        }
+    }
+
+    /// Next turn, outside the layout pass that changed it; once per turn.
+    private func followContentSizeSoon() {
+        guard !followsContentSizeSoon else { return }
+        followsContentSizeSoon = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            followsContentSizeSoon = false
+            syncTierOverscan()
+            syncBottomAnchor()
+            keepRestingEnd()
+            syncMoreButton()
+        }
+    }
+
     func keepRestingEnd() {
         guard kind == .recent, holdsRest, !isAtRest, !collectionView.isTracking,
               !collectionView.isDecelerating, !isScrollingProgrammatically else { return }
@@ -1140,6 +1270,10 @@ final class CommentStream: NSObject {
             }
             cell.onAvatarTap = { [weak self] in self?.viewModel.didTapAuthor() }
         }
+        let tierEndCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> { cell, _, _ in
+            guard cell.contentView.constraints.isEmpty else { return }
+            cell.contentView.heightAnchor.constraint(equalToConstant: Self.tierEndHeight).isActive = true
+        }
         let threadChrome = threadChrome
         streamDataSource = UICollectionViewDiffableDataSource<StreamSection, StreamItem>(
             collectionView: collectionView
@@ -1157,6 +1291,8 @@ final class CommentStream: NSObject {
                     : collectionView.dequeueConfiguredReusableCell(using: commentCell, for: indexPath, item: id)
             case .seam:
                 return collectionView.dequeueConfiguredReusableCell(using: seamCell, for: indexPath, item: item)
+            case .tierEnd:
+                return collectionView.dequeueConfiguredReusableCell(using: tierEndCell, for: indexPath, item: item)
             }
         }
         guard groupsByDay else { return }
@@ -1290,17 +1426,304 @@ final class CommentStream: NSObject {
             return items
         }
         let ordered = kind == .recent ? Self.conversationOrder(latestComments) : latestComments
+        var comments: [StreamItem] = []
         for item in CommentThreadPresentation.items(from: ordered, expanded: expandedReplyParents) {
             switch item {
             case .comment(let model):
-                items.append(.comment(model.id))
+                comments.append(.comment(model.id))
             case .viewMoreReplies(let parentID, let hiddenCount):
-                items.append(.seam(.expand(hidden: hiddenCount), parentID: parentID))
+                comments.append(.seam(.expand(hidden: hiddenCount), parentID: parentID))
             case .collapseReplies(let parentID):
-                items.append(.seam(.collapse, parentID: parentID))
+                comments.append(.seam(.collapse, parentID: parentID))
             }
         }
-        return items
+        guard readsTiersNow else { return items + comments }
+        return cutToTiers(comments, lead: items)
+    }
+
+    // MARK: - Tiers (#2042)
+
+    /// Whether the stream reads in tiers (#2042, the owner 2026-11-02): set by
+    /// a host whose page stands in a vertical feed, where the edge of what is
+    /// shown hands the swipe to the screen (the next post, the close). Off,
+    /// the stream scrolls through everything it holds, as before.
+    var readsInTiers = false {
+        didSet {
+            guard readsInTiers != oldValue, hasAppliedStream else { return }
+            applyStream(animated: false)
+        }
+    }
+
+    /// Whether the tiers cut what is shown now: reading in tiers, with a room
+    /// to measure them against.
+    private var readsTiersNow: Bool { readsInTiers && tierViewport > 0 }
+
+    /// The room one tier is measured against: the stream's settled room,
+    /// less its section's own insets.
+    private var tierViewport: CGFloat { availableStreamHeight - streamSectionVerticalInsets }
+
+    /// The furthest thread shown so far, from the stream's start: what is
+    /// shown only grows — a comment arriving above it never pushes a thread
+    /// the reader saw back out.
+    private var furthestRevealedThread: String?
+    /// The threads of the last cut, from the stream's start, and how many of
+    /// them are shown.
+    private var tierThreads: [[StreamItem]] = []
+    private(set) var revealedThreadCount = 0
+    /// The threads past what is shown, and their height.
+    var hiddenThreadCount: Int { max(0, tierThreads.count - revealedThreadCount) }
+    private var hiddenHeight: CGFloat = 0
+    /// A "More" tapped while the next tier was still loading: revealed when
+    /// it lands.
+    private var revealsWhenLoaded = false
+
+    /// The drag that started at the stream's bottom edge heading up: it moves
+    /// the feed to the next post, as the composer's swipe does, while the
+    /// stream stays at its edge. Nil for any other drag.
+    private var pageDrive: (edge: CGFloat, handler: (CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void)?
+    /// Set while the stream's offset is put back at its edge.
+    private var isHoldingEdge = false
+
+    /// `comments` cut to what the tiers show (Popular from its top, Recent
+    /// from its newest), after `lead` (the caption — Recent's only once its
+    /// whole history is shown).
+    private func cutToTiers(_ comments: [StreamItem], lead: [StreamItem]) -> [StreamItem] {
+        let threads = CommentTiers.threads(of: comments) { item in
+            if case .comment(let id) = item { return streamModels[id]?.parentID == nil }
+            return false
+        }
+        let fromStart = kind == .popular ? threads : Array(threads.reversed())
+        var heights = fromStart.map(threadHeight)
+        // The tier's end room is part of the tier.
+        var leadHeight = (kind == .popular ? lead.reduce(0) { $0 + rowHeight($1) } : 0) + Self.tierEndHeight
+        // Recent's day pills (#757): one over each thread that starts a day,
+        // and one over the topmost thread shown, whose day began further up.
+        if kind == .recent, groupsByDay {
+            let pill = measuredDayPillHeight
+            leadHeight += pill
+            let days = threads.map { thread -> Date? in
+                guard case .comment(let id) = thread.first, let created = streamModels[id]?.createdAt else { return nil }
+                return Calendar.current.startOfDay(for: created)
+            }
+            for index in days.indices where index > 0 && days[index] != days[index - 1] {
+                heights[threads.count - 1 - index] += pill
+            }
+        }
+        var revealed = CommentTiers.firstTierCount(heights: heights, viewport: tierViewport, lead: leadHeight)
+        if let furthest = furthestRevealedThread,
+           let index = fromStart.firstIndex(where: { Self.threadID($0) == furthest }) {
+            revealed = max(revealed, index + 1)
+        }
+        if revealed > 0 { furthestRevealedThread = Self.threadID(fromStart[revealed - 1]) }
+        tierThreads = fromStart
+        revealedThreadCount = revealed
+        hiddenHeight = heights.dropFirst(revealed).reduce(0, +)
+        let shown = fromStart.prefix(revealed)
+        // ⚠️ THE STREAM GOES ON BEHIND THE CHROME (the owner, 2026-11-02):
+        // the next tier — loaded ahead — is drawn past the tier's end, under
+        // the "More" button and the composer (Popular) or the top bar
+        // (Recent), so the list reads as continuing; the reader's scroll
+        // still stops at the tier's end (`tierOverscan`). Nothing hidden
+        // yet but more on its way: the end's room alone.
+        let hiddenHeights = Array(heights.dropFirst(revealed))
+        let behindCount = hiddenHeights.isEmpty
+            ? 0
+            : max(1, CommentTiers.nextTierCount(heights: hiddenHeights, viewport: tierViewport))
+        let behind = fromStart.dropFirst(revealed).prefix(behindCount)
+        let end: [StreamItem] = behind.isEmpty && (hiddenThreadCount > 0 || sourceHasMore) ? [.tierEnd] : []
+        switch kind {
+        case .popular:
+            tierBoundary = behind.isEmpty ? nil : (shown.last?.last ?? lead.last)
+            return lead + shown.flatMap { $0 } + end + behind.flatMap { $0 }
+        case .recent:
+            tierBoundary = behind.isEmpty ? nil : shown.last?.first
+            let top = behind.isEmpty ? (end.isEmpty && hiddenThreadCount == 0 ? lead : end) : behind.reversed().flatMap { $0 }
+            return top + shown.reversed().flatMap { $0 }
+        }
+    }
+
+    /// The tier's last row on the side the stream grows to — Popular's
+    /// lowest, Recent's topmost — when rows are drawn past it.
+    private var tierBoundary: StreamItem?
+
+    /// How far the rows drawn past the tier's end reach beyond its room:
+    /// taken off the inset on that side (Popular's bottom, Recent's top), so
+    /// the reader's scroll stops where the tier ends, with its end's room
+    /// for the "More" button, while those rows show behind the chrome.
+    private(set) var tierOverscan: CGFloat = 0
+    private var topOverscan: CGFloat { kind == .recent ? tierOverscan : 0 }
+
+    /// Measures `tierOverscan` from the tier's boundary row, and moves the
+    /// inset with it.
+    private func syncTierOverscan() {
+        var overscan: CGFloat = 0
+        if readsTiersNow, let boundary = tierBoundary, let path = streamDataSource.indexPath(for: boundary) {
+            collectionView.layoutIfNeeded()
+            if let frame = collectionView.layoutAttributesForItem(at: path)?.frame {
+                overscan = kind == .popular
+                    ? collectionView.contentSize.height - frame.maxY - Self.tierEndHeight
+                    : frame.minY - Self.tierEndHeight
+                overscan = max(0, overscan)
+            }
+        }
+        guard abs(overscan - tierOverscan) > 0.5 else { return }
+        let wasAtTop = collectionView.contentOffset.y <= -collectionView.contentInset.top + 0.5
+        tierOverscan = overscan
+        switch kind {
+        case .popular:
+            if let resting = restingBottomInset { collectionView.contentInset.bottom = resting - overscan }
+        case .recent:
+            guard let engaged = engagedStreamInsets else { return }
+            let top = engaged.top + bottomAnchorSlack - overscan
+            collectionView.contentInset.top = top
+            collectionView.verticalScrollIndicatorInsets.top = top
+            if wasAtTop { collectionView.contentOffset.y = -top }
+        }
+    }
+
+    /// The tier's end room: the button's height and a breath either side.
+    static let tierEndHeight: CGFloat = 52
+
+    /// A day pill's height, as the layout draws it — measured again with the
+    /// rows (`rowHeight`).
+    private var dayPillHeight: CGFloat? = nil
+    private var measuredDayPillHeight: CGFloat {
+        if let dayPillHeight { return dayPillHeight }
+        let pill = DayPillHeaderView()
+        pill.configure(title: "Today")
+        let height = ceil(pill.systemLayoutSizeFitting(
+            CGSize(width: streamRowWidth, height: 0),
+            withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+        ).height)
+        dayPillHeight = height
+        return height
+    }
+
+    /// A thread's identity: its first row's comment.
+    static func threadID(_ thread: [StreamItem]) -> String? {
+        switch thread.first {
+        case .comment(let id): return id
+        case .seam(_, let parentID): return parentID
+        default: return nil
+        }
+    }
+
+    private func threadHeight(_ thread: [StreamItem]) -> CGFloat {
+        thread.reduce(0) { $0 + rowHeight($1) }
+    }
+
+    /// The rows' measured heights at the rows' width — a row keeps its
+    /// height for as long as its identity and the width hold.
+    private var rowHeights: [StreamItem: CGFloat] = [:]
+    private var rowHeightsWidth: CGFloat = 0
+    private var rowHeightsCategory: UIContentSizeCategory?
+    /// The caption's, kept apart: its text arrives late (the seed, then the post).
+    private var captionHeight: (caption: String, height: CGFloat)?
+
+    /// A row's height as the layout will draw it, measured through the same
+    /// cell class at the rows' width — never displayed.
+    private func rowHeight(_ item: StreamItem) -> CGFloat {
+        let width = streamRowWidth
+        guard width > 0 else { return 0 }
+        // A width or a text size of its own: every height is measured again.
+        let category = traitCollection.preferredContentSizeCategory
+        if abs(width - rowHeightsWidth) > 0.5 || category != rowHeightsCategory {
+            rowHeights = [:]
+            captionHeight = nil
+            dayPillHeight = nil
+            rowHeightsWidth = width
+            rowHeightsCategory = category
+        }
+        if case .caption = item {
+            let caption = latestPost?.caption ?? seededCaption?.text ?? ""
+            if let known = captionHeight, known.caption == caption { return known.height }
+            let height = captionRowHeight(width: width)
+            captionHeight = (caption, height)
+            return height
+        }
+        if let known = rowHeights[item] { return known }
+        let height: CGFloat
+        switch item {
+        case .comment(let id):
+            guard let model = streamModels[id] else { return 0 }
+            height = measure(sizingCommentCell, width: width) { cell in
+                guard let row = PostDetailViewController.commentRow(in: cell) else { return }
+                row.variant = .comment
+                row.configure(with: model)
+                row.setLiked(model.isLiked, count: model.likeCount)
+            }
+        case .seam(let kind, let parentID):
+            let seam = CommentThreadToggleRow(kind: kind, parentID: parentID)
+            seam.bounds.size.width = width
+            height = ceil(seam.systemLayoutSizeFitting(
+                CGSize(width: width, height: 0),
+                withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+            ).height) + Spacing.lg
+        default:
+            height = 0
+        }
+        rowHeights[item] = height
+        return height
+    }
+
+    /// The comment row's cell, offscreen, for `rowHeight`.
+    private lazy var sizingCommentCell: UICollectionViewCell = threadChrome ? ThreadRowCell() : CommentCell()
+
+    private func measure(_ cell: UICollectionViewCell, width: CGFloat, configure: (UICollectionViewCell) -> Void) -> CGFloat {
+        configure(cell)
+        cell.bounds.size.width = width
+        cell.contentView.setNeedsLayout()
+        cell.contentView.layoutIfNeeded()
+        return ceil(cell.contentView.systemLayoutSizeFitting(
+            CGSize(width: width, height: 0),
+            withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+        ).height)
+    }
+
+    /// Whether the stream's source holds more than it has loaded.
+    private var sourceHasMore: Bool {
+        kind == .popular ? viewModel.hasMorePopularComments : viewModel.hasOlderComments
+    }
+
+    /// Whether there is a next tier to show: threads held past what is shown,
+    /// or more to load.
+    var hasNextTier: Bool { readsTiersNow && (hiddenThreadCount > 0 || sourceHasMore) }
+
+    /// The next tier's comments, asked ahead (#2042): whenever what is held
+    /// past what is shown is less than a later tier's ceiling.
+    private func loadNextTierAhead() {
+        guard readsTiersNow, sourceHasMore,
+              hiddenHeight < tierViewport * CommentTiers.laterTierCeiling else { return }
+        switch kind {
+        case .recent: viewModel.loadMoreComments()
+        case .popular: viewModel.loadMorePopularComments()
+        }
+    }
+
+    /// "More" (#2042): the next tier comes in — and the stream STAYS WHERE IT
+    /// IS (the owner, 2026-11-02): the button only unlocks the scroll. The
+    /// rows on screen hold their place (Recent's new tier lands above them),
+    /// and the reader scrolls on into it when they choose.
+    func revealNextTier(animated: Bool) {
+        guard readsTiersNow else { return }
+        guard hiddenThreadCount > 0 else {
+            // Still on its way: shown when it lands.
+            revealsWhenLoaded = sourceHasMore
+            loadNextTierAhead()
+            return
+        }
+        revealsWhenLoaded = false
+        let hidden = Array(tierThreads.dropFirst(revealedThreadCount))
+        let count = CommentTiers.nextTierCount(heights: hidden.map(threadHeight), viewport: tierViewport)
+        guard count > 0 else { return }
+        furthestRevealedThread = Self.threadID(hidden[count - 1])
+        let anchor = visibleAnchor()
+        UIView.performWithoutAnimation {
+            applyStream(animated: false)
+            collectionView.layoutIfNeeded()
+            if let anchor { hold(anchor) }
+        }
+        syncMoreButton()
     }
 
     /// Recent as a conversation (#2007): the view model's threads, newest
@@ -1361,13 +1784,20 @@ final class CommentStream: NSObject {
         #endif
         streamDataSource.apply(snapshot, animatingDifferences: animated && anchor == nil) { completion?() }
         suppressesPaging = false
-        // The slack follows the content (#1799): a comment, a page of them,
-        // a sort or a thread's replies only change its height.
+        // The tier's bound follows its rows, and the slack follows the
+        // content (#1799): a comment, a page of them, a sort or a thread's
+        // replies only change its height.
+        syncTierOverscan()
         syncBottomAnchor(animated: animated)
         if let anchor {
             hold(anchor)
         } else if holdsRest, kind == .recent {
             pinToTail(animated: animated && collectionView.window != nil)
+        }
+        if readsTiersNow {
+            if revealsWhenLoaded, hiddenThreadCount > 0 { return revealNextTier(animated: animated) }
+            loadNextTierAhead()
+            syncMoreButton()
         }
     }
 
@@ -1831,7 +2261,7 @@ extension CommentStream: UICollectionViewDelegate {
     /// Paging, not dismissal: one of the stream's last rows coming on screen
     /// asks for the next page of comments (#589).
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
-        guard !suppressesPaging, let item = streamDataSource.itemIdentifier(for: indexPath),
+        guard !suppressesPaging, !readsTiersNow, let item = streamDataSource.itemIdentifier(for: indexPath),
               pagingItems.contains(item) else { return }
         switch kind {
         case .recent: viewModel.loadMoreComments()
@@ -1870,9 +2300,65 @@ extension CommentStream: UICollectionViewDelegate {
             atTop: scrollView.contentOffset.y <= -scrollView.contentInset.top + 0.5,
             keyboardOpen: composeBar.isKeyboardOpen
         )
+        beginPageDriveIfAtTheEdge(scrollView)
+    }
+
+    // MARK: - The next post from the edge (#2042)
+
+    /// ⚠️ DECIDED AS THE DRAG BEGINS (the owner, 2026-11-02): reading in tiers,
+    /// at the bottom edge of what is shown — Popular's tier end, Recent's
+    /// newest — with the keyboard down, an upward drag is the screen's. A
+    /// fling that reaches the edge mid-drag stops there; the next swipe goes
+    /// on, so a reader flicking through comments never leaves the post by
+    /// accident.
+    private func beginPageDriveIfAtTheEdge(_ scrollView: UIScrollView) {
+        pageDrive = nil
+        // A reader who moves on no longer waits for a tier still loading
+        // (or whose load failed): it is not thrown at them later.
+        revealsWhenLoaded = false
+        guard readsTiersNow, let handler = composeBar.onPageSwipe, !composeBar.isKeyboardOpen,
+              Self.dragGoesToNextPost(
+                  atBottomEdge: streamIsAtBottom,
+                  velocity: scrollView.panGestureRecognizer.velocity(in: scrollView),
+                  translation: scrollView.panGestureRecognizer.translation(in: scrollView)
+              ) else { return }
+        pageDrive = (tailOffset, handler)
+        handler(.began, 0, 0)
+    }
+
+    /// Whether a drag beginning now goes to the next post: the stream at its
+    /// bottom edge, the finger heading up more than sideways. Pure, for tests.
+    static func dragGoesToNextPost(atBottomEdge: Bool, velocity: CGPoint, translation: CGPoint) -> Bool {
+        guard atBottomEdge else { return false }
+        let upward = velocity.y < 0 || (velocity.y == 0 && translation.y < 0)
+        return upward && abs(velocity.y) >= abs(velocity.x)
+    }
+
+    /// The page drive's frame: the stream back at its edge, the finger's
+    /// travel handed to the feed.
+    private func drivePage(_ scrollView: UIScrollView) {
+        guard let drive = pageDrive, !isHoldingEdge else { return }
+        isHoldingEdge = true
+        scrollView.contentOffset.y = drive.edge
+        isHoldingEdge = false
+        let pan = scrollView.panGestureRecognizer
+        drive.handler(.changed, pan.translation(in: scrollView.superview).y, pan.velocity(in: scrollView.superview).y)
+    }
+
+    func scrollViewWillEndDragging(
+        _ scrollView: UIScrollView, withVelocity velocity: CGPoint, targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+        guard let drive = pageDrive else { return }
+        pageDrive = nil
+        targetContentOffset.pointee.y = drive.edge
+        let pan = scrollView.panGestureRecognizer
+        drive.handler(.ended, pan.translation(in: scrollView.superview).y, pan.velocity(in: scrollView.superview).y)
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if pageDrive != nil { return drivePage(scrollView) }
+        guard !isHoldingEdge else { return }
+        syncMoreButton()
         // The reader's own scroll decides whether the stream holds its
         // resting end (#2007): away from it, the rows stay where they are.
         if scrollView.isTracking || scrollView.isDecelerating {
