@@ -53,11 +53,10 @@ final class SnapFeedViewController: UIViewController {
         self.toggleBookmark(for: model.id)
     }
 
-    /// The engaged toolbar's trailing item: the comments sort selector,
-    /// occupying the action territory while comments are engaged (the
-    /// bookmark/share/more cluster yields — those live in the engaged
-    /// card; the audio attribution stays anchored on the left).
-    private let commentSortButton = SnapCommentSortButton()
+    /// The comments' Popular | Recent selector (#2007), beside the leading
+    /// item while a thread that has the tabs holds the engaged chrome — bound
+    /// to that thread's panel.
+    private let commentTabs = CommentTabsSelector()
     /// The one living toolbar's items (keep-and-stack): built once. The
     /// author pill's content changes inside its item (`showAuthor`), at a fixed
     /// width (`applyBarPillWidths`). The engagement no longer touches the
@@ -1907,8 +1906,8 @@ final class SnapFeedViewController: UIViewController {
     /// how a half-engaged bar happens.
     ///
     ///   resting          NAV [‹ back] … [🪙 solde] [author pill]
-    ///   comments (media) NAV [✕]      … [🪙 solde] [⇅ sort] [author pill]
-    ///   comments (text)  NAV [‹ back] … [🪙 solde] [⇅ sort] [author pill]
+    ///   comments (media) NAV [✕]      … [🪙 solde] [Popular | Recent] [author pill]
+    ///   comments (text)  NAV [‹ back] … [🪙 solde] [Popular | Recent] [author pill]
     ///   TOOLBAR          [♫ attribution] … [🔖 ⬆︎] [⋯]   — in every state
     ///
     /// (The wallet badge appears only when a wallet is injected; a
@@ -1979,7 +1978,7 @@ final class SnapFeedViewController: UIViewController {
     /// Idempotent, and cheap enough for every layout pass: an unchanged width
     /// writes nothing. Called wherever the bars' geometry can move — a layout
     /// pass of this screen (rotation, the first real width), the sort joining
-    /// or leaving (`setEngagedChrome`, `setCommentSortAvailable`), the wallet
+    /// or leaving (`setEngagedChrome`, `setCommentTabsAvailable`), the wallet
     /// badge growing a digit — and never from a page change.
     private func applyBarPillWidths() {
         // The first width that is real: the bar's, else its navigation
@@ -2003,16 +2002,13 @@ final class SnapFeedViewController: UIViewController {
             toolbarWidth: toolbar,
             walletWidth: walletBadgeItem == nil
                 ? nil : walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width,
-            sort: sortOnBar
-                ? SnapBarPillWidths.Sort(glyph: commentSortButton.glyphWidth, titled: commentSortButton.titledWidth)
-                : nil,
+            tabs: sortOnBar ? commentTabs.width : nil,
             // The footer's glyph items grow with the text size (#1679).
             toolbarIcon: SnapBarPillWidths.toolbarIcon(for: traitCollection),
             // …and so does a text post's like beside them (#1924).
             toolbarLike: defaultToolbarItems.isEmpty ? nil : SnapFooterToolbar.likeBubbleWidth(for: traitCollection)
         )
         barPillWidths = widths
-        commentSortButton.setTitleHidden(sortOnBar && !widths.sortShowsTitle)
         // ⚠️ THE DAY GIVES WAY FIRST (#757): it takes what the run leaves —
         // bar margins, the back arrow and the sort on the left, the ✕ and the
         // points on the right — and truncates in it.
@@ -2021,10 +2017,7 @@ final class SnapFeedViewController: UIViewController {
             let gap = Spacing.sm
             var used: CGFloat = 16 * 2 + padding
             if backItem != nil { used += 44 + padding }
-            if sortOnBar {
-                used += gap + padding
-                    + (widths.sortShowsTitle ? commentSortButton.titledWidth : commentSortButton.glyphWidth)
-            }
+            if sortOnBar { used += gap + padding + commentTabs.width }
             if engagedChromeOnBar, engagedChromeHasMedia { used += 44 + padding + gap }
             if walletBadgeItem != nil {
                 used += walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + padding + gap
@@ -2057,7 +2050,7 @@ final class SnapFeedViewController: UIViewController {
         let padding: CGFloat = 18
         let gap = Spacing.sm
         var used: CGFloat = 16 * 2 + padding + 44 + padding + gap
-        if sortOnBar { used += commentSortButton.glyphWidth + padding + gap }
+        if sortOnBar { used += commentTabs.width + padding + gap }
         if walletBadgeItem != nil {
             used += walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + padding + gap
         }
@@ -2219,7 +2212,7 @@ final class SnapFeedViewController: UIViewController {
     private func applyLeadingNavItem(engaged: Bool, hasMedia: Bool, animated: Bool) {
         let closesComments = engaged && hasMedia
         // ⚠️ LEFT TO RIGHT here, unlike the trailing run: `leftBarButtonItems[0]`
-        // is the one nearest the screen edge. So this reads [‹ back] [⇅ sort],
+        // is the one nearest the screen edge. So this reads [‹ back] [Popular | Recent],
         // the sort just inboard of the arrow, with the fixed space that keeps
         // them two pills rather than one shared platter.
         //
@@ -2256,7 +2249,7 @@ final class SnapFeedViewController: UIViewController {
     /// so a thread that reaches the threshold while it is open — the viewer's
     /// own tenth comment — brings the sort in through the bar's own animation.
     /// Internal for tests, which have no panel to count.
-    func setCommentSortAvailable(_ available: Bool, animated: Bool = false) {
+    func setCommentTabsAvailable(_ available: Bool, animated: Bool = false) {
         guard available != isCommentSortAvailable else { return }
         isCommentSortAvailable = available
         guard engagedChromeOnBar else { return }
@@ -2268,17 +2261,16 @@ final class SnapFeedViewController: UIViewController {
     /// Reads the answer off the panel about to own the engagement — BEFORE the
     /// engaged chrome is built, so the bar comes up right the first time.
     private func syncCommentSortAvailability() {
-        let count = (commentsContentVC as? PostDetailViewController)?.commentCount ?? 0
-        isCommentSortAvailable = CommentSortPolicy.isAvailable(commentCount: count)
+        isCommentSortAvailable = (commentsContentVC as? PostDetailViewController)?.showsPopular ?? false
     }
 
     /// The count, as it changes, from a panel that holds the engagement. A
     /// panel that does not (a warm, a preview) is heard at its promotion
     /// instead, through `syncCommentSortAvailability`.
     private func observeCommentCount(of detail: PostDetailViewController?) {
-        detail?.onCommentCountChange = { [weak self, weak detail] count in
+        detail?.onCommentCountChange = { [weak self, weak detail] _ in
             guard let self, let detail, self.commentsContentVC === detail else { return }
-            self.setCommentSortAvailable(CommentSortPolicy.isAvailable(commentCount: count), animated: true)
+            self.setCommentTabsAvailable(detail.showsPopular, animated: true)
         }
     }
 
@@ -2560,7 +2552,7 @@ final class SnapFeedViewController: UIViewController {
         // No badge until the graph has answered for an author.
         authorIdentityView.setFollowBadge(.none)
         authorItem = makeAuthorItem()
-        sortItem = BarItems.container(id: "feed.snap.sort", view: commentSortButton)
+        sortItem = BarItems.container(id: "feed.snap.commentTabs", view: commentTabs.tabBar)
         if wallet != nil {
             // Tappable exactly when a sheet is wired: the badge opens the
             // same claim sheet the map's does, from any post. Without one
@@ -3640,10 +3632,12 @@ final class SnapFeedViewController: UIViewController {
         detail.setRailSoundActions(tap: { [weak self] in self?.presentSoundSheet() }, hold: nil)
         // Scrolled away from the text, the page's sound bubble offers the way
         // back (#1929) — the composer's own slot does, on the loading page.
-        detail.onScrollAwayChange = hostedByPage ? { [weak self] shows in
-            self?.setSoundShowsReturn(shows, for: id)
+        detail.onScrollAwayChange = hostedByPage ? { [weak self, weak detail] shows in
+            self?.setSoundShowsReturn(shows, down: detail?.scrollAwayReturnsDown ?? false, for: id)
         } : nil
-        if hostedByPage { setSoundShowsReturn(detail.showsScrollAwayReturn, for: id) }
+        if hostedByPage {
+            setSoundShowsReturn(detail.showsScrollAwayReturn, down: detail.scrollAwayReturnsDown, for: id)
+        }
     }
 
     /// The open comments panel showing `id`: the engagement's, or the
@@ -3655,9 +3649,9 @@ final class SnapFeedViewController: UIViewController {
     }
 
     /// The way back on every visible page showing `id` (#1929).
-    private func setSoundShowsReturn(_ shows: Bool, for id: PostID) {
+    private func setSoundShowsReturn(_ shows: Bool, down: Bool = false, for id: PostID) {
         for case let cell as SnapFeedCell in collectionView.visibleCells where cell.representedPostID == id {
-            cell.setSoundShowsReturn(shows)
+            cell.setSoundShowsReturn(shows, down: down)
         }
     }
 
@@ -3738,16 +3732,9 @@ final class SnapFeedViewController: UIViewController {
         // begin-time veto can prevent a handoff on a pan that already
         // began. A disabled pan cannot receive the handoff, full stop.
         collectionView.isScrollEnabled = false
-        // Sort is engagement-scoped — every fresh engagement starts at
-        // Recent, and the selection drives the STREAM. Already done for a
-        // warm panel (see `installCommentsPanel`), so this is the fallback
-        // path's copy.
-        if !wasPrewarmed {
-            commentSortButton.reset()
-            commentSortButton.onOrderChange = { [weak detail] order in
-                detail?.setCommentSortOrder(order)
-            }
-        }
+        // The tabs follow the panel that holds the engagement (#2007) — bound
+        // again here, warm or not: a later page's install binds its own.
+        commentTabs.bind(to: detail)
         syncCommentSortAvailability()
         setEngagedChrome(true, hasMedia: true, animated: animated)
         // LAYOUT FIRST, UNANIMATED. Inside the spring, `layoutIfNeeded`
@@ -4367,8 +4354,6 @@ final class SnapFeedViewController: UIViewController {
         )
         // The count the feed knows: no comment bones for a post with none (#1773).
         detail?.seedCommentCount(modelsByID[id]?.cardMetrics?.comments)
-        // An open sort menu takes the next drag on the list (#759).
-        detail?.closesMenuOnShow = { [weak self] in self?.commentSortButton.closeMenu() ?? false }
         // Dragging the list down from its top collapses back to media — the
         // sheet gesture. MEDIA pages only: a text engagement is the page's
         // permanent resting state, so there is nothing to collapse to.
@@ -4398,10 +4383,7 @@ final class SnapFeedViewController: UIViewController {
         // the work already done.
         cell.prematerializeEngagedChrome()
         detail?.prematerializeComposerChrome()
-        commentSortButton.reset()
-        commentSortButton.onOrderChange = { [weak detail] order in
-            detail?.setCommentSortOrder(order)
-        }
+        commentTabs.bind(to: detail)
         return detail
     }
 
@@ -4662,11 +4644,7 @@ final class SnapFeedViewController: UIViewController {
               commentsEngagedID != nil else { return }
         restingLockApplied = true
         collectionView.isScrollEnabled = false
-        let detail = commentsContentVC as? PostDetailViewController
-        commentSortButton.reset()
-        commentSortButton.onOrderChange = { [weak detail] order in
-            detail?.setCommentSortOrder(order)
-        }
+        commentTabs.bind(to: commentsContentVC as? PostDetailViewController)
         syncCommentSortAvailability()
         setEngagedChrome(true, hasMedia: false, animated: true)
     }
@@ -4678,9 +4656,6 @@ final class SnapFeedViewController: UIViewController {
     /// whole time; nothing structural moves in either direction.
     private func dismissComments() {
         guard let engagedID = commentsEngagedID else { return }
-        // An open sort menu closes first, and alone (#759): the ✕, a tap on
-        // the media strip — any close path while it is up.
-        if commentSortButton.closeMenu() { return }
         // BELT: a text-only post's engagement is undismissable (the
         // permanent resting state — collapsing it would strand the page
         // on its empty shell). No UI path should reach here for text
@@ -8613,6 +8588,14 @@ extension SnapFeedViewController: ForYouSectorPage {
     /// The side list, open or on its way, is closed by the swipe — not left
     /// for Feed.
     func sectorPageOwnsHorizontalDrag(velocity: CGPoint) -> Bool {
+        claimsHorizontalDrag(velocity: velocity)
+    }
+}
+
+extension SnapFeedViewController: HorizontalDragClaiming {
+    /// The side list, open or on its way, is closed by the swipe: every pager
+    /// on the page — the comments' tabs (#2007) — gives the drag away.
+    func claimsHorizontalDrag(velocity: CGPoint) -> Bool {
         guard let sideList else { return false }
         return sideList.isOpen || sideList.isEngaged
     }

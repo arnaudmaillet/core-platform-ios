@@ -19,9 +19,10 @@ import Testing
 /// anywhere, run DesignSystem's tests too.
 struct TitledHeaderTopEdgeGuardTests {
     /// File name → why its titled header stays clear.
-    static let allowed: [String: String] = [
-        "PostDetailViewController.swift": "the snap feed's embedded comment stream, where a blur would band the panel",
-    ]
+    /// (The snap feed's embedded comment stream, where a blur would band the
+    /// panel, clears its edge in `CommentStream`, which sets no title, since
+    /// #2007.)
+    static let allowed: [String: String] = [:]
 
     private static var root: URL {
         URL(fileURLWithPath: #filePath)

@@ -56,7 +56,7 @@ final class RankedCommentsStream {
         let asked = generation
         hasFailed = false
         load = Task { [weak self] in
-            let page = try? await provider.loadCommentsPage(for: postID, after: nil, order: .trending)
+            let page = try? await provider.loadCommentsPage(for: postID, after: nil, order: .popular)
             guard let self, self.generation == asked else { return }
             self.load = nil
             guard let page else {
@@ -76,7 +76,7 @@ final class RankedCommentsStream {
         guard load == nil, hasAnswered, let token = nextToken else { return }
         let asked = generation
         load = Task { [weak self] in
-            let page = try? await provider.loadCommentsPage(for: postID, after: token, order: .trending)
+            let page = try? await provider.loadCommentsPage(for: postID, after: token, order: .popular)
             guard let self, self.generation == asked else { return }
             self.load = nil
             guard let page else { return }
@@ -89,14 +89,33 @@ final class RankedCommentsStream {
 
     /// The viewer's comment: a top-level one leads the tab; a reply goes
     /// under its parent, wherever that is.
-    func addOwn(_ entry: CommentEntry) {
+    /// `notify` false for a caller that emits next anyway.
+    func addOwn(_ entry: CommentEntry, notify: Bool = true) {
         guard !own.contains(where: { $0.id == entry.id }), !ranked.contains(where: { $0.id == entry.id }) else { return }
         if entry.parentID == nil {
             own.insert(entry, at: 0)
         } else if ranked.contains(where: { $0.id == entry.parentID }) || own.contains(where: { $0.id == entry.parentID }) {
             ranked = PostDetailViewModel.inserting(entry, into: ranked)
         }
-        onChange?()
+        if notify { onChange?() }
+    }
+
+    /// A thread's newly loaded replies, under its parent wherever it stands:
+    /// the viewer's own threads keep their replies in the ranking, which
+    /// `shown` reads them from. Returns whether anything changed; nothing is
+    /// announced — the caller emits.
+    @discardableResult
+    func insertReplies(_ fresh: [CommentEntry], under parentID: String, exhausted: Bool) -> Bool {
+        let before = shown
+        if let ownIndex = own.firstIndex(where: { $0.id == parentID }) {
+            ranked = Self.appending(fresh, to: ranked)
+            if exhausted {
+                own[ownIndex].replyCount = ranked.filter { $0.parentID == parentID }.count
+            }
+        } else {
+            ranked = PostDetailViewModel.insertingReplies(fresh, under: parentID, exhausted: exhausted, into: ranked)
+        }
+        return shown != before
     }
 
     /// One change to every comment held — a review, a delete — in both the

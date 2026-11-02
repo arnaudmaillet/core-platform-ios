@@ -17,7 +17,7 @@ struct SkeletonCrossfadeGuardTests {
     static let allowed: [String: String] = [
         "SkeletonCrossfade.swift": "the helpers themselves",
         "EmoteSkeleton.swift": "an emote's bone hands over to the emote's own arrival animation, at its duration",
-        "PostDetailViewController.swift": "the comments' bone ghosts fade under the staged reveal they are timed with",
+        "CommentStream.swift": "the comments' bone ghosts fade under the staged reveal they are timed with",
     ]
 
     private static var root: URL {

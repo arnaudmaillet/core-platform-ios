@@ -4,18 +4,19 @@ import CoreNetworking
 import EntityStore
 import Foundation
 
-/// The comments stream's sort orders (the engaged toolbar's selector).
+/// The comments' two orders (#2007): Recent, the server's chronology; Popular,
+/// its ranking (`ListTopLevel` POPULARITY) — each a tab of the panel.
 public enum CommentSortOrder: Sendable, Equatable {
     case recent
-    case trending
+    case popular
 }
 
-/// When the stream's sort control is offered at all.
+/// When a post's comments have a Popular tab at all (#2007).
 ///
-/// A sort over a handful of comments reorders nothing anyone would notice, and
-/// a control that visibly does nothing reads as broken — so it waits until
-/// there is a thread worth ranking, and gives its width back to the author
-/// until then.
+/// A ranking of a handful of comments reorders nothing anyone would notice,
+/// and a selector that visibly does nothing reads as broken — so below the
+/// threshold there is one Recent stream, no selector, and the bar's width
+/// stays the author's. The owner can lower it to zero, here.
 enum CommentSortPolicy {
     static let minimumComments = 10
 
@@ -188,16 +189,9 @@ public final class PostDetailViewModel {
     /// Pages beyond the first are on screen: a refresh merges its first page
     /// over them rather than replacing the stream.
     private var hasLaterPages = false
-    /// The first top-level comment of each page appended after the first —
-    /// Trending ranks threads WITHIN a page, so rows already on screen never
-    /// move when one lands.
-    private var pageStarts: Set<String> = []
     /// A page filtered down to nothing still carries a token; this many in a
     /// row are walked through before giving up until the next approach.
     static let maxEmptyPagesInARow = 5
-    /// The stream's sort order — Recent is the repository's chronology,
-    /// Trending reorders THREADS by engagement (see `sortedForDisplay`).
-    private var commentSort: CommentSortOrder = .recent
     /// The Popular tab's stream (#2007), beside Recent's (`comments`).
     private let popular = RankedCommentsStream()
     /// The comments' likes, from the server (#637): point stakes like a
@@ -209,10 +203,6 @@ public final class PostDetailViewModel {
     private var commentLikesAsked: Set<String> = []
     /// The comments with a like on its way — one at a time each.
     private var commentLikesInFlight: Set<String> = []
-    /// What Trending ranks by: the comments the viewer liked when the likes
-    /// last landed or the sort last changed — NOT on a tap, so a row never
-    /// jumps out from under the finger that just liked it.
-    private var likedForRanking: Set<String> = []
     /// Comment likes are a capability of the engagement provider.
     private var commentLiking: (any CommentLiking)? { engagementProvider as? any CommentLiking }
     /// Held comments whose review is on its way to the server.
@@ -463,8 +453,9 @@ public final class PostDetailViewModel {
                 // Only a row that is NEW arrives: a replay answered with a
                 // comment already on screen (#795) is not one.
                 if self.insertSubmitted(entry) { self.onCommentPosted?(entry.id) }
-                // At Popular's top too, as the viewer's own (#2007).
-                self.popular.addOwn(entry)
+                // At Popular's top too, as the viewer's own (#2007); the
+                // emission below renders both.
+                self.popular.addOwn(entry, notify: false)
                 self.emitComments()
                 self.setComposing(false)
             } catch {
@@ -761,6 +752,10 @@ public final class PostDetailViewModel {
     /// The viewer neared the end of the stream: the next page, if there is
     /// one and none is already on its way (#589). Appended, never reordering
     /// what is on screen; a failure is retried on the next approach.
+    /// Whether Recent has older comments still to load (#2007): its caption,
+    /// the post's first message, waits above them.
+    var hasOlderComments: Bool { nextPageToken != nil }
+
     func loadMoreComments() {
         guard let commentsProvider, let postID, pageLoad == nil else { return }
         guard let token = nextPageToken else {
@@ -804,7 +799,6 @@ public final class PostDetailViewModel {
         // stream stopped there (found on the inbox, #593).
         pageLoad = nil
         guard let head = fresh.first(where: { $0.parentID == nil }) else { return }
-        pageStarts.insert(head.id)
         hasLaterPages = true
         comments += fresh
         emitComments()
@@ -818,9 +812,14 @@ public final class PostDetailViewModel {
     /// can come back twice, so what the stream holds is dropped, and a page
     /// that brings nothing new asks for the next one.
     func loadMoreReplies(parentID: String) {
+        // ⚠️ EITHER STREAM'S THREAD (#2007): Popular ranks threads Recent has
+        // not paged in yet, so the parent is looked for in both, and the
+        // replies land in whichever holds it — a Popular "View more" that
+        // looked in Recent alone did nothing.
+        let held = comments + popular.shown
         guard let commentsProvider, let postID, !replyLoads.contains(parentID),
-              let parent = comments.first(where: { $0.id == parentID }) else { return }
-        let loaded = comments.filter { $0.parentID == parentID }.count
+              let parent = held.first(where: { $0.id == parentID }) else { return }
+        let loaded = Set(held.filter { $0.parentID == parentID }.map(\.id)).count
         let cursor = replyCursors[parentID]
         guard cursor != nil || (parent.replyCount ?? 0) > loaded else { return }
         replyLoads.insert(parentID)
@@ -833,7 +832,7 @@ public final class PostDetailViewModel {
                 let page = try? await commentsProvider.loadReplies(for: postID, to: parentID, after: token)
                 guard let self, self.pagingGeneration == generation, self.postID == postID else { return }
                 guard let page else { break }
-                let known = Set(self.comments.map(\.id))
+                let known = Set((self.comments + self.popular.shown).map(\.id))
                 fresh = page.entries.filter { !known.contains($0.id) && $0.parentID == parentID }
                 token = page.nextPageToken
                 exhausted = token == nil
@@ -842,22 +841,32 @@ public final class PostDetailViewModel {
             guard let self, self.pagingGeneration == generation, self.postID == postID else { return }
             self.replyLoads.remove(parentID)
             self.replyCursors[parentID] = token
-            var list = self.comments
-            guard var parentIndex = list.firstIndex(where: { $0.id == parentID }) else { return }
-            var end = parentIndex + 1
-            while end < list.count, list[end].parentID == parentID { end += 1 }
-            list.insert(contentsOf: fresh, at: end)
-            // The thread is all here: its count is what it shows, so the
-            // seam closes rather than offering replies the server filters
-            // out for this viewer.
-            if exhausted {
-                parentIndex = list.firstIndex(where: { $0.id == parentID }) ?? parentIndex
-                list[parentIndex].replyCount = list.filter { $0.parentID == parentID }.count
-            }
-            guard list != self.comments else { return }
+            let list = Self.insertingReplies(fresh, under: parentID, exhausted: exhausted, into: self.comments)
+            let popularChanged = self.popular.insertReplies(fresh, under: parentID, exhausted: exhausted)
+            guard list != self.comments || popularChanged else { return }
             self.comments = list
             self.emitComments()
         }
+    }
+
+    /// `list` with a thread's newly loaded `fresh` replies after its last
+    /// one, when the thread is in it. `exhausted`: the thread is all here, so
+    /// its count is what it shows and the seam closes rather than offering
+    /// replies the server filters out for this viewer. Pure, for tests.
+    static func insertingReplies(
+        _ fresh: [CommentEntry], under parentID: String, exhausted: Bool, into list: [CommentEntry]
+    ) -> [CommentEntry] {
+        var list = list
+        guard var parentIndex = list.firstIndex(where: { $0.id == parentID }) else { return list }
+        let known = Set(list.map(\.id))
+        var end = parentIndex + 1
+        while end < list.count, list[end].parentID == parentID { end += 1 }
+        list.insert(contentsOf: fresh.filter { !known.contains($0.id) }, at: end)
+        if exhausted {
+            parentIndex = list.firstIndex(where: { $0.id == parentID }) ?? parentIndex
+            list[parentIndex].replyCount = list.filter { $0.parentID == parentID }.count
+        }
+        return list
     }
 
     /// Internal, not private, for the one test that races a page against it:
@@ -869,7 +878,6 @@ public final class PostDetailViewModel {
         pageLoad = nil
         nextPageToken = nil
         hasLaterPages = false
-        pageStarts = []
         wantsNextPage = false
         replyCursors = [:]
         replyLoads = []
@@ -934,10 +942,20 @@ public final class PostDetailViewModel {
 
     // MARK: - Popular (#2007)
 
-    private func loadPopularIfNeeded() {
+    /// Popular's first page, once — asked by the panel as it opens on the tab,
+    /// before Recent has answered, when the opener's count already reaches
+    /// the threshold.
+    func loadPopularIfNeeded() {
         guard let commentsProvider, let postID, !popular.hasAnswered else { return }
         if popular.onChange == nil { popular.onChange = { [weak self] in self?.emitPopular() } }
         popular.loadFirst(postID: postID, from: commentsProvider)
+    }
+
+    /// The Popular tab's first page again, after it failed.
+    public func retryPopularComments() {
+        guard popular.hasFailed else { return }
+        popular.reset()
+        loadPopularIfNeeded()
     }
 
     /// The viewer neared the end of the Popular tab: its next page.
@@ -968,9 +986,10 @@ public final class PostDetailViewModel {
     private func emitComments() {
         let now = now()
         let viewer = shownIdentity?.profileID
-        let ordered = Self.sortedForDisplay(
-            comments, order: commentSort, liked: likedForRanking, pageStarts: pageStarts, viewer: viewer
-        )
+        // ⚠️ RECENT IS A CONVERSATION (#2007): the server's chronology, the
+        // viewer's threads in it — they lead Popular instead
+        // (`RankedCommentsStream`).
+        let ordered = comments
         let canReview = isViewerPostOwner && commentsProvider is any HeldCommentReviewing
         showsAnswer = true
         onCommentsChange?(.loaded(ordered.map {
@@ -1009,14 +1028,10 @@ public final class PostDetailViewModel {
             for (id, fetched) in likes where !self.commentLikesInFlight.contains(id) {
                 self.commentLikes[id] = fetched
             }
-            self.rerankLikes()
             self.emitComments()
         }
     }
 
-    private func rerankLikes() {
-        likedForRanking = Set(commentLikes.filter { $0.value.mine > 0 }.keys)
-    }
 
     /// A thread the viewer started (#921): a top-level comment by the face the
     /// composer is wearing. Its replies stay with it; the viewer's replies to
@@ -1066,21 +1081,12 @@ public final class PostDetailViewModel {
         }
     }
 
-    // MARK: - Comment sorting & likes
-
-    /// Reorders the stream and re-emits — the engaged toolbar's sort
-    /// selector lands here.
-    public func setCommentSort(_ order: CommentSortOrder) {
-        guard order != commentSort else { return }
-        commentSort = order
-        rerankLikes()
-        emitComments()
-    }
+    // MARK: - Comment likes
 
     /// One like on a comment (#637): a point staked on it, shown at once and
     /// taken back if it does not land — final, like a post's. One in flight
-    /// per comment. Re-emits so the row shows it, but Trending does not
-    /// re-rank on a tap (`likedForRanking`).
+    /// per comment. Re-emits so the row shows it; nothing re-ranks on a tap —
+    /// Popular is the server's.
     /// Whether the like was taken: the point added, its call on its way.
     @discardableResult
     public func likeComment(commentID: String) -> Bool {
@@ -1103,78 +1109,6 @@ public final class PostDetailViewModel {
     /// Whether the viewer has a point on the comment.
     public func isCommentLiked(_ commentID: String) -> Bool {
         (commentLikes[commentID]?.mine ?? 0) > 0
-    }
-
-    /// The display order, thread-aware: replies always stay under their
-    /// parents in chronological order — sorting moves whole THREADS.
-    /// Recent keeps the repository's chronology. Trending ranks threads
-    /// by the engagement signals comment.v1 carries today — reply count
-    /// plus the session's likes anywhere in the thread — highest first
-    /// (stable: ties keep chronology); real like counts slot into the
-    /// score when the contract grows them. Pure and static, for tests.
-    ///
-    /// `pageStarts`: the first thread of each page loaded after the first.
-    /// Threads are ranked within their page, never across: a page landing
-    /// at the bottom must not lift a thread above rows already on screen.
-    ///
-    /// `viewer`: the threads THEY started lead the stream, right under the
-    /// caption, in their own chronology (newest first) and untouched by the
-    /// sort (#921) — the sort orders everyone else's. Nil leaves the stream as
-    /// it was.
-    static func sortedForDisplay(
-        _ entries: [CommentEntry],
-        order: CommentSortOrder,
-        liked: Set<String>,
-        pageStarts: Set<String> = [],
-        viewer: ProfileID? = nil
-    ) -> [CommentEntry] {
-        typealias Thread = (parent: CommentEntry, replies: [CommentEntry])
-        let hasOwn = entries.contains { isOwnThread($0, viewer: viewer) }
-        guard order == .trending || hasOwn else { return entries }
-        // Replies before any parent (a page that starts mid-thread) have no
-        // thread to ride with: they keep their place at the head of the rest.
-        var orphans: [CommentEntry] = []
-        var threads: [Thread] = []
-        for entry in entries {
-            if entry.parentID == nil {
-                threads.append((entry, []))
-            } else if !threads.isEmpty {
-                threads[threads.count - 1].replies.append(entry)
-            } else if order == .recent {
-                orphans.append(entry)
-            }
-        }
-        let own = threads.filter { isOwnThread($0.parent, viewer: viewer) }
-        func score(_ thread: Thread) -> Int {
-            // The thread's whole reply count (#637): a page loads two.
-            max(thread.parent.replyCount ?? 0, thread.replies.count)
-                + (liked.contains(thread.parent.id) ? 1 : 0)
-                + thread.replies.filter { liked.contains($0.id) }.count
-        }
-        // Pages of everyone else's threads. A page whose first thread was the
-        // viewer's still starts a page — at the next thread that stays.
-        var pages: [[Thread]] = []
-        var startsPage = true
-        for thread in threads {
-            if pageStarts.contains(thread.parent.id) { startsPage = true }
-            guard !isOwnThread(thread.parent, viewer: viewer) else { continue }
-            if startsPage || pages.isEmpty { pages.append([]) }
-            startsPage = false
-            pages[pages.count - 1].append(thread)
-        }
-        let others: [CommentEntry] = pages.flatMap { page -> [CommentEntry] in
-            let ranked: [Thread] = order == .trending
-                ? page.enumerated()
-                    .sorted { lhs, rhs in
-                        let l = score(lhs.element)
-                        let r = score(rhs.element)
-                        return l == r ? lhs.offset < rhs.offset : l > r
-                    }
-                    .map(\.element)
-                : page
-            return ranked.flatMap { [$0.parent] + $0.replies }
-        }
-        return own.flatMap { [$0.parent] + $0.replies } + orphans + others
     }
 
     private func setComposing(_ composing: Bool) {
