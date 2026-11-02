@@ -91,7 +91,7 @@ public final class ProfileItemStore: @unchecked Sendable {
     }
 
     /// Whether `accountID` owns the catalogue item `itemID` — any family,
-    /// e.g. a theme (`theme.violet`, #1379): the inventory as
+    /// e.g. a frame (`frame.gold`): the inventory as
     /// `ListOwnedItems` gives it, a set of item ids.
     public func owns(itemID: String, accountID: String) -> Bool {
         lock.withLock { ids(accountID).contains(itemID) }

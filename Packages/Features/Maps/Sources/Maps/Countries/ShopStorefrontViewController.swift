@@ -100,8 +100,6 @@ public final class ShopStorefrontViewController: UIViewController {
     let stakePacks: (any StakePackSelling)?
     /// The profile items (#944): the video banner. Nil: no Profile shelf.
     let profileItems: (any ProfileItemSelling)?
-    /// The accent themes (#1379). Nil: no Themes shelf.
-    let themes: (any ThemeSelling)?
     let atlas: CountryAtlas
 
     private let scroll = UIScrollView()
@@ -109,9 +107,6 @@ public final class ShopStorefrontViewController: UIViewController {
     private(set) var boostsShelf: ShopShelfView?
     private(set) var profileShelf: ShopShelfView?
     private(set) var countriesShelf: ShopShelfView?
-    private(set) var themesShelf: ShopShelfView?
-    /// The themes' cards, pink first.
-    private(set) var themeCards: [ShopThemeCardView] = []
     /// The profile items' cards, in the seller's order.
     private(set) var itemCards: [ShopProfileItemCardView] = []
     /// The packs' cards, smallest first.
@@ -127,14 +122,13 @@ public final class ShopStorefrontViewController: UIViewController {
 
     init(
         access: any CountryAccess, stakePacks: (any StakePackSelling)?,
-        profileItems: (any ProfileItemSelling)? = nil, themes: (any ThemeSelling)? = nil,
+        profileItems: (any ProfileItemSelling)? = nil,
         media: ShopMedia? = nil, atlas: CountryAtlas = .shared
     ) {
         self.media = media
         self.access = access
         self.stakePacks = stakePacks
         self.profileItems = profileItems
-        self.themes = themes
         self.atlas = atlas
         super.init(nibName: nil, bundle: nil)
         title = CountryShopEntry.title
@@ -183,7 +177,6 @@ public final class ShopStorefrontViewController: UIViewController {
         ])
         for name in [
             Notification.Name.countryAccessDidChange, .stakePackDidChange, ProfileItemStore.didChangeNotification,
-            AccentThemePreference.didChangeNotification,
         ] {
             NotificationCenter.default.addObserver(self, selector: #selector(stockChanged), name: name, object: nil)
         }
@@ -247,12 +240,11 @@ public final class ShopStorefrontViewController: UIViewController {
     /// rebuild is cheaper to reason about than a diff. Each row keeps where
     /// it was scrolled to.
     func rebuild() {
-        let offsets = (boostsShelf?.rowOffset, countriesShelf?.rowOffset, profileShelf?.rowOffset, themesShelf?.rowOffset)
+        let offsets = (boostsShelf?.rowOffset, countriesShelf?.rowOffset, profileShelf?.rowOffset)
         column.arrangedSubviews.forEach { $0.removeFromSuperview() }
         boostsShelf = nil
         profileShelf = nil
         countriesShelf = nil
-        themesShelf = nil
         let width = view.bounds.width > 0 ? view.bounds.width : 402
         // Empty categories are not shown: no seller, no Boosts.
         if let stakePacks, !stakePacks.offers.isEmpty {
@@ -268,18 +260,12 @@ public final class ShopStorefrontViewController: UIViewController {
         let countries = countriesShelf(width: width)
         column.addArrangedSubview(countries)
         countriesShelf = countries
-        if let themes, !themes.offers.isEmpty {
-            let shelf = themesShelf(themes, width: width)
-            column.addArrangedSubview(shelf)
-            themesShelf = shelf
-        }
         for shelf in [boostsShelf, profileShelf, countriesShelf].compactMap({ $0 }) where shelf !== column.arrangedSubviews.last {
             column.setCustomSpacing(Metrics.shelfGap, after: shelf)
         }
         boostsShelf?.rowOffset = offsets.0 ?? 0
         countriesShelf?.rowOffset = offsets.1 ?? 0
         profileShelf?.rowOffset = offsets.2 ?? 0
-        themesShelf?.rowOffset = offsets.3 ?? 0
         // The new cards play again: a wallet change rebuilds the page under
         // a visible shelf (a no-op while off screen) — once it is laid out,
         // the visibility test reads frames.
@@ -397,81 +383,6 @@ public final class ShopStorefrontViewController: UIViewController {
         let outcome = await profileItems.buy(item)
         ShopPurchaseFeedback.show(outcome, title: item.shopTitle, pending: pending)
         return outcome
-    }
-
-    /// The accent themes (#1379), side by side — three fit whole, and a
-    /// palette is chosen by comparing. Each card's swatch draws in its own
-    /// theme; its foot says the price, Owned, or In use.
-    private func themesShelf(_ seller: any ThemeSelling, width: CGFloat) -> ShopShelfView {
-        themeCards = seller.offers.map { offer in
-            let owned = seller.owns(offer.theme)
-            return ShopThemeCardView(
-                offer: offer, owned: owned, inUse: seller.applied == offer.theme,
-                affordable: access.gems >= offer.price, menu: themeMenu(offer, owned: owned, seller: seller)
-            )
-        }
-        let perWidth = CGFloat(min(seller.offers.count, Metrics.packsSideBySide))
-        let itemWidth = RowEdgeSnap.itemWidth(
-            forWidth: width, perWidth: max(perWidth, 1), margin: Metrics.margin, gap: Metrics.gap
-        )
-        return ShopShelfView(
-            heading: SectionTitleView.Content(title: "Themes"),
-            items: themeCards.map { ($0, itemWidth) }, vertical: shelvesAreVertical
-        )
-    }
-
-    /// A theme's menu: Apply once owned (a label while in use); otherwise its
-    /// one-line confirmation — never one tap.
-    func themeMenu(_ offer: ThemeOffer, owned: Bool, seller: any ThemeSelling) -> UIMenu {
-        let theme = offer.theme
-        if owned {
-            if seller.applied == theme {
-                // A label, not an action (`EmptyActionGuardTests`, #801).
-                let used = UIAction(
-                    title: "In use", image: UIImage(systemName: "checkmark.circle"), attributes: .disabled
-                ) { _ in }
-                return UIMenu(title: theme.title, children: [used])
-            }
-            let apply = UIAction(title: "Apply", image: UIImage(systemName: "paintpalette")) { [weak self] _ in
-                self?.applyTheme(theme)
-            }
-            return UIMenu(title: theme.title, children: [apply])
-        }
-        let buy = UIAction(title: "Buy for \(offer.price) gems", image: GemSymbol.glyphImage()) { [weak self] _ in
-            guard let self else { return }
-            MemberGates.perform(.shop, from: self) { [weak self] in
-                Task { [weak self] in await self?.buyTheme(offer) }
-            }
-        }
-        if access.purchasesRestricted {
-            buy.attributes = .disabled
-            buy.subtitle = PurchaseRestriction.message
-        } else if access.gems < offer.price {
-            buy.attributes = .disabled
-            buy.subtitle = "\(offer.price - access.gems) more gems needed"
-        }
-        return UIMenu(title: "\(theme.title) — yours for good", children: [buy])
-    }
-
-    /// Buys a theme; once bought, its toast offers to apply it. Internal for
-    /// tests — the menu cannot be raised in one.
-    @discardableResult
-    func buyTheme(_ offer: ThemeOffer) async -> ProfileItemPurchase? {
-        guard let themes, !access.purchasesRestricted else { return nil }
-        let theme = offer.theme
-        let pending = ShopPurchaseFeedback.pending(theme.title, from: self)
-        let outcome = await themes.buy(theme)
-        ShopPurchaseFeedback.show(
-            outcome, title: theme.title, pending: pending,
-            action: ToastView.Action("Apply") { [weak self] in self?.applyTheme(theme) }
-        )
-        return outcome
-    }
-
-    /// Applies an owned theme: the whole app re-tints at once.
-    func applyTheme(_ theme: AccentTheme) {
-        guard let themes, themes.owns(theme) else { return }
-        themes.apply(theme)
     }
 
     private func countriesShelf(width: CGFloat) -> ShopShelfView {
@@ -1637,108 +1548,6 @@ final class ShopProfileItemCardView: ShopCardView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-}
-
-/// An accent theme (#1379), as a portrait card: its swatch — the theme's
-/// own gradient, accent to secondary, drawn IN that theme whatever the app
-/// wears — its name, what it changes, and at the foot its price, Owned, or
-/// In use.
-final class ShopThemeCardView: ShopCardView {
-    let offer: ThemeOffer
-    let owned: Bool
-    let inUse: Bool
-    let swatch: BrandGradientView
-    let priceBubble = UIView()
-
-    static let swatchDiameter: CGFloat = 44
-
-    init(offer: ThemeOffer, owned: Bool, inUse: Bool, affordable: Bool, menu: UIMenu) {
-        self.offer = offer
-        self.owned = owned
-        self.inUse = inUse
-        swatch = BrandGradientView(colors: Palette.accentGradient)
-        super.init(menu: menu)
-
-        // The swatch resolves the palette in the theme it sells, not the
-        // app's: a trait override on the view itself.
-        swatch.traitOverrides.accentTheme = offer.theme
-        swatch.layer.cornerRadius = Self.swatchDiameter / 2
-        swatch.layer.cornerCurve = .circular
-        swatch.clipsToBounds = true
-        swatch.translatesAutoresizingMaskIntoConstraints = false
-        let swatchRow = UIView()
-        swatchRow.addSubview(swatch)
-        let title = UILabel()
-        title.text = offer.theme.title
-        title.font = .appFont(forTextStyle: .headline)
-        title.adjustsFontForContentSizeCategory = true
-        title.numberOfLines = 2
-        let detail = UILabel()
-        detail.text = offer.theme.shopDetail
-        detail.font = .appFont(forTextStyle: .footnote)
-        detail.adjustsFontForContentSizeCategory = true
-        detail.textColor = .secondaryLabel
-        detail.numberOfLines = 3
-        let spacer = UIView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
-        let stack = UIStackView(arrangedSubviews: [swatchRow, title, detail, spacer])
-        stack.axis = .vertical
-        stack.alignment = .fill
-        stack.spacing = Spacing.xs
-        stack.setCustomSpacing(Spacing.sm, after: swatchRow)
-        stack.isUserInteractionEnabled = false
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
-
-        let foot: UIView
-        if owned {
-            let label = UILabel()
-            label.text = inUse ? "In use" : "Owned"
-            label.font = .appFont(forTextStyle: .subheadline)
-            label.adjustsFontForContentSizeCategory = true
-            label.textColor = .secondaryLabel
-            foot = label
-            priceBubble.backgroundColor = .quaternarySystemFill
-        } else {
-            foot = ShopPriceLabel(price: offer.price, inReach: affordable)
-            priceBubble.backgroundColor = affordable ? GemSymbol.tint.withAlphaComponent(0.16) : .quaternarySystemFill
-        }
-        priceBubble.layer.cornerRadius = ShopPackCardView.bubbleRadius
-        priceBubble.layer.cornerCurve = .continuous
-        priceBubble.isUserInteractionEnabled = false
-        foot.translatesAutoresizingMaskIntoConstraints = false
-        priceBubble.addSubview(foot)
-        priceBubble.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(priceBubble)
-
-        let inset = Spacing.md
-        NSLayoutConstraint.activate([
-            swatch.topAnchor.constraint(equalTo: swatchRow.topAnchor),
-            swatch.bottomAnchor.constraint(equalTo: swatchRow.bottomAnchor),
-            swatch.leadingAnchor.constraint(equalTo: swatchRow.leadingAnchor),
-            swatch.widthAnchor.constraint(equalToConstant: Self.swatchDiameter),
-            swatch.heightAnchor.constraint(equalToConstant: Self.swatchDiameter),
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: inset),
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
-            priceBubble.topAnchor.constraint(equalTo: stack.bottomAnchor, constant: Spacing.sm),
-            priceBubble.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ShopPackCardView.bubbleInset),
-            priceBubble.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ShopPackCardView.bubbleInset),
-            priceBubble.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -ShopPackCardView.bubbleInset),
-            priceBubble.heightAnchor.constraint(greaterThanOrEqualToConstant: 34),
-            foot.centerXAnchor.constraint(equalTo: priceBubble.centerXAnchor),
-            foot.centerYAnchor.constraint(equalTo: priceBubble.centerYAnchor),
-            foot.topAnchor.constraint(greaterThanOrEqualTo: priceBubble.topAnchor, constant: 6),
-        ])
-        accessibilityLabel = "\(offer.theme.title) theme. \(offer.theme.shopDetail)"
-        accessibilityValue = owned ? (inUse ? "In use" : "Owned") : "\(offer.price) gems"
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// The swatch's stops as drawn. Tests.
-    var drawnSwatch: [UIColor] { swatch.drawnColours }
 }
 
 // MARK: - How it is left (#1144)

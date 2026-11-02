@@ -85,8 +85,6 @@ final class WalletSheetViewController: UIViewController {
     /// The Shop's Boosts — the ×100 cartridge pack. Nil sells none.
     private let stakePacks: (any StakePackSelling)?
     private let profileItems: (any ProfileItemSelling)?
-    /// The Shop's Themes (#1379). Nil sells none.
-    private let themes: (any ThemeSelling)?
     /// The Shop's posters and preview loops (#1075).
     private let shopMedia: ShopMedia?
 
@@ -146,7 +144,6 @@ final class WalletSheetViewController: UIViewController {
         countries: (any CountryAccess)? = nil,
         stakePacks: (any StakePackSelling)? = nil,
         profileItems: (any ProfileItemSelling)? = nil,
-        themes: (any ThemeSelling)? = nil,
         shopMedia: ShopMedia? = nil,
         historyCache: WalletHistoryLocalCache? = nil
     ) {
@@ -160,7 +157,6 @@ final class WalletSheetViewController: UIViewController {
         self.countries = countries
         self.stakePacks = stakePacks
         self.profileItems = profileItems
-        self.themes = themes
         self.shopMedia = shopMedia
         self.snapshot = wallet.snapshot()
         super.init(nibName: nil, bundle: nil)
@@ -591,7 +587,7 @@ final class WalletSheetViewController: UIViewController {
               let root = view.window?.rootViewController else { return }
         StakeShop.push(
             CountryShopViewController.storefront(
-                access: countries, stakePacks: stakePacks, profileItems: profileItems, themes: themes,
+                access: countries, stakePacks: stakePacks, profileItems: profileItems,
                 media: shopMedia
             ),
             over: root

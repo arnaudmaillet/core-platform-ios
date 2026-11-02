@@ -39,16 +39,16 @@ struct AvatarFrameTests {
     }
 
     /// A frame is the same object for everyone: its colours do not follow
-    /// the appearance or the accent theme.
-    @Test func aFrameIgnoresTheAppearanceAndTheTheme() {
+    /// the appearance or the contrast — nor the brand (`BrandCosmetics`).
+    @Test func aFrameIgnoresTheAppearance() {
         for stops in [Palette.frameGold, Palette.frameNeon, Palette.frameAurora] {
             for stop in stops {
                 let light = stop.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
-                let darkViolet = stop.resolvedColor(with: UITraitCollection(mutations: {
+                let darkHigh = stop.resolvedColor(with: UITraitCollection(mutations: {
                     $0.userInterfaceStyle = .dark
-                    $0.accentTheme = .violet
+                    $0.accessibilityContrast = .high
                 }))
-                #expect(light == darkViolet)
+                #expect(light == darkHigh)
             }
         }
     }

@@ -164,7 +164,7 @@ public struct WalletServerUnsupported: Error, Equatable {
 
 /// One item of the gem catalogue (wallet.v1 `CatalogItem`).
 public struct WalletCatalogItem: Equatable, Sendable {
-    /// `<family>.<name>`, e.g. `theme.violet`.
+    /// `<family>.<name>`, e.g. `frame.gold`.
     public let id: String
     /// In gems; 0 = free, owned by every account.
     public let price: Int

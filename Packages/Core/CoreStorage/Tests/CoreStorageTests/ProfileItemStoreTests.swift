@@ -31,16 +31,16 @@ struct ProfileItemStoreTests {
         #expect(ProfileItemStore(defaults: defaults).owned(by: "acct-1") == [.videoBanner])
     }
 
-    /// Any catalogue item by its id (#1379): a theme sits beside the profile
-    /// items, and never reads as one.
+    /// Any catalogue item by its id: a frame sits beside the profile items,
+    /// and never reads as one.
     @Test func aCatalogueItemIsOwnedByItsID() {
         let store = ProfileItemStore(defaults: Self.defaults())
-        #expect(!store.owns(itemID: "theme.violet", accountID: "acct-1"))
-        #expect(store.grant(itemID: "theme.violet", to: "acct-1"))
-        #expect(!store.grant(itemID: "theme.violet", to: "acct-1"), "already owned")
-        #expect(store.owns(itemID: "theme.violet", accountID: "acct-1"))
-        #expect(!store.owns(itemID: "theme.violet", accountID: "acct-2"))
-        #expect(store.owned(by: "acct-1").isEmpty, "a theme is not a profile item")
+        #expect(!store.owns(itemID: "frame.gold", accountID: "acct-1"))
+        #expect(store.grant(itemID: "frame.gold", to: "acct-1"))
+        #expect(!store.grant(itemID: "frame.gold", to: "acct-1"), "already owned")
+        #expect(store.owns(itemID: "frame.gold", accountID: "acct-1"))
+        #expect(!store.owns(itemID: "frame.gold", accountID: "acct-2"))
+        #expect(store.owned(by: "acct-1").isEmpty, "a frame is not a profile item")
         store.grant(.videoBanner, to: "acct-1")
         #expect(store.owns(itemID: ProfileItem.videoBanner.rawValue, accountID: "acct-1"))
     }

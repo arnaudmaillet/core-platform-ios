@@ -38,6 +38,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // Save Battery in Low Power Mode (#1808): Power Saving's old switch
         // forgotten once, and iOS's Low Power Mode followed live from here on.
         LowPowerMode.forgetPowerSaving()
+        // The paid accent themes are retired (#2062): their stored choice goes.
+        BrandTheme.forgetRetiredThemes()
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
         if let flag = arguments.firstIndex(of: "-simulate-low-power-mode"),

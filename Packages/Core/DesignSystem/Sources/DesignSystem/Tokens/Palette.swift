@@ -1,7 +1,10 @@
 import UIKit
 
 /// THE BRAND PALETTE (#1124, accent chosen in #1169): the app's colours as
-/// roles, never as hex at a call site.
+/// roles, never as hex at a call site — nor here: every role derives from
+/// `BrandTheme.current` (#2062), the one place the brand's raw colours live.
+/// Changing the theme is writing a new `BrandTheme`; the roles keep their
+/// names and their meaning.
 ///
 /// ```
 ///   role                light      dark       IC light   IC dark
@@ -57,53 +60,37 @@ public enum Palette {
     /// mark rather than text strength — chosen knowingly. Increased Contrast
     /// keeps the deep pink (`B0256A`, 6:1).
     ///
-    /// Per accent theme (#1379): violet `A78BFA`, red `E5484D` — starting
-    /// values, tuned on the device.
-    public static let tint = themed(pink: accentPink, violet: accentViolet, red: accentRed)
+    public static let tint = dynamic(theme.primary)
 
     /// Text that carries the accent (≥ 4.5:1): the tint itself, which
     /// already reads as text. Mentions and hashtags do NOT wear it (#1168).
-    public static let brandText = themed(pink: accentPink, violet: accentViolet, red: accentRed)
+    public static let brandText = dynamic(theme.primary)
 
     /// A prominent filled button's ground, an active chip.
-    public static let primaryFill = themed(pink: accentPink, violet: accentViolet, red: accentRed)
+    public static let primaryFill = dynamic(theme.primary)
 
     /// The label on `primaryFill`: white in the light (4.53:1), a deep ink
     /// on the brighter dark fill.
-    public static let onPrimary = themed(
-        pink: Shade(0xFFFFFF, 0x2B0716), violet: Shade(0xFFFFFF, 0x1A1033), red: Shade(0xFFFFFF, 0x2B0709)
-    )
+    public static let onPrimary = dynamic(theme.onPrimary)
 
     /// `primaryFill` pressed or highlighted.
-    public static let primaryFillPressed = themed(
-        pink: Shade(0xE86AA6, 0xE86AA6, ic: (0x9C1F5E, 0xE86AA6)),
-        violet: Shade(0x9478EE, 0x9478EE, ic: (0x4E38A3, 0x9478EE)),
-        red: Shade(0xD63B40, 0xD63B40, ic: (0x9A1C2A, 0xD63B40))
-    )
+    public static let primaryFillPressed = dynamic(theme.primaryPressed)
 
     /// A PROMINENT GLASS button's tint (the wallet's Claim, a country's
     /// Unlock): the primary pink in both appearances (#1190). ⚠️ The glass
     /// draws its label white and vibrant whatever ink is asked for.
-    public static let prominentGlassTint = themed(
-        pink: Shade(0xF37AB4, 0xF37AB4), violet: Shade(0xA78BFA, 0xA78BFA), red: Shade(0xE5484D, 0xE5484D)
-    )
+    public static let prominentGlassTint = dynamic(theme.primarySolid)
 
     /// A soft selected background, an info banner, a "New" badge.
-    public static let primaryContainer = themed(
-        pink: Shade(0xFDE3EF, 0x3A0A22), violet: Shade(0xEFEEFF, 0x211944), red: Shade(0xFDE4E4, 0x3A0A0C)
-    )
+    public static let primaryContainer = dynamic(theme.primaryContainer)
 
     /// The prominent button's fill: a solid pink in both appearances,
     /// under white words (#1178; solid since the owner's 2026-10-23 "no
     /// more white gradient, plain colours").
-    public static let prominentFill = themed(
-        pink: Shade(0xF37AB4, 0xF37AB4), violet: Shade(0xA78BFA, 0xA78BFA), red: Shade(0xE5484D, 0xE5484D)
-    )
+    public static let prominentFill = dynamic(theme.primarySolid)
 
     /// Text on `primaryContainer`.
-    public static let onPrimaryContainer = themed(
-        pink: Shade(0xB8296C, 0xF8ABCF), violet: Shade(0x6852C6, 0xA78BFA), red: Shade(0xB42332, 0xFF8A8F)
-    )
+    public static let onPrimaryContainer = dynamic(theme.onPrimaryContainer)
 
     /// Every solid unread mark — the tab bar's badges, the Messages
     /// selector's, the bell's dot, a menu row's count (#1169: one colour
@@ -119,11 +106,8 @@ public enum Palette {
         }
     }
 
-    /// The secondary's solid mark — violet, or a deep pink in the violet
-    /// theme (#1379: the two hues swap), deep enough for a white count.
-    static let counterViolet = themed(
-        pink: Shade(0x7C5CF0, 0x7C5CF0), violet: Shade(0xB8296C, 0xB8296C), red: Shade(0x7C5CF0, 0x7C5CF0)
-    )
+    /// The solid unread mark's colour, deep enough for a white count.
+    static let counterViolet = dynamic(theme.counter)
 
     /// THE ICON'S GRADIENT (#1169; pink → violet since the icon was redrawn,
     /// #1176): pink at the bottom-left → violet at the top-right, as the icon
@@ -134,13 +118,7 @@ public enum Palette {
     /// coloured mark on any ground. Worn by the unread pills on the inbox's
     /// avatars and by the unseen-story ring — NOT by the tab bar's badges, the
     /// selector's nor the bell's dot: those stay solid (`counter`).
-    ///
-    /// Its first stop is the theme's accent, its far stop the secondary
-    /// (#1379): violet → pink in the violet theme.
-    public static let accentGradient: [UIColor] = [
-        themed(pink: Shade(0xF37AB4, 0xF37AB4), violet: Shade(0xA78BFA, 0xA78BFA), red: Shade(0xE5484D, 0xE5484D)),
-        themed(pink: Shade(0xA78BFA, 0xA78BFA), violet: Shade(0xF37AB4, 0xF37AB4), red: Shade(0xA78BFA, 0xA78BFA)),
-    ]
+    public static let accentGradient: [UIColor] = theme.accentGradient.map(rgb)
 
     /// `@mentions`, `#hashtags` and links in text on a plain surface (#1174,
     /// the owner 2026-10-14: "the pink as accent, used subtly and
@@ -148,7 +126,7 @@ public enum Palette {
     /// apart from the words by its cast and the semibold; never the accent,
     /// never the system blue. 6.3:1 on white, 5.8:1 on the grouped grey;
     /// 7:1 and more in the dark.
-    public static let entityInk = dynamic(light: 0x645A82, dark: 0xAFA3CC, lightIC: 0x4F4669, darkIC: 0xC3B9DD)
+    public static let entityInk = dynamic(theme.entityInk)
 
     /// Where `accentGradient` runs, in a layer's unit space.
     public static let accentGradientStart = CGPoint(x: 0, y: 1)
@@ -207,20 +185,14 @@ public enum Palette {
 
     // MARK: - Secondary: violet
 
-    /// Secondary emphasis. A white label on it passes too (5.82:1). Pink in
-    /// the violet theme (#1379: the two hues swap); gems keep their own
-    /// violet whatever the theme (`gemViolet`).
-    public static let secondary = themed(pink: violetFamily, violet: pinkSecondary, red: violetFamily)
+    /// Secondary emphasis. A white label on it passes too (5.82:1).
+    public static let secondary = dynamic(theme.secondary)
 
     /// A secondary shelf ground, a badge.
-    public static let secondaryContainer = themed(
-        pink: Shade(0xEFEEFF, 0x211944), violet: Shade(0xFDE3EF, 0x3A0A22), red: Shade(0xEFEEFF, 0x211944)
-    )
+    public static let secondaryContainer = dynamic(theme.secondaryContainer)
 
     /// Text on `secondaryContainer`.
-    public static let onSecondaryContainer = themed(
-        pink: Shade(0x6852C6, 0xA78BFA), violet: Shade(0xB8296C, 0xF8ABCF), red: Shade(0x6852C6, 0xA78BFA)
-    )
+    public static let onSecondaryContainer = dynamic(theme.onSecondaryContainer)
 
     // MARK: - The loader (#1329)
 
@@ -228,16 +200,14 @@ public enum Palette {
     /// left to right: pink, mauve, violet. The same in both appearances — the
     /// mark is a logo, not text (owner, 2026-10-17). Read through
     /// `AppLoaderView`.
-    public static let loaderTones: [UIColor] = [
-        rgb(0xF37AB4), rgb(0xD98AD0), rgb(0xA78BFA),
-    ]
+    public static let loaderTones: [UIColor] = theme.loaderTones.map(rgb)
 
     /// Each pill's lead — its pale wake (#1795): the pill's tone mixed
     /// `loaderLeadMix` toward the page (`F2F2F7` light, black dark), so it
     /// resolves per appearance.
     public static let loaderLeadTones: [UIColor] = loaderTones.map { tone in
         UIColor { traits in
-            mixed(tone, toward: traits.userInterfaceStyle == .dark ? .black : rgb(0xF2F2F7), by: loaderLeadMix)
+            mixed(tone, toward: traits.userInterfaceStyle == .dark ? .black : rgb(BrandNeutrals.pageLight), by: loaderLeadMix)
         }
     }
 
@@ -262,7 +232,7 @@ public enum Palette {
     /// The saved star (#1128): gold, the 收藏 convention — ONE gold, the
     /// full-screen post's, in both appearances and over media (#1188, #1190:
     /// the owner's reference). Read through `SaveStar`, never directly.
-    public static let saveGold = rgb(0xFFC53D)
+    public static let saveGold = rgb(theme.saveGold)
 
     /// The same gold — kept as a name for the media surfaces that said so.
     public static var saveGoldOnMedia: UIColor { saveGold }
@@ -276,85 +246,40 @@ public enum Palette {
     public static func likesGradient(for traits: UITraitCollection) -> [UIColor] {
         // ⚠️ SOLID: the pink (#1178, the owner 2026-10-15, after a pink →
         // violet pass). Two equal stops, so the heart's mask and layer — built
-        // for a gradient — are untouched. The ECONOMY's pink, never the
-        // theme's accent (#1379).
+        // for a gradient — are untouched. The likes' own role (`likesPink`).
         let pink = likesPink.resolvedColor(with: traits)
         return [pink, pink]
     }
 
-    /// The likes' pink (#1379): the heart, the likes glyph and coin — the
-    /// pink accent's values, fixed whatever the accent theme.
-    public static let likesPink = dynamic(light: 0xF37AB4, dark: 0xF37AB4, lightIC: 0xB0256A, darkIC: 0xF8ABCF)
+    /// The likes' colour: the heart, the likes glyph and coin.
+    public static let likesPink = dynamic(theme.likes)
 
-    /// The gems' violet (#1379): the secondary's values when the accent is
-    /// pink, fixed whatever the accent theme.
-    public static let gemViolet = dynamic(light: 0x6852C6, dark: 0xA78BFA, lightIC: 0x5C44B7, darkIC: 0xB59EFF)
+    /// The gems' colour, fixed (`GemSymbol.tint`).
+    public static let gemViolet = dynamic(theme.gem)
 
     /// The icon's own gradient, pink → violet (#1176), deep enough to carry a
     /// white label, for brand moments only (splash, onboarding, empty-state
     /// art, the Shop's hero art, the wallet's hero rule).
-    public static let brandGradient: [UIColor] = [rgb(0xE0559A), rgb(0x7C5CF0)]
+    public static let brandGradient: [UIColor] = theme.signatureGradient.map(rgb)
 
     // MARK: - Avatar frames (#943)
 
     /// The avatar frames' rings, swept around the face from twelve o'clock
-    /// (`AvatarFrame`) — the economy's cosmetics, fixed whatever the accent
-    /// theme and the appearance: a frame is the same object for everyone who
-    /// sees it. v1 art, drawn in code (no designer yet), to tune on device.
-    ///
-    /// Gold: a warm metal, light catching at the top and the bottom-right.
-    public static let frameGold: [UIColor] = [
-        rgb(0xFFE9A8), rgb(0xE2B14A), rgb(0xA87412), rgb(0xF5D27A), rgb(0xC8901E), rgb(0xFFE9A8),
-    ]
-    /// Neon: cyan and violet, with a glow of the cyan.
-    public static let frameNeon: [UIColor] = [rgb(0x22D3EE), rgb(0xA855F7), rgb(0x22D3EE), rgb(0xA855F7), rgb(0x22D3EE)]
-    public static let frameNeonGlow = rgb(0x22D3EE)
-    /// Aurora: green into cyan, violet and pink, and round again.
-    public static let frameAurora: [UIColor] = [
-        rgb(0x34D399), rgb(0x22D3EE), rgb(0xA78BFA), rgb(0xF472B6), rgb(0x34D399),
-    ]
+    /// (`AvatarFrame`) — the economy's cosmetics, not the theme: a frame is
+    /// the same object for everyone who sees it (`BrandCosmetics`). v1 art,
+    /// drawn in code (no designer yet), to tune on device.
+    public static let frameGold: [UIColor] = BrandCosmetics.frameGold.map(rgb)
+    public static let frameNeon: [UIColor] = BrandCosmetics.frameNeon.map(rgb)
+    public static let frameNeonGlow = rgb(BrandCosmetics.frameNeonGlow)
+    public static let frameAurora: [UIColor] = BrandCosmetics.frameAurora.map(rgb)
 
     // MARK: - Building
 
-    /// One role's values in one theme: light, dark, and the Increased
-    /// Contrast pair (the ordinary ones without it).
-    struct Shade: Equatable {
-        let light: UInt32
-        let dark: UInt32
-        let lightIC: UInt32
-        let darkIC: UInt32
+    /// The theme every role derives from.
+    static var theme: BrandTheme { BrandTheme.current }
 
-        init(_ light: UInt32, _ dark: UInt32, ic: (light: UInt32, dark: UInt32)? = nil) {
-            self.light = light
-            self.dark = dark
-            self.lightIC = ic?.light ?? light
-            self.darkIC = ic?.dark ?? dark
-        }
-    }
-
-    /// The accents (#1379): pink (#1169), violet (the secondary's family),
-    /// red — clear of the system red `FF3B30` and the heart's pink.
-    static let accentPink = Shade(0xF37AB4, 0xF37AB4, ic: (0xB0256A, 0xF8ABCF))
-    static let accentViolet = Shade(0xA78BFA, 0xA78BFA, ic: (0x5C44B7, 0xB59EFF))
-    static let accentRed = Shade(0xE5484D, 0xE5484D, ic: (0xB42332, 0xFF8A8F))
-    /// The secondary: violet, and its pink stand-in in the violet theme.
-    static let violetFamily = Shade(0x6852C6, 0xA78BFA, ic: (0x5C44B7, 0xB59EFF))
-    static let pinkSecondary = Shade(0xB8296C, 0xF37AB4, ic: (0xB0256A, 0xF8ABCF))
-
-    /// A role that resolves per accent theme, appearance and contrast.
-    static func themed(pink: Shade, violet: Shade, red: Shade) -> UIColor {
-        let colours = (pink: dynamic(pink), violet: dynamic(violet), red: dynamic(red))
-        return UIColor { traits in
-            switch traits.accentTheme {
-            case .pink: colours.pink.resolvedColor(with: traits)
-            case .violet: colours.violet.resolvedColor(with: traits)
-            case .red: colours.red.resolvedColor(with: traits)
-            }
-        }
-    }
-
-    /// One theme's shade as an appearance- and contrast-dynamic colour.
-    private static func dynamic(_ shade: Shade) -> UIColor {
+    /// One role's shade as an appearance- and contrast-dynamic colour.
+    static func dynamic(_ shade: BrandTheme.Shade) -> UIColor {
         dynamic(light: shade.light, dark: shade.dark, lightIC: shade.lightIC, darkIC: shade.darkIC)
     }
 

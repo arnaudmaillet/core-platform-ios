@@ -228,7 +228,7 @@ public final class PersonPill: UIView {
         // hidden, and no seam can form. ⚠️ AND NOT A FULL DISC (the owner's
         // device, 2026-10-30): behind a face still loading — transparent, or
         // a picture half drawn — a disc showed as a grey plate, with a piece
-        // of the picture over it. The friends' ring is the accent (#1379).
+        // of the picture over it. The friends' ring is the accent.
         ring.isUserInteractionEnabled = false
         ring.layer.addSublayer(ringShape)
         // A shape layer fills black until told otherwise.
@@ -240,8 +240,8 @@ public final class PersonPill: UIView {
             ring.heightAnchor.constraint(equalTo: avatar.heightAnchor, constant: PersonPillRing.width * 2)
         }
         sendSubviewToBack(ring)
-        // The friends' ring is the accent: a theme change re-tints it too.
-        registerForTraitChanges([UITraitUserInterfaceStyle.self, AccentThemeTrait.self]) { (pill: PersonPill, _) in
+        // The friends' ring is the accent, which a contrast setting deepens.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (pill: PersonPill, _) in
             pill.drawRing()
         }
 
@@ -594,7 +594,7 @@ public final class PersonPill: UIView {
 public enum PersonPillBadgeInks {
     public static let restingDisc = UIColor.black
     public static let glyph = UIColor.white
-    /// The tint's light value in the viewer's accent theme (#1379).
+    /// The tint's light value.
     public static let accent = UIColor { traits in
         Palette.tint.resolvedColor(with: traits.modifyingTraits { $0.userInterfaceStyle = .light })
     }

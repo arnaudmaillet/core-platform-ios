@@ -5,8 +5,8 @@ import Testing
 /// A server that sells (#1475): its gems, its packs, its catalogue.
 private actor SellingServer: WalletServer {
     var state: WalletServerState
-    var owned: [String] = ["theme.pink"]
-    var prices: [String: Int] = ["theme.violet": 50, "banner.animated": 500]
+    var owned: [String] = ["loader.wave"]
+    var prices: [String: Int] = ["frame.gold": 50, "banner.animated": 500]
     var fails = false
     private(set) var itemKeys: [String] = []
 
@@ -131,12 +131,12 @@ struct WalletServerGemsTests {
         let fixture = Fixture(state(gems: 120))
         await fixture.store.refreshFromServer()
         #expect(await fixture.store.refreshItemsFromServer())
-        #expect(fixture.store.ownedItems == ["theme.pink"])
-        #expect(fixture.store.catalogPrice(of: "theme.violet") == 50)
+        #expect(fixture.store.ownedItems == ["loader.wave"])
+        #expect(fixture.store.catalogPrice(of: "frame.gold") == 50)
 
-        #expect(await fixture.store.purchaseItem("theme.violet", price: 50, idempotencyKey: "key-00001")
+        #expect(await fixture.store.purchaseItem("frame.gold", price: 50, idempotencyKey: "key-00001")
             == .purchased(remainingGems: 70))
-        #expect(fixture.store.ownedItems == ["theme.pink", "theme.violet"])
+        #expect(fixture.store.ownedItems == ["loader.wave", "frame.gold"])
         #expect(fixture.store.snapshot().gems == 70)
 
         await fixture.server.setPrice(60, of: "banner.animated")
@@ -154,7 +154,7 @@ struct WalletServerGemsTests {
         let guest = WalletStore(defaults: defaults, scope: StorageScope(owner: .guest))
         guest.server = SellingServer(state(gems: 999))
         #expect(!guest.isServerBacked)
-        #expect(await guest.purchaseItem("theme.violet", price: 50, idempotencyKey: "key-00001") == .unavailable)
+        #expect(await guest.purchaseItem("frame.gold", price: 50, idempotencyKey: "key-00001") == .unavailable)
         #expect(guest.ownedItems == nil)
     }
 }

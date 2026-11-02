@@ -1459,7 +1459,7 @@ open class HeroHeaderView: UIView {
         // style, contrast or accent change.
         applyRim(animated: false)
         registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, AccentThemeTrait.self]
+            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]
         ) { (self: HeroHeaderView, _) in
             self.applyRim(animated: false)
         }

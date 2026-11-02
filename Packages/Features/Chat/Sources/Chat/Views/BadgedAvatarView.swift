@@ -103,10 +103,10 @@ final class BadgedAvatarView: UIView {
         badge.layer.insertSublayer(gradient, at: 0)
         badge.clipsToBounds = true
         badgeGradient = gradient
-        // The gradient's stops follow the accent theme (#1379) and the
-        // appearance: a layer holds CGColors and re-resolves nothing itself.
+        // The gradient's stops follow the appearance and the contrast: a
+        // layer holds CGColors and re-resolves nothing itself.
         registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, AccentThemeTrait.self]
+            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]
         ) { (view: BadgedAvatarView, _: UITraitCollection) in
             view.badgeGradient?.colors = Palette.accentGradient.map { $0.resolvedColor(with: view.traitCollection).cgColor }
         }
