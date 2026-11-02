@@ -1,5 +1,7 @@
 # core.square.play: custom SF Symbols
 
+> **Superseded by `../play-squircle` (#2070):** the four symbols keep these names, but their art is now the owner's play squircle. This folder is kept for the history of #1191.
+
 Four custom SF Symbols, in the same template format as the app's `Symbols.xcassets` (#1128 / #1184):
 
 | Symbol | Layers |
