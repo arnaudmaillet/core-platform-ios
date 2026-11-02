@@ -1700,8 +1700,10 @@ final class CommentStream: NSObject {
         }
     }
 
-    /// "More" (#2042): the next tier comes in, and the stream scrolls into
-    /// it — Popular down to its first thread, Recent up over its newest.
+    /// "More" (#2042): the next tier comes in — and the stream STAYS WHERE IT
+    /// IS (the owner, 2026-11-02): the button only unlocks the scroll. The
+    /// rows on screen hold their place (Recent's new tier lands above them),
+    /// and the reader scrolls on into it when they choose.
     func revealNextTier(animated: Bool) {
         guard readsTiersNow else { return }
         guard hiddenThreadCount > 0 else {
@@ -1713,41 +1715,14 @@ final class CommentStream: NSObject {
         revealsWhenLoaded = false
         let hidden = Array(tierThreads.dropFirst(revealedThreadCount))
         let count = CommentTiers.nextTierCount(heights: hidden.map(threadHeight), viewport: tierViewport)
-        guard count > 0, let first = hidden.first else { return }
+        guard count > 0 else { return }
         furthestRevealedThread = Self.threadID(hidden[count - 1])
-        applyStream(animated: false)
-        collectionView.layoutIfNeeded()
-        // Where the stream goes: Popular's new tier from its first thread at
-        // the top, Recent's from its newest at the bottom.
-        func target() -> CGFloat? {
-            let insets = collectionView.adjustedContentInset
-            switch kind {
-            case .popular:
-                guard let item = first.first, let path = streamDataSource.indexPath(for: item),
-                      let frame = collectionView.layoutAttributesForItem(at: path)?.frame else { return nil }
-                return min(frame.minY - insets.top, tailOffset)
-            case .recent:
-                guard let item = first.last, let path = streamDataSource.indexPath(for: item),
-                      let frame = collectionView.layoutAttributesForItem(at: path)?.frame else { return nil }
-                return max(frame.maxY - collectionView.bounds.height + insets.bottom, -insets.top)
-            }
-        }
-        // Laid out at its destination before the flight: rows that first come
-        // on screen inside an animated scroll would refine their estimated
-        // heights under it. The stream then goes back to where it was,
-        // holding what the reader sees, and flies there.
         let anchor = visibleAnchor()
-        suppressesPaging = true
-        for _ in 0..<3 {
-            guard let destination = target() else { break }
-            collectionView.contentOffset.y = destination
+        UIView.performWithoutAnimation {
+            applyStream(animated: false)
             collectionView.layoutIfNeeded()
+            if let anchor { hold(anchor) }
         }
-        suppressesPaging = false
-        if let anchor { hold(anchor) }
-        holdsRest = false
-        guard let destination = target() else { return syncMoreButton() }
-        scrollProgrammatically(to: destination, animated: animated && collectionView.window != nil)
         syncMoreButton()
     }
 

@@ -182,7 +182,7 @@ struct CommentTiersTests {
         #expect(stream.hiddenThreadCount > 0, "the premise: more than one tier")
         // The next tier drawn behind the chrome, its bound taken once the
         // rows have sized themselves.
-        #expect(await settle { stream.tierOverscan > 0 })
+        #expect(await settle { stream.tierOverscan > 0 && Self.content(stream) <= Self.room(stream) + 1 })
         let content = Self.content(stream)
         #expect(content <= Self.room(stream) + 1, "\(size): tier 0 is \(content) in a room of \(Self.room(stream))")
         #expect(Self.showsMore(stream, controller), "at tier 0's end the button shows: \(Self.geometry(stream))")
@@ -202,9 +202,12 @@ struct CommentTiersTests {
         #expect(await settle { stream.tierOverscan > 0 }, "nothing drawn past the tier's end")
         let view = stream.collectionView
         view.layoutIfNeeded()
-        // Rows exist past the reachable end, inside the view's frame.
+        // Rows exist past the reachable end.
         let insets = view.adjustedContentInset
-        let beyond = view.indexPathsForVisibleItems.compactMap { view.layoutAttributesForItem(at: $0)?.frame }.filter { frame in
+        let paths = (0..<view.numberOfSections).flatMap { section in
+            (0..<view.numberOfItems(inSection: section)).map { IndexPath(item: $0, section: section) }
+        }
+        let beyond = paths.compactMap { view.layoutAttributesForItem(at: $0)?.frame }.filter { frame in
             kind == .popular
                 ? frame.minY > view.contentSize.height - stream.tierOverscan - 1
                 : frame.maxY < stream.tierOverscan + 1
@@ -217,8 +220,9 @@ struct CommentTiersTests {
         #expect(await settle { Self.showsMore(stream, controller) }, "at the tier's end the button does not show: \(Self.geometry(stream))")
     }
 
-    /// "More" adds a tier of 2 to 3 rooms (give or take a thread), and the
-    /// stream scrolls into it.
+    /// "More" adds a tier of 2 to 3 rooms (give or take a thread) — and the
+    /// stream stays where it is: the button only unlocks the scroll (the
+    /// owner, 2026-11-02).
     @Test func moreAddsATierOfTwoToThreeRooms() async {
         let (controller, window) = panel(TieredComments(count: 60, pageSize: 60))
         defer { window.isHidden = true }
@@ -226,12 +230,23 @@ struct CommentTiersTests {
         #expect(await settle { Self.laidOut(stream) && stream.hiddenThreadCount > 0 && stream.tierOverscan > 0 })
         let before = Self.content(stream)
         let room = Self.room(stream)
+        let offsetBefore = stream.collectionView.contentOffset.y
 
-        stream.revealNextTier(animated: false)
+        stream.revealNextTier(animated: true)
+        let offsetAfter = stream.collectionView.contentOffset.y
+        // The new rows sized for real — they first lay out as the reader
+        // scrolls into them — then measured.
+        let view = stream.collectionView
+        for _ in 0..<8 {
+            let height = view.contentSize.height
+            view.contentOffset.y = max(-view.adjustedContentInset.top,
+                                       view.contentSize.height + view.adjustedContentInset.bottom - view.bounds.height)
+            view.layoutIfNeeded()
+            if abs(view.contentSize.height - height) < 0.5 { break }
+        }
         let added = Self.content(stream) - before
         #expect(added >= room * 1.8 && added <= room * 3.1, "the tier added \(added) to a room of \(room): \(Self.geometry(stream))")
-        #expect(stream.collectionView.contentOffset.y > -stream.collectionView.contentInset.top,
-                "the stream did not scroll into the new tier")
+        #expect(abs(offsetAfter - offsetBefore) < 1, "the stream moved on More: \(offsetBefore) → \(offsetAfter)")
     }
 
     /// The next tier is loaded ahead: with less held than a tier past what is
@@ -251,8 +266,8 @@ struct CommentTiersTests {
         let stream = controller.recent
         #expect(await settle { Self.laidOut(stream) && stream.hiddenThreadCount > 0 })
         controller.showStream(.recent, animated: false)
-        #expect(await settle { stream.tierOverscan > 0 })
-        #expect(Self.content(stream) <= Self.room(stream) + 1)
+        // The bound follows the rows' sizing on the next turn.
+        #expect(await settle { stream.tierOverscan > 0 && Self.content(stream) <= Self.room(stream) + 1 })
         let bodies = stream.collectionView.indexPathsForVisibleItems.sorted().compactMap {
             stream.collectionView.cellForItem(at: $0).flatMap(PostDetailViewController.commentRow(in:))?.bodyTextLabel.text
         }
