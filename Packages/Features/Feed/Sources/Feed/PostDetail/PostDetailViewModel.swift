@@ -812,9 +812,14 @@ public final class PostDetailViewModel {
     /// can come back twice, so what the stream holds is dropped, and a page
     /// that brings nothing new asks for the next one.
     func loadMoreReplies(parentID: String) {
+        // ⚠️ EITHER STREAM'S THREAD (#2007): Popular ranks threads Recent has
+        // not paged in yet, so the parent is looked for in both, and the
+        // replies land in whichever holds it — a Popular "View more" that
+        // looked in Recent alone did nothing.
+        let held = comments + popular.shown
         guard let commentsProvider, let postID, !replyLoads.contains(parentID),
-              let parent = comments.first(where: { $0.id == parentID }) else { return }
-        let loaded = comments.filter { $0.parentID == parentID }.count
+              let parent = held.first(where: { $0.id == parentID }) else { return }
+        let loaded = Set(held.filter { $0.parentID == parentID }.map(\.id)).count
         let cursor = replyCursors[parentID]
         guard cursor != nil || (parent.replyCount ?? 0) > loaded else { return }
         replyLoads.insert(parentID)
@@ -827,7 +832,7 @@ public final class PostDetailViewModel {
                 let page = try? await commentsProvider.loadReplies(for: postID, to: parentID, after: token)
                 guard let self, self.pagingGeneration == generation, self.postID == postID else { return }
                 guard let page else { break }
-                let known = Set(self.comments.map(\.id))
+                let known = Set((self.comments + self.popular.shown).map(\.id))
                 fresh = page.entries.filter { !known.contains($0.id) && $0.parentID == parentID }
                 token = page.nextPageToken
                 exhausted = token == nil
@@ -836,22 +841,32 @@ public final class PostDetailViewModel {
             guard let self, self.pagingGeneration == generation, self.postID == postID else { return }
             self.replyLoads.remove(parentID)
             self.replyCursors[parentID] = token
-            var list = self.comments
-            guard var parentIndex = list.firstIndex(where: { $0.id == parentID }) else { return }
-            var end = parentIndex + 1
-            while end < list.count, list[end].parentID == parentID { end += 1 }
-            list.insert(contentsOf: fresh, at: end)
-            // The thread is all here: its count is what it shows, so the
-            // seam closes rather than offering replies the server filters
-            // out for this viewer.
-            if exhausted {
-                parentIndex = list.firstIndex(where: { $0.id == parentID }) ?? parentIndex
-                list[parentIndex].replyCount = list.filter { $0.parentID == parentID }.count
-            }
-            guard list != self.comments else { return }
+            let list = Self.insertingReplies(fresh, under: parentID, exhausted: exhausted, into: self.comments)
+            let popularChanged = self.popular.insertReplies(fresh, under: parentID, exhausted: exhausted)
+            guard list != self.comments || popularChanged else { return }
             self.comments = list
             self.emitComments()
         }
+    }
+
+    /// `list` with a thread's newly loaded `fresh` replies after its last
+    /// one, when the thread is in it. `exhausted`: the thread is all here, so
+    /// its count is what it shows and the seam closes rather than offering
+    /// replies the server filters out for this viewer. Pure, for tests.
+    static func insertingReplies(
+        _ fresh: [CommentEntry], under parentID: String, exhausted: Bool, into list: [CommentEntry]
+    ) -> [CommentEntry] {
+        var list = list
+        guard var parentIndex = list.firstIndex(where: { $0.id == parentID }) else { return list }
+        let known = Set(list.map(\.id))
+        var end = parentIndex + 1
+        while end < list.count, list[end].parentID == parentID { end += 1 }
+        list.insert(contentsOf: fresh.filter { !known.contains($0.id) }, at: end)
+        if exhausted {
+            parentIndex = list.firstIndex(where: { $0.id == parentID }) ?? parentIndex
+            list[parentIndex].replyCount = list.filter { $0.parentID == parentID }.count
+        }
+        return list
     }
 
     /// Internal, not private, for the one test that races a page against it:
