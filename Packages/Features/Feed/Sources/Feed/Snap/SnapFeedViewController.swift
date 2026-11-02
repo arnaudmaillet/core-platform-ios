@@ -8356,6 +8356,14 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // post the downward drag is the pager's — the previous post comes in.
         // The router the pager asks too, so exactly one of them claims it.
         guard downwardDragOwner == .dismissal else { return false }
+        return verticalCloseTerritoryPermits(at: location, in: view)
+    }
+
+    /// What lies under the finger, for a downward close — the keyboard, an
+    /// open panel, the rail and the composer refuse; a resting stream yields
+    /// at its top. The upward close (`zoomUpwardDismissalPermitted`) reads
+    /// the same tenants, mirrored.
+    func verticalCloseTerritoryPermits(at location: CGPoint, in view: UIView) -> Bool {
         // ⚠️ AN OPEN KEYBOARD OWNS THE DOWNWARD DRAG.
         //
         // The comments list dismisses the keyboard interactively — drag down

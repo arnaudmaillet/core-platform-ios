@@ -137,9 +137,11 @@ struct SnapFeedEndOfSourceTests {
         let point = centre(of: feed)
 
         #expect(feed.isAtEndOfSource)
+        // The territory, not the downward grab itself: on a later post the
+        // downward drag is the pager's (#2057).
         #expect(feed.zoomUpwardDismissalPermitted(at: point, in: feed.view)
-                == feed.zoomVerticalDismissalPermitted(at: point, in: feed.view),
-                "at the end, the upward grab answers as the downward one does")
+                == feed.verticalCloseTerritoryPermits(at: point, in: feed.view),
+                "at the end, the upward grab answers as the downward territory does")
     }
 
     /// Not the last page: upward is the next post, as ever.
@@ -161,7 +163,7 @@ struct SnapFeedEndOfSourceTests {
 
         #expect(feed.isAtEndOfSource)
         #expect(feed.zoomUpwardDismissalPermitted(at: point, in: feed.view)
-                == feed.zoomVerticalDismissalPermitted(at: point, in: feed.view))
+                == feed.verticalCloseTerritoryPermits(at: point, in: feed.view))
     }
 
     /// ⚠️ AT THE END, THE PAGE DRIVE'S DRAGS CLOSE (#770): on an engaged text
