@@ -1998,11 +1998,7 @@ final class SnapFeedViewController: UIViewController {
         // nothing: no pill, no padding, no spacer beside the arrow.
         let sortOnBar = engagedChromeOnBar && isCommentSortAvailable
         let widths = SnapBarPillWidths.resolve(
-            navBarWidth: bar,
             toolbarWidth: toolbar,
-            walletWidth: walletBadgeItem == nil
-                ? nil : walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width,
-            tabs: sortOnBar ? commentTabs.width : nil,
             // The footer's glyph items grow with the text size (#1679).
             toolbarIcon: SnapBarPillWidths.toolbarIcon(for: traitCollection),
             // …and so does a text post's like beside them (#1924).
@@ -8585,16 +8581,12 @@ extension SnapFeedViewController: ForYouSectorPage {
     /// UIKit gives the feed its safe area in the sector: nothing to take.
     func sectorSafeAreaDidChange(_ insets: UIEdgeInsets) {}
 
-    /// The side list, open or on its way, is closed by the swipe — not left
-    /// for Feed.
-    func sectorPageOwnsHorizontalDrag(velocity: CGPoint) -> Bool {
-        claimsHorizontalDrag(velocity: velocity)
-    }
 }
 
 extension SnapFeedViewController: HorizontalDragClaiming {
     /// The side list, open or on its way, is closed by the swipe: every pager
-    /// on the page — the comments' tabs (#2007) — gives the drag away.
+    /// around the page or on it gives the drag away — For You's sector, not
+    /// left for Feed (#1703), and the comments' tabs (#2007).
     func claimsHorizontalDrag(velocity: CGPoint) -> Bool {
         guard let sideList else { return false }
         return sideList.isOpen || sideList.isEngaged

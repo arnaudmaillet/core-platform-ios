@@ -2,33 +2,24 @@ import CoreGraphics
 import UIKit
 import DesignSystem
 
-/// The FIXED widths of the snap feed's two bar pills — the author pill in the
-/// navigation bar, the audio capsule in the toolbar — read off the bars'
-/// geometry and never off what the pills say.
+/// The FIXED width of the snap feed's author pill — in the toolbar's leading
+/// slot since #671 — read off the bar's geometry and never off what the pill
+/// says.
 ///
-/// ⚠️ WHY FIXED (asked 2026-09-30). Both pills used to hug their text, so every
-/// page with a longer or shorter name or sound re-negotiated the item's width:
-/// the glass visibly grew and shrank between posts, however well the width
-/// glided under the blur (#315, #320). Now each pill has ONE width for the
-/// screen — the room its bar can spare, capped — and a long name or sound
-/// truncates inside it. The width moves only with the bars themselves: a new
-/// bar width (rotation), a Dynamic Type size, the wallet badge growing a digit,
-/// a control joining the bar (below). Never with a name or a sound.
+/// ⚠️ WHY FIXED (asked 2026-09-30). The pills used to hug their text, so every
+/// page with a longer or shorter name re-negotiated the item's width: the
+/// glass visibly grew and shrank between posts, however well the width glided
+/// under the blur (#315, #320). Now the pill has ONE width for the screen —
+/// the room its bar can spare, capped — and a long name truncates inside it.
+/// The width moves only with the bar itself: a new width (rotation), a Dynamic
+/// Type size, a control joining the footer (a text post's like). Never with a
+/// name.
 ///
-/// THE AUTHOR PILL takes what the bar's OTHER ITEMS leave it: the back arrow,
-/// the wallet badge, and the comments' Popular | Recent selector while a
-/// thread that has the tabs holds the bar (past `CommentSortPolicy`'s
-/// threshold, #2007). So its width
-/// changes when the bar gains or loses a control — in the same turn, under the
-/// bar's own item animation — and never when a name does. Reserving the sort
-/// on every page was weighed and rejected: measured on the iPhone 18 Pro
-/// (402pt, a "250" balance), it would cost the pill 66pt on EVERY media page
-/// — 193 → 127, the name gone after a few letters — to spare the few text
-/// pages whose thread is long enough to sort. (Passing the sort on every page
-/// below is the one-line switch, should that trade be wanted.) The selector
-/// has no smaller face, as the sort's glyph was: what gives way first is the
-/// day pill beside it (it takes what the run leaves), then the author pill,
-/// which truncates its name.
+/// THE NAVIGATION BAR holds no author pill since #671. Its engaged run — the
+/// leading bubble, the comments' Popular | Recent selector (#2007), the wallet
+/// badge and the day pill that takes what they leave — is checked against the
+/// measured platters below (`SnapBarPillWidthsTests`); the selector has no
+/// smaller face, so what gives way first is the day pill, which truncates.
 ///
 /// THE TOOLBAR'S AUTHOR PILL (#671) takes what the footer's stock items
 /// leave it — `[pill] —— [☆ ⇄] [⋯]` — and those GROW WITH DYNAMIC TYPE: a
@@ -43,8 +34,6 @@ import DesignSystem
 /// floor that could out-argue the bar. Pure arithmetic, pinned by
 /// `SnapBarPillWidthsTests` at 375 / 393 / 402 / 440.
 struct SnapBarPillWidths: Equatable {
-    /// The author pill's width.
-    var author: CGFloat
     /// The author pill's width in the TOOLBAR's leading slot (#671): what the
     /// footer's stock items leave (`toolbarReserve(icon:)`), capped, so the
     /// run never folds into `•••`.
@@ -59,22 +48,13 @@ struct SnapBarPillWidths: Equatable {
     /// The bar's margins, each side.
     static let navBarMargin: CGFloat = 16
     /// The glass UIKit wraps around every custom bar item (not published;
-    /// measured: a 170pt author fits beside an 88pt sort on a 390pt bar and
-    /// 195 does not).
+    /// measured: a 170pt pill fit beside an 88pt control on a 390pt bar and
+    /// 195 did not).
     static let navItemPadding: CGFloat = 18
     /// The fixed space that keeps two adjacent items two pills.
     static let pillSpacing: CGFloat = Spacing.sm
     /// The back arrow's bubble.
     static let backButtonWidth: CGFloat = 36
-    /// The widest the author pill gets, however wide the bar: past it a short
-    /// name floats in a lot of empty glass.
-    ///
-    /// 168 since the pill lost the post's age (2026-10-01): its second line is
-    /// the handle alone, so the line that used to set the width ("@handle ·
-    /// 12 weeks") is gone. 168 leaves the labels ~83pt — a first and last
-    /// name — beside the face, the follow slot and their gaps; on the iPhone
-    /// 18 Pro it was 193 (the bar's room, under the old 220 cap).
-    static let authorCap: CGFloat = 168
     /// What the arithmetic keeps back, so a rounding or an unmeasured point
     /// is never the one that folds the run.
     static let slack: CGFloat = 8
@@ -134,41 +114,24 @@ struct SnapBarPillWidths: Equatable {
 
     /// The smallest a pill is ever made: one bubble, the avatar and its
     /// breathing. Not a floor that keeps text readable — only one that keeps
-    /// a pathological input (an accessibility-size wallet on a narrow bar)
+    /// a pathological input (an accessibility-size glyph on a narrow bar)
     /// from asking for a negative width.
     static let minimum: CGFloat = 36
 
     /// - Parameters:
-    ///   - navBarWidth: the navigation bar's width.
     ///   - toolbarWidth: the toolbar's (the screen's, on a phone).
-    ///   - walletWidth: the wallet badge's fitted width, nil without a wallet.
-    ///   - tabs: the comments' selector's width while it is on the bar, else nil.
     ///   - toolbarIcon: a stock glyph item's width at the screen's text size.
     ///   - toolbarLike: a text post's footer like, its bubble's width
     ///     (`SnapFooterToolbar.likeBubbleWidth`); nil with no such footer.
     static func resolve(
-        navBarWidth: CGFloat,
         toolbarWidth: CGFloat,
-        walletWidth: CGFloat?,
-        tabs: CGFloat?,
         toolbarIcon: CGFloat = defaultToolbarIcon,
         toolbarLike: CGFloat? = nil
     ) -> SnapBarPillWidths {
-        // Everything on the nav bar but the author pill, the selector (if any)
-        // `tabsWidth` points wide. The back arrow is always paid for: whether
-        // the screen has one is known only at its appearance, and a width
-        // that moved then would be a width that moved.
-        func room(tabsWidth: CGFloat?) -> CGFloat {
-            var leading = backButtonWidth + navItemPadding
-            if let tabsWidth { leading += pillSpacing + tabsWidth + navItemPadding }
-            let wallet = walletWidth.map { $0 + navItemPadding + pillSpacing } ?? 0
-            return navBarWidth - navBarMargin * 2 - leading - wallet - navItemPadding - slack
-        }
         func clamp(_ width: CGFloat, cap: CGFloat) -> CGFloat {
             max(minimum, min(cap, width)).rounded(.down)
         }
         return SnapBarPillWidths(
-            author: clamp(room(tabsWidth: tabs), cap: authorCap),
             toolbarAuthor: clamp(toolbarWidth - toolbarReserve(icon: toolbarIcon), cap: toolbarAuthorCap),
             toolbarAuthorBesideLike: clamp(
                 toolbarWidth - (toolbarLike.map { textToolbarReserve(icon: toolbarIcon, like: $0) }

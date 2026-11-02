@@ -213,5 +213,4 @@ private final class SectorStubPage: UIViewController, ForYouSectorPage {
     var ownNavigationItem: UINavigationItem { super.navigationItem }
     func sectorPageDidChangeActivity(_ isActive: Bool) {}
     func sectorSafeAreaDidChange(_ insets: UIEdgeInsets) {}
-    func sectorPageOwnsHorizontalDrag(velocity: CGPoint) -> Bool { false }
 }

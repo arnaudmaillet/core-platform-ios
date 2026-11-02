@@ -351,4 +351,46 @@ struct CommentTabsTests {
         controller.recent.syncKeyboardRise(250)
         #expect(abs(recent.contentOffset.y - (before + 250)) < 0.5)
     }
+
+    // MARK: - The tabs' ends (#2008)
+
+    private static let rightward = CGPoint(x: 820, y: 0)
+    private static let leftward = CGPoint(x: -820, y: 0)
+
+    /// Whether the tabs' pager would take a drag beginning mid-stream.
+    private static func takes(_ controller: PostDetailViewController, velocity: CGPoint) -> Bool {
+        let pager = controller.streamPager
+        guard let scroll = pager.pagingScrollView as? HorizontalPagerScrollView else { return true }
+        pager.layoutIfNeeded()
+        let point = CGPoint(x: scroll.contentOffset.x + pager.bounds.width / 2, y: pager.bounds.height / 2)
+        return scroll.isScrollEnabled && !scroll.shouldYield(at: point, velocity: velocity)
+    }
+
+    /// ⚠️ PAST EITHER END, THE SCREEN'S (#2008): on Popular, the first tab, a
+    /// rightward drag is the page's — the grab of a pushed post, Shots back to
+    /// Feed; on Recent, the last, a leftward one is — the side list. Between
+    /// the tabs the pager keeps both. Decided as the pager's pan begins, with
+    /// no recognizer of its own: the screen's own gestures receive the drag.
+    @Test func pastEitherEndTheDragIsTheScreens() async {
+        let (controller, window) = panel(PagedComments(count: 30, pageSize: 30))
+        defer { window.isHidden = true }
+        #expect(await settle { Self.loaded(controller.popular) })
+        #expect(controller.visibleStreamKind == .popular)
+        #expect(!Self.takes(controller, velocity: Self.rightward), "the pager kept the drag past Popular")
+        #expect(Self.takes(controller, velocity: Self.leftward), "the pager gave away the drag to Recent")
+
+        controller.showStream(.recent, animated: false)
+        #expect(!Self.takes(controller, velocity: Self.leftward), "the pager kept the drag past Recent")
+        #expect(Self.takes(controller, velocity: Self.rightward), "the pager gave away the drag to Popular")
+    }
+
+    /// One stream (below the threshold): no tabs to page, every horizontal
+    /// drag the screen's, as before the tabs.
+    @Test func oneStreamTakesNoDrag() async {
+        let (controller, window) = panel(PagedComments(count: 5, pageSize: 20))
+        defer { window.isHidden = true }
+        #expect(await settle { Self.loaded(controller.recent) })
+        #expect(!Self.takes(controller, velocity: Self.rightward))
+        #expect(!Self.takes(controller, velocity: Self.leftward))
+    }
 }

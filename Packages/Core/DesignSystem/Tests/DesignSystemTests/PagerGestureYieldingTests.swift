@@ -207,18 +207,6 @@ struct PagerGestureYieldingTests {
         #expect(shouldBegin(pager, at: edge, velocity: Self.rightward), "a root kept the leading strip back")
     }
 
-    /// The owner's veto: a drag it claims is given away, whatever the pager
-    /// could do with it.
-    @Test func theOwnerCanClaimADrag() {
-        let pager = twoPagePager(onLast: true)
-        let point = CGPoint(x: 390 + 200, y: 300)
-        var claimed = true
-        pager.yieldsDrag = { _ in claimed }
-        #expect(!shouldBegin(pager, at: point, velocity: Self.rightward))
-        claimed = false
-        #expect(shouldBegin(pager, at: point, velocity: Self.rightward))
-    }
-
     // MARK: - A claim around or inside the pager (#2007)
 
     /// A view holding horizontal drags while a state of its own lasts.
@@ -241,6 +229,25 @@ struct PagerGestureYieldingTests {
         #expect(shouldBegin(pager, at: point, velocity: Self.rightward) == false)
         #expect(shouldBegin(pager, at: point, velocity: Self.leftward) == false)
         claimer.claims = false
+        #expect(shouldBegin(pager, at: point, velocity: Self.rightward))
+    }
+
+    /// A controller whose view is the page claims it too — the vertical
+    /// feed, its side list open, on For You's sector (#1703).
+    @Test func thePagerYieldsToAPageControllerThatClaimsTheDrag() {
+        final class ClaimingPage: UIViewController, HorizontalDragClaiming {
+            var claims = false
+            func claimsHorizontalDrag(velocity: CGPoint) -> Bool { claims }
+        }
+        let page = ClaimingPage()
+        let pager = HorizontalPagerView(pages: [page.view])
+        pager.frame = CGRect(x: 0, y: 0, width: 390, height: 600)
+        pager.layoutIfNeeded()
+        let point = CGPoint(x: 200, y: 300)
+
+        page.claims = true
+        #expect(shouldBegin(pager, at: point, velocity: Self.rightward) == false)
+        page.claims = false
         #expect(shouldBegin(pager, at: point, velocity: Self.rightward))
     }
 

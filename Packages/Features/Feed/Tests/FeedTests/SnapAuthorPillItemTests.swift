@@ -129,7 +129,7 @@ struct SnapAuthorPillItemTests {
         nav.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         nav.view.layoutIfNeeded()
         let cap = SnapBarPillWidths.resolve(
-            navBarWidth: 402, toolbarWidth: 402, walletWidth: nil, tabs: nil
+            toolbarWidth: 402
         ).toolbarAuthor
         func fitted(_ pill: SnapAuthorIdentityView) -> CGFloat {
             pill.setNeedsLayout()
