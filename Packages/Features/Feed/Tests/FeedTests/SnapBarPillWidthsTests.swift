@@ -16,35 +16,10 @@ import UIKit
 /// wide is folded whole into UIKit's `•••`.
 @MainActor
 struct SnapBarPillWidthsTests {
-    /// Widths on the generous side of what the feed hands in (iPhone 18 Pro,
-    /// default text size: a "250" balance badge measured 71pt): a wider
-    /// balance, and the comments' Popular | Recent selector as it draws (#2007).
-    static let wallet: CGFloat = 90
+    /// The comments' Popular | Recent selector as it draws (#2007).
     static var tabs: CGFloat { CommentTabsSelector().width }
     /// iPhone SE, the 6.1" and 6.3" phones, the Pro Max.
     nonisolated static let phoneWidths: [CGFloat] = [375, 393, 402, 440]
-
-    /// Everything on the nav bar, laid end to end with UIKit's measured
-    /// platters, fits the bar — the author pill included — at every width,
-    /// with and without the wallet.
-    @Test(arguments: phoneWidths)
-    func theNavigationRunFitsEveryPhone(_ width: CGFloat) {
-        let padding = SnapBarPillWidths.navItemPadding
-        let spacing = SnapBarPillWidths.pillSpacing
-        for wallet in [nil, Self.wallet] as [CGFloat?] {
-            let widths = SnapBarPillWidths.resolve(
-                navBarWidth: width, toolbarWidth: width, walletWidth: wallet, tabs: nil
-            )
-            let run = SnapBarPillWidths.navBarMargin * 2
-                + (SnapBarPillWidths.backButtonWidth + padding)
-                + (wallet.map { $0 + padding + spacing } ?? 0)
-                + (widths.author + padding)
-            #expect(run + SnapBarPillWidths.slack <= width,
-                    "\(width)pt, wallet \(wallet ?? 0): the run is \(run)")
-            #expect(widths.author <= SnapBarPillWidths.authorCap)
-            #expect(widths.author == widths.author.rounded(.down), "a fractional width is a pixel of drift")
-        }
-    }
 
     /// The engaged bar (#2007): the leading bubble, the Popular | Recent
     /// selector and the wallet — the author is in the toolbar (#671), and the
@@ -73,16 +48,16 @@ struct SnapBarPillWidthsTests {
     func theFooterRunFitsAtEveryTextSize(_ width: CGFloat) {
         for icon in [SnapBarPillWidths.defaultToolbarIcon, 49, 52] as [CGFloat] {
             let widths = SnapBarPillWidths.resolve(
-                navBarWidth: width, toolbarWidth: width, walletWidth: Self.wallet, tabs: nil, toolbarIcon: icon
+                toolbarWidth: width, toolbarIcon: icon
             )
             #expect(widths.toolbarAuthor + SnapBarPillWidths.toolbarReserve(icon: icon) <= width,
                     "\(width)pt, icon \(icon): the footer run overflows")
             #expect(widths.toolbarAuthor >= 80, "\(width)pt, icon \(icon): a pill of \(widths.toolbarAuthor) shows no name")
         }
         // A larger text size only ever takes room from the pill.
-        let base = SnapBarPillWidths.resolve(navBarWidth: width, toolbarWidth: width, walletWidth: nil, tabs: nil)
+        let base = SnapBarPillWidths.resolve(toolbarWidth: width)
         let large = SnapBarPillWidths.resolve(
-            navBarWidth: width, toolbarWidth: width, walletWidth: nil, tabs: nil, toolbarIcon: 49
+            toolbarWidth: width, toolbarIcon: 49
         )
         #expect(large.toolbarAuthor < base.toolbarAuthor)
     }
@@ -101,7 +76,7 @@ struct SnapBarPillWidthsTests {
         let measured: [(icon: CGFloat, platter: CGFloat)] = [(38, 107), (49, 129)]
         for (icon, platter) in measured {
             let pill = SnapBarPillWidths.resolve(
-                navBarWidth: width, toolbarWidth: width, walletWidth: Self.wallet, tabs: nil, toolbarIcon: icon
+                toolbarWidth: width, toolbarIcon: icon
             ).toolbarAuthor
             let run = 27.5 + (pill + 10) + 12.5 + platter + 12.5 + 48 + 27.5
             #expect(run <= width, "\(width)pt, \(icon)pt glyphs: the footer is \(run) — ⇄ folds into •••")
@@ -125,7 +100,7 @@ struct SnapBarPillWidthsTests {
         let measured: [(icon: CGFloat, like: CGFloat)] = [(38, 121), (49, 125)]
         for (icon, like) in measured {
             let pill = SnapBarPillWidths.resolve(
-                navBarWidth: width, toolbarWidth: width, walletWidth: Self.wallet, tabs: nil,
+                toolbarWidth: width,
                 toolbarIcon: icon, toolbarLike: like
             ).toolbarAuthorBesideLike
             let run = 27.5 + (pill + 10) + 12.5 + like + 12.5 + 48 + 27.5
@@ -141,43 +116,17 @@ struct SnapBarPillWidthsTests {
     @Test(arguments: phoneWidths)
     func theTextFootersPillShowsItsName(_ width: CGFloat) {
         let pill = SnapBarPillWidths.resolve(
-            navBarWidth: width, toolbarWidth: width, walletWidth: Self.wallet, tabs: nil,
+            toolbarWidth: width,
             toolbarIcon: SnapBarPillWidths.defaultToolbarIcon, toolbarLike: 121
         ).toolbarAuthorBesideLike
         #expect(pill >= 100, "\(width)pt: the text footer's pill is \(pill) — its face alone")
     }
 
-    /// What a pill's width depends on is the bars — and the one input that
-    /// moves inside a screen's life is what else is on them. A narrower bar,
-    /// a wallet, the comments' tabs: each only ever takes width away.
-    @Test func theAuthorPillOnlyGivesWayToTheBar() {
-        func author(_ width: CGFloat, wallet: CGFloat? = nil, tabs: CGFloat? = nil) -> CGFloat {
-            SnapBarPillWidths.resolve(navBarWidth: width, toolbarWidth: width, walletWidth: wallet, tabs: tabs).author
-        }
-        #expect(author(440) == SnapBarPillWidths.authorCap, "a wide bar's pill stops at the cap")
-        #expect(author(375) <= author(402))
-        #expect(author(375, wallet: Self.wallet) < author(375))
-        #expect(author(402, wallet: Self.wallet, tabs: Self.tabs) < author(402, wallet: Self.wallet))
-    }
-
-    /// The author pill lost the post's age, and its width with it: one
-    /// narrower cap, while the audio capsule — whose lines did not change —
-    /// keeps the old one. On the iPhone 18 Pro with a "250" balance (71pt) the
-    /// pill is the cap, no longer the bar's 193pt of room.
-    @Test func theAuthorPillIsNarrowerThanTheAudioCapsuleCap() {
-        #expect(SnapBarPillWidths.authorCap < SnapBarPillWidths.toolbarAuthorCap)
-        let pro = SnapBarPillWidths.resolve(navBarWidth: 402, toolbarWidth: 402, walletWidth: 71, tabs: nil)
-        #expect(pro.author == SnapBarPillWidths.authorCap)
-        #expect(pro.author < 193)
-    }
-
     /// Nothing pathological asks for a negative width.
     @Test func anImpossibleBarStillGetsABubble() {
-        let widths = SnapBarPillWidths.resolve(
-            navBarWidth: 200, toolbarWidth: 200, walletWidth: 180, tabs: Self.tabs
-        )
-        #expect(widths.author == SnapBarPillWidths.minimum)
+        let widths = SnapBarPillWidths.resolve(toolbarWidth: 200)
         #expect(widths.toolbarAuthor == SnapBarPillWidths.minimum)
+        #expect(widths.toolbarAuthorBesideLike == SnapBarPillWidths.minimum)
     }
 
     // MARK: - On a real bar

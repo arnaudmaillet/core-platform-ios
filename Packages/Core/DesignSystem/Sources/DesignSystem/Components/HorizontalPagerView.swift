@@ -61,14 +61,6 @@ public final class HorizontalPagerView: UIView {
         set { scrollView.yieldsPastEnds = newValue }
     }
 
-    /// The owner's own say over a drag about to begin, by its velocity: true
-    /// gives it to whatever lies under it. For state the pager cannot see —
-    /// a page holding a drawer open that a swipe closes (#1703).
-    public var yieldsDrag: ((CGPoint) -> Bool)? {
-        get { scrollView.yieldsDrag }
-        set { scrollView.yieldsDrag = newValue }
-    }
-
     /// What a drag pulling PAST the first page drives — "page −1" (#1739: a
     /// tab root's notifications drawer). Set, a rightward drag on the first
     /// page is this pager's own (never yielded past the end) and pulls the
@@ -459,8 +451,6 @@ extension HorizontalPagerView: UIScrollViewDelegate {
 public final class HorizontalPagerScrollView: UIScrollView {
     /// See `HorizontalPagerView.yieldsPastEnds`.
     public var yieldsPastEnds = false
-    /// See `HorizontalPagerView.yieldsDrag`.
-    public var yieldsDrag: ((CGPoint) -> Bool)?
     /// See `HorizontalPagerView.leadingPullTarget`.
     public var pullsPastLeadingEdge = false
     /// See `HorizontalPagerView.reservesLeadingEdge`.
@@ -543,9 +533,9 @@ public final class HorizontalPagerScrollView: UIScrollView {
            !(pullsPastLeadingEdge && velocity.x > 0) {
             return true
         }
-        if yieldsDrag?(velocity) == true { return true }
-        // Something around this pager that holds horizontal drags right now —
-        // a side list open over the page — closes with this one (#2007).
+        // Something around this pager, or inside its page, that holds
+        // horizontal drags right now — a side list open over the page — closes
+        // with this one (`HorizontalDragClaiming`, #2007).
         if Self.ancestorClaimsHorizontalDrag(of: self, velocity: velocity) { return true }
         if let hit = hitTest(point, with: nil),
            Self.ownsHorizontalDrag(hit, within: self, velocity: velocity) {
