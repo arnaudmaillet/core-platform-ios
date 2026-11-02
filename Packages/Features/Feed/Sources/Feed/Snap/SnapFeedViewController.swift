@@ -544,10 +544,12 @@ final class SnapFeedViewController: UIViewController {
     /// The landing's deferred warm, while it waits — see
     /// `scheduleIdleCommentsWarm`. Held so leaving can call it off.
     private var idleCommentsWarm: DispatchWorkItem?
-    /// The RESTING panel built ahead for a text page — see
-    /// `prewarmRestingComments`. Deliberately not the engagement slot.
-    private var prewarmedRestingID: PostID?
-    private var prewarmedRestingVC: UIViewController?
+    /// The RESTING panels built ahead for text pages — see
+    /// `prewarmRestingComments`. Deliberately not the engagement slot. The
+    /// window around the settled page (#2059): the next page's, the previous
+    /// one's, and the page being landed on until it mounts its own — three,
+    /// or keeping the page just left pushed out the page arriving.
+    private let restingWarm = SnapWarmSlots<PostID, UIViewController>(capacity: 3)
     /// The panel of a page that is scrolling IN while another still owns the
     /// engagement — see `previewRestingComments`.
     private var previewRestingID: PostID?
@@ -1753,11 +1755,11 @@ final class SnapFeedViewController: UIViewController {
         collectionView.register(SnapFeedCell.self, forCellWithReuseIdentifier: SnapFeedCell.reuseIdentifier)
         collectionView.pin(to: view)
 
-        // No pull-to-refresh: the feed is FORWARD-ONLY (cluster-gallery
-        // milestone) — the whole downward direction belongs to the dismissal
-        // hero, so there is no top overscroll left to hang a refresh on.
-        // Refresh lives on the source surfaces (the grids), which own their
-        // own vertical axis.
+        // No pull-to-refresh: on the first post the downward direction belongs
+        // to the dismissal (cluster-gallery milestone), on any later post to
+        // paging back (#2056) — there is no top overscroll left to hang a
+        // refresh on. Refresh lives on the source surfaces (the grids), which
+        // own their own vertical axis.
 
         let pipeline = imagePipeline
         dataSource = UICollectionViewDiffableDataSource<Section, PostID>(collectionView: collectionView) {
@@ -3843,10 +3845,9 @@ final class SnapFeedViewController: UIViewController {
     /// unchanged.
     private func prewarmRestingComments(for id: PostID) {
         guard !isAwaitingAnyFlight,
-              prewarmedRestingID != id,
+              !restingWarm.contains(id),
               modelsByID[id]?.mediaURL == nil,
               let makeCommentsPanelContent else { return }
-        discardPrewarmedResting()
         let content = (makeRestingCommentsPanelContent ?? makeCommentsPanelContent)(id)
         applyRailSlot(to: content)
         content.view.backgroundColor = .clear
@@ -3863,8 +3864,7 @@ final class SnapFeedViewController: UIViewController {
         // saves nothing.
         content.view.frame = view.bounds
         content.view.layoutIfNeeded()
-        prewarmedRestingID = id
-        prewarmedRestingVC = content
+        restingWarm.insert(content, for: id)
         #if DEBUG
         debugPrewarmedRestingID = id
         #endif
@@ -3956,7 +3956,7 @@ final class SnapFeedViewController: UIViewController {
         let handsOver = head != nil && head == loadingPageID
             && modelsByID[head!]?.mediaURL == nil
             && commentsEngagedID == nil && commentsContentVC == nil
-            && prewarmedRestingID == nil
+            && restingWarm.isEmpty
         loadingPage = nil
         loadingPageID = nil
         guard handsOver, let head else { return fadeOutLoadingPage(panel, animated: true) }
@@ -3969,8 +3969,7 @@ final class SnapFeedViewController: UIViewController {
         panel.view.isUserInteractionEnabled = true
         loadingPageFrost?.removeFromSuperview()
         loadingPageFrost = nil
-        prewarmedRestingID = head
-        prewarmedRestingVC = panel
+        restingWarm.insert(panel, for: head)
         handedOverLoadingPage = panel
         #if DEBUG
         debugPrewarmedRestingID = head
@@ -3989,7 +3988,7 @@ final class SnapFeedViewController: UIViewController {
         collectionView.layoutIfNeeded()
         handedOverLoadingPage = nil
         guard panel.view.superview === view else { return }
-        if prewarmedRestingVC === panel { discardPrewarmedResting() }
+        restingWarm.remove(panel)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-media-log") {
             print(String(format: "[media] %.3f loading-page adopted=no — faded",
@@ -4020,11 +4019,6 @@ final class SnapFeedViewController: UIViewController {
     var debugLoadingPanel: UIViewController? { loadingPage }
     var debugShowsLoadingPage: Bool { loadingPage != nil }
     #endif
-
-    private func discardPrewarmedResting() {
-        prewarmedRestingVC = nil
-        prewarmedRestingID = nil
-    }
 
     /// The stand-in, for the flight's duration (charter PR 5b).
     private func installRestingPlaceholder(for id: PostID, model: FeedItemDisplayModel, host cell: SnapFeedCell) {
@@ -4193,19 +4187,28 @@ final class SnapFeedViewController: UIViewController {
             content.removeFromParent()
             previewRestingCell?.setCommentsEngaged(false)
             previewRestingCell?.clearComments()
+            if let id = previewRestingID { keepAsNeighbourWarm(content, for: id) }
         }
         previewRestingVC = nil
         previewRestingID = nil
         previewRestingCell = nil
     }
 
+    /// ⚠️ A NEIGHBOUR'S PANEL IS KEPT, NOT THROWN AWAY (#2059): the feed
+    /// pages back (#2056), so a text page next to the settled one — the page
+    /// just left, a preview that scrolled away — keeps its resting panel,
+    /// built and laid out, as that page's warm. Its stream stays where the
+    /// reader left it. A page further away lets it go.
+    private func keepAsNeighbourWarm(_ content: UIViewController, for id: PostID) {
+        guard id != activePostID, let index = orderedIDs.firstIndex(of: id),
+              abs(index - settledPageIndex) == 1 else { return }
+        restingWarm.insert(content, for: id)
+    }
+
     /// The panel for a post: the one built ahead when it matches, a fresh one
     /// otherwise.
     private func restingPanel(for id: PostID) -> UIViewController? {
-        if prewarmedRestingID == id, let warmed = prewarmedRestingVC {
-            discardPrewarmedResting()
-            return warmed
-        }
+        if let warmed = restingWarm.take(id) { return warmed }
         let panel = (makeRestingCommentsPanelContent ?? makeCommentsPanelContent)?(id)
         applyRailSlot(to: panel)
         return panel
@@ -4950,7 +4953,7 @@ final class SnapFeedViewController: UIViewController {
     /// thing building ahead exists to prevent. A handed-over loading page
     /// already inherits (`.unspecified`) and is left alone.
     private func deviceAppearanceDidChange() {
-        if let warmed = prewarmedRestingVC, warmed.overrideUserInterfaceStyle != .unspecified {
+        for warmed in restingWarm.values where warmed.overrideUserInterfaceStyle != .unspecified {
             warmed.overrideUserInterfaceStyle = deviceInterfaceStyle
         }
     }
@@ -4973,7 +4976,7 @@ final class SnapFeedViewController: UIViewController {
         // ⚠️ ALL THREE PLACES A PANEL CAN BE, and leaving one out strands the
         // viewer.
         //
-        // A panel is built ahead (`prewarmedRestingID`), then MOUNTED into the
+        // A panel is built ahead (`restingWarm`), then MOUNTED into the
         // incoming cell as a preview — which consumes the warm — and only later
         // promoted to the engagement. Counting the first and the last but not
         // the middle meant a page that was already on screen, fully drawn, read
@@ -4981,7 +4984,7 @@ final class SnapFeedViewController: UIViewController {
         // to advance. Two text posts in a row could not be paged through at
         // all, and the console showed only the hero grab correctly declining an
         // upward drag — nothing about the page that was quietly unreachable.
-        return prewarmedRestingID == model.id
+        return restingWarm.contains(model.id)
             || previewRestingID == model.id
             || commentsEngagedID == model.id
     }
@@ -5025,13 +5028,10 @@ final class SnapFeedViewController: UIViewController {
         let last = max(0, orderedIDs.count - 1)
         let settled = min(settledPageIndex, last)
         guard settled < last, modelsByID[orderedIDs[settled + 1]] != nil else { return settled }
-        // ⚠️ THE NEXT PAGE ONLY, because the warm holds ONE panel.
-        //
-        // Preparing the whole run forward looked thorough and was
-        // self-defeating: each call discards the last one's panel, so walking
-        // three pages ahead threw away the warm for the page actually being
-        // moved onto and it was built twice. One page is also all a gesture can
-        // reach, which is the only page the question is about.
+        // ⚠️ THE NEXT PAGE ONLY, because the warm holds the window around the
+        // settled page (#2059) and one page forward is all a gesture can
+        // reach. Walking the run forward would push the
+        // previous page's panel out for a guess.
         if !isPageReady(settled + 1) { prewarmRestingComments(for: orderedIDs[settled + 1]) }
         // Past it, the only question left is whether the data has arrived.
         var ceiling = settled + 1
@@ -5091,6 +5091,14 @@ final class SnapFeedViewController: UIViewController {
         cell?.clearComments()
         // A panel kept for the next engagement starts back in place (#1730).
         (commentsContentVC as? PostDetailViewController)?.setOverlayOffset(0)
+        // ⚠️ THE PAGE JUST LEFT KEEPS ITS PANEL (#2059): the feed pages back
+        // (#2056), and the text page the viewer just left is the previous
+        // page now — its resting panel, built and laid out, is kept as that
+        // page's warm instead of being thrown away and built again on the way
+        // back. Its stream is where the reader left it, too.
+        if commentsEngagementIsResting, let id = commentsEngagedID, let content = commentsContentVC {
+            keepAsNeighbourWarm(content, for: id)
+        }
         commentsContentVC = nil
         commentsEngagedID = nil
         prewarmedCommentsID = nil
@@ -6271,12 +6279,18 @@ final class SnapFeedViewController: UIViewController {
         let content = SnapWarmWindow.content(around: active, count: count)
         warmContent(at: content)
         warmVideo(around: active, speculative: warmImages(around: active))
-        // ⚠️ AND THE NEXT TEXT PAGE'S INTERFACE, which is the one page whose
-        // content is a whole view controller rather than an image. Only the
-        // page immediately ahead: it is one view controller's memory, and the
-        // page after that is a guess.
-        if orderedIDs.indices.contains(active + 1) {
-            prewarmRestingComments(for: orderedIDs[active + 1])
+        // ⚠️ AND THE NEIGHBOURING TEXT PAGES' INTERFACE, the one page whose
+        // content is a whole view controller rather than an image: the page
+        // immediately ahead AND the one behind, now that the feed pages back
+        // (#2059). Two view controllers' memory, no more — the pages past
+        // them are a guess, and what left the window is let go first.
+        // The page being landed on stays in the window: its warm is mounted
+        // after this. A page whose panel is anywhere already — warm, preview,
+        // or the page just left still holding it — is never built twice.
+        let window = [active - 1, active, active + 1].filter { orderedIDs.indices.contains($0) }
+        restingWarm.keep(only: Set(window.map { orderedIDs[$0] }))
+        for index in [active + 1, active - 1] where orderedIDs.indices.contains(index) && !isPageReady(index) {
+            prewarmRestingComments(for: orderedIDs[index])
         }
         warmCaptionEmotes(around: active)
         #if DEBUG
@@ -6292,13 +6306,15 @@ final class SnapFeedViewController: UIViewController {
     #endif
 
     /// ⚠️ THE NEXT CAPTIONS' EMOTES, BEFORE THEY ARRIVE (#1504): the two pages
-    /// ahead of the settled one, warmed at the bucket the caption on screen
+    /// ahead of the settled one and the one behind it (#2059), warmed at the
+    /// bucket the caption on screen
     /// draws at, so a caption swiped in installs its emotes at once — no
     /// skeleton. What leaves the window is let go.
     private func warmCaptionEmotes(around active: Int) {
         guard let side = (lifecycleCell(at: active) as? SnapFeedCell)?.captionEmotePixelSide else { return }
-        let ahead = (active + 1)...(active + 2)
-        let captions = ahead.compactMap { index -> String? in
+        // And the one behind: the feed pages back (#2059).
+        let window = [active - 1, active + 1, active + 2]
+        let captions = window.compactMap { index -> String? in
             guard orderedIDs.indices.contains(index) else { return nil }
             return modelsByID[orderedIDs[index]]?.caption
         }
