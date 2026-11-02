@@ -74,14 +74,14 @@ Three assets hold the brand outside the code. `BrandAssetsGuardTests` (DesignSys
 |---|---|---|
 | `App/Resources/Assets.xcassets/AccentColor.colorset` | the app's tint: light, dark and the Increased Contrast pair | `primary` |
 | `App/Resources/Assets.xcassets/LaunchLogo.imageset/LaunchLogo.svg` | the launch logo's pale gradient | `launchLogoStops` |
-| `App/Resources/AppIcon.icon/icon.json` | the icon's blob fill, as Icon Composer writes it | `iconGradient` |
+| `App/Resources/AppIcon.icon/Assets/circle.svg` | the icon's blob gradient (the layer has no fill of its own in `icon.json`: Icon Composer's fill takes two colours) | `iconStops` |
 
 ## Changing the theme
 1. **Write the new values** in `BrandTheme.swift`: a new `BrandTheme` value, then point `current` at it. Call sites do not change, because they read `Palette`'s roles.
 2. **Update the assets** until `BrandAssetsGuardTests` passes:
    - `AccentColor`'s four values;
    - the launch logo's stops;
-   - the icon, redone in Icon Composer. Copy its `.icon` byte for byte, then copy its fill strings into `iconGradient`.
+   - the icon: its blob gradient lives in `circle.svg` (three stops, with their opacities; the layer keeps no `fill`). Redo it there, or in Icon Composer and copy the `.icon` byte for byte, then set `iconStops`. Render it with `ictool` (light, dark, tinted, clear).
 3. **Check the contrast.** `PaletteTests` and `PaletteThemeTests` measure every role where it is used, and `PaletteTests.everyRoleIsTheThemes` checks each role against `BrandTheme.current`. Update the table above.
 4. **Update this document's tables.**
 5. **Run the full suite and a Release build.** `Palette` is read everywhere.

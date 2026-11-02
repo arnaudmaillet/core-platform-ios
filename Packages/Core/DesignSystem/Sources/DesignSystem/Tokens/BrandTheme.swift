@@ -98,9 +98,10 @@ public struct BrandTheme: Sendable, Equatable {
     /// `LaunchLogo.svg`'s gradient stops, first to last: the signature's,
     /// made pale.
     public let launchLogoStops: [UInt32]
-    /// `AppIcon.icon/icon.json`'s blob fill, exactly as Icon Composer writes
-    /// it, first stop to last.
-    public let iconGradient: [String]
+    /// The app icon's blob gradient, first stop to last: drawn by
+    /// `AppIcon.icon/Assets/circle.svg` itself — Icon Composer's layer fill
+    /// takes two colours only — with the layer's own fill removed.
+    public let iconStops: [UInt32]
 
     /// The theme the app draws in.
     public static let current = raspberry
@@ -128,12 +129,7 @@ public struct BrandTheme: Sendable, Equatable {
         signatureLocations: [0, 0.5, 1],
         loaderTones: [0xEC1C75, 0x9B5CFF, 0x2EF0A8],
         launchLogoStops: [0xF699C1, 0xD2B6FF, 0xA1F8D8],
-        // The icon is redone in #2062's third pull request: until then, its
-        // fill as it stands.
-        iconGradient: [
-            "display-p3:0.85622,0.33380,0.59312,0.50000",
-            "extended-srgb:0.38039,0.33333,0.96078,0.30000",
-        ]
+        iconStops: [0xEC1C75, 0x9B5CFF, 0x2EF0A8]
     )
 }
 
