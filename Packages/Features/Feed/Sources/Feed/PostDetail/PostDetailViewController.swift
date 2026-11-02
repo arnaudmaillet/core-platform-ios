@@ -837,14 +837,23 @@ final class PostDetailViewController: UIViewController {
     /// pan phase (began/changed/ended) with the raw vertical translation and
     /// velocity, and the host drives the feed pager's `contentOffset` in
     /// real time (finger-linked paging), settling on release.
+    ///
+    /// `pagesBack` answers, as a drag begins at the stream's top edge, whether
+    /// it goes to the previous post (#2058) — the feed's router, so the first
+    /// post keeps its close there.
     func setEngagedPageSwipeHandler(
-        _ handler: @escaping (CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void
+        _ handler: @escaping (CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void,
+        pagesBack: @escaping () -> Bool
     ) {
         composeBar.onPageSwipe = handler
+        pagesBackFromStreamTop = pagesBack
         // A page in a vertical feed: its comments read in tiers, the edge of
         // what is shown handing the swipe to the feed (#2042).
         streams.forEach { $0.readsInTiers = true }
     }
+    /// Whether a drag beginning at the stream's top edge goes to the previous
+    /// post. Nil outside a vertical feed.
+    private(set) var pagesBackFromStreamTop: (() -> Bool)?
 
     /// The STREAM's shrink for the engagement, 0 (engaged) → 1 (dismissed).
     ///

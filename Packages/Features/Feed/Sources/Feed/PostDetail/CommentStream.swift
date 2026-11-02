@@ -114,6 +114,7 @@ final class CommentStream: NSObject {
     private var onPullDismissDrive: ((CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void)? {
         host.onPullDismissDrive
     }
+    private var pagesBackFromTop: Bool { host.pagesBackFromStreamTop?() == true }
 
     /// Builds the list: its bounce, its taps, its menus and its rows.
     func configure() {
@@ -574,9 +575,11 @@ final class CommentStream: NSObject {
     /// gesture that ended inside that window must not thaw it early.
     /// Whether the stream rests at its very top — the one place a downward
     /// drag has nothing left to scroll, which is where a RESTING page's
-    /// vertical slide-to-dismiss may claim the touch instead (the sheet
-    /// idiom; see `SnapFeedViewController.zoomVerticalDismissalPermitted`).
-    /// Same top test the pull-dismiss arming uses.
+    /// vertical slide-to-dismiss may claim the touch instead on the first
+    /// post (the sheet idiom; see
+    /// `SnapFeedViewController.zoomVerticalDismissalPermitted`), and where a
+    /// later post pages back (#2058). Same top test the pull-dismiss arming
+    /// uses.
     var streamIsAtTop: Bool {
         collectionView.contentOffset.y <= -collectionView.contentInset.top + 0.5
     }
@@ -1477,8 +1480,9 @@ final class CommentStream: NSObject {
     /// it lands.
     private var revealsWhenLoaded = false
 
-    /// The drag that started at the stream's bottom edge heading up: it moves
-    /// the feed to the next post, as the composer's swipe does, while the
+    /// The drag that started at the stream's bottom edge heading up, or at
+    /// its top heading down on a later post: it moves the feed to the next
+    /// post or the previous one, as the composer's swipe does, while the
     /// stream stays at its edge. Nil for any other drag.
     private var pageDrive: (edge: CGFloat, handler: (CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void)?
     /// Set while the stream's offset is put back at its edge.
@@ -2301,6 +2305,10 @@ extension CommentStream: UICollectionViewDelegate {
             keyboardOpen: composeBar.isKeyboardOpen
         )
         beginPageDriveIfAtTheEdge(scrollView)
+        // The previous post's drag is not the close's: on a later post the
+        // top edge pages back (#2058), and the pull-down stays the first
+        // post's.
+        if pageDrive != nil { isPullDismissArmed = false }
     }
 
     // MARK: - The next post from the edge (#2042)
@@ -2311,19 +2319,52 @@ extension CommentStream: UICollectionViewDelegate {
     /// fling that reaches the edge mid-drag stops there; the next swipe goes
     /// on, so a reader flicking through comments never leaves the post by
     /// accident.
+    ///
+    /// The mirror at the TOP edge (#2058): a downward drag beginning there
+    /// goes to the previous post, on a later post only — the feed's router
+    /// answers (`pagesBackFromTop`), so the first post keeps its close (the
+    /// text page's dismissal, the media layout's pull-down).
     private func beginPageDriveIfAtTheEdge(_ scrollView: UIScrollView) {
         pageDrive = nil
         // A reader who moves on no longer waits for a tier still loading
         // (or whose load failed): it is not thrown at them later.
         revealsWhenLoaded = false
-        guard readsTiersNow, let handler = composeBar.onPageSwipe, !composeBar.isKeyboardOpen,
-              Self.dragGoesToNextPost(
-                  atBottomEdge: streamIsAtBottom,
-                  velocity: scrollView.panGestureRecognizer.velocity(in: scrollView),
-                  translation: scrollView.panGestureRecognizer.translation(in: scrollView)
-              ) else { return }
-        pageDrive = (tailOffset, handler)
+        guard readsTiersNow, let handler = composeBar.onPageSwipe, !composeBar.isKeyboardOpen else { return }
+        let pan = scrollView.panGestureRecognizer
+        switch Self.edgeHandOff(
+            atTopEdge: streamIsAtTop, atBottomEdge: streamIsAtBottom,
+            velocity: pan.velocity(in: scrollView), translation: pan.translation(in: scrollView),
+            pagesBack: pagesBackFromTop
+        ) {
+        case .nextPost: pageDrive = (tailOffset, handler)
+        case .previousPost: pageDrive = (-scrollView.contentInset.top, handler)
+        case nil: return
+        }
         handler(.began, 0, 0)
+    }
+
+    /// Where a drag beginning at an edge goes.
+    enum EdgeHandOff: Equatable {
+        case nextPost
+        case previousPost
+    }
+
+    /// The edge hand-off, decided as the drag begins: up from the bottom edge
+    /// to the next post; down from the top edge to the previous one when the
+    /// feed has one to give (`pagesBack`, asked only then). A stream shorter
+    /// than its room is at both edges at once. Nil: the stream's own drag.
+    /// Pure, for tests.
+    static func edgeHandOff(
+        atTopEdge: Bool, atBottomEdge: Bool, velocity: CGPoint, translation: CGPoint,
+        pagesBack: @autoclosure () -> Bool
+    ) -> EdgeHandOff? {
+        if dragGoesToNextPost(atBottomEdge: atBottomEdge, velocity: velocity, translation: translation) {
+            return .nextPost
+        }
+        if dragGoesToPreviousPost(atTopEdge: atTopEdge, velocity: velocity, translation: translation), pagesBack() {
+            return .previousPost
+        }
+        return nil
     }
 
     /// Whether a drag beginning now goes to the next post: the stream at its
@@ -2332,6 +2373,15 @@ extension CommentStream: UICollectionViewDelegate {
         guard atBottomEdge else { return false }
         let upward = velocity.y < 0 || (velocity.y == 0 && translation.y < 0)
         return upward && abs(velocity.y) >= abs(velocity.x)
+    }
+
+    /// The mirror: the stream at its top edge, the finger heading down more
+    /// than sideways. Whether that post has a previous one is the feed's to
+    /// say. Pure, for tests.
+    static func dragGoesToPreviousPost(atTopEdge: Bool, velocity: CGPoint, translation: CGPoint) -> Bool {
+        guard atTopEdge else { return false }
+        let downward = velocity.y > 0 || (velocity.y == 0 && translation.y > 0)
+        return downward && abs(velocity.y) >= abs(velocity.x)
     }
 
     /// The page drive's frame: the stream back at its edge, the finger's
