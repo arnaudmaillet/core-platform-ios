@@ -131,7 +131,7 @@ struct CommentTabsTests {
         #expect(!controller.showsPopular)
         #expect(controller.visibleStreamKind == .recent)
         #expect(!controller.streamPager.isPagingEnabled, "a single stream pages")
-        #expect(controller.popular.collectionView.superview == nil, "Popular is mounted with no tab")
+        #expect(controller.popular.pageView.superview == nil, "Popular is mounted with no tab")
     }
 
     /// At the threshold, the first answer opens the panel on Popular.
