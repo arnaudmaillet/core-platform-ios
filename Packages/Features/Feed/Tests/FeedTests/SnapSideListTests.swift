@@ -185,6 +185,32 @@ struct SnapSideListTests {
         return controller
     }
 
+    /// ⚠️ THE PREVIOUS POST (#2057, the owner 2026-11-02): resting on a later
+    /// post, a downward drag is the pager's — it pages back — and the
+    /// dismissal refuses it; on the first post, the dismissal's, as before.
+    /// One router, both sides.
+    @Test func aLaterPostPagesBackAndTheFirstKeepsTheDismiss() throws {
+        let feed = feed(sideList: false)
+        feed.seedProjection([Self.photo("p1"), Self.photo("p2"), Self.photo("p3")])
+        feed.view.layoutIfNeeded()
+        let pager = try #require(feed.collectionView as? SnapFeedCollectionView)
+        let page = pager.bounds.height
+        try #require(page > 0)
+        let middle = CGPoint(x: 120, y: page / 2)
+
+        pager.contentOffset.y = page
+        feed.scrollViewDidEndDecelerating(pager)
+        #expect(feed.downwardDragOwner == .pager, "a later post does not page back")
+        #expect(pager.ownsDownwardTouch?() == true, "the pager declines the downward touch")
+        #expect(!feed.zoomVerticalDismissalPermitted(at: middle, in: feed.view), "the dismissal claims it too")
+
+        pager.contentOffset.y = 0
+        feed.scrollViewDidEndDecelerating(pager)
+        #expect(feed.downwardDragOwner == .dismissal)
+        #expect(pager.ownsDownwardTouch?() != true)
+        #expect(feed.zoomVerticalDismissalPermitted(at: middle, in: feed.view), "the first post lost its dismiss")
+    }
+
     /// The post share sheet's own chips (#1710, #1712): Repost, then the ⋯
     /// menu's Not interested and Report — Report only with somewhere to file.
     @Test func theShareSheetOffersRepostNotInterestedAndReport() {
@@ -237,7 +263,7 @@ struct SnapSideListTests {
         #expect(feed.view.transform == .identity, "the screen itself moved")
         #expect(!sideList.listView.isHidden)
         #expect(!feed.isReadyForInteractiveDismissal, "a dismissal could begin while the list is open")
-        #expect(pager.allowsBackwardPaging, "the pager does not page back while open")
+        #expect(feed.downwardDragOwner == .pager, "the pager does not page back while open")
 
         // ⚠️ THE ACTION COLUMN LOWERS WITH THE REST (#1549): the like pill
         // and the sound bubble live outside the chrome, in the cell.
@@ -256,7 +282,7 @@ struct SnapSideListTests {
                 "an overlay stayed down after the close")
         #expect(sideList.listView.isHidden)
         #expect(feed.isReadyForInteractiveDismissal)
-        #expect(!pager.allowsBackwardPaging)
+        #expect(feed.downwardDragOwner == .dismissal, "on its first post the downward drag is no longer the dismissal's")
     }
 
     // MARK: - Autoplay (#1509)
