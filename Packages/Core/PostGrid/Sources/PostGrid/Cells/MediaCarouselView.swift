@@ -229,8 +229,8 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// system's edge pop, the tab pager's previous page, and the only horizontal
     /// direction the zoom dismissal is armed for (`ZoomDismissAxis.match`
     /// requires `velocity.x > 0`). Leftward means "onward", and on the surfaces a
-    /// carousel actually lives on there is nobody to hand it to — the feed is
-    /// forward-only and the dismissal is not listening. A drag given up to
+    /// carousel actually lives on there is nobody to hand it to — the feed
+    /// pages vertically and the dismissal is not listening. A drag given up to
     /// nobody would be worse than one that ends against a stop: the end-of-run
     /// rubber-band is at least an answer. Where something IS waiting for it —
     /// the tab pager, which has a next tab — that surface makes the mirror
@@ -238,7 +238,7 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     ///
     /// Predominantly horizontal, which is the MIRROR of the dismissal's own
     /// begin gate, so exactly one of the two claims any given drag — the same
-    /// arrangement the feed's forward-only decline makes with the vertical axis.
+    /// arrangement the feed's downward decline makes with the vertical axis.
     ///
     /// Internal so the rule is unit-testable: recognition cannot be driven from
     /// a test, and this is the decision that stands behind it.

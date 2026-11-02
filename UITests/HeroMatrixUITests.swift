@@ -89,7 +89,7 @@ final class HeroMatrixUITests: XCTestCase {
         attachHeroEvidence(app, name: "d04-grab-committed")
     }
 
-    // MARK: - D02: the vertical grab, committed (the forward-only contract)
+    // MARK: - D02: the vertical grab, committed (the first post's contract)
 
     func testAVerticalGrabFliesThePostHome() {
         let app = launchOnForYou()
@@ -99,8 +99,9 @@ final class HeroMatrixUITests: XCTestCase {
 
         let before = heroProbe(in: app)?.sequence ?? 0
         // From the upper half: a downward swipe from the middle travels the
-        // pager's territory, and the pager is forward-only — the grab claims
-        // it — but starting high keeps clear of the composer's strip.
+        // pager's territory, and on the first post the pager declines it —
+        // the grab claims it (#2056) — but starting high keeps clear of the
+        // composer's strip.
         app.windows.firstMatch
             .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
             .press(forDuration: 0.05,
@@ -170,7 +171,7 @@ final class HeroMatrixUITests: XCTestCase {
         attachHeroEvidence(app, name: "d04-media-hero-returned")
     }
 
-    /// The same media flight, thrown home DOWNWARD — the forward-only
+    /// The same media flight, thrown home DOWNWARD — the first post's
     /// contract on the post the hero actually flies for.
     func testAMediaHeroGrabbedHomeVertically() {
         let app = launchOnForYou(extra: ["-foryou-open", "0"])

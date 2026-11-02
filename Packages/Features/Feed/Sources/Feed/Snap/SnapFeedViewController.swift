@@ -1755,11 +1755,11 @@ final class SnapFeedViewController: UIViewController {
         collectionView.register(SnapFeedCell.self, forCellWithReuseIdentifier: SnapFeedCell.reuseIdentifier)
         collectionView.pin(to: view)
 
-        // No pull-to-refresh: the feed is FORWARD-ONLY (cluster-gallery
-        // milestone) — the whole downward direction belongs to the dismissal
-        // hero, so there is no top overscroll left to hang a refresh on.
-        // Refresh lives on the source surfaces (the grids), which own their
-        // own vertical axis.
+        // No pull-to-refresh: on the first post the downward direction belongs
+        // to the dismissal (cluster-gallery milestone), on any later post to
+        // paging back (#2056) — there is no top overscroll left to hang a
+        // refresh on. Refresh lives on the source surfaces (the grids), which
+        // own their own vertical axis.
 
         let pipeline = imagePipeline
         dataSource = UICollectionViewDiffableDataSource<Section, PostID>(collectionView: collectionView) {

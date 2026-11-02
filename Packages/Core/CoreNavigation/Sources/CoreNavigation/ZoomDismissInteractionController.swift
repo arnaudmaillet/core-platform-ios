@@ -29,10 +29,11 @@ import UIKit
 /// in `gestureRecognizerShouldBegin` from the hand's velocity — which is
 /// what lets `.began` claim immediately — and selects the progress
 /// component, the drift component, the span, and the release velocity;
-/// every other channel is axis-blind. A vertical grab exists at all because
-/// the feed is FORWARD-ONLY: its pager declines downward touches (the
-/// mirror of this pan's begin gate), so downward is free the way rightward
-/// always was.
+/// every other channel is axis-blind. A vertical grab exists because the
+/// feed's FIRST post leaves downward free: there its pager declines downward
+/// touches (the mirror of this pan's begin gate). On any later post the
+/// downward drag pages back, and the feed's own gate refuses this pan
+/// (`zoomVerticalDismissalPermitted`, #2056).
 @MainActor
 final class ZoomDismissInteractionController: NSObject, UIViewControllerInteractiveTransitioning {
     /// Whether a grab is currently driving the dismissal — the transitioning
@@ -157,8 +158,8 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
 
     /// Installs the pan on the presented feed's view. `onBeginDismiss` should
     /// pop (or dismiss) the presented view controller; `axes` arms the grab's
-    /// directions (both by default — the forward-only feed leaves downward
-    /// free everywhere this driver is used).
+    /// directions (both by default — the feed leaves downward free on its
+    /// first post, and its destination gate says where, #2056).
     func attach(
         to view: UIView,
         source: any ZoomTransitionSource,
@@ -1058,10 +1059,10 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
 
 extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
     /// The whole conflict story lives here: the pan begins only for an
-    /// outbound movement predominantly along one ARMED axis (rightward, or —
-    /// with the pager forward-only — downward), so the paging the feed still
-    /// owns never sees a competitor — and when it does begin, the intent is
-    /// unambiguous enough to claim on the spot.
+    /// outbound movement predominantly along one ARMED axis (rightward, or
+    /// downward where the destination permits it — the feed's first post,
+    /// #2056), so the paging the feed owns never sees a competitor — and when
+    /// it does begin, the intent is unambiguous enough to claim on the spot.
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         // `context == nil` also gates on the PREVIOUS grab's transition having
         // fully completed — overlapping lifecycles must never share state.

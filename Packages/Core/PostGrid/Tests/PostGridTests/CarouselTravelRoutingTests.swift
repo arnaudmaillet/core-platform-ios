@@ -107,7 +107,7 @@ struct CarouselTravelTests {
     /// Leftward on the last page can only rubber-band too — but on the surfaces
     /// a carousel lives on there is nobody waiting for it: the dismissal is
     /// armed rightward only (`ZoomDismissAxis.match` requires `velocity.x > 0`)
-    /// and the feed is forward-only. A drag given up to nobody is worse than one
+    /// and the feed pages vertically. A drag given up to nobody is worse than one
     /// that ends against a stop, because the stop is at least an answer. Where
     /// something IS waiting — the tab pager, which has a next tab — that surface
     /// makes the mirror decision itself, in `HorizontalPagerScrollView`.
