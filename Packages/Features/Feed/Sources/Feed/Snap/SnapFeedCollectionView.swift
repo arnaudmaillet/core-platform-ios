@@ -18,24 +18,27 @@ final class SnapFeedCollectionView: UICollectionView {
     /// the swipe-up close past a finished source (#628). Asked only for a
     /// predominantly-upward pan; nil (a feed with no such end) never yields.
     var yieldsUpwardTouch: ((CGPoint) -> Bool)?
-    /// Whether a downward drag pages BACK (#1425): only while the side list
-    /// is open, when the dismissal that owns the downward drag stands aside.
-    var allowsBackwardPaging = false
+    /// Whether a downward drag beginning now is the pager's — it pages BACK
+    /// to the previous post (#2057) — rather than the screen's dismissal:
+    /// `SnapVerticalDragRouter`'s answer, which the dismissal's own gate asks
+    /// too. Nil: the dismissal's, as on a feed with nothing to page back to.
+    var ownsDownwardTouch: (() -> Bool)?
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         let location = gestureRecognizer.location(in: self)
         if let hit = hitTest(location, with: nil), Self.claimsTouches(hit) {
             return false
         }
-        // FORWARD-ONLY (cluster-gallery milestone): the pager declines any
-        // predominantly-downward touch, per touch, via the same public seam as
-        // the rail divorce — no gesture-graph edges. One decline kills
-        // backward paging, the top rubber-band and pull-to-refresh at once,
-        // and leaves the whole downward direction to the dismissal hero's pan
-        // (which self-gates on the mirror of this test, so exactly one of the
-        // two ever claims a drag).
-        if !allowsBackwardPaging, let pan = gestureRecognizer as? UIPanGestureRecognizer,
-           Self.declinesDownwardPagingTouch(velocity: pan.velocity(in: self)) {
+        // A DOWNWARD touch is the pager's only where the router says so
+        // (#2057): on a later post it pages back; on the first it is the
+        // dismissal's — declined here, per touch, via the same public seam as
+        // the rail divorce, no gesture-graph edges. The dismissal pans ask the
+        // same router (`zoomVerticalDismissalPermitted`), so exactly one of
+        // the two ever claims a drag. Declined, there is no top rubber-band
+        // and no pull-to-refresh either (#114).
+        if let pan = gestureRecognizer as? UIPanGestureRecognizer,
+           Self.declinesDownwardPagingTouch(velocity: pan.velocity(in: self)),
+           ownsDownwardTouch?() != true {
             return false
         }
         // And at the true end, the UPWARD touch too — handed to the close the
@@ -54,8 +57,9 @@ final class SnapFeedCollectionView: UICollectionView {
         velocity.y < 0 && abs(velocity.y) > abs(velocity.x)
     }
 
-    /// The forward-only axis test, mirrored from the dismissal pan's begin
-    /// gate: a downward, predominantly-vertical movement is not the pager's.
+    /// The downward axis test, mirrored from the dismissal pan's begin gate
+    /// (`ZoomDismissAxis.match(.vertical)`): a downward, predominantly-
+    /// vertical movement — the pager's only where the router gives it.
     /// Pure so the routing rule is unit-testable.
     static func declinesDownwardPagingTouch(velocity: CGPoint) -> Bool {
         velocity.y > 0 && abs(velocity.y) > abs(velocity.x)

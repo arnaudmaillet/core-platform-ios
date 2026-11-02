@@ -2,11 +2,13 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// The forward-only feed (cluster-gallery milestone): backward vertical
-/// paging is gone — the whole downward direction belongs to the dismissal
-/// hero. Two pure rules carry it: the pager's per-touch decline of downward
-/// movements, and the engaged page-drive's refusal to step to the previous
-/// post.
+/// The pager's downward axis test and the engaged page-drive's step rule.
+///
+/// The feed was forward-only (cluster-gallery milestone, #114). Since #2057
+/// a downward drag on a later post pages back through the pager — who owns
+/// it is `SnapVerticalDragRouter`'s (`SnapVerticalDragRouterTests`). The
+/// drive (text pages, engaged comments) still steps forward only until
+/// #2058.
 struct SnapFeedForwardOnlyTests {
     // MARK: - The pager's per-touch decline
 

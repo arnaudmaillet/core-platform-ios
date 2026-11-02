@@ -1716,6 +1716,11 @@ final class SnapFeedViewController: UIViewController {
             guard let self, let pager, self.isReadyForInteractiveDismissal else { return false }
             return self.zoomUpwardDismissalPermitted(at: location, in: pager)
         }
+        // A downward touch: the previous post on a later page, the dismissal
+        // on the first (#2057) — the router both sides ask.
+        pager.ownsDownwardTouch = { [weak self] in
+            self?.downwardDragOwner == .pager
+        }
         collectionView = pager
         collectionView.backgroundColor = emptyGround
         collectionView.isPagingEnabled = true
@@ -8235,6 +8240,29 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     var debugSettledSnapCell: SnapFeedCell? { settledSnapCell }
     #endif
 
+    // MARK: - The downward drag (#2056, #2057)
+
+    /// Where the feed stands, for `SnapVerticalDragRouter`.
+    var downwardDragSituation: SnapVerticalDragRouter.Situation {
+        let index = settledPageIndex
+        let page = collectionView?.bounds.height ?? 0
+        let atRest = page > 0 && abs((collectionView?.contentOffset.y ?? 0) - CGFloat(index) * page) < 0.5
+        return SnapVerticalDragRouter.Situation(
+            settledIndex: index,
+            isAtRestOnPage: atRest,
+            sideListOpen: sideList?.isOpen == true,
+            // The pager pages this page: a media page. A text page (or a
+            // page whose comments hold the scroll) keeps its close until the
+            // direction-aware drive pages it back (#2058).
+            pagerPagesHere: collectionView?.isScrollEnabled == true
+        )
+    }
+
+    /// Who owns a downward drag beginning now: the pager or the dismissal.
+    var downwardDragOwner: SnapVerticalDragRouter.DownwardOwner {
+        SnapVerticalDragRouter.downwardOwner(downwardDragSituation)
+    }
+
     /// The pulls that close the side list now (#1580): with the list open
     /// and still, down on its first post, up on its last — where the card
     /// sits at that end of the pager, with nothing beyond it.
@@ -8281,11 +8309,9 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         (commentsContentVC as? PostDetailViewController)?.setOverlayOffset(offset)
     }
 
-    /// The list settled open or closed. Open, the pager pages BACK too — the
-    /// feed is forward-only because a downward drag is its dismissal, which
-    /// stands aside while the list is open.
+    /// The list settled open or closed. Open, the pager pages back from its
+    /// first post too — the dismissal stands aside (`downwardDragOwner`).
     func sideListDidSettle(open: Bool) {
-        (collectionView as? SnapFeedCollectionView)?.allowsBackwardPaging = open
         handOverPausedMark(listOpen: open)
         if open {
             beginSideListSessionIfNeeded()
@@ -8326,6 +8352,10 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// territory that owns its own vertical gestures (the shortcut rail's
     /// column, the composer).
     public func zoomVerticalDismissalPermitted(at location: CGPoint, in view: UIView) -> Bool {
+        // ⚠️ THE FIRST POST'S, ONLY (#2057, the owner 2026-11-02): on a later
+        // post the downward drag is the pager's — the previous post comes in.
+        // The router the pager asks too, so exactly one of them claims it.
+        guard downwardDragOwner == .dismissal else { return false }
         // ⚠️ AN OPEN KEYBOARD OWNS THE DOWNWARD DRAG.
         //
         // The comments list dismisses the keyboard interactively — drag down
