@@ -312,6 +312,7 @@ final class ConversationThreadViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
         configureCollectionView()
+        observeContentSize()
         if mode == .full {
             configureComposer()
             configureToolbar()
@@ -344,6 +345,15 @@ final class ConversationThreadViewController: UIViewController {
         peerPill.settleLayout()
         // Back from their profile, the relation may have moved.
         resolvePeerRelation(refresh: true)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !hasAppeared else { return }
+        hasAppeared = true
+        // The rows that came on screen with it have sized themselves by now;
+        // a turn later, the tail is the conversation's own again.
+        DispatchQueue.main.async { [weak self] in self?.holdsTail = false }
     }
 
     override func viewIsAppearing(_ animated: Bool) {
@@ -518,6 +528,7 @@ final class ConversationThreadViewController: UIViewController {
     /// Scrolls to the start of the bar's day — its chip in the flow, then
     /// its first message — landing just below the bar (#750, #755).
     private func scrollToDayStart() {
+        holdsTail = false
         guard let day = dayShown,
               let section = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .day(day)),
               collectionView.numberOfItems(inSection: section) > 0
@@ -1568,6 +1579,36 @@ final class ConversationThreadViewController: UIViewController {
         collectionView.contentOffset.y = frame.minY - anchor.offset
     }
 
+    /// ⚠️ THE TAIL HOLDS WHILE THE ROWS SIZE THEMSELVES (the owner's device,
+    /// 2026-11-02). A long conversation is pinned on estimated heights; its
+    /// rows then size for real as they come on screen — under the push — and
+    /// each one moved the content under a fixed offset: the conversation came
+    /// in high and slid down to its place. A short one, all on screen at the
+    /// pin, never moved. Until the reader scrolls (or the screen scrolls to a
+    /// day or a quote), every change of the content's height keeps the
+    /// newest message where it rests, at once.
+    private var holdsTail = false
+    /// Once the screen has come in: the tail is held for its arrival only —
+    /// a message landing while the reader reads keeps its own animated scroll.
+    private var hasAppeared = false
+    private var contentSizeObservation: NSKeyValueObservation?
+
+    private func observeContentSize() {
+        contentSizeObservation = collectionView.observe(\.contentSize, options: [.old, .new]) { [weak self] _, change in
+            guard change.oldValue?.height != change.newValue?.height else { return }
+            MainActor.assumeIsolated { self?.keepTail() }
+        }
+    }
+
+    private func keepTail() {
+        guard holdsTail, hasRenderedContent, !owesTailPin, !collectionView.isTracking,
+              !collectionView.isDecelerating else { return }
+        let insets = collectionView.adjustedContentInset
+        let tail = max(-insets.top, collectionView.contentSize.height + insets.bottom - collectionView.bounds.height)
+        guard abs(collectionView.contentOffset.y - tail) > 0.5 else { return }
+        UIView.performWithoutAnimation { collectionView.contentOffset.y = tail }
+    }
+
     private var isNearBottom: Bool {
         let insets = collectionView.adjustedContentInset
         let visibleBottom = collectionView.contentOffset.y + collectionView.bounds.height - insets.bottom
@@ -1605,6 +1646,7 @@ final class ConversationThreadViewController: UIViewController {
             return
         }
         owesTailPin = false
+        if !hasAppeared { holdsTail = true }
         // Never animated, whatever block it runs in: the tail is where the
         // conversation IS, not somewhere it travels to.
         UIView.performWithoutAnimation {
@@ -1628,6 +1670,7 @@ final class ConversationThreadViewController: UIViewController {
     /// computed here, so the method knows which of the two cases it is in.
     private func scrollToMessage(_ messageID: String) {
         guard let indexPath = dataSource.indexPath(for: .message(messageID)) else { return }
+        holdsTail = false
         pendingFlashID = messageID
         collectionView.layoutIfNeeded()
         guard let row = collectionView.layoutAttributesForItem(at: indexPath)?.frame else { return }
@@ -1850,6 +1893,8 @@ extension ConversationThreadViewController: UICollectionViewDelegate {
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // The reader's own scroll: the conversation no longer holds its tail.
+        holdsTail = false
         contextMenu.endTextSelection()
         // The reader took over: a flash landing after their own scroll would
         // point at something they have moved away from.
