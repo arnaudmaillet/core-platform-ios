@@ -112,58 +112,38 @@ struct PersonPillTests {
         #expect(pill.drawnBadgeSymbol == "checkmark.circle.fill")
     }
 
-    /// THE FACE'S RELATION RING (#1298, the owner 2026-10-16): grey — the
-    /// badge's quiet disc — while the viewer follows, pink once they are
-    /// friends, none otherwise; re-coloured in place, the width unmoved.
-    @Test(arguments: [
-        (PersonPill.Badge.following, PersonPillBadgeInks.quietDisc),
-        (.friends, PersonPillBadgeInks.accent),
-        (.follow, UIColor.clear), (.pending, .clear), (.none, .clear),
-    ])
-    func theRingSaysTheRelation(_ relation: PersonPill.Badge, _ ink: UIColor) {
+    /// NO RING ROUND THE FACE (#2082, the owner 2026-11-03), whatever the
+    /// relation: the badge alone says it (it replaced #1298's grey and pink
+    /// ring), and the face neither moves nor resizes.
+    @Test(arguments: [PersonPill.Badge.none, .follow, .pending, .following, .friends])
+    func theFaceWearsNoRing(_ relation: PersonPill.Badge) {
         let pill = Self.laidOut(PersonPill(carriesBadge: true))
+        let before = pill.debugGeometry.face
         let width = pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
         pill.setBadge(relation, animated: false)
-        #expect(pill.ringRelation == relation)
-        #expect(pill.drawnRingColor.cgColor == ink.cgColor || (ink == .clear && pill.drawnRingColor.cgColor.alpha == 0))
+        pill.layoutIfNeeded()
+        #expect(!pill.drawsAnythingRoundTheFace, "an edge round the face for \(relation)")
+        #expect(pill.debugGeometry.face == before, "the face moved")
         #expect(abs(pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width - width) < 0.5,
-                "the ring moved the pill's width")
+                "the mark moved the pill's width")
     }
 
-    /// ⚠️ THE RING GOES WITH THE BADGE (the owner, 2026-10-16): a pill with
-    /// no badge (the profile's) never wears one, whatever it is told.
-    @Test func aBadgeLessPillWearsNoRing() {
-        let pill = PersonPill(carriesBadge: false)
-        pill.setRing(.friends, animated: false)
-        #expect(pill.ringRelation == .none)
-        #expect(pill.drawnRingColor.cgColor.alpha == 0)
-    }
-
-    // MARK: - #1912: the ring behind the face, the initials' grey, the cutout
-
-    /// The ring is a disc BEHIND the face, never a border meeting it: two
-    /// anti-aliased edges on one circle left a hairline seam on screen.
-    @Test func theRingIsADiscBehindTheFace() {
-        let pill = Self.laidOut(PersonPill(carriesBadge: true))
-        pill.setBadge(.following, animated: false)
-        #expect(pill.ringIsBackingDisc, "the ring is a border, or in front of the face")
-    }
+    // MARK: - #1912: the initials' grey, the cutout
 
     /// The final initials wear their own grey, apart from the badge's quiet
-    /// disc and the following ring, in both appearances.
+    /// disc, in both appearances.
     @Test(arguments: [UIUserInterfaceStyle.light, .dark])
     func theInitialsGreyIsNotTheQuietDisc(_ style: UIUserInterfaceStyle) {
         let traits = UITraitCollection(userInterfaceStyle: style)
         let plate = MonogramAvatarView.initialsPlateColor.resolvedColor(with: traits)
         let quiet = PersonPillBadgeInks.quietDisc.resolvedColor(with: traits)
-        #expect(plate.cgColor != quiet.cgColor, "the initials' grey is the ring's in \(style.rawValue)")
+        #expect(plate.cgColor != quiet.cgColor, "the initials' grey is the quiet disc's in \(style.rawValue)")
     }
 
-    /// The badge's quiet disc and the following ring are the avatar's own
-    /// fixed ground (#2051), not a copy of it.
+    /// The badge's quiet disc is the avatar's own fixed ground (#2051), not
+    /// a copy of it.
     @Test func theQuietDiscIsTheAvatarsGround() {
         #expect(PersonPillBadgeInks.quietDisc == Surface.avatarGround)
-        #expect(RelationMark.ringInk(for: .following) == Surface.avatarGround)
     }
 
     /// A loading face keeps the avatar's ground; only final initials change.
@@ -185,31 +165,6 @@ struct PersonPillTests {
         pill.setBadge(.none, animated: false)
         pill.layoutIfNeeded()
         #expect(pill.drawnCutoutRadius == nil, "a cutout with no badge")
-    }
-
-    /// ⚠️ THE RING IS CUT OUT TOO, in its own path (the owner's device,
-    /// 2026-10-30): a ring painted as the view's background is drawn by the
-    /// bar's glass outside the mask, and the friends' pink filled the cutout.
-    @Test(arguments: [PersonPill.Badge.following, .friends])
-    func theRingLosesTheBadgesCutout(_ relation: PersonPill.Badge) {
-        let pill = Self.laidOut(PersonPill(carriesBadge: true))
-        pill.setBadge(relation, animated: false)
-        pill.layoutIfNeeded()
-        #expect(pill.ringIsBackingDisc)
-        #expect(pill.ringIsCutOut, "the ring fills the badge's cutout")
-    }
-
-    /// ⚠️ A BAND, NOT A DISC (the owner's device, 2026-10-30): behind a face
-    /// still loading, a disc showed as a grey plate with a piece of the
-    /// picture over it. The band covers the face's centre nowhere, runs under
-    /// its edge, and stops at the ring's outer edge.
-    @Test func theRingIsABandUnderTheFacesEdge() {
-        let bounds = CGRect(x: 0, y: 0, width: 40, height: 40)
-        let path = PersonPill.ringPath(in: bounds, cutout: nil)
-        #expect(!path.contains(CGPoint(x: 20, y: 20)), "the ring fills the face")
-        #expect(!path.contains(CGPoint(x: 20, y: 5)), "the band reaches past the tuck")
-        #expect(path.contains(CGPoint(x: 20, y: 1)), "no band outside the face")
-        #expect(path.contains(CGPoint(x: 20, y: 2.5)), "the band does not run under the face's edge")
     }
 
     /// ⚠️ THE WHOLE FACE SHOWS, BUT THE CUTOUT (the owner's device,

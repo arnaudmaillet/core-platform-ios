@@ -164,6 +164,18 @@ struct InboxRelationMarkTests {
         #expect(PersonPill.Badge(relation: nil) == .none, "a relation not known yet drew a mark")
     }
 
+    /// NO RING ROUND THE FACE (#2082, the owner 2026-11-03), whatever the
+    /// relation: the badge alone, its cutout kept.
+    @Test(arguments: [PersonPill.Badge.none, .follow, .pending, .following, .friends])
+    func theFaceWearsNoRing(_ mark: PersonPill.Badge) {
+        let face = RelationMarkedAvatarView()
+        face.frame = CGRect(x: 0, y: 0, width: 48, height: 48)
+        face.setMark(mark, animated: false)
+        face.layoutIfNeeded()
+        #expect(!face.drawsRing, "an edge round the face for \(mark)")
+        #expect(face.faceIsCutOut == (mark != .none))
+    }
+
     /// A group keeps its initials, with no mark.
     @Test func aGroupWearsNoMark() {
         let (row, _) = laidOutRow(model(peers: ["a", "b"]), mark: .follow)

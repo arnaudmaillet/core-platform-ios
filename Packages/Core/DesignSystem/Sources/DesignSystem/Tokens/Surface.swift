@@ -36,18 +36,6 @@ public enum Surface {
     /// What a screen of cards lies on.
     public static let page: UIColor = .systemGroupedBackground
 
-    /// The ring around a profile's avatar where it floats over the banner
-    /// (#1792): the LIGHT grey, in both styles (the owner, 2026-11-02: "the
-    /// rim is light grey or pink, never dark grey"). The light appearance's
-    /// `systemGray5`, resolved once — the grey of the following ring and the
-    /// badge's quiet disc; the friends' ring is the accent. It was the system
-    /// grey (#8E8E93), which read as a dark grey edge round the face. The
-    /// page's tone before that read as a white halo in the light and a black
-    /// one in the dark over raw banner media.
-    public static let avatarRim: UIColor = UIColor.systemGray5.resolvedColor(
-        with: UITraitCollection(userInterfaceStyle: .light)
-    )
-
     /// A card, one step up from the page. Also the ground a media carousel's
     /// gutter shows and the floor a skeleton shimmers on, because they are
     /// the card.
@@ -85,8 +73,8 @@ public enum Surface {
     /// ALWAYS the light grey, whatever the device's appearance. "The dark
     /// grey must not exist." The light appearance's `systemGray5`, resolved
     /// once and never again — the floor a picture loads on, the avatar's
-    /// bone, the ground a host paints behind a face, the following ring and
-    /// the badge's quiet disc.
+    /// bone, the ground a host paints behind a face, and the badge's quiet
+    /// disc. No face wears a rim or a ring (#2082).
     ///
     /// ⚠️ NOT THE MEDIA GROUND, which follows the appearance (#1771): an
     /// avatar is drawn on chrome that is dark whatever the device says (the
@@ -98,8 +86,7 @@ public enum Surface {
 
     /// The plate under FINAL initials (no picture, or a failed one, #1912):
     /// the light appearance's `systemGray4`, a step darker than
-    /// `avatarGround`, so the face stands apart from the ring and the
-    /// badge's disc. Fixed, as `avatarGround` is.
+    /// `avatarGround`, so the face stands apart from the badge's disc. Fixed, as `avatarGround` is.
     public static let avatarInitialsGround: UIColor = lightValue(of: .systemGray4)
 
     /// The initials' ink: the light appearance's `secondaryLabel`, a dark

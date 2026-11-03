@@ -6,27 +6,19 @@ import UIKit
 /// A conversation row's face wearing the relation mark (#2049, the owner
 /// 2026-11-02): the one mark the author pill and the profile wear, scaled to
 /// the row's 48 pt disc — the badge on the rim at 45°, bottom-trailing, cut
-/// into the face (`RelationMark.cutout`), and the ring behind the face while
-/// following (grey) or friends (the accent).
+/// into the face (`RelationMark.cutout`). No ring round the face (#2082, the
+/// owner 2026-11-03): the badge alone.
 ///
 /// All five states, the "+" and the clock included; only the "+" takes
 /// touches (`onFollowTapped`). The face itself draws at once; the mark
-/// arrives when the relation is known, through the badge's replace and the
-/// ring's fade, and moves nothing: the ring and the badge are drawn outside
-/// the disc's 48 pt, which is all the row lays out.
+/// arrives when the relation is known, through the badge's replace, and
+/// moves nothing: the badge is drawn past the disc's 48 pt, which is all
+/// the row lays out.
 final class RelationMarkedAvatarView: UIView {
     static let metrics = RelationMarkMetrics(faceDiameter: MonogramAvatarView.rowDiameter)
 
-    /// How far the ring's band runs under the face's edge, hiding its inner
-    /// edge (the pill's `ringTuck`).
-    private static let ringTuck: CGFloat = 1
-
     /// The app's avatar (#943): the picture over the initials.
     private let avatar = AvatarView(size: .avatar)
-    /// The ring's disc, behind the face, in its own view so its path is laid
-    /// out round the face's bounds.
-    private let ring = UIView()
-    private let ringShape = CAShapeLayer()
     private let faceCutout = CAShapeLayer()
     let badge = RelationBadgeView(metrics: RelationMarkedAvatarView.metrics)
 
@@ -38,16 +30,6 @@ final class RelationMarkedAvatarView: UIView {
 
     init() {
         super.init(frame: .zero)
-        let outset = Self.metrics.ringWidth
-        ring.isUserInteractionEnabled = false
-        ring.layer.addSublayer(ringShape)
-        ringShape.fillColor = UIColor.clear.cgColor
-        ring.constrain(in: self) { parent in
-            ring.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: -outset)
-            ring.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: outset)
-            ring.topAnchor.constraint(equalTo: parent.topAnchor, constant: -outset)
-            ring.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: outset)
-        }
         addSubview(avatar)
         avatar.pin(to: self)
         let offset = Self.metrics.cornerOffset
@@ -61,11 +43,6 @@ final class RelationMarkedAvatarView: UIView {
             guard let self, mark == .follow else { return }
             onFollowTapped?()
         }, for: .primaryActionTriggered)
-        registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]
-        ) { (view: RelationMarkedAvatarView, _: UITraitCollection) in
-            view.drawRing()
-        }
     }
 
     @available(*, unavailable)
@@ -74,7 +51,6 @@ final class RelationMarkedAvatarView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         applyCutout()
-        drawRing()
     }
 
     // MARK: - The face
@@ -98,23 +74,13 @@ final class RelationMarkedAvatarView: UIView {
 
     // MARK: - The mark
 
-    /// Wears `mark`: through the badge's replace and the ring's fade when
-    /// `animated` and on screen, at once otherwise.
+    /// Wears `mark`: through the badge's replace when `animated` and on
+    /// screen, at once otherwise.
     func setMark(_ mark: PersonPill.Badge, animated: Bool) {
         guard mark != self.mark else { return }
         self.mark = mark
-        let onScreen = animated && window != nil
-        badge.show(mark, animated: onScreen)
-        let from = ringShape.presentation()?.fillColor ?? ringShape.fillColor
+        badge.show(mark, animated: animated && window != nil)
         applyCutout()
-        drawRing()
-        if onScreen {
-            let fade = CABasicAnimation(keyPath: "fillColor")
-            fade.fromValue = from
-            fade.toValue = ringShape.fillColor
-            fade.duration = 0.25
-            ringShape.add(fade, forKey: "fillColor")
-        }
     }
 
     /// The badge, when it takes a touch now: the "+" alone. The row's hit
@@ -150,28 +116,9 @@ final class RelationMarkedAvatarView: UIView {
         avatar.layer.mask = faceCutout
     }
 
-    /// The ring's band, less the badge's cutout, in its resolved ink.
-    private func drawRing() {
-        let bounds = ring.bounds
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        ringShape.frame = bounds
-        if RelationMark.hasRing(mark), bounds.width > 0 {
-            let inset = Self.metrics.ringWidth + Self.ringTuck
-            var band = CGPath(ellipseIn: bounds, transform: nil)
-                .subtracting(CGPath(ellipseIn: bounds.insetBy(dx: inset, dy: inset), transform: nil))
-            if let cutout = cutoutCircle(in: ring) { band = band.subtracting(cutout.cgPath) }
-            ringShape.path = band
-        } else {
-            ringShape.path = nil
-        }
-        ringShape.fillColor = RelationMark.ringInk(for: mark).resolvedColor(with: traitCollection).cgColor
-        CATransaction.commit()
-    }
-
     #if DEBUG
-    /// The ring's ink as drawn — clear for none. Tests.
-    var drawnRingColor: UIColor { UIColor(cgColor: ringShape.fillColor ?? UIColor.clear.cgColor) }
+    /// Whether anything is drawn round the face: no, ever (#2082). Tests.
+    var drawsRing: Bool { subviews.contains { $0 !== avatar && $0 !== badge } || layer.borderWidth > 0 }
     /// Whether the face has the badge's cutout taken out. Tests.
     var faceIsCutOut: Bool { avatar.layer.mask === faceCutout }
     #endif

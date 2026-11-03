@@ -3,28 +3,26 @@ import Testing
 import UIKit
 @testable import MediaCore
 
-/// THE RELATION MARK AT ANY FACE SIZE (#2014): the author pill's ring and
-/// badge, worn by the profile header's avatar too.
+/// THE RELATION MARK AT ANY FACE SIZE (#2014): the author pill's badge,
+/// worn by the profile header's avatar too — the badge alone, no ring
+/// (#2082).
 @MainActor
 struct RelationMarkTests {
-    /// At the pill's 36 pt face the mark is today's: a 2 pt ring, a 20 pt
-    /// badge, a 17 pt glyph, a 11.5 pt cutout.
+    /// At the pill's 36 pt face the mark is today's: a 20 pt badge, a 17 pt
+    /// glyph, a 11.5 pt cutout.
     @Test func thePillsFaceKeepsTodaysMark() {
         let metrics = RelationMarkMetrics(faceDiameter: AvatarImageView.bubbleDiameter)
-        #expect(metrics.ringWidth == 2)
         #expect(metrics.badgeDiameter == 20)
         #expect(metrics.glyphPointSize == 17)
         #expect(metrics.cutoutRadius == 11.5)
         #expect(metrics.overhang == 10)
         #expect(abs(metrics.cornerOffset - (10 - 18 * (1 - cos(.pi / 4)))) < 0.0001)
-        #expect(PersonPillRing.width == 2)
         #expect(PersonPill.markMetrics == metrics)
     }
 
     /// ⚠️ NOT A RATIO: at 96 pt the same ratio would give a 53 pt badge.
-    @Test func theHeadersFaceWearsAFourPointRingAndATwentyEightPointBadge() {
+    @Test func theHeadersFaceWearsATwentyEightPointBadge() {
         let metrics = RelationMarkMetrics(faceDiameter: 96)
-        #expect(metrics.ringWidth == 4)
         #expect(metrics.badgeDiameter == 28)
         #expect(metrics.glyphPointSize == 25)
     }
@@ -33,7 +31,6 @@ struct RelationMarkTests {
     @Test(arguments: [110, 130, 200] as [CGFloat])
     func theMarkStopsGrowingAtTheHeadersCap(_ face: CGFloat) {
         let metrics = RelationMarkMetrics(faceDiameter: face)
-        #expect(metrics.ringWidth == 4.5)
         #expect(metrics.badgeDiameter == 30)
     }
 
@@ -42,8 +39,7 @@ struct RelationMarkTests {
         var previous = RelationMarkMetrics(faceDiameter: 36)
         for face in stride(from: 37, through: 110, by: 1) as StrideThrough<CGFloat> {
             let metrics = RelationMarkMetrics(faceDiameter: face)
-            #expect(metrics.ringWidth >= previous.ringWidth && metrics.badgeDiameter >= previous.badgeDiameter)
-            #expect((metrics.ringWidth * 2).rounded() == metrics.ringWidth * 2)
+            #expect(metrics.badgeDiameter >= previous.badgeDiameter)
             #expect((metrics.badgeDiameter * 2).rounded() == metrics.badgeDiameter * 2)
             previous = metrics
         }
@@ -62,20 +58,6 @@ struct RelationMarkTests {
             #expect(centre.y > radius)
             #expect(rightToLeft ? centre.x < radius : centre.x > radius)
         }
-    }
-
-    /// The ring's ink per relation: the quiet grey while following, the
-    /// accent for friends, none otherwise.
-    @Test func theRingsInkPerRelation() {
-        let traits = UITraitCollection(userInterfaceStyle: .light)
-        func ink(_ relation: PersonPill.Badge) -> UIColor { RelationMark.ringInk(for: relation).resolvedColor(with: traits) }
-        #expect(ink(.following) == PersonPillBadgeInks.quietDisc.resolvedColor(with: traits))
-        #expect(ink(.friends) == PersonPillBadgeInks.accent.resolvedColor(with: traits))
-        for relation in [PersonPill.Badge.none, .follow, .pending] {
-            #expect(ink(relation).cgColor.alpha == 0)
-            #expect(!RelationMark.hasRing(relation))
-        }
-        #expect(RelationMark.hasRing(.following) && RelationMark.hasRing(.friends))
     }
 
     /// Only the "+" takes a tap, at any size; the badge is never an

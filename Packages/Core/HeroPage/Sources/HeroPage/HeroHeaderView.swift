@@ -118,7 +118,6 @@ open class HeroHeaderView: UIView {
         static let avatarSize: CGFloat = 96
         /// Dynamic-Type ceiling for the avatar.
         static let avatarMaxSize: CGFloat = 110
-        static let avatarRingWidth: CGFloat = 3
         static let badgeSize: CGFloat = 18
         /// Raw-media window between the navigation chrome and the identity
         /// block, per banner shape. A poster's is the picture's whole stage,
@@ -199,7 +198,7 @@ open class HeroHeaderView: UIView {
         let frame = bannerView.convert(bannerView.bounds, to: window)
         return frame.intersects(window.bounds) && frame.maxY > window.safeAreaInsets.top
     }
-    /// The disc's frame: sized by layout, ringed in the page's tone.
+    /// The disc's frame: sized by layout, with no edge of its own (#2082).
     private let avatarView = CircleAvatarView()
     /// A `.person` disc's avatar (#943): the initials, a smaller face
     /// standing in, then the sharp one — decoded at 512 px, not full (#1086).
@@ -731,8 +730,6 @@ open class HeroHeaderView: UIView {
     public var debugBannerRampFrame: CGRect { bannerView.convert(bannerView.debugRampFrame, to: self) }
     public var debugBannerFrame: CGRect { bannerView.convert(bannerView.bounds, to: self) }
     public var debugAvatarFrame: CGRect { avatarView.convert(avatarView.bounds, to: self) }
-    /// The avatar ring's colour as drawn (#1792).
-    public var debugAvatarRingColor: CGColor? { avatarView.layer.borderColor }
     public var debugTrayFrame: CGRect { actionRowForDebug?.convert(actionRowForDebug!.bounds, to: self) ?? .zero }
     public var debugStatsFrame: CGRect { statsRow.convert(statsRow.bounds, to: self) }
     /// The counter row's cells, leading to trailing (#687).
@@ -1207,8 +1204,8 @@ open class HeroHeaderView: UIView {
             return
         }
         areCountersRedacted = false
-        // The relation comes in with the content: the badge's replace and
-        // the ring's fade, under the reveal.
+        // The relation comes in with the content: the badge's replace,
+        // under the reveal.
         applyRelationMark(animated: animated)
 
         // Alpha-only choreography: `configure(with:)` has already committed
@@ -1255,7 +1252,7 @@ open class HeroHeaderView: UIView {
         // through `awaitPicture` while redacted — `setRedacted`). A second
         // redaction bone over it stacked two skeletons on one disc. Only a
         // header with no avatar view draws one here; the avatar's clipping
-        // rounds it, and the ring border draws above it, staying crisp.
+        // rounds it.
         let avatarBone: SkeletonBoneView? = avatar == nil ? SkeletonBoneView(rounding: .fixed(0)) : nil
         avatarBone?.pin(to: avatarView)
 
@@ -1320,9 +1317,10 @@ open class HeroHeaderView: UIView {
     public private(set) var shownRelationMark: PersonPill.Badge = .none
 
     /// The person's relation to the viewer, worn on the disc as the author
-    /// pill wears it (#2014): the badge on its rim at 45°, and the ring in
-    /// the rim's place while there is one. `.none` draws neither, and the
-    /// grey rim stays. A `.custom` disc wears none. The "+" follows
+    /// pill wears it (#2014): the badge on its rim at 45°, and no ring or
+    /// rim round the disc whatever the relation (#2082, the owner
+    /// 2026-11-03: the face alone, only the badge). `.none` draws nothing.
+    /// A `.custom` disc wears none. The "+" follows
     /// (`onRelationBadgeTapped`, #2050, the owner 2026-11-02, reversing
     /// #2014's "never the '+'"): the one mark is the same everywhere. Every
     /// other tap on the disc stays the disc's.
@@ -1338,42 +1336,7 @@ open class HeroHeaderView: UIView {
         shownRelationMark = mark
         let onScreen = animated && window != nil
         relationBadge.show(mark, animated: onScreen)
-        applyRim(animated: onScreen)
         applyAvatarCutout()
-    }
-
-    /// The disc's edge for `relation`: the relation's ring, at its width,
-    /// while there is one — otherwise the light grey rim (#1792, never a
-    /// dark grey: the owner, 2026-11-02), which defines the disc over the
-    /// banner. Pure, for tests.
-    public static func rim(
-        for relation: PersonPill.Badge, metrics: RelationMarkMetrics
-    ) -> (ink: UIColor, width: CGFloat) {
-        RelationMark.hasRing(relation)
-            ? (RelationMark.ringInk(for: relation), metrics.ringWidth)
-            : (Surface.avatarRim, Metrics.avatarRingWidth)
-    }
-
-    /// Draws the disc's edge — fading between the rim and a ring on screen.
-    private func applyRim(animated: Bool) {
-        let metrics = relationBadge?.metrics ?? RelationMarkMetrics(faceDiameter: Metrics.avatarSize)
-        let rim = Self.rim(for: shownRelationMark, metrics: metrics)
-        let color = rim.ink.resolvedColor(with: traitCollection).cgColor
-        let layer = avatarView.layer
-        if animated {
-            let ink = CABasicAnimation(keyPath: "borderColor")
-            ink.fromValue = layer.presentation()?.borderColor ?? layer.borderColor
-            ink.toValue = color
-            let width = CABasicAnimation(keyPath: "borderWidth")
-            width.fromValue = layer.presentation()?.borderWidth ?? layer.borderWidth
-            width.toValue = rim.width
-            for fade in [ink, width] {
-                fade.duration = 0.25
-                layer.add(fade, forKey: fade.keyPath)
-            }
-        }
-        layer.borderColor = color
-        layer.borderWidth = rim.width
     }
 
     /// Told when the badge's "+" is tapped (#2050) — and only then: a state
@@ -1415,7 +1378,6 @@ open class HeroHeaderView: UIView {
         if metrics != relationBadge.metrics {
             relationBadge.setMetrics(metrics)
             for offset in relationBadgeOffsets { offset.constant = metrics.cornerOffset }
-            applyRim(animated: false)
         }
         applyAvatarCutout()
     }
@@ -1447,7 +1409,7 @@ open class HeroHeaderView: UIView {
     public var debugRelationSymbol: String? { relationBadge?.drawn.symbolName }
     /// The badge, for its frame. Tests.
     public var debugRelationBadge: RelationBadgeView? { relationBadge }
-    /// The disc's edge's width as drawn.
+    /// The disc's border width as drawn: zero, it has none (#2082).
     public var debugAvatarRingWidth: CGFloat { avatarView.layer.borderWidth }
     /// Whether the disc has the badge's cutout taken out.
     public var debugAvatarIsCutOut: Bool { avatarView.layer.mask === avatarCutout }
@@ -1461,22 +1423,13 @@ open class HeroHeaderView: UIView {
 
     private func configureSubviews() {
         // Avatar: a filled circle with a monogram, overlaid by the image once
-        // loaded. The ring keeps it defined while it floats over raw banner
-        // media, above the fade.
-        // The avatar's fixed light ground (#2051), never the appearance's.
+        // loaded. The avatar's fixed light ground (#2051), never the
+        // appearance's.
+        // ⚠️ NO EDGE (#2082, the owner 2026-11-03): the face alone, over the
+        // banner or the page — no grey rim (#1792) and no relation ring
+        // (#2014); the badge alone says the relation.
         avatarView.backgroundColor = Surface.avatarGround
         avatarView.clipsToBounds = true
-        // ⚠️ ONE QUIET GREY (#1792, the owner 2026-10-27), not the page's
-        // tone: over raw banner media the page's white or black read as a
-        // halo that flipped with the theme — unless a relation ring takes
-        // its place (#2014, `rim(for:)`). A `CGColor`, so re-resolved on a
-        // style, contrast or accent change.
-        applyRim(animated: false)
-        registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]
-        ) { (self: HeroHeaderView, _) in
-            self.applyRim(animated: false)
-        }
 
         if let avatar {
             avatar.standInSize = .avatar

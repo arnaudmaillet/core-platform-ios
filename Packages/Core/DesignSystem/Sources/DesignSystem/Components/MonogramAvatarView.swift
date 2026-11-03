@@ -128,8 +128,8 @@ public final class MonogramAvatarView: UIView {
     /// Whether the initials are the face's FINAL state — no picture, or one
     /// that failed — rather than the floor a picture is loading on (#1912).
     /// Final, the plate wears its own grey (`initialsPlateColor`), so the
-    /// face stands apart from the following ring and the badge's disc, which
-    /// are the loading floor's grey; loading, it stays `Surface.avatarGround`.
+    /// face stands apart from the badge's disc, which is the loading floor's
+    /// grey; loading, it stays `Surface.avatarGround`.
     /// The change is a cross-fade, never a flash.
     public var showsFinalInitials = false {
         didSet {
@@ -152,7 +152,7 @@ public final class MonogramAvatarView: UIView {
     /// The final initials' grey (#1912): `Surface.avatarInitialsGround`, the
     /// light appearance's `systemGray4` in BOTH appearances (#2051: the dark
     /// grey must not exist). A step darker than the loading floor, apart
-    /// from the badge's quiet disc and the following ring.
+    /// from the badge's quiet disc.
     public static let initialsPlateColor = Surface.avatarInitialsGround
 
     /// The plate's colour as drawn now. Tests.
