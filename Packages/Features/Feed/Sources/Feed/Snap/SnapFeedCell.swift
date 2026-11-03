@@ -1908,8 +1908,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// owner, 2026-11-03): from the screen's own where it fills the screen —
     /// square where it does not reach the screen's corners — to a media
     /// tile's once shrunk, or the sheet's own `sheetCornerRadius` for a
-    /// landscape picture. The bands fade out round it, and there is no edge
-    /// line: the shrunk media stands on black alone.
+    /// landscape picture. The bands fade out round it, and a light grey line
+    /// fades in round the picture (`drawCommentsSheetEdge`).
     func setCommentsSheetLayout(progress: CGFloat, mediaRegion: CGRect, sheetCornerRadius: CGFloat) {
         let t = min(max(0, progress), 1)
         // The interface, and the action column riding above it (#695).
@@ -1958,8 +1958,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let to = landscape ? sheetCornerRadius : ChaoticSliceLayout.harmonisedCornerRadius
         let framed = picture.offsetBy(dx: -bounds.minX, dy: -bounds.minY)
         let window = landscape ? framed.insetBy(dx: Self.landscapeSideTrim * t, dy: 0) : framed
+        let radius = from + (to - from) * t
         commentsSheetPictureWindow.frame = window
-        commentsSheetPictureWindow.layer.cornerRadius = (from + (to - from) * t) * unscale
+        commentsSheetPictureWindow.layer.cornerRadius = radius * unscale
+        drawCommentsSheetEdge(
+            around: mediaCard.convert(window.offsetBy(dx: bounds.minX, dy: bounds.minY), to: stage),
+            cornerRadius: radius, progress: t, in: stage
+        )
 
         // ⚠️ THE BANDS STOP AT THE PICTURE (the owner, 2026-11-03): one
         // window round both, fading, let the picture's square corners show
@@ -2001,6 +2006,33 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
     }
 
+    /// The picture's edge while the sheet is up: a light grey line, one point,
+    /// fading in as the media shrinks — on the stage, over the media and
+    /// untransformed, so the line keeps its width at every scale. A trial
+    /// (the owner, 2026-11-03): it marks the media's frame, black bands baked
+    /// into the file included.
+    private var commentsSheetEdge: UIView?
+
+    private func drawCommentsSheetEdge(
+        around picture: CGRect, cornerRadius: CGFloat, progress: CGFloat, in stage: UIView
+    ) {
+        let edge = commentsSheetEdge ?? {
+            let edge = UIView()
+            edge.isUserInteractionEnabled = false
+            edge.layer.cornerCurve = .continuous
+            edge.layer.borderWidth = 1
+            commentsSheetEdge = edge
+            return edge
+        }()
+        if edge.superview !== stage { stage.insertSubview(edge, aboveSubview: mediaCard) }
+        // The media stands on black whatever the page's style: the dark grey.
+        let dark = traitCollection.modifyingTraits { $0.userInterfaceStyle = .dark }
+        edge.layer.borderColor = UIColor.systemGray2.resolvedColor(with: dark).cgColor
+        edge.frame = picture
+        edge.layer.cornerRadius = cornerRadius
+        edge.alpha = progress
+    }
+
     /// The page at rest again: identity media, its interface back.
     func clearCommentsSheetLayout() {
         chrome.alpha = 1
@@ -2008,6 +2040,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.transform = .identity
         mediaCard.mask = nil
         commentsSheetMask = nil
+        commentsSheetEdge?.removeFromSuperview()
     }
 
     // MARK: - Configuration
