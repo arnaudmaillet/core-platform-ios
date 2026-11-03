@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import UIKit
 
@@ -346,8 +347,24 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             width: window.bounds.width - 2 * Self.mediaSideMargin,
             height: max(1, top - Self.mediaGap - roomTop)
         )
-        cell.setCommentsSheetLayout(progress: progress, mediaRegion: region)
+        let sheetRadius = sheetCornerRadius(below: container)
+        cell.setCommentsSheetLayout(progress: progress, mediaRegion: region, sheetCornerRadius: sheetRadius)
         refit()
+    }
+
+    /// The sheet's corners as UIKit rounds them: on a view's corner
+    /// configuration, never its layer's radius (all 0, measured) — the
+    /// largest on the way up from the sheet's view. A media tile's before
+    /// iOS 26, which has no such configuration.
+    private func sheetCornerRadius(below container: UIView) -> CGFloat {
+        guard #available(iOS 26.0, *) else { return Spacing.lg }
+        var radius: CGFloat = 0
+        var view: UIView? = sheet.view
+        while let current = view, current !== container {
+            radius = max(radius, current.effectiveRadius(corner: .topLeft))
+            view = current.superview
+        }
+        return radius
     }
 
     /// ⚠️ A FLOATING SHEET RESTS LOWER THAN ITS DETENT SAYS (measured,
