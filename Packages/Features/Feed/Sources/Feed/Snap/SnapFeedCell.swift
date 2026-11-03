@@ -1868,16 +1868,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     // MARK: - The comments sheet (#2087, `CommentsV2`)
 
-    /// The sheet's window onto the media: the picture alone once it has
-    /// shrunk, without the bands a fitted picture stands between — the
-    /// bands' window, and a landscape picture's own (`setCommentsSheetLayout`).
+    /// The sheet's window onto the media: the picture's own, rounded, and its
+    /// bands' — above, below and beside it, never over it, so the picture's
+    /// corners are the only ones drawn there (`setCommentsSheetLayout`).
     private var commentsSheetMask: UIView?
-    private let commentsSheetBandsWindow = UIView()
     private let commentsSheetPictureWindow = UIView()
-    /// A landscape picture's bands, above and below it — never over it, so
-    /// its own corners are the only ones drawn there.
     private let commentsSheetTopBand = UIView()
     private let commentsSheetBottomBand = UIView()
+    private let commentsSheetLeftBand = UIView()
+    private let commentsSheetRightBand = UIView()
 
     /// What the comments sheet shrinks, as the page draws it now: the picture
     /// between its bands, or the whole card when it fills — a landscape
@@ -1905,11 +1904,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// full-bleed frame and its playback, and `clearCommentsSheetLayout` is
     /// identity again.
     ///
-    /// A LANDSCAPE PICTURE (wider than tall) wears its corners on itself, not
-    /// on the window round its bands (the owner, 2026-11-03, a trial): square
-    /// at full screen, the sheet's own `sheetCornerRadius` once shrunk, and no
-    /// grey edge — its bands fade out round it instead. Every other picture
-    /// keeps the window's corners, device to media tile, and the edge.
+    /// THE PICTURE WEARS THE CORNERS, never the window round its bands (the
+    /// owner, 2026-11-03): from the screen's own where it fills the screen —
+    /// square where it does not reach the screen's corners — to a media
+    /// tile's once shrunk, or the sheet's own `sheetCornerRadius` for a
+    /// landscape picture. The bands fade out round it, and there is no edge
+    /// line: the shrunk media stands on black alone.
     func setCommentsSheetLayout(progress: CGFloat, mediaRegion: CGRect, sheetCornerRadius: CGFloat) {
         let t = min(max(0, progress), 1)
         // The interface, and the action column riding above it (#695).
@@ -1933,13 +1933,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let move = CGPoint(x: (mediaRegion.midX - landed.x) * t, y: (mediaRegion.midY - landed.y) * t)
         mediaCard.transform = CGAffineTransform(scaleX: scale, y: scale)
             .concatenating(CGAffineTransform(translationX: move.x, y: move.y))
-        // The bands fade from the window as the picture shrinks.
+
         let mask = commentsSheetMask ?? {
             let mask = UIView()
-            commentsSheetTopBand.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
-            commentsSheetBottomBand.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
             for window in [
-                commentsSheetBandsWindow, commentsSheetPictureWindow, commentsSheetTopBand, commentsSheetBottomBand,
+                commentsSheetPictureWindow, commentsSheetTopBand, commentsSheetBottomBand,
+                commentsSheetLeftBand, commentsSheetRightBand,
             ] {
                 window.backgroundColor = .black
                 window.layer.cornerCurve = .continuous
@@ -1950,79 +1949,56 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             return mask
         }()
         mask.frame = bounds
-        let bands = commentsSheetBandsWindow
-        bands.frame = CGRect(
-            x: (picture.minX - bounds.minX) * t,
-            y: (picture.minY - bounds.minY) * t,
-            width: bounds.width + (picture.width - bounds.width) * t,
-            height: bounds.height + (picture.height - bounds.height) * t
-        )
-        // The corners, drawn on the mask — which the card's scale shrinks
-        // with it, so their radius is divided by it.
-        let screenRadius = ScreenGeometry.cornerRadius(behind: self)
+        // The radii are drawn on the mask, which the card's scale shrinks
+        // with it: divided by it.
         let unscale = 1 / max(scale, 0.01)
-        bands.isHidden = landscape
-        commentsSheetPictureWindow.isHidden = !landscape
-        commentsSheetTopBand.isHidden = !landscape
-        commentsSheetBottomBand.isHidden = !landscape
-        if landscape {
-            // ⚠️ THE BANDS STOP AT THE PICTURE (the owner, 2026-11-03): one
-            // window round both, fading, let the picture's square corners
-            // show through its rounding until it had gone.
-            let window = picture.insetBy(dx: Self.landscapeSideTrim * t, dy: 0)
-                .offsetBy(dx: -bounds.minX, dy: -bounds.minY)
-            commentsSheetPictureWindow.frame = window
-            commentsSheetPictureWindow.layer.cornerRadius = sheetCornerRadius * t * unscale
-            commentsSheetTopBand.frame = CGRect(
-                x: bands.frame.minX, y: bands.frame.minY,
-                width: bands.frame.width, height: max(0, window.minY - bands.frame.minY)
-            )
-            commentsSheetBottomBand.frame = CGRect(
-                x: bands.frame.minX, y: window.maxY,
-                width: bands.frame.width, height: max(0, bands.frame.maxY - window.maxY)
-            )
-            for band in [commentsSheetTopBand, commentsSheetBottomBand] {
-                band.alpha = 1 - t
-                band.layer.cornerRadius = screenRadius * (1 - t) * unscale
-            }
-            commentsSheetEdge?.isHidden = true
-        } else {
-            // The device's own at full screen, a media tile's once shrunk
-            // (the owner, 2026-11-03).
-            let radius = screenRadius + (ChaoticSliceLayout.harmonisedCornerRadius - screenRadius) * t
-            bands.alpha = 1
-            bands.layer.cornerRadius = radius * unscale
-            drawCommentsSheetEdge(
-                around: mediaCard.convert(bands.frame, to: stage), cornerRadius: radius, progress: t, in: stage
-            )
+        let screenRadius = ScreenGeometry.cornerRadius(behind: self)
+        let fills = picture.width >= bounds.width - 0.5 && picture.height >= bounds.height - 0.5
+        let from = fills ? screenRadius : 0
+        let to = landscape ? sheetCornerRadius : ChaoticSliceLayout.harmonisedCornerRadius
+        let framed = picture.offsetBy(dx: -bounds.minX, dy: -bounds.minY)
+        let window = landscape ? framed.insetBy(dx: Self.landscapeSideTrim * t, dy: 0) : framed
+        commentsSheetPictureWindow.frame = window
+        commentsSheetPictureWindow.layer.cornerRadius = (from + (to - from) * t) * unscale
+
+        // ⚠️ THE BANDS STOP AT THE PICTURE (the owner, 2026-11-03): one
+        // window round both, fading, let the picture's square corners show
+        // through its rounding until it had gone. They are the window that
+        // shrinks from the card onto the picture, less the picture, fading.
+        let card = CGRect(origin: .zero, size: bounds.size)
+        let bands = CGRect(
+            x: card.minX + (framed.minX - card.minX) * t,
+            y: card.minY + (framed.minY - card.minY) * t,
+            width: card.width + (framed.width - card.width) * t,
+            height: card.height + (framed.height - card.height) * t
+        )
+        let top = CGRect(x: bands.minX, y: bands.minY, width: bands.width, height: max(0, framed.minY - bands.minY))
+        let bottom = CGRect(
+            x: bands.minX, y: framed.maxY, width: bands.width, height: max(0, bands.maxY - framed.maxY)
+        )
+        let left = CGRect(x: bands.minX, y: framed.minY, width: max(0, framed.minX - bands.minX), height: framed.height)
+        let right = CGRect(
+            x: framed.maxX, y: framed.minY, width: max(0, bands.maxX - framed.maxX), height: framed.height
+        )
+        commentsSheetTopBand.frame = top
+        commentsSheetBottomBand.frame = bottom
+        commentsSheetLeftBand.frame = left
+        commentsSheetRightBand.frame = right
+        // Their outer corners, the screen's at full screen: a side band takes
+        // a corner only where no band runs above or below it.
+        let noTop = top.height < 0.5, noBottom = bottom.height < 0.5
+        commentsSheetTopBand.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        commentsSheetBottomBand.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+        commentsSheetLeftBand.layer.maskedCorners = CACornerMask()
+            .union(noTop ? .layerMinXMinYCorner : [])
+            .union(noBottom ? .layerMinXMaxYCorner : [])
+        commentsSheetRightBand.layer.maskedCorners = CACornerMask()
+            .union(noTop ? .layerMaxXMinYCorner : [])
+            .union(noBottom ? .layerMaxXMaxYCorner : [])
+        for band in [commentsSheetTopBand, commentsSheetBottomBand, commentsSheetLeftBand, commentsSheetRightBand] {
+            band.alpha = 1 - t
+            band.layer.cornerRadius = screenRadius * (1 - t) * unscale
         }
-    }
-
-    /// The media's edge while the sheet is up: a light grey line, one point
-    /// (the card's hairline read too faint on media, the owner 2026-11-03),
-    /// fading in as the media shrinks — on the stage, over the media and
-    /// untransformed, so the line keeps its width at every scale.
-    private var commentsSheetEdge: UIView?
-
-    private func drawCommentsSheetEdge(
-        around window: CGRect, cornerRadius: CGFloat, progress: CGFloat, in stage: UIView
-    ) {
-        let edge = commentsSheetEdge ?? {
-            let edge = UIView()
-            edge.isUserInteractionEnabled = false
-            edge.layer.cornerCurve = .continuous
-            commentsSheetEdge = edge
-            return edge
-        }()
-        if edge.superview !== stage { stage.insertSubview(edge, aboveSubview: mediaCard) }
-        edge.isHidden = false
-        // The media stands on black whatever the page's style: the dark grey.
-        let dark = traitCollection.modifyingTraits { $0.userInterfaceStyle = .dark }
-        edge.layer.borderColor = UIColor.systemGray2.resolvedColor(with: dark).cgColor
-        edge.layer.borderWidth = 1
-        edge.frame = window
-        edge.layer.cornerRadius = cornerRadius
-        edge.alpha = progress
     }
 
     /// The page at rest again: identity media, its interface back.
@@ -2032,7 +2008,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.transform = .identity
         mediaCard.mask = nil
         commentsSheetMask = nil
-        commentsSheetEdge?.removeFromSuperview()
     }
 
     // MARK: - Configuration
