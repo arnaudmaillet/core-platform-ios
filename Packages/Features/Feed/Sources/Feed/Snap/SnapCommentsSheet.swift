@@ -385,8 +385,15 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             height: max(room, smallest)
         )
         let out = preview == nil ? min(1, max(0, (smallest - room) / Self.mediaOutSpan)) : 0
+        // From the collapsed rest's room down to the smallest: the corners
+        // turn the preview's on the way.
+        let restingRoom = restingTop - Self.mediaGap - roomTop
+        let towardsPreview = min(1, max(0, (restingRoom - room) / max(1, restingRoom - smallest)))
         let sheetRadius = sheetCornerRadius(below: container)
-        cell.setCommentsSheetLayout(progress: progress, mediaRegion: region, sheetCornerRadius: sheetRadius, out: out)
+        cell.setCommentsSheetLayout(
+            progress: progress, mediaRegion: region, sheetCornerRadius: sheetRadius, out: out,
+            towardsPreview: towardsPreview, previewCornerRadius: SnapCommentsPreview.cornerRadius
+        )
         followPreview(in: window, sheetTop: top)
         refit()
     }
@@ -414,8 +421,10 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             return
         }
         let size = SnapCommentsPreview.size(for: picture.size)
+        lastSheetTop = sheetTop
         // Its centre, never its frame: the flight in is a transform on it.
-        if let preview, !isPreviewReturning {
+        // Left alone under a finger and while it settles in a corner.
+        if let preview, !isPreviewReturning, !isPreviewHeld {
             let frame = previewFrame(size: preview.bounds.size, in: window, sheetTop: sheetTop)
             preview.center = CGPoint(x: frame.midX, y: frame.midY)
         }
@@ -430,20 +439,110 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         }
     }
 
-    /// Where the preview stands: the screen's top right, under the sheet's
-    /// bar — riding with the sheet as it rises, never over its ✕ and balance
-    /// — the media's margin from the side. Expanded, the screen's top.
+    /// The corner the preview stands in (`SnapCommentsPreview.lastCorner`),
+    /// and whether it is stashed off that corner's side.
+    private var previewCorner = SnapCommentsPreview.lastCorner
+    private var isPreviewStashed = false
+    /// A finger holds the preview, or it is settling where it was thrown:
+    /// it does not ride with the sheet meanwhile.
+    private var isPreviewHeld = false
+    /// The sheet's top as last followed: where the preview's corners stand.
+    private var lastSheetTop: CGFloat = 0
+
+    /// Where the preview stands, in its corner (the top right by default,
+    /// the owner, 2026-11-03), the media's margin from the side:
+    ///
+    /// - up top, under the sheet's bar — riding with the sheet as it rises,
+    ///   never over its ✕ and balance — the screen's top once expanded;
+    /// - down below, over the composer (and the keyboard under it).
+    ///
+    /// Stashed, all but a tab of it off its side.
     private func previewFrame(size: CGSize, in window: UIWindow, sheetTop: CGFloat) -> CGRect {
+        let bounds = previewBounds(in: window, sheetTop: sheetTop)
+        let y = previewCorner.isTop ? bounds.minY : max(bounds.minY, bounds.maxY - size.height)
+        let x: CGFloat
+        switch (previewCorner.isLeading, isPreviewStashed) {
+        case (true, false): x = bounds.minX
+        case (false, false): x = bounds.maxX - size.width
+        case (true, true): x = SnapCommentsPreview.stashedTab - size.width
+        case (false, true): x = window.bounds.width - SnapCommentsPreview.stashedTab
+        }
+        return CGRect(x: x, y: y, width: size.width, height: size.height)
+    }
+
+    /// The room the preview's corners stand in: under the sheet's bar, over
+    /// its composer, the media's margins from the sides.
+    private func previewBounds(in window: UIWindow, sheetTop: CGFloat) -> CGRect {
         let top = max(window.safeAreaInsets.top, sheetTop) + content.barBottom + Spacing.sm
+        let bottom = (content.composerTop ?? window.bounds.height - window.safeAreaInsets.bottom) - Spacing.sm
         return CGRect(
-            x: window.bounds.width - Self.mediaSideMargin - size.width, y: top,
-            width: size.width, height: size.height
+            x: Self.mediaSideMargin, y: top,
+            width: window.bounds.width - 2 * Self.mediaSideMargin, height: max(0, bottom - top)
         )
+    }
+
+    /// A drag on the preview: it follows the finger, then goes, thrown, to
+    /// the corner nearest where it would come to rest — or, thrown past a
+    /// side, is stashed there; thrown back in, it comes out again.
+    private func previewPanned(_ pan: UIPanGestureRecognizer) {
+        guard let preview, let window = preview.window, !isPreviewReturning else { return }
+        switch pan.state {
+        case .began:
+            isPreviewHeld = true
+            preview.layer.removeAllAnimations()
+        case .changed:
+            let move = pan.translation(in: window)
+            preview.center = CGPoint(x: preview.center.x + move.x, y: preview.center.y + move.y)
+            pan.setTranslation(.zero, in: window)
+        case .ended, .cancelled, .failed:
+            let velocity = pan.velocity(in: window)
+            // Where it would come to rest, thrown: a fifth of a second on.
+            let landing = CGPoint(x: preview.center.x + velocity.x * 0.2, y: preview.center.y + velocity.y * 0.2)
+            let bounds = previewBounds(in: window, sheetTop: lastSheetTop)
+            previewCorner = .at(top: landing.y < bounds.midY, leading: landing.x < window.bounds.midX)
+            SnapCommentsPreview.lastCorner = previewCorner
+            isPreviewStashed = landing.x < 0 || landing.x > window.bounds.width
+            settlePreview(velocity: velocity, in: window)
+        default:
+            break
+        }
+    }
+
+    /// A tap on a stashed preview brings it out again.
+    private func previewTapped() {
+        guard let preview, let window = preview.window, isPreviewStashed, !isPreviewReturning else { return }
+        isPreviewStashed = false
+        isPreviewHeld = true
+        settlePreview(velocity: .zero, in: window)
+    }
+
+    /// The preview into its corner, on a spring carrying the throw.
+    private func settlePreview(velocity: CGPoint, in window: UIWindow) {
+        guard let preview else { return }
+        let frame = previewFrame(size: preview.bounds.size, in: window, sheetTop: lastSheetTop)
+        let target = CGPoint(x: frame.midX, y: frame.midY)
+        let distance = hypot(target.x - preview.center.x, target.y - preview.center.y)
+        let speed = hypot(velocity.x, velocity.y)
+        let stashed = isPreviewStashed ? previewCorner.isLeading : nil
+        UIView.animate(
+            withDuration: 0.45, delay: 0, usingSpringWithDamping: 0.8,
+            initialSpringVelocity: distance > 1 ? speed / distance : 0, options: [.allowUserInteraction]
+        ) {
+            preview.center = target
+            preview.showStash(leading: stashed)
+        } completion: { [weak self] _ in
+            self?.isPreviewHeld = false
+        }
     }
 
     private func showPreview(size: CGSize, from picture: CGRect, in window: UIWindow, sheetTop: CGFloat) {
         guard let cell, let media = cell.makeCommentsPreviewContent() else { return }
         let preview = SnapCommentsPreview(content: media)
+        preview.onPan = { [weak self] pan in self?.previewPanned(pan) }
+        preview.onTap = { [weak self] in self?.previewTapped() }
+        // A new preview opens out, in the last corner.
+        isPreviewStashed = false
+        previewCorner = SnapCommentsPreview.lastCorner
         let frame = previewFrame(size: size, in: window, sheetTop: sheetTop)
         preview.frame = frame
         window.addSubview(preview)
@@ -471,6 +570,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// The preview gone at once: the media back in place, its mirror let go.
     private func removePreview() {
         isPreviewReturning = false
+        isPreviewHeld = false
         guard let preview else { return }
         self.preview = nil
         cell?.releaseCommentsPreviewContent(preview.content)
@@ -780,6 +880,14 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     }
 
     func position(for bar: UIBarPositioning) -> UIBarPosition { .top }
+
+    /// The composer's top, in the window: where the preview's lower corners
+    /// stop.
+    var composerTop: CGFloat? {
+        guard let detail = panel as? PostDetailViewController, let host = detail.composeBar.superview,
+              !detail.composeBar.isHidden else { return nil }
+        return host.convert(detail.composeBar.frame, to: nil).minY
+    }
 
     /// The bar's bottom in this view: the lone bar's, or the stack's.
     var barBottom: CGFloat {

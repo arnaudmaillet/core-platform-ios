@@ -1913,8 +1913,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     ///
     /// `out` (0…1) scales the media out where it stands, smaller and fading:
     /// the sheet has grown past the room its smallest size needs.
+    /// `towardsPreview` (0…1) is how far the media has shrunk from its
+    /// collapsed size to its smallest — its preview's size: its corners go
+    /// the same way, to `previewCornerRadius`, so the preview takes it over
+    /// as it stands (the owner, 2026-11-03).
     func setCommentsSheetLayout(
-        progress: CGFloat, mediaRegion: CGRect, sheetCornerRadius: CGFloat, out: CGFloat = 0
+        progress: CGFloat, mediaRegion: CGRect, sheetCornerRadius: CGFloat, out: CGFloat = 0,
+        towardsPreview: CGFloat = 0, previewCornerRadius: CGFloat = 0
     ) {
         let t = min(max(0, progress), 1)
         // The interface, and the action column riding above it (#695).
@@ -1975,7 +1980,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // a picture shrunk under its radius twice over read as a lozenge. A
         // pill at the very least.
         let shownSide = min(window.width, window.height) * scale * shrink
-        let radius = min(from + (to - from) * t, shownSide / 2)
+        let k = min(max(0, towardsPreview), 1)
+        let settled = to + (previewCornerRadius - to) * k
+        let radius = min(from + (settled - from) * t, shownSide / 2)
         commentsSheetPictureWindow.frame = window
         commentsSheetPictureFrame = mediaCard.convert(window.offsetBy(dx: bounds.minX, dy: bounds.minY), to: nil)
         commentsSheetPictureRadius = radius
