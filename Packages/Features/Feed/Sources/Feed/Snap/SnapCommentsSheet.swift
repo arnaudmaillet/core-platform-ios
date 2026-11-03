@@ -508,12 +508,34 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         }
     }
 
-    /// A tap on a stashed preview brings it out again.
+    /// A tap on the preview plays or pauses the clip (the owner,
+    /// 2026-11-03) — its stopped mark on the preview, not on the page under
+    /// the sheet — and brings a stashed preview out again.
     private func previewTapped() {
-        guard let preview, let window = preview.window, isPreviewStashed, !isPreviewReturning else { return }
-        isPreviewStashed = false
-        isPreviewHeld = true
-        settlePreview(velocity: .zero, in: window)
+        guard let preview, let window = preview.window, !isPreviewReturning else { return }
+        if isPreviewStashed {
+            isPreviewStashed = false
+            isPreviewHeld = true
+            settlePreview(velocity: .zero, in: window)
+            return
+        }
+        guard let paused = cell?.togglePlayback(markOnPage: false) else { return }
+        isMediaPaused = paused
+        preview.showPaused(paused)
+    }
+
+    /// The clip stands paused — before the preview came, or from it: the
+    /// preview wears the stopped mark meanwhile, the page once the media is
+    /// back in place.
+    private var isMediaPaused = false
+
+    /// The preview's expand button: the sheet down to its collapsed height,
+    /// the media back above it — the preview flies into it on the way
+    /// (`followPreview`). The keyboard goes first.
+    private func previewExpanded() {
+        guard let controller = sheet.sheetPresentationController else { return }
+        if content.isKeyboardUp { sheet.view.endEditing(true) }
+        controller.animateChanges { controller.selectedDetentIdentifier = Self.detent }
     }
 
     /// The preview into its corner, on a spring carrying the throw.
@@ -540,6 +562,9 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         let preview = SnapCommentsPreview(content: media)
         preview.onPan = { [weak self] pan in self?.previewPanned(pan) }
         preview.onTap = { [weak self] in self?.previewTapped() }
+        preview.onExpand = { [weak self] in self?.previewExpanded() }
+        isMediaPaused = cell.showsPausedMark
+        preview.showPaused(isMediaPaused)
         // A new preview opens out, in the last corner.
         isPreviewStashed = false
         previewCorner = SnapCommentsPreview.lastCorner
@@ -575,6 +600,8 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         self.preview = nil
         cell?.releaseCommentsPreviewContent(preview.content)
         cell?.setCommentsSheetMediaHidden(false)
+        cell?.setPausedMarkVisible(isMediaPaused, animated: false)
+        isMediaPaused = false
         preview.removeFromSuperview()
     }
 

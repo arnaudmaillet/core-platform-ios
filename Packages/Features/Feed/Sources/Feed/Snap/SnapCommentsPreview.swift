@@ -52,10 +52,18 @@ final class SnapCommentsPreview: UIView {
     private let stashVeil = UIView()
     private let stashChevron = UIImageView()
 
+    /// The clip's stopped mark, in the middle, while it is paused.
+    private let pausedMark = UIImageView()
+    /// Puts the media back in place (the owner, 2026-11-03), at the top right.
+    private let expandButton = UIButton(type: .system)
+
     /// A drag on the preview, its phases as the recogniser has them.
     var onPan: ((UIPanGestureRecognizer) -> Void)?
-    /// A tap on the preview.
+    /// A tap on the preview: the clip played or paused (the owner,
+    /// 2026-11-03), a stashed preview brought out.
     var onTap: (() -> Void)?
+    /// The expand button: the media back in place.
+    var onExpand: (() -> Void)?
 
     init(content: UIView) {
         self.content = content
@@ -96,8 +104,58 @@ final class SnapCommentsPreview: UIView {
             stashChevron.centerYAnchor.constraint(equalTo: stashVeil.centerYAnchor),
             stashChevron.widthAnchor.constraint(equalToConstant: Self.stashedTab),
         ])
+        pausedMark.image = UIImage(systemName: "play.fill")
+        pausedMark.tintColor = .white
+        pausedMark.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .title2)
+        pausedMark.layer.shadowColor = UIColor.black.cgColor
+        pausedMark.layer.shadowOpacity = 0.5
+        pausedMark.layer.shadowRadius = Spacing.xs
+        pausedMark.layer.shadowOffset = .zero
+        pausedMark.alpha = 0
+        pausedMark.translatesAutoresizingMaskIntoConstraints = false
+        clip.insertSubview(pausedMark, belowSubview: stashVeil)
+        var expand = UIButton.Configuration.plain()
+        expand.image = UIImage(systemName: "arrow.up.left.and.arrow.down.right")
+        expand.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(textStyle: .caption1, scale: .medium)
+        expand.baseForegroundColor = .white
+        expand.background.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        expand.background.cornerRadius = Self.expandSide / 2
+        expand.contentInsets = .zero
+        expandButton.configuration = expand
+        expandButton.accessibilityLabel = "Show the post"
+        expandButton.addTarget(self, action: #selector(expandTapped), for: .touchUpInside)
+        expandButton.translatesAutoresizingMaskIntoConstraints = false
+        clip.insertSubview(expandButton, belowSubview: stashVeil)
+        NSLayoutConstraint.activate([
+            pausedMark.centerXAnchor.constraint(equalTo: clip.centerXAnchor),
+            pausedMark.centerYAnchor.constraint(equalTo: clip.centerYAnchor),
+            expandButton.topAnchor.constraint(equalTo: clip.topAnchor, constant: Spacing.xs + 2),
+            expandButton.trailingAnchor.constraint(equalTo: clip.trailingAnchor, constant: -(Spacing.xs + 2)),
+            expandButton.widthAnchor.constraint(equalToConstant: Self.expandSide),
+            expandButton.heightAnchor.constraint(equalToConstant: Self.expandSide),
+        ])
         addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(panned(_:))))
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
+        isAccessibilityElement = false
+        accessibilityElements = [expandButton]
+    }
+
+    /// The expand button's side; its touch reaches a little wider.
+    private static let expandSide: CGFloat = 28
+
+    /// A touch near the expand button is the button's: it is small, and the
+    /// preview round it drags.
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if !expandButton.isHidden, expandButton.alpha > 0,
+           expandButton.convert(expandButton.bounds, to: self).insetBy(dx: -Spacing.sm, dy: -Spacing.sm).contains(point) {
+            return expandButton
+        }
+        return super.hitTest(point, with: event)
+    }
+
+    /// The clip's stopped mark shown, or taken down.
+    func showPaused(_ paused: Bool) {
+        UIView.animate(withDuration: 0.2) { self.pausedMark.alpha = paused ? 1 : 0 }
     }
 
     private var stashChevronLeading: NSLayoutConstraint?
@@ -114,10 +172,13 @@ final class SnapCommentsPreview: UIView {
             (leading ? stashChevronTrailing : stashChevronLeading)?.isActive = true
         }
         stashVeil.alpha = leading == nil ? 0 : 1
+        // Stashed, the tab only brings it out.
+        expandButton.alpha = leading == nil ? 1 : 0
     }
 
     @objc private func panned(_ pan: UIPanGestureRecognizer) { onPan?(pan) }
     @objc private func tapped() { onTap?() }
+    @objc private func expandTapped() { onExpand?() }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
