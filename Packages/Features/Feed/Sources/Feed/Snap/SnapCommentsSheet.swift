@@ -155,6 +155,12 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         // turns to a light glass under its white text.
         sheet.overrideUserInterfaceStyle = .dark
         sheet.presentationController?.traitOverrides.userInterfaceStyle = .dark
+        // ⚠️ ONE LEVEL AT BOTH HEIGHTS (measured on a device, 2026-11-03):
+        // UIKit raises a sheet at the screen's top to the elevated level and
+        // lowers it again below — every view in it re-read its traits at each
+        // detent change, ~10 ms of the frame that starts the move, and the
+        // dynamic colours shifted between the two heights.
+        sheet.traitOverrides.userInterfaceLevel = .base
         restingHeight = resting
         self.bottomInset = bottomInset
         if let controller = sheet.sheetPresentationController {
@@ -487,28 +493,23 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     private static let previewHandoffSpan: CGFloat = 96
     /// The room lost, past the media's smallest, over which it scales out.
     private static let mediaOutSpan: CGFloat = 64
-    /// ONE PICTURE AT A TIME, the
-    /// preview first (the owner, 2026-11-03) — never both on the screen. The
+    /// ONE PICTURE AT A TIME, the preview first (the owner, 2026-11-03). The
     /// media scales out over the room's last `popMediaOutLead` before its
-    /// smallest; past it, the preview pops in over the hand-over's first
-    /// `popPreviewInShare`. Between the two, for a moment, neither: a sheet
+    /// smallest; past it, a quarter of the hand-over on, the preview pops in
+    /// (`setPreviewPopped`), and it pops out only once the sheet is nearly
+    /// back at the threshold. Between the two, for a moment, neither: a sheet
     /// never rests there.
     private static let popMediaOutLead: CGFloat = 48
-    private static let popPreviewInShare: CGFloat = 0.6
+    private static let popInAt: CGFloat = 0.25
+    private static let popOutBelow: CGFloat = 0.05
+    /// The preview's size, as a share of its own, as it pops in and out.
+    private static let popFrom: CGFloat = 0.5
 
     private static func smoothstep(_ t: CGFloat) -> CGFloat {
         let t = min(max(0, t), 1)
         return t * t * (3 - 2 * t)
     }
 
-    /// The trial's pop: from half its size to a little over its own, back
-    /// to its own (an ease-out-back), as `t` goes 0 to 1.
-    private static func popScale(_ t: CGFloat) -> CGFloat {
-        let t = min(max(0, t), 1)
-        let c1: CGFloat = 1.70158
-        let back = 1 + (c1 + 1) * pow(t - 1, 3) + c1 * pow(t - 1, 2)
-        return 0.5 + 0.5 * back
-    }
 
     /// ⚠️ THE SHEET DRIVES THE HAND-OVER, frame by frame (the owner,
     /// 2026-11-03). Played as an animation when the media crossed its
@@ -526,31 +527,67 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// before the player's next picture reached it.
     private func followPreview(handoff: CGFloat, in window: UIWindow, sheetTop: CGFloat) {
         lastSheetTop = sheetTop
-        guard handoff > 0 else {
-            setPreviewShown(false)
-            isPreviewUnavailable = false
-            return
-        }
+        if handoff == 0 { isPreviewUnavailable = false }
+        // Out once well past the threshold, back only once nearly before it:
+        // a sheet held at the threshold does not pop it in and out.
+        let wantsPreview = isPreviewPopped ? handoff > Self.popOutBelow : handoff >= Self.popInAt
         if preview == nil {
-            guard !isLeaving, !isPreviewUnavailable, let cell, let picture = cell.commentsSheetPictureFrame,
-                  picture.width > 0, picture.height > 0 else { return }
+            guard wantsPreview, !isLeaving, !isPreviewUnavailable, let cell,
+                  let picture = cell.commentsSheetPictureFrame, picture.width > 0, picture.height > 0 else { return }
             guard makePreview(size: SnapCommentsPreview.size(for: picture.size), in: window) else {
                 isPreviewUnavailable = true
                 return
             }
         }
-        setPreviewShown(true)
         guard let preview else { return }
-        // In its corner from the start, popping in, driven by the sheet —
-        // seen early in its pop, the fade done by its middle. Left where it
-        // is under a finger and while it settles in a corner.
-        let t = min(1, max(0, handoff / Self.popPreviewInShare))
-        preview.alpha = Self.smoothstep(min(1, t * 2))
-        guard !isPreviewHeld else { return }
-        let scale = Self.popScale(t)
-        preview.transform = CGAffineTransform(scaleX: scale, y: scale)
-        let corner = previewFrame(size: preview.bounds.size, in: window, sheetTop: sheetTop)
-        preview.center = CGPoint(x: corner.midX, y: corner.midY)
+        // In its corner, riding with the sheet's bar; left where it is under
+        // a finger and while it settles in a corner.
+        if !isPreviewHeld {
+            let corner = previewFrame(size: preview.bounds.size, in: window, sheetTop: sheetTop)
+            preview.center = CGPoint(x: corner.midX, y: corner.midY)
+        }
+        if wantsPreview != isPreviewPopped { setPreviewPopped(wantsPreview) }
+    }
+
+    /// Whether the preview is popped in, or on its way in.
+    private var isPreviewPopped = false
+
+    /// ⚠️ THE POP PLAYS IN ITS OWN TIME (the owner, 2026-11-03): driven by
+    /// the sheet, a quick throw played it in a frame or two — a jump. The
+    /// sheet decides WHEN (`followPreview`); the pop takes the same time
+    /// whatever its speed, and a pop turned back mid-way goes back from where
+    /// it stands.
+    private func setPreviewPopped(_ popped: Bool) {
+        guard let preview, let cell else { return }
+        isPreviewPopped = popped
+        if popped {
+            if preview.isHidden {
+                setPreviewShown(true)
+                preview.alpha = 0
+                preview.transform = CGAffineTransform(scaleX: Self.popFrom, y: Self.popFrom)
+            }
+            UIView.animate(
+                withDuration: 0.45, delay: 0, usingSpringWithDamping: 0.62, initialSpringVelocity: 0,
+                options: [.beginFromCurrentState, .allowUserInteraction]
+            ) {
+                preview.alpha = 1
+                preview.transform = .identity
+            }
+        } else {
+            // The media is the sheet's again at once — it scales back in with
+            // the sheet — as the preview fades out over it.
+            cell.setCommentsSheetMediaHidden(false)
+            cell.setPausedMarkVisible(isMediaPaused, animated: false)
+            UIView.animate(
+                withDuration: 0.18, delay: 0, options: [.beginFromCurrentState, .curveEaseIn, .allowUserInteraction]
+            ) {
+                preview.alpha = 0
+                preview.transform = CGAffineTransform(scaleX: Self.popFrom, y: Self.popFrom)
+            } completion: { [weak self] _ in
+                guard let self, !self.isPreviewPopped else { return }
+                self.setPreviewShown(false)
+            }
+        }
     }
 
     /// The corner the preview stands in (`SnapCommentsPreview.lastCorner`),
@@ -704,7 +741,10 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         } else {
             preview.layer.removeAllAnimations()
             isPreviewHeld = false
+            isPreviewPopped = false
             preview.isHidden = true
+            preview.alpha = 1
+            preview.transform = .identity
             cell.setCommentsSheetMediaHidden(false)
             cell.setPausedMarkVisible(isMediaPaused, animated: false)
         }
