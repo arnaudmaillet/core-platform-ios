@@ -90,6 +90,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             controller.prefersScrollingExpandsWhenScrolledToEdge = false
         }
         content.onDismissed = { [weak self] in self?.end() }
+        content.onClose = { [weak self] in self?.close() }
 
         // The page's bars leave with its interface, through UIKit's own API.
         if let navigation = feed.navigationController {
@@ -232,11 +233,17 @@ private final class DisplayLinkTarget: NSObject {
 /// owner, 2026-11-03), the page's own balance gone with the page's bar.
 final class SnapCommentsSheetViewController: UIViewController {
     static let tabsItemID = "feed.comments.sheet.tabs"
+    static let closeItemID = "feed.comments.sheet.close"
 
     let panel: UIViewController
     private let tabs = CommentTabsSelector()
     let walletBadge: WalletBadgeButton?
     var onDismissed: (() -> Void)?
+    /// The bar's ✕.
+    var onClose: (() -> Void)?
+    private lazy var closeItem = BarItems.icon(
+        id: Self.closeItemID, image: UIImage(systemName: "xmark"), label: "Close comments"
+    ) { [weak self] in self?.onClose?() }
     private let keyboardObservers = NotificationObserverBag()
     /// Over the list's top edge, as tall as the bar: what makes UIKit draw
     /// the soft edge under it (`viewWillAppear`).
@@ -351,10 +358,16 @@ final class SnapCommentsSheetViewController: UIViewController {
         (panel as? PostDetailViewController)?.setComposerTracksKeyboard(false)
     }
 
+    /// The trailing run, right to left: the balance, then the ✕ to its left
+    /// (the owner, 2026-11-03) — a fixed space between, or iOS 26 groups the
+    /// two adjacent items into one platter.
     private func installWalletItem() {
-        navigationItem.rightBarButtonItem = walletBadge.map {
-            BarItems.container(id: BarItems.SharedID.walletBalance, view: $0)
-        }
+        guard let walletBadge else { return navigationItem.rightBarButtonItems = [closeItem] }
+        navigationItem.rightBarButtonItems = [
+            BarItems.container(id: BarItems.SharedID.walletBalance, view: walletBadge),
+            .fixedSpace(Spacing.sm),
+            closeItem,
+        ]
     }
 
     override func viewSafeAreaInsetsDidChange() {

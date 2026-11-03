@@ -178,6 +178,11 @@ final class PostDetailViewController: UIViewController {
         return engaged.top + rows + engaged.bottom
     }
 
+    /// The streams stop at their last row (`CommentStream.holdsBottomEdge`).
+    func holdStreamsBottomEdge() {
+        streams.forEach { $0.holdsBottomEdge = true }
+    }
+
     /// The comments sheet's edges: UIKit's own SOFT edge effects, as the
     /// app's other lists wear them (the owner, 2026-11-03) — the top one
     /// under the sheet's bar, a titled screen's (`prefersSoftTopEdge`), the

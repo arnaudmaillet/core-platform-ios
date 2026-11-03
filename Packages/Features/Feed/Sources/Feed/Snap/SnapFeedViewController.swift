@@ -3834,6 +3834,8 @@ final class SnapFeedViewController: UIViewController {
         // A short stream rests at its top: the sheet is fitted to it, and a
         // stream anchored to the bottom moved its rows as the sheet settled.
         detail?.anchorsShortStream = false
+        // …and never drags past its last row.
+        detail?.holdStreamsBottomEdge()
         // The count the feed knows: no comment bones for a post with none (#1773).
         detail?.seedCommentCount(modelsByID[id]?.cardMetrics?.comments)
         detail?.setStreamTransitionProgress(0)
