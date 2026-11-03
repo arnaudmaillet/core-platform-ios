@@ -7,11 +7,11 @@ import UIKit
 ///
 ///   ┌──────────────────────┐
 ///   │      [ media ]       │  ← the post's media, shrunk WHOLE into the top
-///   │                      │    ~40 %, centred, still playing; the page's
+///   │                      │    ~30 %, centred, still playing; the page's
 ///   ├──────────────────────┤    interface and bars gone
 ///   │ [Popular|Recent] [♥ 250] │  ← the sheet's own bar: the tabs, the balance
 ///   │  comment rows …      │  ← today's comments panel, in a UIKit sheet
-///   │  [ compose bar ]     │    resting at 60 % of the screen
+///   │  [ compose bar ]     │    resting at 70 % of the screen
 ///   └──────────────────────┘
 ///
 /// ONE MEASURE DRIVES THE PAGE: the sheet's top, read every frame from its
@@ -19,7 +19,7 @@ import UIKit
 /// sheet through its entrance, a drag down and its exit — never a second
 /// animation trying to keep pace with UIKit's.
 ///
-/// One height for now: the content's own, at most 60 % of the screen (the
+/// One height for now: the content's own, at most 70 % of the screen (the
 /// owner, 2026-11-03) — a short thread takes a short sheet, with no room
 /// above its first row; a full-screen detent waits for the owner's approval
 /// of this one. The sheet is undimmed, so the media above it stays
@@ -27,7 +27,7 @@ import UIKit
 @MainActor
 final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationControllerDelegate {
     /// The sheet's tallest resting height, as a share of the screen.
-    static let restingShare: CGFloat = 0.6
+    static let restingShare: CGFloat = 0.7
     static let detent = UISheetPresentationController.Detent.Identifier("feed.comments.v2")
     /// Between the shrunk media's bottom and the sheet's top.
     static let mediaGap: CGFloat = Spacing.md
