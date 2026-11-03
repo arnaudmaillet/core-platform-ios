@@ -416,14 +416,38 @@ final class SnapCommentsSheetViewController: UIViewController {
     /// the band the page keeps for its toolbar, which the panel's engaged
     /// layout otherwise reserves. The bar's own bottom stands in for the
     /// safe area while the sheet is laid out ahead of its presentation.
+    ///
+    /// ⚠️ THE BAR'S HEIGHT IS LEARNED, NOT MEASURED, UNTIL THE SHEET HAS
+    /// SETTLED (profiled, 2026-11-03). A sheet's bar only takes its height on
+    /// screen — 44 pt ahead of the presentation, 64 then 70 pt during it —
+    /// and each new top re-laid the stream out inside the presentation's
+    /// frame: its rows were made there, ~25 ms of the ~150 ms between the
+    /// tap and the sheet's first frame. The bar's settled bottom is kept from
+    /// the last sheet, and the panel is laid out against it until this one
+    /// has appeared.
     func applyPanelInsets() {
         guard let detail = panel as? PostDetailViewController else { return }
         let bar = navigationController.map { view.convert($0.navigationBar.frame, from: $0.view).maxY } ?? 0
-        let top = max(view.safeAreaInsets.top, bar) + SnapCommentsLayout.streamTopBreath
+        let measured = max(view.safeAreaInsets.top, bar)
+        let barBottom = hasAppeared ? measured : max(measured, Self.settledBarBottom ?? 0)
+        let top = barBottom + SnapCommentsLayout.streamTopBreath
         let bottom = max(0, composerBottomInset + Spacing.sm - detail.composerRestingGap)
         if let applied = appliedInsets, abs(applied.top - top) < 0.5, abs(applied.bottom - bottom) < 0.5 { return }
         appliedInsets = (top, bottom)
         detail.setEngagedInsets(top: top, bottomInset: bottom)
+    }
+
+    /// The bar's bottom as the last sheet settled with it (`applyPanelInsets`).
+    private static var settledBarBottom: CGFloat?
+    private var hasAppeared = false
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        hasAppeared = true
+        let bar = navigationController.map { view.convert($0.navigationBar.frame, from: $0.view).maxY } ?? 0
+        Self.settledBarBottom = max(view.safeAreaInsets.top, bar)
+        // The learned bottom was this one's, or the panel takes the real one.
+        applyPanelInsets()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
