@@ -70,9 +70,8 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         // The page's bars leave with its interface, through UIKit's own API.
         if let navigation = feed.navigationController {
             barsWereHidden = (navigation.isNavigationBarHidden, navigation.isToolbarHidden)
-            navigation.setNavigationBarHidden(true, animated: animated)
-            navigation.setToolbarHidden(true, animated: animated)
         }
+        setBarsHidden(true, animated: animated)
         catcher.frame = feed.view.bounds
         catcher.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         catcher.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(close)))
@@ -89,7 +88,23 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     @objc func close() {
         guard !hasEnded, sheet.presentingViewController != nil else { return }
         sheet.view.endEditing(true)
+        // The bars come back WITH the sheet's exit, not after it.
+        setBarsHidden(false, animated: true)
         feed?.dismiss(presented: sheet)
+    }
+
+    /// The page's bars: gone while the sheet is up, as the sheet found them
+    /// otherwise. Idempotent — the exit asks more than once.
+    private func setBarsHidden(_ hidden: Bool, animated: Bool) {
+        guard let barsWereHidden, let navigation = feed?.navigationController else { return }
+        let navigationHidden = hidden || barsWereHidden.navigation
+        let toolbarHidden = hidden || barsWereHidden.toolbar
+        if navigation.isNavigationBarHidden != navigationHidden {
+            navigation.setNavigationBarHidden(navigationHidden, animated: animated)
+        }
+        if navigation.isToolbarHidden != toolbarHidden {
+            navigation.setToolbarHidden(toolbarHidden, animated: animated)
+        }
     }
 
     /// The page as the sheet stands this frame.
@@ -122,14 +137,21 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         link = nil
         catcher.removeFromSuperview()
         cell?.clearCommentsSheetLayout()
-        if let barsWereHidden, let navigation = feed?.navigationController {
-            navigation.setNavigationBarHidden(barsWereHidden.navigation, animated: true)
-            navigation.setToolbarHidden(barsWereHidden.toolbar, animated: true)
-        }
+        setBarsHidden(false, animated: true)
         onEnd()
     }
 
     // MARK: UIAdaptivePresentationControllerDelegate
+
+    /// A swipe down has begun: the bars start back now, and leave again if
+    /// the sheet is let go back to its rest.
+    func presentationControllerWillDismiss(_ presentationController: UIPresentationController) {
+        setBarsHidden(false, animated: true)
+        sheet.transitionCoordinator?.notifyWhenInteractionChanges { [weak self] context in
+            guard context.isCancelled else { return }
+            self?.setBarsHidden(true, animated: true)
+        }
+    }
 
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
         end()

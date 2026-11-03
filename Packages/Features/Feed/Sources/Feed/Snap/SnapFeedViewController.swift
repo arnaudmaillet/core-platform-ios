@@ -482,6 +482,9 @@ final class SnapFeedViewController: UIViewController {
     /// A media post's comments as a native sheet, while one is up (#2087,
     /// `CommentsV2`): the engagement above stays nil meanwhile.
     private var commentsSheet: SnapCommentsSheetSession?
+    /// The active page's sheet panel, built ahead of the tap on the settle
+    /// seam — the page's own warm, outside the page (#2087).
+    private var commentsSheetWarm: (id: PostID, panel: UIViewController)?
     /// The engaged comments UI — a child of THIS controller (thread data,
     /// scroll position, and reply drafts must never live in a recycled
     /// cell); the cell only hosts its view while engaged.
@@ -3817,7 +3820,7 @@ final class SnapFeedViewController: UIViewController {
               view.window != nil, modelsByID[id]?.mediaURL != nil,
               let indexPath = dataSource.indexPath(for: id),
               let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell,
-              let content = makeCommentsPanelContent?(id)
+              let content = takeCommentsSheetWarm(for: id) ?? makeCommentsPanelContent?(id)
         else { return }
         applyRailSlot(to: content, hostedByPage: false)
         let detail = content as? PostDetailViewController
@@ -3833,9 +3836,27 @@ final class SnapFeedViewController: UIViewController {
             commentsSheet = nil
             collectionView.isScrollEnabled = true
             (parent as? ForYouSectorViewController)?.setPagingEnabled(true)
+            // Reopening is as cheap as opening.
+            rewarmActivePageComments()
         }
         commentsSheet = session
         session.present(animated: animated)
+    }
+
+    /// Builds the sheet's panel for `id` before the tap: loading its view asks
+    /// for its first comments (`PostDetailViewController.viewDidLoad`), so the
+    /// sheet rises on rows, not bones — the page's own warm, without the page.
+    private func prewarmCommentsSheet(for id: PostID) {
+        guard commentsSheet == nil, commentsSheetWarm?.id != id, modelsByID[id]?.mediaURL != nil,
+              let content = makeCommentsPanelContent?(id) else { return }
+        content.loadViewIfNeeded()
+        commentsSheetWarm = (id, content)
+    }
+
+    /// The warm panel, if it is `id`'s; spent by the taking.
+    private func takeCommentsSheetWarm(for id: PostID) -> UIViewController? {
+        defer { commentsSheetWarm = nil }
+        return commentsSheetWarm?.id == id ? commentsSheetWarm?.panel : nil
     }
 
     /// The TEXT page's resting engagement, PHASE 1 (visual pre-render):
@@ -4452,8 +4473,8 @@ final class SnapFeedViewController: UIViewController {
         // across the flight for exactly this reason; so is this now, and
         // `zoomTransitionDidEnd` picks it up on landing.
         guard !isAwaitingZoomPresentation else { return }
-        // The sheet builds its own panel (#2087): none waits in the page.
-        guard !CommentsV2.isEnabled else { return }
+        // The sheet's panel waits beside the page, not in it (#2087).
+        guard !CommentsV2.isEnabled else { return prewarmCommentsSheet(for: id) }
         guard commentsEngagedID == nil, commentsContentVC == nil,
               prewarmedCommentsID == nil,
               modelsByID[id]?.mediaURL != nil else { return }
@@ -4523,6 +4544,7 @@ final class SnapFeedViewController: UIViewController {
     /// Drops a warm panel that was never engaged — the page moved on, or its
     /// cell is being recycled underneath it.
     private func discardPrewarmedComments() {
+        commentsSheetWarm = nil
         guard prewarmedCommentsID != nil, commentsEngagedID == nil else { return }
         prewarmedCommentsID = nil
         if let content = commentsContentVC {
