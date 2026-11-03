@@ -6,6 +6,15 @@ import UIKit
 /// back, rippling left to right as a continuous wave — never stopping — each
 /// with a pale lead running just ahead of it.
 ///
+/// ⚠️ **ONE GRADIENT, NOT THREE COLOURS (#2083, the owner 2026-11-03).** The
+/// pills are windows onto the signature gradient (`Palette.loaderGradient`):
+/// one `CAGradientLayer` the loader's square wide, masked by the three
+/// pills, horizontal — raspberry at the first pill's leading edge, violet on
+/// the middle one's centre, mint at the last one's trailing edge. The pills
+/// grow in height only, so the slice each shows never changes through the
+/// wave. The leads are a second, pale copy under it (`loaderLeadGradient`),
+/// masked by the leads. The keyframes animate the masks' pills as before.
+///
 /// Its API mirrors `UIActivityIndicatorView` — `startAnimating()`,
 /// `stopAnimating()`, `isAnimating`, `hidesWhenStopped`, a size — so a call site
 /// migrates mechanically, plus `setProgress(_:)` for a pull to scrub it.
@@ -55,8 +64,12 @@ public final class AppLoaderView: UIView {
 
     private let side: CGFloat
     private let mark = CALayer()
-    /// The pills, left to right, each over its lead.
+    /// The signature gradient the pills show, over the leads' pale one.
+    private let pillGradient = CAGradientLayer()
+    private let leadGradient = CAGradientLayer()
+    /// The pills, left to right: the shapes of `pillGradient`'s mask.
     private let pills: [CALayer]
+    /// The leads, the shapes of `leadGradient`'s mask.
     private let leads: [CALayer]
     private var progress: CGFloat = 0
     private var phase: Phase = .idle
@@ -80,20 +93,29 @@ public final class AppLoaderView: UIView {
 
     public init(side: CGFloat) {
         self.side = side
-        pills = Palette.loaderTones.map { _ in CALayer() }
-        leads = Palette.loaderLeadTones.map { _ in CALayer() }
+        pills = (0..<AppLoaderGeometry.pillCount).map { _ in CALayer() }
+        leads = (0..<AppLoaderGeometry.pillCount).map { _ in CALayer() }
         super.init(frame: CGRect(x: 0, y: 0, width: side, height: side))
         isUserInteractionEnabled = false
         isAccessibilityElement = true
         accessibilityLabel = "Loading"
         layer.addSublayer(mark)
         let width = AppLoaderGeometry.pillWidth(side: side)
-        for (lead, pill) in zip(leads, pills) {
-            for piece in [lead, pill] {
+        let square = CGRect(x: 0, y: 0, width: side, height: side)
+        for (gradient, pieces) in [(leadGradient, leads), (pillGradient, pills)] {
+            gradient.frame = square
+            gradient.startPoint = Self.gradientStart
+            gradient.endPoint = Self.gradientEnd
+            let mask = CALayer()
+            mask.frame = square
+            for piece in pieces {
                 piece.cornerRadius = width / 2
                 piece.cornerCurve = .circular
-                mark.addSublayer(piece)
+                piece.backgroundColor = UIColor.black.cgColor
+                mask.addSublayer(piece)
             }
+            gradient.mask = mask
+            mark.addSublayer(gradient)
         }
         applyTones()
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _: UITraitCollection) in
@@ -117,14 +139,28 @@ public final class AppLoaderView: UIView {
         CATransaction.commit()
     }
 
-    /// The pills' tones; the leads' resolve against the page, per appearance.
+    /// Where the gradient runs: left to right across the square, so a pill
+    /// growing in height keeps its slice. DEBUG `-loader-gradient-diagonal`
+    /// draws the brand's own diagonal instead, for the owner's comparison
+    /// (#2083): a growing pill then changes colour as it grows.
+    static var gradientStart: CGPoint { diagonal ? Palette.brandGradientStart : CGPoint(x: 0, y: 0.5) }
+    static var gradientEnd: CGPoint { diagonal ? Palette.brandGradientEnd : CGPoint(x: 1, y: 0.5) }
+    private static var diagonal: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-loader-gradient-diagonal")
+        #else
+        false
+        #endif
+    }
+
+    /// The gradients' stops: the signature for the pills, the same made pale
+    /// toward the page for the leads, resolved per appearance.
     private func applyTones() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for (pill, tone) in zip(pills, Palette.loaderTones) { pill.backgroundColor = tone.cgColor }
-        for (lead, tone) in zip(leads, Palette.loaderLeadTones) {
-            lead.backgroundColor = tone.resolvedColor(with: traitCollection).cgColor
-        }
+        pillGradient.colors = Palette.loaderGradient.map { $0.resolvedColor(with: traitCollection).cgColor }
+        leadGradient.colors = Palette.loaderLeadGradient.map { $0.resolvedColor(with: traitCollection).cgColor }
+        for gradient in [pillGradient, leadGradient] { gradient.locations = Palette.brandGradientLocations }
         CATransaction.commit()
     }
 
@@ -338,7 +374,19 @@ public final class AppLoaderView: UIView {
         return AppLoaderTimeline.Frame(heights: pills.map(fraction), leadHeights: leads.map(fraction))
     }
     var debugOpacity: Float { mark.opacity }
-    /// The tones the pills and their leads wear now.
-    var debugTones: (pills: [CGColor?], leads: [CGColor?]) { (pills.map(\.backgroundColor), leads.map(\.backgroundColor)) }
+    /// The gradients the pills and their leads show now: their stops and
+    /// where they run.
+    var debugTones: (pills: [CGColor], leads: [CGColor]) {
+        ((pillGradient.colors as? [CGColor]) ?? [], (leadGradient.colors as? [CGColor]) ?? [])
+    }
+    var debugGradient: (locations: [NSNumber]?, start: CGPoint, end: CGPoint, frame: CGRect) {
+        (pillGradient.locations, pillGradient.startPoint, pillGradient.endPoint, pillGradient.frame)
+    }
+    /// Whether the pills (and the leads) are the shapes their gradient shows
+    /// through, rather than coloured layers.
+    var debugPillsMaskTheGradient: Bool {
+        pills.allSatisfy { $0.superlayer === pillGradient.mask } && leads.allSatisfy { $0.superlayer === leadGradient.mask }
+            && mark.sublayers == [leadGradient, pillGradient]
+    }
     #endif
 }

@@ -17,7 +17,7 @@ The app's colours are one **theme**: **raspberry**, used almost everywhere, with
 - **There is no secondary colour.** The violet is the gems' alone, and otherwise appears only inside the signature gradient, as the mint does.
 - **Links, `@mentions` and `#hashtags` are a neutral grey** (`entityInk`), set apart by the semibold.
 - **A filled button wears white** (`onPrimary`) in both appearances.
-- **The signature gradient** (`brandGradient`) is for the launch logo and the unseen-story ring. **White text never sits over its mint half** (1.5:1), so no button wears it.
+- **The signature gradient** (`brandGradient`) is for the launch logo, the unseen-story ring and the loader, whose three pills show one horizontal gradient across them (#2083). The loader is a brand mark, not a UI pill, so the rule below does not reach it. **White text never sits over its mint half** (1.5:1), so no button wears it.
 - **The system red is for errors and destruction only.**
 - **A warning is a yellow glyph with neutral words** (`Warning`).
 - **Dark mode is not an inversion.** Roles near the contrast line have Increased Contrast values.
@@ -40,8 +40,7 @@ The app's colours are one **theme**: **raspberry**, used almost everywhere, with
 | `gem` → `gemViolet`, `GemSymbol.tint` | the gems' glyph | `9B5CFF` | `9B5CFF` | `7A3FE0` / `B48AFF` |
 | `gemText` → `GemSymbol.textColor` | a gem amount or price as text | `7A3FE0` | `A97AFF` | `6E33D6` / `B48AFF` |
 | `saveGold` | the saved star | `FFC53D` | `FFC53D` | — |
-| `signatureGradient` → `brandGradient` | the launch logo, the story ring | `EC1C75` 0 · `9B5CFF` 0.5 · `2EF0A8` 1 | same | — |
-| `loaderTones` | the branded loader's pills | `EC1C75`, `9B5CFF`, `2EF0A8` | same | — |
+| `signatureGradient` → `brandGradient`, `loaderGradient` | the launch logo, the story ring, the loader's pills (#2083) | `EC1C75` 0 · `9B5CFF` 0.5 · `2EF0A8` 1 | same | — |
 
 ### Measured contrast (WCAG 2.x)
 | Pair | Light | Dark | IC light | IC dark |

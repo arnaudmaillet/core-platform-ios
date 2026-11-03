@@ -87,11 +87,10 @@ public struct BrandTheme: Sendable, Equatable {
     // MARK: - Brand moments
 
     /// The brand's signature gradient, first stop to last, and where each
-    /// stop sits (0…1): the launch logo, the story ring.
+    /// stop sits (0…1): the launch logo, the story ring, the loader's pills
+    /// (#2083, which read it rather than tones of their own).
     public let signatureGradient: [UInt32]
     public let signatureLocations: [Double]
-    /// The branded loader's three pills, left to right.
-    public let loaderTones: [UInt32]
 
     // MARK: - The assets (checked by `BrandAssetsGuardTests`)
 
@@ -127,7 +126,6 @@ public struct BrandTheme: Sendable, Equatable {
         crownYellow: 0xFFE600,
         signatureGradient: [0xEC1C75, 0x9B5CFF, 0x2EF0A8],
         signatureLocations: [0, 0.5, 1],
-        loaderTones: [0xEC1C75, 0x9B5CFF, 0x2EF0A8],
         launchLogoStops: [0xF699C1, 0xD2B6FF, 0xA1F8D8],
         iconStops: [0xEC1C75, 0x9B5CFF, 0x2EF0A8]
     )
