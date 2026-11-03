@@ -189,6 +189,14 @@ final class SnapCommentsPreview: UIView {
         drawEdge()
     }
 
+    /// The shadow's outline, given: without one, Core Animation renders the
+    /// preview offscreen every frame to find it (measured on a device,
+    /// 2026-11-03).
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: Self.cornerRadius).cgPath
+    }
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         drawEdge()

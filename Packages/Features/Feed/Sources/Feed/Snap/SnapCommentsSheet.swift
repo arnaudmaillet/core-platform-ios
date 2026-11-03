@@ -205,8 +205,12 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         // only for comments that outgrow the collapsed one.
         sheet.sheetPresentationController?.detents = detents(expandable: isExpandable)
 
-        let link = CADisplayLink(target: DisplayLinkTarget(self), selector: #selector(DisplayLinkTarget.tick))
+        let link = CADisplayLink(target: DisplayLinkTarget(self), selector: #selector(DisplayLinkTarget.tick(_:)))
+        // As fast as the screen: a 120 Hz sheet followed at 60 drags its
+        // media a frame behind every other frame (measured, 2026-11-03).
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
         link.add(to: .main, forMode: .common)
+        observeCommits()
         self.link = link
         feed.present(sheet, animated: animated)
         follow()
@@ -326,6 +330,49 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         }
     }
 
+    /// The display link's frame as `follow` is called for it: its time, and
+    /// when the frame it builds is shown. Nil off the link.
+    fileprivate var frameTiming: (now: CFTimeInterval, shown: CFTimeInterval)?
+    /// The sheet's top as last read, and when.
+    private var lastTopReading: (top: CGFloat, at: CFTimeInterval)?
+
+    private func predictedTop(drawn: CGFloat, model: CGFloat) -> CGFloat {
+        defer { if let frameTiming { lastTopReading = (drawn, frameTiming.now) } }
+        guard let frameTiming, abs(drawn - model) > 0.5,
+              let last = lastTopReading, frameTiming.now > last.at else { return drawn }
+        let speed = (drawn - last.top) / CGFloat(frameTiming.now - last.at)
+        let ahead = drawn + speed * CGFloat(frameTiming.shown - frameTiming.now)
+        return min(max(ahead, min(drawn, model)), max(drawn, model))
+    }
+
+    /// Before each commit: a sheet moved under a finger since the link's call
+    /// — a touch handled after it — is followed in the same frame.
+    private var followCommitObserver: CFRunLoopObserver?
+    private var lastFollowedModelTop: CGFloat?
+
+    private func observeCommits() {
+        // Just ahead of Core Animation's own commit observer (order 2 000 000).
+        let observer = CFRunLoopObserverCreateWithHandler(
+            nil, CFRunLoopActivity.beforeWaiting.rawValue, true, 1_999_000
+        ) { [weak self] _, _ in
+            MainActor.assumeIsolated { self?.followIfMovedByHand() }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        followCommitObserver = observer
+    }
+
+    private func followIfMovedByHand() {
+        guard let container = sheet.presentationController?.containerView,
+              let presented = sheet.presentationController?.presentedView,
+              presented.layer.animationKeys()?.isEmpty ?? true else { return }
+        let modelTop = container.convert(presented.frame, to: nil).minY
+        guard let last = lastFollowedModelTop, abs(modelTop - last) > 0.1 else { return }
+        let timing = frameTiming
+        frameTiming = nil
+        follow()
+        frameTiming = timing
+    }
+
     /// The page as the sheet stands this frame.
     fileprivate func follow() {
         followKeyboardDrag()
@@ -352,6 +399,16 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             drawnTop = modelTop
         }
         lastDrawnTop = drawnTop
+        // ⚠️ ONE FRAME AHEAD (measured on a device, 2026-11-03): read at the
+        // display link's call, the presentation layer is the sheet NOW, and
+        // the frame this pass builds is shown a frame later — the media a
+        // frame behind the sheet, the gap between them breathing with the
+        // sheet's speed. While UIKit animates the sheet (its drawn top is not
+        // its model's), its top is carried on at its current speed to the
+        // moment the frame is shown, never past where it is going. Under a
+        // finger there is no animation: the model frame is the sheet's, and
+        // it is followed before the frame commits (`followCommitObserver`).
+        let shownTop = predictedTop(drawn: drawnTop, model: modelTop)
         // …against where it RESTS. The model frame is the end of whatever is
         // animating — the rest on the way in and on a refit — but once the
         // sheet starts to leave it is the finger's, then the exit's, off the
@@ -374,12 +431,13 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         // higher than its cap's top: a sheet above it is past 1, the page
         // held there, and a drag back down shows the page again only once
         // the sheet is below its collapsed rest.
+        lastFollowedModelTop = modelTop
         if !isLeaving, !content.isKeyboardUp {
             if sheet.isBeingPresented { correctCap(restingAt: modelTop) }
             restingTop = max(modelTop, capTop ?? modelTop)
         }
         guard let restingTop else { return }
-        let top = drawnTop
+        let top = shownTop
         let progress = (height - top) / max(1, height - restingTop)
         // The room above the sheet, a breath short of its top and of the
         // screen's sides: the media never touches them.
@@ -737,6 +795,8 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         hasEnded = true
         link?.invalidate()
         link = nil
+        if let followCommitObserver { CFRunLoopRemoveObserver(CFRunLoopGetMain(), followCommitObserver, .commonModes) }
+        followCommitObserver = nil
         removePreview()
         catcher.removeFromSuperview()
         sheet.presentationController?.containerView?.transform = .identity
@@ -785,8 +845,10 @@ private final class DisplayLinkTarget: NSObject {
         self.session = session
     }
 
-    @objc func tick() {
+    @objc func tick(_ link: CADisplayLink) {
+        session?.frameTiming = (link.timestamp, link.targetTimestamp)
         session?.follow()
+        session?.frameTiming = nil
     }
 }
 
