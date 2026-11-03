@@ -157,7 +157,38 @@ final class PostDetailViewController: UIViewController {
         applyRailWayBack()
         onScrollAwayChange?(stream.showsScrollAwayReturn)
         syncDayUnderHeader()
+        if wearsSheetEdges { sheetEdgePocket.scrollView = stream.collectionView }
         onVisibleStreamChange?(stream.kind)
+    }
+
+    // MARK: - The comments sheet's edges (#2087)
+
+    /// Whether the panel wears the sheet's edges (`wearSheetEdges`).
+    private var wearsSheetEdges = false
+    /// The composer as the pocket over the visible list's bottom edge.
+    private let sheetEdgePocket = UIScrollEdgeElementContainerInteraction()
+
+    /// The comments sheet's edges: UIKit's own SOFT edge effects, as the
+    /// app's other lists wear them (the owner, 2026-11-03) — the top one
+    /// under the sheet's bar, a titled screen's (`prefersSoftTopEdge`), the
+    /// bottom one under the composer, which stands over the visible list's
+    /// bottom edge as its pocket: `BottomEdgeBlurView`'s mechanism, the
+    /// composer being the content over the edge. The host's bar tracks
+    /// `stream.collectionView` (`onVisibleStreamChange`).
+    ///
+    /// ⚠️ On a window, not before: touching an edge effect materialises Liquid
+    /// Glass machinery (`StatusBarBlurView`).
+    func wearSheetEdges() {
+        guard !wearsSheetEdges else { return }
+        wearsSheetEdges = true
+        for stream in streams {
+            stream.collectionView.prefersSoftTopEdge()
+            stream.collectionView.bottomEdgeEffect.isHidden = false
+            stream.collectionView.bottomEdgeEffect.style = .soft
+        }
+        sheetEdgePocket.edge = .bottom
+        sheetEdgePocket.scrollView = stream.collectionView
+        composeBar.addInteraction(sheetEdgePocket)
     }
 
     // MARK: - The stream, as the panel's

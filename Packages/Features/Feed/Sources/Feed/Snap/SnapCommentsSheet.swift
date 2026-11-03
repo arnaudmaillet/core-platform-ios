@@ -102,18 +102,22 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         guard !hasEnded, sheet.presentingViewController != nil else { return }
         sheet.view.endEditing(true)
         content.freeze()
-        // The bars come back WITH the sheet's exit, not after it.
-        setBarsHidden(false, animated: true)
+        // The toolbar comes back WITH the sheet's exit; the top bar after it.
+        setBarsHidden(false, animated: true, includingNavigationBar: false)
         feed?.dismiss(presented: sheet)
     }
 
     /// The page's bars: gone while the sheet is up, as the sheet found them
     /// otherwise. Idempotent — the exit asks more than once.
-    private func setBarsHidden(_ hidden: Bool, animated: Bool) {
+    ///
+    /// ⚠️ THE TOP BAR ONLY ONCE THE SHEET HAS GONE (the owner, 2026-11-03):
+    /// `includingNavigationBar` false brings the toolbar back alone — the
+    /// exit's — and the navigation bar waits for the end.
+    private func setBarsHidden(_ hidden: Bool, animated: Bool, includingNavigationBar: Bool = true) {
         guard let barsWereHidden, let navigation = feed?.navigationController else { return }
         let navigationHidden = hidden || barsWereHidden.navigation
         let toolbarHidden = hidden || barsWereHidden.toolbar
-        if navigation.isNavigationBarHidden != navigationHidden {
+        if includingNavigationBar, navigation.isNavigationBarHidden != navigationHidden {
             navigation.setNavigationBarHidden(navigationHidden, animated: animated)
         }
         if navigation.isToolbarHidden != toolbarHidden {
@@ -157,10 +161,10 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
 
     // MARK: UIAdaptivePresentationControllerDelegate
 
-    /// A swipe down has begun: the bars start back now, and leave again if
-    /// the sheet is let go back to its rest.
+    /// A swipe down has begun: the toolbar starts back now (the top bar waits
+    /// for the end), and leaves again if the sheet is let go back to its rest.
     func presentationControllerWillDismiss(_ presentationController: UIPresentationController) {
-        setBarsHidden(false, animated: true)
+        setBarsHidden(false, animated: true, includingNavigationBar: false)
         content.freeze()
         sheet.transitionCoordinator?.notifyWhenInteractionChanges { [weak self] context in
             guard context.isCancelled else { return }
@@ -200,6 +204,11 @@ final class SnapCommentsSheetViewController: UIViewController {
     let walletBadge: WalletBadgeButton?
     var onDismissed: (() -> Void)?
     private let keyboardObservers = NotificationObserverBag()
+    /// Over the list's top edge, as tall as the bar: what makes UIKit draw
+    /// the soft edge under it (`viewWillAppear`).
+    private let topPocket = UIView()
+    private let topPocketElement = UILabel()
+    private let topPocketInteraction = UIScrollEdgeElementContainerInteraction()
 
     init(panel: UIViewController, walletBadge: WalletBadgeButton?, onWalletTap: (() -> Void)?) {
         self.panel = panel
@@ -229,10 +238,37 @@ final class SnapCommentsSheetViewController: UIViewController {
         view.addSubview(panel.view)
         panel.didMove(toParent: self)
         NSLayoutConstraint.activate([
-            panel.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            // Under the bar: the rows pass behind it, its soft edge over them.
+            panel.view.topAnchor.constraint(equalTo: view.topAnchor),
             panel.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             panel.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             panel.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        // ⚠️ AN UNTITLED BAR DRAWS NO EDGE IN A SHEET. UIKit resolves the
+        // soft top effect under a bar of pills alone to the status band
+        // (`StatusBarBlurView`), and a sheet has none — so the list passed
+        // under the tabs with nothing between. `BottomEdgeBlurView`'s pocket,
+        // at the top: a view over the edge, holding content (a clear label —
+        // an empty view draws nothing), takes the bar's place.
+        topPocket.isUserInteractionEnabled = false
+        topPocket.accessibilityElementsHidden = true
+        topPocket.translatesAutoresizingMaskIntoConstraints = false
+        topPocketElement.text = " "
+        topPocketElement.textColor = .clear
+        topPocketElement.isAccessibilityElement = false
+        topPocketElement.translatesAutoresizingMaskIntoConstraints = false
+        topPocket.addSubview(topPocketElement)
+        view.addSubview(topPocket)
+        NSLayoutConstraint.activate([
+            topPocket.topAnchor.constraint(equalTo: view.topAnchor),
+            topPocket.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            topPocket.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            topPocket.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            // The whole pocket: the edge is drawn as tall as what it holds.
+            topPocketElement.topAnchor.constraint(equalTo: topPocket.topAnchor),
+            topPocketElement.bottomAnchor.constraint(equalTo: topPocket.bottomAnchor),
+            topPocketElement.leadingAnchor.constraint(equalTo: topPocket.leadingAnchor),
+            topPocketElement.trailingAnchor.constraint(equalTo: topPocket.trailingAnchor),
         ])
         tabs.bind(to: panel as? PostDetailViewController)
         // ⚠️ THE KEYBOARD'S GUIDE IS ANCHORED TO THE SCREEN: with no keyboard
@@ -249,6 +285,28 @@ final class SnapCommentsSheetViewController: UIViewController {
         keyboardObservers.add(center.addObserver(
             forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main
         ) { [weak detail] _ in MainActor.assumeIsolated { detail?.setComposerTracksKeyboard(false) } })
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        guard let detail = panel as? PostDetailViewController else { return }
+        // The app's soft edges, top and bottom; the bar follows the tab shown.
+        detail.wearSheetEdges()
+        if topPocketInteraction.view == nil {
+            topPocketInteraction.edge = .top
+            topPocket.addInteraction(topPocketInteraction)
+        }
+        follow(detail.stream.collectionView)
+        detail.onVisibleStreamChange = { [weak self, weak detail] _ in
+            guard let self, let detail else { return }
+            follow(detail.stream.collectionView)
+        }
+    }
+
+    /// The bar and the top pocket on the list shown.
+    private func follow(_ list: UIScrollView) {
+        setContentScrollView(list, for: .top)
+        topPocketInteraction.scrollView = list
     }
 
     /// The sheet is leaving: its content moves as one piece from here.
@@ -269,7 +327,9 @@ final class SnapCommentsSheetViewController: UIViewController {
         super.viewSafeAreaInsetsDidChange()
         guard let detail = panel as? PostDetailViewController else { return }
         let rest = view.safeAreaInsets.bottom + Spacing.sm
-        detail.setEngagedInsets(top: 0, bottomInset: max(0, rest - detail.composerRestingGap))
+        detail.setEngagedInsets(
+            top: view.safeAreaInsets.top, bottomInset: max(0, rest - detail.composerRestingGap)
+        )
     }
 
     override func viewDidDisappear(_ animated: Bool) {
