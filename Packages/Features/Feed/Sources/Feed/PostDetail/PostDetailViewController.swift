@@ -178,6 +178,13 @@ final class PostDetailViewController: UIViewController {
         return engaged.top + rows + engaged.bottom
     }
 
+    /// Whether Recent rides the keyboard, as a conversation does (#2007).
+    /// Not in the comments sheet (#2087): UIKit raises the sheet itself over
+    /// the keyboard, and Recent riding it too was pinned to its tail then
+    /// clamped back, inside the keyboard's animation — the rows slid under
+    /// the bar and back (measured, 2026-11-03).
+    var streamsRideKeyboard = true
+
     /// A stream its room holds whole does not scroll at all, so a drag on it
     /// is the sheet's own — the sheet stretches and springs back, as it does
     /// under the grabber (#2087, the owner 2026-11-03). A longer stream
@@ -387,7 +394,7 @@ final class PostDetailViewController: UIViewController {
         refitEmptyPageOnHeightChange()
         syncDayUnderHeader()
         // Rows realised as the engaged stream grows into its room (#1799).
-        let rise = composerRise
+        let rise = streamsRideKeyboard ? composerRise : 0
         streams.forEach {
             $0.syncBottomAnchor()
             $0.syncKeyboardRise(rise)

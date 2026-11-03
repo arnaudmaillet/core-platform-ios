@@ -3836,6 +3836,8 @@ final class SnapFeedViewController: UIViewController {
         detail?.anchorsShortStream = false
         // …and, held whole, leaves a drag on it to the sheet.
         detail?.letSheetTakeShortStreams()
+        // The sheet rises over the keyboard itself: Recent does not ride it.
+        detail?.streamsRideKeyboard = false
         // The count the feed knows: no comment bones for a post with none (#1773).
         detail?.seedCommentCount(modelsByID[id]?.cardMetrics?.comments)
         detail?.setStreamTransitionProgress(0)

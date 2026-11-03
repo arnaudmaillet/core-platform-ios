@@ -177,11 +177,11 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         let height = window.bounds.height
         // Where the sheet IS on screen, mid-animation or under a finger: its
         // presentation layer, carried up the presentation tree to the window.
-        let top: CGFloat
+        let drawnTop: CGFloat
         if let layer = presented.layer.presentation() {
-            top = layer.convert(layer.bounds, to: nil).minY
+            drawnTop = layer.convert(layer.bounds, to: nil).minY
         } else {
-            top = container.convert(presented.frame, to: nil).minY
+            drawnTop = container.convert(presented.frame, to: nil).minY
         }
         // …against where it RESTS. The model frame is the end of whatever is
         // animating — the rest on the way in and on a refit — but once the
@@ -190,8 +190,19 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         // under the finger and ran to 157 on the release: the media held its
         // shrunk size all the way down and jumped to full screen at the end.
         // So the rest is kept from before the sheet started to leave.
-        if !isLeaving { restingTop = container.convert(presented.frame, to: nil).minY }
+        //
+        // ⚠️ AND FROM BEFORE THE KEYBOARD CAME (measured, 2026-11-03). UIKit
+        // raises the sheet over the keyboard (its top from 507 to 193 pt):
+        // read then, the rest jumped with it — the progress fell to 0.54 and
+        // the media grew back towards full screen for a frame. Against the
+        // rest from before, a sheet above it is past 1 (held there by the
+        // page), and the media shrinks with the rising sheet into the room
+        // left above it (the owner, 2026-11-03).
+        if !isLeaving, !content.isKeyboardUp {
+            restingTop = container.convert(presented.frame, to: nil).minY
+        }
         guard let restingTop else { return }
+        let top = drawnTop
         let progress = (height - top) / max(1, height - restingTop)
         // The room above the sheet, a breath short of its top: the media
         // never touches the sheet.
@@ -284,6 +295,14 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         id: Self.closeItemID, image: UIImage(systemName: "xmark"), label: "Close comments"
     ) { [weak self] in self?.onClose?() }
     private let keyboardObservers = NotificationObserverBag()
+    /// Whether a keyboard is up (or coming up) over the sheet.
+    private(set) var isKeyboardUp = false
+    /// The panel to the sheet's bottom at rest; to its resting height while
+    /// a keyboard is up (`setKeyboardUp`).
+    private var panelBottom: NSLayoutConstraint?
+    private var panelHeight: NSLayoutConstraint?
+    /// The view's height at rest, without a keyboard.
+    private var restingHeight: CGFloat = 0
     /// Over the list's top edge, as tall as the bar: what makes UIKit draw
     /// the soft edge under it (`viewWillAppear`).
     private let topPocket = UIView()
@@ -321,12 +340,15 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         panel.view.backgroundColor = .clear
         view.addSubview(panel.view)
         panel.didMove(toParent: self)
+        let bottom = panel.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        panelBottom = bottom
+        panelHeight = panel.view.heightAnchor.constraint(equalToConstant: 0)
         NSLayoutConstraint.activate([
             // Under the bar: the rows pass behind it, its soft edge over them.
             panel.view.topAnchor.constraint(equalTo: view.topAnchor),
             panel.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             panel.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            panel.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            bottom,
         ])
         // ⚠️ AN UNTITLED BAR DRAWS NO EDGE IN A SHEET. UIKit resolves the
         // soft top effect under a bar of pills alone to the status band
@@ -356,20 +378,23 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
             topPocketElement.trailingAnchor.constraint(equalTo: topPocket.trailingAnchor),
         ])
         tabs.bind(to: panel as? PostDetailViewController)
-        // ⚠️ THE KEYBOARD'S GUIDE IS ANCHORED TO THE SCREEN: with no keyboard
-        // up, the input row's ceiling is the screen's bottom, so a sheet
-        // sliding in or out left the field pinned there while everything
-        // else moved (the owner, 2026-11-03). The sheet moves as ONE frozen
-        // piece: the row follows the keyboard only while one is coming up.
-        let detail = panel as? PostDetailViewController
-        detail?.setComposerTracksKeyboard(false)
+        // ⚠️ THE COMPOSER NEVER RIDES THE KEYBOARD HERE (measured,
+        // 2026-11-03). UIKit raises the sheet itself over the keyboard, its
+        // resting height just above the keys: the composer, at the foot of
+        // the panel held at that height (`setKeyboardUp`), lands over them
+        // with the sheet, as one piece. Riding the keyboard's guide as well —
+        // a guide anchored to the screen, on the keyboard's curve while the
+        // sheet moves on its own — pinned the field at the screen's bottom
+        // while a sheet slid in or out, and threw it over the rows while the
+        // sheet rose.
+        (panel as? PostDetailViewController)?.setComposerTracksKeyboard(false)
         let center = NotificationCenter.default
         keyboardObservers.add(center.addObserver(
             forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
-        ) { [weak detail] _ in MainActor.assumeIsolated { detail?.setComposerTracksKeyboard(true) } })
+        ) { [weak self] _ in MainActor.assumeIsolated { self?.setKeyboardUp(true) } })
         keyboardObservers.add(center.addObserver(
             forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main
-        ) { [weak detail] _ in MainActor.assumeIsolated { detail?.setComposerTracksKeyboard(false) } })
+        ) { [weak self] _ in MainActor.assumeIsolated { self?.setKeyboardUp(false) } })
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -424,7 +449,33 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     /// The panel's height for what it shows (`PostDetailViewController.fittedHeight`).
     var fittedHeight: CGFloat? { (panel as? PostDetailViewController)?.fittedHeight }
 
-    /// The sheet is leaving: its content moves as one piece from here.
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        if !isKeyboardUp { restingHeight = view.bounds.height }
+    }
+
+    /// ⚠️ THE KEYBOARD DOES NOT RESIZE THE PANEL (measured, 2026-11-03).
+    /// UIKit raises the sheet over the keyboard and grows it down under the
+    /// keys (its content from 373 to 701 pt). While a keyboard is up the
+    /// panel keeps its resting height, pinned to the sheet's top: its foot —
+    /// the composer — then stands just over the keys, and the sheet grows
+    /// below it, under them.
+    private func setKeyboardUp(_ up: Bool) {
+        guard up != isKeyboardUp, let panelBottom, let panelHeight, restingHeight > 0 else { return }
+        isKeyboardUp = up
+        if up {
+            panelHeight.constant = restingHeight
+            panelBottom.isActive = false
+            panelHeight.isActive = true
+        } else {
+            panelHeight.isActive = false
+            panelBottom.isActive = true
+        }
+    }
+
+    /// The sheet is leaving: its content moves as one piece from here. The
+    /// composer never rides the keyboard in the sheet (`viewDidLoad`); kept
+    /// for the call sites that say so.
     func freeze() {
         (panel as? PostDetailViewController)?.setComposerTracksKeyboard(false)
     }
