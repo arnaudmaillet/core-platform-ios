@@ -174,6 +174,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
                 }
             }
             controller.largestUndimmedDetentIdentifier = Self.expandedDetent
+            if #available(iOS 26.1, *) { controller.backgroundEffect = UIColorEffect(color: Self.ground) }
             controller.prefersGrabberVisible = true
             // A scroll at the top of the rows grows the sheet first, as a
             // drag on its bar does — with nothing to grow to, it scrolls.
@@ -859,8 +860,21 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// comments outgrow it.
     private func detents(expandable: Bool) -> [UISheetPresentationController.Detent] {
         guard let collapsedDetent else { return [] }
-        guard expandable else { return [collapsedDetent] }
-        return [collapsedDetent, .custom(identifier: Self.expandedDetent) { $0.maximumDetentValue }]
+        guard expandable else { return [Self.opaque(collapsedDetent)] }
+        return [collapsedDetent, .custom(identifier: Self.expandedDetent) { $0.maximumDetentValue }].map(Self.opaque)
+    }
+
+    /// The sheet's ground: opaque, the page's plain background (the owner,
+    /// 2026-11-03: white, not the glass's grey over the black page) — on
+    /// every detent and the presentation itself, or it is glass on the way
+    /// up (as the wallet sheet found, #1494).
+    private static let ground = UIColor.systemBackground
+
+    private static func opaque(
+        _ detent: UISheetPresentationController.Detent
+    ) -> UISheetPresentationController.Detent {
+        if #available(iOS 26.1, *) { detent.backgroundEffect = UIColorEffect(color: ground) }
+        return detent
     }
 
     private func end() {
