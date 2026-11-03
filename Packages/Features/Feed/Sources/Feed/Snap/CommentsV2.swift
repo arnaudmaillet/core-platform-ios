@@ -11,7 +11,12 @@ import Foundation
 public enum CommentsV2 {
     #if DEBUG
     public static var isEnabled = ProcessInfo.processInfo.arguments.contains("-comments-v2")
+    /// The sheet's bar in a navigation stack of its own — the first build,
+    /// kept aside (the owner, 2026-11-03): `-comments-v2-navstack`. Off, the
+    /// sheet carries a lone `UINavigationBar` (`SnapCommentsSheetViewController`).
+    public static var sheetUsesNavigationStack = ProcessInfo.processInfo.arguments.contains("-comments-v2-navstack")
     #else
     public static let isEnabled = false
+    public static let sheetUsesNavigationStack = false
     #endif
 }

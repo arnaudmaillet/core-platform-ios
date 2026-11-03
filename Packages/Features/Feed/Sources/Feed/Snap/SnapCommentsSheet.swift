@@ -33,8 +33,10 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     static let mediaGap: CGFloat = Spacing.md
 
     let postID: PostID
-    /// What is presented: the content in a stack of its own, for its bar.
-    let sheet: UINavigationController
+    /// What is presented: the content itself, carrying its own bar — or, as
+    /// first built (`CommentsV2.sheetUsesNavigationStack`), in a stack of its
+    /// own for the stack's bar.
+    let sheet: UIViewController
     let content: SnapCommentsSheetViewController
     private weak var feed: UIViewController?
     private weak var cell: SnapFeedCell?
@@ -64,8 +66,11 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
          walletBadge: WalletBadgeButton?, onWalletTap: (() -> Void)?,
          onEnd: @escaping () -> Void) {
         self.postID = postID
-        content = SnapCommentsSheetViewController(panel: panel, walletBadge: walletBadge, onWalletTap: onWalletTap)
-        sheet = UINavigationController(rootViewController: content)
+        let stacked = CommentsV2.sheetUsesNavigationStack
+        content = SnapCommentsSheetViewController(
+            panel: panel, walletBadge: walletBadge, onWalletTap: onWalletTap, ownsBar: !stacked
+        )
+        sheet = stacked ? UINavigationController(rootViewController: content) : content
         self.feed = feed
         self.cell = cell
         self.onEnd = onEnd
@@ -257,7 +262,15 @@ private final class DisplayLinkTarget: NSObject {
 /// first step: the panel moves, its redesign comes after), under the sheet's
 /// own bar — the Popular | Recent selector leading, the balance trailing (the
 /// owner, 2026-11-03), the page's own balance gone with the page's bar.
-final class SnapCommentsSheetViewController: UIViewController {
+///
+/// ⚠️ A LONE BAR, NOT A NAVIGATION STACK (profiled, 2026-11-03). Nothing is
+/// pushed in the sheet: the stack was there for its bar alone, and moving it
+/// into the window — its bars' set-up and position, the insets it hands down
+/// — weighed on every opening. The bar is a `UINavigationBar` this screen
+/// holds, showing its own `navigationItem`: the same native items, and a
+/// height known before the sheet is presented. The stacked build stays
+/// behind `CommentsV2.sheetUsesNavigationStack`.
+final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDelegate {
     static let tabsItemID = "feed.comments.sheet.tabs"
     static let closeItemID = "feed.comments.sheet.close"
 
@@ -277,9 +290,13 @@ final class SnapCommentsSheetViewController: UIViewController {
     private let topPocketElement = UILabel()
     private let topPocketInteraction = UIScrollEdgeElementContainerInteraction()
 
-    init(panel: UIViewController, walletBadge: WalletBadgeButton?, onWalletTap: (() -> Void)?) {
+    /// The sheet's own bar; nil in a navigation stack, whose bar it uses.
+    private let ownBar: UINavigationBar?
+
+    init(panel: UIViewController, walletBadge: WalletBadgeButton?, onWalletTap: (() -> Void)?, ownsBar: Bool) {
         self.panel = panel
         self.walletBadge = walletBadge
+        ownBar = ownsBar ? UINavigationBar() : nil
         super.init(nibName: nil, bundle: nil)
         guard let walletBadge else { return }
         walletBadge.isUserInteractionEnabled = onWalletTap != nil
@@ -326,11 +343,12 @@ final class SnapCommentsSheetViewController: UIViewController {
         topPocketElement.translatesAutoresizingMaskIntoConstraints = false
         topPocket.addSubview(topPocketElement)
         view.addSubview(topPocket)
+        if let ownBar { installOwnBar(ownBar) }
         NSLayoutConstraint.activate([
             topPocket.topAnchor.constraint(equalTo: view.topAnchor),
             topPocket.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             topPocket.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            topPocket.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            topPocket.bottomAnchor.constraint(equalTo: ownBar?.bottomAnchor ?? view.safeAreaLayoutGuide.topAnchor),
             // The whole pocket: the edge is drawn as tall as what it holds.
             topPocketElement.topAnchor.constraint(equalTo: topPocket.topAnchor),
             topPocketElement.bottomAnchor.constraint(equalTo: topPocket.bottomAnchor),
@@ -368,6 +386,33 @@ final class SnapCommentsSheetViewController: UIViewController {
             guard let self, let detail else { return }
             follow(detail.stream.collectionView)
         }
+    }
+
+    /// The lone bar: at the sheet's top, under the grabber's band, showing
+    /// this screen's item, with no ground of its own — the sheet's material
+    /// is its ground, as a stack's bar in a sheet.
+    private func installOwnBar(_ bar: UINavigationBar) {
+        let appearance = UINavigationBarAppearance()
+        appearance.configureWithTransparentBackground()
+        bar.standardAppearance = appearance
+        bar.scrollEdgeAppearance = appearance
+        bar.delegate = self
+        bar.items = [navigationItem]
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bar)
+        NSLayoutConstraint.activate([
+            bar.topAnchor.constraint(equalTo: view.topAnchor, constant: Spacing.lg),
+            bar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ])
+    }
+
+    func position(for bar: UIBarPositioning) -> UIBarPosition { .top }
+
+    /// The bar's bottom in this view: the lone bar's, or the stack's.
+    private var barBottom: CGFloat {
+        if let ownBar { return ownBar.frame.maxY }
+        return navigationController.map { view.convert($0.navigationBar.frame, from: $0.view).maxY } ?? 0
     }
 
     /// The bar and the top pocket on the list shown.
@@ -427,8 +472,7 @@ final class SnapCommentsSheetViewController: UIViewController {
     /// has appeared.
     func applyPanelInsets() {
         guard let detail = panel as? PostDetailViewController else { return }
-        let bar = navigationController.map { view.convert($0.navigationBar.frame, from: $0.view).maxY } ?? 0
-        let measured = max(view.safeAreaInsets.top, bar)
+        let measured = max(view.safeAreaInsets.top, barBottom)
         let barBottom = hasAppeared ? measured : max(measured, Self.settledBarBottom ?? 0)
         let top = barBottom + SnapCommentsLayout.streamTopBreath
         let bottom = max(0, composerBottomInset + Spacing.sm - detail.composerRestingGap)
@@ -444,14 +488,13 @@ final class SnapCommentsSheetViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         hasAppeared = true
-        let bar = navigationController.map { view.convert($0.navigationBar.frame, from: $0.view).maxY } ?? 0
-        Self.settledBarBottom = max(view.safeAreaInsets.top, bar)
+        Self.settledBarBottom = max(view.safeAreaInsets.top, barBottom)
         // The learned bottom was this one's, or the panel takes the real one.
         applyPanelInsets()
     }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        if navigationController?.isBeingDismissed == true { onDismissed?() }
+        if (navigationController ?? self).isBeingDismissed { onDismissed?() }
     }
 }
