@@ -33,12 +33,16 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     static let ceilingShare: CGFloat = 0.75
     static let detent = UISheetPresentationController.Detent.Identifier("feed.comments.v2")
     /// Between the shrunk media's bottom and the sheet's top.
-    static let mediaGap: CGFloat = Spacing.md
+    static let mediaGap: CGFloat = Spacing.sm
+    /// Between the shrunk media and the screen's sides: it never touches
+    /// them (the owner, 2026-11-03).
+    static let mediaSideMargin: CGFloat = Spacing.sm
 
     /// The sheet's tallest resting height, the media's to decide (the owner,
-    /// 2026-11-03): the media keeps the screen's whole width in the room
-    /// above, and the sheet takes what is left, between `floorShare` and
-    /// `ceilingShare` of the screen. A 16:9 media keeps its whole width; a
+    /// 2026-11-03): the media keeps the screen's whole width, less its side
+    /// margins, in the room above, and the sheet takes what is left, between
+    /// `floorShare` and `ceilingShare` of the screen. A 16:9 media keeps its
+    /// whole width; a
     /// portrait one, which the width would leave the sheet no room, gets the
     /// floor. Read once, at the opening: a carousel paged under the sheet
     /// does not move it.
@@ -52,7 +56,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         let floor = screen.height * floorShare
         let ceiling = screen.height * ceilingShare
         guard picture.width > 0, picture.height > 0 else { return floor }
-        let mediaHeight = screen.width * picture.height / picture.width
+        let mediaHeight = (screen.width - 2 * mediaSideMargin) * picture.height / picture.width
         let left = screen.height - safeArea.top - mediaHeight - mediaGap - safeArea.bottom
         return min(max(left, floor), ceiling)
     }
@@ -82,6 +86,14 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// Where the sheet's top rests, in the window: kept while it is not
     /// leaving (`follow`).
     private var restingTop: CGFloat?
+    /// The detent last resolved at the media's cap, not at its content's
+    /// height, and where the sheet's top should then rest, in the window
+    /// (`correctCap`).
+    private var restsAtCap = false
+    private var capTop: CGFloat?
+    /// What a floating sheet's detent needs on top of `restingHeight` to rest
+    /// where it says, measured on the first sheet and kept (`correctCap`).
+    private static var capCorrection: CGFloat = 0
     /// Follows the keyboard's top, frame by frame — its interactive
     /// dismissal included, which no notification reports.
     private let keyboardTracker = UIView()
@@ -126,15 +138,19 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         sheet.overrideUserInterfaceStyle = .dark
         sheet.presentationController?.traitOverrides.userInterfaceStyle = .dark
         if let controller = sheet.sheetPresentationController {
-            controller.detents = [.custom(identifier: Self.detent) { [weak content] context in
-                let cap = min(context.maximumDetentValue, resting)
-                let fitted = MainActor.assumeIsolated { content?.fittedHeight }
-                return fitted.map { min(cap, $0 - bottomInset) } ?? cap
+            controller.detents = [.custom(identifier: Self.detent) { [weak self, weak content] context in
+                MainActor.assumeIsolated {
+                    let cap = min(context.maximumDetentValue, resting + Self.capCorrection)
+                    let height = content?.fittedHeight.map { min(cap, $0 - bottomInset) } ?? cap
+                    self?.restsAtCap = height == cap && cap < context.maximumDetentValue
+                    return height
+                }
             }]
             controller.largestUndimmedDetentIdentifier = Self.detent
             controller.prefersGrabberVisible = true
             controller.prefersScrollingExpandsWhenScrolledToEdge = false
         }
+        capTop = window.bounds.height - resting - bottomInset
         content.onDismissed = { [weak self] in self?.end() }
         content.onClose = { [weak self] in self?.close() }
 
@@ -317,18 +333,38 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         // left above it (the owner, 2026-11-03).
         if !isLeaving, !content.isKeyboardUp {
             restingTop = container.convert(presented.frame, to: nil).minY
+            correctCap()
         }
         guard let restingTop else { return }
         let top = drawnTop
         let progress = (height - top) / max(1, height - restingTop)
-        // The room above the sheet, a breath short of its top: the media
-        // never touches the sheet.
+        // The room above the sheet, a breath short of its top and of the
+        // screen's sides: the media never touches them.
         let roomTop = window.safeAreaInsets.top
         let region = CGRect(
-            x: 0, y: roomTop, width: window.bounds.width, height: max(1, top - Self.mediaGap - roomTop)
+            x: Self.mediaSideMargin, y: roomTop,
+            width: window.bounds.width - 2 * Self.mediaSideMargin,
+            height: max(1, top - Self.mediaGap - roomTop)
         )
         cell.setCommentsSheetLayout(progress: progress, mediaRegion: region)
         refit()
+    }
+
+    /// ⚠️ A FLOATING SHEET RESTS LOWER THAN ITS DETENT SAYS (measured,
+    /// 2026-11-03): inset from the screen's edges, it stood ~15 pt under the
+    /// top `restingHeight` reckons (the screen's height less the detent and
+    /// the bottom safe area), so the room above it outgrew the media and the
+    /// gap under the media with it (16 pt seen for 8). The difference is read
+    /// where the sheet rests at its cap — from the first frame, its model
+    /// frame is already the rest — given back to the detent, and kept for
+    /// the next sheet.
+    private func correctCap() {
+        guard restsAtCap, let restingTop, let capTop,
+              let controller = sheet.sheetPresentationController else { return }
+        let error = restingTop - capTop
+        guard abs(error) > 0.5, abs(Self.capCorrection + error) < 60 else { return }
+        Self.capCorrection += error
+        controller.animateChanges { controller.invalidateDetents() }
     }
 
     /// The detent again when the content's height has moved — rows landing,

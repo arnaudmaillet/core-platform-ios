@@ -3,8 +3,9 @@ import UIKit
 @testable import Feed
 
 /// The comments sheet's tallest resting height follows the media's shape
-/// (#2087, the owner, 2026-11-03): the media keeps the screen's width above
-/// it, the sheet takes the rest, between a floor and a ceiling.
+/// (#2087, the owner, 2026-11-03): the media keeps the screen's width, less
+/// its side margins, above it; the sheet takes the rest, between a floor and
+/// a ceiling.
 @MainActor
 struct CommentsSheetRestingHeightTests {
     /// An iPhone 18 Pro's window.
@@ -24,7 +25,8 @@ struct CommentsSheetRestingHeightTests {
         let height = resting(CGSize(width: 1280, height: 720))
         #expect(height > screen.height * SnapCommentsSheetSession.floorShare)
         #expect(height < screen.height * SnapCommentsSheetSession.ceilingShare)
-        #expect(abs(room(above: height) - screen.width * 720 / 1280) < 0.5)
+        let width = screen.width - 2 * SnapCommentsSheetSession.mediaSideMargin
+        #expect(abs(room(above: height) - width * 720 / 1280) < 0.5)
     }
 
     @Test func aFullScreenPortraitMediaGetsTheFloor() {
