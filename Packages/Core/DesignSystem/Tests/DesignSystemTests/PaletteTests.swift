@@ -135,7 +135,7 @@ struct PaletteTests {
         #expect(Self.hex(Palette.saveGold, Self.light) == theme.saveGold)
         #expect(Palette.brandGradient.map { Self.hex($0, Self.light) } == theme.signatureGradient)
         #expect(Palette.brandGradientLocations.map(\.doubleValue) == theme.signatureLocations)
-        #expect(Palette.loaderGradient.map { Self.hex($0, Self.light) } == theme.signatureGradient, "the loader is the signature")
+        #expect(Palette.loaderTones.map { Self.hex($0, Self.light) } == theme.loaderTones)
     }
 
     /// The owner's values (#2062), as asked.

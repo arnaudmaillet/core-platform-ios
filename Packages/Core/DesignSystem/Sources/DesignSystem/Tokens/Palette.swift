@@ -41,15 +41,15 @@ import UIKit
 ///   never a gradient, under a white count.
 /// - **A filled button wears white** (`onPrimary`) in both appearances.
 /// - **There is no secondary colour any more** (#2062). The violet appears
-///   only inside the signature gradient, as the mint does (#2071: the gems
-///   wear the crown's yellow — `gem`, `gemText`, `gemGround`). Links,
+///   only inside the signature gradient, as the mint does, and on the
+///   loader's last pill (`loaderTones`, #2083) (#2071: the gems wear the
+///   crown's yellow — `gem`, `gemText`, `gemGround`). Links,
 ///   mentions and hashtags are a neutral grey (`entityInk`).
 /// - **Dark mode is not an inversion.** Every role has an Increased
 ///   Contrast value where its contrast is close to the line.
 /// - **The signature gradient is kept to a few places** (`brandGradient`):
-///   the launch logo, the unseen-story ring and the loader's pills — brand
-///   marks, not UI pills. White text never sits over its mint half, so no
-///   button wears it.
+///   the launch logo and the unseen-story ring. White text never sits over
+///   its mint half, so no button wears it.
 public enum Palette {
     // MARK: - Primary: raspberry
 
@@ -157,19 +157,21 @@ public enum Palette {
 
     // MARK: - The loader (#1329)
 
-    /// The gradient the branded loader's three pills show (#1795, #2083):
-    /// the signature itself, raspberry → violet → mint across the pills, at
-    /// `brandGradientLocations` — so the loader can never drift from the
-    /// brand. The same in both appearances: the mark is a logo, not text
-    /// (owner, 2026-10-17). Read through `AppLoaderView`.
-    public static let loaderGradient: [UIColor] = brandGradient
+    /// The branded loader's three pills (#1795, #2083), left to right: the
+    /// primary's raspberry `EC1C75`, an orchid `CF3DC7` halfway to the
+    /// violet, the violet `9B5CFF` — one solid colour each, the owner's call
+    /// (2026-11-03) over a gradient and over the signature's mint. The same
+    /// in both appearances — the mark is a logo, not text (owner,
+    /// 2026-10-17); each is past a graphic's 3:1 on white and on black.
+    /// Read through `AppLoaderView`.
+    public static let loaderTones: [UIColor] = theme.loaderTones.map(rgb)
 
-    /// The leads' gradient — the pills' pale wake (#1795): each of the
-    /// signature's stops mixed `loaderLeadMix` toward the page (`F2F2F7`
-    /// light, black dark), so it resolves per appearance.
-    public static let loaderLeadGradient: [UIColor] = loaderGradient.map { stop in
+    /// Each pill's lead — its pale wake (#1795): the pill's tone mixed
+    /// `loaderLeadMix` toward the page (`F2F2F7` light, black dark), so it
+    /// resolves per appearance.
+    public static let loaderLeadTones: [UIColor] = loaderTones.map { tone in
         UIColor { traits in
-            mixed(stop, toward: traits.userInterfaceStyle == .dark ? .black : rgb(BrandNeutrals.pageLight), by: loaderLeadMix)
+            mixed(tone, toward: traits.userInterfaceStyle == .dark ? .black : rgb(BrandNeutrals.pageLight), by: loaderLeadMix)
         }
     }
 
@@ -234,8 +236,8 @@ public enum Palette {
     public static let gemGround = dynamic(theme.gemGround)
 
     /// THE SIGNATURE GRADIENT (#2062): raspberry → violet → mint, for brand
-    /// moments only (the launch logo, the unseen-story ring, the loader,
-    /// #2083), bottom-left to top-right — the loader runs it left to right. ⚠️ White text never sits over its mint half (1.5:1).
+    /// moments only (the launch logo, the unseen-story ring), bottom-left
+    /// to top-right. ⚠️ White text never sits over its mint half (1.5:1).
     public static let brandGradient: [UIColor] = theme.signatureGradient.map(rgb)
     /// Where each of `brandGradient`'s stops sits. Computed: `NSNumber` is
     /// not `Sendable`, so it cannot be a stored static.

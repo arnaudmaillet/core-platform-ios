@@ -14,10 +14,10 @@ The app's colours are one **theme**: **raspberry**, used almost everywhere, a go
   - the system controls, through the app's tint (`AccentColor` and the main window's `tintColor`);
   - the unseen-story ring, the hearts, and every unread mark.
 - **Every pill and badge is the solid primary** (`counter`), never a gradient, under a white count: the tab bar's badges, the bell's dot, the Messages selector's badges, the inbox's unread pills, the profile switcher's counts.
-- **There is no secondary colour.** The violet appears only inside the signature gradient, as the mint does.
+- **There is no secondary colour.** The violet appears only inside the signature gradient, as the mint does, and on the loader's last pill: the loader runs raspberry → orchid `CF3DC7` → violet, one solid colour per pill (#2083).
 - **Links, `@mentions` and `#hashtags` are a neutral grey** (`entityInk`), set apart by the semibold.
 - **A filled button wears white** (`onPrimary`) in both appearances.
-- **The signature gradient** (`brandGradient`) is for the launch logo, the unseen-story ring and the loader, whose three pills show one horizontal gradient across them (#2083). The loader is a brand mark, not a UI pill, so the rule below does not reach it. **White text never sits over its mint half** (1.5:1), so no button wears it.
+- **The signature gradient** (`brandGradient`) is for the launch logo and the unseen-story ring. **White text never sits over its mint half** (1.5:1), so no button wears it.
 - **The system red is for errors and destruction only.**
 - **A warning is a yellow glyph with neutral words** (`Warning`).
 - **Dark mode is not an inversion.** Roles near the contrast line have Increased Contrast values.
@@ -41,7 +41,8 @@ The app's colours are one **theme**: **raspberry**, used almost everywhere, a go
 | `gemText` → `GemSymbol.textColor` | a gem amount or price as text | `8A6400` | `FFE600` | `7A5800` / `FFE600` |
 | `gemGround` → `GemSymbol.ground` | the wash under a price or a claim, at the reader's alpha | `FFE600` | `FFE600` | — |
 | `saveGold` | the saved star | `FFC53D` | `FFC53D` | — |
-| `signatureGradient` → `brandGradient`, `loaderGradient` | the launch logo, the story ring, the loader's pills (#2083) | `EC1C75` 0 · `9B5CFF` 0.5 · `2EF0A8` 1 | same | — |
+| `signatureGradient` → `brandGradient` | the launch logo, the story ring | `EC1C75` 0 · `9B5CFF` 0.5 · `2EF0A8` 1 | same | — |
+| `loaderTones` | the branded loader's pills, left to right, one solid colour each (#2083) | `EC1C75`, `CF3DC7`, `9B5CFF` | same | — |
 
 ### Measured contrast (WCAG 2.x)
 | Pair | Light | Dark | IC light | IC dark |

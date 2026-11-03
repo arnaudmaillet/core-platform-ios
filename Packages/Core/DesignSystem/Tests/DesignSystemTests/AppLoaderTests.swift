@@ -114,9 +114,9 @@ struct AppLoaderTests {
 
     // MARK: - The view
 
-    private func loader(reducesMotion: Bool = false, size: AppLoaderView.Size = .large) -> (AppLoaderView, UIWindow) {
+    private func loader(reducesMotion: Bool = false) -> (AppLoaderView, UIWindow) {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 200))
-        let view = AppLoaderView(size: size)
+        let view = AppLoaderView(size: .large)
         view.reducesMotion = { reducesMotion }
         window.addSubview(view)
         window.isHidden = false
@@ -192,45 +192,43 @@ struct AppLoaderTests {
         #expect(view.debugAnimationCount == 1, "the dots do not pulse")
     }
 
-    /// ONE GRADIENT ACROSS THE THREE PILLS (#2083, the owner 2026-11-03):
-    /// the signature's colours at its locations, horizontal across the
-    /// loader's square, shown through the pills as its mask — not three
-    /// solid layers.
-    @Test(arguments: [AppLoaderView.Size.medium, .large])
-    func thePillsShowOneSignatureGradient(_ size: AppLoaderView.Size) {
-        let (view, window) = loader(size: size)
-        defer { window.isHidden = true }
-        let traits = view.traitCollection
-        #expect(view.debugTones.pills == Palette.brandGradient.map { $0.resolvedColor(with: traits).cgColor })
-        let gradient = view.debugGradient
-        #expect(gradient.locations == Palette.brandGradientLocations)
-        #expect(gradient.start == CGPoint(x: 0, y: 0.5) && gradient.end == CGPoint(x: 1, y: 0.5), "not horizontal")
-        #expect(gradient.frame == CGRect(x: 0, y: 0, width: size.side, height: size.side), "not the square")
-        #expect(view.debugPillsMaskTheGradient, "the pills are not the gradient's mask")
-        // Its ends are the first pill's leading edge and the last one's
-        // trailing edge, its middle the middle pill's centre.
-        #expect(Geometry.pillFrame(0, height: 0, side: size.side).minX == 0)
-        #expect(abs(Geometry.pillFrame(2, height: 0, side: size.side).maxX - size.side) < 0.001)
-        #expect(abs(Geometry.pillFrame(1, height: 0, side: size.side).midX - size.side / 2) < 0.001)
-    }
-
-    /// The leads are the same gradient made pale toward the page, resolved
-    /// per appearance.
-    @Test func theLeadsAreThePaleGradientPerAppearance() {
-        #expect(Palette.loaderGradient.count == Palette.brandGradient.count)
-        let light = Palette.loaderLeadGradient[0].resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
-        let dark = Palette.loaderLeadGradient[0].resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark))
+    /// The pills wear their tones; each lead its tone toward the page,
+    /// resolved per appearance.
+    @Test func theLeadsResolvePerAppearance() {
+        #expect(Palette.loaderTones.count == 3)
+        let light = Palette.loaderLeadTones[0].resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+        let dark = Palette.loaderLeadTones[0].resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark))
         #expect(light != dark, "the lead does not follow the appearance")
         let (view, window) = loader()
         defer { window.isHidden = true }
         view.overrideUserInterfaceStyle = .dark
         view.layoutIfNeeded()
         let expected = dark.cgColor.components ?? []
-        let drawn = view.debugTones.leads.first?.components ?? []
+        let drawn = view.debugTones.leads[0]?.components ?? []
         #expect(expected.count == drawn.count && zip(expected, drawn).allSatisfy { abs($0 - $1) < 0.01 },
                 "the lead did not re-resolve for dark: \(drawn) vs \(expected)")
-        #expect(view.debugTones.leads.count == 3)
-        #expect(view.debugTones.pills.first == Palette.brandGradient[0].cgColor, "the pills went pale too")
+        #expect(view.debugTones.pills[0] == Palette.loaderTones[0].cgColor)
+    }
+
+    /// RASPBERRY TO VIOLET, ONE SOLID COLOUR PER PILL (#2083, the owner
+    /// 2026-11-03): the primary on the left, the violet on the right, the
+    /// colour halfway between them in the middle — no mint, no gradient.
+    @Test func thePillsRunFromTheRaspberryToTheViolet() {
+        let (view, window) = loader()
+        defer { window.isHidden = true }
+        let light = UITraitCollection(userInterfaceStyle: .light)
+        func hex(_ color: CGColor?) -> UInt32 {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            UIColor(cgColor: color ?? UIColor.clear.cgColor).getRed(&r, green: &g, blue: &b, alpha: &a)
+            return UInt32((r * 255).rounded()) << 16 | UInt32((g * 255).rounded()) << 8 | UInt32((b * 255).rounded())
+        }
+        #expect(view.debugTones.pills.map(hex) == [0xEC1C75, 0xCF3DC7, 0x9B5CFF])
+        #expect(hex(view.debugTones.pills[0]) == hex(Palette.tint.resolvedColor(with: light).cgColor), "the left pill is not the primary")
+        // The middle is between its neighbours on every channel.
+        let channels = view.debugTones.pills.map { hex($0) }.map { [($0 >> 16) & 0xFF, ($0 >> 8) & 0xFF, $0 & 0xFF] }
+        for c in 0..<3 {
+            #expect((min(channels[0][c], channels[2][c])...max(channels[0][c], channels[2][c])).contains(channels[1][c]))
+        }
     }
 
     // MARK: - Pull-to-refresh (#1329 slice 2)
