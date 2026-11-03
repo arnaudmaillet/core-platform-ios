@@ -408,7 +408,7 @@ public final class CountryShopViewController: UIViewController {
         return button
     }
 
-    /// A price on the app's button (#931): the tinted pill, a diamond and the
+    /// A price on the app's button (#931): the tinted pill, the crown and the
     /// price. As a list accessory it goes through `AppButton.cellAccessory`,
     /// whose measured host is what receives the taps (the hand-made host this
     /// replaced). With a `menu`, the tap raises it.
@@ -647,11 +647,11 @@ public final class CountryShopViewController: UIViewController {
         apply(animated: true)
     }
 
-    /// The gem balance on the bar's RIGHT: a cyan diamond and the count, in the
+    /// The gem balance on the bar's RIGHT: the gold crown and the count, in the
     /// glass the system draws behind any bar item.
     ///
     /// ⚠️ AN IMAGE VIEW, NOT A TEXT ATTACHMENT: bar items sit on glass, which
-    /// draws a label's attachments vibrant — the diamond came out black.
+    /// draws a label's attachments vibrant — the glyph came out black.
     /// `.alwaysOriginal` (`GemSymbol.glyphImage`) for the same reason, the
     /// tint as the belt. And a FRESH item per change, with a stable
     /// identifier: a reused custom-view item keeps a wrapper sized for the
@@ -662,17 +662,17 @@ public final class CountryShopViewController: UIViewController {
         navigationItem.rightBarButtonItem = Self.balanceItem(gems: access.gems)
     }
 
-    /// The gems balance as a bar item: a cyan diamond and the count.
+    /// The gems balance as a bar item: the gold crown and the count.
     static func balanceItem(gems: Int) -> UIBarButtonItem {
-        let diamond = UIImageView(image: GemSymbol.glyphImage(.init(pointSize: 14, weight: .bold)))
-        diamond.tintColor = GemSymbol.tint
+        let crown = UIImageView(image: GemSymbol.glyphImage(.init(pointSize: 14, weight: .bold)))
+        crown.tintColor = GemSymbol.tint
         let count = UILabel()
         count.text = gems.formatted()
         count.font = .scaledMonospacedDigitSystemFont(
             ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 20
         )
         count.textColor = .label
-        let balance = UIStackView(arrangedSubviews: [diamond, count])
+        let balance = UIStackView(arrangedSubviews: [crown, count])
         balance.spacing = 6
         balance.alignment = .center
         balance.isLayoutMarginsRelativeArrangement = true

@@ -72,17 +72,18 @@ public struct BrandTheme: Sendable, Equatable {
 
     /// The likes' heart, glyph and coin.
     public let likes: Shade
-    /// The gems' glyph. The violet is the gems' alone, outside the signature
-    /// gradient.
+    /// The gems' glyph, the crown (#2071): the brand's yellow on dark
+    /// grounds, a bright gold on light ones (the owner's pick, 2026-11-03),
+    /// with a deeper gold under Increased Contrast.
     public let gem: Shade
-    /// The gems' violet as TEXT — a price, a balance: deep enough for
-    /// 4.5:1 where the glyph's 3:1 is not.
+    /// The gems as TEXT — a price, a balance, "+N": a deeper gold in the
+    /// light, for 4.5:1 where the glyph's 3:1 is not.
     public let gemText: Shade
-    /// The saved star: one gold.
+    /// The gems' wash under a price or a claim, at the bubble's alpha: the
+    /// yellow itself in both appearances, under `gemText`.
+    public let gemGround: Shade
+    /// The saved star: one gold, apart from the crowns' yellow.
     public let saveGold: UInt32
-    /// Recorded, not drawn: the crowns' colour, when the crowns replace the
-    /// gems. It becomes a role only then.
-    public let crownYellow: UInt32
 
     // MARK: - Brand moments
 
@@ -107,8 +108,8 @@ public struct BrandTheme: Sendable, Equatable {
     public static let current = raspberry
 
     /// Raspberry (#2062, the owner 2026-11-02): the primary almost
-    /// everywhere, the violet for the gems, the signature running raspberry →
-    /// violet → mint.
+    /// everywhere, the yellow for the gems' crown (#2071), the signature
+    /// running raspberry → violet → mint.
     public static let raspberry = BrandTheme(
         name: "raspberry",
         primary: Shade(0xEC1C75, 0xEC1C75, ic: (0xC2105F, 0xF25C9A)),
@@ -121,10 +122,10 @@ public struct BrandTheme: Sendable, Equatable {
         counter: Shade(0xEC1C75, 0xEC1C75, ic: (0xC2105F, 0xC2105F)),
         entityInk: Shade(0x5E5E66, 0xAEAEB4, ic: (0x48484F, 0xC8C8CD)),
         likes: Shade(0xEC1C75, 0xEC1C75, ic: (0xC2105F, 0xF25C9A)),
-        gem: Shade(0x9B5CFF, 0x9B5CFF, ic: (0x7A3FE0, 0xB48AFF)),
-        gemText: Shade(0x7A3FE0, 0xA97AFF, ic: (0x6E33D6, 0xB48AFF)),
+        gem: Shade(0xF5C000, 0xFFE600, ic: (0xA87C00, 0xFFE600)),
+        gemText: Shade(0x8A6400, 0xFFE600, ic: (0x7A5800, 0xFFE600)),
+        gemGround: Shade(0xFFE600, 0xFFE600),
         saveGold: 0xFFC53D,
-        crownYellow: 0xFFE600,
         signatureGradient: [0xEC1C75, 0x9B5CFF, 0x2EF0A8],
         signatureLocations: [0, 0.5, 1],
         loaderTones: [0xEC1C75, 0x9B5CFF, 0x2EF0A8],
