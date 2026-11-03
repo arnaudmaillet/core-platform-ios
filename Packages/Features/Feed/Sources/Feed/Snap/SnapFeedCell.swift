@@ -2008,9 +2008,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// The picture's edge while the sheet is up: a light grey line, one point,
     /// fading in as the media shrinks — on the stage, over the media and
-    /// untransformed, so the line keeps its width at every scale. A trial
-    /// (the owner, 2026-11-03): it marks the media's frame, black bands baked
-    /// into the file included.
+    /// untransformed, so the line keeps its width at every scale. Kept for
+    /// every media (the owner, 2026-11-03): it marks the media's frame, black
+    /// bands baked into the file included, so a viewer sees why they are
+    /// there.
     private var commentsSheetEdge: UIView?
 
     private func drawCommentsSheetEdge(
