@@ -401,6 +401,17 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
                 shell.present(gallery, animated: false)
             }
         }
+        // `-comments-sandbox [shots | post | <post id>]`: the Shots page and
+        // the full-screen post, apart from the app, for the comments redesign
+        // (#2087) — see `CommentsSandbox`.
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains(CommentsSandbox.argument) {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                guard let self, let shell = mainTabCoordinator?.rootViewController else { return }
+                shell.present(CommentsSandbox.make(feed: container.feedFeature, arguments: arguments), animated: false)
+            }
+        }
         #endif
     }
 

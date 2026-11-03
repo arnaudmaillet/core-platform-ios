@@ -57,6 +57,7 @@ struct StackScreenGuardTests {
         "CaptureViewController": "the camera's root",
         "HapticCatalogViewController": "a DEBUG sheet",
         "AppButtonCatalogViewController": "a DEBUG sheet",
+        "CommentsSandboxPostsViewController": "the DEBUG comments sandbox's Post tab root",
         "ToastOverlayRootController": "the toast window's root",
         // Neither.
         "HeroPageViewController": "a base class: its subclasses state theirs",
