@@ -374,7 +374,12 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         let observer = CFRunLoopObserverCreateWithHandler(
             nil, CFRunLoopActivity.beforeWaiting.rawValue, true, 1_999_000
         ) { [weak self] _, _ in
-            MainActor.assumeIsolated { self?.followIfMovedByHand() }
+            MainActor.assumeIsolated {
+                // The keys under a finger too: the rows held over the
+                // composer after the finger's last scroll.
+                self?.followKeyboardDrag()
+                self?.followIfMovedByHand()
+            }
         }
         CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
         followCommitObserver = observer
@@ -1219,11 +1224,33 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         let heldAtRest = restTop + composerBottomInset - window.safeAreaInsets.top
         guard heldAtRest < lowered else { return false }
         let height = min(view.bounds.height, panelHeightOverKeyboard(at: max(restTop, keyboardTop), in: window, cap: false))
-        guard abs(height - panelHeight.constant) > 0.5 else { return true }
-        holdStreamEnd(panelGrowingBy: height - panelHeight.constant)
-        panelHeight.constant = height
+        let growth = height - panelHeight.constant
+        guard let list = (panel as? PostDetailViewController)?.stream.collectionView else { return true }
+        // ⚠️ THE ROWS FOLLOW THE KEYS, NOT THE FINGER (the owner, 2026-11-04):
+        // a drag in the rows that takes the keyboard down also scrolled them
+        // with it, and the last row slid under the keys. As in Messages, once
+        // the keys move, the rows' end keeps where it stood over the composer
+        // — the finger's scroll is held, here, before every commit.
+        let inset = list.adjustedContentInset
+        let boundsHeight = list.bounds.height + growth
+        if keyboardTop > restTop + 0.5 {
+            let gap = keyboardDragEndGap ?? (list.contentSize.height + inset.bottom - list.contentOffset.y - list.bounds.height)
+            keyboardDragEndGap = gap
+            let lowest = -inset.top
+            let highest = max(lowest, list.contentSize.height + inset.bottom - boundsHeight)
+            let offset = min(max(list.contentSize.height + inset.bottom - boundsHeight - gap, lowest), highest)
+            if abs(offset - list.contentOffset.y) > 0.25 { list.contentOffset.y = offset }
+        } else {
+            keyboardDragEndGap = nil
+            holdStreamEnd(panelGrowingBy: growth)
+        }
+        if abs(growth) > 0.5 { panelHeight.constant = height }
         return true
     }
+
+    /// How far the rows' end stood under the composer as the keys began to
+    /// move under a finger (`followKeyboardDrag`).
+    private var keyboardDragEndGap: CGFloat?
 
     private func panelHeightOverKeyboard(at keyboardTop: CGFloat, in window: UIWindow, cap: Bool = true) -> CGFloat {
         let lowered = restingHeight + composerBottomInset - Spacing.sm
@@ -1251,6 +1278,7 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     private func setKeyboardUp(_ up: Bool) {
         guard up != isKeyboardUp, let panelBottom, let panelHeight, restingHeight > 0 else { return }
         isKeyboardUp = up
+        keyboardDragEndGap = nil
         // Nothing of the streams under the composer while it stands on the keys.
         (panel as? PostDetailViewController)?.setStreamsClippedAtComposer(up)
         if up {
