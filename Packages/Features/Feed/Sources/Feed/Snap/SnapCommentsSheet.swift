@@ -29,6 +29,8 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// The sheet's tallest resting height, as a share of the screen.
     static let restingShare: CGFloat = 0.6
     static let detent = UISheetPresentationController.Detent.Identifier("feed.comments.v2")
+    /// Between the shrunk media's bottom and the sheet's top.
+    static let mediaGap: CGFloat = Spacing.md
 
     let postID: PostID
     /// What is presented: the content in a stack of its own, for its bar.
@@ -173,8 +175,12 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         if !isLeaving { restingTop = container.convert(presented.frame, to: nil).minY }
         guard let restingTop else { return }
         let progress = (height - top) / max(1, height - restingTop)
+        // The room above the sheet, a breath short of its top: the media
+        // never touches the sheet.
         let roomTop = window.safeAreaInsets.top
-        let region = CGRect(x: 0, y: roomTop, width: window.bounds.width, height: max(1, top - roomTop))
+        let region = CGRect(
+            x: 0, y: roomTop, width: window.bounds.width, height: max(1, top - Self.mediaGap - roomTop)
+        )
         cell.setCommentsSheetLayout(progress: progress, mediaRegion: region)
         refit()
     }

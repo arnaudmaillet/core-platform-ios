@@ -1927,10 +1927,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         )
     }
 
-    /// The media's edge while the sheet is up: the card's discreet outline
-    /// (`Surface.cardEdge`, a hairline), fading in as the media shrinks (the
-    /// owner, 2026-11-03) — on the stage, over the media and untransformed,
-    /// so the line stays a hairline at every scale.
+    /// The media's edge while the sheet is up: a light grey line, one point
+    /// (the card's hairline read too faint on media, the owner 2026-11-03),
+    /// fading in as the media shrinks — on the stage, over the media and
+    /// untransformed, so the line keeps its width at every scale.
     private var commentsSheetEdge: UIView?
 
     private func drawCommentsSheetEdge(
@@ -1944,10 +1944,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             return edge
         }()
         if edge.superview !== stage { stage.insertSubview(edge, aboveSubview: mediaCard) }
-        // The media stands on black whatever the page's style: the dark edge.
+        // The media stands on black whatever the page's style: the dark grey.
         let dark = traitCollection.modifyingTraits { $0.userInterfaceStyle = .dark }
-        edge.layer.borderColor = Surface.cardEdge.resolvedColor(with: dark).cgColor
-        edge.layer.borderWidth = Surface.hairline(for: traitCollection)
+        edge.layer.borderColor = UIColor.systemGray2.resolvedColor(with: dark).cgColor
+        edge.layer.borderWidth = 1
         edge.frame = window
         edge.layer.cornerRadius = cornerRadius
         edge.alpha = progress
