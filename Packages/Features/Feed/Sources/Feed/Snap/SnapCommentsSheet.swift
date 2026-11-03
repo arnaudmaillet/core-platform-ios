@@ -6,12 +6,12 @@ import UIKit
 /// the TikTok arrangement the owner asked for on 2026-11-03:
 ///
 ///   ┌──────────────────────┐
-///   │      [ media ]       │  ← the post's media, shrunk WHOLE into the top
-///   │                      │    ~30 %, centred, still playing; the page's
+///   │      [ media ]       │  ← the post's media, shrunk WHOLE into the room
+///   │                      │    above, centred, still playing; the page's
 ///   ├──────────────────────┤    interface and bars gone
 ///   │ [Popular|Recent] [♥ 250] │  ← the sheet's own bar: the tabs, the balance
 ///   │  comment rows …      │  ← today's comments panel, in a UIKit sheet
-///   │  [ compose bar ]     │    resting at 70 % of the screen
+///   │  [ compose bar ]     │    resting at the height the media leaves it
 ///   └──────────────────────┘
 ///
 /// ONE MEASURE DRIVES THE PAGE: the sheet's top, read every frame from its
@@ -19,18 +19,43 @@ import UIKit
 /// sheet through its entrance, a drag down and its exit — never a second
 /// animation trying to keep pace with UIKit's.
 ///
-/// One height for now: the content's own, at most 70 % of the screen (the
-/// owner, 2026-11-03) — a short thread takes a short sheet, with no room
-/// above its first row; a full-screen detent waits for the owner's approval
-/// of this one. The sheet is undimmed, so the media above it stays
+/// One height for now: the content's own, at most what the media leaves it
+/// (`restingHeight`, the owner, 2026-11-03) — a short thread takes a short
+/// sheet, with no room above its first row; a full-screen detent waits for
+/// the owner's approval of this one. The sheet is undimmed, so the media above it stays
 /// lit; a tap there closes it, as a swipe down does.
 @MainActor
 final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationControllerDelegate {
-    /// The sheet's tallest resting height, as a share of the screen.
-    static let restingShare: CGFloat = 0.7
+    /// The sheet's tallest resting height, as shares of the screen: never
+    /// under the floor, which keeps the rows readable, never over the
+    /// ceiling (`restingHeight`).
+    static let floorShare: CGFloat = 0.6
+    static let ceilingShare: CGFloat = 0.75
     static let detent = UISheetPresentationController.Detent.Identifier("feed.comments.v2")
     /// Between the shrunk media's bottom and the sheet's top.
     static let mediaGap: CGFloat = Spacing.md
+
+    /// The sheet's tallest resting height, the media's to decide (the owner,
+    /// 2026-11-03): the media keeps the screen's whole width in the room
+    /// above, and the sheet takes what is left, between `floorShare` and
+    /// `ceilingShare` of the screen. A 16:9 media keeps its whole width; a
+    /// portrait one, which the width would leave the sheet no room, gets the
+    /// floor. Read once, at the opening: a carousel paged under the sheet
+    /// does not move it.
+    ///
+    /// The height of a custom detent, so it leaves out the bottom safe area
+    /// the sheet stands on.
+    ///
+    /// - Parameter picture: what the sheet shrinks, as the page draws it
+    ///   (`SnapFeedCell.commentsSheetPictureSize`).
+    static func restingHeight(screen: CGSize, safeArea: UIEdgeInsets, picture: CGSize) -> CGFloat {
+        let floor = screen.height * floorShare
+        let ceiling = screen.height * ceilingShare
+        guard picture.width > 0, picture.height > 0 else { return floor }
+        let mediaHeight = screen.width * picture.height / picture.width
+        let left = screen.height - safeArea.top - mediaHeight - mediaGap - safeArea.bottom
+        return min(max(left, floor), ceiling)
+    }
 
     let postID: PostID
     /// What is presented: the content itself, carrying its own bar — or, as
@@ -86,9 +111,10 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     }
 
     func present(animated: Bool) {
-        guard let feed, let window = feed.view.window else { return end() }
-        let screenHeight = window.bounds.height
-        let share = Self.restingShare
+        guard let feed, let window = feed.view.window, let cell else { return end() }
+        let resting = Self.restingHeight(
+            screen: window.bounds.size, safeArea: window.safeAreaInsets, picture: cell.commentsSheetPictureSize
+        )
         // A custom detent's height leaves out the bottom safe area, which the
         // content's own height includes.
         let bottomInset = window.safeAreaInsets.bottom
@@ -101,7 +127,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         sheet.presentationController?.traitOverrides.userInterfaceStyle = .dark
         if let controller = sheet.sheetPresentationController {
             controller.detents = [.custom(identifier: Self.detent) { [weak content] context in
-                let cap = min(context.maximumDetentValue, screenHeight * share)
+                let cap = min(context.maximumDetentValue, resting)
                 let fitted = MainActor.assumeIsolated { content?.fittedHeight }
                 return fitted.map { min(cap, $0 - bottomInset) } ?? cap
             }]
@@ -131,7 +157,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         observeKeyboard()
         // Laid out at the sheet's width before it is presented, so the first
         // height it resolves is already its content's.
-        sheet.view.frame = CGRect(x: 0, y: 0, width: window.bounds.width, height: screenHeight * share + bottomInset)
+        sheet.view.frame = CGRect(x: 0, y: 0, width: window.bounds.width, height: resting + bottomInset)
         content.composerBottomInset = bottomInset
         sheet.view.layoutIfNeeded()
         content.applyPanelInsets()

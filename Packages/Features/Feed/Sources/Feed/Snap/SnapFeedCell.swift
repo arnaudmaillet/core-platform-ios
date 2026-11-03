@@ -1872,6 +1872,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// shrunk, without the bands a fitted picture stands between.
     private var commentsSheetMask: UIView?
 
+    /// What the comments sheet shrinks, as the page draws it now: the picture
+    /// between its bands, or the whole card when it fills.
+    var commentsSheetPictureSize: CGSize { mediaCard.drawnPictureRect.size }
+
     /// The page under the comments sheet, at `progress` of the way from rest
     /// (0) to the sheet up (1): the page's interface fades out, and the media
     /// shrinks WHOLE into `mediaRegion` (the window's coordinates) — the room

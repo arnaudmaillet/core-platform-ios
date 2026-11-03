@@ -40,6 +40,8 @@ enum CommentsSandbox {
     static let fixtures: [Fixture] = [
         Fixture(id: "post-0000", title: "Dense — video", detail: "18 reactions + 6 sentences: ticker and subtitles"),
         Fixture(id: "post-0004", title: "Dense — image", detail: "18 reactions + 6 sentences: ticker and subtitles"),
+        Fixture(id: "post-0054", title: "Dense — landscape video, 16:9", detail: "The sheet leaves the media its whole width"),
+        Fixture(id: "post-0063", title: "Dense — landscape video, 4:3", detail: "The sheet at its floor, the media a little shrunk"),
         Fixture(id: "post-0001", title: "Sparse — image", detail: "Two comments"),
         Fixture(id: "post-0012", title: "Reactions only — video", detail: "W, 🔥🔥, GG: under the ticker's gate"),
         Fixture(id: "post-0013", title: "Reactions only — image", detail: "W, 🔥🔥, GG: under the ticker's gate"),
