@@ -150,12 +150,14 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         let bottomInset = window.safeAreaInsets.bottom
         sheet.modalPresentationStyle = .pageSheet
         sheet.presentationController?.delegate = self
-        // One style, the sheet's own material included: a sheet the keyboard
-        // grows otherwise turns to the other style's glass under its text.
-        // Light (a trial, the owner, 2026-11-03), dark as first built.
-        let style: UIUserInterfaceStyle = .light
-        sheet.overrideUserInterfaceStyle = style
-        sheet.presentationController?.traitOverrides.userInterfaceStyle = style
+        // The DEVICE's style (the owner, 2026-11-03), the sheet's own material
+        // included — read off the window, which the page's dark pin over a
+        // photograph does not reach — and followed while the sheet is up.
+        applyStyle(window.traitCollection.userInterfaceStyle)
+        styleRegistration = window.registerForTraitChanges([UITraitUserInterfaceStyle.self]) {
+            [weak self] (window: UIWindow, _) in
+            self?.applyStyle(window.traitCollection.userInterfaceStyle)
+        }
         // ⚠️ ONE LEVEL AT BOTH HEIGHTS (measured on a device, 2026-11-03):
         // UIKit raises a sheet at the screen's top to the elevated level and
         // lowers it again below — every view in it re-read its traits at each
@@ -279,6 +281,15 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
               let container = sheet.presentationController?.containerView else { return }
         catcher.layoutIfNeeded()
         let keyboardTop = keyboardTracker.convert(CGPoint.zero, to: nil).y
+        // ⚠️ A SHEET HELD AT THE SCREEN'S TOP STAYS (the owner, 2026-11-03):
+        // moved down whole with the keys, its bar left the top — not how a
+        // conversation lets its keyboard go. Its composer follows the keys
+        // down instead, the rows above it with it. A sheet riding on the keys
+        // goes down with them, or they would leave a hole under it.
+        if content.followKeyboardDrag(to: keyboardTop, restingAt: keyboardRestTop) {
+            if container.transform != .identity { container.transform = .identity }
+            return
+        }
         let drop = max(0, keyboardTop - keyboardRestTop)
         guard abs(container.transform.ty - drop) > 0.5 else { return }
         container.transform = drop > 0 ? CGAffineTransform(translationX: 0, y: drop) : .identity
@@ -864,8 +875,16 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         return [collapsedDetent, .custom(identifier: Self.expandedDetent) { $0.maximumDetentValue }].map(Self.opaque)
     }
 
-    /// The sheet's ground: opaque, the page's plain background (the owner,
-    /// 2026-11-03: white, not the glass's grey over the black page) — on
+    private var styleRegistration: (any UITraitChangeRegistration)?
+
+    private func applyStyle(_ style: UIUserInterfaceStyle) {
+        sheet.overrideUserInterfaceStyle = style
+        sheet.presentationController?.traitOverrides.userInterfaceStyle = style
+    }
+
+    /// The sheet's ground: opaque, the page's plain background in the
+    /// device's style (the owner, 2026-11-03: not the glass, grey over the
+    /// black page in light) — on
     /// every detent and the presentation itself, or it is glass on the way
     /// up (as the wallet sheet found, #1494).
     private static let ground = UIColor.systemBackground
@@ -882,6 +901,8 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         hasEnded = true
         link?.invalidate()
         link = nil
+        if let styleRegistration { feed?.view.window?.unregisterForTraitChanges(styleRegistration) }
+        styleRegistration = nil
         if let followCommitObserver { CFRunLoopRemoveObserver(CFRunLoopGetMain(), followCommitObserver, .commonModes) }
         followCommitObserver = nil
         removePreview()
@@ -1188,10 +1209,26 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     /// - A sheet too tall for that is held at the top of the screen, its top
     ///   on the window's top inset (measured): its panel ends where the
     ///   composer stands `Spacing.sm` over the keys from there.
-    private func panelHeightOverKeyboard(at keyboardTop: CGFloat, in window: UIWindow) -> CGFloat {
+    /// The keyboard dragged down under a finger, its top at `keyboardTop`:
+    /// for a sheet the keys hold at the screen's top, the panel's foot — the
+    /// composer — follows them down, the rows at its end with it, and true;
+    /// false for a sheet that rides on the keys, which the session moves.
+    func followKeyboardDrag(to keyboardTop: CGFloat, restingAt restTop: CGFloat) -> Bool {
+        guard isKeyboardUp, let window = view.window, let panelHeight, restingHeight > 0 else { return false }
+        let lowered = restingHeight + composerBottomInset - Spacing.sm
+        let heldAtRest = restTop + composerBottomInset - window.safeAreaInsets.top
+        guard heldAtRest < lowered else { return false }
+        let height = min(view.bounds.height, panelHeightOverKeyboard(at: max(restTop, keyboardTop), in: window, cap: false))
+        guard abs(height - panelHeight.constant) > 0.5 else { return true }
+        holdStreamEnd(panelGrowingBy: height - panelHeight.constant)
+        panelHeight.constant = height
+        return true
+    }
+
+    private func panelHeightOverKeyboard(at keyboardTop: CGFloat, in window: UIWindow, cap: Bool = true) -> CGFloat {
         let lowered = restingHeight + composerBottomInset - Spacing.sm
         let heldAtTop = keyboardTop + composerBottomInset - window.safeAreaInsets.top
-        return max(0, min(lowered, heldAtTop))
+        return max(0, cap ? min(lowered, heldAtTop) : heldAtTop)
     }
 
     /// The keyboard is going: the panel back on the sheet's foot at once, in
