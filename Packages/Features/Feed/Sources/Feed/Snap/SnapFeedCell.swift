@@ -1941,14 +1941,19 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let offset = CGPoint(x: picture.midX - bounds.midX, y: picture.midY - bounds.midY)
         let landed = CGPoint(x: cardCenter.x + offset.x * fit, y: cardCenter.y + offset.y * fit)
         let move = CGPoint(x: (mediaRegion.midX - landed.x) * t, y: (mediaRegion.midY - landed.y) * t)
-        // Scaled out about the region's centre.
+        // Scaled out where it stands, about the picture's own centre — the
+        // region's. ⚠️ A view's transform is about its centre: the pivot is
+        // the region's centre as seen from the card's (measured, 2026-11-03:
+        // taken in the stage's coordinates, it was far off at the bottom
+        // right, and the media slid there as it shrank).
         let out = min(max(0, out), 1)
         let shrink = 1 - Self.commentsSheetOutShrink * out
+        let pivot = CGPoint(x: mediaRegion.midX - cardCenter.x, y: mediaRegion.midY - cardCenter.y)
         mediaCard.transform = CGAffineTransform(scaleX: scale, y: scale)
             .concatenating(CGAffineTransform(translationX: move.x, y: move.y))
-            .concatenating(CGAffineTransform(translationX: -mediaRegion.midX, y: -mediaRegion.midY))
+            .concatenating(CGAffineTransform(translationX: -pivot.x, y: -pivot.y))
             .concatenating(CGAffineTransform(scaleX: shrink, y: shrink))
-            .concatenating(CGAffineTransform(translationX: mediaRegion.midX, y: mediaRegion.midY))
+            .concatenating(CGAffineTransform(translationX: pivot.x, y: pivot.y))
         commentsSheetMediaOut = out
         applyCommentsSheetMediaAlpha()
 

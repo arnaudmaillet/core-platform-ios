@@ -392,12 +392,8 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         let roomTop = window.safeAreaInsets.top
         let room = top - Self.mediaGap - roomTop
         let smallest = SnapCommentsPreview.size(for: cell.commentsSheetPictureSize).height
-        // The trial (`CommentsV2.previewPops`): past its smallest, the media
-        // rises with the sheet as it scales out — whole above it, never
-        // covered by it.
-        let regionTop = CommentsV2.previewPops ? min(roomTop, top - Self.mediaGap - smallest) : roomTop
         let region = CGRect(
-            x: Self.mediaSideMargin, y: regionTop,
+            x: Self.mediaSideMargin, y: roomTop,
             width: window.bounds.width - 2 * Self.mediaSideMargin,
             height: max(room, smallest)
         )
