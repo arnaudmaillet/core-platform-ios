@@ -403,18 +403,20 @@ final class PostDetailViewController: UIViewController {
         syncStreamsClip()
     }
 
-    /// Whether the streams end at the composer's foot (`clipStreamsAtComposer`).
+    /// Whether the streams end at the composer's foot (`setStreamsClippedAtComposer`).
     private var clipsStreamsAtComposer = false
     private let streamsClip = UIView()
 
-    /// The streams end at the composer's foot: nothing of them shows under it
-    /// (the comments sheet, #2087). The composer moves within the sheet as a
-    /// keyboard comes and goes, and rows were seen passing beneath it, in the
-    /// band it leaves (the owner, 2026-11-03).
-    func clipStreamsAtComposer() {
-        clipsStreamsAtComposer = true
+    /// The streams end at the composer's foot, or run to the panel's bottom,
+    /// under the composer and its soft edge (the comments sheet, #2087). Clipped
+    /// while a keyboard is up only: the composer then moves within the sheet,
+    /// and rows were seen passing beneath it, in the band it leaves; at rest
+    /// the rows run to the sheet's foot (the owner, 2026-11-03).
+    func setStreamsClippedAtComposer(_ clipped: Bool) {
+        guard clipped != clipsStreamsAtComposer else { return }
+        clipsStreamsAtComposer = clipped
         streamsClip.backgroundColor = .black
-        streamSurface.mask = streamsClip
+        streamSurface.mask = clipped ? streamsClip : nil
         syncStreamsClip()
     }
 

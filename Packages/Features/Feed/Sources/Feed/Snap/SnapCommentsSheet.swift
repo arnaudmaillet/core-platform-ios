@@ -617,6 +617,8 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     private func setKeyboardUp(_ up: Bool) {
         guard up != isKeyboardUp, let panelBottom, let panelHeight, restingHeight > 0 else { return }
         isKeyboardUp = up
+        // Nothing of the streams under the composer while it stands on the keys.
+        (panel as? PostDetailViewController)?.setStreamsClippedAtComposer(up)
         if up {
             panelHeight.constant = restingHeight
             panelBottom.isActive = false
