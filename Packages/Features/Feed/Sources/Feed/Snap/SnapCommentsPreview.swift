@@ -6,8 +6,9 @@ import UIKit
 /// at the screen's top right under the sheet's bar, a clip playing on in it
 /// (`SnapFeedCell.makeCommentsPreviewContent`).
 ///
-/// It does not appear: the shrunk media flies into it from where it stood
-/// above the sheet, and back (`SnapCommentsSheetSession`). It drags, and
+/// It does not appear: it takes the shrunk media over where it stood above
+/// the sheet, the same size, and goes to its corner as the sheet rises —
+/// and back (`SnapCommentsSheetSession`). It drags, and
 /// snaps to the corner it is thrown towards — the last one is where the next
 /// preview opens — or is stashed off a side, a tab of it left showing (iOS's
 /// picture in picture's ways).
@@ -205,14 +206,5 @@ final class SnapCommentsPreview: UIView {
         guard shape.width > 0, shape.height > 0 else { return CGSize(width: longSide, height: longSide) }
         let scale = longSide / max(shape.width, shape.height)
         return CGSize(width: (shape.width * scale).rounded(), height: (shape.height * scale).rounded())
-    }
-
-    /// The transform that lays the preview, at `frame`, over `target` — the
-    /// same shape, so one scale, about its centre.
-    static func transform(from frame: CGRect, onto target: CGRect) -> CGAffineTransform {
-        guard frame.width > 0 else { return .identity }
-        let scale = target.width / frame.width
-        return CGAffineTransform(translationX: target.midX - frame.midX, y: target.midY - frame.midY)
-            .scaledBy(x: scale, y: scale)
     }
 }
