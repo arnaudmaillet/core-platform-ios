@@ -91,7 +91,10 @@ public struct BrandTheme: Sendable, Equatable {
     /// stop sits (0…1): the launch logo, the story ring.
     public let signatureGradient: [UInt32]
     public let signatureLocations: [Double]
-    /// The branded loader's three pills, left to right.
+    /// The branded loader's three pills, left to right (#2083, the owner
+    /// 2026-11-03): one solid colour each, the primary's raspberry to the
+    /// violet, with the colour halfway between them (in OKLCH: lightness,
+    /// chroma and hue each at the midpoint) in the middle.
     public let loaderTones: [UInt32]
 
     // MARK: - The assets (checked by `BrandAssetsGuardTests`)
@@ -128,7 +131,7 @@ public struct BrandTheme: Sendable, Equatable {
         saveGold: 0xFFC53D,
         signatureGradient: [0xEC1C75, 0x9B5CFF, 0x2EF0A8],
         signatureLocations: [0, 0.5, 1],
-        loaderTones: [0xEC1C75, 0x9B5CFF, 0x2EF0A8],
+        loaderTones: [0xEC1C75, 0xCF3DC7, 0x9B5CFF],
         launchLogoStops: [0xF699C1, 0xD2B6FF, 0xA1F8D8],
         iconStops: [0xEC1C75, 0x9B5CFF, 0x2EF0A8]
     )

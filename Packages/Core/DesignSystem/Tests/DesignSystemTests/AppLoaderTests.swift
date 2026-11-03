@@ -192,7 +192,7 @@ struct AppLoaderTests {
         #expect(view.debugAnimationCount == 1, "the dots do not pulse")
     }
 
-    /// The pills wear the brand gradient; each lead its tone toward the page,
+    /// The pills wear their tones; each lead its tone toward the page,
     /// resolved per appearance.
     @Test func theLeadsResolvePerAppearance() {
         #expect(Palette.loaderTones.count == 3)
@@ -208,6 +208,27 @@ struct AppLoaderTests {
         #expect(expected.count == drawn.count && zip(expected, drawn).allSatisfy { abs($0 - $1) < 0.01 },
                 "the lead did not re-resolve for dark: \(drawn) vs \(expected)")
         #expect(view.debugTones.pills[0] == Palette.loaderTones[0].cgColor)
+    }
+
+    /// RASPBERRY TO VIOLET, ONE SOLID COLOUR PER PILL (#2083, the owner
+    /// 2026-11-03): the primary on the left, the violet on the right, the
+    /// colour halfway between them in the middle — no mint, no gradient.
+    @Test func thePillsRunFromTheRaspberryToTheViolet() {
+        let (view, window) = loader()
+        defer { window.isHidden = true }
+        let light = UITraitCollection(userInterfaceStyle: .light)
+        func hex(_ color: CGColor?) -> UInt32 {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            UIColor(cgColor: color ?? UIColor.clear.cgColor).getRed(&r, green: &g, blue: &b, alpha: &a)
+            return UInt32((r * 255).rounded()) << 16 | UInt32((g * 255).rounded()) << 8 | UInt32((b * 255).rounded())
+        }
+        #expect(view.debugTones.pills.map(hex) == [0xEC1C75, 0xCF3DC7, 0x9B5CFF])
+        #expect(hex(view.debugTones.pills[0]) == hex(Palette.tint.resolvedColor(with: light).cgColor), "the left pill is not the primary")
+        // The middle is between its neighbours on every channel.
+        let channels = view.debugTones.pills.map { hex($0) }.map { [($0 >> 16) & 0xFF, ($0 >> 8) & 0xFF, $0 & 0xFF] }
+        for c in 0..<3 {
+            #expect((min(channels[0][c], channels[2][c])...max(channels[0][c], channels[2][c])).contains(channels[1][c]))
+        }
     }
 
     // MARK: - Pull-to-refresh (#1329 slice 2)

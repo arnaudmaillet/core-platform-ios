@@ -41,8 +41,9 @@ import UIKit
 ///   never a gradient, under a white count.
 /// - **A filled button wears white** (`onPrimary`) in both appearances.
 /// - **There is no secondary colour any more** (#2062). The violet appears
-///   only inside the signature gradient, as the mint does (#2071: the gems
-///   wear the crown's yellow — `gem`, `gemText`, `gemGround`). Links,
+///   only inside the signature gradient, as the mint does, and on the
+///   loader's last pill (`loaderTones`, #2083) (#2071: the gems wear the
+///   crown's yellow — `gem`, `gemText`, `gemGround`). Links,
 ///   mentions and hashtags are a neutral grey (`entityInk`).
 /// - **Dark mode is not an inversion.** Every role has an Increased
 ///   Contrast value where its contrast is close to the line.
@@ -156,10 +157,13 @@ public enum Palette {
 
     // MARK: - The loader (#1329)
 
-    /// The branded loader's three pills (#1795), the signature's three stops
-    /// left to right: raspberry, violet, mint. The same in both appearances — the
-    /// mark is a logo, not text (owner, 2026-10-17). Read through
-    /// `AppLoaderView`.
+    /// The branded loader's three pills (#1795, #2083), left to right: the
+    /// primary's raspberry `EC1C75`, an orchid `CF3DC7` halfway to the
+    /// violet, the violet `9B5CFF` — one solid colour each, the owner's call
+    /// (2026-11-03) over a gradient and over the signature's mint. The same
+    /// in both appearances — the mark is a logo, not text (owner,
+    /// 2026-10-17); each is past a graphic's 3:1 on white and on black.
+    /// Read through `AppLoaderView`.
     public static let loaderTones: [UIColor] = theme.loaderTones.map(rgb)
 
     /// Each pill's lead — its pale wake (#1795): the pill's tone mixed
