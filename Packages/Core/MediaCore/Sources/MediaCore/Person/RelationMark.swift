@@ -2,15 +2,15 @@ import DesignSystem
 import UIKit
 
 /// The relation mark's sizes for a face of a given diameter (#2014): the
-/// ring's width and the badge's side, worn by the author pill's 36 pt face
-/// and the profile header's 96 to 110 pt one alike.
+/// badge's side, worn by the author pill's 36 pt face, the inbox row's 48 pt
+/// one and the profile header's 96 to 110 pt one alike. The mark is the
+/// badge alone: no face wears a ring (#2082, the owner 2026-11-03).
 ///
-/// ⚠️ NOT A RATIO. At the pill's 36 pt the mark is a 2 pt ring and a 20 pt
-/// badge (#1298, #1277); kept in proportion, a 96 pt face would wear a 53 pt
-/// badge. Between the pill's face and the header's, the sizes run from the
-/// pill's to a 4 pt ring and a 28 pt badge, on to the header's Dynamic-Type
-/// cap (110 pt), and no further — rounded to half points, so a ring never
-/// lands between pixels.
+/// ⚠️ NOT A RATIO. At the pill's 36 pt the badge is 20 pt (#1277); kept in
+/// proportion, a 96 pt face would wear a 53 pt badge. Between the pill's
+/// face and the header's, the side runs from 20 to 28 pt, on to the header's
+/// Dynamic-Type cap (110 pt), and no further — rounded to half points, so a
+/// badge never lands between pixels.
 public nonisolated struct RelationMarkMetrics: Equatable, Sendable {
     /// The pill's face, where the mark is today's.
     public static let pillFace: CGFloat = 36
@@ -18,12 +18,10 @@ public nonisolated struct RelationMarkMetrics: Equatable, Sendable {
     public static let headerFace: CGFloat = 96
     /// The header's Dynamic-Type cap: no face's mark grows past it.
     public static let largestFace: CGFloat = 110
-    /// The clear gap round the badge, cut out of the face and the ring.
+    /// The clear gap round the badge, cut out of the face.
     public static let cutoutGap: CGFloat = 1.5
 
     public let faceDiameter: CGFloat
-    /// The ring's thickness.
-    public let ringWidth: CGFloat
     /// The badge's side.
     public let badgeDiameter: CGFloat
 
@@ -31,7 +29,6 @@ public nonisolated struct RelationMarkMetrics: Equatable, Sendable {
         self.faceDiameter = faceDiameter
         let face = min(max(faceDiameter, Self.pillFace), Self.largestFace)
         let progress = (face - Self.pillFace) / (Self.headerFace - Self.pillFace)
-        ringWidth = Self.halfPoint(2 + 2 * progress)
         badgeDiameter = Self.halfPoint(20 + 8 * progress)
     }
 
@@ -81,21 +78,6 @@ public enum RelationMark {
     /// The badge's cutout, a disc round `centre`.
     public static func cutout(centre: CGPoint, metrics: RelationMarkMetrics) -> UIBezierPath {
         UIBezierPath(arcCenter: centre, radius: metrics.cutoutRadius, startAngle: 0, endAngle: 2 * .pi, clockwise: true)
-    }
-
-    /// The ring's ink (#1298): grey (the badge's quiet disc) while the viewer
-    /// follows, the accent once they are friends, clear otherwise.
-    public static func ringInk(for relation: PersonPill.Badge) -> UIColor {
-        switch relation {
-        case .following: PersonPillBadgeInks.quietDisc
-        case .friends: PersonPillBadgeInks.accent
-        case .none, .follow, .pending: .clear
-        }
-    }
-
-    /// Whether `relation` draws a ring at all.
-    public static func hasRing(_ relation: PersonPill.Badge) -> Bool {
-        relation == .following || relation == .friends
     }
 }
 

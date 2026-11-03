@@ -36,8 +36,9 @@ struct HeroHeaderRelationMarkTests {
         header.layoutIfNeeded()
     }
 
-    /// Each relation's symbol on the disc, the ring in the rim's place for
-    /// following and friends, the grey rim kept otherwise.
+    /// Each relation's symbol on the disc, and NO EDGE round it whatever the
+    /// relation (#2082, the owner 2026-11-03): no ring, no grey rim — the
+    /// badge alone.
     @Test(arguments: [PersonPill.Badge.follow, .following, .friends, .pending])
     func theAvatarWearsEachRelation(_ relation: PersonPill.Badge) throws {
         let header = makeHeader()
@@ -45,15 +46,7 @@ struct HeroHeaderRelationMarkTests {
         layOut(header)
         #expect(header.debugRelationSymbol == relation.symbolName)
         #expect(header.debugAvatarIsCutOut, "the disc keeps the badge's cutout")
-        let ring = try #require(header.debugAvatarRingColor)
-        let traits = header.traitCollection
-        if RelationMark.hasRing(relation) {
-            #expect(UIColor(cgColor: ring) == RelationMark.ringInk(for: relation).resolvedColor(with: traits))
-            #expect(header.debugAvatarRingWidth == 4, "the ring's width at 96 pt")
-        } else {
-            #expect(UIColor(cgColor: ring) == Surface.avatarRim.resolvedColor(with: traits))
-            #expect(header.debugAvatarRingWidth == 3, "the rim's width")
-        }
+        #expect(header.debugAvatarRingWidth == 0, "an edge round the disc for \(relation)")
     }
 
     /// The badge's centre on the disc's circle at 45°, at the 96 pt face's
@@ -74,33 +67,15 @@ struct HeroHeaderRelationMarkTests {
         #expect(frame.maxX <= disc.maxX + 0.5 && frame.maxY <= disc.maxY + 0.5)
     }
 
-    /// ⚠️ THE RIM IS LIGHT GREY OR PINK, NEVER A DARK GREY (the owner,
-    /// 2026-11-02): light grey with no relation, "+" or the clock, and
-    /// while following; the accent for friends — in both styles.
-    @Test(arguments: [UIUserInterfaceStyle.light, .dark])
-    func theRimIsLightGreyOrPink(_ style: UIUserInterfaceStyle) {
-        let traits = UITraitCollection(userInterfaceStyle: style)
-        let light = UIColor.systemGray5.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
-        let metrics = RelationMarkMetrics(faceDiameter: 96)
-        for relation in [PersonPill.Badge.none, .follow, .pending, .following] {
-            let ink = HeroHeaderView.rim(for: relation, metrics: metrics).ink.resolvedColor(with: traits)
-            #expect(ink.cgColor == light.cgColor, "\(relation)'s rim is not the light grey")
-        }
-        let friends = HeroHeaderView.rim(for: .friends, metrics: metrics).ink.resolvedColor(with: traits)
-        #expect(friends == RelationMark.ringInk(for: .friends).resolvedColor(with: traits))
-    }
-
-    /// None: no badge, the grey rim, no cutout.
-    @Test func noRelationKeepsTheRim() throws {
+    /// None: no badge, no cutout, and no edge either.
+    @Test func noRelationDrawsNothing() {
         let header = makeHeader()
         header.setRelationMark(.following, animated: false)
         header.setRelationMark(.none, animated: false)
         layOut(header)
         #expect(header.debugRelationSymbol == nil)
         #expect(!header.debugAvatarIsCutOut)
-        #expect(header.debugAvatarRingWidth == 3)
-        let ring = try #require(header.debugAvatarRingColor)
-        #expect(UIColor(cgColor: ring) == Surface.avatarRim.resolvedColor(with: header.traitCollection))
+        #expect(header.debugAvatarRingWidth == 0)
     }
 
     /// ⚠️ NO LAYOUT MOVE: the relation arriving moves nothing in the header
@@ -163,6 +138,6 @@ struct HeroHeaderRelationMarkTests {
         let header = makeHeader(avatar: .custom(UIView()))
         header.setRelationMark(.follow, animated: false)
         #expect(header.debugRelationBadge == nil)
-        #expect(header.debugAvatarRingWidth == 3)
+        #expect(header.debugAvatarRingWidth == 0)
     }
 }

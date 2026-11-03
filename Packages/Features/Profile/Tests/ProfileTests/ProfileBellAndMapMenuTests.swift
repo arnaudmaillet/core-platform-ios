@@ -478,13 +478,13 @@ extension ProfileBellAndMapMenuTests {
         #expect(try pill(screen).followBadge == .friends, "the bar and the avatar disagree")
     }
 
-    /// The viewer's own profile: no mark, the grey rim.
+    /// The viewer's own profile: no mark, and no edge (#2082).
     @Test func theViewersOwnAvatarWearsNoMark() async throws {
         let (screen, _, _) = makeScreen(relationship: .me, own: true)
         try #require(await settle { screen.followButtonState == .edit })
         #expect(screen.headerView.relationMark == .none)
         #expect(screen.headerView.debugRelationSymbol == nil)
-        #expect(screen.headerView.debugAvatarRingWidth == 3)
+        #expect(screen.headerView.debugAvatarRingWidth == 0)
     }
 
     /// Not followed, the avatar wears the "+"; the tray's Follow brings the
