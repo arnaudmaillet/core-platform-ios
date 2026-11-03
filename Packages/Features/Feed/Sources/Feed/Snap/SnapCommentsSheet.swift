@@ -150,11 +150,12 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         let bottomInset = window.safeAreaInsets.bottom
         sheet.modalPresentationStyle = .pageSheet
         sheet.presentationController?.delegate = self
-        // Dark, the sheet's own material included: the panel is drawn for the
-        // dark page it lived on, and a sheet the keyboard grows otherwise
-        // turns to a light glass under its white text.
-        sheet.overrideUserInterfaceStyle = .dark
-        sheet.presentationController?.traitOverrides.userInterfaceStyle = .dark
+        // One style, the sheet's own material included: a sheet the keyboard
+        // grows otherwise turns to the other style's glass under its text.
+        // Light (a trial, the owner, 2026-11-03), dark as first built.
+        let style: UIUserInterfaceStyle = .light
+        sheet.overrideUserInterfaceStyle = style
+        sheet.presentationController?.traitOverrides.userInterfaceStyle = style
         // ⚠️ ONE LEVEL AT BOTH HEIGHTS (measured on a device, 2026-11-03):
         // UIKit raises a sheet at the screen's top to the elevated level and
         // lowers it again below — every view in it re-read its traits at each
