@@ -416,14 +416,20 @@ final class PostDetailViewController: UIViewController {
         guard clipped != clipsStreamsAtComposer else { return }
         clipsStreamsAtComposer = clipped
         streamsClip.backgroundColor = .black
-        streamSurface.mask = clipped ? streamsClip : nil
-        syncStreamsClip()
+        // ⚠️ THE CLIP STARTS WHERE THE STREAMS ARE, NOT AT ZERO (measured,
+        // 2026-11-03): set inside the keyboard's animation, a clip born empty
+        // grew from nothing — the rows vanished, then came back from the top
+        // down, a flash at every keyboard. Its frame is set unanimated first.
+        UIView.performWithoutAnimation {
+            syncStreamsClip()
+            streamSurface.mask = clipped ? streamsClip : nil
+        }
     }
 
     /// The clip to the composer's foot, in this layout pass — inside a
     /// keyboard's animation when one runs it, so the two move together.
     private func syncStreamsClip() {
-        guard clipsStreamsAtComposer else { return }
+        guard clipsStreamsAtComposer, streamSurface.bounds.width > 0 else { return }
         let foot = composeBar.convert(composeBar.bounds, to: streamSurface).maxY
         streamsClip.frame = CGRect(x: 0, y: 0, width: streamSurface.bounds.width, height: max(0, foot))
     }
