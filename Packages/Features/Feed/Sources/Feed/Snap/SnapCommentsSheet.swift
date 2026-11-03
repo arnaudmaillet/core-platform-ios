@@ -96,6 +96,9 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// Where the sheet's top rests, in the window: kept while it is not
     /// leaving (`follow`).
     private var restingTop: CGFloat?
+    /// The sheet's top as last drawn (`follow`): what a frame that cannot be
+    /// read is given.
+    private var lastDrawnTop: CGFloat?
     /// The detent last resolved at the media's cap, not at its content's
     /// height, and where the sheet's top should then rest, in the window
     /// (`correctCap`).
@@ -332,12 +335,23 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         let height = window.bounds.height
         // Where the sheet IS on screen, mid-animation or under a finger: its
         // presentation layer, carried up the presentation tree to the window.
-        let drawnTop: CGFloat
+        //
+        // ⚠️ ONE FRAME OF A DETENT CHANGE READS 0 (measured, 2026-11-03): the
+        // presentation layer, carried up a tree UIKit is rearranging, put the
+        // sheet at the screen's very top for a frame — the media handed to
+        // its preview all at once, the preview flashed up at its corner and
+        // back. No sheet stands above the screen's top inset: such a reading
+        // is the last frame's — not the model frame's, which is already the
+        // detent the sheet is on its way to.
+        let modelTop = container.convert(presented.frame, to: nil).minY
+        var drawnTop = lastDrawnTop ?? modelTop
         if let layer = presented.layer.presentation() {
-            drawnTop = layer.convert(layer.bounds, to: nil).minY
+            let read = layer.convert(layer.bounds, to: nil).minY
+            if read >= window.safeAreaInsets.top - 1 { drawnTop = read }
         } else {
-            drawnTop = container.convert(presented.frame, to: nil).minY
+            drawnTop = modelTop
         }
+        lastDrawnTop = drawnTop
         // …against where it RESTS. The model frame is the end of whatever is
         // animating — the rest on the way in and on a refit — but once the
         // sheet starts to leave it is the finger's, then the exit's, off the
@@ -361,7 +375,6 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         // held there, and a drag back down shows the page again only once
         // the sheet is below its collapsed rest.
         if !isLeaving, !content.isKeyboardUp {
-            let modelTop = container.convert(presented.frame, to: nil).minY
             if sheet.isBeingPresented { correctCap(restingAt: modelTop) }
             restingTop = max(modelTop, capTop ?? modelTop)
         }
