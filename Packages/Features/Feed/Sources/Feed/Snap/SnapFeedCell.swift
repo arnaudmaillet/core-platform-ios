@@ -1915,7 +1915,31 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             width: bounds.width + (picture.width - bounds.width) * t,
             height: bounds.height + (picture.height - bounds.height) * t
         )
+        #if DEBUG
+        drawCommentsSheetDebugFrame(around: mediaCard.convert(mask.frame, to: stage), in: stage)
+        #endif
     }
+
+    #if DEBUG
+    /// `CommentsV2.showsDebugFrames`: the media's window as drawn this frame,
+    /// in red, on the stage — over the media, untransformed, so the line
+    /// keeps its width as the picture shrinks.
+    private var commentsSheetDebugFrame: UIView?
+
+    private func drawCommentsSheetDebugFrame(around window: CGRect, in stage: UIView) {
+        guard CommentsV2.showsDebugFrames else { return }
+        let frame = commentsSheetDebugFrame ?? {
+            let frame = UIView()
+            frame.isUserInteractionEnabled = false
+            frame.layer.borderColor = UIColor.systemRed.cgColor
+            frame.layer.borderWidth = 2
+            commentsSheetDebugFrame = frame
+            return frame
+        }()
+        if frame.superview !== stage { stage.insertSubview(frame, aboveSubview: mediaCard) }
+        frame.frame = window
+    }
+    #endif
 
     /// The page at rest again: identity media, its interface back.
     func clearCommentsSheetLayout() {
@@ -1924,6 +1948,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.transform = .identity
         mediaCard.mask = nil
         commentsSheetMask = nil
+        #if DEBUG
+        commentsSheetDebugFrame?.removeFromSuperview()
+        #endif
     }
 
     // MARK: - Configuration

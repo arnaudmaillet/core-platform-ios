@@ -21,7 +21,8 @@ import UIKit
 ///   as a list; a row opens the full-screen feed on that post, the other
 ///   fixtures a swipe away.
 ///
-/// The sandbox runs the redesign: it turns `CommentsV2` on for the process.
+/// The sandbox runs the redesign: it turns `CommentsV2` on for the process,
+/// its debug frames included.
 ///
 /// The value after the flag picks the opening: `shots` (the default), `post`
 /// (the list), or a post id (`post-0004`: that post, open).
@@ -51,6 +52,7 @@ enum CommentsSandbox {
     @MainActor
     static func make(feed: any FeedFeatureBuilding, arguments: [String]) -> UIViewController {
         CommentsV2.isEnabled = true
+        CommentsV2.showsDebugFrames = true
         let opening = arguments.firstIndex(of: argument)
             .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
             .flatMap { $0.hasPrefix("-") ? nil : $0 }

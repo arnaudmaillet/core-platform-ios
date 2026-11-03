@@ -11,6 +11,10 @@ import Foundation
 public enum CommentsV2 {
     #if DEBUG
     public static var isEnabled = ProcessInfo.processInfo.arguments.contains("-comments-v2")
+    /// A red frame around the post's media window, to follow it through the
+    /// sheet's transitions (the owner, 2026-11-03): `-comments-v2-frames`,
+    /// and on in the comments sandbox. DEBUG only.
+    public static var showsDebugFrames = ProcessInfo.processInfo.arguments.contains("-comments-v2-frames")
     #else
     public static let isEnabled = false
     #endif
