@@ -6,9 +6,9 @@ import UIKit
 /// at the screen's top right under the sheet's bar, a clip playing on in it
 /// (`SnapFeedCell.makeCommentsPreviewContent`).
 ///
-/// It does not appear: it takes the shrunk media over where it stood above
-/// the sheet, the same size, and goes to its corner as the sheet rises —
-/// and back (`SnapCommentsSheetSession`). It drags, and
+/// It pops in at its corner as the shrunk media scales out above the rising
+/// sheet — one picture at a time — and back (`SnapCommentsSheetSession`).
+/// It drags, and
 /// snaps to the corner it is thrown towards — the last one is where the next
 /// preview opens — or is stashed off a side, a tab of it left showing (iOS's
 /// picture in picture's ways).
