@@ -57,6 +57,14 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// Where the sheet's top rests, in the window: kept while it is not
     /// leaving (`follow`).
     private var restingTop: CGFloat?
+    /// Follows the keyboard's top, frame by frame — its interactive
+    /// dismissal included, which no notification reports.
+    private let keyboardTracker = UIView()
+    /// The keyboard's top, in the window, as it rests while up.
+    private var keyboardRestTop: CGFloat?
+    /// The keyboard is animating away: the sheet is UIKit's again.
+    private var isKeyboardHiding = false
+    private let keyboardObservers = NotificationObserverBag()
 
     /// - Parameters:
     ///   - walletBadge: the balance for the sheet's bar, nil for none (a
@@ -110,6 +118,17 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         catcher.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         catcher.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(mediaTapped)))
         feed.view.addSubview(catcher)
+        keyboardTracker.isUserInteractionEnabled = false
+        keyboardTracker.translatesAutoresizingMaskIntoConstraints = false
+        catcher.addSubview(keyboardTracker)
+        catcher.keyboardLayoutGuide.usesBottomSafeArea = false
+        NSLayoutConstraint.activate([
+            keyboardTracker.topAnchor.constraint(equalTo: catcher.keyboardLayoutGuide.topAnchor),
+            keyboardTracker.leadingAnchor.constraint(equalTo: catcher.leadingAnchor),
+            keyboardTracker.widthAnchor.constraint(equalToConstant: 1),
+            keyboardTracker.heightAnchor.constraint(equalToConstant: 1),
+        ])
+        observeKeyboard()
         // Laid out at the sheet's width before it is presented, so the first
         // height it resolves is already its content's.
         sheet.view.frame = CGRect(x: 0, y: 0, width: window.bounds.width, height: screenHeight * share + bottomInset)
@@ -135,6 +154,66 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             return
         }
         close()
+    }
+
+    /// The keyboard's resting top as it comes up, and its going.
+    private func observeKeyboard() {
+        let center = NotificationCenter.default
+        keyboardObservers.add(center.addObserver(
+            forName: UIResponder.keyboardDidShowNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+            MainActor.assumeIsolated {
+                self?.isKeyboardHiding = false
+                self?.keyboardRestTop = frame?.minY
+            }
+        })
+        keyboardObservers.add(center.addObserver(
+            forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+            MainActor.assumeIsolated { self?.keyboardWillHide(duration: duration) }
+        })
+        keyboardObservers.add(center.addObserver(
+            forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.isKeyboardHiding = false
+                self?.keyboardRestTop = nil
+            }
+        })
+    }
+
+    /// The keyboard dragged down by the finger (interactive dismissal): the
+    /// whole sheet goes down with it, as iOS's own sheets over a keyboard do
+    /// (the owner, 2026-11-03). UIKit only moves the sheet on the keyboard's
+    /// notifications, none of which a drag sends: the sheet is translated by
+    /// how far the keyboard's top stands under its rest, read every frame.
+    ///
+    /// ⚠️ ON THE PRESENTATION'S CONTAINER, NOT THE SHEET (measured,
+    /// 2026-11-03): UIKit writes the sheet's own transform (its
+    /// `UIDropShadowView`) on every layout, and a translation set there never
+    /// showed. The container (`UITransitionView`) holds the sheet alone and is
+    /// left to us.
+    private func followKeyboardDrag() {
+        guard !isKeyboardHiding, let keyboardRestTop,
+              let container = sheet.presentationController?.containerView else { return }
+        catcher.layoutIfNeeded()
+        let keyboardTop = keyboardTracker.convert(CGPoint.zero, to: nil).y
+        let drop = max(0, keyboardTop - keyboardRestTop)
+        guard abs(container.transform.ty - drop) > 0.5 else { return }
+        container.transform = drop > 0 ? CGAffineTransform(translationX: 0, y: drop) : .identity
+    }
+
+    /// The keyboard is going: the drag's translation is let go in the same
+    /// animation as UIKit's own lowering of the sheet, so the two land as one.
+    private func keyboardWillHide(duration: TimeInterval) {
+        isKeyboardHiding = true
+        guard let container = sheet.presentationController?.containerView,
+              container.transform != .identity else { return }
+        UIView.animate(withDuration: duration, delay: 0, options: [.beginFromCurrentState]) {
+            container.transform = .identity
+        }
     }
 
     /// Closes the sheet; the session ends when it has gone.
@@ -182,6 +261,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
 
     /// The page as the sheet stands this frame.
     fileprivate func follow() {
+        followKeyboardDrag()
         guard let cell, let window = cell.window,
               let container = sheet.presentationController?.containerView,
               let presented = sheet.presentationController?.presentedView else { return }
@@ -242,6 +322,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         link?.invalidate()
         link = nil
         catcher.removeFromSuperview()
+        sheet.presentationController?.containerView?.transform = .identity
         cell?.clearCommentsSheetLayout()
         setTopBarItemsHidden(false, animated: true)
         onEnd()
@@ -516,11 +597,15 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         return max(0, min(lowered, heldAtTop))
     }
 
-    /// The keyboard is going: the panel back to its resting height, in the
-    /// keyboard's own animation; to the sheet's foot once it has gone.
+    /// The keyboard is going: the panel back on the sheet's foot at once, in
+    /// the keyboard's own animation.
+    ///
+    /// ⚠️ NOT AT ITS END (measured, 2026-11-03): held at a height of its own
+    /// until the keyboard had gone, the panel outgrew the shrinking sheet for
+    /// ~0.8 s — the composer under its visible edge, and the soft edge drawn
+    /// over the composer left standing in the middle of the rows.
     private func keyboardWillHide() {
-        guard isKeyboardUp, let panelHeight else { return }
-        panelHeight.constant = restingHeight
+        setKeyboardUp(false)
     }
 
     /// ⚠️ THE KEYBOARD DOES NOT RESIZE THE PANEL WITH THE SHEET (measured,
