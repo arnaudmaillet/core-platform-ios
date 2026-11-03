@@ -3545,13 +3545,16 @@ final class SnapFeedViewController: UIViewController {
     private func refreshWalletBadge() {
         guard let wallet else { return }
         let snapshot = wallet.snapshot()
-        walletBadge.update(
-            balance: snapshot.balance,
-            claimAvailable: makeWalletSheet != nil && snapshot.claimAvailable,
-            claimProgress: snapshot.claimCountdown.map {
-                WalletBadgeButton.ClaimProgress(fraction: $0.fraction, remaining: $0.remaining)
-            }
-        )
+        // The page's badge, and the comments sheet's while one is up (#2087).
+        for badge in [walletBadge, commentsSheet?.content.walletBadge].compactMap({ $0 }) {
+            badge.update(
+                balance: snapshot.balance,
+                claimAvailable: makeWalletSheet != nil && snapshot.claimAvailable,
+                claimProgress: snapshot.claimCountdown.map {
+                    WalletBadgeButton.ClaimProgress(fraction: $0.fraction, remaining: $0.remaining)
+                }
+            )
+        }
     }
 
     /// Presents the shell-vended wallet sheet over this screen — the badge's
@@ -3824,14 +3827,24 @@ final class SnapFeedViewController: UIViewController {
         else { return }
         applyRailSlot(to: content, hostedByPage: false)
         let detail = content as? PostDetailViewController
-        detail?.setEngagedInsets(top: 0, bottomInset: view.window?.safeAreaInsets.bottom ?? 0)
         // The count the feed knows: no comment bones for a post with none (#1773).
         detail?.seedCommentCount(modelsByID[id]?.cardMetrics?.comments)
         detail?.setStreamTransitionProgress(0)
         detail?.setComposerEntranceState(offstage: false)
         collectionView.isScrollEnabled = false
         (parent as? ForYouSectorViewController)?.setPagingEnabled(false)
-        let session = SnapCommentsSheetSession(postID: id, panel: content, cell: cell, feed: self) { [weak self] in
+        // The balance moves to the sheet's bar (the page's leaves with its
+        // bar): a badge of its own, kept current with the page's.
+        let sheetBadge = walletBadgeItem != nil ? WalletBadgeButton() : nil
+        let makeWalletSheet = makeWalletSheet
+        let session = SnapCommentsSheetSession(
+            postID: id, panel: content, cell: cell, feed: self,
+            walletBadge: sheetBadge,
+            onWalletTap: makeWalletSheet.map { make in { [weak self] in
+                guard let sheet = self?.commentsSheet?.sheet, sheet.presentedViewController == nil else { return }
+                sheet.present(make(), animated: true)
+            } }
+        ) { [weak self] in
             guard let self else { return }
             commentsSheet = nil
             collectionView.isScrollEnabled = true
@@ -3840,6 +3853,7 @@ final class SnapFeedViewController: UIViewController {
             rewarmActivePageComments()
         }
         commentsSheet = session
+        refreshWalletBadge()
         session.present(animated: animated)
     }
 

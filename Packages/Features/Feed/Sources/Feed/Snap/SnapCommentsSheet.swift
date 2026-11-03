@@ -9,7 +9,7 @@ import UIKit
 ///   │      [ media ]       │  ← the post's media, shrunk WHOLE into the top
 ///   │                      │    ~40 %, centred, still playing; the page's
 ///   ├──────────────────────┤    interface and bars gone
-///   │  Popular | Recent    │
+///   │ [Popular|Recent] [♥ 250] │  ← the sheet's own bar: the tabs, the balance
 ///   │  comment rows …      │  ← today's comments panel, in a UIKit sheet
 ///   │  [ compose bar ]     │    resting at 60 % of the screen
 ///   └──────────────────────┘
@@ -29,7 +29,9 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     static let detent = UISheetPresentationController.Detent.Identifier("feed.comments.v2")
 
     let postID: PostID
-    let sheet: SnapCommentsSheetViewController
+    /// What is presented: the content in a stack of its own, for its bar.
+    let sheet: UINavigationController
+    let content: SnapCommentsSheetViewController
     private weak var feed: UIViewController?
     private weak var cell: SnapFeedCell?
     private let onEnd: () -> Void
@@ -41,10 +43,16 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     private var barsWereHidden: (navigation: Bool, toolbar: Bool)?
     private var hasEnded = false
 
+    /// - Parameters:
+    ///   - walletBadge: the balance for the sheet's bar, nil for none (a
+    ///     guest, a feed that shows no balance); the feed keeps it current.
+    ///   - onWalletTap: what a tap on it does, nil for display only.
     init(postID: PostID, panel: UIViewController, cell: SnapFeedCell, feed: UIViewController,
+         walletBadge: WalletBadgeButton?, onWalletTap: (() -> Void)?,
          onEnd: @escaping () -> Void) {
         self.postID = postID
-        sheet = SnapCommentsSheetViewController(panel: panel)
+        content = SnapCommentsSheetViewController(panel: panel, walletBadge: walletBadge, onWalletTap: onWalletTap)
+        sheet = UINavigationController(rootViewController: content)
         self.feed = feed
         self.cell = cell
         self.onEnd = onEnd
@@ -65,7 +73,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             controller.prefersGrabberVisible = true
             controller.prefersScrollingExpandsWhenScrolledToEdge = false
         }
-        sheet.onDismissed = { [weak self] in self?.end() }
+        content.onDismissed = { [weak self] in self?.end() }
 
         // The page's bars leave with its interface, through UIKit's own API.
         if let navigation = feed.navigationController {
@@ -173,17 +181,30 @@ private final class DisplayLinkTarget: NSObject {
     }
 }
 
-/// The sheet's content: the Popular | Recent selector over today's comments
-/// panel, as it is in the page (#2087's first step: the panel moves, its
-/// redesign comes after).
+/// The sheet's content: today's comments panel as it is in the page (#2087's
+/// first step: the panel moves, its redesign comes after), under the sheet's
+/// own bar — the Popular | Recent selector leading, the balance trailing (the
+/// owner, 2026-11-03), the page's own balance gone with the page's bar.
 final class SnapCommentsSheetViewController: UIViewController {
+    static let tabsItemID = "feed.comments.sheet.tabs"
+
     let panel: UIViewController
     private let tabs = CommentTabsSelector()
+    let walletBadge: WalletBadgeButton?
     var onDismissed: (() -> Void)?
 
-    init(panel: UIViewController) {
+    init(panel: UIViewController, walletBadge: WalletBadgeButton?, onWalletTap: (() -> Void)?) {
         self.panel = panel
+        self.walletBadge = walletBadge
         super.init(nibName: nil, bundle: nil)
+        guard let walletBadge else { return }
+        walletBadge.isUserInteractionEnabled = onWalletTap != nil
+        if let onWalletTap {
+            walletBadge.addAction(UIAction { _ in onWalletTap() }, for: .primaryActionTriggered)
+        }
+        // A grown count needs a FRESH item: the bar measured the old one once
+        // (see `WalletBadgeButton`).
+        walletBadge.onFittedWidthChange = { [weak self] in self?.installWalletItem() }
     }
 
     @available(*, unavailable)
@@ -192,10 +213,10 @@ final class SnapCommentsSheetViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         // The panel is drawn for the dark page it lived on.
+        navigationController?.overrideUserInterfaceStyle = .dark
         overrideUserInterfaceStyle = .dark
-        let header = tabs.tabBar
-        header.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(header)
+        navigationItem.leftBarButtonItem = BarItems.container(id: Self.tabsItemID, view: tabs.tabBar)
+        installWalletItem()
 
         addChild(panel)
         panel.view.translatesAutoresizingMaskIntoConstraints = false
@@ -203,9 +224,7 @@ final class SnapCommentsSheetViewController: UIViewController {
         view.addSubview(panel.view)
         panel.didMove(toParent: self)
         NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: view.topAnchor, constant: Spacing.lg),
-            header.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            panel.view.topAnchor.constraint(equalTo: header.bottomAnchor, constant: Spacing.sm),
+            panel.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             panel.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             panel.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             panel.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -213,8 +232,24 @@ final class SnapCommentsSheetViewController: UIViewController {
         tabs.bind(to: panel as? PostDetailViewController)
     }
 
+    private func installWalletItem() {
+        navigationItem.rightBarButtonItem = walletBadge.map {
+            BarItems.container(id: BarItems.SharedID.walletBalance, view: $0)
+        }
+    }
+
+    /// The composer rests on the SHEET's bottom edge, its home indicator
+    /// cleared by a breath — not on the band the page keeps for its toolbar,
+    /// which the panel's engaged layout otherwise reserves (#2087).
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        guard let detail = panel as? PostDetailViewController else { return }
+        let rest = view.safeAreaInsets.bottom + Spacing.sm
+        detail.setEngagedInsets(top: 0, bottomInset: max(0, rest - detail.composerRestingGap))
+    }
+
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        if isBeingDismissed { onDismissed?() }
+        if navigationController?.isBeingDismissed == true { onDismissed?() }
     }
 }
