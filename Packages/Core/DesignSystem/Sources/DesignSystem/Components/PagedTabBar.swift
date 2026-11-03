@@ -2934,8 +2934,9 @@ private final class BadgeView: UIView {
     /// bar the tabs live on beats matching ACROSS to the rows they summarise,
     /// because the bar is the thing a viewer sees in the same glance. The cost
     /// is stated rather than hidden — a count is red on the tab and blue on the
-    /// row it counts, and `BadgedAvatarView` is where that would be reconciled
-    /// if it ever should be.
+    /// row it counts, and the rows' `UnreadCountPill` (Chat, under a row's
+    /// time or a request's actions since #2049 and #2088) is where that would
+    /// be reconciled if it ever should be.
     ///
     /// ⚠️ **A count used to be chrome** — it followed its segment's selection,
     /// brightening from `secondaryLabel` to `label` alongside the title it
