@@ -2006,7 +2006,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
     }
 
-    /// The picture's edge while the sheet is up: a light grey line, one point,
+    /// The picture's edge while the sheet is up: a card's hairline, one device
+    /// pixel of the dark separator — barely there (the owner, 2026-11-03) —
     /// fading in as the media shrinks — on the stage, over the media and
     /// untransformed, so the line keeps its width at every scale. Kept for
     /// every media (the owner, 2026-11-03): it marks the media's frame, black
@@ -2021,14 +2022,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             let edge = UIView()
             edge.isUserInteractionEnabled = false
             edge.layer.cornerCurve = .continuous
-            edge.layer.borderWidth = 1
             commentsSheetEdge = edge
             return edge
         }()
         if edge.superview !== stage { stage.insertSubview(edge, aboveSubview: mediaCard) }
-        // The media stands on black whatever the page's style: the dark grey.
+        // The media stands on black whatever the page's style: the dark edge.
         let dark = traitCollection.modifyingTraits { $0.userInterfaceStyle = .dark }
-        edge.layer.borderColor = UIColor.systemGray2.resolvedColor(with: dark).cgColor
+        edge.layer.borderColor = Surface.cardEdge.resolvedColor(with: dark).cgColor
+        edge.layer.borderWidth = Surface.hairline(for: traitCollection)
         edge.frame = picture
         edge.layer.cornerRadius = cornerRadius
         edge.alpha = progress
