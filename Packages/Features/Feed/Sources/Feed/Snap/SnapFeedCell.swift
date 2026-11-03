@@ -1880,8 +1880,20 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private let commentsSheetBottomBand = UIView()
 
     /// What the comments sheet shrinks, as the page draws it now: the picture
-    /// between its bands, or the whole card when it fills.
-    var commentsSheetPictureSize: CGSize { mediaCard.drawnPictureRect.size }
+    /// between its bands, or the whole card when it fills — a landscape
+    /// picture less its trimmed sides.
+    var commentsSheetPictureSize: CGSize {
+        let picture = mediaCard.drawnPictureRect.size
+        guard picture.width > picture.height else { return picture }
+        return CGSize(width: picture.width - 2 * Self.landscapeSideTrim, height: picture.height)
+    }
+
+    /// What a landscape picture loses on each side once shrunk, in the card's
+    /// points (the owner, 2026-11-03): a clip often carries a dark sliver
+    /// down its sides, baked into the file (clip-98: 4 px of 1280), which its
+    /// rounded corners cut through on the sides and not at the top — the
+    /// curves read uneven.
+    static let landscapeSideTrim: CGFloat = 1.5
 
     /// The page under the comments sheet, at `progress` of the way from rest
     /// (0) to the sheet up (1): the page's interface fades out, and the media
@@ -1908,9 +1920,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let bounds = mediaCard.bounds
         let picture = mediaCard.drawnPictureRect
         guard picture.width > 0, picture.height > 0, mediaRegion.width > 0, mediaRegion.height > 0 else { return }
-        // The scale that fits the picture in the region, and the move that
-        // centres it there — about the card's centre, its transform's anchor.
-        let fit = min(mediaRegion.width / picture.width, mediaRegion.height / picture.height, 1)
+        let landscape = picture.width > picture.height
+        // What lands in the region: a landscape picture, its sides trimmed.
+        let shown = landscape ? picture.insetBy(dx: Self.landscapeSideTrim, dy: 0) : picture
+        // The scale that fits it in the region, and the move that centres it
+        // there — about the card's centre, its transform's anchor.
+        let fit = min(mediaRegion.width / shown.width, mediaRegion.height / shown.height, 1)
         let scale = 1 + (fit - 1) * t
         let cardCenter = mediaCard.center
         let offset = CGPoint(x: picture.midX - bounds.midX, y: picture.midY - bounds.midY)
@@ -1946,7 +1961,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // with it, so their radius is divided by it.
         let screenRadius = ScreenGeometry.cornerRadius(behind: self)
         let unscale = 1 / max(scale, 0.01)
-        let landscape = picture.width > picture.height
         bands.isHidden = landscape
         commentsSheetPictureWindow.isHidden = !landscape
         commentsSheetTopBand.isHidden = !landscape
@@ -1955,7 +1969,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             // ⚠️ THE BANDS STOP AT THE PICTURE (the owner, 2026-11-03): one
             // window round both, fading, let the picture's square corners
             // show through its rounding until it had gone.
-            let window = picture.offsetBy(dx: -bounds.minX, dy: -bounds.minY)
+            let window = picture.insetBy(dx: Self.landscapeSideTrim * t, dy: 0)
+                .offsetBy(dx: -bounds.minX, dy: -bounds.minY)
             commentsSheetPictureWindow.frame = window
             commentsSheetPictureWindow.layer.cornerRadius = sheetCornerRadius * t * unscale
             commentsSheetTopBand.frame = CGRect(
