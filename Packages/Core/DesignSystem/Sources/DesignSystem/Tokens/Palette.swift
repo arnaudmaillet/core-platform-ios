@@ -20,7 +20,8 @@ import UIKit
 ///   gemText             8A6400     FFE600     7A5800     FFE600
 ///   gemGround           FFE600     FFE600     (a wash, at the bubble's alpha)
 ///   saveGold            FFC53D     FFC53D     (one gold, #1190)
-///   brandGradient       EC1C75 0 · 9B5CFF 0.5 · 2EF0A8 1
+///   brandGradient       EC1C75 0 · 9B5CFF 0.5 · 2EF0A8 1   (the assets)
+///   storyRingGradient   EC1C75 0 · 9B5CFF 1
 /// ```
 ///
 /// The rules the owner settled (#1124, #1169, #1178, #1190; #2062 on
@@ -48,8 +49,10 @@ import UIKit
 /// - **Dark mode is not an inversion.** Every role has an Increased
 ///   Contrast value where its contrast is close to the line.
 /// - **The signature gradient is kept to a few places** (`brandGradient`):
-///   the launch logo and the unseen-story ring. White text never sits over
-///   its mint half, so no button wears it.
+///   the launch logo and the app icon, both baked assets. White text never
+///   sits over its mint half, so no button wears it. The unseen-story ring
+///   wears its own two-stop gradient, raspberry → violet, no mint
+///   (`storyRingGradient`, #2089).
 public enum Palette {
     // MARK: - Primary: raspberry
 
@@ -123,8 +126,9 @@ public enum Palette {
         /// The solid unread marks: the primary (decided, #2062), or the
         /// system red to compare.
         public var counters = Counters.accent
-        /// The unseen-story ring: the signature gradient (decided 2026-10-14),
-        /// or the solid accent to compare.
+        /// The unseen-story ring: its raspberry → violet gradient (decided
+        /// 2026-10-14, the mint dropped by #2089), or the solid accent to
+        /// compare.
         public var storyRing = Ring.gradient
 
         public init() {}
@@ -235,14 +239,26 @@ public enum Palette {
     /// or a claim's alpha, under `gemText`.
     public static let gemGround = dynamic(theme.gemGround)
 
-    /// THE SIGNATURE GRADIENT (#2062): raspberry → violet → mint, for brand
-    /// moments only (the launch logo, the unseen-story ring), bottom-left
-    /// to top-right. ⚠️ White text never sits over its mint half (1.5:1).
+    /// THE SIGNATURE GRADIENT (#2062): raspberry → violet → mint, the
+    /// launch logo's and the app icon's, bottom-left to top-right. ⚠️ White
+    /// text never sits over its mint half (1.5:1). No code draws it since
+    /// #2089 (the story ring has its own): it is the record of the baked
+    /// assets, checked by `BrandAssetsGuardTests`.
     public static let brandGradient: [UIColor] = theme.signatureGradient.map(rgb)
     /// Where each of `brandGradient`'s stops sits. Computed: `NSNumber` is
     /// not `Sendable`, so it cannot be a stored static.
     public static var brandGradientLocations: [NSNumber] { theme.signatureLocations.map { NSNumber(value: $0) } }
-    /// Where `brandGradient` runs, in a layer's unit space.
+
+    /// The unseen-story ring's gradient (#2089, the owner 2026-11-03):
+    /// raspberry → violet, no mint, along the signature's diagonal
+    /// (`brandGradientStart` → `brandGradientEnd`). The same in both
+    /// appearances.
+    public static let storyRingGradient: [UIColor] = theme.storyRingGradient.map(rgb)
+    /// Where each of `storyRingGradient`'s stops sits: 0 and 1.
+    public static var storyRingGradientLocations: [NSNumber] { theme.storyRingLocations.map { NSNumber(value: $0) } }
+
+    /// Where `brandGradient` (and the story ring's) runs, in a layer's unit
+    /// space.
     public static let brandGradientStart = CGPoint(x: 0, y: 1)
     public static let brandGradientEnd = CGPoint(x: 1, y: 0)
 
