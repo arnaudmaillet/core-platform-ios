@@ -87,12 +87,25 @@ struct BrandAssetsGuardTests {
         #expect(Self.svgStops(svg) == Self.theme.launchLogoStops.map(Self.hex))
     }
 
-    /// The icon's blob fill, exactly as Icon Composer writes it.
+    /// The icon's blob: the theme's stops, drawn by `circle.svg` — and no
+    /// layer fill in `icon.json` painting over them.
     @Test func theIconWearsTheThemesGradient() throws {
-        let json = String(decoding: try Self.read("App/Resources/AppIcon.icon/icon.json"), as: UTF8.self)
-        for stop in Self.theme.iconGradient {
-            #expect(json.contains("\"\(stop)\""), "icon.json has no \(stop)")
+        let svg = String(decoding: try Self.read("App/Resources/AppIcon.icon/Assets/circle.svg"), as: UTF8.self)
+        #expect(Self.svgStops(svg) == Self.theme.iconStops.map(Self.hex))
+        struct Icon: Decodable {
+            struct Group: Decodable { let layers: [Layer] }
+            struct Layer: Decodable {
+                let imageName: String
+                let fill: AnyFill?
+                enum CodingKeys: String, CodingKey { case imageName = "image-name", fill }
+            }
+            /// Present or not is all that matters.
+            struct AnyFill: Decodable { init(from decoder: Decoder) throws {} }
+            let groups: [Group]
         }
+        let icon = try JSONDecoder().decode(Icon.self, from: Self.read("App/Resources/AppIcon.icon/icon.json"))
+        let circle = try #require(icon.groups.flatMap(\.layers).first { $0.imageName == "circle.svg" })
+        #expect(circle.fill == nil, "a layer fill would paint over the SVG's gradient")
     }
 
     /// The guard cannot pass by reading nothing: an asset one value out of

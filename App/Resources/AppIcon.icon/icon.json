@@ -20,22 +20,6 @@
         },
         {
           "blend-mode" : "normal",
-          "fill" : {
-            "linear-gradient" : [
-              "display-p3:0.85622,0.33380,0.59312,0.50000",
-              "extended-srgb:0.38039,0.33333,0.96078,0.30000"
-            ],
-            "orientation" : {
-              "start" : {
-                "x" : -0.07837949172525338,
-                "y" : 0.8392567768823767
-              },
-              "stop" : {
-                "x" : 1.2565161182285993,
-                "y" : -0.2664190457747104
-              }
-            }
-          },
           "image-name" : "circle.svg",
           "name" : "circle",
           "position" : {
