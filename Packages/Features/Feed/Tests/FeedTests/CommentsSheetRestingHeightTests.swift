@@ -4,8 +4,8 @@ import UIKit
 
 /// The comments sheet's tallest resting height follows the media's shape
 /// (#2087, the owner, 2026-11-03): the media keeps the screen's width, less
-/// its side margins, above it; the sheet takes the rest, between a floor and
-/// a ceiling.
+/// its side margins, above it; the sheet takes the rest, between a floor —
+/// lower for a square to landscape media — and a ceiling.
 @MainActor
 struct CommentsSheetRestingHeightTests {
     /// An iPhone 18 Pro's window.
@@ -33,8 +33,20 @@ struct CommentsSheetRestingHeightTests {
         #expect(resting(screen) == screen.height * SnapCommentsSheetSession.floorShare)
     }
 
-    @Test func aSquareMediaGetsTheFloor() {
-        #expect(resting(CGSize(width: 402, height: 402)) == screen.height * SnapCommentsSheetSession.floorShare)
+    @Test func aFourThreeMediaKeepsTheScreensWidthUnderTheUsualFloor() {
+        let height = resting(CGSize(width: 960, height: 720))
+        #expect(height < screen.height * SnapCommentsSheetSession.floorShare)
+        #expect(height > screen.height * SnapCommentsSheetSession.wideFloorShare)
+        let width = screen.width - 2 * SnapCommentsSheetSession.mediaSideMargin
+        #expect(abs(room(above: height) - width * 720 / 960) < 0.5)
+    }
+
+    @Test func aSquareMediaGetsTheWideFloor() {
+        #expect(resting(CGSize(width: 402, height: 402)) == screen.height * SnapCommentsSheetSession.wideFloorShare)
+    }
+
+    @Test func aPortraitFittedMediaGetsTheFloor() {
+        #expect(resting(CGSize(width: 716, height: 934)) == screen.height * SnapCommentsSheetSession.floorShare)
     }
 
     @Test func aPanoramaStopsAtTheCeiling() {

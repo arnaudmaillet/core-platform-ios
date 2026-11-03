@@ -28,9 +28,11 @@ import UIKit
 @MainActor
 final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationControllerDelegate {
     /// The sheet's tallest resting height, as shares of the screen: never
-    /// under the floor, which keeps the rows readable, never over the
+    /// under the floor, which keeps the rows readable — lower for a square
+    /// to landscape media, whose whole width comes first — never over the
     /// ceiling (`restingHeight`).
     static let floorShare: CGFloat = 0.6
+    static let wideFloorShare: CGFloat = 0.5
     static let ceilingShare: CGFloat = 0.75
     static let detent = UISheetPresentationController.Detent.Identifier("feed.comments.v2")
     /// Between the shrunk media's bottom and the sheet's top.
@@ -42,11 +44,12 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// The sheet's tallest resting height, the media's to decide (the owner,
     /// 2026-11-03): the media keeps the screen's whole width, less its side
     /// margins, in the room above, and the sheet takes what is left, between
-    /// `floorShare` and `ceilingShare` of the screen. A 16:9 media keeps its
-    /// whole width; a
-    /// portrait one, which the width would leave the sheet no room, gets the
-    /// floor. Read once, at the opening: a carousel paged under the sheet
-    /// does not move it.
+    /// a floor and `ceilingShare` of the screen. A square to landscape media
+    /// comes first, down to `wideFloorShare` (the owner, 2026-11-03): a 4:3
+    /// one keeps its whole width over a ~55 % sheet, a square one shrinks a
+    /// little over a 50 % one. A portrait one, which the width would leave
+    /// the sheet no room, gets `floorShare`. Read once, at the opening: a
+    /// carousel paged under the sheet does not move it.
     ///
     /// The height of a custom detent, so it leaves out the bottom safe area
     /// the sheet stands on.
@@ -54,9 +57,9 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// - Parameter picture: what the sheet shrinks, as the page draws it
     ///   (`SnapFeedCell.commentsSheetPictureSize`).
     static func restingHeight(screen: CGSize, safeArea: UIEdgeInsets, picture: CGSize) -> CGFloat {
-        let floor = screen.height * floorShare
         let ceiling = screen.height * ceilingShare
-        guard picture.width > 0, picture.height > 0 else { return floor }
+        guard picture.width > 0, picture.height > 0 else { return screen.height * floorShare }
+        let floor = screen.height * (picture.width >= picture.height ? wideFloorShare : floorShare)
         let mediaHeight = (screen.width - 2 * mediaSideMargin) * picture.height / picture.width
         let left = screen.height - safeArea.top - mediaHeight - mediaGap - safeArea.bottom
         return min(max(left, floor), ceiling)
