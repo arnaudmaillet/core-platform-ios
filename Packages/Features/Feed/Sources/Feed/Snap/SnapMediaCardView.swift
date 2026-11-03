@@ -157,6 +157,20 @@ final class SnapMediaCardView: UIView {
         return valid(imageView.image?.size) ?? declaredAspect ?? valid(posterImage?.size)
     }
 
+    /// Where the picture is drawn in the card's bounds: the whole card when it
+    /// fills (or a collection, whose pages frame themselves), else the fitted
+    /// rect between the bands — what the comments sheet shrinks whole (#2087).
+    var drawnPictureRect: CGRect {
+        guard !showsCollection, framing.fits, let aspect = framingAspect,
+              bounds.width > 0, bounds.height > 0 else { return bounds }
+        let scale = min(bounds.width / aspect.width, bounds.height / aspect.height)
+        let size = CGSize(width: aspect.width * scale, height: aspect.height * scale)
+        return CGRect(
+            x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
+            width: size.width, height: size.height
+        )
+    }
+
     /// The backdrop being drawn, nil when there is none.
     var backdropImage: UIImage? { backdropView.isHidden ? nil : backdropView.image }
 

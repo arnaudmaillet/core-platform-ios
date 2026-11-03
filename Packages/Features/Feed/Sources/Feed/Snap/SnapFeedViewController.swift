@@ -479,6 +479,9 @@ final class SnapFeedViewController: UIViewController {
     private var isMaskedRevealActive = false
     private var isEngagedDismissalActive = false
     private var commentsEngagedID: PostID?
+    /// A media post's comments as a native sheet, while one is up (#2087,
+    /// `CommentsV2`): the engagement above stays nil meanwhile.
+    private var commentsSheet: SnapCommentsSheetSession?
     /// The engaged comments UI — a child of THIS controller (thread data,
     /// scroll position, and reply drafts must never live in a recycled
     /// cell); the cell only hosts its view while engaged.
@@ -3702,6 +3705,7 @@ final class SnapFeedViewController: UIViewController {
     /// reveal, the pager lock, and the toolbar swap all fire together;
     /// text pages take the pre-rendered resting path instead.
     private func presentComments(for id: PostID, animated: Bool = true) {
+        if CommentsV2.isEnabled { return presentCommentsSheet(for: id, animated: animated) }
         guard commentsEngagedID == nil,
               let indexPath = dataSource.indexPath(for: id),
               let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell
@@ -3802,6 +3806,36 @@ final class SnapFeedViewController: UIViewController {
                          animated ? "yes" : "no"))
         }
         #endif
+    }
+
+    /// `CommentsV2` (#2087): the comments in a native sheet over the bottom
+    /// of the screen, the page's media shrunk whole into the room above it —
+    /// `SnapCommentsSheetSession`. Today's panel, built as the page's is; the
+    /// pager and the sector hold still while it is up.
+    private func presentCommentsSheet(for id: PostID, animated: Bool) {
+        guard commentsSheet == nil, commentsEngagedID == nil, presentedViewController == nil,
+              view.window != nil, modelsByID[id]?.mediaURL != nil,
+              let indexPath = dataSource.indexPath(for: id),
+              let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell,
+              let content = makeCommentsPanelContent?(id)
+        else { return }
+        applyRailSlot(to: content, hostedByPage: false)
+        let detail = content as? PostDetailViewController
+        detail?.setEngagedInsets(top: 0, bottomInset: view.window?.safeAreaInsets.bottom ?? 0)
+        // The count the feed knows: no comment bones for a post with none (#1773).
+        detail?.seedCommentCount(modelsByID[id]?.cardMetrics?.comments)
+        detail?.setStreamTransitionProgress(0)
+        detail?.setComposerEntranceState(offstage: false)
+        collectionView.isScrollEnabled = false
+        (parent as? ForYouSectorViewController)?.setPagingEnabled(false)
+        let session = SnapCommentsSheetSession(postID: id, panel: content, cell: cell, feed: self) { [weak self] in
+            guard let self else { return }
+            commentsSheet = nil
+            collectionView.isScrollEnabled = true
+            (parent as? ForYouSectorViewController)?.setPagingEnabled(true)
+        }
+        commentsSheet = session
+        session.present(animated: animated)
     }
 
     /// The TEXT page's resting engagement, PHASE 1 (visual pre-render):
@@ -4418,6 +4452,8 @@ final class SnapFeedViewController: UIViewController {
         // across the flight for exactly this reason; so is this now, and
         // `zoomTransitionDidEnd` picks it up on landing.
         guard !isAwaitingZoomPresentation else { return }
+        // The sheet builds its own panel (#2087): none waits in the page.
+        guard !CommentsV2.isEnabled else { return }
         guard commentsEngagedID == nil, commentsContentVC == nil,
               prewarmedCommentsID == nil,
               modelsByID[id]?.mediaURL != nil else { return }

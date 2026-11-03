@@ -1866,6 +1866,66 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
     }
 
+    // MARK: - The comments sheet (#2087, `CommentsV2`)
+
+    /// The sheet's window onto the media: the picture alone once it has
+    /// shrunk, without the bands a fitted picture stands between.
+    private var commentsSheetMask: UIView?
+
+    /// The page under the comments sheet, at `progress` of the way from rest
+    /// (0) to the sheet up (1): the page's interface fades out, and the media
+    /// shrinks WHOLE into `mediaRegion` (the window's coordinates) — the room
+    /// above the sheet — centred, never cropped. Driven every frame by the
+    /// sheet's own position, so it follows the finger on the way down.
+    ///
+    /// ⚠️ A TRANSFORM ON THE CARD, and nothing else moves: the card keeps its
+    /// full-bleed frame and its playback, and `clearCommentsSheetLayout` is
+    /// identity again.
+    func setCommentsSheetLayout(progress: CGFloat, mediaRegion: CGRect) {
+        let t = min(max(0, progress), 1)
+        // The interface, and the action column riding above it (#695).
+        chrome.alpha = 1 - t
+        columnStage.alpha = 1 - t
+        guard let stage = mediaCard.superview else { return }
+        let mediaRegion = stage.convert(mediaRegion, from: nil)
+        let bounds = mediaCard.bounds
+        let picture = mediaCard.drawnPictureRect
+        guard picture.width > 0, picture.height > 0, mediaRegion.width > 0, mediaRegion.height > 0 else { return }
+        // The scale that fits the picture in the region, and the move that
+        // centres it there — about the card's centre, its transform's anchor.
+        let fit = min(mediaRegion.width / picture.width, mediaRegion.height / picture.height, 1)
+        let scale = 1 + (fit - 1) * t
+        let cardCenter = mediaCard.center
+        let offset = CGPoint(x: picture.midX - bounds.midX, y: picture.midY - bounds.midY)
+        let landed = CGPoint(x: cardCenter.x + offset.x * fit, y: cardCenter.y + offset.y * fit)
+        let move = CGPoint(x: (mediaRegion.midX - landed.x) * t, y: (mediaRegion.midY - landed.y) * t)
+        mediaCard.transform = CGAffineTransform(scaleX: scale, y: scale)
+            .concatenating(CGAffineTransform(translationX: move.x, y: move.y))
+        // The bands fade from the window as the picture shrinks.
+        let mask = commentsSheetMask ?? {
+            let mask = UIView()
+            mask.backgroundColor = .black
+            mediaCard.mask = mask
+            commentsSheetMask = mask
+            return mask
+        }()
+        mask.frame = CGRect(
+            x: bounds.minX + (picture.minX - bounds.minX) * t,
+            y: bounds.minY + (picture.minY - bounds.minY) * t,
+            width: bounds.width + (picture.width - bounds.width) * t,
+            height: bounds.height + (picture.height - bounds.height) * t
+        )
+    }
+
+    /// The page at rest again: identity media, its interface back.
+    func clearCommentsSheetLayout() {
+        chrome.alpha = 1
+        columnStage.alpha = 1
+        mediaCard.transform = .identity
+        mediaCard.mask = nil
+        commentsSheetMask = nil
+    }
+
     // MARK: - Configuration
 
     func configure(

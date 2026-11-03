@@ -1,6 +1,7 @@
 #if DEBUG
 import CoreModels
 import DesignSystem
+import Feed
 import FeedInterface
 import UIKit
 
@@ -19,6 +20,8 @@ import UIKit
 /// - **Post**: the mock's comment fixtures (`MockCommentService`'s seed sets)
 ///   as a list; a row opens the full-screen feed on that post, the other
 ///   fixtures a swipe away.
+///
+/// The sandbox runs the redesign: it turns `CommentsV2` on for the process.
 ///
 /// The value after the flag picks the opening: `shots` (the default), `post`
 /// (the list), or a post id (`post-0004`: that post, open).
@@ -47,6 +50,7 @@ enum CommentsSandbox {
     /// The sandbox, opening where `arguments` say.
     @MainActor
     static func make(feed: any FeedFeatureBuilding, arguments: [String]) -> UIViewController {
+        CommentsV2.isEnabled = true
         let opening = arguments.firstIndex(of: argument)
             .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
             .flatMap { $0.hasPrefix("-") ? nil : $0 }
