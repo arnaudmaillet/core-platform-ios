@@ -462,12 +462,12 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             height: max(room, smallest)
         )
         let handoff = min(1, max(0, (smallest - room) / Self.previewHandoffSpan))
-        // Out over the room just before its smallest, so it has gone before
-        // the preview comes — one picture at a time; with no preview to come,
-        // out past its smallest instead.
+        // Out as it nears its smallest, before the preview comes — one
+        // picture at a time; with no preview to come, out past its smallest,
+        // with the sheet.
         let out: CGFloat = isPreviewUnavailable
             ? min(1, max(0, (smallest - room) / Self.mediaOutSpan))
-            : Self.smoothstep((smallest + Self.popMediaOutLead - room) / Self.popMediaOutLead)
+            : timedMediaOut(room: room, smallest: smallest)
         // From the collapsed rest's room down to the smallest: the corners
         // turn the preview's on the way.
         let restingRoom = restingTop - Self.mediaGap - roomTop
@@ -494,12 +494,44 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// The room lost, past the media's smallest, over which it scales out.
     private static let mediaOutSpan: CGFloat = 64
     /// ONE PICTURE AT A TIME, the preview first (the owner, 2026-11-03). The
-    /// media scales out over the room's last `popMediaOutLead` before its
-    /// smallest; past it, a quarter of the hand-over on, the preview pops in
-    /// (`setPreviewPopped`), and it pops out only once the sheet is nearly
-    /// back at the threshold. Between the two, for a moment, neither: a sheet
-    /// never rests there.
-    private static let popMediaOutLead: CGFloat = 48
+    /// media scales out as it nears its smallest (`timedMediaOut`); past it,
+    /// a quarter of the hand-over on, the preview pops in (`setPreviewPopped`),
+    /// and it pops out only once the sheet is nearly back at the threshold.
+    /// Between the two, for a moment, neither: a sheet never rests there.
+    ///
+    /// The media goes out within `mediaOutAt` of its smallest and comes back
+    /// past `mediaInAt`: a sheet held there does not flicker it.
+    private static let mediaOutAt: CGFloat = 12
+    private static let mediaInAt: CGFloat = 36
+    private static let mediaOutDuration: CFTimeInterval = 0.2
+    /// The media's way out, 0 in, 1 out, and where it is going.
+    private var mediaOutTarget: CGFloat = 0
+    private var mediaOutShare: CGFloat = 0
+    private var lastMediaOutTime: CFTimeInterval?
+
+    /// ⚠️ THE MEDIA'S WAY OUT IN ITS OWN TIME, as the preview's pop (the
+    /// owner, 2026-11-03): played over the room's last points, a quick throw
+    /// crossed them in a frame or two and the media vanished at once. The
+    /// sheet decides when; the scale-out takes `mediaOutDuration` whatever its
+    /// speed, advanced frame by frame on the display link's clock, and turns
+    /// back from where it stands. Its SIZE stays the sheet's: the room above it.
+    private func timedMediaOut(room: CGFloat, smallest: CGFloat) -> CGFloat {
+        if mediaOutTarget == 0, room < smallest + Self.mediaOutAt {
+            mediaOutTarget = 1
+        } else if mediaOutTarget == 1, room > smallest + Self.mediaInAt {
+            mediaOutTarget = 0
+        }
+        if let now = frameTiming?.now {
+            if let last = lastMediaOutTime, mediaOutShare != mediaOutTarget {
+                let step = CGFloat((now - last) / Self.mediaOutDuration)
+                mediaOutShare = mediaOutTarget > mediaOutShare
+                    ? min(mediaOutTarget, mediaOutShare + step)
+                    : max(mediaOutTarget, mediaOutShare - step)
+            }
+            lastMediaOutTime = now
+        }
+        return Self.smoothstep(mediaOutShare)
+    }
     private static let popInAt: CGFloat = 0.25
     private static let popOutBelow: CGFloat = 0.05
     /// The preview's size, as a share of its own, as it pops in and out.
