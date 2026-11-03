@@ -73,8 +73,8 @@ final class WalletWeekStrip: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// The streak's colour (#1494): the primary — the violet is the gems'
-    /// alone since #2062, and a streak earns likes.
+    /// The streak's colour (#1494): the primary — a streak earns likes, and
+    /// the gems have their own colour (the crown's gold since #2071).
     static let ink: UIColor = Palette.tint
     /// The streak chip's words, on the primary's soft ground: the tint's
     /// 4.2:1 is short of text strength.

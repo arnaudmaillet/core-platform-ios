@@ -12,8 +12,8 @@ import UIKit
 ///   text style, the symbol effects (bounce, replace).
 /// - **Save is the STAR** (outline / filled gold, `Palette.saveGold`), the
 ///   收藏 convention; the like is the heart.
-/// - **The gem is our own drawing** (side view, rounded), not a Phosphor or
-///   Sketch glyph.
+/// - **The gems' glyph is the owner's crown** (#2071), traced from the
+///   owner's drawings (`dev/symbols/crown`); it was our own side-view gem.
 /// - **One family per cluster**: the card's whole action row — share
 ///   included — is this set. Everything else stays SF Symbols.
 /// - **The ⋯ is the system's `ellipsis`** everywhere (the owner, 2026-10-15:
@@ -46,10 +46,10 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     case saved = "core.star.fill"
     /// Share.
     case share = "core.share"
-    /// Gems, outline.
-    case gem = "core.gem"
-    /// Gems, filled — the glyph beside an amount.
-    case gemFilled = "core.gem.fill"
+    /// Gems, outline: the owner's crown (#2071).
+    case crown = "core.crown"
+    /// Gems, filled — the glyph beside an amount (`GemSymbol.glyph`).
+    case crownFilled = "core.crown.fill"
 
     // The tab bar's own glyphs (#1191), drawn by the owner from Phosphor:
     // each an outline, a fill (the selected tab), and both with a badge
@@ -87,7 +87,7 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         case .save: "Save"
         case .saved: "Saved"
         case .share: "Share"
-        case .gem, .gemFilled: "Gems"
+        case .crown, .crownFilled: "Gems"
         case .paperplane, .paperplaneFill, .paperplaneBadge, .paperplaneBadgeFill: "Explore"
         case .squarePlay, .squarePlayFill, .squarePlayBadge, .squarePlayBadgeFill: "For You"
         case .chats, .chatsFill, .chatsBadge, .chatsBadgeFill: "Messages"

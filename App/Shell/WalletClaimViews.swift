@@ -74,8 +74,8 @@ func walletAgoText(since date: Date, now: Date) -> String {
 ///
 /// ACTIVE — the likes committed and how long until it settles.
 /// SETTLED — what it earned in gems, or "No reward" (a normal outcome: the
-/// charter pays demonstrated value, not attention), and how long ago. Gem
-/// violet only beside a gem amount: the server's "Rewarded" (shadow mode, no
+/// charter pays demonstrated value, not attention), and how long ago. The
+/// gems' gold only beside a gem amount: the server's "Rewarded" (shadow mode, no
 /// gems credited) is in the secondary ink.
 ///
 /// A row of a list's card, selectable: it opens the post in the feed, flying
@@ -94,7 +94,7 @@ class WalletStakeCell: UICollectionViewListCell {
     private let subtitleLabel = UILabel()
     private let resultLabel = UILabel()
     /// The outcome as a chip once settled (#1477): a ground under the
-    /// verdict, grey for words, the gems' violet only for gems. Bare for an
+    /// verdict, grey for words, the gems' yellow only for gems. Bare for an
     /// active stake's amount.
     private let resultChip = UIStackView()
     private let detailLabel = UILabel()
@@ -362,7 +362,7 @@ class WalletStakeCell: UICollectionViewListCell {
             spoken = [staked, ago, "no reward"]
         // The server's verdicts (#903): the outcome alone, never gems the
         // balance does not hold while settlement runs in shadow mode — and
-        // so not in gem violet either, which promises gems.
+        // so not in the gems' gold either, which promises gems.
         case .rewarded:
             result.append(words("Rewarded"))
             detailLabel.attributedText = detail(" staked · \(ago)")
@@ -379,13 +379,14 @@ class WalletStakeCell: UICollectionViewListCell {
         accessibilityValue = spoken.joined(separator: ", ")
     }
 
-    /// The outcome's chip: gems on the gems' violet wash, every verdict in
-    /// words on a grey one — so violet always means gems (#1477). An active
+    /// The outcome's chip: gems on the gems' yellow wash (#2071), every
+    /// verdict in words on a grey one — so the yellow always means gems
+    /// (#1477). An active
     /// stake's amount, and a verdict still on its way, wear none.
     private func applyChip(for outcome: WalletStake.Outcome?, pending: Bool) {
         let ground: UIColor? = switch outcome {
         case nil: nil
-        case .gems: GemSymbol.tint.withAlphaComponent(0.16)
+        case .gems: GemSymbol.ground.withAlphaComponent(0.16)
         case .noReward, .notRewarded, .rewarded, .pending: .tertiarySystemFill
         }
         resultChip.backgroundColor = ground

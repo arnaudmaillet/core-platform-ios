@@ -3,19 +3,25 @@ import UIKit
 /// The glyph for GEMS — the charter's currency B, earned-only: what a stake
 /// that turned out to carry information pays, after its deferred settlement
 /// (`dev/economy/`). `LikesSymbol`'s counterpart, so the two currencies are
-/// told apart at a glance: a red heart you commit, a violet diamond you earn.
+/// told apart at a glance: a raspberry heart you commit, a gold crown you
+/// earn (the owner's crown since #2071; a violet diamond before).
 public enum GemSymbol {
-    public static let glyph = AppSymbol.gemFilled.rawValue
-    /// The palette's violet (#2062), the gems' alone: a GLYPH colour (3:1).
-    /// It was the system cyan once (#1124), which said nothing.
-    public static let tint: UIColor = Palette.gemViolet
-    /// The same violet as TEXT — "+N", a price, a balance: a deeper step in
-    /// the light, where the glyph's violet is under 4.5:1.
+    /// The owner's crown, filled (#2071).
+    public static let glyph = AppSymbol.crownFilled.rawValue
+    /// The crown's colour (`Palette.gem`): a bright gold on light grounds,
+    /// the brand's yellow on dark ones. One colour, so a reader that tints
+    /// the symbol draws it right. In the light it is under a glyph's 3:1:
+    /// draw the crown beside its amount, in `textColor`.
+    public static let tint: UIColor = Palette.gem
+    /// The same gold as TEXT — "+N", a price, a balance: a deeper step in
+    /// the light, where the glyph's gold is under 4.5:1.
     public static let textColor: UIColor = Palette.gemText
+    /// The wash under a price or a claim, at the reader's alpha: the yellow.
+    public static let ground: UIColor = Palette.gemGround
     /// The display name.
     public static let name = "Gems"
 
-    /// A gem glyph that carries its own tint whatever the control's.
+    /// A crown glyph that carries its own tint whatever the control's.
     public static func glyphImage(_ configuration: UIImage.SymbolConfiguration? = nil) -> UIImage? {
         let image = UIImage.symbol(named: glyph, configuration: configuration)
         return image?.withTintColor(tint, renderingMode: .alwaysOriginal)
