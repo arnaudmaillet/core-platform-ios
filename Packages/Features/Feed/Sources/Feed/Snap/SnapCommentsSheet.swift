@@ -570,7 +570,25 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         guard let frame, let window = view.window, frame.minY < window.screen.bounds.maxY else { return }
         setKeyboardUp(true)
         guard let panelHeight, restingHeight > 0 else { return }
-        panelHeight.constant = panelHeightOverKeyboard(at: frame.minY, in: window)
+        let height = panelHeightOverKeyboard(at: frame.minY, in: window)
+        holdStreamEnd(panelGrowingBy: height - panelHeight.constant)
+        panelHeight.constant = height
+    }
+
+    /// ⚠️ THE ROW OVER THE COMPOSER STAYS THE ROW OVER THE COMPOSER (the
+    /// owner, 2026-11-03). The panel's height changes as a keyboard comes and
+    /// goes, and the stream, laid out from its top, showed another last row
+    /// over the composer. Its offset takes the change back — inside the
+    /// keyboard's animation, which runs this — so what stands over the
+    /// composer stays, within what the stream can scroll to.
+    private func holdStreamEnd(panelGrowingBy growth: CGFloat) {
+        guard abs(growth) > 0.5, let list = (panel as? PostDetailViewController)?.stream.collectionView else { return }
+        let inset = list.adjustedContentInset
+        let lowest = -inset.top
+        let highest = max(lowest, list.contentSize.height + inset.bottom - (list.bounds.height + growth))
+        let offset = min(max(list.contentOffset.y - growth, lowest), highest)
+        guard abs(offset - list.contentOffset.y) > 0.5 else { return }
+        list.contentOffset.y = offset
     }
 
     /// The panel's height while a keyboard is up, its top at `keyboardTop`
@@ -624,6 +642,7 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
             panelBottom.isActive = false
             panelHeight.isActive = true
         } else {
+            holdStreamEnd(panelGrowingBy: restingHeight - panelHeight.constant)
             panelHeight.isActive = false
             panelBottom.isActive = true
         }
