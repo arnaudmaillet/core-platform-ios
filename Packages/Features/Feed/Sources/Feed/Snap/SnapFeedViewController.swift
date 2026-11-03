@@ -3825,8 +3825,12 @@ final class SnapFeedViewController: UIViewController {
               let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell,
               let content = takeCommentsSheetWarm(for: id) ?? makeCommentsPanelContent?(id)
         else { return }
-        applyRailSlot(to: content, hostedByPage: false)
         let detail = content as? PostDetailViewController
+        // The panel learns here that its post turned out unavailable (#1409),
+        // as `applyRailSlot` tells the page's.
+        detail?.onPostUnavailable = { [weak self] id in self?.markPostUnavailable(id) }
+        // The avatar and the field alone: no like, no slot, no post actions.
+        detail?.setComposerBare()
         // The count the feed knows: no comment bones for a post with none (#1773).
         detail?.seedCommentCount(modelsByID[id]?.cardMetrics?.comments)
         detail?.setStreamTransitionProgress(0)

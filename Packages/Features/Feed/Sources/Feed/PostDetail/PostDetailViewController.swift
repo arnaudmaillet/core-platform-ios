@@ -1417,6 +1417,19 @@ final class PostDetailViewController: UIViewController {
         composeBar.postActions.onShare = onShare
     }
 
+    /// The composer alone — the avatar and the field, no column: no stake,
+    /// no slot, no post actions (the comments sheet, #2087, the owner
+    /// 2026-11-03). The field takes the column's width, as it does on a page
+    /// with no slot (#1999).
+    func setComposerBare() {
+        composeBar.hostsActionColumn = true
+        composeBar.showsStake = false
+        setPostActions(shown: false, saved: false, onSave: nil)
+        railShareAction = nil
+        railShareHoldArms = false
+        setRailSoundFace(nil, keepsSlot: false)
+    }
+
     /// The composer's star after a save anywhere (#1681).
     func setPostSaved(_ saved: Bool) {
         composeBar.postActions.setSaved(saved)

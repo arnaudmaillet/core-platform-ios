@@ -65,6 +65,11 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         let share = Self.restingShare
         sheet.modalPresentationStyle = .pageSheet
         sheet.presentationController?.delegate = self
+        // Dark, the sheet's own material included: the panel is drawn for the
+        // dark page it lived on, and a sheet the keyboard grows otherwise
+        // turns to a light glass under its white text.
+        sheet.overrideUserInterfaceStyle = .dark
+        sheet.presentationController?.traitOverrides.userInterfaceStyle = .dark
         if let controller = sheet.sheetPresentationController {
             controller.detents = [.custom(identifier: Self.detent) { context in
                 min(context.maximumDetentValue, screenHeight * share)
@@ -96,6 +101,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     @objc func close() {
         guard !hasEnded, sheet.presentingViewController != nil else { return }
         sheet.view.endEditing(true)
+        content.freeze()
         // The bars come back WITH the sheet's exit, not after it.
         setBarsHidden(false, animated: true)
         feed?.dismiss(presented: sheet)
@@ -155,6 +161,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// the sheet is let go back to its rest.
     func presentationControllerWillDismiss(_ presentationController: UIPresentationController) {
         setBarsHidden(false, animated: true)
+        content.freeze()
         sheet.transitionCoordinator?.notifyWhenInteractionChanges { [weak self] context in
             guard context.isCancelled else { return }
             self?.setBarsHidden(true, animated: true)
@@ -192,6 +199,7 @@ final class SnapCommentsSheetViewController: UIViewController {
     private let tabs = CommentTabsSelector()
     let walletBadge: WalletBadgeButton?
     var onDismissed: (() -> Void)?
+    private let keyboardObservers = NotificationObserverBag()
 
     init(panel: UIViewController, walletBadge: WalletBadgeButton?, onWalletTap: (() -> Void)?) {
         self.panel = panel
@@ -212,9 +220,6 @@ final class SnapCommentsSheetViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // The panel is drawn for the dark page it lived on.
-        navigationController?.overrideUserInterfaceStyle = .dark
-        overrideUserInterfaceStyle = .dark
         navigationItem.leftBarButtonItem = BarItems.container(id: Self.tabsItemID, view: tabs.tabBar)
         installWalletItem()
 
@@ -230,6 +235,25 @@ final class SnapCommentsSheetViewController: UIViewController {
             panel.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         tabs.bind(to: panel as? PostDetailViewController)
+        // ⚠️ THE KEYBOARD'S GUIDE IS ANCHORED TO THE SCREEN: with no keyboard
+        // up, the input row's ceiling is the screen's bottom, so a sheet
+        // sliding in or out left the field pinned there while everything
+        // else moved (the owner, 2026-11-03). The sheet moves as ONE frozen
+        // piece: the row follows the keyboard only while one is coming up.
+        let detail = panel as? PostDetailViewController
+        detail?.setComposerTracksKeyboard(false)
+        let center = NotificationCenter.default
+        keyboardObservers.add(center.addObserver(
+            forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
+        ) { [weak detail] _ in MainActor.assumeIsolated { detail?.setComposerTracksKeyboard(true) } })
+        keyboardObservers.add(center.addObserver(
+            forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main
+        ) { [weak detail] _ in MainActor.assumeIsolated { detail?.setComposerTracksKeyboard(false) } })
+    }
+
+    /// The sheet is leaving: its content moves as one piece from here.
+    func freeze() {
+        (panel as? PostDetailViewController)?.setComposerTracksKeyboard(false)
     }
 
     private func installWalletItem() {
