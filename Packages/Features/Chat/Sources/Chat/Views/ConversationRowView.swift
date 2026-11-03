@@ -32,10 +32,8 @@ final class ConversationRowView: UIView {
     private let timeLabel = UILabel()
     private let mutedIcon = UIImageView(image: UIImage(systemName: "bell.slash.fill"))
     private let pinnedIcon = UIImageView(image: UIImage(systemName: "pin.fill"))
-    /// The unread count, under the time at the row's trailing edge (#2049):
-    /// the avatar badge's pill, with no ring — it sits on the row, not on a
-    /// face.
-    private let unreadPill = UnreadCountPill(ringed: false)
+    /// The unread count, under the time at the row's trailing edge (#2049).
+    private let unreadPill = UnreadCountPill()
 
     /// Told when the face's "+" is tapped — never the row's own tap.
     var onFollowTapped: (() -> Void)? {

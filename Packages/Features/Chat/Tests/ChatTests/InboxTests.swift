@@ -1491,52 +1491,42 @@ struct InboxListSectionTests {
 
 // MARK: - Avatar badge
 
-/// The pill on a conversation's avatar. Its geometry is otherwise only
-/// checkable by measuring a screenshot, and every failure here still renders
-/// something badge-shaped.
+/// The unread pill's shape (#2088: it left the avatar for the row, the
+/// tests with it): a circle for one digit, a capsule beyond, "99+" past 99.
 @MainActor
-struct BadgedAvatarViewTests {
-    private func laidOut(_ style: BadgedAvatarView.Style) -> CGSize {
-        let view = BadgedAvatarView()
-        view.frame = CGRect(x: 0, y: 0, width: 48, height: 48)
-        view.setBadge(style)
-        view.setNeedsLayout()
-        view.layoutIfNeeded()
-        return view.badgeSize
+struct UnreadCountPillShapeTests {
+    private func laidOut(_ count: Int?) -> CGSize {
+        let pill = UnreadCountPill()
+        pill.show(count: count)
+        return pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
     }
 
     /// One digit is a CIRCLE: the height floor wins, because a capsule narrower
     /// than it is tall has a corner radius exceeding half its width and
     /// degenerates — the same floor the tab capsule's lens states.
     @Test func aSingleDigitDrawsACircle() {
-        let size = laidOut(.count(3))
+        let size = laidOut(3)
         #expect(size.width == size.height)
     }
 
     /// Two digits WIDEN it — that is the whole reason it is a capsule — without
     /// changing its height, so a row whose count crosses ten does not move.
     @Test func aSecondDigitWidensThePillWithoutHeighteningIt() {
-        let one = laidOut(.count(3))
-        let two = laidOut(.count(11))
-
+        let one = laidOut(3)
+        let two = laidOut(11)
         #expect(two.width > one.width)
         #expect(two.height == one.height)
     }
 
-    /// Past 99 the text stops growing, so the pill stops too rather than
-    /// running across the face behind it.
+    /// Past 99 the text stops growing, so the pill stops too.
     @Test func theCountSaturatesRatherThanGrowingWithoutBound() {
-        let hundred = laidOut(.count(100))
-        let thousand = laidOut(.count(4_000))
-
-        #expect(hundred.width == thousand.width)
+        #expect(laidOut(100).width == laidOut(4_000).width)
     }
 
-    /// A dot is the same height as a count — they occupy one slot, so a surface
-    /// switching between them cannot shift the avatar beneath.
+    /// A dot is the same height as a count, and a circle.
     @Test func aDotMatchesACountsHeight() {
-        #expect(laidOut(.dot).height == laidOut(.count(1)).height)
-        #expect(laidOut(.dot).width == laidOut(.dot).height)
+        #expect(laidOut(nil).height == laidOut(1).height)
+        #expect(laidOut(nil).width == laidOut(nil).height)
     }
 }
 

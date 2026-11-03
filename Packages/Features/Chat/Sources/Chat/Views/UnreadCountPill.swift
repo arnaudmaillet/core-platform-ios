@@ -5,10 +5,9 @@ import UIKit
 /// (#2062, never a gradient), "99+" past 99, a circle for one digit and a
 /// capsule beyond.
 ///
-/// Worn in two places, the same pill: on a request's avatar (with a ring in
-/// the list's own colour, so it reads as sitting ON the face), and under a
-/// conversation row's time (#2049, no ring: it sits on the row, not on a
-/// face).
+/// Worn on the rows, never on a face: under a conversation row's time
+/// (#2049), and under a request's Accept and ✕ (#2088). The ringed variant
+/// that sat on a request's avatar went with that badge.
 final class UnreadCountPill: UIView {
     enum Metrics {
         /// The pill's height, and the diameter a bare dot draws at.
@@ -27,37 +26,17 @@ final class UnreadCountPill: UIView {
         /// one-digit pill at 22 against a 20pt height, which is neither a
         /// circle nor obviously a capsule; 6 lets the floor bind.
         static let labelInset: CGFloat = 6
-        /// The ring that separates the badge from a disc beneath it. Drawn in
-        /// the list's own background colour, so the badge reads as sitting ON
-        /// the avatar rather than being part of it.
-        ///
-        /// 2.5pt: at 2 the ring disappeared into the disc's own edge at the one
-        /// place they cross, which is exactly where it has work to do.
-        static let ringWidth: CGFloat = 2.5
     }
 
     private let label = UILabel()
     private var width: NSLayoutConstraint!
-    private let ringed: Bool
 
-    /// `ringed`: a ring in the list's background colour, for a pill over a
-    /// face.
-    init(ringed: Bool) {
-        self.ringed = ringed
+    init() {
         super.init(frame: .zero)
         // The solid unread mark, as every pill and badge (#2062).
         backgroundColor = Palette.counter
         clipsToBounds = true
         layer.cornerCurve = .continuous
-        if ringed { layer.borderWidth = Metrics.ringWidth }
-        // The ring follows the appearance and the contrast: a layer holds
-        // CGColors and re-resolves nothing itself.
-        applyColours()
-        registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]
-        ) { (view: UnreadCountPill, _: UITraitCollection) in
-            view.applyColours()
-        }
 
         // `.caption1` rather than `.caption2`: the pill grew, and a number in
         // it should look deliberate rather than lost.
@@ -89,10 +68,6 @@ final class UnreadCountPill: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         layer.cornerRadius = bounds.height / 2
-    }
-
-    private func applyColours() {
-        if ringed { layer.borderColor = UIColor.systemBackground.resolvedColor(with: traitCollection).cgColor }
     }
 
     /// What the pill reads: "99+" past 99. Pure, for tests.

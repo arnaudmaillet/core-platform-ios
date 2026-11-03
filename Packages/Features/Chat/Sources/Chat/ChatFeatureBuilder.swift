@@ -122,7 +122,9 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         let requests = MessageRequestsViewController(
             viewModel: MessageRequestsViewModel(catalog: catalog, router: router),
             imagePipeline: imagePipeline,
-            avatars: connections as? any PeerAvatarProviding
+            avatars: connections as? any PeerAvatarProviding,
+            // The faces wear the relation mark, as All's (#2088).
+            relations: relations
         )
         requests.threadPreviewProvider = makeThreadPreview
         // The Hidden requests list (#552): the same screen over the hidden
@@ -131,7 +133,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             let hidden = MessageRequestsViewController(
                 viewModel: MessageRequestsViewModel(catalog: catalog, router: router, folder: .hiddenRequests),
                 imagePipeline: imagePipeline,
-                avatars: connections as? any PeerAvatarProviding
+                avatars: connections as? any PeerAvatarProviding,
+                relations: relations
             )
             hidden.threadPreviewProvider = makeThreadPreview
             return hidden

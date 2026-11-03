@@ -104,15 +104,21 @@ final class MessageRequestsViewController: UIViewController {
     var hiddenRequestsProvider: (() -> UIViewController)?
     private let imagePipeline: ImagePipeline?
     private let avatars: (any PeerAvatarProviding)?
+    /// The peers' relations, for the faces' mark and its "+" (#2088), as the
+    /// All list's (#2049). Nil: no mark.
+    private let relations: InboxRelations?
 
     init(
         viewModel: MessageRequestsViewModel,
         imagePipeline: ImagePipeline? = nil,
-        avatars: (any PeerAvatarProviding)? = nil
+        avatars: (any PeerAvatarProviding)? = nil,
+        relations: InboxRelations? = nil
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
-        self.avatars = avatars
+        // The faces the rows read are kept for the thread they open (#2049).
+        self.avatars = relations?.recording(avatars) ?? avatars
+        self.relations = relations
         super.init(nibName: nil, bundle: nil)
         // Published from the init, off the view model, and from off screen
         // too — a request landing while the viewer is on another tab is
@@ -133,6 +139,7 @@ final class MessageRequestsViewController: UIViewController {
     /// its own after a beat.
     private func pullToRefresh() {
         viewModel.refresh()
+        resolveRelations(refresh: true)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             self?.refreshControl.endRefreshing()
         }
@@ -150,6 +157,8 @@ final class MessageRequestsViewController: UIViewController {
         hiddenRequestsRow.addTarget(self, action: #selector(openHiddenRequests), for: .touchUpInside)
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        // A relation that changed: the faces on screen take it, animated.
+        relations?.observe(by: self) { [weak self] peers in self?.applyRelations(of: peers) }
         // Pull to refresh, with the app's loader (#1901, the owner 2026-10-30):
         // the pull came back when search moved into the stacked field.
         refreshControl.addAction(UIAction { [weak self] _ in self?.pullToRefresh() }, for: .valueChanged)
@@ -160,6 +169,12 @@ final class MessageRequestsViewController: UIViewController {
         // Whatever the view model holds now — the catalog may have answered
         // before this view was asked for.
         render(viewModel.phase)
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // Back from a thread or a profile: a follow made there shows.
+        if hasRenderedContent { resolveRelations(refresh: true) }
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -231,7 +246,11 @@ final class MessageRequestsViewController: UIViewController {
                 withIdentifier: MessageRequestCell.reuseIdentifier, for: indexPath
             ) as! MessageRequestCell
             if let self, let model = self.modelsByID[id] {
-                cell.configure(with: model, imagePipeline: self.imagePipeline, avatars: self.avatars)
+                self.relations?.saw(model)
+                cell.configure(
+                    with: model, imagePipeline: self.imagePipeline, avatars: self.avatars,
+                    mark: self.relations?.mark(for: model.peerID) ?? .none, onFollow: self.followHandler(for: model)
+                )
             }
             // Decisions are captured per row: the diffable snapshot animates
             // the row out, so neither handler needs an index path.
@@ -286,6 +305,9 @@ final class MessageRequestsViewController: UIViewController {
             // come back in reach before it turns again.
             pagingFooter.setSpinning(false)
             revealContent()
+            // The rows draw now; their marks arrive as the relations land.
+            // Next turn, once the table has laid the rows out.
+            DispatchQueue.main.async { [weak self] in self?.resolveRelations() }
         case .empty where viewModel.folder == .hiddenRequests:
             statusView.configure(
                 symbol: "eye.slash",
@@ -341,6 +363,50 @@ final class MessageRequestsViewController: UIViewController {
     }
     #endif
 
+    // MARK: - The relation mark (#2088, as the All list's #2049)
+
+    /// The peers to ask about: the rows on screen and as many again below
+    /// the last one shown. Before the first layout, the first two screens'
+    /// worth.
+    private func peersToResolve() -> [ProfileID] {
+        let ids = dataSource.snapshot().itemIdentifiers
+        let visible = (tableView.indexPathsForVisibleRows ?? []).compactMap { dataSource.itemIdentifier(for: $0) }
+        let range: Range<Int>
+        if let first = visible.first.flatMap({ ids.firstIndex(of: $0) }),
+           let last = visible.last.flatMap({ ids.firstIndex(of: $0) }) {
+            range = first..<min(ids.count, last + 1 + visible.count)
+        } else {
+            range = 0..<min(ids.count, InboxPaging.relationLookahead)
+        }
+        return ids[range].compactMap { modelsByID[$0]?.peerID }
+    }
+
+    private func resolveRelations(refresh: Bool = false) {
+        guard let relations, relations.isEnabled else { return }
+        relations.resolve(peersToResolve(), refresh: refresh)
+    }
+
+    /// The faces on screen whose peer's relation changed.
+    /// `peers` nil: every row (a viewer change).
+    private func applyRelations(of peers: Set<ProfileID>?) {
+        guard let relations else { return }
+        for case let cell as MessageRequestCell in tableView.visibleCells {
+            guard let peer = cell.peerID, peers?.contains(peer) ?? true else { continue }
+            cell.setRelationMark(relations.mark(for: peer), animated: true)
+        }
+    }
+
+    /// The "+" on `model`'s face: the inbox's follow (member gate,
+    /// optimistic flip, haptic, a failure put back and announced). It never
+    /// accepts the request: the row stays a request until Accept.
+    private func followHandler(for model: ConversationDisplayModel) -> (() -> Void)? {
+        guard let relations, relations.isEnabled, let peer = model.peerID else { return nil }
+        return { [weak self, weak relations] in
+            guard let self else { return }
+            relations?.follow(peer, handle: model.peerHandle, name: model.title, from: self)
+        }
+    }
+
     /// The spinner hangs under the last row while there is more to load;
     /// once there isn't, the Hidden requests row closes the list (#552) —
     /// at the very end, never between two pages.
@@ -365,6 +431,7 @@ extension MessageRequestsViewController: UITableViewDelegate {
     /// Paging: one of the last rows coming on screen asks for the next page
     /// (#593), early enough that it usually lands before the end does.
     func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        resolveRelations()
         guard viewModel.hasMore, let id = dataSource.itemIdentifier(for: indexPath),
               dataSource.snapshot().itemIdentifiers.suffix(InboxPaging.nearEndRowCount).contains(id) else { return }
         pagingFooter.setSpinning(true)

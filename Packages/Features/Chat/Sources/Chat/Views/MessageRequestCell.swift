@@ -5,14 +5,18 @@ import MediaCore
 import UIKit
 
 /// A pending message request, laid out as a standard two-line messaging row
-/// with its decision attached:
+/// with its decision attached (#2088):
 ///
-///     [avatar] [name · time ················] ⟷ [Accept] [✕]
-///              [message preview ············]
+///     [face+mark] [name · time ·············] ⟷ [Accept] ✕
+///                 [message preview ·········]          (3)
 ///
-/// The avatar and the action pair are both centred across the full two-line
-/// height; the text column takes whatever width is left, which is what makes
-/// the gap before the buttons elastic. The timestamp sits directly beside the
+/// The face wears the relation mark, as an All row's does (#2049): the "+"
+/// follows — it never accepts — and the rest of the row behaves as before.
+/// The trailing column is two lines, aligned to the trailing edge: Accept
+/// and a bare ✕ on the name's line, the unread count under them on the
+/// preview's, as the time and the count sit in an All row. The face and the
+/// column are centred across the row; the text column takes whatever width
+/// is left, which is what makes the gap before the buttons elastic. The timestamp sits directly beside the
 /// name as part of the same phrase rather than anchored to the far edge —
 /// with a short name, a lone right-aligned time reads as unrelated to it.
 /// Name and preview truncate; the timestamp and the buttons never shrink, so
@@ -27,16 +31,11 @@ import UIKit
 final class MessageRequestCell: UITableViewCell {
     static let reuseIdentifier = "MessageRequestCell"
 
-    private enum Metrics {
-        /// Diameter of the dismiss button — a comfortable target that still
-        /// reads as secondary beside the filled Accept pill.
-        static let dismissDiameter: CGFloat = 36
-    }
-
     var onAccept: (() -> Void)?
     var onDismiss: (() -> Void)?
 
-    private let avatarView = BadgedAvatarView()
+    /// The face, wearing the relation mark (#2088), as an All row's.
+    private let avatarView = RelationMarkedAvatarView()
     private var avatarTask: Task<Void, Never>?
     /// Guards a late fetch against cell reuse — see `ConversationCell`.
     private var avatarPeerID: ProfileID?
@@ -46,17 +45,31 @@ final class MessageRequestCell: UITableViewCell {
     /// The app's button, shared with every person row (#932), with its one
     /// press (#866).
     private let acceptButton = AppButton(aspect: .pill(.prominent), size: .row, content: .title("Accept"))
-    /// A quiet circle carrying only a glyph.
+    /// A bare glyph, the Suggestions row's ✕ (#2088): quiet enough that the
+    /// eye lands on Accept. Its hit region stays 44×44
+    /// (`AppControl.hitRegion`).
     private let dismissButton: AppIconButton = {
-        let button = AppIconButton(style: .bubble(.quiet), content: .symbol("xmark"))
-        button.inkColor = .secondaryLabel
+        let button = AppIconButton(style: .glyph, content: .symbol("xmark"))
+        button.inkColor = .tertiaryLabel
         return button
     }()
+    /// The unread count, under Accept and the ✕ at the trailing edge
+    /// (#2088): the All row's pill.
+    private let unreadPill = UnreadCountPill()
+
+    /// The peer the row shows, for the relations' updates.
+    private(set) var peerID: ProfileID?
 
     /// Accept. Internal for tests.
     var debugAcceptButton: AppButton { acceptButton }
     /// Decline. Internal for tests.
     var debugDismissButton: AppIconButton { dismissButton }
+    /// The count's pill. Internal for tests.
+    var debugUnreadPill: UnreadCountPill { unreadPill }
+    /// The face's badge. Internal for tests.
+    var debugBadge: RelationBadgeView { avatarView.badge }
+    /// The mark on show. Internal for tests.
+    var relationMark: PersonPill.Badge { avatarView.mark }
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -73,21 +86,38 @@ final class MessageRequestCell: UITableViewCell {
         avatarTask?.cancel()
         avatarTask = nil
         avatarPeerID = nil
+        peerID = nil
         avatarView.setPicture(nil, pipeline: nil)
+        avatarView.setMark(.none, animated: false)
+        avatarView.onFollowTapped = nil
     }
 
     /// Same contract as `ConversationCell`: the row is complete on initials,
     /// and the picture streams in behind it if `profile.v1` has one.
+    ///
+    /// `mark` and `onFollow`: the face's relation and its "+" (#2088), as an
+    /// All row's — `.none` for a relation not known yet, or a host with no
+    /// graph.
     func configure(
         with model: ConversationDisplayModel,
         imagePipeline: ImagePipeline? = nil,
-        avatars: (any PeerAvatarProviding)? = nil
+        avatars: (any PeerAvatarProviding)? = nil,
+        mark: PersonPill.Badge = .none,
+        onFollow: (() -> Void)? = nil
     ) {
+        peerID = model.peerID
         avatarView.setMonogram(model.monogram)
+        avatarView.setMark(model.peerID == nil ? .none : mark, animated: false)
+        avatarView.onFollowTapped = onFollow
         loadAvatar(for: model, imagePipeline: imagePipeline, avatars: avatars)
-        // The same count, on the same corner, as an All row — and it clears the
-        // same way, when the viewer opens the thread and the read cursor moves.
-        avatarView.setBadge(model.isUnread ? .count(model.unreadCount) : .none)
+        // The same count as an All row, under the actions as it sits under
+        // the time there — and it clears the same way, when the viewer opens
+        // the thread and the read cursor moves. Never at zero.
+        if model.isUnread, model.unreadCount > 0 {
+            unreadPill.show(count: model.unreadCount)
+        } else {
+            unreadPill.hide()
+        }
         applyUnreadStyle(model.isUnread)
         nameLabel.text = model.title
         previewLabel.text = Self.previewText(for: model)
@@ -102,8 +132,39 @@ final class MessageRequestCell: UITableViewCell {
         accessibilityElements = [contentView, acceptButton, dismissButton]
         contentView.isAccessibilityElement = true
         contentView.accessibilityLabel = [
-            model.title, model.timeText, Self.previewText(for: model)
-        ].filter { !$0.isEmpty }.joined(separator: ", ")
+            model.title, ConversationRowView.unreadWords(model), model.timeText, Self.previewText(for: model)
+        ].compactMap(\.self).filter { !$0.isEmpty }.joined(separator: ", ")
+        updateFollowAccessibility()
+    }
+
+    /// The face's relation, changed on screen.
+    func setRelationMark(_ mark: PersonPill.Badge, animated: Bool) {
+        avatarView.setMark(mark, animated: animated)
+        updateFollowAccessibility()
+    }
+
+    /// VoiceOver's way to the "+": a "Follow" action on the row while the
+    /// face shows it, and the mark's state otherwise read by the badge.
+    private func updateFollowAccessibility() {
+        guard avatarView.mark == .follow, let follow = avatarView.onFollowTapped else {
+            contentView.accessibilityCustomActions = nil
+            return
+        }
+        contentView.accessibilityCustomActions = [UIAccessibilityCustomAction(name: "Follow") { _ in
+            follow()
+            return true
+        }]
+    }
+
+    /// ⚠️ THE "+" IS ASKED FIRST, as on an All row: its touch area reaches
+    /// past the 48 pt disc and the stack round it, which would refuse the
+    /// touch before the badge saw it.
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if let badge = avatarView.tappableBadge, !isHidden, alpha > 0.01,
+           badge.point(inside: convert(point, to: badge), with: event) {
+            return badge
+        }
+        return super.hitTest(point, with: event)
     }
 
     /// A request usually *is* its first message, so the preview carries the
@@ -231,18 +292,42 @@ final class MessageRequestCell: UITableViewCell {
         actions.setContentHuggingPriority(.required, for: .horizontal)
         actions.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        let row = UIStackView(arrangedSubviews: [avatarView, textColumn, actions])
+        // ⚠️ THE SECOND LINE KEEPS ITS HEIGHT, count or not (#2088, as an
+        // All row's, #2049): an unread request and a read one put Accept at
+        // the same height, and a count arriving moves nothing.
+        let secondLine = UIView()
+        secondLine.addSubview(unreadPill)
+        unreadPill.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            secondLine.heightAnchor.constraint(equalToConstant: UnreadCountPill.Metrics.height),
+            unreadPill.centerYAnchor.constraint(equalTo: secondLine.centerYAnchor),
+            unreadPill.leadingAnchor.constraint(greaterThanOrEqualTo: secondLine.leadingAnchor),
+            unreadPill.trailingAnchor.constraint(equalTo: secondLine.trailingAnchor)
+        ])
+
+        // Accept and the ✕ over the count, aligned to the trailing edge, the
+        // text column's own 2 pt apart: at `Spacing.xs` the column was a
+        // point over the shared pitch.
+        let actionColumn = UIStackView(arrangedSubviews: [actions, secondLine])
+        actionColumn.axis = .vertical
+        actionColumn.alignment = .trailing
+        actionColumn.spacing = Self.actionLineGap
+        actionColumn.setContentHuggingPriority(.required, for: .horizontal)
+        actionColumn.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        let row = UIStackView(arrangedSubviews: [avatarView, textColumn, actionColumn])
         row.axis = .horizontal
-        // Centred: the avatar and the buttons sit on the row's midline,
-        // across the whole two-line height.
+        // Centred: the face and the action column sit on the row's midline.
         row.alignment = .center
         row.spacing = Spacing.md
         // Tallest of the three things in the row: the disc, the two lines of
-        // type, and the dismiss button.
+        // type, and the action column (Accept, the gap, the count's line). At
+        // the default text size the column (56 pt) fits the shared pitch
+        // (65 pt); at larger sizes the row grows by what it lacks.
         let inset = PersonRowMetrics.verticalInset(forContentHeight: max(
             MonogramAvatarView.rowDiameter,
             PersonRowMetrics.textHeight([.headline, .subheadline]),
-            Metrics.dismissDiameter
+            Self.actionColumnHeight(accept: acceptButton)
         ))
         row.pin(to: contentView, insets: NSDirectionalEdgeInsets(
             top: inset, leading: Spacing.lg, bottom: inset, trailing: Spacing.lg
@@ -258,20 +343,22 @@ final class MessageRequestCell: UITableViewCell {
         acceptButton.setContentCompressionResistancePriority(.required, for: .horizontal)
     }
 
-    /// Secondary: a tinted circle carrying only a glyph. Quiet enough that the
-    /// eye lands on Accept first, present enough to be an obvious target.
+    /// Secondary: a bare glyph, the Suggestions row's ✕ (#2088). Quiet
+    /// enough that the eye lands on Accept first; its hit region stays 44×44
+    /// (`AppControl.hitRegion`), so the smaller glyph is as easy to tap.
     private func configureDismissButton() {
         dismissButton.addAction(UIAction { [weak self] _ in self?.onDismiss?() }, for: .primaryActionTriggered)
-        // ⚠️ Drawn at 36pt, under its 44pt icon size: the size constraints
-        // below win, so the button's own intrinsic 44 must give rather than
-        // resist (a required resistance was an unsatisfiable layout). Its
-        // hit region stays 44×44 (`AppControl.hitRegion`).
         dismissButton.setContentHuggingPriority(.required, for: .horizontal)
-        dismissButton.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
-        dismissButton.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
-        NSLayoutConstraint.activate([
-            dismissButton.widthAnchor.constraint(equalToConstant: Metrics.dismissDiameter),
-            dismissButton.heightAnchor.constraint(equalToConstant: Metrics.dismissDiameter)
-        ])
+        dismissButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+    }
+
+    /// The gap between Accept's line and the count's.
+    static let actionLineGap: CGFloat = 2
+
+    /// The action column's height: Accept (the taller of the pair), the gap,
+    /// and the count's line.
+    static func actionColumnHeight(accept: UIView) -> CGFloat {
+        accept.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height
+            + actionLineGap + UnreadCountPill.Metrics.height
     }
 }
