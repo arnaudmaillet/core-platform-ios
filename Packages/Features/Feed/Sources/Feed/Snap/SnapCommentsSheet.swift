@@ -20,11 +20,13 @@ import UIKit
 /// sheet through its entrance, a drag down and its exit — never a second
 /// animation trying to keep pace with UIKit's.
 ///
-/// One height for now: the content's own, at most what the media leaves it
-/// (`restingHeight`, the owner, 2026-11-03) — a short thread takes a short
-/// sheet, with no room above its first row; a full-screen detent waits for
-/// the owner's approval of this one. The sheet is undimmed, so the media above it stays
-/// lit; a tap there closes it, as a swipe down does.
+/// Two heights (the owner, 2026-11-03): collapsed, the content's own, at most
+/// what the media leaves it (`restingHeight`) — a short thread takes a short
+/// sheet, with no room above its first row — and, for comments that outgrow
+/// it, expanded to the top of the screen, the media shrinking on in the room
+/// left (a floating preview takes it from there, #2087's next steps). The
+/// sheet is undimmed, so the media above it stays lit; a tap there closes
+/// it, as a swipe down does.
 @MainActor
 final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationControllerDelegate {
     /// The sheet's tallest resting height, as shares of the screen: never
@@ -35,6 +37,10 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     static let wideFloorShare: CGFloat = 0.5
     static let ceilingShare: CGFloat = 0.75
     static let detent = UISheetPresentationController.Detent.Identifier("feed.comments.v2")
+    /// The sheet up to the top of the screen — offered only while the
+    /// comments outgrow `detent` (the owner, 2026-11-03), the media shrinking
+    /// on in the room left above it.
+    static let expandedDetent = UISheetPresentationController.Detent.Identifier("feed.comments.v2.expanded")
     /// Between the shrunk media's bottom and the sheet's top.
     static let mediaGap: CGFloat = Spacing.sm
     /// Between the shrunk media and the screen's sides: it never touches
@@ -95,6 +101,11 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// (`correctCap`).
     private var restsAtCap = false
     private var capTop: CGFloat?
+    /// The collapsed detent's tallest height (`restingHeight`), and the
+    /// bottom safe area the sheet stands on: whether the comments outgrow it
+    /// (`isExpandable`).
+    private var restingHeight: CGFloat = 0
+    private var bottomInset: CGFloat = 0
     /// What a floating sheet's detent needs on top of `restingHeight` to rest
     /// where it says, measured on the first sheet and kept (`correctCap`).
     private static var capCorrection: CGFloat = 0
@@ -141,18 +152,22 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         // turns to a light glass under its white text.
         sheet.overrideUserInterfaceStyle = .dark
         sheet.presentationController?.traitOverrides.userInterfaceStyle = .dark
+        restingHeight = resting
+        self.bottomInset = bottomInset
         if let controller = sheet.sheetPresentationController {
-            controller.detents = [.custom(identifier: Self.detent) { [weak self, weak content] context in
+            collapsedDetent = .custom(identifier: Self.detent) { [weak self, weak content] context in
                 MainActor.assumeIsolated {
                     let cap = min(context.maximumDetentValue, resting + Self.capCorrection)
                     let height = content?.fittedHeight.map { min(cap, $0 - bottomInset) } ?? cap
                     self?.restsAtCap = height == cap && cap < context.maximumDetentValue
                     return height
                 }
-            }]
-            controller.largestUndimmedDetentIdentifier = Self.detent
+            }
+            controller.largestUndimmedDetentIdentifier = Self.expandedDetent
             controller.prefersGrabberVisible = true
-            controller.prefersScrollingExpandsWhenScrolledToEdge = false
+            // A scroll at the top of the rows grows the sheet first, as a
+            // drag on its bar does — with nothing to grow to, it scrolls.
+            controller.prefersScrollingExpandsWhenScrolledToEdge = true
         }
         capTop = window.bounds.height - resting - bottomInset
         content.onDismissed = { [weak self] in self?.end() }
@@ -183,6 +198,9 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         content.applyPanelInsets()
         content.view.layoutIfNeeded()
         fittedHeight = content.fittedHeight
+        // The detents once the content's height is known: the expanded one
+        // only for comments that outgrow the collapsed one.
+        sheet.sheetPresentationController?.detents = detents(expandable: isExpandable)
 
         let link = CADisplayLink(target: DisplayLinkTarget(self), selector: #selector(DisplayLinkTarget.tick))
         link.add(to: .main, forMode: .common)
@@ -335,9 +353,17 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         // rest from before, a sheet above it is past 1 (held there by the
         // page), and the media shrinks with the rising sheet into the room
         // left above it (the owner, 2026-11-03).
+        //
+        // ⚠️ AND NEVER ABOVE THE COLLAPSED DETENT'S TOP (the expanded one,
+        // 2026-11-03): pulled up, and resting expanded, the model frame is
+        // the finger's and the expanded rest. The collapsed rest is never
+        // higher than its cap's top: a sheet above it is past 1, the page
+        // held there, and a drag back down shows the page again only once
+        // the sheet is below its collapsed rest.
         if !isLeaving, !content.isKeyboardUp {
-            restingTop = container.convert(presented.frame, to: nil).minY
-            correctCap()
+            let modelTop = container.convert(presented.frame, to: nil).minY
+            if sheet.isBeingPresented { correctCap(restingAt: modelTop) }
+            restingTop = max(modelTop, capTop ?? modelTop)
         }
         guard let restingTop else { return }
         let top = drawnTop
@@ -377,25 +403,51 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// gap under the media with it (16 pt seen for 8). The difference is read
     /// where the sheet rests at its cap — from the first frame, its model
     /// frame is already the rest — given back to the detent, and kept for
-    /// the next sheet.
-    private func correctCap() {
-        guard restsAtCap, let restingTop, let capTop,
-              let controller = sheet.sheetPresentationController else { return }
-        let error = restingTop - capTop
+    /// the next sheet. On the way in only: once up, the model frame is also
+    /// a finger's, and the cap does not move.
+    private func correctCap(restingAt modelTop: CGFloat) {
+        guard restsAtCap, let capTop, let controller = sheet.sheetPresentationController else { return }
+        let error = modelTop - capTop
         guard abs(error) > 0.5, abs(Self.capCorrection + error) < 60 else { return }
         Self.capCorrection += error
         controller.animateChanges { controller.invalidateDetents() }
     }
 
     /// The detent again when the content's height has moved — rows landing,
-    /// a thread's replies opening, the other tab — never on the way out.
+    /// a thread's replies opening, the other tab — never on the way out; and
+    /// the expanded detent offered, or taken back, as the comments outgrow
+    /// the collapsed one or no longer do.
     private func refit() {
         guard !isLeaving, let controller = sheet.sheetPresentationController else { return }
         let fitted = content.fittedHeight
         if let fitted, let last = fittedHeight, abs(fitted - last) < 1 { return }
         guard fitted != fittedHeight else { return }
         fittedHeight = fitted
-        controller.animateChanges { controller.invalidateDetents() }
+        let expandable = isExpandable
+        controller.animateChanges {
+            if expandable != controller.detents.contains(where: { $0.identifier == Self.expandedDetent }) {
+                controller.detents = detents(expandable: expandable)
+            }
+            controller.invalidateDetents()
+        }
+    }
+
+    /// The collapsed detent (`present`), kept to rebuild the list with.
+    private var collapsedDetent: UISheetPresentationController.Detent?
+
+    /// Whether the comments stand taller than the collapsed detent: the
+    /// expanded one has something to show.
+    private var isExpandable: Bool {
+        guard let fitted = content.fittedHeight else { return false }
+        return fitted - bottomInset > restingHeight + Self.capCorrection + 1
+    }
+
+    /// The sheet's detents: the collapsed one, and the expanded one when the
+    /// comments outgrow it.
+    private func detents(expandable: Bool) -> [UISheetPresentationController.Detent] {
+        guard let collapsedDetent else { return [] }
+        guard expandable else { return [collapsedDetent] }
+        return [collapsedDetent, .custom(identifier: Self.expandedDetent) { $0.maximumDetentValue }]
     }
 
     private func end() {
@@ -467,7 +519,12 @@ private final class DisplayLinkTarget: NSObject {
 /// holds, showing its own `navigationItem`: the same native items, and a
 /// height known before the sheet is presented. The stacked build stays
 /// behind `CommentsV2.sheetUsesNavigationStack`.
-final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDelegate {
+final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDelegate, ScreenCovering {
+    /// ⚠️ NEVER A COVER, expanded included (#1970's rule would pause the
+    /// clip it hides): the media plays on above the sheet, and expanded it
+    /// will play on in its preview (#2087).
+    var coversScreen: Bool { false }
+
     static let tabsItemID = "feed.comments.sheet.tabs"
     static let closeItemID = "feed.comments.sheet.close"
 
