@@ -1237,15 +1237,29 @@ final class SnapChromeView: UIView {
     /// `.footnote` alone. It was a 0.78 grey with a half-white timestamp
     /// (#1697), 3.4 : 1 over a bright picture under the scrim — under AA's
     /// 4.5 : 1, and dimmer than the comments around it.
+    ///
+    /// The AGE has its own ink since #2052 (the owner, 2026-11-02): a
+    /// solid grey a little darker than the caption's white, so it steps
+    /// back as metadata. Solid, not a translucent white, so the picture
+    /// behind never shifts it; fixed, as the chrome is over media in both
+    /// appearances. The caption itself stays white.
     enum CaptionRegister {
         static let textStyle: UIFont.TextStyle = .subheadline
         static let ink = UIColor.white
+        static let timestampInk: UIColor = {
+            #if DEBUG
+            // `-caption-age-white 0.65`: the owner's device comparison (#2052).
+            let white = UserDefaults.standard.double(forKey: "caption-age-white")
+            if white > 0, white <= 1 { return UIColor(white: white, alpha: 1) }
+            #endif
+            return UIColor(white: 0.75, alpha: 1)
+        }()
     }
 
     /// The caption typography — the shared attributes for the caption glyphs
     /// (`.body`) and, for `secondary`, the appended timestamp: a SMALLER
-    /// `.footnote` register, in the same white (#2012), so it reads as clean
-    /// secondary metadata by its size alone (the same footnote register the
+    /// `.footnote` register in its own grey (`timestampInk`, #2052), so it
+    /// reads as secondary metadata by its size and ink (the same footnote register the
     /// engaged info card uses for the post age). Baked per-run so
     /// `boundingRect` measures each font's true footprint — the two-line
     /// truncation therefore accounts for the smaller timestamp automatically.
@@ -1262,7 +1276,7 @@ final class SnapChromeView: UIView {
         shadow.shadowOffset = .zero
         return [
             .font: UIFont.appFont(forTextStyle: secondary ? .footnote : CaptionRegister.textStyle),
-            .foregroundColor: CaptionRegister.ink,
+            .foregroundColor: secondary ? CaptionRegister.timestampInk : CaptionRegister.ink,
             .shadow: shadow,
             // GEOMETRY LOCK: every line takes the PRIMARY (body) line height —
             // identical on every run — so a line ending on the smaller

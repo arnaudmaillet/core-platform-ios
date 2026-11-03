@@ -146,9 +146,9 @@ struct SnapChromeCaptionTests {
     }
 
     /// The timestamp reads as SECONDARY metadata by its SMALLER font register
-    /// alone, in the caption's own white (#2012, the owner: no grey), on
-    /// every case. It used to be dimmer too.
-    @Test func timestampRendersSmallerInTheCaptionsWhite() throws {
+    /// and its own solid grey (#2052, the owner: a little darker than the
+    /// caption), on every case; the caption keeps its white (#2012).
+    @Test func timestampRendersSmallerInItsOwnGrey() throws {
         for caption in ["Golden hour.", // Case A
                         "Rebuilt the whole deploy pipeline over a slow rainy weekend.", // Case B
                         "Weekend build log: rebuilt the pipeline end to end, found two race conditions that only reproduce on cold caches, and learned more about backpressure than I ever wanted to."] { // Case C
@@ -163,8 +163,15 @@ struct SnapChromeCaptionTests {
                 composed.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor
             )
             let capFont = try #require(composed.attribute(.font, at: 0, effectiveRange: nil) as? UIFont)
-            #expect(tsColor == capColor, "the time is not the caption's white")
-            #expect(tsColor == .white)
+            #expect(tsColor == SnapChromeView.CaptionRegister.timestampInk, "the time is not in its own ink")
+            #expect(capColor == SnapChromeView.CaptionRegister.ink, "the caption is not white")
+            var white: CGFloat = 0, alpha: CGFloat = 0
+            tsColor.getWhite(&white, alpha: &alpha)
+            #expect(white == 0.75 && alpha == 1, "the time is not the solid 0.75 grey: \(white), \(alpha)")
+            // The gap before the time is a caption run, in the caption's white.
+            let gapIndex = composed.length - shownTime.count - 1
+            let gapColor = composed.attribute(.foregroundColor, at: gapIndex, effectiveRange: nil) as? UIColor
+            #expect(gapColor == SnapChromeView.CaptionRegister.ink)
             #expect(tsFont.pointSize < capFont.pointSize) // smaller register
         }
     }
