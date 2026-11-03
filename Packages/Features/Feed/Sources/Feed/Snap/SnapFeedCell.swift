@@ -1922,35 +1922,36 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let radius = screenRadius + (ChaoticSliceLayout.harmonisedCornerRadius - screenRadius) * t
         mask.layer.cornerCurve = .continuous
         mask.layer.cornerRadius = radius / max(scale, 0.01)
-        #if DEBUG
-        drawCommentsSheetDebugFrame(
-            around: mediaCard.convert(mask.frame, to: stage), cornerRadius: radius, in: stage
+        drawCommentsSheetEdge(
+            around: mediaCard.convert(mask.frame, to: stage), cornerRadius: radius, progress: t, in: stage
         )
-        #endif
     }
 
-    #if DEBUG
-    /// `CommentsV2.showsDebugFrames`: the media's window as drawn this frame,
-    /// in red, on the stage — over the media, untransformed, so the line
-    /// keeps its width as the picture shrinks.
-    private var commentsSheetDebugFrame: UIView?
+    /// The media's edge while the sheet is up: the card's discreet outline
+    /// (`Surface.cardEdge`, a hairline), fading in as the media shrinks (the
+    /// owner, 2026-11-03) — on the stage, over the media and untransformed,
+    /// so the line stays a hairline at every scale.
+    private var commentsSheetEdge: UIView?
 
-    private func drawCommentsSheetDebugFrame(around window: CGRect, cornerRadius: CGFloat, in stage: UIView) {
-        guard CommentsV2.showsDebugFrames else { return }
-        let frame = commentsSheetDebugFrame ?? {
-            let frame = UIView()
-            frame.isUserInteractionEnabled = false
-            frame.layer.borderColor = UIColor.systemRed.cgColor
-            frame.layer.borderWidth = 2
-            frame.layer.cornerCurve = .continuous
-            commentsSheetDebugFrame = frame
-            return frame
+    private func drawCommentsSheetEdge(
+        around window: CGRect, cornerRadius: CGFloat, progress: CGFloat, in stage: UIView
+    ) {
+        let edge = commentsSheetEdge ?? {
+            let edge = UIView()
+            edge.isUserInteractionEnabled = false
+            edge.layer.cornerCurve = .continuous
+            commentsSheetEdge = edge
+            return edge
         }()
-        if frame.superview !== stage { stage.insertSubview(frame, aboveSubview: mediaCard) }
-        frame.frame = window
-        frame.layer.cornerRadius = cornerRadius
+        if edge.superview !== stage { stage.insertSubview(edge, aboveSubview: mediaCard) }
+        // The media stands on black whatever the page's style: the dark edge.
+        let dark = traitCollection.modifyingTraits { $0.userInterfaceStyle = .dark }
+        edge.layer.borderColor = Surface.cardEdge.resolvedColor(with: dark).cgColor
+        edge.layer.borderWidth = Surface.hairline(for: traitCollection)
+        edge.frame = window
+        edge.layer.cornerRadius = cornerRadius
+        edge.alpha = progress
     }
-    #endif
 
     /// The page at rest again: identity media, its interface back.
     func clearCommentsSheetLayout() {
@@ -1959,9 +1960,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.transform = .identity
         mediaCard.mask = nil
         commentsSheetMask = nil
-        #if DEBUG
-        commentsSheetDebugFrame?.removeFromSuperview()
-        #endif
+        commentsSheetEdge?.removeFromSuperview()
     }
 
     // MARK: - Configuration
