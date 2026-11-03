@@ -43,8 +43,10 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// under it (the pager, the page's taps) can be reached meanwhile.
     private let catcher = UIView()
     private var link: CADisplayLink?
-    /// The bars as the sheet found them, given back as it leaves.
-    private var barsWereHidden: (navigation: Bool, toolbar: Bool)?
+    /// The top bar's items the sheet hid, given back once it has gone, and
+    /// whether it hid the back button.
+    private var hiddenNavigationItems: [UIBarButtonItem] = []
+    private var hidBackButton = false
     private var hasEnded = false
     /// The sheet is on its way out: its height holds still.
     private var isLeaving = false
@@ -97,11 +99,8 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         content.onDismissed = { [weak self] in self?.end() }
         content.onClose = { [weak self] in self?.close() }
 
-        // The page's bars leave with its interface, through UIKit's own API.
-        if let navigation = feed.navigationController {
-            barsWereHidden = (navigation.isNavigationBarHidden, navigation.isToolbarHidden)
-        }
-        setBarsHidden(true, animated: animated)
+        // The page's top bar items leave with its interface.
+        setTopBarItemsHidden(true, animated: animated)
         catcher.frame = feed.view.bounds
         catcher.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         catcher.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(close)))
@@ -128,26 +127,40 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         sheet.view.endEditing(true)
         isLeaving = true
         content.freeze()
-        // The toolbar comes back WITH the sheet's exit; the top bar after it.
-        setBarsHidden(false, animated: true, includingNavigationBar: false)
         feed?.dismiss(presented: sheet)
     }
 
-    /// The page's bars: gone while the sheet is up, as the sheet found them
-    /// otherwise. Idempotent — the exit asks more than once.
+    /// The page's TOP BAR items: gone while the sheet is up, back once it
+    /// has gone, as the sheet found them. Idempotent.
     ///
-    /// ⚠️ THE TOP BAR ONLY ONCE THE SHEET HAS GONE (the owner, 2026-11-03):
-    /// `includingNavigationBar` false brings the toolbar back alone — the
-    /// exit's — and the navigation bar waits for the end.
-    private func setBarsHidden(_ hidden: Bool, animated: Bool, includingNavigationBar: Bool = true) {
-        guard let barsWereHidden, let navigation = feed?.navigationController else { return }
-        let navigationHidden = hidden || barsWereHidden.navigation
-        let toolbarHidden = hidden || barsWereHidden.toolbar
-        if includingNavigationBar, navigation.isNavigationBarHidden != navigationHidden {
-            navigation.setNavigationBarHidden(navigationHidden, animated: animated)
+    /// ⚠️ THE ITEMS, NOT THE BAR (the owner, 2026-11-03): each item hidden
+    /// the way UIKit provides (`UIBarButtonItem.isHidden`, the back button's
+    /// `setHidesBackButton`), which the bar animates itself; hiding the bar
+    /// slid it up and out.
+    ///
+    /// ⚠️ AND NEVER THE TOOLBAR (measured, 2026-11-03): a toolbar with no
+    /// item left — or hidden — leaves the page's safe area, and the page's
+    /// interface, anchored to it, dropped 52 pt the instant the sheet was
+    /// asked for. The sheet covers the toolbar from its first frame and
+    /// uncovers it on the way out: it is left alone.
+    private func setTopBarItemsHidden(_ hidden: Bool, animated: Bool) {
+        guard let screen = feed?.navigationController?.topViewController else { return }
+        let item = screen.navigationItem
+        if hidden {
+            hiddenNavigationItems = ((item.leftBarButtonItems ?? []) + (item.rightBarButtonItems ?? []))
+                .filter { !$0.isHidden }
+            hiddenNavigationItems.forEach { $0.isHidden = true }
+            if !item.hidesBackButton {
+                hidBackButton = true
+                item.setHidesBackButton(true, animated: animated)
+            }
+            return
         }
-        if navigation.isToolbarHidden != toolbarHidden {
-            navigation.setToolbarHidden(toolbarHidden, animated: animated)
+        hiddenNavigationItems.forEach { $0.isHidden = false }
+        hiddenNavigationItems = []
+        if hidBackButton {
+            hidBackButton = false
+            item.setHidesBackButton(false, animated: animated)
         }
     }
 
@@ -203,22 +216,20 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         link = nil
         catcher.removeFromSuperview()
         cell?.clearCommentsSheetLayout()
-        setBarsHidden(false, animated: true)
+        setTopBarItemsHidden(false, animated: true)
         onEnd()
     }
 
     // MARK: UIAdaptivePresentationControllerDelegate
 
-    /// A swipe down has begun: the toolbar starts back now (the top bar waits
-    /// for the end), and leaves again if the sheet is let go back to its rest.
+    /// A swipe down has begun: the sheet leaves from here, unless it is let
+    /// go back to its rest.
     func presentationControllerWillDismiss(_ presentationController: UIPresentationController) {
-        setBarsHidden(false, animated: true, includingNavigationBar: false)
         isLeaving = true
         content.freeze()
         sheet.transitionCoordinator?.notifyWhenInteractionChanges { [weak self] context in
             guard context.isCancelled else { return }
             self?.isLeaving = false
-            self?.setBarsHidden(true, animated: true)
         }
     }
 
