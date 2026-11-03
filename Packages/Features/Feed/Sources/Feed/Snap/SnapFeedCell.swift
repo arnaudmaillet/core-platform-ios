@@ -1915,8 +1915,17 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             width: bounds.width + (picture.width - bounds.width) * t,
             height: bounds.height + (picture.height - bounds.height) * t
         )
+        // The corners: the device's own at full screen, a media tile's once
+        // shrunk (the owner, 2026-11-03), drawn on the mask — which the
+        // card's scale shrinks with it, so its radius is divided by it.
+        let screenRadius = ScreenGeometry.cornerRadius(behind: self)
+        let radius = screenRadius + (ChaoticSliceLayout.harmonisedCornerRadius - screenRadius) * t
+        mask.layer.cornerCurve = .continuous
+        mask.layer.cornerRadius = radius / max(scale, 0.01)
         #if DEBUG
-        drawCommentsSheetDebugFrame(around: mediaCard.convert(mask.frame, to: stage), in: stage)
+        drawCommentsSheetDebugFrame(
+            around: mediaCard.convert(mask.frame, to: stage), cornerRadius: radius, in: stage
+        )
         #endif
     }
 
@@ -1926,18 +1935,20 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// keeps its width as the picture shrinks.
     private var commentsSheetDebugFrame: UIView?
 
-    private func drawCommentsSheetDebugFrame(around window: CGRect, in stage: UIView) {
+    private func drawCommentsSheetDebugFrame(around window: CGRect, cornerRadius: CGFloat, in stage: UIView) {
         guard CommentsV2.showsDebugFrames else { return }
         let frame = commentsSheetDebugFrame ?? {
             let frame = UIView()
             frame.isUserInteractionEnabled = false
             frame.layer.borderColor = UIColor.systemRed.cgColor
             frame.layer.borderWidth = 2
+            frame.layer.cornerCurve = .continuous
             commentsSheetDebugFrame = frame
             return frame
         }()
         if frame.superview !== stage { stage.insertSubview(frame, aboveSubview: mediaCard) }
         frame.frame = window
+        frame.layer.cornerRadius = cornerRadius
     }
     #endif
 
