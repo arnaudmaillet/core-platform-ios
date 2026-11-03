@@ -400,6 +400,30 @@ final class PostDetailViewController: UIViewController {
             $0.syncKeyboardRise(rise)
             $0.keepRestingEnd()
         }
+        syncStreamsClip()
+    }
+
+    /// Whether the streams end at the composer's foot (`clipStreamsAtComposer`).
+    private var clipsStreamsAtComposer = false
+    private let streamsClip = UIView()
+
+    /// The streams end at the composer's foot: nothing of them shows under it
+    /// (the comments sheet, #2087). The composer moves within the sheet as a
+    /// keyboard comes and goes, and rows were seen passing beneath it, in the
+    /// band it leaves (the owner, 2026-11-03).
+    func clipStreamsAtComposer() {
+        clipsStreamsAtComposer = true
+        streamsClip.backgroundColor = .black
+        streamSurface.mask = streamsClip
+        syncStreamsClip()
+    }
+
+    /// The clip to the composer's foot, in this layout pass — inside a
+    /// keyboard's animation when one runs it, so the two move together.
+    private func syncStreamsClip() {
+        guard clipsStreamsAtComposer else { return }
+        let foot = composeBar.convert(composeBar.bounds, to: streamSurface).maxY
+        streamsClip.frame = CGRect(x: 0, y: 0, width: streamSurface.bounds.width, height: max(0, foot))
     }
 
     /// How far the keyboard holds the composer's input row above the bar's
