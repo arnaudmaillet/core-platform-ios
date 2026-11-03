@@ -219,17 +219,15 @@ struct InboxRowActionButtonTests {
 
     // MARK: - Requests
 
-    /// Accept stands on the prominent ground, Decline is a quiet ✕ circle —
-    /// both the shared button, one press each.
+    /// Accept stands on the prominent ground, Decline is a bare ✕ glyph
+    /// (#2088) — both the shared button, one press each.
     @Test func requestRowsShowAcceptAndDecline() {
         let cell = MessageRequestCell(style: .default, reuseIdentifier: nil)
         #expect(cell.debugAcceptButton.content.title == "Accept")
         #expect(cell.debugAcceptButton.currentGround == .prominent)
         let decline = cell.debugDismissButton
         #expect(decline.content.symbol == "xmark" && decline.content.count == nil, "Decline is not the ✕")
-        #expect(decline.style == .bubble(.quiet))
-        #expect(decline.currentGround == .quiet)
-        #expect(decline.configuration?.cornerStyle == .capsule)
+        #expect(decline.style == .glyph)
         expectOnePress(cell.debugAcceptButton, "Accept")
         expectOnePress(cell.debugDismissButton, "Decline")
     }
