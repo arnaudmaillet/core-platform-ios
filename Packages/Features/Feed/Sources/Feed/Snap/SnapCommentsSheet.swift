@@ -392,13 +392,24 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         let roomTop = window.safeAreaInsets.top
         let room = top - Self.mediaGap - roomTop
         let smallest = SnapCommentsPreview.size(for: cell.commentsSheetPictureSize).height
+        // The trial (`CommentsV2.previewPops`): past its smallest, the media
+        // rises with the sheet as it scales out — whole above it, never
+        // covered by it.
+        let regionTop = CommentsV2.previewPops ? min(roomTop, top - Self.mediaGap - smallest) : roomTop
         let region = CGRect(
-            x: Self.mediaSideMargin, y: roomTop,
+            x: Self.mediaSideMargin, y: regionTop,
             width: window.bounds.width - 2 * Self.mediaSideMargin,
             height: max(room, smallest)
         )
         let handoff = min(1, max(0, (smallest - room) / Self.previewHandoffSpan))
-        let out = isPreviewUnavailable ? min(1, max(0, (smallest - room) / Self.mediaOutSpan)) : 0
+        let out: CGFloat = if CommentsV2.previewPops, !isPreviewUnavailable {
+            // The trial: out over the hand-over's first half.
+            Self.smoothstep(min(1, handoff / Self.popMediaOutShare))
+        } else if isPreviewUnavailable {
+            min(1, max(0, (smallest - room) / Self.mediaOutSpan))
+        } else {
+            0
+        }
         // From the collapsed rest's room down to the smallest: the corners
         // turn the preview's on the way.
         let restingRoom = restingTop - Self.mediaGap - roomTop
@@ -426,6 +437,26 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     private static let mediaOutSpan: CGFloat = 64
     /// How far the preview has gone, 0 at the media, 1 in its corner.
     private var previewHandoff: CGFloat = 0
+    /// The trial (`CommentsV2.previewPops`): the share of the hand-over the
+    /// media scales out over, from its start, and the stretch the preview
+    /// pops in over — overlapping well, so the screen is never empty
+    /// (measured: a short overlap left a stretch with neither showing).
+    private static let popMediaOutShare: CGFloat = 0.6
+    private static let popPreviewIn: ClosedRange<CGFloat> = 0.2...0.8
+
+    private static func smoothstep(_ t: CGFloat) -> CGFloat {
+        let t = min(max(0, t), 1)
+        return t * t * (3 - 2 * t)
+    }
+
+    /// The trial's pop: from half its size to a little over its own, back
+    /// to its own (an ease-out-back), as `t` goes 0 to 1.
+    private static func popScale(_ t: CGFloat) -> CGFloat {
+        let t = min(max(0, t), 1)
+        let c1: CGFloat = 1.70158
+        let back = 1 + (c1 + 1) * pow(t - 1, 3) + c1 * pow(t - 1, 2)
+        return 0.5 + 0.5 * back
+    }
 
     /// ⚠️ THE SHEET DRIVES THE HAND-OVER, frame by frame (the owner,
     /// 2026-11-03). Played as an animation when the media crossed its
@@ -457,9 +488,29 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             }
         }
         setPreviewShown(true)
+        guard let preview else { return }
+        if CommentsV2.previewPops {
+            // The trial: in its corner from the start, popping in as the
+            // media scales out, both driven by the sheet.
+            let span = Self.popPreviewIn.upperBound - Self.popPreviewIn.lowerBound
+            let t = min(1, max(0, (handoff - Self.popPreviewIn.lowerBound) / span))
+            // Seen early in its pop: the fade done by its middle.
+            preview.alpha = Self.smoothstep(min(1, t * 2))
+            if !isPreviewHeld {
+                let scale = Self.popScale(t)
+                preview.transform = CGAffineTransform(scaleX: scale, y: scale)
+                let corner = previewFrame(size: preview.bounds.size, in: window, sheetTop: sheetTop)
+                preview.center = CGPoint(x: corner.midX, y: corner.midY)
+            }
+            return
+        }
         // Left alone under a finger and while it settles in a corner.
-        guard let preview, !isPreviewHeld, let center = drivenPreviewCenter(of: preview, in: window) else { return }
+        guard !isPreviewHeld, let center = drivenPreviewCenter(of: preview, in: window) else { return }
         preview.center = center
+    }
+
+    private static func center(of frame: CGRect) -> CGPoint? {
+        CGPoint(x: frame.midX, y: frame.midY)
     }
 
     /// Where the hand-over puts the preview: on its way from the media,
@@ -576,7 +627,9 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// The preview into its corner, on a spring carrying the throw.
     private func settlePreview(velocity: CGPoint, in window: UIWindow) {
         guard let preview else { return }
-        guard let target = drivenPreviewCenter(of: preview, in: window) else { return }
+        guard let target = CommentsV2.previewPops
+            ? Self.center(of: previewFrame(size: preview.bounds.size, in: window, sheetTop: lastSheetTop))
+            : drivenPreviewCenter(of: preview, in: window) else { return }
         let distance = hypot(target.x - preview.center.x, target.y - preview.center.y)
         let speed = hypot(velocity.x, velocity.y)
         let stashed = isPreviewStashed ? previewCorner.isLeading : nil
@@ -620,7 +673,8 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             preview.showStash(leading: nil)
             previewCorner = SnapCommentsPreview.lastCorner
             preview.isHidden = false
-            cell.setCommentsSheetMediaHidden(true)
+            // The trial scales the media out instead (`out`).
+            if !CommentsV2.previewPops { cell.setCommentsSheetMediaHidden(true) }
         } else {
             preview.layer.removeAllAnimations()
             isPreviewHeld = false

@@ -15,8 +15,14 @@ public enum CommentsV2 {
     /// kept aside (the owner, 2026-11-03): `-comments-v2-navstack`. Off, the
     /// sheet carries a lone `UINavigationBar` (`SnapCommentsSheetViewController`).
     public static var sheetUsesNavigationStack = ProcessInfo.processInfo.arguments.contains("-comments-v2-navstack")
+    /// The media handed to its preview without travelling (a trial, the
+    /// owner, 2026-11-03): it scales out above the sheet while the preview
+    /// pops in at its corner — `-comments-v2-preview-pop`. Off, the preview
+    /// carries the media from where it stood to its corner.
+    public static var previewPops = ProcessInfo.processInfo.arguments.contains("-comments-v2-preview-pop")
     #else
     public static let isEnabled = false
     public static let sheetUsesNavigationStack = false
+    public static let previewPops = false
     #endif
 }
