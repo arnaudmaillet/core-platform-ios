@@ -48,6 +48,9 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     private var isLeaving = false
     /// The content height the detent last resolved against.
     private var fittedHeight: CGFloat?
+    /// Where the sheet's top rests, in the window: kept while it is not
+    /// leaving (`follow`).
+    private var restingTop: CGFloat?
 
     /// - Parameters:
     ///   - walletBadge: the balance for the sheet's bar, nil for none (a
@@ -160,9 +163,15 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         } else {
             top = container.convert(presented.frame, to: nil).minY
         }
-        // …against where it rests: the model frame is already the end of
-        // whatever is animating.
-        let restingTop = container.convert(presented.frame, to: nil).minY
+        // …against where it RESTS. The model frame is the end of whatever is
+        // animating — the rest on the way in and on a refit — but once the
+        // sheet starts to leave it is the finger's, then the exit's, off the
+        // screen. Read there (measured, 2026-11-03), the progress stayed at 1
+        // under the finger and ran to 157 on the release: the media held its
+        // shrunk size all the way down and jumped to full screen at the end.
+        // So the rest is kept from before the sheet started to leave.
+        if !isLeaving { restingTop = container.convert(presented.frame, to: nil).minY }
+        guard let restingTop else { return }
         let progress = (height - top) / max(1, height - restingTop)
         let roomTop = window.safeAreaInsets.top
         let region = CGRect(x: 0, y: roomTop, width: window.bounds.width, height: max(1, top - roomTop))
