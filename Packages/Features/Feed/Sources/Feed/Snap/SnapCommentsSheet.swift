@@ -19,12 +19,14 @@ import UIKit
 /// sheet through its entrance, a drag down and its exit — never a second
 /// animation trying to keep pace with UIKit's.
 ///
-/// One height for now (60 %); a full-screen detent waits for the owner's
-/// approval of this one. The sheet is undimmed, so the media above it stays
+/// One height for now: the content's own, at most 60 % of the screen (the
+/// owner, 2026-11-03) — a short thread takes a short sheet, with no room
+/// above its first row; a full-screen detent waits for the owner's approval
+/// of this one. The sheet is undimmed, so the media above it stays
 /// lit; a tap there closes it, as a swipe down does.
 @MainActor
 final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationControllerDelegate {
-    /// The sheet's resting height, as a share of the screen.
+    /// The sheet's tallest resting height, as a share of the screen.
     static let restingShare: CGFloat = 0.6
     static let detent = UISheetPresentationController.Detent.Identifier("feed.comments.v2")
 
@@ -42,6 +44,10 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// The bars as the sheet found them, given back as it leaves.
     private var barsWereHidden: (navigation: Bool, toolbar: Bool)?
     private var hasEnded = false
+    /// The sheet is on its way out: its height holds still.
+    private var isLeaving = false
+    /// The content height the detent last resolved against.
+    private var fittedHeight: CGFloat?
 
     /// - Parameters:
     ///   - walletBadge: the balance for the sheet's bar, nil for none (a
@@ -63,6 +69,9 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         guard let feed, let window = feed.view.window else { return end() }
         let screenHeight = window.bounds.height
         let share = Self.restingShare
+        // A custom detent's height leaves out the bottom safe area, which the
+        // content's own height includes.
+        let bottomInset = window.safeAreaInsets.bottom
         sheet.modalPresentationStyle = .pageSheet
         sheet.presentationController?.delegate = self
         // Dark, the sheet's own material included: the panel is drawn for the
@@ -71,8 +80,10 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         sheet.overrideUserInterfaceStyle = .dark
         sheet.presentationController?.traitOverrides.userInterfaceStyle = .dark
         if let controller = sheet.sheetPresentationController {
-            controller.detents = [.custom(identifier: Self.detent) { context in
-                min(context.maximumDetentValue, screenHeight * share)
+            controller.detents = [.custom(identifier: Self.detent) { [weak content] context in
+                let cap = min(context.maximumDetentValue, screenHeight * share)
+                let fitted = MainActor.assumeIsolated { content?.fittedHeight }
+                return fitted.map { min(cap, $0 - bottomInset) } ?? cap
             }]
             controller.largestUndimmedDetentIdentifier = Self.detent
             controller.prefersGrabberVisible = true
@@ -89,6 +100,11 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         catcher.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         catcher.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(close)))
         feed.view.addSubview(catcher)
+        // Laid out at the sheet's width before it is presented, so the first
+        // height it resolves is already its content's.
+        sheet.view.frame = CGRect(x: 0, y: 0, width: window.bounds.width, height: screenHeight * share + bottomInset)
+        sheet.view.layoutIfNeeded()
+        fittedHeight = content.fittedHeight
 
         let link = CADisplayLink(target: DisplayLinkTarget(self), selector: #selector(DisplayLinkTarget.tick))
         link.add(to: .main, forMode: .common)
@@ -101,6 +117,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     @objc func close() {
         guard !hasEnded, sheet.presentingViewController != nil else { return }
         sheet.view.endEditing(true)
+        isLeaving = true
         content.freeze()
         // The toolbar comes back WITH the sheet's exit; the top bar after it.
         setBarsHidden(false, animated: true, includingNavigationBar: false)
@@ -146,6 +163,18 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         let roomTop = window.safeAreaInsets.top
         let region = CGRect(x: 0, y: roomTop, width: window.bounds.width, height: max(1, top - roomTop))
         cell.setCommentsSheetLayout(progress: progress, mediaRegion: region)
+        refit()
+    }
+
+    /// The detent again when the content's height has moved — rows landing,
+    /// a thread's replies opening, the other tab — never on the way out.
+    private func refit() {
+        guard !isLeaving, let controller = sheet.sheetPresentationController else { return }
+        let fitted = content.fittedHeight
+        if let fitted, let last = fittedHeight, abs(fitted - last) < 1 { return }
+        guard fitted != fittedHeight else { return }
+        fittedHeight = fitted
+        controller.animateChanges { controller.invalidateDetents() }
     }
 
     private func end() {
@@ -165,9 +194,11 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// for the end), and leaves again if the sheet is let go back to its rest.
     func presentationControllerWillDismiss(_ presentationController: UIPresentationController) {
         setBarsHidden(false, animated: true, includingNavigationBar: false)
+        isLeaving = true
         content.freeze()
         sheet.transitionCoordinator?.notifyWhenInteractionChanges { [weak self] context in
             guard context.isCancelled else { return }
+            self?.isLeaving = false
             self?.setBarsHidden(true, animated: true)
         }
     }
@@ -308,6 +339,9 @@ final class SnapCommentsSheetViewController: UIViewController {
         setContentScrollView(list, for: .top)
         topPocketInteraction.scrollView = list
     }
+
+    /// The panel's height for what it shows (`PostDetailViewController.fittedHeight`).
+    var fittedHeight: CGFloat? { (panel as? PostDetailViewController)?.fittedHeight }
 
     /// The sheet is leaving: its content moves as one piece from here.
     func freeze() {

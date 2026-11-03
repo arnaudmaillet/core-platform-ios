@@ -168,6 +168,16 @@ final class PostDetailViewController: UIViewController {
     /// The composer as the pocket over the visible list's bottom edge.
     private let sheetEdgePocket = UIScrollEdgeElementContainerInteraction()
 
+    /// The panel's height for its visible stream as laid out — the engaged
+    /// top, the rows, the composer's band — what a sheet fitted to its content
+    /// asks for (#2087). Nil before the stream has rows or engaged insets.
+    var fittedHeight: CGFloat? {
+        guard let engaged = engagedStreamInsets else { return nil }
+        let rows = stream.collectionView.contentSize.height
+        guard rows > 0 else { return nil }
+        return engaged.top + rows + engaged.bottom
+    }
+
     /// The comments sheet's edges: UIKit's own SOFT edge effects, as the
     /// app's other lists wear them (the owner, 2026-11-03) — the top one
     /// under the sheet's bar, a titled screen's (`prefersSoftTopEdge`), the
