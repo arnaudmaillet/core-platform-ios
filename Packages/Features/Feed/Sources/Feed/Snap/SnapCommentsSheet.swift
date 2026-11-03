@@ -103,7 +103,10 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         // Laid out at the sheet's width before it is presented, so the first
         // height it resolves is already its content's.
         sheet.view.frame = CGRect(x: 0, y: 0, width: window.bounds.width, height: screenHeight * share + bottomInset)
+        content.composerBottomInset = bottomInset
         sheet.view.layoutIfNeeded()
+        content.applyPanelInsets()
+        content.view.layoutIfNeeded()
         fittedHeight = content.fittedHeight
 
         let link = CADisplayLink(target: DisplayLinkTarget(self), selector: #selector(DisplayLinkTarget.tick))
@@ -354,16 +357,34 @@ final class SnapCommentsSheetViewController: UIViewController {
         }
     }
 
-    /// The composer rests on the SHEET's bottom edge, its home indicator
-    /// cleared by a breath — not on the band the page keeps for its toolbar,
-    /// which the panel's engaged layout otherwise reserves (#2087).
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
+        applyPanelInsets()
+    }
+
+    /// The bottom inset the composer rests over: the WINDOW's, known before
+    /// the sheet is presented and the same all the way in. The sheet's own
+    /// safe area passes through 0, 34 and 23 pt as it rises (measured), and
+    /// the composer rode each value — the sheet's content is frozen (#2087).
+    var composerBottomInset: CGFloat = 0
+    /// What the panel was last given, so a pass that changes nothing moves
+    /// nothing (`setEngagedInsets` puts the stream back at its top).
+    private var appliedInsets: (top: CGFloat, bottom: CGFloat)?
+
+    /// The panel's insets: under the bar, the page's breath before the first
+    /// row (`SnapCommentsLayout.streamTopBreath`); the composer resting on the
+    /// sheet's bottom edge, a breath over the window's bottom inset — not on
+    /// the band the page keeps for its toolbar, which the panel's engaged
+    /// layout otherwise reserves. The bar's own bottom stands in for the
+    /// safe area while the sheet is laid out ahead of its presentation.
+    func applyPanelInsets() {
         guard let detail = panel as? PostDetailViewController else { return }
-        let rest = view.safeAreaInsets.bottom + Spacing.sm
-        detail.setEngagedInsets(
-            top: view.safeAreaInsets.top, bottomInset: max(0, rest - detail.composerRestingGap)
-        )
+        let bar = navigationController.map { view.convert($0.navigationBar.frame, from: $0.view).maxY } ?? 0
+        let top = max(view.safeAreaInsets.top, bar) + SnapCommentsLayout.streamTopBreath
+        let bottom = max(0, composerBottomInset + Spacing.sm - detail.composerRestingGap)
+        if let applied = appliedInsets, abs(applied.top - top) < 0.5, abs(applied.bottom - bottom) < 0.5 { return }
+        appliedInsets = (top, bottom)
+        detail.setEngagedInsets(top: top, bottomInset: bottom)
     }
 
     override func viewDidDisappear(_ animated: Bool) {
