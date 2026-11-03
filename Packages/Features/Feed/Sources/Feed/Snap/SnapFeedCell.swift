@@ -1910,7 +1910,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// tile's once shrunk, or the sheet's own `sheetCornerRadius` for a
     /// landscape picture. The bands fade out round it, and a light grey line
     /// fades in round the picture (`drawCommentsSheetEdge`).
-    func setCommentsSheetLayout(progress: CGFloat, mediaRegion: CGRect, sheetCornerRadius: CGFloat) {
+    ///
+    /// `out` (0…1) scales the media out where it stands, smaller and fading:
+    /// the sheet has grown past the room its smallest size needs.
+    func setCommentsSheetLayout(
+        progress: CGFloat, mediaRegion: CGRect, sheetCornerRadius: CGFloat, out: CGFloat = 0
+    ) {
         let t = min(max(0, progress), 1)
         // The interface, and the action column riding above it (#695).
         chrome.alpha = 1 - t
@@ -1931,8 +1936,16 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let offset = CGPoint(x: picture.midX - bounds.midX, y: picture.midY - bounds.midY)
         let landed = CGPoint(x: cardCenter.x + offset.x * fit, y: cardCenter.y + offset.y * fit)
         let move = CGPoint(x: (mediaRegion.midX - landed.x) * t, y: (mediaRegion.midY - landed.y) * t)
+        // Scaled out about the region's centre.
+        let out = min(max(0, out), 1)
+        let shrink = 1 - Self.commentsSheetOutShrink * out
         mediaCard.transform = CGAffineTransform(scaleX: scale, y: scale)
             .concatenating(CGAffineTransform(translationX: move.x, y: move.y))
+            .concatenating(CGAffineTransform(translationX: -mediaRegion.midX, y: -mediaRegion.midY))
+            .concatenating(CGAffineTransform(scaleX: shrink, y: shrink))
+            .concatenating(CGAffineTransform(translationX: mediaRegion.midX, y: mediaRegion.midY))
+        commentsSheetMediaOut = out
+        applyCommentsSheetMediaAlpha()
 
         let mask = commentsSheetMask ?? {
             let mask = UIView()
@@ -1958,9 +1971,16 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         let to = landscape ? sheetCornerRadius : ChaoticSliceLayout.harmonisedCornerRadius
         let framed = picture.offsetBy(dx: -bounds.minX, dy: -bounds.minY)
         let window = landscape ? framed.insetBy(dx: Self.landscapeSideTrim * t, dy: 0) : framed
-        let radius = from + (to - from) * t
+        // ⚠️ NEVER MORE THAN HALF ITS SHORTER SIDE (the owner, 2026-11-03):
+        // a picture shrunk under its radius twice over read as a lozenge. A
+        // pill at the very least.
+        let shownSide = min(window.width, window.height) * scale * shrink
+        let radius = min(from + (to - from) * t, shownSide / 2)
         commentsSheetPictureWindow.frame = window
-        commentsSheetPictureWindow.layer.cornerRadius = radius * unscale
+        commentsSheetPictureFrame = mediaCard.convert(window.offsetBy(dx: bounds.minX, dy: bounds.minY), to: nil)
+        commentsSheetPictureRadius = radius
+        let unshrink = 1 / max(shrink, 0.01)
+        commentsSheetPictureWindow.layer.cornerRadius = radius * unscale * unshrink
         drawCommentsSheetEdge(
             around: mediaCard.convert(window.offsetBy(dx: bounds.minX, dy: bounds.minY), to: stage),
             cornerRadius: radius, progress: t, in: stage
@@ -2033,7 +2053,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         edge.layer.borderWidth = Surface.hairline(for: traitCollection)
         edge.frame = picture
         edge.layer.cornerRadius = cornerRadius
-        edge.alpha = progress
+        edge.alpha = progress * mediaCard.alpha
+        edge.isHidden = mediaCard.alpha == 0
     }
 
     /// The page at rest again: identity media, its interface back.
@@ -2044,6 +2065,60 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         mediaCard.mask = nil
         commentsSheetMask = nil
         commentsSheetEdge?.removeFromSuperview()
+        commentsSheetPictureFrame = nil
+        setCommentsSheetMediaHidden(false)
+    }
+
+    // MARK: The comments sheet's preview (#2087)
+
+    /// Where the shrunk picture stands, in the window's coordinates, as the
+    /// last layout drew it, and its corners' radius there: what the sheet's
+    /// preview flies from and back to.
+    private(set) var commentsSheetPictureFrame: CGRect?
+    private(set) var commentsSheetPictureRadius: CGFloat = 0
+
+    /// The picture out of sight in place while its preview is out — the
+    /// card's alpha only: it keeps its frame, its surface and its playback.
+    func setCommentsSheetMediaHidden(_ hidden: Bool) {
+        isCommentsSheetMediaHidden = hidden
+        applyCommentsSheetMediaAlpha()
+    }
+
+    private var isCommentsSheetMediaHidden = false
+    /// How far the media is scaled out (`setCommentsSheetLayout`).
+    private var commentsSheetMediaOut: CGFloat = 0
+    /// How much smaller the media is once all the way out.
+    private static let commentsSheetOutShrink: CGFloat = 0.4
+
+    private func applyCommentsSheetMediaAlpha() {
+        let alpha = isCommentsSheetMediaHidden ? 0 : 1 - commentsSheetMediaOut
+        mediaCard.alpha = alpha
+        commentsSheetEdge?.isHidden = alpha == 0
+    }
+
+    /// The media as the sheet's preview draws it: for a clip, a passive
+    /// surface on the clip's own player (`attachSurface(_:alongsideSurface:)`),
+    /// so it plays on in step and never starts again; otherwise the picture.
+    /// Nil when there is nothing to draw.
+    func makeCommentsPreviewContent() -> UIView? {
+        if let surface = audibleSurface, let videoPlayback {
+            let mirror = VideoRenderView()
+            mirror.videoGravity = .resizeAspectFill
+            mirror.isUserInteractionEnabled = false
+            mirror.setPoster(mediaCard.showsCollection ? mediaCard.currentPageCover : mediaCard.imageView.image)
+            if videoPlayback.attachSurface(mirror, alongsideSurface: surface) { return mirror }
+        }
+        let picture = mediaCard.showsCollection ? mediaCard.currentPageCover : mediaCard.imageView.image
+        guard let picture else { return nil }
+        let view = UIImageView(image: picture)
+        view.contentMode = .scaleAspectFill
+        return view
+    }
+
+    /// Lets a preview's content go: a mirror leaves the clip's player.
+    func releaseCommentsPreviewContent(_ content: UIView) {
+        guard let mirror = content as? VideoRenderView else { return }
+        videoPlayback?.detachSurface(mirror, reason: "comments-preview")
     }
 
     // MARK: - Configuration

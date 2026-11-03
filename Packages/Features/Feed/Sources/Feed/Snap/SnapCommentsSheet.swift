@@ -370,15 +370,112 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         let progress = (height - top) / max(1, height - restingTop)
         // The room above the sheet, a breath short of its top and of the
         // screen's sides: the media never touches them.
+        //
+        // ⚠️ NEVER SMALLER THAN ITS PREVIEW (the owner, 2026-11-03): shrunk
+        // on with the sheet, the media became a speck its corners turned to
+        // a lozenge. It stops at the preview's size, where the preview takes
+        // it (`followPreview`); past that room, with no preview to take it,
+        // it scales out where it stands.
         let roomTop = window.safeAreaInsets.top
+        let room = top - Self.mediaGap - roomTop
+        let smallest = SnapCommentsPreview.size(for: cell.commentsSheetPictureSize).height
         let region = CGRect(
             x: Self.mediaSideMargin, y: roomTop,
             width: window.bounds.width - 2 * Self.mediaSideMargin,
-            height: max(1, top - Self.mediaGap - roomTop)
+            height: max(room, smallest)
         )
+        let out = preview == nil ? min(1, max(0, (smallest - room) / Self.mediaOutSpan)) : 0
         let sheetRadius = sheetCornerRadius(below: container)
-        cell.setCommentsSheetLayout(progress: progress, mediaRegion: region, sheetCornerRadius: sheetRadius)
+        cell.setCommentsSheetLayout(progress: progress, mediaRegion: region, sheetCornerRadius: sheetRadius, out: out)
+        followPreview(in: window, sheetTop: top)
         refit()
+    }
+
+    // MARK: The preview
+
+    /// The media floating over the sheet once it has grown over it, nil
+    /// while the media stands above the sheet.
+    private var preview: SnapCommentsPreview?
+    /// The preview is flying back into the media: it is let finish.
+    private var isPreviewReturning = false
+    /// How much bigger than the preview the media must grow back before the
+    /// preview flies into it: a sheet held at the threshold does not bounce
+    /// the media in and out.
+    private static let previewHysteresis: CGFloat = Spacing.lg
+    /// The room lost, past the media's smallest, over which it scales out.
+    private static let mediaOutSpan: CGFloat = 64
+
+    /// ⚠️ THE MEDIA FLIES INTO ITS PREVIEW once it has shrunk to the
+    /// preview's size above the rising sheet (the owner, 2026-11-03) — not
+    /// at the expanded rest, where it would be a speck first — and back out
+    /// once it has room to stand bigger than the preview again.
+    private func followPreview(in window: UIWindow, sheetTop: CGFloat) {
+        guard let cell, let picture = cell.commentsSheetPictureFrame, picture.width > 0, picture.height > 0 else {
+            return
+        }
+        let size = SnapCommentsPreview.size(for: picture.size)
+        // Its centre, never its frame: the flight in is a transform on it.
+        if let preview, !isPreviewReturning {
+            let frame = previewFrame(size: preview.bounds.size, in: window, sheetTop: sheetTop)
+            preview.center = CGPoint(x: frame.midX, y: frame.midY)
+        }
+        if preview == nil {
+            // A point's slack: the preview's size is rounded.
+            guard !isLeaving, picture.width <= size.width + 1, picture.height <= size.height + 1 else { return }
+            showPreview(size: size, from: picture, in: window, sheetTop: sheetTop)
+        } else if !isPreviewReturning,
+                  picture.width > size.width + Self.previewHysteresis
+                    || picture.height > size.height + Self.previewHysteresis {
+            hidePreview(into: picture)
+        }
+    }
+
+    /// Where the preview stands: the screen's top right, under the sheet's
+    /// bar — riding with the sheet as it rises, never over its ✕ and balance
+    /// — the media's margin from the side. Expanded, the screen's top.
+    private func previewFrame(size: CGSize, in window: UIWindow, sheetTop: CGFloat) -> CGRect {
+        let top = max(window.safeAreaInsets.top, sheetTop) + content.barBottom + Spacing.sm
+        return CGRect(
+            x: window.bounds.width - Self.mediaSideMargin - size.width, y: top,
+            width: size.width, height: size.height
+        )
+    }
+
+    private func showPreview(size: CGSize, from picture: CGRect, in window: UIWindow, sheetTop: CGFloat) {
+        guard let cell, let media = cell.makeCommentsPreviewContent() else { return }
+        let preview = SnapCommentsPreview(content: media)
+        let frame = previewFrame(size: size, in: window, sheetTop: sheetTop)
+        preview.frame = frame
+        window.addSubview(preview)
+        self.preview = preview
+        cell.setCommentsSheetMediaHidden(true)
+        // From the shrunk media, exactly where it stood, into the corner —
+        // landing with a little bounce.
+        preview.transform = SnapCommentsPreview.transform(from: frame, onto: picture)
+        UIView.animate(withDuration: 0.5, delay: 0, usingSpringWithDamping: 0.72, initialSpringVelocity: 0) {
+            preview.transform = .identity
+        }
+    }
+
+    /// The preview back into the media, then gone, and the media shown.
+    private func hidePreview(into picture: CGRect) {
+        guard let preview else { return }
+        isPreviewReturning = true
+        UIView.animate(withDuration: 0.3, delay: 0, options: [.curveEaseInOut]) {
+            preview.transform = SnapCommentsPreview.transform(from: preview.frame, onto: picture)
+        } completion: { [weak self] _ in
+            self?.removePreview()
+        }
+    }
+
+    /// The preview gone at once: the media back in place, its mirror let go.
+    private func removePreview() {
+        isPreviewReturning = false
+        guard let preview else { return }
+        self.preview = nil
+        cell?.releaseCommentsPreviewContent(preview.content)
+        cell?.setCommentsSheetMediaHidden(false)
+        preview.removeFromSuperview()
     }
 
     /// The sheet's corners as UIKit rounds them: on a view's corner
@@ -455,6 +552,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         hasEnded = true
         link?.invalidate()
         link = nil
+        removePreview()
         catcher.removeFromSuperview()
         sheet.presentationController?.containerView?.transform = .identity
         cell?.clearCommentsSheetLayout()
@@ -684,7 +782,7 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     func position(for bar: UIBarPositioning) -> UIBarPosition { .top }
 
     /// The bar's bottom in this view: the lone bar's, or the stack's.
-    private var barBottom: CGFloat {
+    var barBottom: CGFloat {
         if let ownBar { return ownBar.frame.maxY }
         return navigationController.map { view.convert($0.navigationBar.frame, from: $0.view).maxY } ?? 0
     }
