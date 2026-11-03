@@ -108,7 +108,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         setTopBarItemsHidden(true, animated: animated)
         catcher.frame = feed.view.bounds
         catcher.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        catcher.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(close)))
+        catcher.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(mediaTapped)))
         feed.view.addSubview(catcher)
         // Laid out at the sheet's width before it is presented, so the first
         // height it resolves is already its content's.
@@ -124,6 +124,17 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         self.link = link
         feed.present(sheet, animated: animated)
         follow()
+    }
+
+    /// A tap on the media above the sheet: with the keyboard up, it puts the
+    /// keyboard away and nothing else (the owner, 2026-11-03); otherwise it
+    /// closes the sheet.
+    @objc private func mediaTapped() {
+        if content.isKeyboardUp {
+            sheet.view.endEditing(true)
+            return
+        }
+        close()
     }
 
     /// Closes the sheet; the session ends when it has gone.
@@ -238,6 +249,18 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
 
     // MARK: UIAdaptivePresentationControllerDelegate
 
+    /// With the keyboard up, nothing outside the sheet closes it — a tap on
+    /// the media puts the keyboard away and nothing else (the owner,
+    /// 2026-11-03). ⚠️ That tap never reaches `catcher`: the sheet then
+    /// stands taller than its undimmed detent, UIKit lays its own tap-outside
+    /// view over the page and asks here (measured) — so the keyboard is put
+    /// away from here. A swipe down with the keyboard up does the same.
+    func presentationControllerShouldDismiss(_ presentationController: UIPresentationController) -> Bool {
+        guard content.isKeyboardUp else { return true }
+        DispatchQueue.main.async { [weak self] in self?.sheet.view.endEditing(true) }
+        return false
+    }
+
     /// A swipe down has begun: the sheet leaves from here, unless it is let
     /// go back to its rest.
     func presentationControllerWillDismiss(_ presentationController: UIPresentationController) {
@@ -303,6 +326,8 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     private var panelHeight: NSLayoutConstraint?
     /// The view's height at rest, without a keyboard.
     private var restingHeight: CGFloat = 0
+    /// Where the keyboard stands, in the window, while one is up.
+    private var keyboardFrame: CGRect?
     /// Over the list's top edge, as tall as the bar: what makes UIKit draw
     /// the soft edge under it (`viewWillAppear`).
     private let topPocket = UIView()
@@ -389,9 +414,12 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         // sheet rose.
         (panel as? PostDetailViewController)?.setComposerTracksKeyboard(false)
         let center = NotificationCenter.default
-        keyboardObservers.add(center.addObserver(
-            forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
-        ) { [weak self] _ in MainActor.assumeIsolated { self?.setKeyboardUp(true) } })
+        for name in [UIResponder.keyboardWillShowNotification, UIResponder.keyboardWillChangeFrameNotification] {
+            keyboardObservers.add(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
+                MainActor.assumeIsolated { self?.keyboardWillMove(to: frame) }
+            })
+        }
         keyboardObservers.add(center.addObserver(
             forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main
         ) { [weak self] _ in MainActor.assumeIsolated { self?.setKeyboardUp(false) } })
@@ -452,6 +480,34 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         if !isKeyboardUp { restingHeight = view.bounds.height }
+        fitPanelOverKeyboard()
+    }
+
+    /// A keyboard coming up or changing: its frame, and the panel set over it.
+    /// One going away (its frame off the screen) leaves both as they are —
+    /// the panel goes back to the sheet's foot once it has gone.
+    private func keyboardWillMove(to frame: CGRect?) {
+        guard let frame, let window = view.window, frame.minY < window.screen.bounds.maxY else { return }
+        keyboardFrame = frame
+        setKeyboardUp(true)
+        fitPanelOverKeyboard()
+    }
+
+    /// ⚠️ THE PANEL'S FOOT ON THE KEYBOARD, NOT ON A RESTING HEIGHT (measured,
+    /// 2026-11-03). UIKit raises a sheet over the keyboard by a rule of its
+    /// own — a short sheet's resting foot landed 5 pt under the keys, a tall
+    /// one's 74 pt: held at its resting height, the composer stood 35 pt over
+    /// the keys on the one, and 32 pt under them on the other. The panel's
+    /// foot is set where the keyboard's top is, in this view's settled
+    /// geometry, in the layout pass UIKit runs inside its own animation: the
+    /// composer, `composerBottomInset + Spacing.sm` over that foot, stands
+    /// `Spacing.sm` over the keys whatever the sheet's height.
+    private func fitPanelOverKeyboard() {
+        guard isKeyboardUp, let keyboardFrame, let panelHeight, view.window != nil else { return }
+        let keyboardTop = view.convert(keyboardFrame, from: nil).minY
+        let height = max(0, keyboardTop + composerBottomInset)
+        guard abs(panelHeight.constant - height) > 0.5 else { return }
+        panelHeight.constant = height
     }
 
     /// ⚠️ THE KEYBOARD DOES NOT RESIZE THE PANEL (measured, 2026-11-03).
@@ -465,9 +521,11 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         isKeyboardUp = up
         if up {
             panelHeight.constant = restingHeight
+            fitPanelOverKeyboard()
             panelBottom.isActive = false
             panelHeight.isActive = true
         } else {
+            keyboardFrame = nil
             panelHeight.isActive = false
             panelBottom.isActive = true
         }
