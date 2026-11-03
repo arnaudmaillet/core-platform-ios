@@ -399,8 +399,9 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         )
         let handoff = min(1, max(0, (smallest - room) / Self.previewHandoffSpan))
         let out: CGFloat = if CommentsV2.previewPops, !isPreviewUnavailable {
-            // The trial: out over the hand-over's first half.
-            Self.smoothstep(min(1, handoff / Self.popMediaOutShare))
+            // The trial: out over the room just before its smallest, so it
+            // has gone before the preview comes — one picture at a time.
+            Self.smoothstep((smallest + Self.popMediaOutLead - room) / Self.popMediaOutLead)
         } else if isPreviewUnavailable {
             min(1, max(0, (smallest - room) / Self.mediaOutSpan))
         } else {
@@ -433,12 +434,14 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     private static let mediaOutSpan: CGFloat = 64
     /// How far the preview has gone, 0 at the media, 1 in its corner.
     private var previewHandoff: CGFloat = 0
-    /// The trial (`CommentsV2.previewPops`): the share of the hand-over the
-    /// media scales out over, from its start, and the stretch the preview
-    /// pops in over — overlapping well, so the screen is never empty
-    /// (measured: a short overlap left a stretch with neither showing).
-    private static let popMediaOutShare: CGFloat = 0.6
-    private static let popPreviewIn: ClosedRange<CGFloat> = 0.2...0.8
+    /// The trial (`CommentsV2.previewPops`): ONE PICTURE AT A TIME, the
+    /// preview first (the owner, 2026-11-03) — never both on the screen. The
+    /// media scales out over the room's last `popMediaOutLead` before its
+    /// smallest; past it, the preview pops in over the hand-over's first
+    /// `popPreviewInShare`. Between the two, for a moment, neither: a sheet
+    /// never rests there.
+    private static let popMediaOutLead: CGFloat = 48
+    private static let popPreviewInShare: CGFloat = 0.6
 
     private static func smoothstep(_ t: CGFloat) -> CGFloat {
         let t = min(max(0, t), 1)
@@ -488,8 +491,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         if CommentsV2.previewPops {
             // The trial: in its corner from the start, popping in as the
             // media scales out, both driven by the sheet.
-            let span = Self.popPreviewIn.upperBound - Self.popPreviewIn.lowerBound
-            let t = min(1, max(0, (handoff - Self.popPreviewIn.lowerBound) / span))
+            let t = min(1, max(0, handoff / Self.popPreviewInShare))
             // Seen early in its pop: the fade done by its middle.
             preview.alpha = Self.smoothstep(min(1, t * 2))
             if !isPreviewHeld {
