@@ -1874,6 +1874,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private var commentsSheetMask: UIView?
     private let commentsSheetBandsWindow = UIView()
     private let commentsSheetPictureWindow = UIView()
+    /// A landscape picture's bands, above and below it — never over it, so
+    /// its own corners are the only ones drawn there.
+    private let commentsSheetTopBand = UIView()
+    private let commentsSheetBottomBand = UIView()
 
     /// What the comments sheet shrinks, as the page draws it now: the picture
     /// between its bands, or the whole card when it fills.
@@ -1917,7 +1921,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // The bands fade from the window as the picture shrinks.
         let mask = commentsSheetMask ?? {
             let mask = UIView()
-            for window in [commentsSheetBandsWindow, commentsSheetPictureWindow] {
+            commentsSheetTopBand.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+            commentsSheetBottomBand.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner]
+            for window in [
+                commentsSheetBandsWindow, commentsSheetPictureWindow, commentsSheetTopBand, commentsSheetBottomBand,
+            ] {
                 window.backgroundColor = .black
                 window.layer.cornerCurve = .continuous
                 mask.addSubview(window)
@@ -1938,13 +1946,30 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // with it, so their radius is divided by it.
         let screenRadius = ScreenGeometry.cornerRadius(behind: self)
         let unscale = 1 / max(scale, 0.01)
-        if picture.width > picture.height {
-            bands.alpha = 1 - t
-            bands.layer.cornerRadius = screenRadius * (1 - t) * unscale
-            let window = commentsSheetPictureWindow
-            window.isHidden = false
-            window.frame = picture.offsetBy(dx: -bounds.minX, dy: -bounds.minY)
-            window.layer.cornerRadius = sheetCornerRadius * t * unscale
+        let landscape = picture.width > picture.height
+        bands.isHidden = landscape
+        commentsSheetPictureWindow.isHidden = !landscape
+        commentsSheetTopBand.isHidden = !landscape
+        commentsSheetBottomBand.isHidden = !landscape
+        if landscape {
+            // ⚠️ THE BANDS STOP AT THE PICTURE (the owner, 2026-11-03): one
+            // window round both, fading, let the picture's square corners
+            // show through its rounding until it had gone.
+            let window = picture.offsetBy(dx: -bounds.minX, dy: -bounds.minY)
+            commentsSheetPictureWindow.frame = window
+            commentsSheetPictureWindow.layer.cornerRadius = sheetCornerRadius * t * unscale
+            commentsSheetTopBand.frame = CGRect(
+                x: bands.frame.minX, y: bands.frame.minY,
+                width: bands.frame.width, height: max(0, window.minY - bands.frame.minY)
+            )
+            commentsSheetBottomBand.frame = CGRect(
+                x: bands.frame.minX, y: window.maxY,
+                width: bands.frame.width, height: max(0, bands.frame.maxY - window.maxY)
+            )
+            for band in [commentsSheetTopBand, commentsSheetBottomBand] {
+                band.alpha = 1 - t
+                band.layer.cornerRadius = screenRadius * (1 - t) * unscale
+            }
             commentsSheetEdge?.isHidden = true
         } else {
             // The device's own at full screen, a media tile's once shrunk
@@ -1952,7 +1977,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             let radius = screenRadius + (ChaoticSliceLayout.harmonisedCornerRadius - screenRadius) * t
             bands.alpha = 1
             bands.layer.cornerRadius = radius * unscale
-            commentsSheetPictureWindow.isHidden = true
             drawCommentsSheetEdge(
                 around: mediaCard.convert(bands.frame, to: stage), cornerRadius: radius, progress: t, in: stage
             )
