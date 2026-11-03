@@ -178,9 +178,12 @@ final class PostDetailViewController: UIViewController {
         return engaged.top + rows + engaged.bottom
     }
 
-    /// The streams stop at their last row (`CommentStream.holdsBottomEdge`).
-    func holdStreamsBottomEdge() {
-        streams.forEach { $0.holdsBottomEdge = true }
+    /// A stream its room holds whole does not scroll at all, so a drag on it
+    /// is the sheet's own — the sheet stretches and springs back, as it does
+    /// under the grabber (#2087, the owner 2026-11-03). A longer stream
+    /// scrolls, as any list.
+    func letSheetTakeShortStreams() {
+        streams.forEach { $0.collectionView.alwaysBounceVertical = false }
     }
 
     /// The comments sheet's edges: UIKit's own SOFT edge effects, as the

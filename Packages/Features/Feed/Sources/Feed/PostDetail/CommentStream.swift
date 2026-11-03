@@ -605,11 +605,6 @@ final class CommentStream: NSObject {
     /// engaged top (`syncBottomAnchor`).
     private(set) var bottomAnchorSlack: CGFloat = 0
 
-    /// Whether the stream stops at its last row: no drag past its end, no
-    /// bounce there — and none at all for a stream its room holds whole (the
-    /// comments sheet, #2087, the owner 2026-11-03). Its top edge is left as
-    /// it is: a pull down there is the sheet's.
-    var holdsBottomEdge = false
 
     /// A short stream STARTS FROM THE BOTTOM (#1799, the default since
     /// #1923): the caption and its comments are one block, the post its
@@ -2413,11 +2408,6 @@ extension CommentStream: UICollectionViewDelegate {
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         if pageDrive != nil { return drivePage(scrollView) }
-        if holdsBottomEdge {
-            let inset = scrollView.adjustedContentInset
-            let end = max(-inset.top, scrollView.contentSize.height + inset.bottom - scrollView.bounds.height)
-            if scrollView.contentOffset.y > end { scrollView.contentOffset.y = end }
-        }
         guard !isHoldingEdge else { return }
         syncMoreButton()
         // The reader's own scroll decides whether the stream holds its

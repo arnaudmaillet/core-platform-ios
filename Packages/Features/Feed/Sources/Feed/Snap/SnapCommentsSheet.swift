@@ -358,15 +358,15 @@ final class SnapCommentsSheetViewController: UIViewController {
         (panel as? PostDetailViewController)?.setComposerTracksKeyboard(false)
     }
 
-    /// The trailing run, right to left: the balance, then the ✕ to its left
-    /// (the owner, 2026-11-03) — a fixed space between, or iOS 26 groups the
-    /// two adjacent items into one platter.
+    /// The trailing run, right to left: the ✕ at the edge, the balance to its
+    /// left (the owner, 2026-11-03) — a fixed space between, or iOS 26 groups
+    /// the two adjacent items into one platter.
     private func installWalletItem() {
         guard let walletBadge else { return navigationItem.rightBarButtonItems = [closeItem] }
         navigationItem.rightBarButtonItems = [
-            BarItems.container(id: BarItems.SharedID.walletBalance, view: walletBadge),
-            .fixedSpace(Spacing.sm),
             closeItem,
+            .fixedSpace(Spacing.sm),
+            BarItems.container(id: BarItems.SharedID.walletBalance, view: walletBadge),
         ]
     }
 
