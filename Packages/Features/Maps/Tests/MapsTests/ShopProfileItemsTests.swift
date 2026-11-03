@@ -57,7 +57,7 @@ struct ShopProfileItemsTests {
         #expect(shelf.heading.debugTitleText == "Profile")
         let card = try #require(front.itemCards.first)
         #expect(card.item == .videoBanner && !card.owned)
-        #expect(card.accessibilityValue == "500 gems")
+        #expect(card.accessibilityValue == "500 crowns")
         let countries = try #require(front.countriesShelf)
         #expect(shelf.frame.maxY <= countries.frame.minY)
     }
@@ -85,7 +85,7 @@ struct ShopProfileItemsTests {
         let menu = front.itemMenu(.videoBanner, owned: false)
         let buy = try #require(menu.children.first as? UIAction)
         #expect(buy.attributes.contains(.disabled))
-        #expect(buy.subtitle == "418 more gems needed")
+        #expect(buy.subtitle == "418 more crowns needed")
     }
 
     /// Owned, the menu says where it is used, and buys nothing.

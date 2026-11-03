@@ -122,7 +122,7 @@ struct CountryShopViewControllerTests {
 
         let gems = try #require(shop.navigationItem.rightBarButtonItem)
         #expect(gems.identifier == CountryShopViewController.balanceItemIdentifier)
-        #expect(gems.accessibilityLabel == "40 gems")
+        #expect(gems.accessibilityLabel == "40 crowns")
         let balance = try #require(gems.customView as? UIStackView)
         // The diamond is an IMAGE VIEW in the gem's own colour, never a text
         // attachment (glass draws those black).
@@ -152,7 +152,7 @@ struct CountryShopViewControllerTests {
         let after = try #require(shop.navigationItem.rightBarButtonItem)
         #expect(after !== before)
         #expect(after.identifier == CountryShopViewController.balanceItemIdentifier)
-        #expect(after.accessibilityLabel == "1250 gems")
+        #expect(after.accessibilityLabel == "\(1_250.formatted()) crowns")
     }
 
     /// A pushed screen, not a sheet (owner, 2026-10-13): the storefront
@@ -274,7 +274,7 @@ struct CountryShopViewControllerTests {
         let row = try packRow(shop)
         #expect(row.titleLabel.text == "×100 cartridges")
         #expect(row.detailLabel.text == "3 shots · 100 likes a tap")
-        #expect(row.accessibilityValue == "50 gems")
+        #expect(row.accessibilityValue == "50 crowns")
     }
 
     /// Opened by the stake menu's "Get ×100 cartridges in the Shop": the
@@ -318,9 +318,9 @@ struct CountryShopViewControllerTests {
         #expect(CountryShopViewController.refusalMessage(for: .packStillActive(shotsLeft: 3))
                 == "Your pack is still active, 3 left")
         #expect(CountryShopViewController.refusalMessage(for: .insufficientGems(needed: 50, have: 20))
-                == "30 more gems needed")
+                == "30 more crowns needed")
         #expect(CountryShopViewController.refusalMessage(for: .insufficientGems(needed: 50, have: 49))
-                == "1 more gem needed")
+                == "1 more crown needed")
         #expect(CountryShopViewController.refusalMessage(for: .bought(shots: 3, remainingGems: 20)) == nil)
     }
 
@@ -371,7 +371,7 @@ struct CountryShopViewControllerTests {
         // Spent down (in the feed), the price comes back.
         packs.shotsLeft = 0
         NotificationCenter.default.post(name: .stakePackDidChange, object: packs)
-        #expect(try packRow(shop).accessibilityValue == "50 gems")
+        #expect(try packRow(shop).accessibilityValue == "50 crowns")
     }
 
     /// Boosts is not a country: a search hides it, clearing it brings it back.
@@ -412,7 +412,7 @@ struct CountryShopViewControllerTests {
         shop.view.layoutIfNeeded()
         let covered = try #require(shop.debugPriceButton(for: "CN"))
         #expect(covered.isEnabled, "the balance covers the price and it stayed disabled")
-        #expect(covered.accessibilityLabel == "Unlock China for \(access.standing(of: "CN")?.price ?? 0) gems")
+        #expect(covered.accessibilityLabel == "Unlock China for \((access.standing(of: "CN")?.price ?? 0).formatted()) crowns")
     }
 
     /// The price is the button as a list accessory — measured, so the slot

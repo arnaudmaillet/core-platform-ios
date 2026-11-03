@@ -582,9 +582,9 @@ final class AppButtonCatalogViewController: UIViewController {
     // MARK: - Shop
 
     private func buildShop() {
-        section("Shop", source: "CountryShopViewController — the price: tinted pill, gem, its menu")
+        section("Shop", source: "CountryShopViewController — the price: tinted pill, crown, its menu")
         let price = track(AppButton(aspect: .pill(.tinted), size: .row, content: AppButton.Content(title: 40.formatted(), symbol: GemSymbol.glyph)))
-        price.menu = UIMenu(children: [UIAction(title: "Unlock for 40 Gems", image: UIImage(systemName: "lock.open")) { _ in print("[catalog] Unlock") }])
+        price.menu = UIMenu(children: [UIAction(title: "Unlock for \(GemSymbol.amount(40))", image: UIImage(systemName: "lock.open")) { _ in print("[catalog] Unlock") }])
         price.showsMenuAsPrimaryAction = true
         let disabled = track(AppButton(aspect: .pill(.tinted), size: .row, content: AppButton.Content(title: 2_500.formatted(), symbol: GemSymbol.glyph)))
         disabled.isEnabled = false

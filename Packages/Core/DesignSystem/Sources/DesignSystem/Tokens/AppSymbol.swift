@@ -87,7 +87,7 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         case .save: "Save"
         case .saved: "Saved"
         case .share: "Share"
-        case .crown, .crownFilled: "Gems"
+        case .crown, .crownFilled: GemSymbol.name
         case .paperplane, .paperplaneFill, .paperplaneBadge, .paperplaneBadgeFill: "Explore"
         case .squarePlay, .squarePlayFill, .squarePlayBadge, .squarePlayBadgeFill: "For You"
         case .chats, .chatsFill, .chatsBadge, .chatsBadgeFill: "Messages"

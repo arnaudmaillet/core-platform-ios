@@ -14,7 +14,7 @@ final class WalletHowItWorksViewController: UIViewController {
         ("plus.circle.fill", "Claim likes", "Free likes every hour. Claim every day to grow your streak bonus, up to ×2."),
         (LikesSymbol.glyph, "Stake them", "A like is a stake: the likes you give a post are staked on it."),
         ("clock.fill", "It settles", "A day later the stake settles, rewarded if the post turned out to matter to people."),
-        (GemSymbol.glyph, "Earn gems", "Rewarded stakes earn gems. Gems are only ever earned, never bought."),
+        (GemSymbol.glyph, "Earn crowns", "Rewarded stakes earn crowns. Crowns are only ever earned, never bought."),
         ("storefront.fill", "Spend them", "In the Shop: boosts, profile items and countries."),
     ]
 

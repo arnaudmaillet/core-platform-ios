@@ -312,7 +312,7 @@ final class WalletHistoryViewController: UIViewController {
             let isLast = indexPath.section == (self?.dataSource.snapshot().numberOfSections ?? 0) - 1
             let isFilter = self?.dataSource.sectionIdentifier(for: indexPath.section) == .filter
             content.text = isLast && !isFilter
-                ? "Nothing in the app is sold for real money: likes are claimed and staked, gems are earned."
+                ? "Nothing in the app is sold for real money: likes are claimed and staked, crowns are earned."
                 : nil
             view.contentConfiguration = content
         }

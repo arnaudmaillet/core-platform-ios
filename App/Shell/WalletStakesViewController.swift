@@ -305,7 +305,7 @@ final class WalletStakesViewController: UIViewController {
         switch segment {
         case .active:
             content.text = "No active stakes"
-            content.secondaryText = "Like a post to stake on it. A stake settles a day later, and pays gems if it turned out right."
+            content.secondaryText = "Like a post to stake on it. A stake settles a day later, and pays crowns if it turned out right."
         case .settled:
             content.text = "Nothing settled yet"
             content.secondaryText = "Your stakes show here once they settle, with what each one earned."

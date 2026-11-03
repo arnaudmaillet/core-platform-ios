@@ -25,12 +25,12 @@ enum ShopPurchaseFeedback {
             pending.end()
         case .insufficientGems(let needed, let have):
             let missing = max(needed - have, 1)
-            pending.fail(missing == 1 ? "1 more gem needed" : "\(missing) more gems needed")
+            pending.fail("\(GemSymbol.more(missing)) needed")
         case .unavailable:
             pending.fail(PurchaseRestriction.message)
         case .priceChanged(let price):
             pending.fail(
-                price.map { "The price changed: now \($0) gems. Nothing was charged." }
+                price.map { "The price changed: now \(GemSymbol.amount($0)). Nothing was charged." }
                     ?? "The price changed. Nothing was charged."
             )
         case .failed:
