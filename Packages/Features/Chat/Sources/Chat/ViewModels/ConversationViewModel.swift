@@ -166,6 +166,11 @@ public final class ConversationViewModel {
             case text(String)
         }
 
+        var isVoice: Bool {
+            if case .media(.voice) = payload { return true }
+            return false
+        }
+
         var isText: Bool {
             if case .text = payload { return true }
             return false
@@ -349,6 +354,18 @@ public final class ConversationViewModel {
     /// picked, and turns into the delivered message — or into a failed one
     /// with a retry (`retry`).
     public func send(media uploads: [ChatMediaUpload]) {
+        sendPending(uploads)
+    }
+
+    /// Sends a finished take as a voice message (#2103), as a photo is
+    /// sent: a pending bubble at once — playable from the take — then the
+    /// upload and the send, one idempotency key on every attempt, a failed
+    /// one retried by a tap (`retry`). A reply when one is being composed.
+    public func send(voice: ChatVoiceUpload) {
+        sendPending([.voice(voice)])
+    }
+
+    private func sendPending(_ uploads: [ChatMediaUpload]) {
         guard !uploads.isEmpty else { return }
         let replyTo = replyingToID
         cancelReply()
@@ -432,7 +449,7 @@ public final class ConversationViewModel {
             // says so only when the connection is why (#794): its bubble
             // reads "Not sent", which cannot tell the viewer they're offline.
             if (error as? ChatError) == .messagesRefused || pending.isText || Self.isConnectionFailure(error) {
-                let notice = Self.sendFailureNotice(error, isMedia: !pending.isText)
+                let notice = Self.sendFailureNotice(error, isMedia: !pending.isText, isVoice: pending.isVoice)
                 onActionNotice?(notice.title, notice.message)
             }
         }
@@ -447,11 +464,14 @@ public final class ConversationViewModel {
     /// What a message that didn't go says: the recipient takes none (#397),
     /// or it simply failed — titled "You’re offline" or "That took too long"
     /// when that is why (#794), the media upload's failure included.
-    static func sendFailureNotice(_ error: Error, isMedia: Bool = false) -> (title: String, message: String) {
+    static func sendFailureNotice(
+        _ error: Error, isMedia: Bool = false, isVoice: Bool = false
+    ) -> (title: String, message: String) {
         if (error as? ChatError) == .messagesRefused {
             return ("Can't Send Message", "This account doesn't take messages.")
         }
         let title = FailureCopy.title(for: error, fallback: "Couldn't send")
+        if isVoice { return (title, "Your voice message wasn\u{2019}t sent. Tap it to try again.") }
         return isMedia
             ? (title, "Your photo or video wasn\u{2019}t sent. Tap it to try again.")
             : (title, "Your message wasn\u{2019}t sent. Check your connection and try again.")

@@ -5,6 +5,7 @@ import CoreNetworking
 import Foundation
 import MediaCore
 import UIKit
+import VoiceKit
 
 public enum ChatError: Error, Equatable, Sendable {
     case notAuthenticated
@@ -624,6 +625,35 @@ public actor ChatRepository: ChatProviding {
                 pixelWidth: video.pixelWidth, pixelHeight: video.pixelHeight, duration: video.duration
             )
             return (media, asset.assetID)
+        case .voice(let voice):
+            // ⚠️ NO VOICE KIND IN media.v1 YET (backend#993): the default kind,
+            // the audio mime type and signed delivery — a conversation is
+            // private. The length and the waveform travel in the reference
+            // (`ChatMediaRef`) until the contract carries them.
+            let fingerprint = try voice.fingerprint()
+            let asset = try await uploader.upload(
+                .file(voice.fileURL), ownerID: ownerID, mimeType: voice.mimeType,
+                sizeBytes: fingerprint.size, sha256: fingerprint.sha256, idempotencyKey: key,
+                visibility: .mediaDeliveryVisibilitySigned
+            )
+            keepSentTake(voice.fileURL, as: asset.assetID)
+            let media = ChatMedia(
+                kind: .voice, url: asset.url, duration: voice.duration,
+                waveform: voice.waveform, assetID: asset.assetID
+            )
+            return (media, asset.assetID)
+        }
+    }
+
+    /// The sender never downloads their own voice message (#2103): a copy of
+    /// the take is kept as the asset's audio. The take stays where it is, for
+    /// the bubble until the message lands.
+    static func keepSentTake(_ fileURL: URL, as assetID: String, in cache: VoiceFileCache? = .shared) {
+        guard let cache, cache.fileURL(forAsset: assetID) == nil else { return }
+        let copy = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).m4a")
+        guard (try? FileManager.default.copyItem(at: fileURL, to: copy)) != nil else { return }
+        if (try? cache.keep(fileAt: copy, forAsset: assetID)) == nil {
+            try? FileManager.default.removeItem(at: copy)
         }
     }
 
@@ -818,7 +848,9 @@ public actor ChatRepository: ChatProviding {
 
     /// The inbox row's line: the preview, or — a MEDIA message with no
     /// caption, whose preview is empty — what it carries (#681). The preview
-    /// holds no reference, so the line cannot say which of the two.
+    /// holds no reference, so the line cannot say which of the two. A voice
+    /// message's preview is the server's own, "🎤 Voice message (0:12)"
+    /// (backend#993; the mock writes it, #2103).
     static func previewText(_ preview: Chat_V1_MessagePreview) -> String {
         guard preview.preview.isEmpty, preview.contentType == .media else { return preview.preview }
         return "Photo or video"

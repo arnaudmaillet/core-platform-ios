@@ -15,6 +15,10 @@ public final class VoiceFileCache: Sendable {
 
     public let store: DiskStore
 
+    /// The app's namespace, opened on first use; nil only if its folder
+    /// cannot be made — a message then plays from its delivery.
+    public static let shared: VoiceFileCache? = try? open()
+
     public init(store: DiskStore) {
         self.store = store
     }

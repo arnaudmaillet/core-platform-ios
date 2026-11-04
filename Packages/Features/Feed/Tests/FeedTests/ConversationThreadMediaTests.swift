@@ -173,6 +173,48 @@ struct ConversationThreadMediaTests {
         #expect(driver.retried == ["pending-1"])
     }
 
+    // MARK: - Voice messages (#2103)
+
+    /// Until its bubble lands (#2104), a voice message reads as its line —
+    /// "🎤 Voice message (0:12)" — with no media view; a failed one of the
+    /// viewer's retries on a tap, as a text does.
+    @Test func aVoiceMessageReadsAsItsLineAndRetriesLikeAText() throws {
+        let voice = ConversationThreadMedia(
+            kind: .voice, url: nil, duration: 12.4, waveform: Array(repeating: 9, count: 100),
+            localFileURL: URL(fileURLWithPath: "/tmp/take.m4a")
+        )
+        let (screen, driver, window) = screen(messages: [Self.message("pending-1", media: voice, delivery: .failed)])
+        defer { window.isHidden = true }
+        let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
+        stream.layoutIfNeeded()
+        let cell = try #require(stream.cellForItem(at: IndexPath(item: 0, section: 0)) as? ThreadRowCell)
+        #expect(cell.mediaView.isHidden || cell.mediaView.bounds.height == 0, "a voice message drew a photo bubble")
+        let labels = Self.allLabels(in: cell).compactMap(\.text)
+        #expect(labels.contains("🎤 Voice message (0:12)"), "the line: \(labels)")
+        cell.row.onReplyTap?()
+        #expect(driver.retried == ["pending-1"])
+    }
+
+    /// A voice message's long press: Reply and Delete — no text to copy or
+    /// select, and forwarding waits (#2103).
+    @Test func aVoiceMessagesMenuIsReplyAndDelete() {
+        let voice = ConversationThreadMedia(kind: .voice, url: URL(string: "mock://asset/v1"), duration: 4)
+        let photo = ConversationThreadMedia(kind: .image, url: URL(string: "mock://asset/p1"), aspectRatio: 1)
+        let (screen, _, window) = screen(messages: [
+            Self.message("v1", media: voice, mine: false), Self.message("p1", media: photo, mine: false),
+        ])
+        defer { window.isHidden = true }
+        screen.view.layoutIfNeeded()
+        #expect(screen.debugMenuTitles(for: "v1") == ["Reply", "Delete"])
+        #expect(screen.debugMenuTitles(for: "p1").contains("Copy"), "the photo's menu changed")
+    }
+
+    private static func allLabels(in view: UIView) -> [UILabel] {
+        var labels = view.subviews.flatMap(allLabels)
+        if let label = view as? UILabel { labels.insert(label, at: 0) }
+        return labels
+    }
+
     /// #794: the picker is still closing when a photo sent offline fails,
     /// and its "You’re offline" alert used to be dropped. A notice waits
     /// for a screen on its way out, and never covers one still in use.

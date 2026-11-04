@@ -16,6 +16,9 @@ enum ThreadMediaViewer {
         _ media: ConversationThreadMedia, shownImage: UIImage?, pipeline: ImagePipeline?
     ) -> UIViewController? {
         switch media.kind {
+        case .voice:
+            // Played in its bubble (#2104), never opened full screen.
+            return nil
         case .video:
             guard let url = media.url else { return nil }
             let player = AVPlayerViewController()
