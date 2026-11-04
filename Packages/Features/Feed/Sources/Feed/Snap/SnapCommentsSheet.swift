@@ -1233,6 +1233,32 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         detachedComposer?.tearDown()
+        setShielded(false)
+    }
+
+    /// ⚠️ WITH THE KEYS UP, NOTHING BUT THE COMPOSER (the owner, 2026-11-04):
+    /// the rows scrolled, the sheet moved, the preview played under a
+    /// finger while a comment was being written. Over the whole window
+    /// while the keys carry the sheet, this takes every touch outside the
+    /// composer and puts the keys away with it, and nothing else — the
+    /// detached composer's way (`SnapCommentsDetachedComposer`). In the
+    /// window, not the sheet: a view in the sheet still fed UIKit's drag of it.
+    private lazy var shield: KeyboardShield = {
+        let shield = KeyboardShield()
+        shield.onTouch = { [weak self] in self?.panel.view.endEditing(true) }
+        return shield
+    }()
+
+    private func setShielded(_ shielded: Bool) {
+        guard shielded else {
+            shield.removeFromSuperview()
+            return
+        }
+        guard let window = view.window, let detail = panel as? PostDetailViewController else { return }
+        shield.passThrough = detail.composeBar
+        shield.frame = window.bounds
+        shield.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        window.addSubview(shield)
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -1422,9 +1448,9 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         guard up != isKeyboardUp, let panelBottom, let panelHeight, restingHeight > 0 else { return }
         isKeyboardUp = up
         keyboardDragEndGap = nil
-        // Nothing of the streams under the composer while it stands on the keys.
-        // On under the keys past their rounded corners: the composer stands
-        // `Spacing.sm` over them.
+        setShielded(up)
+        // The streams end under the keys, past their rounded corners: the
+        // composer stands `Spacing.sm` over them.
         (panel as? PostDetailViewController)?.setStreamsClippedAtComposer(up, below: Spacing.sm + Self.rowsUnderKeys)
         if up {
             panelHeight.constant = restingHeight
@@ -1511,5 +1537,24 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         if (navigationController ?? self).isBeingDismissed { onDismissed?() }
+    }
+}
+
+/// Over the window while the keys carry the comments sheet: every touch
+/// but the composer's is its own, and puts the keys away.
+private final class KeyboardShield: UIView {
+    weak var passThrough: UIView?
+    var onTouch: (() -> Void)?
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if let passThrough, passThrough.window != nil,
+           passThrough.convert(passThrough.bounds, to: self).contains(point) {
+            return nil
+        }
+        return super.hitTest(point, with: event)
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        onTouch?()
     }
 }
