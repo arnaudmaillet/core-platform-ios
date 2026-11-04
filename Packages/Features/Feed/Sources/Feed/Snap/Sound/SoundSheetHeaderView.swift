@@ -23,8 +23,9 @@ import UIKit
 /// ```
 ///  ╭────╮  Veridis Quo Veridis Qu…   (✕)   the sheet's close button, a bar
 ///  │ ▶︎  │  Daft Punk                      item floating over this header
-///  ╰────╯  0:30 · 23 posts
-/// ```
+///  │    │  0:30 · 23 posts
+///  ╰────╯  ━━━━━━━━━━━━━━━━━━━━━          the track's bar, its bottom the
+/// ```                                       record's, once the track played
 ///
 /// **IT STANDS UNDER THE SHEET'S NAVIGATION BAR**, whose one item is the
 /// close button at the top trailing corner: the lines stop short of it
@@ -54,10 +55,13 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
     private let metaLabel = UILabel()
-    /// The sheet's own track's playhead (#1964, the owner's choice (a)):
-    /// under the title, the meta line's width — the Shots clip bar's drawing
-    /// and handling (`PlayheadBarView`). Always laid out, so the header's
-    /// height (which the collapsed detent counts) never changes with it.
+    /// The three lines, one block.
+    private let labels = UIStackView()
+    /// The sheet's own track's playhead (#1964): the Shots clip bar's
+    /// drawing and handling (`PlayheadBarView`), the lines' width, its bottom
+    /// the record's bottom (#2100). Hidden until the track first plays
+    /// (`setTrackShown`), but always laid out, so the header's height (which
+    /// the collapsed detent counts) never changes with it.
     let trackBar = PlayheadBarView()
     private let artworkBackdrop = UIView()
 
@@ -139,14 +143,14 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         )
         metaLabel.textColor = .tertiaryLabel
 
-        let labels = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel, metaLabel])
+        for line in [titleLabel, subtitleLabel, metaLabel] { labels.addArrangedSubview(line) }
         labels.axis = .vertical
         labels.spacing = 2
         labels.setCustomSpacing(Spacing.xs, after: subtitleLabel)
-        labels.setCustomSpacing(Spacing.sm, after: metaLabel)
+        labels.translatesAutoresizingMaskIntoConstraints = false
         trackBar.ink = .surface(.label)
-        labels.addArrangedSubview(trackBar)
-        trackBar.heightAnchor.constraint(equalToConstant: PlayheadBarView.cursorRoom).isActive = true
+        trackBar.translatesAutoresizingMaskIntoConstraints = false
+        applyTrackShown()
 
         artwork.insertSubview(artworkBackdrop, at: 0)
         NSLayoutConstraint.activate([
@@ -155,24 +159,47 @@ final class SoundSheetHeaderView: UICollectionReusableView {
             artworkBackdrop.trailingAnchor.constraint(equalTo: artwork.trailingAnchor),
             artworkBackdrop.bottomAnchor.constraint(equalTo: artwork.bottomAnchor),
         ])
-        let identity = UIStackView(arrangedSubviews: [record, labels])
-        identity.spacing = Spacing.lg
-        identity.alignment = .center
-        identity.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(identity)
+        record.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(record)
+        addSubview(labels)
+        addSubview(trackBar)
 
+        // The lines are one block, centred in the room the bar leaves over
+        // it (#2100): from the header's top to `Spacing.xs` above the bar.
+        // At the default text size the three lines centred on the 96 pt
+        // record end where the bar begins, so they are centred above it
+        // instead — the bar shown or not, they never move.
+        let lines = UILayoutGuide()
+        addLayoutGuide(lines)
         // NO GAP OF ITS OWN under the record: the room under the sound is its
         // SECTION's (`SoundSheetViewController.DetentMetrics.sectionGap`),
-        // counted by the detents from the same value.
-        let bottom = identity.bottomAnchor.constraint(equalTo: bottomAnchor)
+        // counted by the detents from the same value. The header is the
+        // record's height, or the lines' and the bar's when a large text size
+        // makes them taller: the bar then stays under them, at the bottom.
+        let bottom = record.bottomAnchor.constraint(equalTo: bottomAnchor)
         bottom.priority = .init(999)
+        let linesCentre = labels.centerYAnchor.constraint(equalTo: lines.centerYAnchor)
+        linesCentre.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            identity.topAnchor.constraint(equalTo: topAnchor),
-            identity.leadingAnchor.constraint(equalTo: leadingAnchor),
-            identity.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.closeClearance),
+            record.leadingAnchor.constraint(equalTo: leadingAnchor),
+            record.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
             bottom,
             record.widthAnchor.constraint(equalToConstant: Self.artworkSide),
             record.heightAnchor.constraint(equalToConstant: Self.artworkSide),
+
+            labels.leadingAnchor.constraint(equalTo: record.trailingAnchor, constant: Spacing.lg),
+            labels.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.closeClearance),
+            lines.topAnchor.constraint(equalTo: topAnchor),
+            lines.bottomAnchor.constraint(equalTo: trackBar.topAnchor, constant: -Spacing.xs),
+            labels.topAnchor.constraint(greaterThanOrEqualTo: lines.topAnchor),
+            labels.bottomAnchor.constraint(lessThanOrEqualTo: lines.bottomAnchor),
+            linesCentre,
+
+            // The bar: the lines' width, its bottom the record's.
+            trackBar.leadingAnchor.constraint(equalTo: labels.leadingAnchor),
+            trackBar.trailingAnchor.constraint(equalTo: labels.trailingAnchor),
+            trackBar.bottomAnchor.constraint(equalTo: record.bottomAnchor),
+            trackBar.heightAnchor.constraint(equalToConstant: PlayheadBarView.cursorRoom),
         ])
         setPlaying(false)
     }
@@ -184,9 +211,43 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         trackBar.setProgress(fraction)
     }
 
+    private var trackShown = false
+    private var canToggle = true
+
+    /// Shows the track's bar — from the sheet's first play of its track to
+    /// the sheet's end (#2100) — with the kit's short fade; nothing else
+    /// moves, its room was always kept. Hidden, it is not drawn, takes no
+    /// finger and is no accessibility element. A post with no audio never
+    /// shows it.
+    func setTrackShown(_ shown: Bool, animated: Bool) {
+        guard shown != trackShown else { return }
+        trackShown = shown
+        applyTrackShown(animated: animated)
+    }
+
+    private func applyTrackShown(animated: Bool = false) {
+        let shown = trackShown && canToggle
+        trackBar.layer.removeAnimation(forKey: "opacity")
+        guard shown, animated, window != nil, trackBar.isHidden else {
+            trackBar.alpha = 1
+            trackBar.isHidden = !shown
+            return
+        }
+        trackBar.alpha = 0
+        trackBar.isHidden = false
+        UIView.animate(withDuration: AppearMotion.fadeDuration, delay: 0, options: [.allowUserInteraction]) {
+            self.trackBar.alpha = 1
+        }
+    }
+
     #if DEBUG
     /// The bar's played width, nil with no position. Tests.
     var debugTrackPlayedWidth: CGFloat? { trackBar.debugPlayedWidth }
+    /// Whether the bar is shown. Tests.
+    var debugTrackShown: Bool { !trackBar.isHidden }
+    /// The lines' block and the bar, in this view's space. Tests.
+    var debugLinesFrame: CGRect { labels.frame }
+    var debugTrackFrame: CGRect { trackBar.frame }
     #endif
 
     @available(*, unavailable)
@@ -216,6 +277,8 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         metaLabel.text = meta
         playButton.isHidden = !canToggle
         record.isUserInteractionEnabled = canToggle
+        self.canToggle = canToggle
+        applyTrackShown()
     }
 
     /// The sound's picture through the slot (#1772): the bone on the record

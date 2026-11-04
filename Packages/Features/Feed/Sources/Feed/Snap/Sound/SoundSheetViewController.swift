@@ -1101,6 +1101,7 @@ final class SoundSheetViewController: UIViewController {
         header.trackBar.onSeekRequested = { [weak self] fraction in self?.seekTrack(to: fraction) }
         header.trackBar.onScrubEnded = { [weak self] fraction in self?.endTrackScrub(at: fraction) }
         header.setTrackProgress(previewFraction, loading: false)
+        header.setTrackShown(trackShown, animated: false)
         header.onTogglePlayback = { [weak self] in
             // A transport control: silent (#1881).
             guard let self, record.available else { return }
@@ -1665,6 +1666,10 @@ final class SoundSheetViewController: UIViewController {
     private var previewFeed: CADisplayLink?
     /// Where the track last stood, 0…1 — the bar holds it while paused.
     private var previewFraction: Double?
+    /// The header's bar shows from the track's first play to the sheet's
+    /// end (#2100): through a pause, the post taking the sound back, the
+    /// loop. A sheet opened again is a new controller, its bar hidden.
+    private var trackShown = false
 
     private func togglePreview() {
         isPreviewing ? stopPreview() : startPreview()
@@ -1676,9 +1681,11 @@ final class SoundSheetViewController: UIViewController {
         isTrackEngaged = true
         setRecord(RecordPlayback(playing: true, available: record.available))
         refreshCover()
-        // The bar shows from the first play: loading until the track says its
-        // length, then its position (#1964).
+        // The bar shows from the first play (#2100): loading until the track
+        // says its length, then its position (#1964).
+        trackShown = true
         header?.setTrackProgress(previewFraction, loading: preview == nil)
+        header?.setTrackShown(true, animated: true)
         startPreviewFeed()
         // A transport control: silent (#1881).
         if let preview {
@@ -1763,7 +1770,9 @@ final class SoundSheetViewController: UIViewController {
         previewEndObserver = nil
         stopPreviewFeed()
         previewFraction = nil
+        trackShown = false
         header?.setTrackProgress(nil, loading: false)
+        header?.setTrackShown(false, animated: false)
         header?.trackBar.isScrubbable = false
         preview?.pause()
         preview = nil
