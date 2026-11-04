@@ -34,6 +34,7 @@ struct StackScreenGuardTests {
         "PostDetailViewController": "the feed's side panel",
         "SideDrawerContainerViewController": "the drawer's container",
         "LensLabPage": "a page of the DEBUG lens bench",
+        "VoiceLabViewController": "the DEBUG voice bench's root, alone in the window (#2101)",
         // A sheet's or a modal's root: left by its own close or swipe-down.
         "WalletSheetViewController": "a sheet",
         "ToastMessageSheet": "a sheet",

@@ -37,6 +37,7 @@
 		5F00000000000000000040B1 /* CacheKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000040C1 /* CacheKit */; };
 		5F00000000000000000050B1 /* LocalStore in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000050C1 /* LocalStore */; };
 		5F00000000000000000060B1 /* EntityStore in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000060C1 /* EntityStore */; };
+		5F00000000000000000070B1 /* VoiceKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000070C1 /* VoiceKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -115,6 +116,7 @@
 				5F00000000000000000040B1 /* CacheKit in Frameworks */,
 				5F00000000000000000050B1 /* LocalStore in Frameworks */,
 				5F00000000000000000060B1 /* EntityStore in Frameworks */,
+				5F00000000000000000070B1 /* VoiceKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -188,6 +190,7 @@
 				5F00000000000000000040C1 /* CacheKit */,
 				5F00000000000000000050C1 /* LocalStore */,
 				5F00000000000000000060C1 /* EntityStore */,
+				5F00000000000000000070C1 /* VoiceKit */,
 			);
 			productName = "core-platform-ios";
 			productReference = 51A1B7722FFBCAB6005918BC /* core-platform-ios.app */;
@@ -271,6 +274,7 @@
 				5F00000000000000000040A1 /* XCLocalSwiftPackageReference "Packages/Core/CacheKit" */,
 				5F00000000000000000050A1 /* XCLocalSwiftPackageReference "Packages/Core/LocalStore" */,
 				5F00000000000000000060A1 /* XCLocalSwiftPackageReference "Packages/Core/EntityStore" */,
+				5F00000000000000000070A1 /* XCLocalSwiftPackageReference "Packages/Core/VoiceKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 51A1B7732FFBCAB6005918BC /* Products */;
@@ -344,7 +348,7 @@
 				INFOPLIST_KEY_NSContactsUsageDescription = "Find the people in your contacts who are here. Only codes made from their email addresses and phone numbers are checked, and nothing is stored.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock the app with Face ID when App Lock is on.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Your location opens the country you are in on the map. Only the country leaves your device.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Capture sound while recording a video to share.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Record voice messages, and capture sound while recording a video to share.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Keep a copy of the photos and videos you post, when you ask for one.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Choose photos and videos from your library to share in a post.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -385,7 +389,7 @@
 				INFOPLIST_KEY_NSContactsUsageDescription = "Find the people in your contacts who are here. Only codes made from their email addresses and phone numbers are checked, and nothing is stored.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock the app with Face ID when App Lock is on.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Your location opens the country you are in on the map. Only the country leaves your device.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Capture sound while recording a video to share.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Record voice messages, and capture sound while recording a video to share.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Keep a copy of the photos and videos you post, when you ask for one.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Choose photos and videos from your library to share in a post.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -709,6 +713,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Core/EntityStore;
 		};
+		5F00000000000000000070A1 /* XCLocalSwiftPackageReference "Packages/Core/VoiceKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Core/VoiceKit;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -831,6 +839,10 @@
 		5F00000000000000000060C1 /* EntityStore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = EntityStore;
+		};
+		5F00000000000000000070C1 /* VoiceKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoiceKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
