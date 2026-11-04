@@ -371,6 +371,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     fileprivate var isAnimating: Bool {
         isKeyboardHiding || (sheet.presentationController?.presentedView?.layer.animationKeys()?.isEmpty == false)
             || preview?.layer.animationKeys()?.isEmpty == false
+            || (!isPreviewUnavailable && mediaOutShare != (previewOwnsMedia ? 1 : 0))
     }
 
     /// The display link's frame as `follow` is called for it: its time, and
@@ -503,13 +504,17 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             width: window.bounds.width - 2 * Self.mediaSideMargin,
             height: max(room, smallest)
         )
-        let handoff = min(1, max(0, (smallest - room) / Self.previewHandoffSpan))
-        // Out as it nears its smallest, before the preview comes — one
-        // picture at a time; with no preview to come, out past its smallest,
-        // with the sheet.
+        if !previewOwnsMedia, room < smallest - Self.previewTakesAt {
+            previewOwnsMedia = true
+        } else if previewOwnsMedia, room > smallest + Self.mediaTakesBackAt {
+            previewOwnsMedia = false
+        }
+        if room >= smallest { isPreviewUnavailable = false }
+        // Out before the preview comes — one picture at a time; with no
+        // preview to come, out past its smallest, with the sheet.
         let out: CGFloat = isPreviewUnavailable
             ? min(1, max(0, (smallest - room) / Self.mediaOutSpan))
-            : timedMediaOut(room: room, smallest: smallest)
+            : timedMediaOut()
         // From the collapsed rest's room down to the smallest: the corners
         // turn the preview's on the way.
         let restingRoom = restingTop - Self.mediaGap - roomTop
@@ -519,7 +524,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             progress: progress, mediaRegion: region, sheetCornerRadius: sheetRadius, out: out,
             towardsPreview: towardsPreview, previewCornerRadius: SnapCommentsPreview.cornerRadius
         )
-        followPreview(handoff: handoff, in: window, sheetTop: top)
+        followPreview(wantsPreview: previewOwnsMedia && mediaOutShare >= 1, in: window, sheetTop: top)
         refit()
     }
 
@@ -530,52 +535,51 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     private var preview: SnapCommentsPreview?
     /// The media has nothing for a preview to draw: it scales out instead.
     private var isPreviewUnavailable = false
-    /// The sheet's travel, past the media's smallest, over which the preview
-    /// goes from where the media stands to its corner.
-    private static let previewHandoffSpan: CGFloat = 96
     /// The room lost, past the media's smallest, over which it scales out.
     private static let mediaOutSpan: CGFloat = 64
-    /// ONE PICTURE AT A TIME, the preview first (the owner, 2026-11-03). The
-    /// media scales out as it nears its smallest (`timedMediaOut`); past it,
-    /// a quarter of the hand-over on, the preview pops in (`setPreviewPopped`),
-    /// and it pops out only once the sheet is nearly back at the threshold.
-    /// Between the two, for a moment, neither: a sheet never rests there.
+    /// ONE PICTURE AT A TIME (the owner, 2026-11-03), AND ALWAYS ONE (the
+    /// owner, 2026-11-04). One state says whose the picture is: the preview
+    /// takes it once the room above the sheet is `previewTakesAt` short of
+    /// the media's smallest, and gives it back once the room is
+    /// `mediaTakesBackAt` past it. The media scales out (`timedMediaOut`),
+    /// then the preview pops in (`setPreviewPopped`); back, the preview goes
+    /// and the media scales in.
     ///
-    /// The media goes out within `mediaOutAt` of its smallest and comes back
-    /// past `mediaInAt`: a sheet held there does not flicker it.
-    private static let mediaOutAt: CGFloat = 12
-    private static let mediaInAt: CGFloat = 36
+    /// ⚠️ NO HEIGHT WITH NEITHER (the owner's video, 2026-11-04): the media
+    /// and the preview had thresholds of their own, the media out within
+    /// 12 pt of its smallest, the preview in only 24 pt past it — a band
+    /// with no picture, said to be crossed only. A sheet raised by the keys
+    /// rests where UIKit puts it, and rested in it. Between the two
+    /// thresholds the picture stays whose it was: the media, its smallest,
+    /// a few points under the sheet's edge at most.
+    private var previewOwnsMedia = false
+    private static let previewTakesAt: CGFloat = 8
+    private static let mediaTakesBackAt: CGFloat = 24
     private static let mediaOutDuration: CFTimeInterval = 0.2
-    /// The media's way out, 0 in, 1 out, and where it is going.
-    private var mediaOutTarget: CGFloat = 0
+    /// The media's way out, 0 in, 1 out.
     private var mediaOutShare: CGFloat = 0
     private var lastMediaOutTime: CFTimeInterval?
 
     /// ⚠️ THE MEDIA'S WAY OUT IN ITS OWN TIME, as the preview's pop (the
     /// owner, 2026-11-03): played over the room's last points, a quick throw
     /// crossed them in a frame or two and the media vanished at once. The
-    /// sheet decides when; the scale-out takes `mediaOutDuration` whatever its
-    /// speed, advanced frame by frame on the display link's clock, and turns
-    /// back from where it stands. Its SIZE stays the sheet's: the room above it.
-    private func timedMediaOut(room: CGFloat, smallest: CGFloat) -> CGFloat {
-        if mediaOutTarget == 0, room < smallest + Self.mediaOutAt {
-            mediaOutTarget = 1
-        } else if mediaOutTarget == 1, room > smallest + Self.mediaInAt {
-            mediaOutTarget = 0
-        }
+    /// sheet decides when (`previewOwnsMedia`); the scale-out takes
+    /// `mediaOutDuration` whatever its speed, advanced frame by frame on the
+    /// display link's clock, and turns back from where it stands. Its SIZE
+    /// stays the sheet's: the room above it.
+    private func timedMediaOut() -> CGFloat {
+        let target: CGFloat = previewOwnsMedia ? 1 : 0
         if let now = frameTiming?.now {
-            if let last = lastMediaOutTime, mediaOutShare != mediaOutTarget {
+            if let last = lastMediaOutTime, mediaOutShare != target {
                 let step = CGFloat((now - last) / Self.mediaOutDuration)
-                mediaOutShare = mediaOutTarget > mediaOutShare
-                    ? min(mediaOutTarget, mediaOutShare + step)
-                    : max(mediaOutTarget, mediaOutShare - step)
+                mediaOutShare = target > mediaOutShare
+                    ? min(target, mediaOutShare + step)
+                    : max(target, mediaOutShare - step)
             }
             lastMediaOutTime = now
         }
         return Self.smoothstep(mediaOutShare)
     }
-    private static let popInAt: CGFloat = 0.25
-    private static let popOutBelow: CGFloat = 0.05
     /// The preview's size, as a share of its own, as it pops in and out.
     private static let popFrom: CGFloat = 0.5
 
@@ -591,20 +595,16 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// threshold, landed back on a media already bigger than itself (a jump
     /// in size), and lost the race with a sheet closed from expanded (the
     /// media popped back full screen at the end). Now the media scales out
-    /// where it stands, then the preview pops in at its corner, both where
-    /// `handoff` puts them: under the finger, both ways, and out with the
+    /// where it stands, then the preview pops in at its corner, both as
+    /// `previewOwnsMedia` says: under the finger, both ways, and out with the
     /// closing sheet. Carrying the media to the corner instead was tried and
     /// dropped (the owner, 2026-11-03).
     ///
     /// ⚠️ ONE PREVIEW A SHEET, hidden and shown, never made again at the
     /// threshold (measured, 2026-11-03): a new one's mirror drew a black frame
     /// before the player's next picture reached it.
-    private func followPreview(handoff: CGFloat, in window: UIWindow, sheetTop: CGFloat) {
+    private func followPreview(wantsPreview: Bool, in window: UIWindow, sheetTop: CGFloat) {
         lastSheetTop = sheetTop
-        if handoff == 0 { isPreviewUnavailable = false }
-        // Out once well past the threshold, back only once nearly before it:
-        // a sheet held at the threshold does not pop it in and out.
-        let wantsPreview = isPreviewPopped ? handoff > Self.popOutBelow : handoff >= Self.popInAt
         if preview == nil {
             guard wantsPreview, !isLeaving, !isPreviewUnavailable, let cell,
                   let picture = cell.commentsSheetPictureFrame, picture.width > 0, picture.height > 0 else { return }
