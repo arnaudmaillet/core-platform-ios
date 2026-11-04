@@ -442,9 +442,8 @@ struct BoostControlTests {
 
     /// With a wallet injected the trailing run is the badge alone at rest —
     /// the author pill is the toolbar's (#671) — and it stays the badge alone
-    /// while a media post's thread is open: the ✕ is the LEADING item now
-    /// (#1192), in the back arrow's place (a tab-root feed, with no arrow,
-    /// takes the ✕ item there).
+    /// while a text post's thread holds the page. (A media post's comments
+    /// are a sheet, #2087: the page's bar wears no ✕ any more.)
     @Test func feedTrailingRunEndsWithTheWalletBadgeWhenAWalletIsWired() throws {
         let (feed, _) = Self.walletFeed()
 
@@ -452,26 +451,20 @@ struct BoostControlTests {
         #expect(resting.count == 1)
         #expect(resting.first?.customView is WalletBadgeButton)
 
-        feed.setEngagedChrome(true, hasMedia: true, animated: false)
+        feed.setEngagedChrome(true, hasMedia: false, animated: false)
         let engaged = feed.navigationItem.rightBarButtonItems ?? []
-        #expect(engaged.count == 1, "no trailing ✕ any more")
+        #expect(engaged.count == 1)
         #expect(engaged.first == resting.first)
-        #expect(feed.debugTrailingHasClose == false)
-        let leading = feed.navigationItem.leftBarButtonItems ?? []
-        #expect(leading.first?.accessibilityLabel == "Close comments")
-        #expect(feed.debugLeadingIsClose)
 
-        feed.setEngagedChrome(false, hasMedia: true, animated: false)
+        feed.setEngagedChrome(false, hasMedia: false, animated: false)
         #expect((feed.navigationItem.rightBarButtonItems ?? []).count == 1)
-        #expect(feed.debugLeadingIsClose == false)
         #expect((feed.navigationItem.leftBarButtonItems ?? []).isEmpty, "a tab root has no way back")
     }
 
-    /// A pushed feed's back arrow gives the edge to the ✕ while a media
-    /// post's thread is open — two ITEMS swapped through the animated setter,
-    /// so the bar draws UIKit's own transition (#1197) — and takes it back
-    /// after. A text post keeps its arrow: its thread IS the page.
-    @Test func thePushedFeedsArrowGivesTheEdgeToTheClose() throws {
+    /// A pushed feed keeps its back arrow at the edge while a thread holds
+    /// the page: a text post's thread IS the page, and a media post's is a
+    /// sheet (#2087).
+    @Test func thePushedFeedKeepsItsArrowWhileEngaged() throws {
         let (feed, _) = Self.walletFeed()
         let nav = UINavigationController(rootViewController: UIViewController())
         nav.pushViewController(feed, animated: false)
@@ -480,16 +473,10 @@ struct BoostControlTests {
         let arrow = try #require(feed.debugBackItem)
         #expect(feed.navigationItem.leftBarButtonItems?.first === arrow)
 
-        feed.setEngagedChrome(true, hasMedia: true, animated: false)
-        #expect(feed.debugLeadingIsClose)
-        #expect(feed.navigationItem.leftBarButtonItems?.first !== arrow)
-        #expect(feed.navigationItem.leftBarButtonItems?.first?.accessibilityLabel == "Close comments")
-        #expect(feed.debugTrailingHasClose == false)
-
-        feed.setEngagedChrome(false, hasMedia: true, animated: false)
+        feed.setEngagedChrome(true, hasMedia: false, animated: false)
         #expect(feed.navigationItem.leftBarButtonItems?.first === arrow)
 
-        feed.setEngagedChrome(true, hasMedia: false, animated: false)
+        feed.setEngagedChrome(false, hasMedia: false, animated: false)
         #expect(feed.navigationItem.leftBarButtonItems?.first === arrow)
     }
 

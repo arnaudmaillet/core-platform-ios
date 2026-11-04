@@ -3,7 +3,7 @@ import CoreNavigation
 import DesignSystem
 import UIKit
 
-/// A media post's comments as a NATIVE SHEET (#2087, behind `CommentsV2`) —
+/// A media post's comments as a NATIVE SHEET (#2087) —
 /// the TikTok arrangement the owner asked for on 2026-11-03:
 ///
 ///   ┌──────────────────────┐

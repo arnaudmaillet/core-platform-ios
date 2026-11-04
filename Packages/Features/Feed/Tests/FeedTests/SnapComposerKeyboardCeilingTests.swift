@@ -75,25 +75,6 @@ struct SnapComposerKeyboardCeilingTests {
         try #require(feed.view.subviews.compactMap { $0 as? UICollectionView }.first)
     }
 
-    /// ⚠️ THE REPORTED TRIGGER: a media page's warm panel, turned off at the
-    /// settle, then engaged by a tap.
-    @Test func aWarmPanelEngagedByATapRisesWithTheKeyboard() throws {
-        let panels = Panels()
-        let feed = makeFeed([media("a"), media("b")], panels: panels)
-        if !feed.debugHasParkedCommentsWarm { feed.debugPrewarmComments(for: PostID("a")) }
-        // The page settles with the warm parked: the reconcile turns it off.
-        feed.scrollViewDidEndDecelerating(try pager(of: feed))
-        #expect(feed.debugHasParkedCommentsWarm, "the premise: a warm is parked in the slot")
-        #expect(try !panels.tracks("a"), "the premise: the settle turned the parked warm off")
-
-        // The tap: the warm becomes the engagement, and nothing settles.
-        feed.openComments(for: PostID("a"))
-
-        #expect(feed.debugRestingCommentsID == PostID("a"), "the premise: a is engaged")
-        #expect(panels.byPost.count == 1, "the premise: the engagement is the warm, not a new panel")
-        #expect(try panels.tracks("a"), "the engaged page's composer stays put under the keyboard")
-    }
-
     /// ⚠️ TEXT ONTO TEXT: the settle lands while the page being left still
     /// holds the slot, and the promotion comes after it, when its last pixel
     /// goes.

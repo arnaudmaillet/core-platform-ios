@@ -11,7 +11,7 @@ import UIKit
 /// the profile.
 final class AppPreferencesViewController: UIViewController {
     enum Section: Int, CaseIterable {
-        case playback, players, sounds, appearance, care, motion, emojis, band, subtitles, commentsScreen, muted, language
+        case playback, players, sounds, appearance, care, motion, emojis, band, subtitles, muted, language
     }
 
     enum Item: Hashable {
@@ -24,7 +24,6 @@ final class AppPreferencesViewController: UIViewController {
         case bandSwitch, opacity, bandBackground, speed, dontCoverPeople
         case mutedWords, mutedAccounts
         case subtitlesSwitch, subtitleBackground
-        case commentsBackdrop
         case appLanguage
     }
 
@@ -34,7 +33,7 @@ final class AppPreferencesViewController: UIViewController {
         case .playback: [.playback, .players, .sounds]
         case .display: [.appearance, .care, .motion]
         case .emojis: [.emojis]
-        case .mediaComments: [.band, .subtitles, .commentsScreen, .muted]
+        case .mediaComments: [.band, .subtitles, .muted]
         case .language: [.language]
         default: []
         }
@@ -138,7 +137,6 @@ final class AppPreferencesViewController: UIViewController {
         case .band: "Reaction Band"
         case .muted: "Muted on Media"
         case .subtitles: "Subtitles"
-        case .commentsScreen: "Comments Screen"
         }
     }
 
@@ -167,7 +165,6 @@ final class AppPreferencesViewController: UIViewController {
         case .band: "The short reactions that scroll over videos and photos. Background darkens the strip behind them; it darkens more while you scrub through them. Don't Cover People lets reactions pass behind the people in a playing video; it pauses in Low Power Mode or when your iPhone is hot."
         case .muted: "Comments with these words, or from these accounts, never appear in the reaction band or the subtitles. They still show in the comments."
         case .subtitles: "Comments shown as captions above the reaction band. Background is the shade behind each caption."
-        case .commentsScreen: "How dark a video or photo gets behind its comments when you open them. Darker reads more easily; lighter keeps more of the post."
         }
     }
 
@@ -277,7 +274,6 @@ final class AppPreferencesViewController: UIViewController {
         case .band: [.bandSwitch, .opacity, .bandBackground, .speed, .dontCoverPeople]
         case .muted: [.mutedWords, .mutedAccounts]
         case .subtitles: [.subtitlesSwitch, .subtitleBackground]
-        case .commentsScreen: [.commentsBackdrop]
         case .language: [.appLanguage]
         }
     }
@@ -400,12 +396,6 @@ final class AppPreferencesViewController: UIViewController {
                 value: preferences.subtitleBackgroundOpacity, isEnabled: preferences.showsSubtitles,
                 symbols: ("checkerboard.rectangle", "rectangle.fill")
             ) { $0.subtitleBackgroundOpacity = $1 }
-        case .commentsBackdrop:
-            installSlider(
-                in: cell, title: "Background", range: MediaCommentPreferences.commentsBackdropRange,
-                value: preferences.commentsBackdropOpacity, isEnabled: true,
-                symbols: ("photo", "rectangle.fill")
-            ) { $0.commentsBackdropOpacity = $1 }
         case .speed:
             cell.contentConfiguration = nil
             let speeds = MediaCommentPreferences.BandSpeed.allCases

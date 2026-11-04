@@ -99,13 +99,10 @@ struct CommentPreferencesStreamTests {
         var preferences = MediaCommentPreferences()
         #expect(preferences.bandBackgroundOpacity == 0)
         #expect(preferences.subtitleBackgroundOpacity == 0.45)
-        #expect(preferences.commentsBackdropOpacity == 0.8)
         preferences.bandBackgroundOpacity = 5
         preferences.subtitleBackgroundOpacity = -1
-        preferences.commentsBackdropOpacity = 0.1
         #expect(preferences.bandBackgroundOpacity == MediaCommentPreferences.bandBackgroundRange.upperBound)
         #expect(preferences.subtitleBackgroundOpacity == 0)
-        #expect(preferences.commentsBackdropOpacity == MediaCommentPreferences.commentsBackdropRange.lowerBound)
     }
 
     /// Preferences saved before the background settings existed keep every
@@ -120,29 +117,17 @@ struct CommentPreferencesStreamTests {
         #expect(decoded.bandOpacity == 0.5)
         #expect(decoded.bandSpeed == .fast)
         #expect(decoded.mutedKeywords == ["spoiler"])
-        #expect(decoded.commentsBackdropOpacity == 0.8)
         let roundTrip = try JSONDecoder().decode(MediaCommentPreferences.self, from: JSONEncoder().encode(decoded))
         #expect(roundTrip == decoded)
     }
 
-    @Test func theSubtitlePillAndTheCommentsWashReadTheStore() {
+    @Test func theSubtitlePillReadsTheStore() {
         let store = MediaCommentPreferencesStore(defaults: UserDefaults(suiteName: "fills-\(UUID().uuidString)")!)
-        store.update {
-            $0.subtitleBackgroundOpacity = 0.2
-            $0.commentsBackdropOpacity = 0.95
-        }
+        store.update { $0.subtitleBackgroundOpacity = 0.2 }
         let reset = MediaCommentPreferencesStore(defaults: UserDefaults(suiteName: "reset-\(UUID().uuidString)")!)
-        defer {
-            SubtitlePillLabel.refreshFill(from: reset)
-            SnapCommentsLayout.refreshBackdrop(from: reset)
-        }
+        defer { SubtitlePillLabel.refreshFill(from: reset) }
         SubtitlePillLabel.refreshFill(from: store)
-        SnapCommentsLayout.refreshBackdrop(from: store)
         #expect(abs(SubtitlePillLabel.fillOpacity - 0.2) < 0.001)
-        #expect(abs(SnapCommentsLayout.backdropDimOpacity - 0.95) < 0.001)
-        let backdrop = SnapMediaBackdropView()
-        backdrop.setActive(true)
-        #expect(abs(backdrop.dimOpacity - 0.95) < 0.001)
     }
 
     @Test func theStorePersistsAndAnnouncesOnlyRealChanges() {

@@ -40,7 +40,7 @@ struct SettingsCatalogTests {
         #expect(AppPreferencesViewController.sections(for: .playback) == [.playback, .players, .sounds])
         #expect(AppPreferencesViewController.sections(for: .display) == [.appearance, .care, .motion])
         #expect(AppPreferencesViewController.sections(for: .emojis) == [.emojis])
-        #expect(AppPreferencesViewController.sections(for: .mediaComments) == [.band, .subtitles, .commentsScreen, .muted])
+        #expect(AppPreferencesViewController.sections(for: .mediaComments) == [.band, .subtitles, .muted])
         #expect(AppPreferencesViewController.sections(for: .language) == [.language])
         #expect(AppPreferencesViewController.sections(for: .storage).isEmpty, "Storage has its own screen (#899)")
         for section in SettingsSection.sections(in: .device) where section != .storage {

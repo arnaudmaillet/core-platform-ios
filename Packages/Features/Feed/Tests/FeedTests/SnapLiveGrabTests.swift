@@ -76,14 +76,4 @@ struct SnapLiveGrabTests {
         #expect(chrome.convert(chrome.bounds, to: cell.contentView) == cell.contentView.bounds)
     }
 
-    /// The engaged dismissal keeps its own rule: the thread recedes with the
-    /// finger.
-    @Test func anEngagedGrabIsNotALiveOne() {
-        let cell = makeCell()
-        cell.setCommentsEngaged(true)
-        cell.beginEngagedDismissal()
-        #expect(!cell.isLiveGrab)
-        cell.beginLiveGrab()
-        #expect(!cell.isLiveGrab, "a second grab began over the first")
-    }
 }

@@ -22,9 +22,6 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
     public static let bandBackgroundRange: ClosedRange<Double> = 0...0.8
     /// The subtitle pill's fill. 0 leaves the text bare over the media.
     public static let subtitleBackgroundRange: ClosedRange<Double> = 0...0.9
-    /// The black wash over the post behind the comments screen. Below 0.5 a
-    /// near-white photo drops body text under 4:1; 1 is solid black.
-    public static let commentsBackdropRange: ClosedRange<Double> = 0.5...1
 
     public var showsReactionBand: Bool
     /// Bubble opacity, clamped to `opacityRange`.
@@ -41,11 +38,6 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
     public var subtitleBackgroundOpacity: Double {
         didSet { subtitleBackgroundOpacity = Self.clamp(subtitleBackgroundOpacity, to: Self.subtitleBackgroundRange) }
     }
-    /// How dark the post is behind the comments screen, clamped to
-    /// `commentsBackdropRange`.
-    public var commentsBackdropOpacity: Double {
-        didSet { commentsBackdropOpacity = Self.clamp(commentsBackdropOpacity, to: Self.commentsBackdropRange) }
-    }
     /// Lowercased; a comment whose body contains one is never shown on media.
     public var mutedKeywords: [String]
     /// Lowercased handles without "@"; their comments are never shown on media.
@@ -61,7 +53,6 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
         bandBackgroundOpacity: Double = 0,
         showsSubtitles: Bool = true,
         subtitleBackgroundOpacity: Double = 0.45,
-        commentsBackdropOpacity: Double = 0.8,
         mutedKeywords: [String] = [],
         mutedHandles: [String] = [],
         avoidsPeople: Bool = false
@@ -72,7 +63,6 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
         self.bandBackgroundOpacity = Self.clamp(bandBackgroundOpacity, to: Self.bandBackgroundRange)
         self.showsSubtitles = showsSubtitles
         self.subtitleBackgroundOpacity = Self.clamp(subtitleBackgroundOpacity, to: Self.subtitleBackgroundRange)
-        self.commentsBackdropOpacity = Self.clamp(commentsBackdropOpacity, to: Self.commentsBackdropRange)
         self.mutedKeywords = mutedKeywords
         self.mutedHandles = mutedHandles
         self.avoidsPeople = avoidsPeople
@@ -80,7 +70,7 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case showsReactionBand, bandOpacity, bandSpeed, bandBackgroundOpacity
-        case showsSubtitles, subtitleBackgroundOpacity, commentsBackdropOpacity
+        case showsSubtitles, subtitleBackgroundOpacity
         case mutedKeywords, mutedHandles, avoidsPeople
     }
 
@@ -99,8 +89,6 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
             showsSubtitles: try container.decodeIfPresent(Bool.self, forKey: .showsSubtitles) ?? defaults.showsSubtitles,
             subtitleBackgroundOpacity: try container.decodeIfPresent(Double.self, forKey: .subtitleBackgroundOpacity)
                 ?? defaults.subtitleBackgroundOpacity,
-            commentsBackdropOpacity: try container.decodeIfPresent(Double.self, forKey: .commentsBackdropOpacity)
-                ?? defaults.commentsBackdropOpacity,
             mutedKeywords: try container.decodeIfPresent([String].self, forKey: .mutedKeywords) ?? defaults.mutedKeywords,
             mutedHandles: try container.decodeIfPresent([String].self, forKey: .mutedHandles) ?? defaults.mutedHandles,
             avoidsPeople: try container.decodeIfPresent(Bool.self, forKey: .avoidsPeople) ?? defaults.avoidsPeople

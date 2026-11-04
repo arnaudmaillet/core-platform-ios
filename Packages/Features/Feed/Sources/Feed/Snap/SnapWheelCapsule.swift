@@ -79,8 +79,6 @@ final class SnapWheelCapsule: NSObject {
     private var wasActive = false
     /// Wanted: the wheel active, or within the linger after it stopped.
     private(set) var isWanted = false
-    /// The capsule folded away for good (the comments took the page).
-    private(set) var isDismissed = false
     private var presence = Spring(0)
     private var link: CADisplayLink?
     private var lastTick: CFTimeInterval = 0
@@ -153,7 +151,7 @@ final class SnapWheelCapsule: NSObject {
     /// capsule read as drawn OVER the like (the owner, on a device). Fully
     /// retracted once the capsule covers half the pill.
     var likeCover: CGFloat {
-        guard !isDismissed, let rail else { return 0 }
+        guard let rail else { return 0 }
         let likeTop = rail.bounds.maxY - rail.bottomReservedInset
         let span = max(likeHeight, rail.bottomReservedInset)
         let t = max(0, min(1, (capsuleBottom - likeTop) / (span / 2)))
@@ -206,7 +204,7 @@ final class SnapWheelCapsule: NSObject {
         // (care mode, the comments' fade, the comments' dismissal) — the
         // column's glass, which never fades, would keep them otherwise.
         let wheelShows = !rail.isHidden && (rail.superview?.alpha ?? 1) > 0.01
-        glass.isUserInteractionEnabled = !isDismissed && wheelShows
+        glass.isUserInteractionEnabled = wheelShows
         // By bounds and centre: the interactive reaction transforms the glass.
         let frame = rail.convert(frameInRail, to: superview)
         glass.bounds = CGRect(origin: .zero, size: frame.size)
@@ -225,7 +223,7 @@ final class SnapWheelCapsule: NSObject {
             lastCover = cover
             onLikeCover?(cover)
         }
-        let shown = isWanted && !isDismissed && travel >= SnapShortcutRailView.step - 0.5
+        let shown = isWanted && travel >= SnapShortcutRailView.step - 0.5
         if shown != returnShown {
             returnShown = shown
             onReturnShown?(shown)
@@ -238,7 +236,7 @@ final class SnapWheelCapsule: NSObject {
     /// down into the like and the drop melts into it.
     private func layoutDrop(in superview: UIView) {
         let u = bridgeProgress
-        guard let rail, !isDismissed, isWanted, u > 0.001, u < 0.999 else {
+        guard let rail, isWanted, u > 0.001, u < 0.999 else {
             drop?.removeFromSuperview()
             drop = nil
             return
@@ -292,7 +290,7 @@ final class SnapWheelCapsule: NSObject {
     }
 
     private func touchDown() {
-        guard !isDismissed, rail?.isUserInteractionEnabled == true else { return }
+        guard rail?.isUserInteractionEnabled == true else { return }
         lingerItem?.cancel()
         lingerItem = nil
         isWanted = true
@@ -303,7 +301,7 @@ final class SnapWheelCapsule: NSObject {
     /// The wheel's state changed: shown while active, lingering after.
     func update() {
         let active = isActive
-        if active || isDismissed {
+        if active {
             lingerItem?.cancel()
             lingerItem = nil
         } else if wasActive {
@@ -316,7 +314,7 @@ final class SnapWheelCapsule: NSObject {
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.linger, execute: item)
         }
         wasActive = active
-        let wanted = !isDismissed && (active || lingerItem != nil)
+        let wanted = active || lingerItem != nil
         isWanted = wanted
         setPresence(wanted)
         layout()
@@ -325,19 +323,6 @@ final class SnapWheelCapsule: NSObject {
         } else {
             hide(animated: glass.window != nil)
         }
-    }
-
-    /// The comments took the page (the column folds into the sound): the
-    /// capsule goes at once. `false` lets it come back with the next touch.
-    func setDismissed(_ dismissed: Bool) {
-        guard dismissed != isDismissed else { return }
-        isDismissed = dismissed
-        touched = false
-        if dismissed {
-            presence = Spring(0)
-            hide(animated: false)
-        }
-        update()
     }
 
     /// A tap on the chevron: the wheel scrolls back to rest.
