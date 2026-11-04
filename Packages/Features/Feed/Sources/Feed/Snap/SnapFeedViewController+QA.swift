@@ -239,17 +239,6 @@ extension SnapFeedViewController {
     }
 }
 
-// MARK: - Menu and reveal
-
-extension SnapFeedViewController {
-    /// Opens the masked window the comment-count path opens, without a
-    /// transition to drive it — the state a settle must not paint over.
-    func debugBeginMaskedReveal(for id: PostID) {
-        openComments(for: id, revealingFrom: CGRect(x: 28, y: 601, width: 312, height: 195))
-        setZoomContentHidden(true)
-    }
-}
-
 // MARK: - Pages
 
 extension SnapFeedViewController {

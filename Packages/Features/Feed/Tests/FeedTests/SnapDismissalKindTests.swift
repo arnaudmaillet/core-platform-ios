@@ -249,28 +249,6 @@ struct SnapDismissalKindTests {
         #expect(panels.count("b") == 1)
     }
 
-    /// ⚠️ A PARKED WARM MUST NOT BLOCK THE MOUNT.
-    ///
-    /// The mount guards on the engagement slot, and a media page's
-    /// tap-to-comments warm sits in that same field with no engagement behind
-    /// it. Scrolling from a warmed media page onto a text page therefore found
-    /// the slot taken and declined — the text page scrolled in black and
-    /// appeared all at once at the settle, which is the reported defect,
-    /// unchanged by two rounds of warming the page ahead.
-    @Test func aParkedWarmDoesNotBlockTheNextTextPage() {
-        let panels = PanelBuilds()
-        let feed = feed([media("a"), text("b")], panels: panels)
-        page(feed, to: 0)
-        // What a media page's own warm does to the slot.
-        feed.debugPrewarmComments(for: PostID("a"))
-        #expect(feed.debugHasParkedCommentsWarm)
-
-        feed.debugMountRestingComments(for: PostID("b"))
-
-        #expect(feed.debugRestingCommentsID == PostID("b"),
-                "the text page could not mount because a warm was parked in the slot")
-    }
-
     /// ⚠️ TEXT ONTO TEXT: the incoming page shows its panel while the page
     /// being left still owns the engagement.
     ///

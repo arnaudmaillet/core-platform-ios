@@ -111,9 +111,6 @@ final class CommentStream: NSObject {
         host.restingComposerHeight(for: category)
     }
     private var isViewLoaded: Bool { host.isViewLoaded }
-    private var onPullDismissDrive: ((CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void)? {
-        host.onPullDismissDrive
-    }
     private var pagesBackFromTop: Bool { host.pagesBackFromStreamTop?() == true }
 
     /// Builds the list: its bounce, its taps, its menus and its rows.
@@ -173,13 +170,6 @@ final class CommentStream: NSObject {
             rowContextMenu.menuProvider = { [weak self] indexPath in self?.rowMenu(at: indexPath) }
         }
         configureStreamDataSource()
-    }
-
-    /// A tap at `location` in the stream's coordinates, through the
-    /// recogniser's own decision, for tests.
-    func debugTapStream(at location: CGPoint) {
-        guard emptyRoomTap.isEnabled, emptyRoomContains(location) else { return }
-        tapEmptyRoom()
     }
 
     /// The engaged context's insets (`PostDetailViewController.setEngagedInsets`):
@@ -496,68 +486,6 @@ final class CommentStream: NSObject {
         guard !isFirst, hasAppliedStream else { return }
         remeasureStream()
     }
-
-    /// A tap in the EMPTY ROOM above a short stream closes the comments
-    /// (#1926, the owner): the room the bottom anchor leaves between the top
-    /// bar and the caption (`bottomAnchorSlack`) is the media's, as the ✕
-    /// says. Wired by media pages only, as the pull-down is; nil turns it
-    /// off. A stream that fills its room has no such room: nothing changes.
-    ///
-    /// ⚠️ FILTERED AT `shouldReceive`, so the tap never sees a touch on a row:
-    /// it cannot compete with the rows' own taps, the pull-down or a scroll.
-    func setEmptyRoomTapHandler(_ handler: (() -> Void)?) {
-        onEmptyRoomTap = handler
-        if handler != nil, emptyRoomTap.view == nil {
-            collectionView.addGestureRecognizer(emptyRoomTap)
-        }
-        emptyRoomTap.isEnabled = handler != nil
-    }
-    private var onEmptyRoomTap: (() -> Void)?
-
-    private lazy var emptyRoomTap: UITapGestureRecognizer = {
-        let tap = UITapGestureRecognizer(target: self, action: #selector(emptyRoomTapped(_:)))
-        tap.cancelsTouchesInView = false
-        tap.delegate = emptyRoomFilter
-        return tap
-    }()
-
-    private lazy var emptyRoomFilter = TouchFilter { [weak self] location in
-        self?.emptyRoomContains(location) ?? false
-    }
-
-    /// Whether `location`, in the stream's own coordinates, is in the empty
-    /// room: above the content's first row, while the anchor leaves room
-    /// there.
-    func emptyRoomContains(_ location: CGPoint) -> Bool {
-        bottomAnchorSlack > 0.5 && location.y < 0
-    }
-
-    @objc private func emptyRoomTapped(_ tap: UITapGestureRecognizer) {
-        guard tap.state == .ended, emptyRoomContains(tap.location(in: collectionView)) else { return }
-        tapEmptyRoom()
-    }
-
-    /// With the keyboard up, the first tap puts the keyboard away — the
-    /// writer is only leaving the field — and the next one closes.
-    private func tapEmptyRoom() {
-        if keyboardHeightFromBottom != nil {
-            view.endEditing(true)
-            return
-        }
-        onEmptyRoomTap?()
-    }
-
-    /// Set once a released pull has committed, so the spring-back that
-    /// follows cannot drive the transition backwards over the dismissal
-    /// already in flight.
-    private var isCommittingPullDismiss = false
-    /// Whether the gesture in flight is allowed to drive the dismissal —
-    /// armed only when the drag PHYSICALLY BEGAN at the top.
-    ///
-    /// It outlives the drag on purpose: a released pull that fell short
-    /// springs home, and the transition has to ride that bounce back to
-    /// rest before disarming, or it would freeze mid-fade.
-    private var isPullDismissArmed = false
 
     /// Freezes the comment stream for the length of a gesture that owns the
     /// screen — a dismissal swipe.
@@ -2287,28 +2215,7 @@ extension CommentStream: UICollectionViewDelegate {
     /// top, so a drag anywhere else reports zero and drives nothing.
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         if threadChrome { rowContextMenu.endTextSelection() }
-        // INTENT, decided once per drag: only a gesture that starts at the
-        // top is a dismissal. A drag that begins mid-list and scrolls up
-        // into the top is someone reading — it still bounces, because that
-        // is UIKit's own behaviour and the content genuinely ran out, but it
-        // drives nothing. Arming continuously (which the overshoot alone
-        // would do) made every read that reached the top start dissolving
-        // the screen.
-        //
-        // And never while the KEYBOARD is up (asked 2026-10-02): a downward
-        // drag then means "put the keyboard away" — the list's interactive
-        // dismissal — and must never close the layout under a half-typed
-        // comment. Decided at the drag's start, so a drag that carried the
-        // keyboard down stays a keyboard drag to its end.
-        isPullDismissArmed = PostDetailViewController.armsPullDismiss(
-            atTop: scrollView.contentOffset.y <= -scrollView.contentInset.top + 0.5,
-            keyboardOpen: composeBar.isKeyboardOpen
-        )
         beginPageDriveIfAtTheEdge(scrollView)
-        // The previous post's drag is not the close's: on a later post the
-        // top edge pages back (#2058), and the pull-down stays the first
-        // post's.
-        if pageDrive != nil { isPullDismissArmed = false }
     }
 
     // MARK: - The next post from the edge (#2042)
@@ -2419,30 +2326,6 @@ extension CommentStream: UICollectionViewDelegate {
         // Only the reader's own scroll shows the way back; any move hides it
         // once the text is near again (#1929).
         syncScrollAway(userScroll: scrollView.isTracking || scrollView.isDecelerating)
-        guard let onPullDismissDrive, isPullDismissArmed, !isCommittingPullDismiss else { return }
-        onPullDismissDrive(.changed, overshoot(of: scrollView), 0)
-    }
-
-    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate: Bool) {
-        guard let onPullDismissDrive, isPullDismissArmed, !isCommittingPullDismiss else { return }
-        let pull = overshoot(of: scrollView)
-        let velocity = scrollView.panGestureRecognizer.velocity(in: scrollView).y / 1000
-        guard pull > 0, SnapCommentsLayout.shouldCompletePullDismiss(
-            progress: SnapCommentsLayout.pullDismissProgress(translation: pull),
-            velocity: velocity
-        ) else {
-            // Below the bar: the bounce springs home and the transition
-            // rides it back through `scrollViewDidScroll`. Stay armed until
-            // it settles, or the fade would stop wherever it was.
-            if !willDecelerate { disarmPullDismiss(scrollView) }
-            return
-        }
-        isCommittingPullDismiss = true
-        onPullDismissDrive(.ended, pull, velocity)
-    }
-
-    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        disarmPullDismiss(scrollView)
     }
 
     /// A posted comment's landing scroll arrived (#921).
@@ -2453,20 +2336,6 @@ extension CommentStream: UICollectionViewDelegate {
         finishLanding(landingGeneration)
     }
 
-    /// Ends the armed window, settling the transition at rest first so a
-    /// disarm can never strand it part-way faded.
-    private func disarmPullDismiss(_ scrollView: UIScrollView) {
-        guard isPullDismissArmed, !isCommittingPullDismiss else { return }
-        isPullDismissArmed = false
-        onPullDismissDrive?(.changed, 0, 0)
-    }
-
-    /// How far past its resting top the list has been pulled, in points.
-    /// Zero anywhere else — the resting offset is NEGATIVE here, since the
-    /// engaged stream carries a top content inset.
-    private func overshoot(of scrollView: UIScrollView) -> CGFloat {
-        max(0, -(scrollView.contentOffset.y + scrollView.contentInset.top))
-    }
 }
 
 /// A gesture delegate that lets its recogniser see only the touches whose

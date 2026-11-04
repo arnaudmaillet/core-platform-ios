@@ -40,12 +40,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// Whether this cell has pages a dismissal has to freeze — diagnostics.
     var hasMediaCarousel: Bool { mediaCard.showsCollection }
-    /// The engaged screen's readability layer, directly over the media and
-    /// directly under the stream: a plain black wash — no blur — so
-    /// comments stay legible over live content while the post stays
-    /// visibly the post. Inert and invisible at rest; it is the layer that
-    /// replaced the opaque black container the comments used to sit on.
-    private let mediaBackdrop = SnapMediaBackdropView()
     private let chrome = SnapChromeView()
 
     /// The bucket the caption's emotes are drawn at (#1504).
@@ -721,10 +715,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func setBoostContext(balance: Int, undoable: Int, stakeShots: Int = 0) {
         chrome.setBoostContext(balance: balance, undoable: undoable, stakeShots: stakeShots)
     }
-    /// While engaged, a tap on the strip (the docked media / the page
-    /// background) asks to expand back — the owning VC dismisses the panel.
-    var onRequestCommentsClose: (() -> Void)?
-    /// While engaged, a vertical swipe on the glass card drives the feed
     /// pager INTERACTIVELY — the strip-side mirror of the composer bar's
     /// page-swipe. The cell forwards each pan phase with the raw vertical
     /// translation and velocity; the host hand-moves `contentOffset` so the
@@ -748,7 +738,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The window a masked-hero opening is seen through — see
     /// `beginMaskedRevealForFlight`. Non-nil only for the length of a flight.
     private var flightMask: UIView?
-    private var mediaHiddenForMaskedReveal = false
     private var alphaForMaskedReveal: CGFloat = 1
     private var groundForMaskedReveal: UIColor?
     /// ⚠️ ITS OWN FLAG, not a re-read of `groundForMaskedReveal`.
@@ -797,9 +786,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         maskLocations: SnapCommentsLayout.headerFrostMaskLocations
     )
     private var headerFrostConstraints: [NSLayoutConstraint] = []
-    /// Remembers a visible pause glyph across an engagement (the glyph is
-    /// centered on the full page and would float mid-strip while docked).
-    private var pauseGlyphSuppressedByEngagement = false
     /// The glass card's interactive exit pan — the composer bar's
     /// finger-connected swipe, mirrored onto the ENTIRE top floating
     /// card (media tile, caption column, music line, metrics row: one
@@ -1042,11 +1028,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // background of the engaged screen.
         mediaCard.pin(to: pageStage)
 
-        // The readability layer, directly over the media: inert until the
-        // engagement materializes it, and never moved again (it covers the
-        // whole cell in both states, it just isn't visible in one).
-        mediaBackdrop.pin(to: pageStage)
-
         // The header frost sits directly above the stream and below the
         // chrome: media → backdrop → stream → frost → chrome.
         // (Added after the container below.)
@@ -1147,237 +1128,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         commentsContainer.addSubview(view)
         view.pin(to: commentsContainer)
         contentView.layoutIfNeeded()
-    }
-
-    /// The engagement, driven by Core Animation.
-    ///
-    /// Four opacities move, and after the chrome's own collapse each is ONE
-    /// layer: the comments container, the header band, the readability wash,
-    /// and the page chrome. Model values are set first and unanimated — so
-    /// the settled state is right even if an animation is removed — then one
-    /// explicit animation per layer carries the eye.
-    ///
-    /// `presentation()` is the start value, not the model: an engagement
-    /// interrupted mid-flight continues from what is on screen rather than
-    /// snapping back to where the last one began. That is the same property
-    /// the interactive pull-down relies on, which is why both paths can share
-    /// `setCommentsEngagementProgress` as their definition of the two ends.
-    func animateCommentsEngaged(
-        _ engaged: Bool, duration: TimeInterval, completion: (() -> Void)? = nil
-    ) {
-        guard engaged != isCommentsEngaged else { return completion?() ?? () }
-        let layers = engagementFadeLayers
-        let starts = layers.map { ($0.presentation() ?? $0).opacity }
-        UIView.performWithoutAnimation { setCommentsEngaged(engaged) }
-        // The completion rides ONE designated layer, chosen by identity
-        // rather than by position in the list: the comments container exists
-        // for the cell's whole life and is always part of this transition, and
-        // an ordinal would silently move if the list were ever reordered.
-        let completionLayer = commentsContainer.layer
-        for (layer, start) in zip(layers, starts) {
-            let animation = CABasicAnimation(keyPath: "opacity")
-            animation.fromValue = start
-            animation.toValue = layer.opacity
-            animation.duration = duration
-            animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            // The completion hangs off ONE animation's delegate, not off the
-            // transaction.
-            //
-            // `CATransaction.setCompletionBlock` is the obvious place for it
-            // and it DOES NOT FIRE here — `performWithoutAnimation` above
-            // opens and commits a nested transaction, and the block set on the
-            // outer one never ran. That cost a real regression: the disengage's
-            // teardown is what clears `commentsEngagedID`, and while it is set
-            // `presentComments` refuses to open, so closing with the ✕ left
-            // every comment entry point dead. A delegate is attached to the
-            // animation itself and cannot be lost that way.
-            if layer === completionLayer, let completion {
-                animation.delegate = CALayerAnimationCompletion(completion)
-            }
-            layer.add(animation, forKey: "comments-engage-opacity")
-        }
-    }
-
-    /// The four layers the engagement fades, in no particular order.
-    private var engagementFadeLayers: [CALayer] {
-        [commentsContainer.layer, headerFrost.layer, mediaBackdrop.layer, chrome.layer]
-    }
-
-    /// **OPTION B — `-comments-masked-hero`.** Opens the REAL engaged thread
-    /// through a window that grows with the flight, over the card flying the
-    /// photograph.
-    ///
-    /// ⚠️ NO STAND-IN ANYWHERE. `RevealTransition` records why that matters:
-    /// five text-hero attempts flew a replica of the destination and every one
-    /// of them died of impersonation — a skeleton in the photographed still
-    /// being the first symptom on the list, and the one a still of this page
-    /// reproduced exactly. What is masked here IS the page.
-    ///
-    /// The destination stays visible for this (see `setZoomContentHidden`) and
-    /// sits ABOVE the flight card in the container, so the thread draws over
-    /// the photograph the card is carrying. The page's own media is hidden for
-    /// the duration — the card has it, at the crop the row was showing, which
-    /// is the handshake a plain reveal cannot make.
-    func beginMaskedRevealForFlight(from rect: CGRect, cornerRadius: CGFloat) {
-        guard isCommentsEngaged, flightMask == nil else { return }
-        mediaHiddenForMaskedReveal = mediaCard.isHidden
-        mediaCard.isHidden = true
-        // ⚠️ AND THE GROUND HAS TO GO TRANSPARENT, or the window reveals a
-        // black page.
-        //
-        // The page's floor is opaque black by design — it is what a media page
-        // rests on. Masking only decides WHERE the page draws, not what it
-        // draws, so the window opened correctly onto the thread and the thread
-        // was standing on black, with the card's photograph shut out behind it.
-        // The whole point of this variant is that the two are composited.
-        groundForMaskedReveal = contentView.backgroundColor
-        contentView.backgroundColor = .clear
-        let mask = UIView(frame: rect)
-        // Opaque: a mask reads its alpha channel, so a clear view masks
-        // everything away — a blank screen rather than a clipped one. The rule
-        // `RevealTransition` states, and the first thing to get wrong here.
-        mask.backgroundColor = .black
-        mask.layer.cornerCurve = .continuous
-        mask.layer.cornerRadius = cornerRadius
-        contentView.mask = mask
-        flightMask = mask
-        // ⚠️ THE CONTENT GROWS WITH THE WINDOW; a mask alone does not move it.
-        //
-        // Opening the window over a page at 1:1 reads as a shutter sweeping
-        // across something already there, while the card beside it is visibly
-        // growing — two channels of one opening disagreeing about what is
-        // happening. So the revealed views take the window's own scale and
-        // ride it back to identity.
-        //
-        // ⚠️ SCALED BY WIDTH, and it is deliberately the smaller of the two
-        // numbers. The card's media grows 1.09× in width and 2.36× in height:
-        // no uniform scale is both, and a non-uniform one would stretch text.
-        // Width is the honest one — the content grows exactly as the window
-        // does across, and never distorts.
-        let scale = rect.width / max(contentView.bounds.width, 1)
-        // ⚠️ THE STAGE, not a list of layers.
-        //
-        // It used to transform `commentsContainer` and `mediaBackdrop`
-        // individually and deliberately leave the header's frost out of it —
-        // a material must not be transformed, since a scaled backdrop samples a
-        // scaled world. Moving the stage moves all three, frost included, which
-        // is the one thing that rule was protecting against. It is acceptable
-        // here for the reason it always was on the flight card: the whole page
-        // is being scaled as one object, so the material is scaled WITH its
-        // world rather than against it, and it lasts a third of a second.
-        let opening = CGAffineTransform(
-            translationX: rect.midX - contentView.bounds.midX,
-            y: rect.midY - contentView.bounds.midY
-        ).scaledBy(x: scale, y: scale)
-        stages.forEach { $0.transform = opening }
-        UIView.animate(
-            withDuration: ZoomFlightSpring.duration, delay: 0,
-            usingSpringWithDamping: ZoomFlightSpring.damping,
-            initialSpringVelocity: ZoomFlightSpring.velocity,
-            options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            mask.frame = self.contentView.bounds
-            // ⚠️ THE RADIUS RIDES THIS SPRING, in this block, with the frame.
-            //
-            // It was a separate `CABasicAnimation` on an ease-out curve, which
-            // is a second opinion about the same corner: the card interpolates
-            // its own radius inside the flight's property animator, so the two
-            // silhouettes travelled the same distance at different rates and
-            // only agreed at the ends. `cornerRadius` on a view's OWN layer is
-            // animatable inside a UIView block — the exception to the trap the
-            // page indicator's dots hit, where the value changed in
-            // `layoutSubviews` rather than in the block.
-            mask.layer.cornerRadius = ScreenGeometry.cornerRadius(behind: self)
-            self.stages.forEach { $0.transform = .identity }
-        }
-
-    }
-
-    /// **THE DISMISSING GRAB'S OTHER HALF.** The whole page travels with the
-    /// card, as one object.
-    ///
-    /// ⚠️ ONE TRANSFORM, HELD AGAINST THE LAYOUT THAT KEEPS ERASING IT.
-    ///
-    /// Three ways to move the page were tried and two of them are silently
-    /// undone. A `transform` on `contentView` does nothing at all: a cell's
-    /// content view belongs to UIKit, `layoutSubviews` assigns its FRAME on
-    /// every pass, and assigning a frame to a transformed view re-derives
-    /// bounds and centre from it. Transforms on the page's own top-level views
-    /// are correct arithmetic and fail the same way one level down — they are
-    /// pinned by constraints, so a layout pass writes their frames back and the
-    /// page freezes while its WINDOW carries on. That is the interface and the
-    /// media visibly disagreeing, and it comes and goes with whatever else
-    /// happens to trigger a layout.
-    ///
-    /// (`sublayerTransform` survives layout and was the third try. It is
-    /// applied about a different origin than a view transform, and the page
-    /// landed roughly twice as far out as the card — mapping page onto card
-    /// through it is not the same arithmetic, and getting it wrong is invisible
-    /// until something is on screen to compare against.)
-    ///
-    /// So the transform stays a view transform, and `layoutSubviews`
-    /// re-asserts it. The layout is not fought, it is answered: whatever it
-    /// writes, the grab's own state is put back in the same pass.
-    ///
-    /// ⚠️ AND THE PAGE KEEPS ITS OWN FACE. It used to hide its media and clear
-    /// its floor, on the reasoning that the card behind was carrying the
-    /// photograph. But the card is only guaranteed to be DRAWING after a
-    /// display tick — the deferred content hide waits for exactly that — so the
-    /// page went transparent over a card that had not painted yet, and with the
-    /// readability wash lifting at three times the rate of the text, what got
-    /// uncovered was the container: the background dropped to black at the
-    /// instant of the grab.
-    ///
-    /// - Parameter hidingMedia: the one case where the page cannot show its own
-    ///   media — its live surface has been DONATED to the card, so its media
-    ///   view is an empty hole. Then, and only then, it is hidden and the card
-    ///   underneath is what shows.
-    func beginEngagedDismissal() {
-        guard isCommentsEngaged, !isEngagedDismissing else { return }
-        isEngagedDismissing = true
-        // ⚠️ THE PAGE STOPS DRAWING THE PHOTOGRAPH; THE CARD IS THE ONE COPY.
-        //
-        // The page kept its own media for a while, and every mapping of page
-        // onto card was then a mapping of one CROP onto another: the photograph
-        // is aspect-filled into a 402x874 page, and squeezing that result into
-        // a 312x433 tile is not the same picture as aspect-filling the
-        // photograph into the tile directly. Fit stretched it, fill re-cropped
-        // it — both a visible zoom against the card at the handover.
-        //
-        // There is nothing to reconcile if there is only one picture. The card
-        // is behind the page, carrying the media at the crop the row will land
-        // on, and it has been doing that correctly since long before this
-        // existed. So the page draws the thread and nothing else, and what is
-        // dragged home is the card's own image the whole way — identical at the
-        // last frame because it was never a copy.
-        // ⚠️ ALPHA, NOT `isHidden`, and on a video post that is the whole
-        // difference between the card flying frames and flying a thumbnail.
-        //
-        // The card does not take this page's surface: it attaches a SECOND one
-        // to the same player, ALONGSIDE this one, so both draw the same frames.
-        // Alongside is the operative word — a hidden view is out of the render
-        // path, and with this one hidden the sibling stopped being fed. The
-        // card ended up holding a live surface with a single frame on it and
-        // its cover image showing through: the thumbnail in the window.
-        //
-        // Alpha 0 is invisible and still rendered, which is exactly what the
-        // flight does to the destination as a whole, for the same reason.
-        alphaForMaskedReveal = mediaCard.alpha
-        mediaCard.alpha = 0
-        groundForMaskedReveal = contentView.backgroundColor
-        contentView.backgroundColor = .clear
-        // ⚠️ EACH LAYER STARTS FROM ITS OWN OPACITY, not from 1.
-        //
-        // Fading them as `1 - t` assumes they were all opaque, and the wash is
-        // not: at rest it carries whatever the engagement left it at. Driven
-        // from 1 it went FULLY opaque on the grab's first frame and the
-        // photograph vanished behind it — the page changing the moment it was
-        // touched, which is the one thing the first frame of a gesture must
-        // never do.
-        //
-        // Captured here and scaled from, so t=0 is exactly the page that was on
-        // screen and t=1 is nothing.
-        restingAlphas = dismissalTravellers.map(\.alpha)
     }
 
     /// **THE LIVE GRAB (#1915)**: the page follows the card as the engaged
@@ -1568,32 +1318,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         stages.forEach { $0.center = CGPoint(x: contentView.bounds.midX, y: contentView.bounds.midY) }
     }
 
-    /// Every layer that makes up the page's face — one list, so the grab has
-    /// one thing to move and the layout one thing to put back.
-    /// The layers whose OPACITY the grab drives. Their geometry is the stage's
-    /// — see `setEngagedDismissalProgress`.
-    ///
-    /// ⚠️ THE WASH IS ONE OF THEM, on the thread's own value.
-    ///
-    /// It exists to hold text off a photograph, so it belongs to the text: it
-    /// leaves at exactly the rate the text does, and the page looks like itself
-    /// at the moment the grab begins rather than brightening in one frame.
-    ///
-    /// It can only be here because the page no longer draws the media. Over the
-    /// page's own photograph it was a second dimming of a picture the card was
-    /// already showing undimmed; over nothing at all it was the black rectangle
-    /// this spent two rounds chasing. Over the CARD's photograph, through a
-    /// cleared ground, it is what it always was — a wash on the picture, fading
-    /// out with the words it serves.
-    ///
-    /// The column's stage is one too (#1917): the folded record fades with
-    /// the thread it sits beside, from its own resting alpha.
-    ///
-    /// A live grab's are the two stages themselves (#1915): the whole page,
-    /// its media already handed to the card.
-    private var dismissalTravellers: [UIView] {
-        isLiveGrab ? stages : [commentsContainer, headerFrost, mediaBackdrop, columnStage]
-    }
+    /// The views the grab moves and fades: the two stages, the whole page —
+    /// its media already handed to the card (#1915).
+    private var dismissalTravellers: [UIView] { stages }
 
     /// How far the page overhangs the card it covers. Small enough to be
     /// invisible where it spills, large enough to swallow a follower's error.
@@ -1639,36 +1366,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         groundForMaskedReveal = nil
     }
 
-    /// Retires the window and gives the page its media back.
-    func endMaskedRevealForFlight() {
-        guard flightMask != nil else { return }
-        contentView.mask = nil
-        flightMask = nil
-        mediaCard.isHidden = mediaHiddenForMaskedReveal
-        contentView.backgroundColor = groundForMaskedReveal
-        groundForMaskedReveal = nil
-        // Identity, unconditionally: an interrupted flight must not strand the
-        // page under a transform nobody can see the origin of.
-        stages.forEach { $0.transform = .identity }
-    }
-
-    /// Materializes the header band's blur AHEAD of the engagement.
-    ///
-    /// A material arrives through `effect`, and building one is render-server
-    /// work on the main thread — paid at engage it is part of the tap's frame
-    /// budget. Paid on the warm it is free, and the band is invisible either
-    /// way: its alpha is 0 in the dismissed pose, so a materialized-but-unseen
-    /// blur costs nothing to composite (a fully transparent layer is not
-    /// rendered).
-    ///
-    /// Window-guarded, like every glass surface here — headless CI never pays
-    /// for a real blur — and idempotent, so the engagement's own attempt finds
-    /// it already done.
-    func prematerializeEngagedChrome() {
-        guard window != nil, headerFrost.effect == nil, !headerFrost.isHidden else { return }
-        headerFrost.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
-    }
-
     /// The engaged stream's top inset — where its content rests, just
     /// below the screen chrome. A pure function of the safe area now: the
     /// caption scrolls inside the stream, so nothing above it has to be
@@ -1701,7 +1398,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // its `effect` at the ends — but fading an already-built one out is
         // exactly what alpha is for.)
         headerFrost.alpha = 1 - t
-        mediaBackdrop.setDim(backdropDim(at: t))
         // The page's own chrome returns as the stream leaves — the ticker
         // and caption fade back IN as the comments fade out, one crossfade
         // rather than two sequential ones.
@@ -1731,22 +1427,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     func setRevealGroundTint(_ color: UIColor?) {
         revealGroundTint = color
         contentView.backgroundColor = color ?? restingGround
-    }
-
-    /// The readability wash's opacity for THIS page at engagement progress
-    /// `t` — the single answer both the interactive drive and the re-assert
-    /// path must use, because the wash has two callers and they disagreed
-    /// once already.
-    ///
-    /// The wash is a treatment FOR MEDIA and only media: it buys text
-    /// contrast against an arbitrary photo. A text page has no photo to
-    /// fight, and pouring 50% black over its own ground merely mutes it —
-    /// invisible while that ground was black, a flat 50% grey the moment it
-    /// started following the system appearance. (Measured exactly that:
-    /// #7F7F7F over what should have been white.)
-    private func backdropDim(at t: CGFloat) -> CGFloat {
-        guard mediaURL != nil else { return 0 }
-        return SnapCommentsLayout.backdropDimOpacity * (1 - t)
     }
 
     /// Reclaims the region after disengagement settles (the VC removes the
@@ -1779,10 +1459,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         headerFrost.effect = nil
         NSLayoutConstraint.deactivate(headerFrostConstraints)
         headerFrostConstraints = []
-        // The backdrop keeps its frame (it is pinned for the cell's life);
-        // only its treatment is state. Reset it unconditionally so an
-        // interrupted disengagement can't leave a recycled cell dimmed.
-        mediaBackdrop.setActive(false)
     }
 
     /// Applies or reverses the comments-engaged layout. Call inside a
@@ -1831,24 +1507,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // it never dismisses, so it's the right gesture on a text post's
         // permanent resting interface too.
         cardSwipeRecognizer.isEnabled = engaged
-        // A media page's column folds into its sound bubble while the
-        // comments are up, and is revealed from it as they close (#1872). A
-        // text page's engagement is its resting layout: nothing moves.
-        chrome.setColumnCollapsed(engaged && mediaURL != nil, animated: window != nil)
 
         if engaged {
-            if mediaCard.showsPausedMark {
-                pauseGlyphSuppressedByEngagement = true
-                mediaCard.setPausedMark(false)
-            }
-            // THE BACKGROUND, not a tile: the media holds its full-bleed
-            // frame, its identity transform, and its playback — the
-            // engagement never touches it. Everything that DOES change is
-            // one interpolatable set (see `setCommentsEngagementProgress`),
-            // so the boolean legs and the finger-driven ones can never
-            // diverge. (Near-inert on a text page: its media surfaces are
-            // hidden and the readability wash is skipped entirely.)
-            SnapCommentsLayout.refreshBackdrop()
+            // One interpolatable set (see `setCommentsEngagementProgress`),
+            // so the boolean legs and any driven one can never diverge.
             setCommentsEngagementProgress(0)
             // The band materializes on the same beat and the same supported
             // path (the `effect` property — alpha on an effect view is not,
@@ -1859,14 +1521,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         } else {
             setCommentsEngagementProgress(1)
             headerFrost.effect = nil
-            if pauseGlyphSuppressedByEngagement {
-                pauseGlyphSuppressedByEngagement = false
-                mediaCard.setPausedMark(true)
-            }
         }
     }
 
-    // MARK: - The comments sheet (#2087, `CommentsV2`)
+    // MARK: - The comments sheet (#2087)
 
     /// The sheet's window onto the media: the picture's own, rounded, and its
     /// bands' — above, below and beside it, never over it, so the picture's
@@ -3218,14 +2876,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // The screen's say first (#1550): with the side list open, a tap on
         // the card closes the list rather than pausing.
         if interceptsMediaTap?() == true { return }
-        // While engaged, the strip is the only cell territory the panel
-        // doesn't cover — a tap there means "expand back", not play/pause.
-        // Unless the post is TEXT-ONLY: its engagement is the permanent
-        // resting state, and no tap may collapse it onto the empty shell.
-        if isCommentsEngaged {
-            if mediaURL != nil { onRequestCommentsClose?() }
-            return
-        }
+        // A text page's engagement is its permanent resting state: no tap
+        // collapses it, and it has no media to pause.
+        if isCommentsEngaged { return }
         guard playbackTapRegionContains(point) else { return }
         // A carousel's track (#1849): the screen pauses the post's sound and
         // the clip on screen together.
@@ -3695,19 +3348,12 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         #endif
     }
 
-    /// Re-asserts the engaged treatment after the screen re-appears from an
-    /// outbound push: the backdrop's blur is window-guarded, so an
-    /// engagement that began off-window never materialized it. Layout runs
-    /// first so the pass reads settled coordinates, not a mid-transition
-    /// hierarchy. Idempotent — and it has nothing to say about the media,
-    /// which holds identity in both states.
+    /// Re-asserts the engaged layout after the screen re-appears from an
+    /// outbound push, so the pass reads settled coordinates, not a
+    /// mid-transition hierarchy. Idempotent.
     func reassertEngagedGeometry() {
         guard isCommentsEngaged else { return }
         contentView.layoutIfNeeded()
-        // Through the resolver, NOT `setActive(true)` — that convenience
-        // applies the full wash unconditionally, which put a text page's
-        // wash back every time the screen re-appeared.
-        UIView.performWithoutAnimation { mediaBackdrop.setDim(backdropDim(at: 0)) }
     }
 
     /// Which theme this page draws in, resolved against the DEVICE rather than
@@ -3801,7 +3447,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // then the media is put back to a fresh page's own values, because
         // what either restores was captured from a page that no longer exists.
         endEngagedDismissal()
-        endMaskedRevealForFlight()
         // The reveal's spring may still be carrying the stage to identity, and
         // a released dismissal's spring may still be fading the layers it
         // drives: neither may play out on the next post.
@@ -3819,13 +3464,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         onPostTrackHold = nil
         onRequestBoost = nil
         onRequestBoostUndo = nil
-        onRequestCommentsClose = nil
         onRequestCommentsPageDrive = nil
         // EVERY page's mark, not just the one showing: a recycled cell that
         // kept one on page three would put a stopped clip's receipt on a
         // picture belonging to a different post.
         mediaCard.clearPausedMarks()
-        pauseGlyphSuppressedByEngagement = false
         playback.reset()
         stopPlayheadFeed()
         // ⚠️ A held chrome must never ride a recycled cell. A flight that is
@@ -3969,26 +3612,6 @@ extension SnapFeedCell: UIGestureRecognizerDelegate {
     }
 }
 
-
-/// Runs a closure when a `CAAnimation` stops — completed OR removed.
-///
-/// Core Animation retains an animation's delegate for its lifetime, so this
-/// needs no owner. It fires on removal too (`finished == false`), which is
-/// what an interruptible transition wants: the caller decides whether the
-/// world still needs the teardown, rather than the teardown being skipped
-/// because the animation did not run to the end.
-final class CALayerAnimationCompletion: NSObject, CAAnimationDelegate {
-    private let body: () -> Void
-
-    init(_ body: @escaping () -> Void) {
-        self.body = body
-        super.init()
-    }
-
-    func animationDidStop(_ animation: CAAnimation, finished: Bool) {
-        body()
-    }
-}
 
 /// The author row's badge, as the screen's `AuthorBadgeBinding` draws it
 /// (#1972): bound at configure, redrawn on every answer for its author,
