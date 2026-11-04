@@ -86,8 +86,20 @@ public final class AppRefreshControl: UIRefreshControl {
     /// Ends the spin, once it has turned `minimumShown`: a list that answers
     /// from memory would otherwise flash the loader for a frame (#1901, the
     /// owner 2026-10-30, next to the Feed's, which waits on the network).
+    ///
+    /// ⚠️ NOT REFRESHING, NOTHING TO END (#2097). UIKit's `endRefreshing`
+    /// puts the list's offset back even when no refresh is under way
+    /// (`_endRefreshingAnimated:` → `setContentOffset`), and that write STOPS
+    /// A DECELERATION DEAD (`_stopScrollDecelerationNotify:`). Hosts end their
+    /// controls whenever a load settles — For You after every page — so a fast
+    /// fling stopped at each page landing, measured at 5,000 pt/s.
     public override func endRefreshing() {
-        if isRefreshing, let startedAt {
+        guard isRefreshing else {
+            startedAt = nil
+            loader.stopAnimating()
+            return
+        }
+        if let startedAt {
             let left = minimumShown - (CACurrentMediaTime() - startedAt)
             if left > 0 {
                 let asked = generation
@@ -99,7 +111,10 @@ public final class AppRefreshControl: UIRefreshControl {
             }
         }
         startedAt = nil
-        if isRefreshing { isSettling = true }
+        isSettling = true
+        #if DEBUG
+        debugEndsPassedToUIKit += 1
+        #endif
         super.endRefreshing()
         loader.stopAnimating()
     }
@@ -113,6 +128,9 @@ public final class AppRefreshControl: UIRefreshControl {
     /// The loader this control drives — what a test reads.
     var debugLoader: AppLoaderView { loader }
     var debugThresholdFeedback: PullThresholdFeedback { thresholdFeedback }
+    /// The ends handed to UIKit's own — whose offset write stops a list's
+    /// deceleration (#2097). Tests.
+    public private(set) var debugEndsPassedToUIKit = 0
     /// Drives the pull as an offset would (#1400). Tests.
     func debugFollow(_ scrollView: UIScrollView) { follow(scrollView) }
     #endif
