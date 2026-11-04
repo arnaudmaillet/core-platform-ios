@@ -605,7 +605,6 @@ final class CommentStream: NSObject {
     /// engaged top (`syncBottomAnchor`).
     private(set) var bottomAnchorSlack: CGFloat = 0
 
-
     /// A short stream STARTS FROM THE BOTTOM (#1799, the default since
     /// #1923): the caption and its comments are one block, the post its
     /// first message, resting just above the composer — the room above them
