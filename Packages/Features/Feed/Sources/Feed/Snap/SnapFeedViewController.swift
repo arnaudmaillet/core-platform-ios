@@ -3711,7 +3711,10 @@ final class SnapFeedViewController: UIViewController {
     /// reveal, the pager lock, and the toolbar swap all fire together;
     /// text pages take the pre-rendered resting path instead.
     private func presentComments(for id: PostID, animated: Bool = true) {
-        if CommentsV2.isEnabled { return presentCommentsSheet(for: id, animated: animated) }
+        // The sheet is a media post's; a text post keeps its own space.
+        if CommentsV2.isEnabled, modelsByID[id]?.mediaURL != nil {
+            return presentCommentsSheet(for: id, animated: animated)
+        }
         guard commentsEngagedID == nil,
               let indexPath = dataSource.indexPath(for: id),
               let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell

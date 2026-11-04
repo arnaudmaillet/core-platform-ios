@@ -1,16 +1,17 @@
 import Foundation
 
-/// The comments space's flag (#2087): off, a media post's comments are
-/// today's (`SnapCommentsPresentation`, in the page); on, the redesign — a
-/// native sheet over the bottom of the screen, the post's media shrunk whole
-/// into the room above it (`SnapCommentsSheetSession`).
+/// The comments space's flag (#2087): on, a media post's comments are the
+/// redesign — a native sheet over the bottom of the screen, the post's media
+/// shrunk whole into the room above it (`SnapCommentsSheetSession`); off,
+/// the first space (`SnapCommentsPresentation`, in the page). A text post
+/// keeps its own either way.
 ///
-/// DEBUG only, and off by default: `-comments-v2` turns it on, and so does
-/// the comments sandbox (`-comments-sandbox`). Release never reads it.
+/// ON BY DEFAULT, Release included (the owner, 2026-11-04). DEBUG keeps the
+/// first space a launch argument away, `-comments-v1`, until it is retired.
 @MainActor
 public enum CommentsV2 {
     #if DEBUG
-    public static var isEnabled = ProcessInfo.processInfo.arguments.contains("-comments-v2")
+    public static var isEnabled = !ProcessInfo.processInfo.arguments.contains("-comments-v1")
     /// The sheet's bar in a navigation stack of its own — the first build,
     /// kept aside (the owner, 2026-11-03): `-comments-v2-navstack`. Off, the
     /// sheet carries a lone `UINavigationBar` (`SnapCommentsSheetViewController`).
@@ -21,7 +22,7 @@ public enum CommentsV2 {
     /// (`-comments-v2-sheet-keyboard`), the sheet rises with the keys.
     public static var detachedComposer = !ProcessInfo.processInfo.arguments.contains("-comments-v2-sheet-keyboard")
     #else
-    public static let isEnabled = false
+    public static let isEnabled = true
     public static let sheetUsesNavigationStack = false
     public static let detachedComposer = true
     #endif
