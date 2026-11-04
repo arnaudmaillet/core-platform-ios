@@ -14,9 +14,13 @@ import UIKit
 /// picture in picture's ways).
 @MainActor
 final class SnapCommentsPreview: UIView {
-    /// The preview's longer side; the other follows the media's shape.
-    static let longSide: CGFloat = 168
-    static let cornerRadius: CGFloat = Spacing.md
+    /// The preview's longer side, as a share of the screen's width; the other
+    /// follows the media's shape. iOS's own picture in picture's (the owner,
+    /// 2026-11-04: "the same size as Apple's"), measured on an iPhone 17 Pro
+    /// Max: a 16:9 clip at 208 × 117 pt on a 440 pt wide screen.
+    static let longSideShare: CGFloat = 208.0 / 440.0
+    /// Its corners, iOS's picture in picture's too (~20 pt, the same capture).
+    static let cornerRadius: CGFloat = 20
     /// What of a stashed preview stays on the screen.
     static let stashedTab: CGFloat = Spacing.xl
 
@@ -208,9 +212,11 @@ final class SnapCommentsPreview: UIView {
         edge.layer.borderWidth = Surface.hairline(for: traitCollection)
     }
 
-    /// The preview's size for a picture of `shape`: its longer side
-    /// `longSide`, the media's own proportions.
-    static func size(for shape: CGSize) -> CGSize {
+    /// The preview's size for a picture of `shape` on a screen `screenWidth`
+    /// wide: its longer side `longSideShare` of it, the media's own
+    /// proportions.
+    static func size(for shape: CGSize, screenWidth: CGFloat) -> CGSize {
+        let longSide = (screenWidth * longSideShare).rounded()
         guard shape.width > 0, shape.height > 0 else { return CGSize(width: longSide, height: longSide) }
         let scale = longSide / max(shape.width, shape.height)
         return CGSize(width: (shape.width * scale).rounded(), height: (shape.height * scale).rounded())

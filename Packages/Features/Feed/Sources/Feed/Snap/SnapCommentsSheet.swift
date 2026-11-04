@@ -539,7 +539,9 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         // go), the media shrinks on with the room down to `keyboardFloor`;
         // only a room smaller than that is the preview's.
         let ridesKeys = (content.isKeyboardUp || isKeyboardHiding) && !content.editsDetached
-        let previewHeight = SnapCommentsPreview.size(for: cell.commentsSheetPictureSize).height
+        let previewHeight = SnapCommentsPreview.size(
+            for: cell.commentsSheetPictureSize, screenWidth: window.bounds.width
+        ).height
         let smallest = ridesKeys ? min(previewHeight, Self.keyboardFloor) : previewHeight
         let region = CGRect(
             x: Self.mediaSideMargin, y: roomTop,
@@ -689,7 +691,8 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         if preview == nil {
             guard wantsPreview, !isLeaving, !isPreviewUnavailable, let cell,
                   let picture = cell.commentsSheetPictureFrame, picture.width > 0, picture.height > 0 else { return }
-            guard makePreview(size: SnapCommentsPreview.size(for: picture.size), in: window) else {
+            let size = SnapCommentsPreview.size(for: picture.size, screenWidth: window.bounds.width)
+            guard makePreview(size: size, in: window) else {
                 isPreviewUnavailable = true
                 return
             }
