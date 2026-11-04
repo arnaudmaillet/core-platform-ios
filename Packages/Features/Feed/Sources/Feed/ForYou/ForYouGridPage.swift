@@ -1079,6 +1079,9 @@ final class ForYouGridPage: UIView {
         // Value-guarded: this runs per scroll tick in hosted mode, and an
         // unconditional write mid-drag disturbs the pan.
         guard abs(collectionView.contentInset.bottom - bottom) > 0.5 else { return }
+        #if DEBUG
+        scrollStopTrace.write(String(format: "inset.bottom %.0f → %.0f", collectionView.contentInset.bottom, bottom))
+        #endif
         collectionView.contentInset.bottom = bottom
         collectionView.verticalScrollIndicatorInsets.bottom =
             trayInset + footerInset + hostedBottomInset
@@ -1109,6 +1112,9 @@ final class ForYouGridPage: UIView {
             host.host(view)
         }
         guard abs(height - leadHeight) > 0.5 else { return }
+        #if DEBUG
+        scrollStopTrace.write(String(format: "lead height %.0f → %.0f", leadHeight, height))
+        #endif
         // ⚠️ A LIST AT ITS TOP STAYS AT ITS TOP. A new configuration keeps the
         // content offset while the content above the first stretch grows, so
         // the rows arriving on a list already laid out slid in UNDER the
@@ -1400,6 +1406,9 @@ final class ForYouGridPage: UIView {
     func setPaging(_ paging: Bool) {
         guard isPaging != paging else { return }
         isPaging = paging
+        #if DEBUG
+        scrollStopTrace.event("paging footer \(paging ? "on" : "off")")
+        #endif
         if paging {
             pagingSpinner.setSpinning(true)
             positionPagingFooter()
@@ -3162,6 +3171,9 @@ final class ForYouGridPage: UIView {
             // being inserted are this page's, not upstream's.
             let start = posts.count
             posts += arrange(added, startingAt: start)
+            #if DEBUG
+            scrollStopTrace.write("landing: insert \(added.count) (flat)")
+            #endif
             collectionView.performBatchUpdates {
                 collectionView.insertItems(
                     at: (start..<posts.count).map { indexPath(for: $0) }
@@ -3227,6 +3239,8 @@ final class ForYouGridPage: UIView {
     private(set) var debugReconfiguredItems = 0
     /// Whole-list reloads — what a counts-only change or an append must not be.
     private(set) var debugReloadCount = 0
+    /// `-scroll-stop-trace` (#2097).
+    let scrollStopTrace = ScrollStopTrace()
     /// The post the last `applyPendingReveal` brought clear of the chrome.
     private(set) var debugLastRevealedPostID: PostID?
 
@@ -3273,6 +3287,9 @@ final class ForYouGridPage: UIView {
         if !wasSkeleton, !skeleton, !dissolving, !mustReload,
            case .extended(let grown, let appended) = change {
             let last = before.count - 1
+            #if DEBUG
+            scrollStopTrace.write("landing: insert \(grown.count) items, \(appended.count) sections (discover)")
+            #endif
             collectionView.performBatchUpdates {
                 if !grown.isEmpty {
                     collectionView.insertItems(at: grown.map { IndexPath(item: $0, section: last) })
@@ -3368,6 +3385,7 @@ final class ForYouGridPage: UIView {
     private func reloadAll(dissolving: Bool) {
         #if DEBUG
         debugReloadCount += 1
+        scrollStopTrace.write("landing: reloadAll dissolving=\(dissolving)")
         #endif
         // The covers are the lookahead's (#970): it plans once the reload has
         // laid out the new items (`render`'s `setNeedsPlan`), the visible ones
@@ -3758,6 +3776,9 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        #if DEBUG
+        scrollStopTrace.didScroll(scrollView)
+        #endif
         positionPagingFooter()
         schedulePinnedSectionCheck()
         if hostedTopInset != nil {
@@ -3795,6 +3816,9 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         let length = collectionView.contentSize.height
         guard force || nextPageAskedAtLength != length else { return }
         nextPageAskedAtLength = length
+        #if DEBUG
+        scrollStopTrace.event(String(format: "ask next page at length %.0f", length))
+        #endif
         onNearEnd?()
     }
 
@@ -3834,6 +3858,9 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         targetContentOffset: UnsafeMutablePointer<CGPoint>
     ) {
         pendingSnap = nil
+        #if DEBUG
+        scrollStopTrace.willEndDragging(velocity: velocity, target: targetContentOffset.pointee.y)
+        #endif
         guard !snapDetents.isEmpty else { return }
         let inset = scrollView.adjustedContentInset.top
         let target = targetContentOffset.pointee.y + inset
@@ -3847,6 +3874,9 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        #if DEBUG
+        scrollStopTrace.didEndDragging(decelerate: decelerate, scrollView: scrollView)
+        #endif
         if !decelerate {
             updateAutoplay()
             lookahead.scrollViewDidEndScrolling()
@@ -3859,6 +3889,9 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        #if DEBUG
+        scrollStopTrace.didEndDecelerating()
+        #endif
         updateAutoplay()
         lookahead.scrollViewDidEndScrolling()
     }
