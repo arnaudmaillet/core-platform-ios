@@ -210,7 +210,7 @@ open class HeroHeaderView: UIView {
     /// inside it: the disc clips its own bounds.
     private let relationBadge: RelationBadgeView?
     /// The disc's mask while a badge is drawn: the badge's cutout.
-    private let avatarCutout = CAShapeLayer()
+    private let avatarCutout = FaceCutout()
     private let nameLabel = UILabel()
     private let verifiedBadge = UIImageView(image: UIImage(systemName: "checkmark.seal.fill"))
     private let handleLabel = UILabel()
@@ -1199,7 +1199,7 @@ open class HeroHeaderView: UIView {
             }
             areCountersRedacted = true
             bannerView.setRedacted(true)
-            // The skeleton wears no relation (#2014).
+            // The skeleton wears the skeleton's badge (#2098).
             applyRelationMark(animated: false)
             return
         }
@@ -1313,7 +1313,7 @@ open class HeroHeaderView: UIView {
     /// The relation the host asked for — what is drawn once the header is
     /// not a skeleton.
     public private(set) var relationMark: PersonPill.Badge = .none
-    /// The relation drawn now: none under the bones.
+    /// The relation drawn now: the skeleton's badge under the bones.
     public private(set) var shownRelationMark: PersonPill.Badge = .none
 
     /// The person's relation to the viewer, worn on the disc as the author
@@ -1329,13 +1329,19 @@ open class HeroHeaderView: UIView {
         applyRelationMark(animated: animated)
     }
 
+    /// ⚠️ THE SKELETON WEARS THE SKELETON'S BADGE (#2098, reversing #2014's
+    /// "the skeleton wears no relation"): under the bones the badge is a
+    /// bone with its cutout, so the mark that lands with the reveal changes
+    /// only what the disc draws. A face that wears none for good (the
+    /// viewer's own, someone blocked) wears none under the bones either.
     private func applyRelationMark(animated: Bool) {
         guard let relationBadge else { return }
-        let mark = isRedacted ? .none : relationMark
+        let mark: PersonPill.Badge = isRedacted && relationMark != .none ? .loading : relationMark
         guard mark != shownRelationMark else { return }
         shownRelationMark = mark
         let onScreen = animated && window != nil
         relationBadge.show(mark, animated: onScreen)
+        if !mark.cutsTheFace { avatarCutout.close(avatarView.layer, animated: onScreen) }
         applyAvatarCutout()
     }
 
@@ -1387,21 +1393,15 @@ open class HeroHeaderView: UIView {
     /// from the disc's own side, never the badge's frame, which may not be
     /// laid out yet.
     private func applyAvatarCutout() {
-        guard let relationBadge, shownRelationMark != .none, avatarView.bounds.width > 0 else {
-            avatarView.layer.mask = nil
+        guard let relationBadge, shownRelationMark.cutsTheFace, avatarView.bounds.width > 0 else {
+            if !avatarCutout.isClosing { avatarCutout.close(avatarView.layer, animated: false) }
             return
         }
         let centre = relationBadge.metrics.badgeCentre(
             inFaceOfSide: avatarView.bounds.width,
             rightToLeft: effectiveUserInterfaceLayoutDirection == .rightToLeft
         )
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        avatarCutout.fillRule = .evenOdd
-        avatarCutout.frame = avatarView.bounds
-        avatarCutout.path = RelationMark.faceMaskPath(cutout: RelationMark.cutout(centre: centre, metrics: relationBadge.metrics))
-        CATransaction.commit()
-        avatarView.layer.mask = avatarCutout
+        avatarCutout.cut(avatarView.layer, centre: centre, metrics: relationBadge.metrics)
     }
 
     #if DEBUG
@@ -1412,7 +1412,7 @@ open class HeroHeaderView: UIView {
     /// The disc's border width as drawn: zero, it has none (#2082).
     public var debugAvatarRingWidth: CGFloat { avatarView.layer.borderWidth }
     /// Whether the disc has the badge's cutout taken out.
-    public var debugAvatarIsCutOut: Bool { avatarView.layer.mask === avatarCutout }
+    public var debugAvatarIsCutOut: Bool { avatarCutout.isCut(avatarView.layer) }
     #endif
 
     // MARK: - Layout

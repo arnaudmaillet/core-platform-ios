@@ -7,14 +7,13 @@
           "fill" : {
             "solid" : "extended-gray:1.00000,0.70000"
           },
-          "glass" : true,
-          "image-name" : "play.svg",
-          "name" : "play",
+          "image-name" : "play-converti.svg",
+          "name" : "play-converti",
           "position" : {
-            "scale" : 1,
+            "scale" : 1.05,
             "translation-in-points" : [
-              -3.344502994350762,
-              -9.13539216474436
+              -0.4800000000000182,
+              -0.005572070426296705
             ]
           }
         },

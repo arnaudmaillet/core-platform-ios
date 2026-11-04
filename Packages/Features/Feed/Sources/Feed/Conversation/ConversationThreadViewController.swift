@@ -1959,7 +1959,7 @@ extension ConversationThreadViewController {
     private func startFromKnownRelation(of id: ProfileID?) {
         let known = id.flatMap { entities?.relation(to: $0) }
         peerRelation = known
-        peerPill.setFollowBadge(Self.badge(for: known), animated: false)
+        peerPill.setFollowBadge(badge(for: known), animated: false)
         peerObservation?.cancel()
         peerObservation = id.flatMap { id in
             entities?.observeProfile(id) { [weak self] _ in self?.knownRelationDidChange(for: id) }
@@ -1986,15 +1986,25 @@ extension ConversationThreadViewController {
     private func setPeerRelation(_ relation: FollowRelation?, tapped: Bool = false) {
         peerRelation = relation
         if tapped {
-            peerPill.setFollowBadge(Self.badge(for: relation), animated: view.window != nil)
+            peerPill.setFollowBadge(badge(for: relation), animated: view.window != nil)
         } else {
             drawLandedRelation()
         }
         fitTrailingRun()
     }
 
-    private static func badge(for relation: FollowRelation?) -> SnapAuthorIdentityView.FollowBadge {
-        relation.map(SnapAuthorIdentityView.FollowBadge.init) ?? .none
+    /// The peer's mark: the skeleton's badge while a relation that will be
+    /// read is not known yet (#2098), never nothing; none where no read
+    /// comes (a group, no graph).
+    private func badge(for relation: FollowRelation?) -> SnapAuthorIdentityView.FollowBadge {
+        if let relation { return SnapAuthorIdentityView.FollowBadge(relation) }
+        return readsPeerRelation ? .loading : .none
+    }
+
+    /// Whether the correspondent's relation is read at all — what
+    /// `resolvePeerRelation` asks.
+    private var readsPeerRelation: Bool {
+        mode == .full && socialGraph != nil && followRelations != nil && peer.id != nil
     }
 
     /// Draws `peerRelation` on the pill's badge — once the push or pop under
@@ -2011,7 +2021,7 @@ extension ConversationThreadViewController {
                     guard let self else { return }
                     self.landedRelationScheduled = false
                     self.peerPill.setFollowBadge(
-                        Self.badge(for: self.peerRelation), animated: self.view.window != nil
+                        self.badge(for: self.peerRelation), animated: self.view.window != nil
                     )
                 }
             }
@@ -2019,7 +2029,7 @@ extension ConversationThreadViewController {
             // The coordinator took nothing: never leave the flag stuck.
             landedRelationScheduled = false
         }
-        peerPill.setFollowBadge(Self.badge(for: peerRelation), animated: view.window != nil)
+        peerPill.setFollowBadge(badge(for: peerRelation), animated: view.window != nil)
     }
 
     /// The "+": follows the correspondent, optimistically, as the feed's

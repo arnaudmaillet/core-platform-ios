@@ -1,4 +1,5 @@
 import CoreModels
+import CoreStorage
 import EntityStore
 
 /// Where the viewer stands with each author the feed's pill shows, and the
@@ -45,17 +46,32 @@ final class SnapAuthorFollowStore {
     /// reports nothing through `onRelationChange`, yet must be asked again.
     var onEveryRelationChange: (() -> Void)?
 
-    init(writer: (any SocialGraphWriting)?, reader: (any SocialGraphReading)?, entities: EntityStore = EntityStore()) {
+    /// The profile using the app: its own posts wear no badge from the first
+    /// frame, never the skeleton's first (#2098) — the reader's `.viewer`
+    /// answer would come a call later.
+    private let viewer: @MainActor () -> ProfileID?
+
+    /// The active profile, as the app's `StorageScope` holds it.
+    static func activeProfile() -> ProfileID? {
+        guard case .member(_, let profile?) = StorageScope.shared.owner else { return nil }
+        return ProfileID(profile)
+    }
+
+    init(
+        writer: (any SocialGraphWriting)?, reader: (any SocialGraphReading)?, entities: EntityStore = EntityStore(),
+        viewer: @escaping @MainActor () -> ProfileID? = SnapAuthorFollowStore.activeProfile
+    ) {
         self.writer = writer
         self.reader = reader
         self.entities = entities
+        self.viewer = viewer
         observation = entities.observeProfiles { [weak self] change in
             self?.entitiesDidChange(change)
         }
     }
 
     /// Where the viewer stands with `author`, as far as the store knows.
-    /// Nil: not known yet, which draws no badge.
+    /// Nil: not known yet, which draws the skeleton's badge.
     func relation(for author: ProfileID) -> FollowRelation? {
         entities.relation(to: author)
     }
@@ -80,16 +96,19 @@ final class SnapAuthorFollowStore {
     /// mark for a mutual one — and nothing for the viewer's own posts, someone
     /// blocked, or without a follow seam to act through.
     ///
-    /// Unknown is NOTHING — a "+" drawn for someone the viewer follows and
-    /// then withdrawn is worse than a badge that arrives late (the neighbours'
-    /// answers are asked for at every settle, so a paged-to author is usually
-    /// known already).
+    /// Unknown is the SKELETON'S BADGE (#2098), never a guess: a "+" drawn
+    /// for someone the viewer follows and then withdrawn is worse than a mark
+    /// that lands late, and nothing at all opened a hole in the face when it
+    /// landed. A read that fails leaves it until a later one answers.
     func badge(for author: ProfileID?) -> SnapAuthorIdentityView.FollowBadge {
         guard writer != nil, let author else { return .none }
+        if author == viewer() { return .none }
         let known = relation(for: author)
         // Drawn from now on: a later change of answer is reported.
         if reported[author] == nil { reported[author] = .some(known) }
-        guard let known else { return .none }
+        // No reader: no answer is coming, so nothing rather than a bone
+        // that never resolves.
+        guard let known else { return reader == nil ? .none : .loading }
         return SnapAuthorIdentityView.FollowBadge(known)
     }
 

@@ -54,21 +54,6 @@ struct SnapWheelCapsuleTests {
         #expect(!capsule.isWanted)
     }
 
-    /// The comments take the page: the capsule goes, and no touch brings it
-    /// back until they close.
-    @Test func dismissedTheCapsuleStaysAway() {
-        let (rail, _) = makeWheel()
-        let capsule = rail.capsule
-        capsule.debugTouch(down: true)
-        capsule.setDismissed(true)
-        #expect(!capsule.isWanted)
-        capsule.debugTouch(down: true)
-        #expect(!capsule.isWanted)
-        capsule.setDismissed(false)
-        capsule.debugTouch(down: true)
-        #expect(capsule.isWanted)
-    }
-
     /// At rest the capsule wraps the resting window, the like's width, and
     /// stops over the fade above the like.
     @Test func atRestTheCapsuleWrapsTheRestingWindow() {

@@ -219,8 +219,6 @@ final class PostDetailViewController: UIViewController {
     // MARK: - The stream, as the panel's
 
     // What a host asks of the panel's list (each documented on `CommentStream`).
-    func setEmptyRoomTapHandler(_ handler: (() -> Void)?) { streams.forEach { $0.setEmptyRoomTapHandler(handler) } }
-    func emptyRoomContains(_ location: CGPoint) -> Bool { stream.emptyRoomContains(location) }
     var streamIsAtTop: Bool { stream.streamIsAtTop }
     var streamIsAtBottom: Bool { stream.streamIsAtBottom }
     func setStreamScrollEnabled(_ enabled: Bool) { streams.forEach { $0.setStreamScrollEnabled(enabled) } }
@@ -907,27 +905,8 @@ final class PostDetailViewController: UIViewController {
     /// deliberately stays full-width: the rail's territory ends well above
     /// the footer.
 
-    /// A tap at `location` in the stream's coordinates, through the
-    /// recogniser's own decision, for tests.
-    func debugTapStream(at location: CGPoint) {
-        stream.debugTapStream(at: location)
-    }
-
     /// The stream's frame of reference, for tests.
     var debugStream: UICollectionView { stream.collectionView }
-
-    /// Wires the INTERACTIVE pull-down dismissal: dragging the list down
-    /// from its top drives the collapse under the finger. The list forwards
-    /// each phase with the raw downward translation and release velocity;
-    /// the host renders the progress and decides, on release, whether to
-    /// finish or spring back. Left unwired by text posts (whose engagement
-    /// is permanent) — nil makes the gesture a plain scroll.
-    func setPullDismissDriveHandler(
-        _ handler: @escaping (CommentsInputBar.PageSwipePhase, _ translation: CGFloat, _ velocity: CGFloat) -> Void
-    ) {
-        onPullDismissDrive = handler
-    }
-    var onPullDismissDrive: ((CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void)?
 
     /// Wires the composer's INTERACTIVE page-swipe — the bar forwards each
     /// pan phase (began/changed/ended) with the raw vertical translation and
@@ -981,64 +960,6 @@ final class PostDetailViewController: UIViewController {
         } else if view.window != nil, !composerBackdrop.isHidden, composerBackdrop.effect == nil {
             composerBackdrop.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
         }
-    }
-
-    /// The stream's two moving parts, driven by Core Animation directly
-    /// rather than inside a `UIView.animate` block. Symmetric: the exit runs
-    /// the same three animations towards the offstage pose.
-    ///
-    /// Model values are set FIRST and unanimated (so the settled state is
-    /// correct even if the animation is removed), then one explicit
-    /// animation per property carries the eye from where it actually was.
-    /// `presentation()` rather than the model value as the start, so an
-    /// interrupted entrance continues from what is on screen instead of
-    /// snapping back.
-    func animateEngagedTransition(toEngaged engaged: Bool, duration: TimeInterval) {
-        let surface = streamSurface.layer
-        let bar = composeBar.layer
-        let fromStream = (surface.presentation() ?? surface).transform
-        let fromBarOpacity = (bar.presentation() ?? bar).opacity
-        // ⚠️ FROM THE MODEL unless an entrance is in flight (the owner's
-        // video, 2026-10-25): the side list's offset (`setOverlayOffset`) is
-        // set just before this, and the presentation layer still shows the
-        // transform of the last commit — identity for a panel released at 0.
-        // Read from there, the bar was drawn without the offset for the whole
-        // engagement and jumped into place at its end.
-        let fromBarTransform = bar.animation(forKey: "comments-engage-transform") != nil
-            ? (bar.presentation() ?? bar).transform
-            : bar.transform
-
-        UIView.performWithoutAnimation {
-            setStreamTransitionProgress(engaged ? 0 : 1)
-            setComposerEntranceState(offstage: !engaged)
-        }
-
-        addEntranceAnimation(surface, "transform", from: fromStream, to: surface.transform, duration: duration)
-        addEntranceAnimation(bar, "opacity", from: fromBarOpacity, to: bar.opacity, duration: duration)
-        addEntranceAnimation(bar, "transform", from: fromBarTransform, to: bar.transform, duration: duration)
-    }
-
-    private func addEntranceAnimation(
-        _ layer: CALayer, _ keyPath: String, from: Any, to: Any, duration: TimeInterval
-    ) {
-        let animation = CABasicAnimation(keyPath: keyPath)
-        animation.fromValue = from
-        animation.toValue = to
-        animation.duration = duration
-        animation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        layer.add(animation, forKey: "comments-engage-\(keyPath)")
-    }
-
-    /// Materializes the footer band's blur AHEAD of the engagement — the
-    /// composer's half of `SnapFeedCell.prematerializeEngagedChrome`, and the
-    /// same reasoning: build the material while nothing is moving.
-    ///
-    /// Called after the offstage pose, which nils the effect; the entrance
-    /// then finds it already built and skips.
-    func prematerializeComposerChrome() {
-        guard view.window != nil, !composerBackdrop.isHidden,
-              composerBackdrop.effect == nil else { return }
-        composerBackdrop.effect = UIBlurEffect(style: SnapCommentsLayout.frostStyle)
     }
 
     /// Extra bottom room so resting content clears the composer: the bar's
@@ -1646,12 +1567,6 @@ final class PostDetailViewController: UIViewController {
     }
 
     static let nearEndRowCount = 5
-
-    /// Whether a drag starting now may drive the pull-down close: from the
-    /// list's top, with the keyboard down. Pure, for tests.
-    static func armsPullDismiss(atTop: Bool, keyboardOpen: Bool) -> Bool {
-        atTop && !keyboardOpen
-    }
 
     /// The empty stream's words: an invitation to write while this is a
     /// DRAFT, an invitation to comment once it is a post.

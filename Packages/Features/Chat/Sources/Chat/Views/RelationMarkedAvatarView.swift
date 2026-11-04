@@ -10,16 +10,17 @@ import UIKit
 /// owner 2026-11-03): the badge alone.
 ///
 /// All five states, the "+" and the clock included; only the "+" takes
-/// touches (`onFollowTapped`). The face itself draws at once; the mark
-/// arrives when the relation is known, through the badge's replace, and
-/// moves nothing: the badge is drawn past the disc's 48 pt, which is all
-/// the row lays out.
+/// touches (`onFollowTapped`). The face itself draws at once; until the
+/// relation is known the badge is a skeleton bone, its cutout already taken
+/// out of the face (#2098), and the mark lands in its place through the
+/// badge's replace. Nothing moves: the badge is drawn past the disc's 48 pt,
+/// which is all the row lays out.
 final class RelationMarkedAvatarView: UIView {
     static let metrics = RelationMarkMetrics(faceDiameter: MonogramAvatarView.rowDiameter)
 
     /// The app's avatar (#943): the picture over the initials.
     private let avatar = AvatarView(size: .avatar)
-    private let faceCutout = CAShapeLayer()
+    private let faceCutout = FaceCutout()
     let badge = RelationBadgeView(metrics: RelationMarkedAvatarView.metrics)
 
     /// The mark on show.
@@ -80,6 +81,7 @@ final class RelationMarkedAvatarView: UIView {
         guard mark != self.mark else { return }
         self.mark = mark
         badge.show(mark, animated: animated && window != nil)
+        if !mark.cutsTheFace { faceCutout.close(avatar.layer, animated: animated && window != nil) }
         applyCutout()
     }
 
@@ -90,52 +92,42 @@ final class RelationMarkedAvatarView: UIView {
         mark == .follow && badge.isUserInteractionEnabled && !badge.isHidden ? badge : nil
     }
 
-    /// The badge's cutout as a disc in `view`'s space, nil with no mark.
-    private func cutoutCircle(in view: UIView) -> UIBezierPath? {
-        guard mark != .none, bounds.width > 0 else { return nil }
+    /// The face loses the badge's disc and its gap (#1912) — the skeleton's
+    /// too (#2098) — cut from the face's own side, never the badge's frame,
+    /// which may not be laid out yet.
+    private func applyCutout() {
+        guard mark.cutsTheFace, bounds.width > 0 else {
+            if !faceCutout.isClosing { faceCutout.close(avatar.layer, animated: false) }
+            return
+        }
         let centre = Self.metrics.badgeCentre(
             inFaceOfSide: bounds.width, rightToLeft: effectiveUserInterfaceLayoutDirection == .rightToLeft
         )
-        return RelationMark.cutout(centre: convert(centre, to: view), metrics: Self.metrics)
-    }
-
-    /// The face loses the badge's disc and its gap (#1912), cut from the
-    /// face's own side, never the badge's frame, which may not be laid out
-    /// yet.
-    private func applyCutout() {
-        guard let circle = cutoutCircle(in: avatar) else {
-            avatar.layer.mask = nil
-            return
-        }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        faceCutout.fillRule = .evenOdd
-        faceCutout.frame = avatar.bounds
-        faceCutout.path = RelationMark.faceMaskPath(cutout: circle)
-        CATransaction.commit()
-        avatar.layer.mask = faceCutout
+        faceCutout.cut(avatar.layer, centre: convert(centre, to: avatar), metrics: Self.metrics)
     }
 
     #if DEBUG
     /// Whether anything is drawn round the face: no, ever (#2082). Tests.
     var drawsRing: Bool { subviews.contains { $0 !== avatar && $0 !== badge } || layer.borderWidth > 0 }
     /// Whether the face has the badge's cutout taken out. Tests.
-    var faceIsCutOut: Bool { avatar.layer.mask === faceCutout }
+    var faceIsCutOut: Bool { faceCutout.isCut(avatar.layer) }
     #endif
 }
 
 extension PersonPill.Badge {
     /// The mark for a relation (#2049): the author pill's mapping — "+" for
     /// someone not followed (a follower included: following back makes a
-    /// friend), the clock for a request, the check, friends — and nothing for
-    /// the viewer, someone blocked, or a relation not known yet.
+    /// friend), the clock for a request, the check, friends — nothing for
+    /// the viewer or someone blocked, and the skeleton's badge for a relation
+    /// not known yet (#2098), never nothing.
     init(relation: FollowRelation?) {
         self = switch relation {
         case .notFollowing, .followedBy: .follow
         case .following: .following
         case .mutual: .friends
         case .requested: .pending
-        case .viewer, .blocked, nil: .none
+        case .viewer, .blocked: .none
+        case nil: .loading
         }
     }
 }

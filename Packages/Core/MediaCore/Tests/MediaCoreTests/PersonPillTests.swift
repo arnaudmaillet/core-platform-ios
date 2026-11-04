@@ -186,6 +186,41 @@ struct PersonPillTests {
         #expect(!pill.faceShows(at: centre), "no cutout under the badge")
     }
 
+    /// ⚠️ NOT KNOWN YET IS THE SKELETON'S BADGE (#2098): a bone disc with
+    /// its cutout already out of the face; none for good is neither.
+    @Test func aRelationNotKnownYetIsABoneDiscWithItsCutout() {
+        let pill = Self.laidOut(PersonPill(carriesBadge: true))
+        pill.setBadge(.loading, animated: false)
+        pill.layoutIfNeeded()
+        #expect(pill.drawnCutoutRadius == 10 + PersonPill.cutoutGap, "no cutout under the skeleton's badge")
+        #expect(pill.drawnBadgeSymbol == nil, "a symbol on the bone")
+        #expect(pill.debugBadgeShowsBone)
+        #expect(pill.accessibilityCustomActions == nil, "a Follow action for a relation not known")
+        pill.setBadge(.none, animated: false)
+        pill.layoutIfNeeded()
+        #expect(pill.drawnCutoutRadius == nil)
+        #expect(!pill.debugBadgeShowsBone)
+    }
+
+    /// The mark lands in the bone's place: the cutout never moves, only the
+    /// disc's content changes.
+    @Test(arguments: [PersonPill.Badge.follow, .following, .friends, .pending])
+    func theMarkLandsWhereTheBoneWas(_ mark: PersonPill.Badge) throws {
+        let pill = Self.laidOut(PersonPill(carriesBadge: true))
+        pill.setBadge(.loading, animated: false)
+        pill.layoutIfNeeded()
+        let before = try #require(pill.debugGeometry.badge)
+        let side = AvatarImageView.bubbleDiameter
+        let probe = pill.convert(CGPoint(x: before.midX, y: before.midY), to: pill.avatar)
+        #expect(!pill.faceShows(at: probe))
+        pill.setBadge(mark, animated: false)
+        pill.layoutIfNeeded()
+        #expect(pill.debugGeometry.badge == before, "the badge moved")
+        #expect(!pill.faceShows(at: probe), "the cutout moved")
+        #expect(pill.faceShows(at: CGPoint(x: side / 2, y: side / 2)))
+        #expect(!pill.debugBadgeShowsBone)
+    }
+
     /// The face's mask reaches its skeleton: the bone's ground is a layer,
     /// never a background the glass would paint outside the mask.
     @Test func theLoadingFaceKeepsTheCutout() {

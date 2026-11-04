@@ -5,23 +5,9 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// **THE FLIGHT IS COMPOSITED THROUGH THIS SCREEN, so this screen's floors
-/// have to stay out of its way.**
-///
-/// A post opened from its COMMENT COUNT engages before the push and opens as a
-/// masked hero: the real thread is drawn through a window that grows from the
-/// media rect, over a card carrying the photograph. That only works while every
-/// opaque layer between the two is transparent — the view, the collection view,
-/// and the cell's own ground.
-///
-/// ⚠️ WHAT BROKE IT was a rule that has nothing to do with transitions: the
-/// ground follows the settled page (light under a text page, black under a
-/// media one), applied at EVERY settle. A flight triggers settles, so one frame
-/// into the opening the ground went black and shut the card out — reported as
-/// the media not transitioning at all and appearing only at the end, and filmed
-/// as exactly one frame of photograph followed by black.
-///
-/// Both rules are right; the order between them was missing. These pin it.
+/// The screen's ground under a media page: black at rest. (The masked
+/// comments opening these tests also pinned is gone with the first comments
+/// space, #2087.)
 @MainActor
 struct MaskedRevealGroundTests {
     private func model(_ id: String, media: URL?) -> FeedItemDisplayModel {
@@ -65,50 +51,6 @@ struct MaskedRevealGroundTests {
         #expect(pager.backgroundColor == .black)
     }
 
-    /// ⚠️ AND IT GOES TRANSPARENT FOR A MASKED OPENING, because the card is
-    /// behind it.
-    @Test func theGroundClearsWhenTheWindowOpens() throws {
-        let feed = feed([model("a", media: URL(string: "https://example.test/a.jpg"))])
-        let pager = try #require(collection(feed))
-
-        feed.debugBeginMaskedReveal(for: PostID("a"))
-
-        #expect(pager.backgroundColor != .black, "the ground is still opaque under the card")
-        #expect(feed.view.backgroundColor != .black)
-    }
-
-    /// ⚠️ AND A SETTLE MID-FLIGHT MUST NOT PAINT IT BACK — the whole defect.
-    ///
-    /// The settle is not hypothetical: realizing the page fires `willDisplay`,
-    /// which recomputes the active item, which reconciles the interface — and
-    /// the ground is one of the things it derives.
-    @Test func aSettleDuringTheOpeningLeavesTheGroundClear() throws {
-        let feed = feed([model("a", media: URL(string: "https://example.test/a.jpg"))])
-        let pager = try #require(collection(feed))
-        feed.debugBeginMaskedReveal(for: PostID("a"))
-
-        feed.scrollViewDidEndDecelerating(pager)
-        feed.debugRealizeVisibleCells()
-
-        #expect(pager.backgroundColor != .black,
-                "a settle repainted the ground black over the flight card")
-    }
-
-    /// And the ground comes back when the flight lands — the rule resumes,
-    /// rather than being permanently disabled by having been suspended once.
-    @Test func theGroundReturnsWhenTheFlightLands() throws {
-        let feed = feed([model("a", media: URL(string: "https://example.test/a.jpg"))])
-        let pager = try #require(collection(feed))
-        feed.debugBeginMaskedReveal(for: PostID("a"))
-
-        feed.zoomTransitionDidEnd()
-
-        #expect(pager.backgroundColor == .black)
-        // …and a later settle keeps it that way, which is what "the rule
-        // resumes" means.
-        feed.scrollViewDidEndDecelerating(pager)
-        #expect(pager.backgroundColor == .black)
-    }
 }
 
 private final class QuietFeed: FeedProviding, @unchecked Sendable {

@@ -88,7 +88,9 @@ final class MessageRequestCell: UITableViewCell {
         avatarPeerID = nil
         peerID = nil
         avatarView.setPicture(nil, pipeline: nil)
-        avatarView.setMark(.none, animated: false)
+        // A reused row starts unknown for its next person, never wearing
+        // the previous one's mark (#2098).
+        avatarView.setMark(.loading, animated: false)
         avatarView.onFollowTapped = nil
     }
 

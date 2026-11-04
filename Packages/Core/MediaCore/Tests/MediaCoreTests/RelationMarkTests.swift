@@ -65,11 +65,56 @@ struct RelationMarkTests {
     @Test(arguments: [36, 96] as [CGFloat])
     func onlyThePlusTakesATap(_ face: CGFloat) {
         let badge = RelationBadgeView(metrics: RelationMarkMetrics(faceDiameter: face))
-        for relation in [PersonPill.Badge.none, .follow, .following, .friends, .pending] {
+        for relation in [PersonPill.Badge.none, .loading, .follow, .following, .friends, .pending] {
             badge.show(relation, animated: false)
             #expect(badge.isUserInteractionEnabled == (relation == .follow), "\(relation)")
             #expect(!badge.isAccessibilityElement, "\(relation)")
         }
+    }
+
+    /// The skeleton's badge (#2098): the kit's bone, the badge's whole side,
+    /// no symbol, no tap, never spoken — not even where the badge speaks for
+    /// itself (the profile header).
+    @Test func theSkeletonsBadgeIsABone() {
+        let badge = RelationBadgeView(metrics: RelationMarkMetrics(faceDiameter: 96))
+        badge.speaksForItself = true
+        #expect(!badge.showsBone)
+        badge.show(.loading, animated: false)
+        #expect(badge.showsBone)
+        #expect(!badge.isUserInteractionEnabled)
+        #expect(!badge.isAccessibilityElement)
+        #expect(RelationBadgeView.discInk(for: .loading) == .clear)
+        badge.show(.follow, animated: false)
+        #expect(!badge.showsBone, "the bone outlived the mark")
+        #expect(badge.isAccessibilityElement)
+        badge.show(.loading, animated: false)
+        badge.show(.none, animated: false)
+        #expect(!badge.showsBone)
+    }
+
+    /// A cutout closed with an animation stays on the face until its shrink
+    /// ends — the bone fades with it; a second animated close changes
+    /// nothing, a new cut cancels it, and a plain close is at once.
+    @Test func anAnimatedCloseShrinksTheDiscThenGivesTheFaceBack() {
+        let face = CALayer()
+        face.bounds = CGRect(x: 0, y: 0, width: 96, height: 96)
+        let cutout = FaceCutout()
+        let metrics = RelationMarkMetrics(faceDiameter: 96)
+        cutout.cut(face, centre: CGPoint(x: 82, y: 82), metrics: metrics)
+        #expect(cutout.isCut(face))
+        cutout.close(face, animated: true)
+        #expect(cutout.isClosing)
+        #expect(cutout.isCut(face), "the mask left before its shrink")
+        #expect(cutout.mask.animation(forKey: "faceCutout.close") != nil)
+        cutout.close(face, animated: true)
+        #expect(cutout.isCut(face), "a second close cut the first short")
+        cutout.cut(face, centre: CGPoint(x: 82, y: 82), metrics: metrics)
+        #expect(!cutout.isClosing)
+        #expect(cutout.mask.animation(forKey: "faceCutout.close") == nil)
+        cutout.close(face, animated: true)
+        cutout.close(face, animated: false)
+        #expect(!cutout.isCut(face), "a plain close waited for the shrink")
+        #expect(!cutout.isClosing)
     }
 
     /// Resized for a Dynamic-Type face, the badge takes its new side and

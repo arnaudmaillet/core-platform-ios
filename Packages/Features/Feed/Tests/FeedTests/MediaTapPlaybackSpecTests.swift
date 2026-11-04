@@ -296,27 +296,4 @@ struct MediaTapPlaybackSpecTests {
         #expect(cell.playbackTapRegionContains(CGPoint(x: 200, y: 104)))
         #expect(cell.playbackTapRegionContains(CGPoint(x: 200, y: 102)) == false)
     }
-
-    // MARK: - The engaged screen keeps its own meaning
-
-    /// ⚠️ WITH THE THREAD OPEN, THE STRIP IS THE WAY BACK — and it stays that
-    /// way. The visible media band above the comments is the one piece of the
-    /// page the panel does not cover, and its job there is to bring the media
-    /// back; pausing would take the screen's only expand-back gesture and give
-    /// nothing in return.
-    @Test func theStripStillExpandsWhileTheThreadIsOpen() async {
-        let (cell, pool, tile) = await Self.landedPage()
-        var expanded = 0
-        cell.onRequestCommentsClose = { expanded += 1 }
-        cell.setCommentsEngaged(true)
-
-        cell.tapMedia(at: Self.mediaPoint(cell))
-        #expect(expanded == 1)
-        #expect(pool.isAdvancing(in: tile))
-
-        // …and the hold is off duty there too, so the two gestures cannot
-        // disagree about whose territory this is.
-        cell.beginMediaHold(at: Self.mediaPoint(cell))
-        #expect(pool.isAdvancing(in: tile))
-    }
 }

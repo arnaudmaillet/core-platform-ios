@@ -498,15 +498,6 @@ final class SnapGlassColumn: UIView {
 
     // MARK: - The items as drawn
 
-    /// An item as it is drawn now — its centre in this view's bounds, its
-    /// scale and opacity — or nil while it does not exist (not born yet, or
-    /// gone). What the wheel hangs on to follow the like through its folds
-    /// (#1872, the lab's `presentedIcon(of:)`).
-    func presentedFace(of id: String) -> (centre: CGPoint, scale: CGFloat, alpha: CGFloat)? {
-        guard let face = faces[id] else { return nil }
-        return (face.centreNow, face.scale.x, max(0, min(1, face.alpha.x)))
-    }
-
     // MARK: - Tests
 
     #if DEBUG

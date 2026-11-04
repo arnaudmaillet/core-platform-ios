@@ -698,41 +698,6 @@ struct SnapActionColumnLayoutTests {
         _ = window
     }
 
-    /// ⚠️ THE PULL-DOWN CLOSE IS THE KEYBOARD'S WHILE IT IS UP (asked
-    /// 2026-10-02). With the keyboard up a downward drag at the list's top only
-    /// puts the keyboard away — it never drives the layout's fade-and-shrink
-    /// close; with the keyboard down the same drag does.
-    @Test func thePullDownCloseWaitsForTheKeyboardToBeDown() throws {
-        #expect(PostDetailViewController.armsPullDismiss(atTop: true, keyboardOpen: false))
-        #expect(!PostDetailViewController.armsPullDismiss(atTop: true, keyboardOpen: true))
-        #expect(!PostDetailViewController.armsPullDismiss(atTop: false, keyboardOpen: false))
-
-        let (controller, window) = Self.engagedPanel()
-        var pulls: [CGFloat] = []
-        controller.setPullDismissDriveHandler { phase, translation, _ in
-            if phase == .changed { pulls.append(translation) }
-        }
-        let stream = try #require(Self.firstView(UICollectionView.self, in: controller.view))
-        let bar = try #require(Self.firstView(CommentsInputBar.self, in: controller.view))
-        let top = -stream.contentInset.top
-        func pull() {
-            stream.contentOffset.y = top
-            stream.delegate?.scrollViewWillBeginDragging?(stream)
-            stream.contentOffset.y = top - 60
-            stream.delegate?.scrollViewDidScroll?(stream)
-        }
-
-        bar.setKeyboardOpen(true)
-        pull()
-        #expect(pulls.allSatisfy { $0 == 0 }, "a pull with the keyboard up drove the close: \(pulls)")
-
-        bar.setKeyboardOpen(false)
-        pulls.removeAll()
-        pull()
-        #expect(pulls.contains { abs($0 - 60) < 0.5 }, "a pull with the keyboard down drove nothing: \(pulls)")
-        _ = window
-    }
-
     /// ⚠️ THE ENGAGED THREAD'S DAY RIDES THE BAR LEFT OF THE POINTS (#757):
     /// none until a chip has gone under the header; one item per day, each
     /// under its own identifier (the morph); held to the width the run leaves

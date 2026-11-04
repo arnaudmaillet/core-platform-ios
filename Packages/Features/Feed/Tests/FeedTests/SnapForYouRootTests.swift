@@ -46,19 +46,19 @@ struct SnapForYouRootTests {
         #expect(!(pushed.navigationItem.rightBarButtonItems ?? []).contains { $0.customView is SnapAuthorIdentityView })
     }
 
-    /// The shell's bell leads while nothing else holds the edge; the ✕ takes
-    /// it while a media post's comments are open, and the pill stays.
-    @Test func theBellLeadsAndTheExitTakesItsPlaceInTheComments() {
+    /// The shell's bell leads, a text post's thread open or not: a media
+    /// post's comments are a sheet (#2087), and nothing takes the edge.
+    @Test func theBellLeadsThroughAThread() {
         let root = feed(root: true)
         let bell = BarItems.icon(id: BarItems.SharedID.notificationsBell, image: nil, label: "Notifications") {}
         root.setLeadingAccessoryItem(bell)
         #expect(root.navigationItem.leftBarButtonItems?.first === bell)
 
-        root.setEngagedChrome(true, hasMedia: true, animated: false)
-        #expect(root.navigationItem.leftBarButtonItems?.first?.accessibilityLabel == "Close comments")
+        root.setEngagedChrome(true, hasMedia: false, animated: false)
+        #expect(root.navigationItem.leftBarButtonItems?.first === bell)
         #expect(!(root.navigationItem.rightBarButtonItems ?? []).contains { $0.customView is SnapAuthorIdentityView })
 
-        root.setEngagedChrome(false, hasMedia: true, animated: false)
+        root.setEngagedChrome(false, hasMedia: false, animated: false)
         #expect(root.navigationItem.leftBarButtonItems?.first === bell)
     }
 

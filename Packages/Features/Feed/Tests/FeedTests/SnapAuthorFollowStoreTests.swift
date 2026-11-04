@@ -87,10 +87,19 @@ struct SnapAuthorFollowStoreTests {
         withExtendedLifetime(subscription) {}
     }
 
-    @Test func anUnknownAuthorDrawsNoBadge() {
-        let store = Self.store(GatedGraph())
-        #expect(store.badge(for: ava) == .none)
+    /// ⚠️ AN UNKNOWN AUTHOR WEARS THE SKELETON'S BADGE (#2098), never
+    /// nothing and never a guess — a failed read leaves it there. The
+    /// viewer's own posts wear none from the first frame, and a store with
+    /// no reader, which will never know, draws none.
+    @Test func anUnknownAuthorWearsTheSkeletonsBadge() {
+        let graph = GatedGraph()
+        let store = SnapAuthorFollowStore(writer: graph, reader: graph, viewer: { ProfileID("prof-viewer") })
+        #expect(store.badge(for: ava) == .loading)
+        #expect(!store.offersFollow(to: ava))
         #expect(store.badge(for: nil) == .none)
+        #expect(store.badge(for: ProfileID("prof-viewer")) == .none, "the viewer's own post wore a mark")
+        let blind = SnapAuthorFollowStore(writer: graph, reader: nil)
+        #expect(blind.badge(for: ava) == .none, "a bone no read will ever resolve")
     }
 
     @Test func withoutAFollowSeamNothingIsOfferedOrAsked() {
@@ -350,8 +359,8 @@ struct SnapAuthorFollowStoreTests {
         entities.viewerDidChange()
 
         #expect(changed == [ava, bo])
-        #expect(store.badge(for: ava) == .none)
-        #expect(store.badge(for: bo) == .none)
+        #expect(store.badge(for: ava) == .loading)
+        #expect(store.badge(for: bo) == .loading)
         store.resolve(for: ava)
         await Self.settle { graph.pendingLookups == 1 }
         #expect(graph.lookups == [ava], "the new viewer's answer is asked for")

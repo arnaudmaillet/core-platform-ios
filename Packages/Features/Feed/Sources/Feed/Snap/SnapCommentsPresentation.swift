@@ -1,48 +1,15 @@
-import CoreStorage
 import DesignSystem
 import UIKit
 
-/// The single geometry authority for the comments engagement — the pure
-/// in-cell layout mutation between the page's two states:
+/// The comments' shared geometry and materials: where a stream starts under
+/// the screen chrome, the frost bands that keep the bars legible over rows,
+/// the skeleton and empty page, a text page's resting panel. Read by the text
+/// page's comments, the media post's sheet (`SnapCommentsSheetSession`), the
+/// detached composer and the conversation.
 ///
-///   NORMAL:  full-bleed media under the overlay chrome.
-///   ENGAGED: [‹]  …  [⇅ sort] [author pill]       — screen chrome
-///            ( ) [ caption bubble  10 weeks ]     ┐ the comment LIST:
-///            ( ) Kenji Tanaka · 20m               │ the caption is row #0
-///            ( ) Lena Klein · 5m                  ┘ and scrolls with it
-///            [ compose bar          🎙 ]          — clear, no frost band
-///            [ a black wash, ~50%    ]            — the readability layer
-///            [ the post's media, full-bleed ]     — never moves, never stops
-///
-/// THE MEDIA DOES NOT DOCK. It stays exactly where it was — full-bleed,
-/// identity transform, still playing — and becomes the BACKGROUND of the
-/// engaged screen — at identity, square-cornered, untouched. A plain black
-/// wash pushes it back in depth so the stream reading over it stays legible
-/// WITHOUT blurring the photo away. (The 88pt tile that
-/// preceded this is gone, and with it the crop masks, the media's own glass
-/// card, and the whole bug class that came from the engagement owning the
-/// media's transform — every path that reset it had to branch on the
-/// engagement, and three separate defects came from one that didn't.)
-///
-/// (Author identity deliberately does NOT appear in the card: the nav
-/// pill — screen chrome — already carries it, and fading the pill means
-/// fighting its glass platter. One identity, zero duplication.)
-///
-/// ONE surface, one motion profile: every element of the mutation lives in
-/// the cell's own hierarchy and animates in a single spring block (the
-/// sheet, the custom presentation controller, and the reveal animators that
-/// preceded this design are gone — each split the screen into two motion
-/// systems, and each read as exactly that).
-///
-/// The background is the wash, plus two blur bands — a dense adaptive
-/// material, gradient-masked so each dissolves into the stream instead of
-/// ending on an edge. They do one narrow job: keeping the nav chrome and the
-/// composer legible where rows glide past them.
-///
-/// What is left here is small on purpose: with the caption scrolling as a
-/// list row, the only geometry the cell still needs is where the stream
-/// starts, and that is a pure function of the frozen top inset (the feed's
-/// pushed-threshold doctrine).
+/// The first comments space of a media post — the in-page engagement over a
+/// black wash, with its pull-down dismissal — is gone (#2087): a media post's
+/// comments are the sheet.
 enum SnapCommentsLayout {
     /// The gap between the screen chrome and the first row of the stream.
     ///
@@ -62,37 +29,6 @@ enum SnapCommentsLayout {
     /// it, which is exactly what was subtracted.
     static let streamTopBreath: CGFloat = Spacing.lg
 
-    // MARK: The caption bubble's interior
-    //
-    // The caption is no longer a floating card the cell reserves space for —
-    // it is the comment list's FIRST ROW, a message bubble that scrolls with
-    // everything else (see `CaptionBubbleCell`). What survives here is the
-    // bubble's own styling, shared with the list cell so its interior and
-    // the stream's other geometry agree.
-    //
-    // Everything that existed to RESERVE a fixed region for a floating card
-    // is gone with the card: the caption line cap, the measured caption
-    // height, the band slack, and `cardHeight`. A self-sizing list cell
-    // measures its own text — that is the entire job those did, done by
-    // Auto Layout instead of by hand.
-
-    /// The bubble's inner content margins.
-    ///
-    /// `lg`, the message-bubble measure: a chat bubble's text sits well clear
-    /// of its rounded edge, and at the old `md` the caption crowded a corner
-    /// radius that has since grown.
-    static let cardContentInset: CGFloat = Spacing.lg
-    /// The interior separation between the caption and the timestamp beneath
-    /// it — a comfortable breath, not a cramped hairline.
-    static let captionActionsGap: CGFloat = Spacing.sm
-
-    /// The engaged-state spring, shared by every leg of the one animation —
-    /// and symmetric: the return runs the same envelope. ONE rhythm: the
-    /// media's recede, the backdrop's wash, the chrome fades, the stream's
-    /// fade-and-expand, and the composer's fade all breathe in this single
-    /// block.
-    static let engageDuration: TimeInterval = 0.45
-    static let disengageDuration: TimeInterval = 0.45
     /// The stream's entrance scale: the whole comments layer EXPANDS into
     /// place as it fades in, rather than simply appearing there. This
     /// carries the engagement's motion now that neither the media nor a
@@ -194,60 +130,6 @@ enum SnapCommentsLayout {
     /// clip the material instead of shaping it.
     static let stripCardCornerRadius: CGFloat = 18
 
-    /// The comments region's height: everything below the screen chrome,
-    /// down to the cell's bottom edge.
-    static func commentsRegionHeight(containerHeight: CGFloat, topInset: CGFloat) -> CGFloat {
-        max(0, containerHeight - commentsTopInset(topInset: topInset))
-    }
-
-    // MARK: The background treatment
-    //
-    // The media stays full-bleed behind the whole engaged screen, so the
-    // stream reads over live content. ONE constant makes that legible: a
-    // plain black wash. No blur, by decision — see `backdropDimOpacity`.
-
-    /// How far the media is dimmed behind the engaged stream, and the whole
-    /// readability treatment: a solid black overlay at this opacity, over
-    /// undisturbed pixels. Nothing else — no blur, no material, no gradient.
-    ///
-    /// TWO ROUNDS OF MATERIAL WERE TRIED AND BOTH LOST THE PHOTO, which is
-    /// why the treatment is now this plain. `systemThinMaterialDark` + 0.45
-    /// sampled a FLAT (36,44,64) at two heights 700pt apart on a page whose
-    /// media runs a yellow-green gradient from (164,164,91) to (101,100,56)
-    /// — a blue-dominant constant, which that content cannot produce: it had
-    /// rebuilt the black curtain this layout exists to remove.
-    /// `systemUltraThinMaterialDark` + 0.28 restored the hue but still
-    /// smeared the image past recognition. A dark material does not merely
-    /// blur; it desaturates and tints toward its own grey, and over a
-    /// full-screen photo that reads as fog.
-    ///
-    /// A wash has none of that: it scales luminance and leaves hue, detail,
-    /// and motion intact, so the post stays the post. It is also the
-    /// cheapest thing that can work — a single opaque-blend pass over a
-    /// surface that may be a playing `AVPlayerLayer`, where a full-screen
-    /// blur is a per-frame render-server cost. (Per-row glass was considered
-    /// and declined for the same reason, plus the reply indent / thread
-    /// seams / rail exclusion all fight a per-row capsule.)
-    ///
-    /// At 0.8 a white region lands at sRGB 51 and a mid-tone photo near 26:
-    /// white body text reads at about 12:1 over the brightest media, and a
-    /// dark photo still shows its shapes and motion. It was 0.5 (a
-    /// near-white region at about 3.9:1) until 2026-09-28, then 0.65 (about
-    /// 7:1, the post at 35% of its light) until 2026-10-02, when the
-    /// comments still did not stand out enough over the post. Raising it
-    /// buys contrast and costs visibility of the post, which is the trade
-    /// this constant exists to express; the post keeps a fifth of its light.
-    ///
-    /// Since 2026-10-04 the viewer can move it (Settings → App and Device →
-    /// Comments on Media → Comments Screen, 0.5…1): 0.8 is the default, read
-    /// again each time the comments open.
-    nonisolated(unsafe) private(set) static var backdropDimOpacity: CGFloat = 0.8
-
-    /// Reads the wash from the device preferences.
-    static func refreshBackdrop(from store: MediaCommentPreferencesStore = .standard) {
-        backdropDimOpacity = CGFloat(store.preferences.commentsBackdropOpacity)
-    }
-
     // MARK: The chrome's frost bands
     //
     // Two dissolving bands frame the stream: one under the nav chrome, one
@@ -310,52 +192,6 @@ enum SnapCommentsLayout {
     /// what makes it gentle, so the number stays.
     static let footerFrostLead: CGFloat = 96
 
-    // MARK: The interactive pull-down dismissal
-    //
-    // Dragging down at the top of the comment list collapses back to media,
-    // and does it UNDER THE FINGER: the layer fades, shrinks, and un-dims in
-    // step with the drag, then commits or springs back on release. The
-    // earlier version fired a fixed animation once a threshold was crossed,
-    // which meant the gesture had no relationship to what was on screen
-    // until it was already over.
-    //
-    // The list's OVERSHOOT past its top is the progress — the same number
-    // UIKit is already rubber-banding, so the content and the fade cannot
-    // drift apart. Arming is unconditional by construction: overshoot exists
-    // only at the top, so a drag anywhere else drives nothing, and no rule
-    // about where the drag began is needed to say so.
-    //
-    // The CANCEL is free for the same reason. A pull that falls short
-    // springs home under UIKit's own animation, and the scroll callbacks
-    // walk the transition back to rest with it — there is no separate
-    // spring to write, and none to keep in sync with the bounce.
-
-    /// The OVERSHOOT that maps to a complete dismissal — how far past its
-    /// top the list is pulled, not how far the finger moved. UIKit's rubber
-    /// band damps the finger to roughly half, so this reads as about twice
-    /// its number in the hand; 90 of overshoot is a deliberate,
-    /// comfortable pull.
-    static let pullDismissDistance: CGFloat = 90
-    /// The progress at which releasing COMMITS rather than springs back —
-    /// about a third of the way, so a decisive pull finishes and a hesitant
-    /// one returns.
-    static let pullDismissCommitProgress: CGFloat = 0.35
-    /// A flick commits from any progress: past this downward velocity
-    /// (points/ms) the gesture reads as a throw.
-    static let pullDismissCommitVelocity: CGFloat = 1.2
-
-    /// The transition's progress for a finger displacement: 0 fully engaged,
-    /// 1 fully dismissed. Clamped, so an upward drag reads as 0 rather than
-    /// running the transition backwards past its own resting state.
-    static func pullDismissProgress(translation: CGFloat) -> CGFloat {
-        min(1, max(0, translation / pullDismissDistance))
-    }
-
-    /// Whether a released drag should finish the dismissal or spring back.
-    /// `velocity` is the release velocity in points/ms, positive downward.
-    static func shouldCompletePullDismiss(progress: CGFloat, velocity: CGFloat) -> Bool {
-        progress >= pullDismissCommitProgress || velocity >= pullDismissCommitVelocity
-    }
 }
 
 /// The engaged screen's READABILITY LAYER: the one surface between the
@@ -419,33 +255,6 @@ enum SnapChromeTheme {
     static func style(hasMedia: Bool, device: UIUserInterfaceStyle) -> UIUserInterfaceStyle {
         hasMedia ? .dark : device
     }
-}
-
-final class SnapMediaBackdropView: UIView {
-    init() {
-        super.init(frame: .zero)
-        isUserInteractionEnabled = false
-        backgroundColor = .black
-        alpha = 0
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// Raises (or clears) the wash. Call inside the engagement's animation
-    /// block — alpha interpolates.
-    func setActive(_ active: Bool) {
-        setDim(active ? SnapCommentsLayout.backdropDimOpacity : 0)
-    }
-
-    /// The wash at an arbitrary opacity — the interactive dismissal ramps it
-    /// down under the finger rather than switching it.
-    func setDim(_ opacity: CGFloat) {
-        alpha = min(max(0, opacity), SnapCommentsLayout.backdropDimOpacity)
-    }
-
-    /// The wash's current opacity — the choreography's test seam.
-    var dimOpacity: CGFloat { alpha }
 }
 
 

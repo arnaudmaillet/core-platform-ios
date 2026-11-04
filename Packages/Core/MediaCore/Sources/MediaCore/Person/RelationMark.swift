@@ -81,6 +81,89 @@ public enum RelationMark {
     }
 }
 
+/// A face's mask with the relation badge's disc cut out (#1912): the one
+/// owner of that mask for every face that wears the mark — the author pill,
+/// the inbox rows, the profile header (#2098).
+///
+/// Cut from the badge's centre in the face's own space, never the badge's
+/// frame, which may not be laid out yet. Closed, the face is whole again: at
+/// once, or — a skeleton badge that turned out to be no badge — the disc
+/// shrinks to nothing while the bone fades, in one motion.
+@MainActor
+public final class FaceCutout {
+    /// The mask set on the face while it is cut.
+    public let mask = CAShapeLayer()
+    private var centre: CGPoint?
+    /// A close under way: the mask leaves the face when it ends.
+    public private(set) var isClosing = false
+    /// Which close the running animation's end belongs to: one cancelled by a
+    /// cut, then followed by another close, must not end the new one early.
+    private var closeGeneration = 0
+    private static let closeKey = "faceCutout.close"
+
+    public init() {
+        mask.fillRule = .evenOdd
+    }
+
+    /// Whether `face` wears this cutout now.
+    public func isCut(_ face: CALayer) -> Bool { face.mask === mask }
+
+    /// Cuts the badge's disc round `centre` (in `face`'s space) out of `face`.
+    public func cut(_ face: CALayer, centre: CGPoint, metrics: RelationMarkMetrics) {
+        cancelClose()
+        self.centre = centre
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        mask.frame = face.bounds
+        mask.path = RelationMark.faceMaskPath(cutout: RelationMark.cutout(centre: centre, metrics: metrics))
+        CATransaction.commit()
+        face.mask = mask
+    }
+
+    /// Gives `face` back whole: at once, or — animated — the disc shrinks to
+    /// nothing over a skeleton's exit (`UIView.skeletonFadeDuration`), the
+    /// badge's bone fading with it, and the mask leaves at the end. A layout
+    /// pass leaves a close under way to finish (`isClosing`).
+    public func close(_ face: CALayer, animated: Bool) {
+        guard isCut(face) else { return }
+        guard animated, let from = mask.path, let centre else {
+            cancelClose()
+            face.mask = nil
+            return
+        }
+        guard !isClosing else { return }
+        isClosing = true
+        closeGeneration += 1
+        let generation = closeGeneration
+        let to = RelationMark.faceMaskPath(
+            cutout: UIBezierPath(arcCenter: centre, radius: 0.01, startAngle: 0, endAngle: 2 * .pi, clockwise: true)
+        )
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { [weak self, weak face] in
+            MainActor.assumeIsolated {
+                guard let self, self.isClosing, self.closeGeneration == generation else { return }
+                self.isClosing = false
+                if let face, self.isCut(face) { face.mask = nil }
+            }
+        }
+        let shrink = CABasicAnimation(keyPath: "path")
+        shrink.fromValue = from
+        shrink.toValue = to
+        shrink.duration = UIView.skeletonFadeDuration
+        shrink.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        CATransaction.setDisableActions(true)
+        mask.path = to
+        mask.add(shrink, forKey: Self.closeKey)
+        CATransaction.commit()
+    }
+
+    private func cancelClose() {
+        guard isClosing else { return }
+        isClosing = false
+        mask.removeAnimation(forKey: Self.closeKey)
+    }
+}
+
 /// The relation badge (#925): a disc on the face's rim wearing the relation's
 /// symbol — the author pill's, and the profile header's (#2014), at the size
 /// its face's metrics give.
@@ -101,6 +184,9 @@ public final class RelationBadgeView: UIButton {
     /// The sizes it is drawn at.
     public private(set) var metrics: RelationMarkMetrics
     private let glyph = UIImageView()
+    /// The skeleton's disc while the relation is not known (#2098): the
+    /// kit's bone, the badge's whole side, under the glyph.
+    private let bone = SkeletonBoneView(rounding: .capsule)
     private var widthConstraint: NSLayoutConstraint?
     private var heightConstraint: NSLayoutConstraint?
     /// The badge on screen.
@@ -111,6 +197,9 @@ public final class RelationBadgeView: UIButton {
     public init(metrics: RelationMarkMetrics) {
         self.metrics = metrics
         super.init(frame: .zero)
+        bone.isUserInteractionEnabled = false
+        bone.isHidden = true
+        bone.pin(to: self)
         glyph.isUserInteractionEnabled = false
         glyph.contentMode = .center
         glyph.constrain(in: self) { parent in
@@ -135,6 +224,8 @@ public final class RelationBadgeView: UIButton {
     }
 
     public var glyphImage: UIImage? { glyph.image }
+    /// Whether the skeleton's bone shows. Tests.
+    public var showsBone: Bool { !bone.isHidden }
 
     /// Resizes the badge for a face whose side layout resolved (a Dynamic
     /// Type face): its side and its glyph, in place.
@@ -146,10 +237,20 @@ public final class RelationBadgeView: UIButton {
         glyph.image = Self.glyphImage(drawn, metrics: metrics)
     }
 
+    /// Draws `badge`. The skeleton's bone shows for `.loading`; leaving it,
+    /// the bone fades out as a skeleton's exit (#1769) while the mark comes in
+    /// through the badge's replace — the disc's content changes, nothing
+    /// moves (#2098).
     public func show(_ badge: PersonPill.Badge, animated: Bool) {
         guard badge != drawn else { return }
+        let wasLoading = drawn == .loading
         drawn = badge
         apply(interactionFor: badge)
+        if badge == .loading {
+            bone.showSkeleton()
+        } else if wasLoading {
+            if animated { bone.fadeOutSkeleton() } else { bone.isHidden = true }
+        }
         let image = Self.glyphImage(badge, metrics: metrics)
         guard animated else {
             glyph.image = image
@@ -171,7 +272,7 @@ public final class RelationBadgeView: UIButton {
     /// host's own tap.
     private func apply(interactionFor badge: PersonPill.Badge) {
         isUserInteractionEnabled = badge == .follow
-        isAccessibilityElement = speaksForItself && badge != .none
+        isAccessibilityElement = speaksForItself && badge.accessibilityLabel != nil
         accessibilityLabel = speaksForItself ? Self.spokenState(badge) : nil
         accessibilityTraits = speaksForItself && badge == .follow ? .button : .none
     }
@@ -179,7 +280,7 @@ public final class RelationBadgeView: UIButton {
     /// The badge's words for VoiceOver. Nil for none.
     static func spokenState(_ badge: PersonPill.Badge) -> String? {
         switch badge {
-        case .none: nil
+        case .none, .loading: nil
         case .follow: "Follow"
         case .following: "Following"
         case .friends: "Friends"
@@ -192,7 +293,7 @@ public final class RelationBadgeView: UIButton {
     /// FRIENDS pink, their mark white; clear for none.
     public static func discInk(for badge: PersonPill.Badge) -> UIColor {
         switch badge {
-        case .none: .clear
+        case .none, .loading: .clear
         case .follow: PersonPillBadgeInks.restingDisc
         case .following, .pending: PersonPillBadgeInks.quietDisc
         case .friends: PersonPillBadgeInks.accent
@@ -202,7 +303,7 @@ public final class RelationBadgeView: UIButton {
     /// The glyph's ink for a badge: pink on the grey discs, white elsewhere.
     public static func glyphInk(for badge: PersonPill.Badge) -> UIColor {
         switch badge {
-        case .none: .clear
+        case .none, .loading: .clear
         case .following, .pending: PersonPillBadgeInks.accent
         case .follow, .friends: PersonPillBadgeInks.glyph
         }

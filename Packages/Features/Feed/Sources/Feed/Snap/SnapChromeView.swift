@@ -240,9 +240,6 @@ final class SnapChromeView: UIView {
     /// actions and the sound fuse, split and fold into the sound — the
     /// buttons are its items, on their stations.
     private let glassColumn = SnapGlassColumn()
-    /// The comments layout of a media page (#1872): everything folds into
-    /// the sound bubble, which stays in place.
-    private(set) var isColumnCollapsed = false
     /// Where `columnLayer` is mounted: this chrome, or the cell's content.
     private weak var columnHost: UIView?
 
@@ -862,9 +859,6 @@ final class SnapChromeView: UIView {
         capsule.onReturnShown = { [weak self] shown in self?.boostButton.setShowsReturn(shown) }
         boostButton.onReturn = { [weak capsule] in capsule?.returnToRest() }
         capsule.host = { [weak self] glass in self?.glassColumn.insertAccessory(glass) }
-        // The wheel hangs on the like as drawn: it folds with it (#1872).
-        // The column and the wheel's layer share one space.
-        shortcutRail.follow = { [weak self] in self?.glassColumn.presentedFace(of: ColumnItem.like) }
         mountColumn(in: self)
         soundBubble.onTap = { [weak self] in
             guard let self else { return }
@@ -1021,8 +1015,8 @@ final class SnapChromeView: UIView {
         // them in the same pass (#1872).
         glassColumn.setNeedsLayout()
         glassColumn.layoutIfNeeded()
-        // The wheel on its seat (#1872) — by size and centre: it may wear its
-        // fold's transform, and a scroll view's bounds origin is its offset.
+        // The wheel on its seat (#1872) — by size and centre: a scroll view's
+        // bounds origin is its offset.
         let wheelFrame = railSeat.convert(railSeat.bounds, to: railLayer)
         if shortcutRail.bounds.size != wheelFrame.size { shortcutRail.bounds.size = wheelFrame.size }
         let centre = CGPoint(x: wheelFrame.midX, y: wheelFrame.midY)
@@ -1923,11 +1917,8 @@ final class SnapChromeView: UIView {
         let returnedToRest = resolved >= 1 && lastEngagedProgress < 1
         lastEngagedProgress = resolved
         alpha = resolved
-        // A wheel folding with the like hides by its fold, not by a fade
-        // (#1872); any other — a text page's, a page whose column does not
-        // fold — fades with the chrome, as before.
-        let fold = shortcutRail.fold
-        railLayer.alpha = fold.isCollapsed || fold.isFolding ? 1 : resolved
+        // The wheel fades with the chrome.
+        railLayer.alpha = resolved
         shortcutRail.capsule.layout()
         if returnedToRest { commentEmptyState.restartLabelDwell() }
     }
@@ -1977,38 +1968,18 @@ final class SnapChromeView: UIView {
     }
 
     /// Where the column's items stand: on their stations, each a bubble of
-    /// its own; collapsed, the sound alone.
+    /// its own.
     private func columnSlots() -> [[SnapGlassColumn.Slot]] {
         func slot(_ id: String, _ item: UIView, _ station: UIView) -> SnapGlassColumn.Slot? {
             guard !item.isHidden, station.bounds.width > 0 else { return nil }
             return SnapGlassColumn.Slot(id: id, frame: station.convert(station.bounds, to: glassColumn))
         }
         let sound = slot(ColumnItem.sound, soundBubble, soundStation)
-        if isColumnCollapsed, let sound { return [[sound]] }
         return [
             slot(ColumnItem.like, boostButton, boostStation),
             slot(ColumnItem.actions, postActions, postActionsStation),
             sound,
         ].compactMap { $0.map { [$0] } }
-    }
-
-    /// The comments layout of a MEDIA page (#1872, the owner): the like and
-    /// the post's actions fold into the sound bubble, which stays in place;
-    /// closing the comments reveals them from it — one capsule, then the
-    /// split. A text page's engagement is permanent and changes nothing.
-    func setColumnCollapsed(_ collapsed: Bool, animated: Bool) {
-        guard collapsed != isColumnCollapsed else { return }
-        isColumnCollapsed = collapsed
-        // The comments take the page: the wheel's capsule goes at once.
-        shortcutRail.capsule.setDismissed(collapsed)
-        glassColumn.refresh(animated: animated)
-        // …and its emotes fold into the like, with the bubbles — recursive,
-        // as in the lab; they come out of it once it is born again (#1872).
-        if collapsed, !soundBubble.isHidden {
-            shortcutRail.collapseEmotes(animated: animated)
-        } else {
-            shortcutRail.revealEmotes(animated: animated)
-        }
     }
 
     /// Shows or hides the column — the like (boost) pill and the sound
@@ -2063,10 +2034,6 @@ final class SnapChromeView: UIView {
         // trap as the line below, one gesture further in. Unanimated: there is
         // nothing on screen to dissolve, and the next configure is immediate.
         setScrubFocus(false, animated: false)
-        // The next post opens on its media layout (#1872).
-        isColumnCollapsed = false
-        glassColumn.refresh(animated: false)
-        shortcutRail.revealEmotes(animated: false)
         // …and a browse in flight takes its previews with it (#1734).
         browseStrip.hide(animated: false)
         // A scaffold handed the next post while still faded would keep that

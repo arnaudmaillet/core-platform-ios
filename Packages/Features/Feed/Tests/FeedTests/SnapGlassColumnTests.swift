@@ -26,34 +26,6 @@ struct SnapGlassColumnTests {
         #expect(mediaChrome(postActions: false).debugColumnItems == [["like"], ["sound"]])
     }
 
-    /// The comments layout folds everything into the sound, which stays on
-    /// its station; closing them stands the stations again.
-    @Test func theCommentsFoldTheColumnIntoTheSound() {
-        let chrome = mediaChrome(postActions: true)
-        let sound = chrome.debugFrame(of: chrome.debugSoundBubble)
-        chrome.setColumnCollapsed(true, animated: false)
-        chrome.layoutIfNeeded()
-        #expect(chrome.debugColumnItems == [["sound"]])
-        #expect(chrome.debugGlassColumn.debugShapes.count == 1)
-        #expect(chrome.debugFrame(of: chrome.debugSoundBubble) == sound, "the sound bubble moved")
-        #expect(chrome.debugBoostButton.superview == nil, "the like stayed in the glass")
-        chrome.setColumnCollapsed(false, animated: false)
-        chrome.layoutIfNeeded()
-        #expect(chrome.debugColumnItems == [["like"], ["actions"], ["sound"]])
-        #expect(chrome.debugBoostButton.superview != nil)
-    }
-
-    /// A page with no sound face (a text page) has nothing to fold into: its
-    /// like stands where it stood.
-    @Test func withNoSoundTheColumnDoesNotFold() {
-        let chrome = SnapChromeView(frame: SnapActionColumnLayoutTests.screen)
-        chrome.setFixedInsets(SnapActionColumnLayoutTests.insets)
-        chrome.configure(with: SnapActionColumnLayoutTests.mediaModel(mediaURL: nil))
-        chrome.layoutIfNeeded()
-        chrome.setColumnCollapsed(true, animated: false)
-        #expect(chrome.debugColumnItems == [["like"]])
-    }
-
     /// Each item is hosted IN its bubble's glass — the only way a touch
     /// reaches the glass (the lab's finding 3) — at its station's frame.
     @Test func eachItemLivesInItsBubblesGlass() throws {

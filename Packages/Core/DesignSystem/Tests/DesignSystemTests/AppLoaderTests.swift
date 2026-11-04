@@ -317,6 +317,33 @@ struct AppLoaderTests {
         #expect(!indicator.debugIsRefreshing, "the hero loader never ended")
     }
 
+    /// ⚠️ NOT REFRESHING, NOTHING TO END (#2097): an end asked with no
+    /// refresh under way — For You ends its controls after every page —
+    /// never reaches UIKit's own, whose offset write (`_endRefreshingAnimated:`
+    /// → `_stopScrollingNotify:`) cut a fast fling dead at each page landing,
+    /// measured on the simulator with `-scroll-stop-trace`. A refresh that
+    /// did start still ends through it, folding the list back.
+    @Test func anEndWithNoRefreshNeverReachesUIKits() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        let list = UIScrollView(frame: window.bounds)
+        list.contentSize = CGSize(width: 390, height: 4000)
+        window.addSubview(list)
+        let control = AppRefreshControl()
+        control.minimumShown = 0
+        list.refreshControl = control
+        window.isHidden = false
+        defer { window.isHidden = true }
+        list.contentOffset = CGPoint(x: 0, y: 1200)
+        control.endRefreshing()
+        control.endRefreshing()
+        #expect(control.debugEndsPassedToUIKit == 0, "an end with no refresh reached UIKit's")
+        #expect(list.contentOffset.y == 1200)
+        control.beginRefreshing()
+        control.endRefreshing()
+        #expect(control.debugEndsPassedToUIKit == 1, "a refresh's end never reached UIKit's")
+        #expect(!control.isRefreshing)
+    }
+
     /// After a refresh, the list folding back is not a pull (#1400): once
     /// the ring's fade is over, nothing shows again until the list is at
     /// rest — or a finger pulls anew.
