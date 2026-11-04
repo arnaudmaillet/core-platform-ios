@@ -899,11 +899,10 @@ struct SoundSheetTests {
         #expect(covers == [true, false])
     }
 
-    /// The track's playhead (#1964, placement (a)): under the title, laid
-    /// out always — the header's height does not move with it — empty before
-    /// any play, back at the start at the end. It takes the finger only once
-    /// the track exists.
-    @Test func theTracksBarSitsUnderTheTitle() throws {
+    /// The track's playhead (#1964): laid out always — the header's height
+    /// does not move with it — empty before any play, back at the start at
+    /// the end. It takes the finger only once the track exists.
+    @Test func theTracksBarFollowsTheTrack() throws {
         let controller = sheet(tiles: 3, preview: Self.previewFile)
         try laidOut(controller)
         let header = try #require(controller.debugHeader)
@@ -921,6 +920,112 @@ struct SoundSheetTests {
         controller.debugEndTrack()
         #expect(header.debugTrackPlayedWidth == 0, "the end left the bar where it was")
         #expect(controller.isPreviewing, "the track stopped at its end instead of looping")
+    }
+
+    /// The bar is hidden until the sheet's track first plays (#2100), then
+    /// stays for the sheet's life: paused, the sound given back to the post,
+    /// looped. Hidden, it is not drawn and takes no finger.
+    @Test func theTracksBarShowsFromTheFirstPlay() throws {
+        let controller = sheet(tiles: 3, preview: Self.previewFile)
+        try laidOut(controller)
+        let header = try #require(controller.debugHeader)
+        #expect(!header.debugTrackShown, "a bar before any play")
+        #expect(header.trackBar.isHidden, "a hidden bar still drawn")
+        header.debugTapRecord()
+        #expect(header.debugTrackShown, "no bar once the track plays")
+        controller.stopPreview()
+        #expect(header.debugTrackShown, "the bar went on pause")
+        controller.releaseTrack()
+        #expect(header.debugTrackShown, "the bar went when the post took the sound back")
+        header.debugTapRecord()
+        controller.debugEndTrack()
+        #expect(header.debugTrackShown, "the bar went at the loop")
+
+        let next = sheet(tiles: 3, preview: Self.previewFile)
+        try laidOut(next)
+        #expect(try !#require(next.debugHeader).debugTrackShown, "a new sheet starts with a bar")
+    }
+
+    /// A post with no audio never shows the bar, whatever is asked.
+    @Test func aPostWithNoAudioNeverShowsTheBar() {
+        let header = SoundSheetHeaderView(frame: CGRect(x: 0, y: 0, width: 370, height: 96))
+        header.configure(title: "Original sound", subtitle: "@vera", meta: "0:30 · 3 posts", canToggle: false)
+        header.setTrackShown(true, animated: false)
+        #expect(!header.debugTrackShown)
+    }
+
+    /// The bar's bottom is the record's (#2100), and the three lines are one
+    /// block centred in the room above it — the bar shown or not, at the
+    /// same header height, so the collapsed detent never moves.
+    @Test func theBarSitsOnTheRecordsBottomAndTheLinesAboveIt() {
+        let width: CGFloat = 402 - 2 * Sheet.headerInset
+        let height = SoundSheetHeaderView.fittingHeight(
+            width: width, title: "Veridis Quo", subtitle: "Daft Punk", meta: "0:30 · 23 posts", canToggle: true
+        )
+        #expect(height == SoundSheetHeaderView.artworkSide, "the header is no longer the record's height")
+        func laidOut(shown: Bool) -> SoundSheetHeaderView {
+            let header = SoundSheetHeaderView(frame: CGRect(x: 0, y: 0, width: width, height: height))
+            header.configure(title: "Veridis Quo", subtitle: "Daft Punk", meta: "0:30 · 23 posts", canToggle: true)
+            header.setTrackShown(shown, animated: false)
+            header.layoutIfNeeded()
+            return header
+        }
+        let hidden = laidOut(shown: false)
+        let shown = laidOut(shown: true)
+        for header in [hidden, shown] {
+            #expect(abs(header.debugTrackFrame.maxY - header.debugRecordFrame.maxY) < 0.5)
+            #expect(header.debugTrackFrame.minX == header.debugLinesFrame.minX)
+            let lines = header.debugLinesFrame
+            #expect(lines.maxY <= header.debugTrackFrame.minY - Spacing.xs + 0.5, "the lines run into the bar")
+            let room = (header.debugTrackFrame.minY - Spacing.xs) / 2
+            #expect(abs(lines.midY - room) < 0.5, "the lines are not centred above the bar: \(lines)")
+        }
+        #expect(hidden.debugLinesFrame == shown.debugLinesFrame, "the lines moved with the bar")
+        let fitted = shown.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+        ).height.rounded(.up)
+        #expect(fitted == height, "the bar shown changed the header's height")
+        // Centred on the record instead, the lines would end this close to
+        // the bar — under `Spacing.xs`, so they are centred above it (§3).
+        let centredGap = header(centredGapOf: shown)
+        #expect(centredGap < Spacing.xs, "centred on the record would clear the bar: \(centredGap)")
+    }
+
+    /// At the app's largest text size the lines outgrow the record: the
+    /// header grows, and the bar stays under them at its bottom, never over
+    /// them — on an iPhone 18 Pro and an SE alike.
+    @Test func atTheLargestTextSizeTheBarStaysUnderTheLines() {
+        for screen: CGFloat in [402, 375] {
+            let width = screen - 2 * Sheet.headerInset
+            // In a window: a label follows a text size its window gives it.
+            let window = UIWindow(frame: CGRect(x: 0, y: 0, width: screen, height: 874))
+            window.traitOverrides.preferredContentSizeCategory = TextSizeCeiling.maximum
+            window.isHidden = false
+            defer { window.isHidden = true }
+            let header = SoundSheetHeaderView(frame: CGRect(x: 0, y: 0, width: width, height: 96))
+            window.addSubview(header)
+            header.configure(title: "Veridis Quo", subtitle: "Daft Punk", meta: "0:30 · 23 posts", canToggle: true)
+            header.setTrackShown(true, animated: false)
+            header.layoutIfNeeded()
+            let height = header.systemLayoutSizeFitting(
+                CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+                withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+            ).height.rounded(.up)
+            header.frame.size.height = height
+            header.layoutIfNeeded()
+            #expect(height > SoundSheetHeaderView.artworkSide, "the lines did not outgrow the record: \(height)")
+            #expect(header.debugLinesFrame.minY >= -0.5, "the lines run off the header's top")
+            #expect(header.debugLinesFrame.maxY <= header.debugTrackFrame.minY - Spacing.xs + 0.5,
+                    "the lines run into the bar on a \(screen) pt screen")
+            #expect(abs(header.debugTrackFrame.maxY - height) < 0.5, "the bar left the header's bottom")
+        }
+    }
+
+    private func header(centredGapOf header: SoundSheetHeaderView) -> CGFloat {
+        let linesHeight = header.debugLinesFrame.height
+        let centredBottom = header.debugRecordFrame.midY + linesHeight / 2
+        return header.debugTrackFrame.minY - centredBottom
     }
 
     /// ▶︎ ⇄ ❚❚ is one glyph view swapping its symbol (a symbol replace, the
