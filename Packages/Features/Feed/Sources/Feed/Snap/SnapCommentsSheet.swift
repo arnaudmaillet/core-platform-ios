@@ -241,6 +241,11 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     private func observeKeyboard() {
         let center = NotificationCenter.default
         keyboardObservers.add(center.addObserver(
+            forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.isKeyboardShowing = true }
+        })
+        keyboardObservers.add(center.addObserver(
             forName: UIResponder.keyboardDidShowNotification, object: nil, queue: .main
         ) { [weak self] note in
             let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue
@@ -261,6 +266,8 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             MainActor.assumeIsolated {
                 self?.isKeyboardHiding = false
                 self?.keyboardRestTop = nil
+                self?.isKeyboardShowing = false
+                self?.holdSheetStill()
             }
         })
     }
@@ -276,11 +283,55 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// `UIDropShadowView`) on every layout, and a translation set there never
     /// showed. The container (`UITransitionView`) holds the sheet alone and is
     /// left to us.
+    // MARK: The keyboard over the sheet (`CommentsV2.keyboardOverlaysSheet`)
+
+    /// The keyboard is on the screen, or on its way on or off it.
+    private var isKeyboardShowing = false
+    /// Where the sheet stands, in its container, with no keyboard: where it
+    /// is held while there is one.
+    private var stillSheetTop: CGFloat?
+    private var lastHoldReading: (top: CGFloat, at: CFTimeInterval)?
+
+    /// ⚠️ UIKIT RAISES A SHEET OVER THE KEYBOARD, and nothing turns that off.
+    /// The trial takes the rise back, frame by frame: the container is moved
+    /// down by as much as UIKit has moved the sheet up — carried on to the
+    /// frame's display time while UIKit animates it — so the sheet, and the
+    /// media above it, stand still. Its composer alone rises on the keys
+    /// (`SnapCommentsSheetViewController.keyboardWillMove`).
+    private func holdSheetStill() {
+        guard CommentsV2.keyboardOverlaysSheet, let container = sheet.presentationController?.containerView,
+              let presented = sheet.presentationController?.presentedView else { return }
+        let layer = presented.layer.presentation() ?? presented.layer
+        var top = layer.convert(layer.bounds, to: container.layer).minY
+        guard isKeyboardShowing, let stillSheetTop else {
+            stillSheetTop = top
+            lastHoldReading = nil
+            if container.transform != .identity { container.transform = .identity }
+            return
+        }
+        if let frameTiming {
+            if let last = lastHoldReading, frameTiming.now > last.at, presented.layer.animationKeys()?.isEmpty == false {
+                let speed = (top - last.top) / CGFloat(frameTiming.now - last.at)
+                top += speed * CGFloat(frameTiming.shown - frameTiming.now)
+            }
+            lastHoldReading = (layer.convert(layer.bounds, to: container.layer).minY, frameTiming.now)
+        }
+        let hold = max(0, stillSheetTop - top)
+        guard abs(container.transform.ty - hold) > 0.25 else { return }
+        container.transform = hold > 0 ? CGAffineTransform(translationX: 0, y: hold) : .identity
+    }
+
     private func followKeyboardDrag() {
+        holdSheetStill()
         guard !isKeyboardHiding, let keyboardRestTop,
               let container = sheet.presentationController?.containerView else { return }
         catcher.layoutIfNeeded()
         let keyboardTop = keyboardTracker.convert(CGPoint.zero, to: nil).y
+        if CommentsV2.keyboardOverlaysSheet {
+            // The sheet held still; its composer follows the keys down.
+            content.followKeyboardOverlay(to: keyboardTop)
+            return
+        }
         // ⚠️ A SHEET HELD AT THE SCREEN'S TOP STAYS (the owner, 2026-11-03):
         // moved down whole with the keys, its bar left the top — not how a
         // conversation lets its keyboard go. Its composer follows the keys
@@ -299,7 +350,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// animation as UIKit's own lowering of the sheet, so the two land as one.
     private func keyboardWillHide(duration: TimeInterval) {
         isKeyboardHiding = true
-        guard let container = sheet.presentationController?.containerView,
+        guard !CommentsV2.keyboardOverlaysSheet, let container = sheet.presentationController?.containerView,
               container.transform != .identity else { return }
         UIView.animate(withDuration: duration, delay: 0, options: [.beginFromCurrentState]) {
             container.transform = .identity
@@ -1166,7 +1217,30 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        if !isKeyboardUp { restingHeight = view.bounds.height }
+        if !isKeyboardUp {
+            restingHeight = view.bounds.height
+            restingTop = view.convert(CGPoint.zero, to: nil).y
+        }
+    }
+
+    /// The panel's top, in the window, as the sheet rests with no keyboard:
+    /// where it stays with one, in the trial (`CommentsV2.keyboardOverlaysSheet`).
+    private var restingTop: CGFloat?
+
+    /// The trial's panel over the keys: from where the sheet rests down to
+    /// the composer, `Spacing.sm` over them — the rows not moved, the keys
+    /// over the rest of them.
+    private func overlayPanelHeight(keyboardTop: CGFloat) -> CGFloat? {
+        guard let restingTop else { return nil }
+        return max(0, min(restingHeight, keyboardTop + composerBottomInset - Spacing.sm - restingTop))
+    }
+
+    /// The keys dragged down under a finger, in the trial: the composer
+    /// follows them; the rows stay.
+    func followKeyboardOverlay(to keyboardTop: CGFloat) {
+        guard isKeyboardUp, let panelHeight, let height = overlayPanelHeight(keyboardTop: keyboardTop),
+              abs(height - panelHeight.constant) > 0.5 else { return }
+        panelHeight.constant = height
     }
 
     /// A keyboard coming up or changing: the panel's height for it. One going
@@ -1175,6 +1249,11 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         guard let frame, let window = view.window, frame.minY < window.screen.bounds.maxY else { return }
         setKeyboardUp(true)
         guard let panelHeight, restingHeight > 0 else { return }
+        if CommentsV2.keyboardOverlaysSheet {
+            // The rows stay: only the composer rises, on the keys' curve.
+            if let height = overlayPanelHeight(keyboardTop: frame.minY) { panelHeight.constant = height }
+            return
+        }
         let height = panelHeightOverKeyboard(at: frame.minY, in: window)
         holdStreamEnd(panelGrowingBy: height - panelHeight.constant)
         panelHeight.constant = height
@@ -1286,7 +1365,10 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
             panelBottom.isActive = false
             panelHeight.isActive = true
         } else {
-            holdStreamEnd(panelGrowingBy: restingHeight - panelHeight.constant)
+            // The trial's rows never moved: nothing to hold.
+            if !CommentsV2.keyboardOverlaysSheet {
+                holdStreamEnd(panelGrowingBy: restingHeight - panelHeight.constant)
+            }
             panelHeight.isActive = false
             panelBottom.isActive = true
         }
