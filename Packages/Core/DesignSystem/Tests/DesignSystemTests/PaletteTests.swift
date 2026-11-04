@@ -135,6 +135,8 @@ struct PaletteTests {
         #expect(Self.hex(Palette.saveGold, Self.light) == theme.saveGold)
         #expect(Palette.brandGradient.map { Self.hex($0, Self.light) } == theme.signatureGradient)
         #expect(Palette.brandGradientLocations.map(\.doubleValue) == theme.signatureLocations)
+        #expect(Palette.storyRingGradient.map { Self.hex($0, Self.light) } == theme.storyRingGradient)
+        #expect(Palette.storyRingGradientLocations.map(\.doubleValue) == theme.storyRingLocations)
         #expect(Palette.loaderTones.map { Self.hex($0, Self.light) } == theme.loaderTones)
     }
 
@@ -144,6 +146,11 @@ struct PaletteTests {
         #expect(Self.hex(Palette.tint, Self.dark) == 0xEC1C75)
         #expect(Self.hex(Palette.counter, Self.light) == 0xEC1C75, "unread marks are the raspberry, no longer violet")
         #expect(Palette.brandGradient.map { Self.hex($0, Self.light) } == [0xEC1C75, 0x9B5CFF, 0x2EF0A8])
+        // The story ring (#2089): raspberry → violet, no mint, at 0 and 1.
+        for traits in [Self.light, Self.dark] {
+            #expect(Palette.storyRingGradient.map { Self.hex($0, traits) } == [0xEC1C75, 0x9B5CFF])
+        }
+        #expect(Palette.storyRingGradientLocations == [0, 1])
         #expect(Self.hex(Palette.saveGold, Self.light) == 0xFFC53D, "the saved star keeps its gold")
     }
 

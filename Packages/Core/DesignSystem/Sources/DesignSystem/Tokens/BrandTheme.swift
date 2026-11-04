@@ -88,9 +88,15 @@ public struct BrandTheme: Sendable, Equatable {
     // MARK: - Brand moments
 
     /// The brand's signature gradient, first stop to last, and where each
-    /// stop sits (0…1): the launch logo, the story ring.
+    /// stop sits (0…1): the launch logo and the app icon, as baked assets
+    /// (`BrandAssetsGuardTests`); no code draws it since #2089.
     public let signatureGradient: [UInt32]
     public let signatureLocations: [Double]
+    /// The unseen-story ring's gradient (#2089, the owner 2026-11-03): the
+    /// raspberry to the violet, no mint — the signature's first two colours,
+    /// at 0 and 1.
+    public let storyRingGradient: [UInt32]
+    public let storyRingLocations: [Double]
     /// The branded loader's three pills, left to right (#2083, the owner
     /// 2026-11-03): one solid colour each, the primary's raspberry to the
     /// violet, with the colour halfway between them (in OKLCH: lightness,
@@ -131,6 +137,8 @@ public struct BrandTheme: Sendable, Equatable {
         saveGold: 0xFFC53D,
         signatureGradient: [0xEC1C75, 0x9B5CFF, 0x2EF0A8],
         signatureLocations: [0, 0.5, 1],
+        storyRingGradient: [0xEC1C75, 0x9B5CFF],
+        storyRingLocations: [0, 1],
         loaderTones: [0xEC1C75, 0xCF3DC7, 0x9B5CFF],
         launchLogoStops: [0xF699C1, 0xD2B6FF, 0xA1F8D8],
         iconStops: [0xEC1C75, 0x9B5CFF, 0x2EF0A8]

@@ -58,18 +58,18 @@ final class ForYouStoryCell: UICollectionViewCell {
         }
     }
 
-    /// The ring a face wears while there is something unseen: the signature
-    /// gradient, raspberry → violet → mint (#1169, #2062 — a ring, not a
-    /// pill, so it keeps a gradient). `-theme-rings accent` compares the
-    /// solid accent.
+    /// The ring a face wears while there is something unseen: raspberry →
+    /// violet, no mint (`Palette.storyRingGradient`, #2089; #1169, #2062 — a
+    /// ring, not a pill, so it keeps a gradient). `-theme-rings accent`
+    /// compares the solid accent.
     /// A gradient layer either way, so the mask and geometry are untouched;
     /// re-resolved on a style flip.
     private func applyRingColors() {
         // #1169 compares the solid accent with the brand's gradient on the
         // device (`Palette.rules.storyRing`).
         if Palette.rules.storyRing == .gradient {
-            ring.colors = Palette.brandGradient.map { $0.resolvedColor(with: traitCollection).cgColor }
-            ring.locations = Palette.brandGradientLocations
+            ring.colors = Palette.storyRingGradient.map { $0.resolvedColor(with: traitCollection).cgColor }
+            ring.locations = Palette.storyRingGradientLocations
             return
         }
         let tint = Palette.tint.resolvedColor(with: traitCollection).cgColor
@@ -218,4 +218,12 @@ final class ForYouStoryCell: UICollectionViewCell {
     var isDiscConcealed = false {
         didSet { disc.isHidden = isDiscConcealed }
     }
+
+    #if DEBUG
+    /// The ring's gradient as drawn: its stops, their places and its run.
+    /// Tests.
+    var debugRingGradient: (colors: [CGColor], locations: [NSNumber]?, start: CGPoint, end: CGPoint) {
+        ((ring.colors as? [CGColor]) ?? [], ring.locations, ring.startPoint, ring.endPoint)
+    }
+    #endif
 }
