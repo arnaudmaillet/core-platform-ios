@@ -2,8 +2,8 @@ import DesignSystem
 import UIKit
 
 /// The comments sheet's composer, edited in a bar of its own over the
-/// keyboard — TikTok's and Instagram's way (#2087, a trial, the owner
-/// 2026-11-04, `CommentsV2.detachedComposer`).
+/// keyboard — TikTok's and Instagram's way (#2087, the owner, 2026-11-04),
+/// on the expanded detent: collapsed, the sheet rides the keys instead.
 ///
 /// ⚠️ UIKIT RAISES A SHEET OVER THE KEYBOARD OF A FIELD IN IT, and nothing
 /// turns that off; taking the rise back frame by frame was tried and ran

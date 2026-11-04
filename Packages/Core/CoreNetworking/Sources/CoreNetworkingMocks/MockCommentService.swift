@@ -258,7 +258,6 @@ public final class MockCommentService: @unchecked Sendable {
         "post-0000", "post-0003", "post-0006", // video pages (index % 3 == 0)
         "post-0004", "post-0007", // image pages (index % 3 == 1; post-0001 stays sparse)
         "post-0002", "post-0005", "post-0008", // text-only pages (index % 3 == 2)
-        "post-0054", "post-0063", // landscape video pages, 16:9 and 4:3 (the comments sandbox, #2087)
     ]
 
     /// Media posts seeded with NO comments at all (not even the sparse

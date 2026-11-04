@@ -1509,22 +1509,5 @@
         "height": 1280
       }
     ]
-  },
-  {
-    "id": "fixtures",
-    "photos": [
-      {
-        "id": "fixture-2x3",
-        "file": "fixture-2x3.jpg",
-        "width": 960,
-        "height": 1440
-      },
-      {
-        "id": "fixture-tall",
-        "file": "fixture-tall.jpg",
-        "width": 640,
-        "height": 1440
-      }
-    ]
   }
 ]

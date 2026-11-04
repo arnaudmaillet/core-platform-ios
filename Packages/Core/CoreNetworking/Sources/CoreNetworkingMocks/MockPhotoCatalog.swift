@@ -52,14 +52,6 @@ public struct MockPhotoCatalog: Sendable {
     public let posts: [Photo]
     /// The id of the manifest entry holding `posts`.
     public static let postsID = "posts"
-    /// Shapes the corpus lacks, for the comments sandbox only (#2087): no
-    /// post, avatar or banner draws from them, so adding one moves nobody's
-    /// picture. Reached by their posts' ids alone
-    /// (`MockSocialDataset.fixturePosts`). ⚠️ A whole-folder import rewrites
-    /// the manifest without this entry; a `--posts=` one keeps it.
-    public let fixtures: [Photo]
-    /// The id of the manifest entry holding `fixtures`.
-    public static let fixturesID = "fixtures"
     /// Every photo of every gallery, in gallery order.
     public let photos: [Photo]
     private let directory: URL?
@@ -74,16 +66,12 @@ public struct MockPhotoCatalog: Sendable {
             self.galleries = []
             self.singles = []
             self.posts = []
-            self.fixtures = []
             self.photos = []
             return
         }
-        self.galleries = galleries.filter {
-            !$0.photos.isEmpty && ![Self.singlesID, Self.postsID, Self.fixturesID].contains($0.id)
-        }
+        self.galleries = galleries.filter { !$0.photos.isEmpty && ![Self.singlesID, Self.postsID].contains($0.id) }
         self.singles = galleries.first { $0.id == Self.singlesID }?.photos ?? []
         self.posts = galleries.first { $0.id == Self.postsID }?.photos ?? []
-        self.fixtures = galleries.first { $0.id == Self.fixturesID }?.photos ?? []
         self.photos = self.galleries.flatMap(\.photos) + singles + posts
     }
 
@@ -146,7 +134,7 @@ public struct MockPhotoCatalog: Sendable {
     public func photo(for url: URL) -> Photo? {
         guard url.scheme == "mock", url.host == "photo" else { return nil }
         let id = url.lastPathComponent
-        return photos.first { $0.id == id } ?? fixtures.first { $0.id == id }
+        return photos.first { $0.id == id }
     }
 
     /// The gallery a photo belongs to.

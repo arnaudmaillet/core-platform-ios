@@ -72,10 +72,8 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     }
 
     let postID: PostID
-    /// What is presented: the content itself, carrying its own bar — or, as
-    /// first built (`CommentsV2.sheetUsesNavigationStack`), in a stack of its
-    /// own for the stack's bar.
-    let sheet: UIViewController
+    /// What is presented: the content itself, carrying its own bar.
+    var sheet: UIViewController { content }
     let content: SnapCommentsSheetViewController
     private weak var feed: UIViewController?
     private weak var cell: SnapFeedCell?
@@ -129,11 +127,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
          walletBadge: WalletBadgeButton?, onWalletTap: (() -> Void)?,
          onEnd: @escaping () -> Void) {
         self.postID = postID
-        let stacked = CommentsV2.sheetUsesNavigationStack
-        content = SnapCommentsSheetViewController(
-            panel: panel, walletBadge: walletBadge, onWalletTap: onWalletTap, ownsBar: !stacked
-        )
-        sheet = stacked ? UINavigationController(rootViewController: content) : content
+        content = SnapCommentsSheetViewController(panel: panel, walletBadge: walletBadge, onWalletTap: onWalletTap)
         self.feed = feed
         self.cell = cell
         self.onEnd = onEnd
@@ -1134,8 +1128,7 @@ private final class DisplayLinkTarget: NSObject {
 /// into the window — its bars' set-up and position, the insets it hands down
 /// — weighed on every opening. The bar is a `UINavigationBar` this screen
 /// holds, showing its own `navigationItem`: the same native items, and a
-/// height known before the sheet is presented. The stacked build stays
-/// behind `CommentsV2.sheetUsesNavigationStack`.
+/// height known before the sheet is presented.
 final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDelegate, ScreenCovering {
     /// ⚠️ NEVER A COVER, expanded included (#1970's rule would pause the
     /// clip it hides): the media plays on above the sheet, and expanded it
@@ -1169,13 +1162,12 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     private let topPocketElement = UILabel()
     private let topPocketInteraction = UIScrollEdgeElementContainerInteraction()
 
-    /// The sheet's own bar; nil in a navigation stack, whose bar it uses.
-    private let ownBar: UINavigationBar?
+    /// The sheet's own bar.
+    private let ownBar = UINavigationBar()
 
-    init(panel: UIViewController, walletBadge: WalletBadgeButton?, onWalletTap: (() -> Void)?, ownsBar: Bool) {
+    init(panel: UIViewController, walletBadge: WalletBadgeButton?, onWalletTap: (() -> Void)?) {
         self.panel = panel
         self.walletBadge = walletBadge
-        ownBar = ownsBar ? UINavigationBar() : nil
         super.init(nibName: nil, bundle: nil)
         guard let walletBadge else { return }
         walletBadge.isUserInteractionEnabled = onWalletTap != nil
@@ -1225,12 +1217,12 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         topPocketElement.translatesAutoresizingMaskIntoConstraints = false
         topPocket.addSubview(topPocketElement)
         view.addSubview(topPocket)
-        if let ownBar { installOwnBar(ownBar) }
+        installOwnBar(ownBar)
         NSLayoutConstraint.activate([
             topPocket.topAnchor.constraint(equalTo: view.topAnchor),
             topPocket.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             topPocket.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            topPocket.bottomAnchor.constraint(equalTo: ownBar?.bottomAnchor ?? view.safeAreaLayoutGuide.topAnchor),
+            topPocket.bottomAnchor.constraint(equalTo: ownBar.bottomAnchor),
             // The whole pocket: the edge is drawn as tall as what it holds.
             topPocketElement.topAnchor.constraint(equalTo: topPocket.topAnchor),
             topPocketElement.bottomAnchor.constraint(equalTo: topPocket.bottomAnchor),
@@ -1266,7 +1258,8 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     /// How far the rows go on under the keys' top while they carry the sheet.
     private static let rowsUnderKeys: CGFloat = 48
 
-    /// The composer's stand-in over the keyboard (`CommentsV2.detachedComposer`).
+    /// The composer's stand-in over the keyboard, the expanded detent's
+    /// (`detachesKeyboard`).
     private var detachedComposer: SnapCommentsDetachedComposer?
 
     func endDetachedEditing() {
@@ -1317,7 +1310,7 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         guard let detail = panel as? PostDetailViewController else { return }
-        if CommentsV2.detachedComposer, detachedComposer == nil {
+        if detachedComposer == nil {
             let composer = SnapCommentsDetachedComposer(source: detail.composeBar, sheetView: view)
             composer.onEditingChanged = { [weak self] editing in self?.onDetachedEditingChanged?(editing) }
             composer.detaches = { [weak self] in self?.detachesKeyboard?() ?? true }
@@ -1365,11 +1358,8 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         return host.convert(detail.composeBar.frame, to: nil).minY
     }
 
-    /// The bar's bottom in this view: the lone bar's, or the stack's.
-    var barBottom: CGFloat {
-        if let ownBar { return ownBar.frame.maxY }
-        return navigationController.map { view.convert($0.navigationBar.frame, from: $0.view).maxY } ?? 0
-    }
+    /// The bar's bottom in this view.
+    var barBottom: CGFloat { ownBar.frame.maxY }
 
     /// The bar and the top pocket on the list shown.
     private func follow(_ list: UIScrollView) {
@@ -1603,7 +1593,7 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        if (navigationController ?? self).isBeingDismissed { onDismissed?() }
+        if isBeingDismissed { onDismissed?() }
     }
 }
 
