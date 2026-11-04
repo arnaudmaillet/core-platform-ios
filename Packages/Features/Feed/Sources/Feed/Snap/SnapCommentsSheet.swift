@@ -229,9 +229,16 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// A tap on the media above the sheet: with the keyboard up, it puts the
     /// keyboard away and nothing else (the owner, 2026-11-03); otherwise it
     /// closes the sheet.
+    /// The keyboard put away, wherever it is edited — in the sheet, or in
+    /// the detached composer over it.
+    private func endEditing() {
+        sheet.view.endEditing(true)
+        content.endDetachedEditing()
+    }
+
     @objc private func mediaTapped() {
         if content.isKeyboardUp {
-            sheet.view.endEditing(true)
+            endEditing()
             return
         }
         close()
@@ -277,7 +284,8 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// showed. The container (`UITransitionView`) holds the sheet alone and is
     /// left to us.
     private func followKeyboardDrag() {
-        guard !isKeyboardHiding, let keyboardRestTop,
+        // The detached composer's keyboard is not the sheet's: it never moves it.
+        guard !CommentsV2.detachedComposer, !isKeyboardHiding, let keyboardRestTop,
               let container = sheet.presentationController?.containerView else { return }
         catcher.layoutIfNeeded()
         let keyboardTop = keyboardTracker.convert(CGPoint.zero, to: nil).y
@@ -309,7 +317,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// Closes the sheet; the session ends when it has gone.
     @objc func close() {
         guard !hasEnded, sheet.presentingViewController != nil else { return }
-        sheet.view.endEditing(true)
+        endEditing()
         isLeaving = true
         content.freeze()
         feed?.dismiss(presented: sheet)
@@ -735,7 +743,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// (`followPreview`). The keyboard goes first.
     private func previewExpanded() {
         guard let controller = sheet.sheetPresentationController else { return }
-        if content.isKeyboardUp { sheet.view.endEditing(true) }
+        if content.isKeyboardUp { endEditing() }
         controller.animateChanges { controller.selectedDetentIdentifier = Self.detent }
     }
 
@@ -928,7 +936,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// away from here. A swipe down with the keyboard up does the same.
     func presentationControllerShouldDismiss(_ presentationController: UIPresentationController) -> Bool {
         guard content.isKeyboardUp else { return true }
-        DispatchQueue.main.async { [weak self] in self?.sheet.view.endEditing(true) }
+        DispatchQueue.main.async { [weak self] in self?.endEditing() }
         return false
     }
 
@@ -1104,9 +1112,24 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         ) { [weak self] _ in MainActor.assumeIsolated { self?.setKeyboardUp(false) } })
     }
 
+    /// The composer's stand-in over the keyboard (`CommentsV2.detachedComposer`).
+    private var detachedComposer: SnapCommentsDetachedComposer?
+
+    func endDetachedEditing() {
+        detachedComposer?.endEditing()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        detachedComposer?.tearDown()
+    }
+
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         guard let detail = panel as? PostDetailViewController else { return }
+        if CommentsV2.detachedComposer, detachedComposer == nil {
+            detachedComposer = SnapCommentsDetachedComposer(source: detail.composeBar)
+        }
         // The app's soft edges, top and bottom; the bar follows the tab shown.
         detail.wearSheetEdges()
         if topPocketInteraction.view == nil {
@@ -1174,6 +1197,7 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     private func keyboardWillMove(to frame: CGRect?) {
         guard let frame, let window = view.window, frame.minY < window.screen.bounds.maxY else { return }
         setKeyboardUp(true)
+        if CommentsV2.detachedComposer { return }
         guard let panelHeight, restingHeight > 0 else { return }
         let height = panelHeightOverKeyboard(at: frame.minY, in: window)
         holdStreamEnd(panelGrowingBy: height - panelHeight.constant)
@@ -1276,6 +1300,11 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     /// (`panelHeightOverKeyboard(at:in:)`), and the sheet grows below it,
     /// under the keys.
     private func setKeyboardUp(_ up: Bool) {
+        // The detached composer edits over the keys: the panel stays as it is.
+        if CommentsV2.detachedComposer {
+            isKeyboardUp = up
+            return
+        }
         guard up != isKeyboardUp, let panelBottom, let panelHeight, restingHeight > 0 else { return }
         isKeyboardUp = up
         keyboardDragEndGap = nil

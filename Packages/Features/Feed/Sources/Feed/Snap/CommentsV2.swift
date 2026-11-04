@@ -15,8 +15,14 @@ public enum CommentsV2 {
     /// kept aside (the owner, 2026-11-03): `-comments-v2-navstack`. Off, the
     /// sheet carries a lone `UINavigationBar` (`SnapCommentsSheetViewController`).
     public static var sheetUsesNavigationStack = ProcessInfo.processInfo.arguments.contains("-comments-v2-navstack")
+    /// The composer edits in a bar of its own over the keyboard, TikTok's
+    /// way (a trial, the owner, 2026-11-04): the keyboard is not the sheet's,
+    /// so UIKit leaves the sheet, its rows and the media where they are —
+    /// `-comments-v2-detached-composer`. Off, the sheet rises with the keys.
+    public static var detachedComposer = ProcessInfo.processInfo.arguments.contains("-comments-v2-detached-composer")
     #else
     public static let isEnabled = false
     public static let sheetUsesNavigationStack = false
+    public static let detachedComposer = false
     #endif
 }
