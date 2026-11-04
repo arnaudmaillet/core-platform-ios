@@ -16,9 +16,9 @@ struct VoiceRecorderTests {
 
     func recorder(_ permission: VoicePermissionState = .granted, awake: ((Bool) -> Void)? = nil) -> (VoiceRecorder, FakePermission) {
         let permission = FakePermission(permission)
-        let device = device
+        let fake = device
         let recorder = VoiceRecorder(
-            session: session, permission: permission, makeDevice: { device }, ticker: ticker,
+            session: session, permission: permission, makeDevice: { fake }, ticker: ticker,
             notifications: center, directory: directory, keepAwake: awake ?? { _ in }
         )
         return (recorder, permission)

@@ -177,7 +177,7 @@ private final class WaveformBarsView: UIView {
             let height = max(2, bounds.height * CGFloat(level) / CGFloat(VoiceWaveform.maxLevel))
             let bar = CGRect(x: CGFloat(index) * width, y: (bounds.height - height) / 2, width: max(1, width - 1), height: height)
             let played = Double(index) / Double(levels.count) < progress
-            (played ? UIColor.systemPink : UIColor.tertiaryLabel).setFill()
+            (played ? tintColor : UIColor.tertiaryLabel).setFill()
             UIBezierPath(rect: bar).fill()
         }
     }
