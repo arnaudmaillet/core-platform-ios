@@ -835,7 +835,7 @@ struct ConversationThreadSendAndMuteTests {
         let pill = try #require(peerPill(screen))
         #expect(pill.window != nil, "the pill is not on screen: nothing to prove")
         #expect(pill.bounds.width > 0)
-        #expect(screen.debugPeerFollowBadge == .none, "the relation was already there")
+        #expect(screen.debugPeerFollowBadge == .loading, "the relation was already there, or no skeleton's badge (#2098)")
 
         // ⚠️ AT REST FIRST (#996). The screen's first appearance can redraw
         // the whole pill on its own (the person landing); on a starved runner

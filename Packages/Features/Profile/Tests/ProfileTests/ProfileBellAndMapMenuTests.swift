@@ -450,23 +450,30 @@ extension ProfileBellAndMapMenuTests {
     /// ONE MARK EVERYWHERE, THE "+" INCLUDED (#2050, the owner 2026-11-02,
     /// reversing #2014's "no '+'"): the bar's own mapping, whole — "+",
     /// the clock, the check, friends. Nothing for someone blocked, the
-    /// viewer's own profile, one not read yet or not followable. A guest
+    /// viewer's own profile or one not followable; the skeleton's badge for
+    /// one not read yet (#2098), never on the viewer's own. A guest
     /// is not an exception: their relation reads as not followed, so the
     /// "+" (behind the member gate), as the author pill shows a guest.
     @Test func theAvatarWearsTheWholeMark() {
         typealias Header = ProfileHeaderView
-        #expect(Header.avatarMark(for: .follow, mutual: false, blocked: false) == .follow)
-        #expect(Header.avatarMark(for: .requested, mutual: false, blocked: false) == .pending)
-        #expect(Header.avatarMark(for: .following, mutual: false, blocked: false) == .following)
-        #expect(Header.avatarMark(for: .following, mutual: true, blocked: false) == .friends)
+        #expect(Header.avatarMark(for: .follow, mutual: false, blocked: false, isOwnProfile: false) == .follow)
+        #expect(Header.avatarMark(for: .requested, mutual: false, blocked: false, isOwnProfile: false) == .pending)
+        #expect(Header.avatarMark(for: .following, mutual: false, blocked: false, isOwnProfile: false) == .following)
+        #expect(Header.avatarMark(for: .following, mutual: true, blocked: false, isOwnProfile: false) == .friends)
         for state in [ProfileViewModel.FollowButton.follow, .requested, .following] {
-            #expect(Header.avatarMark(for: state, mutual: true, blocked: true) == PersonPill.Badge.none, "\(state)")
-            #expect(Header.avatarMark(for: state, mutual: false, blocked: false)
+            #expect(Header.avatarMark(for: state, mutual: true, blocked: true, isOwnProfile: false) == PersonPill.Badge.none, "\(state)")
+            #expect(Header.avatarMark(for: state, mutual: false, blocked: false, isOwnProfile: false)
                     == ProfileViewController.barBadge(for: state, mutual: false), "the avatar and the bar disagree")
         }
-        for state in [ProfileViewModel.FollowButton.edit, .hidden, .unavailable] {
-            #expect(Header.avatarMark(for: state, mutual: false, blocked: false) == PersonPill.Badge.none, "\(state)")
+        for state in [ProfileViewModel.FollowButton.edit, .unavailable] {
+            #expect(Header.avatarMark(for: state, mutual: false, blocked: false, isOwnProfile: false) == PersonPill.Badge.none, "\(state)")
         }
+        #expect(Header.avatarMark(for: .hidden, mutual: false, blocked: false, isOwnProfile: false) == .loading)
+        for state in [ProfileViewModel.FollowButton.hidden, .edit] {
+            #expect(Header.avatarMark(for: state, mutual: false, blocked: false, isOwnProfile: true) == PersonPill.Badge.none,
+                    "the viewer's own face wore a mark for \(state)")
+        }
+        #expect(Header.avatarMark(for: .hidden, mutual: false, blocked: true, isOwnProfile: false) == PersonPill.Badge.none)
     }
 
     /// Friends on the avatar, as in the bar: the two people and the accent

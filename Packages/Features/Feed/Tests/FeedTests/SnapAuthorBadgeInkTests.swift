@@ -46,7 +46,7 @@ struct SnapAuthorBadgeInkTests {
         case .follow: (.black, .white)
         case .following, .pending: (PersonPillBadgeInks.quietDisc, PersonPillBadgeInks.accent)
         case .friends: (PersonPillBadgeInks.accent, .white)
-        case .none: (.clear, .clear)
+        case .none, .loading: (.clear, .clear)
         }
         let mode = style == .dark ? "dark" : "light"
         let badgePixels = try Self.opaquePixels(of: [glyph], style: style)

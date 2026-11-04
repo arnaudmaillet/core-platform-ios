@@ -661,7 +661,8 @@ final class ProfileCardViewController: UIViewController {
     /// profile's own mapping (`ProfileHeaderView.avatarMark`).
     private func applyRelationMark() {
         headerView.configureRelationMark(
-            followButtonState, mutual: viewModel.isMutualFollow, blocked: viewModel.isBlocked
+            followButtonState, mutual: viewModel.isMutualFollow, blocked: viewModel.isBlocked,
+            isOwnProfile: viewModel.isOwnProfile
         )
     }
 
