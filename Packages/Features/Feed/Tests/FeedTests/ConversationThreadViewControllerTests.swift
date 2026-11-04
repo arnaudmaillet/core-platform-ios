@@ -108,6 +108,39 @@ struct ConversationThreadViewControllerTests {
         return (screen, driver, accessory, window)
     }
 
+    /// ⚠️ ON THE CONDITION, NOT A FIXED SLEEP (#2092). The bar's day lands
+    /// a turn after `shown` — later still behind a transition — and a
+    /// starved runner lost a 50 ms sleep: wait for it.
+    private static func settleDay(_ screen: ConversationThreadViewController, inBar: Bool) async -> Bool {
+        await settle { screen.debugDayItem.inBar == inBar }
+    }
+
+    /// ⚠️ IN ITS WINDOW, ITS APPEARANCE OVER (#2092). Out of a window the
+    /// day is placed at once, unanimated: the navigation controller installs
+    /// the screen at the window's first layout, laid out here rather than
+    /// left to a later turn. During the appearance the day's placement waits
+    /// for its end, which a starved runner stretched.
+    private static func settleOnScreen(_ screen: ConversationThreadViewController, in window: UIWindow) async -> Bool {
+        window.layoutIfNeeded()
+        return await settle { screen.view.window != nil && screen.transitionCoordinator == nil }
+    }
+
+    /// What a day wait that gave up found.
+    private static func dayDiagnostic(_ screen: ConversationThreadViewController) -> String {
+        "\(screen.debugDayPlacement), holds tail: \(screen.debugHoldsTail), offset: \(screen.debugStreamOffset)"
+    }
+
+    /// ⚠️ LOOKS, NOT A WALL-CLOCK DEADLINE: a starved main thread can spend
+    /// a deadline's seconds with no look at all (the runs #2092 failed took
+    /// 240–255 s). 6,000 looks is about a minute on a free main actor.
+    private static func settle(looks: Int = 6_000, _ condition: () -> Bool) async -> Bool {
+        for _ in 0..<looks {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
+
     private static func firstView<T: UIView>(_ type: T.Type, in view: UIView) -> T? {
         if let match = view as? T { return match }
         for subview in view.subviews {
@@ -276,8 +309,7 @@ struct ConversationThreadViewControllerTests {
         #expect(middle.item.identifier != tail.item.identifier)
         // ⚠️ In the bar a turn later (#756): placed from inside a diffable
         // apply, it lost UIKit's appearance transition and morph.
-        try? await Task.sleep(for: .milliseconds(50))
-        #expect(screen.debugDayItem.inBar)
+        #expect(await Self.settleDay(screen, inBar: true), "the day never reached the bar: \(Self.dayDiagnostic(screen))")
         #expect(screen.navigationItem.rightBarButtonItems?.last === middle.item, "the day is not left of the bell")
         #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains { $0 === tail.item }, "both days in the bar")
 
@@ -308,14 +340,18 @@ struct ConversationThreadViewControllerTests {
         let (screen, _, _, window) = makeScreen(phase: .content(messages), now: now)
         defer { window.isHidden = true }
         screen.view.layoutIfNeeded()
+        try #require(await Self.settleOnScreen(screen, in: window), "the screen never arrived: \(Self.dayDiagnostic(screen))")
         let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
-        let tail = stream.contentOffset.y
 
-        // The start: no day.
+        // The start: no day. The reader's own scroll, begun as a finger
+        // begins it: until then the stream holds its tail for the arrival
+        // (until a turn after `viewDidAppear`, seconds late in a busy suite),
+        // and the rows sizing at the top took the scroll back down to today —
+        // the day never left the bar (#2092).
+        screen.scrollViewWillBeginDragging(stream)
         stream.setContentOffset(CGPoint(x: 0, y: -stream.adjustedContentInset.top), animated: false)
         screen.scrollViewDidScroll(stream)
-        try? await Task.sleep(for: .milliseconds(50))
-        #expect(!screen.debugDayItem.inBar)
+        #expect(await Self.settleDay(screen, inBar: false), "the day never left the bar: \(Self.dayDiagnostic(screen))")
         let before = screen.debugAnimatedBarPlacements
 
         // One turn: yesterday's chip under the header, then the tail.
@@ -325,13 +361,15 @@ struct ConversationThreadViewControllerTests {
         stream.setContentOffset(CGPoint(x: 0, y: chip.frame.maxY + 40 - screen.view.safeAreaInsets.top), animated: false)
         screen.scrollViewDidScroll(stream)
         #expect(screen.debugDayItem.title == "Yesterday", "guard: the day showed mid-turn")
+        // The tail as it is now: rows sized at the top since the open.
+        let insets = stream.adjustedContentInset
+        let tail = max(-insets.top, stream.contentSize.height + insets.bottom - stream.bounds.height)
         stream.setContentOffset(CGPoint(x: 0, y: tail), animated: false)
         screen.scrollViewDidScroll(stream)
         #expect(screen.debugDayItem.title == "Today")
-        try? await Task.sleep(for: .milliseconds(50))
+        #expect(await Self.settleDay(screen, inBar: true), "the day never reached the bar: \(Self.dayDiagnostic(screen))")
 
         #expect(screen.debugAnimatedBarPlacements - before == 1, "the appearance was placed again and cut short")
-        #expect(screen.debugDayItem.inBar)
         let days = screen.navigationItem.rightBarButtonItems?.filter { $0.identifier?.hasPrefix("conversation.day.") == true }
         #expect(days?.count == 1)
     }

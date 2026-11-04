@@ -465,6 +465,7 @@ final class ConversationThreadViewController: UIViewController {
                // Off the completion's turn, which still belongs to the transition.
                DispatchQueue.main.async { self?.placeDayAfterTransition() }
            }) {
+            debugDayPlacementWaits += 1
             return
         }
         dayPlacementScheduled = false
@@ -472,6 +473,13 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     private var dayPlacementScheduled = false
+
+    /// A day placement on its way, how many transitions it waited for, and
+    /// whether one runs now. Tests.
+    var debugDayPlacement: (scheduled: Bool, waits: Int, inTransition: Bool) {
+        (dayPlacementScheduled, debugDayPlacementWaits, transitionCoordinator != nil)
+    }
+    private var debugDayPlacementWaits = 0
 
     private func makeDayItem(_ day: Date) -> UIBarButtonItem {
         let title = DayTitleFormatter.title(for: day, now: dayClock())
@@ -1588,6 +1596,8 @@ final class ConversationThreadViewController: UIViewController {
     /// day or a quote), every change of the content's height keeps the
     /// newest message where it rests, at once.
     private var holdsTail = false
+    /// Whether the stream still holds its tail for the screen's arrival. Tests.
+    var debugHoldsTail: Bool { holdsTail }
     /// Once the screen has come in: the tail is held for its arrival only —
     /// a message landing while the reader reads keeps its own animated scroll.
     private var hasAppeared = false
