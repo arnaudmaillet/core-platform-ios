@@ -1900,9 +1900,9 @@ final class SnapFeedViewController: UIViewController {
     /// (The wallet badge appears only when a wallet is injected; a
     /// nil-wallet feed keeps the historical runs without it.)
     ///
-    /// `hasMedia` picks the LEADING slot: a media post can collapse back to
-    /// its layout, a text post has none to collapse to. (It used to pick the
-    /// toolbar's trailing slot instead; the footer is invariant now.)
+    /// `hasMedia` no longer changes the bar: it picked the leading slot for
+    /// the first comments space's ✕, gone with it (#2087) — a media post's
+    /// comments are a sheet with a bar of its own.
     ///
     /// Internal, not private, so the bar contracts are unit-testable without
     /// driving a whole engagement — which needs a live cell, a hosted child,
