@@ -22,16 +22,14 @@ import UIKit
 final class SnapCommentsDetachedComposer {
     private weak var source: CommentsInputBar?
     private let bar = CommentsInputBar()
-    /// Under the bar, from over it to under the keys, across the sheet: the
-    /// rows recede under it.
+    /// Under the bar, from its top to the keys' top, across the sheet: the
+    /// rows recede under it. ⚠️ ONE RAMP OVER ITS WHOLE HEIGHT, as the sheet's
+    /// own soft edge, only shorter (the owner, 2026-11-04): none at the bar's
+    /// top — never over it — the most at the keys.
     private let band = ProgressiveFrostView(
         maskColors: SnapCommentsLayout.footerFrostMaskColors,
-        maskLocations: SnapCommentsLayout.footerFrostMaskLocations,
-        topRampLength: SnapCommentsDetachedComposer.frostRamp
+        maskLocations: SnapCommentsLayout.footerFrostMaskLocations
     )
-    /// The frost's ramp, from the bar's top down: it never reaches over the
-    /// bar (the owner, 2026-11-04).
-    private static let frostRamp: CGFloat = Spacing.lg
     /// The sheet's view: the band spans its width.
     private weak var sheetView: UIView?
     /// Where the bar's foot stands at rest, in the window.
@@ -104,13 +102,28 @@ final class SnapCommentsDetachedComposer {
             band.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: sheetFrame.minX),
             band.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: sheetFrame.maxX - window.bounds.width),
             band.topAnchor.constraint(equalTo: bar.topAnchor),
-            band.bottomAnchor.constraint(equalTo: guide.topAnchor, constant: Spacing.xl),
+            band.bottomAnchor.constraint(equalTo: guide.topAnchor),
         ])
         host.layoutIfNeeded()
-        source.alpha = 0
+        hideSource(true)
         isEditingDetached = true
         onEditingChanged?(true)
         bar.focusComposer()
+    }
+
+    /// ⚠️ THE SHEET'S BAR'S CONTENT, NOT THE BAR (measured, 2026-11-04): the
+    /// sheet's bottom soft edge is drawn for it (its edge pocket), and gone
+    /// with the bar's alpha — the sheet's foot lost its frost as the keys rose.
+    private var hiddenSourceViews: [UIView] = []
+
+    private func hideSource(_ hidden: Bool) {
+        if hidden, let source {
+            hiddenSourceViews = source.subviews.filter { $0.alpha > 0 }
+            hiddenSourceViews.forEach { $0.alpha = 0 }
+        } else {
+            hiddenSourceViews.forEach { $0.alpha = 1 }
+            hiddenSourceViews = []
+        }
     }
 
     /// The frost as the bar rises: none where the sheet's bar stood, whole
@@ -146,7 +159,7 @@ final class SnapCommentsDetachedComposer {
         bar.removeFromSuperview()
         band.removeFromSuperview()
         host.removeFromSuperview()
-        source?.alpha = 1
+        hideSource(false)
         isEditingDetached = false
         onEditingChanged?(false)
     }
