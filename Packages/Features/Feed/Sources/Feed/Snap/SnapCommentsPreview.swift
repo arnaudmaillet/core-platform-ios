@@ -55,7 +55,7 @@ final class SnapCommentsPreview: UIView {
 
     /// The clip's stopped mark, in the middle, while it is paused.
     private let pausedMark = UIImageView()
-    /// Puts the media back in place (the owner, 2026-11-03), at the top right.
+    /// Puts the media back in place (the owner, 2026-11-03), at the bottom right (the owner, 2026-11-04).
     private let expandButton = UIButton(type: .system)
 
     /// A drag on the preview, its phases as the recogniser has them.
@@ -130,7 +130,7 @@ final class SnapCommentsPreview: UIView {
         NSLayoutConstraint.activate([
             pausedMark.centerXAnchor.constraint(equalTo: clip.centerXAnchor),
             pausedMark.centerYAnchor.constraint(equalTo: clip.centerYAnchor),
-            expandButton.topAnchor.constraint(equalTo: clip.topAnchor, constant: Spacing.xs + 2),
+            expandButton.bottomAnchor.constraint(equalTo: clip.bottomAnchor, constant: -(Spacing.xs + 2)),
             expandButton.trailingAnchor.constraint(equalTo: clip.trailingAnchor, constant: -(Spacing.xs + 2)),
             expandButton.widthAnchor.constraint(equalToConstant: Self.expandSide),
             expandButton.heightAnchor.constraint(equalToConstant: Self.expandSide),
