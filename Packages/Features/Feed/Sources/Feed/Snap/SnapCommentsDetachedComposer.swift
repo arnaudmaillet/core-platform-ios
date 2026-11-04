@@ -26,16 +26,28 @@ final class SnapCommentsDetachedComposer {
     /// rows recede under it. ⚠️ ONE RAMP OVER ITS WHOLE HEIGHT, as the sheet's
     /// own soft edge, only shorter (the owner, 2026-11-04): none at the bar's
     /// top — never over it — the most at the keys.
+    ///
+    /// ⚠️ ON UNDER THE KEYS (the owner, 2026-11-04): the keyboard's top
+    /// corners are rounded, and a band stopping at its top showed its foot in
+    /// them. It goes on `underKeys` below, whole there, its ramp above the
+    /// same.
     private let band = ProgressiveFrostView(
-        maskColors: SnapCommentsLayout.footerFrostMaskColors,
-        maskLocations: SnapCommentsLayout.footerFrostMaskLocations
+        maskColors: [.clear, .black, .black],
+        maskLocations: [0, 0.5, 1],
+        bottomHoldLength: SnapCommentsDetachedComposer.underKeys
     )
+    /// How far the band goes on under the keys' top: past their corners.
+    private static let underKeys: CGFloat = 48
     /// The sheet's view: the band spans its width.
     private weak var sheetView: UIView?
     /// Where the bar's foot stands at rest, in the window.
     private var restingBottom: CGFloat = 0
     /// Over how much of its rise the frost comes in.
     private static let frostRise: CGFloat = 48
+    /// Asked as the sheet's bar is about to edit: false lets it edit where
+    /// it stands, the sheet riding the keys as UIKit raises it — a collapsed
+    /// sheet's way (the owner, 2026-11-04).
+    var detaches: (() -> Bool)?
     /// Whether the bar edits, for the sheet (a tap on it ends editing, its
     /// height holds meanwhile).
     var onEditingChanged: ((Bool) -> Void)?
@@ -56,7 +68,8 @@ final class SnapCommentsDetachedComposer {
         // (TikTok's way, the owner 2026-11-04).
         host.onTouchOutside = { [weak self] in self?.endEditing() }
         source.shouldBeginEditing = { [weak self] in
-            self?.beginEditing()
+            guard let self, detaches?() ?? true else { return true }
+            beginEditing()
             return false
         }
         bar.tracksKeyboard = false
@@ -128,7 +141,7 @@ final class SnapCommentsDetachedComposer {
             band.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: sheetFrame.minX),
             band.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: sheetFrame.maxX - window.bounds.width),
             band.topAnchor.constraint(equalTo: bar.topAnchor, constant: shrink),
-            band.bottomAnchor.constraint(equalTo: guide.topAnchor),
+            band.bottomAnchor.constraint(equalTo: guide.topAnchor, constant: Self.underKeys),
         ])
         host.layoutIfNeeded()
         hideSource(true)
@@ -175,10 +188,20 @@ final class SnapCommentsDetachedComposer {
     /// No avatar over the keys (the owner, 2026-11-04): it fades as the keys
     /// rise, the field taking its room, and comes back as they go — on the
     /// keys' own time, so the bar lands back on the sheet's bar's face.
+    /// The sheet's own bar, editing where it stands, does the same: its
+    /// avatar's menu would put the keys away.
     private func setAvatarShown(_ shown: Bool, duration: TimeInterval) {
-        guard isEditing, bar.showsAvatar != shown else { return }
+        let editing: CommentsInputBar
+        if isEditing {
+            editing = bar
+        } else if let source, shown ? !source.showsAvatar : source.isEditingDraft {
+            editing = source
+        } else {
+            return
+        }
+        guard editing.showsAvatar != shown else { return }
         UIView.animate(withDuration: duration, delay: 0, options: [.beginFromCurrentState, .curveEaseInOut]) {
-            self.bar.showsAvatar = shown
+            editing.showsAvatar = shown
         }
     }
 
