@@ -1210,6 +1210,9 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         ) { [weak self] _ in MainActor.assumeIsolated { self?.setKeyboardUp(false) } })
     }
 
+    /// How far the rows go on under the keys' top while they carry the sheet.
+    private static let rowsUnderKeys: CGFloat = 48
+
     /// The composer's stand-in over the keyboard (`CommentsV2.detachedComposer`).
     private var detachedComposer: SnapCommentsDetachedComposer?
 
@@ -1420,7 +1423,9 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         isKeyboardUp = up
         keyboardDragEndGap = nil
         // Nothing of the streams under the composer while it stands on the keys.
-        (panel as? PostDetailViewController)?.setStreamsClippedAtComposer(up)
+        // On under the keys past their rounded corners: the composer stands
+        // `Spacing.sm` over them.
+        (panel as? PostDetailViewController)?.setStreamsClippedAtComposer(up, below: Spacing.sm + Self.rowsUnderKeys)
         if up {
             panelHeight.constant = restingHeight
             panelBottom.isActive = false

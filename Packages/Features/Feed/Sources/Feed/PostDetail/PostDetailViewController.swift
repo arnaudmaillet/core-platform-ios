@@ -405,6 +405,8 @@ final class PostDetailViewController: UIViewController {
 
     /// Whether the streams end at the composer's foot (`setStreamsClippedAtComposer`).
     private var clipsStreamsAtComposer = false
+    /// How far below the composer's foot the clipped streams end.
+    private var streamsClipBelowComposer: CGFloat = 0
     private let streamsClip = UIView()
 
     /// The streams end at the composer's foot, or run to the panel's bottom,
@@ -412,9 +414,15 @@ final class PostDetailViewController: UIViewController {
     /// while a keyboard is up only: the composer then moves within the sheet,
     /// and rows were seen passing beneath it, in the band it leaves; at rest
     /// the rows run to the sheet's foot (the owner, 2026-11-03).
-    func setStreamsClippedAtComposer(_ clipped: Bool) {
+    ///
+    /// ⚠️ `below` CARRIES THEM ON UNDER THE KEYS (the owner, 2026-11-04): the
+    /// keyboard's top corners are rounded, and rows ending at the composer's
+    /// foot left a plain band there, its edge seen in the corners. Below the
+    /// composer they pass under its soft edge, at its fullest there.
+    func setStreamsClippedAtComposer(_ clipped: Bool, below: CGFloat = 0) {
         guard clipped != clipsStreamsAtComposer else { return }
         clipsStreamsAtComposer = clipped
+        streamsClipBelowComposer = below
         streamsClip.backgroundColor = .black
         // ⚠️ THE CLIP STARTS WHERE THE STREAMS ARE, NOT AT ZERO (measured,
         // 2026-11-03): set inside the keyboard's animation, a clip born empty
@@ -430,7 +438,7 @@ final class PostDetailViewController: UIViewController {
     /// keyboard's animation when one runs it, so the two move together.
     private func syncStreamsClip() {
         guard clipsStreamsAtComposer, streamSurface.bounds.width > 0 else { return }
-        let foot = composeBar.convert(composeBar.bounds, to: streamSurface).maxY
+        let foot = composeBar.convert(composeBar.bounds, to: streamSurface).maxY + streamsClipBelowComposer
         streamsClip.frame = CGRect(x: 0, y: 0, width: streamSurface.bounds.width, height: max(0, foot))
     }
 
