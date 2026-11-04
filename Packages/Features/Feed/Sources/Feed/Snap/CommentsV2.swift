@@ -15,14 +15,8 @@ public enum CommentsV2 {
     /// kept aside (the owner, 2026-11-03): `-comments-v2-navstack`. Off, the
     /// sheet carries a lone `UINavigationBar` (`SnapCommentsSheetViewController`).
     public static var sheetUsesNavigationStack = ProcessInfo.processInfo.arguments.contains("-comments-v2-navstack")
-    /// The keyboard over the sheet, TikTok's way (a trial, the owner,
-    /// 2026-11-04): the sheet and its rows stay where they are, only the
-    /// composer rises on the keys — `-comments-v2-keyboard-overlay`. Off, the
-    /// sheet rises with the keyboard, as UIKit raises it.
-    public static var keyboardOverlaysSheet = ProcessInfo.processInfo.arguments.contains("-comments-v2-keyboard-overlay")
     #else
     public static let isEnabled = false
     public static let sheetUsesNavigationStack = false
-    public static let keyboardOverlaysSheet = false
     #endif
 }
