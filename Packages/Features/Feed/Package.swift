@@ -15,6 +15,8 @@ let package = Package(
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../../Core/MediaCore"),
         .package(path: "../../Core/MediaPlayback"),
+        // Voice messages in the conversation (#2104): the one voice player.
+        .package(path: "../../Core/VoiceKit"),
         .package(path: "../../Core/CoreNavigation"),
         .package(path: "../../Core/CoreNetworking"),
         .package(path: "../../Core/CoreRealtime"),
@@ -44,6 +46,7 @@ let package = Package(
                 "CoreModels",
                 "MediaCore",
                 "MediaPlayback",
+                "VoiceKit",
                 "CoreNavigation",
                 "CoreRealtime",
                 "CoreStorage",

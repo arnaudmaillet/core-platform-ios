@@ -175,10 +175,10 @@ struct ConversationThreadMediaTests {
 
     // MARK: - Voice messages (#2103)
 
-    /// Until its bubble lands (#2104), a voice message reads as its line —
-    /// "🎤 Voice message (0:12)" — with no media view; a failed one of the
-    /// viewer's retries on a tap, as a text does.
-    @Test func aVoiceMessageReadsAsItsLineAndRetriesLikeAText() throws {
+    /// A voice message is its bubble (#2104), under the row: no photo
+    /// bubble; a failed one of the viewer's says "Not sent. Tap to retry",
+    /// and the tap sends it again.
+    @Test func aFailedVoiceMessageIsItsBubbleAndRetries() throws {
         let voice = ConversationThreadMedia(
             kind: .voice, url: nil, duration: 12.4, waveform: Array(repeating: 9, count: 100),
             localFileURL: URL(fileURLWithPath: "/tmp/take.m4a")
@@ -188,10 +188,11 @@ struct ConversationThreadMediaTests {
         let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
         stream.layoutIfNeeded()
         let cell = try #require(stream.cellForItem(at: IndexPath(item: 0, section: 0)) as? ThreadRowCell)
-        #expect(cell.mediaView.isHidden || cell.mediaView.bounds.height == 0, "a voice message drew a photo bubble")
-        let labels = Self.allLabels(in: cell).compactMap(\.text)
-        #expect(labels.contains("🎤 Voice message (0:12)"), "the line: \(labels)")
-        cell.row.onReplyTap?()
+        #expect(cell.mediaView.isHidden, "a voice message drew a photo bubble")
+        #expect(!cell.voiceView.isHidden)
+        #expect(cell.voiceView.state.delivery == .failed)
+        #expect(cell.voiceView.debugTimerText == "0:12")
+        cell.voiceView.onRetry?()
         #expect(driver.retried == ["pending-1"])
     }
 

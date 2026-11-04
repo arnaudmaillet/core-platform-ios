@@ -136,6 +136,8 @@ public final class VoicePlayer {
     private var link: CADisplayLink?
     private var observers: [NSObjectProtocol] = []
     private var holdsFocus = false
+    /// A seek asked before the file said its length: applied once it does.
+    private var pendingFraction: Double?
 
     public init(
         session: any VoiceAudioSessionControlling = AVAudioSession.sharedInstance(),
@@ -152,8 +154,9 @@ public final class VoicePlayer {
     }
 
     /// Plays message `id` from `url` — from where it was paused when it is
-    /// the one paused, from the start otherwise, stopping any other.
-    public func play(_ id: String, url: URL) {
+    /// the one paused, from `fraction` of it otherwise (a message left
+    /// mid-way and come back to), stopping any other.
+    public func play(_ id: String, url: URL, from fraction: Double? = nil) {
         if id == messageID, let engine, state == .paused || state == .playing {
             if state == .paused { start(engine) }
             return
@@ -166,6 +169,7 @@ public final class VoicePlayer {
         messageID = id
         set(.loading)
         engine.load(url)
+        if let fraction, fraction > 0, fraction < 1 { seek(to: fraction) }
         start(engine)
     }
 
@@ -184,8 +188,14 @@ public final class VoicePlayer {
 
     /// Moves the message on show to `fraction` of its length.
     public func seek(to fraction: Double) {
-        guard let engine, let duration = engine.duration else { return }
-        engine.seek(to: duration * min(1, max(0, fraction)))
+        guard let engine else { return }
+        let fraction = min(1, max(0, fraction))
+        guard let duration = engine.duration else {
+            pendingFraction = fraction
+            return
+        }
+        pendingFraction = nil
+        engine.seek(to: duration * fraction)
         if state == .ended { set(.paused) } else { onChange?() }
     }
 
@@ -201,6 +211,7 @@ public final class VoicePlayer {
     public func stop() {
         engine?.pause()
         engine = nil
+        pendingFraction = nil
         stopLink()
         releaseFocus()
         messageID = nil
@@ -259,9 +270,19 @@ public final class VoicePlayer {
 
     private func startLink() {
         guard link == nil else { return }
-        let link = CADisplayLink(target: LinkTarget { [weak self] in self?.onChange?() }, selector: #selector(LinkTarget.fire))
+        let link = CADisplayLink(target: LinkTarget { [weak self] in self?.tick() }, selector: #selector(LinkTarget.fire))
         link.add(to: .main, forMode: .common)
         self.link = link
+    }
+
+    /// Every display frame while it plays: a seek waiting on the length,
+    /// then the position.
+    func tick() {
+        if let pendingFraction, let engine, let duration = engine.duration {
+            self.pendingFraction = nil
+            engine.seek(to: duration * pendingFraction)
+        }
+        onChange?()
     }
 
     private func stopLink() {

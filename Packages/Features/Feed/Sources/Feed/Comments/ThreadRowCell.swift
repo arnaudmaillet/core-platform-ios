@@ -27,6 +27,8 @@ final class ThreadRowCell: UICollectionViewCell {
     let row = CommentRowView(installsContextMenu: false)
     /// A media message's photo or video (#681); hidden otherwise.
     let mediaView = ThreadMediaView()
+    /// A voice message (#2104); hidden otherwise.
+    let voiceView = ThreadVoiceView()
     private let liftPlate = UIView()
     private let quoteView = ThreadQuoteView(indented: false)
 
@@ -52,7 +54,7 @@ final class ThreadRowCell: UICollectionViewCell {
         // On the header line, right of the time (#753, the owner's call
         // 2026-10-09) — not a line of its own above the row.
         row.installHeaderAccessory(quoteView)
-        let stack = UIStackView(arrangedSubviews: [row, mediaView])
+        let stack = UIStackView(arrangedSubviews: [row, mediaView, voiceView])
         stack.axis = .vertical
         stack.spacing = Spacing.xs
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -95,6 +97,12 @@ final class ThreadRowCell: UICollectionViewCell {
         setQuote(nil)
         mediaView.configure(nil, delivery: .sent, pipeline: nil)
         mediaView.onTap = nil
+        // Never another message's progress (#2104).
+        voiceView.configure(nil)
+        voiceView.onPlayTap = nil
+        voiceView.onSeek = nil
+        voiceView.onSpeedTap = nil
+        voiceView.onRetry = nil
         liftPlate.layer.removeAllAnimations()
         liftPlate.backgroundColor = .clear
         // An arrival or a departure in flight does not follow the cell.
