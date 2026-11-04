@@ -219,7 +219,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         let link = CADisplayLink(target: DisplayLinkTarget(self), selector: #selector(DisplayLinkTarget.tick(_:)))
         // As fast as the screen: a 120 Hz sheet followed at 60 drags its
         // media a frame behind every other frame (measured, 2026-11-03).
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
+        link.preferredFrameRateRange = DisplayLinkTarget.movingRate
         link.add(to: .main, forMode: .common)
         observeCommits()
         self.link = link
@@ -356,6 +356,14 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             hidBackButton = false
             item.setHidesBackButton(false, animated: animated)
         }
+    }
+
+    /// The sheet's top as last followed, and whether UIKit is animating it
+    /// or the keyboard is on the move (the display link's pace).
+    fileprivate var lastFollowedTop: CGFloat? { lastDrawnTop }
+    fileprivate var isAnimating: Bool {
+        isKeyboardHiding || (sheet.presentationController?.presentedView?.layer.animationKeys()?.isEmpty == false)
+            || preview?.layer.animationKeys()?.isEmpty == false
     }
 
     /// The display link's frame as `follow` is called for it: its time, and
@@ -988,10 +996,25 @@ private final class DisplayLinkTarget: NSObject {
     }
 
     @objc func tick(_ link: CADisplayLink) {
-        session?.frameTiming = (link.timestamp, link.targetTimestamp)
-        session?.follow()
-        session?.frameTiming = nil
+        guard let session else { return }
+        let before = session.lastFollowedTop
+        session.frameTiming = (link.timestamp, link.targetTimestamp)
+        session.follow()
+        session.frameTiming = nil
+        // ⚠️ AT THE SCREEN'S RATE ONLY WHILE SOMETHING MOVES: a sheet at rest
+        // followed 120 times a second for as long as it is up. Still for a
+        // quarter second, the link drops to a slow pace; the first frame
+        // that moves brings it back (and a finger's move is followed before
+        // its frame commits anyway, `followCommitObserver`).
+        let moved = before.map { abs($0 - (session.lastFollowedTop ?? $0)) > 0.1 } ?? true
+        stillFrames = moved || session.isAnimating ? 0 : stillFrames + 1
+        let range = stillFrames > 30 ? Self.restingRate : Self.movingRate
+        if link.preferredFrameRateRange != range { link.preferredFrameRateRange = range }
     }
+
+    private var stillFrames = 0
+    static let movingRate = CAFrameRateRange(minimum: 80, maximum: 120, preferred: 120)
+    private static let restingRate = CAFrameRateRange(minimum: 10, maximum: 30, preferred: 30)
 }
 
 /// The sheet's content: today's comments panel as it is in the page (#2087's

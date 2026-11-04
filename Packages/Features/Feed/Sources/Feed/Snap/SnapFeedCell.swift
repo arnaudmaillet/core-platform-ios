@@ -2078,6 +2078,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         commentsSheetMask = nil
         commentsSheetEdge?.removeFromSuperview()
         commentsSheetPictureFrame = nil
+        // Whatever the last frame left of a scale-out goes with the sheet.
+        commentsSheetMediaOut = 0
         setCommentsSheetMediaHidden(false)
     }
 

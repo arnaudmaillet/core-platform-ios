@@ -160,8 +160,14 @@ final class SnapCommentsDetachedComposer {
         band.setRampStrength(min(1, max(0, rise / Self.frostRise)))
     }
 
+    /// Through the sheet's bar, which holds the send in flight: while one
+    /// is, the draft stays here rather than going nowhere.
     private func send(_ text: String) {
         guard let source else { return }
+        guard !source.isSending else {
+            bar.draftText = text
+            return
+        }
         source.draftText = text
         source.send()
     }

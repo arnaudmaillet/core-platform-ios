@@ -11,7 +11,12 @@ import Foundation
 @MainActor
 public enum CommentsV2 {
     #if DEBUG
+    ///
+    /// ⚠️ OFF UNDER A TEST HOST: the Feed suites cover the first space, which
+    /// still ships in DEBUG; they retire with it (#2087's later step). The
+    /// redesign's own tests do not read the flag.
     public static var isEnabled = !ProcessInfo.processInfo.arguments.contains("-comments-v1")
+        && ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
     /// The sheet's bar in a navigation stack of its own — the first build,
     /// kept aside (the owner, 2026-11-03): `-comments-v2-navstack`. Off, the
     /// sheet carries a lone `UINavigationBar` (`SnapCommentsSheetViewController`).
