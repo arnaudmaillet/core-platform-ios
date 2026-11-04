@@ -65,8 +65,20 @@ final class SnapCommentsDetachedComposer {
         band.setRampStrength(0)
         let center = NotificationCenter.default
         observers.add(center.addObserver(
+            forName: UIResponder.keyboardWillShowNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+            MainActor.assumeIsolated { self?.setAvatarShown(false, duration: duration) }
+        })
+        observers.add(center.addObserver(
             forName: UIResponder.keyboardWillHideNotification, object: nil, queue: .main
-        ) { [weak self] _ in MainActor.assumeIsolated { self?.keyboardWillHide() } })
+        ) { [weak self] note in
+            let duration = (note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+            MainActor.assumeIsolated {
+                self?.keyboardWillHide()
+                self?.setAvatarShown(true, duration: duration)
+            }
+        })
         observers.add(center.addObserver(
             forName: UIResponder.keyboardDidHideNotification, object: nil, queue: .main
         ) { [weak self] _ in MainActor.assumeIsolated { self?.tearDown() } })
@@ -77,6 +89,9 @@ final class SnapCommentsDetachedComposer {
         guard !isEditing, let source, let window = source.window else { return }
         isEditing = true
         bar.mirrorLook(of: source)
+        // The sheet's bar's face at the hand-over; the avatar goes as the
+        // keys rise (`keyboardWillShow`).
+        bar.showsAvatar = true
         bar.draftText = source.draftText
         bar.onVoiceNote = source.onVoiceNote
         let frame = source.convert(source.bounds, to: window)
@@ -149,6 +164,16 @@ final class SnapCommentsDetachedComposer {
         guard let source else { return }
         source.draftText = text
         source.send()
+    }
+
+    /// No avatar over the keys (the owner, 2026-11-04): it fades as the keys
+    /// rise, the field taking its room, and comes back as they go — on the
+    /// keys' own time, so the bar lands back on the sheet's bar's face.
+    private func setAvatarShown(_ shown: Bool, duration: TimeInterval) {
+        guard isEditing, bar.showsAvatar != shown else { return }
+        UIView.animate(withDuration: duration, delay: 0, options: [.beginFromCurrentState, .curveEaseInOut]) {
+            self.bar.showsAvatar = shown
+        }
     }
 
     /// The draft back to the sheet's bar as the keyboard goes.

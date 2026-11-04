@@ -706,6 +706,8 @@ final class CommentsInputBar: UIView {
         )
         let fieldAtRest = field.bottomAnchor.constraint(equalTo: restingInputRow.bottomAnchor)
         fieldAtRest.priority = .defaultHigh
+        fieldAfterAvatar = field.leadingAnchor.constraint(equalTo: avatarBubble.trailingAnchor, constant: Spacing.sm)
+        fieldAtLeading = field.leadingAnchor.constraint(equalTo: leadingAnchor)
         NSLayoutConstraint.activate([
             fieldHeight,
             restingInputRow.leadingAnchor.constraint(equalTo: field.leadingAnchor),
@@ -717,7 +719,7 @@ final class CommentsInputBar: UIView {
             avatarBubble.bottomAnchor.constraint(equalTo: field.bottomAnchor),
             avatarBubble.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
             avatarBubble.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
-            field.leadingAnchor.constraint(equalTo: avatarBubble.trailingAnchor, constant: Spacing.sm),
+            fieldAfterAvatar,
             fieldAtRest,
             fieldTrailing,
             railButton.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -1377,6 +1379,24 @@ final class CommentsInputBar: UIView {
         textView.becomeFirstResponder()
     }
 
+    /// The field after the avatar, or from the bar's leading edge with the
+    /// avatar gone (`showsAvatar`).
+    private var fieldAfterAvatar: NSLayoutConstraint!
+    private var fieldAtLeading: NSLayoutConstraint!
+
+    /// Whether the avatar leads the field. Off, it fades out and the field
+    /// takes its room — the detached composer over the keys (#2087, the
+    /// owner 2026-11-04). Inside an animation block, it follows it.
+    var showsAvatar = true {
+        didSet {
+            guard showsAvatar != oldValue else { return }
+            fieldAfterAvatar.isActive = showsAvatar
+            fieldAtLeading.isActive = !showsAvatar
+            avatarBubble.alpha = showsAvatar ? 1 : 0
+            layoutIfNeeded()
+        }
+    }
+
     /// Asked as the field is about to edit, for a member: false keeps the
     /// keyboard away — a host that edits in another bar instead (#2087's
     /// detached composer, `SnapCommentsDetachedComposer`).
@@ -1399,8 +1419,6 @@ final class CommentsInputBar: UIView {
         setViewerIdentity(other.viewerIdentity, imagePipeline: other.viewerImagePipeline)
         replyName = other.replyName
         applyPlaceholder()
-        // The avatar's profile switcher, anchored to this bar's face.
-        setProfileSwitch(other.onProfileSwitch)
     }
 
     #if DEBUG
