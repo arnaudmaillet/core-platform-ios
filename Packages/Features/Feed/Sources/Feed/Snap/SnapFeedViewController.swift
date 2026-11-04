@@ -7033,7 +7033,12 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         //
         // "I asked" and "it happened" are different facts, and only the second
         // one may clear a one-shot.
-        if commentsEngagedID == id { pendingCommentsID = nil }
+        //
+        // ⚠️ THE SHEET TOO (#2087): a media post's comments open in a sheet,
+        // which never takes `commentsEngagedID`; the request stayed armed,
+        // and the next appearance or landing opened the sheet again after the
+        // viewer had closed it.
+        if commentsEngagedID == id || commentsSheet?.postID == id { pendingCommentsID = nil }
     }
 
     /// Takes the pending page for `id`, if there is one. Reading it clears it —
