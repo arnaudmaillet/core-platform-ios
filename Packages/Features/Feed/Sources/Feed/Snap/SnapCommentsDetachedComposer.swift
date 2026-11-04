@@ -92,16 +92,27 @@ final class SnapCommentsDetachedComposer {
         }
         let guide = host.keyboardLayoutGuide
         guide.usesBottomSafeArea = false
+        // ⚠️ THE SHEET'S SCALE (measured, 2026-11-04): a floating sheet lays
+        // its content out at the screen's width and draws it scaled down
+        // (×0.96 on an iPhone 18 Pro) — its bar 43.2 pt high for this one's
+        // 45, a jump in size at the hand-over. This bar is laid out at the
+        // sheet's bar's own size and drawn at its scale, about its centre:
+        // its constraints place it unscaled, so its foot is offset by the
+        // half-height the scale takes off.
+        let scale = source.bounds.width > 0 ? frame.width / source.bounds.width : 1
+        bar.transform = CGAffineTransform(scaleX: scale, y: scale)
+        let shrink = source.bounds.height * (1 - scale) / 2
         NSLayoutConstraint.activate([
-            bar.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: frame.minX),
-            bar.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: frame.maxX - window.bounds.width),
+            bar.widthAnchor.constraint(equalToConstant: source.bounds.width),
+            bar.centerXAnchor.constraint(equalTo: host.leadingAnchor, constant: frame.midX),
             // Where the sheet's bar stands with no keyboard, on the keys' top
             // with one, riding them both ways.
-            bar.bottomAnchor.constraint(equalTo: guide.topAnchor, constant: -Spacing.sm).withPriority(.defaultHigh),
-            bar.bottomAnchor.constraint(lessThanOrEqualTo: host.topAnchor, constant: frame.maxY),
+            bar.bottomAnchor.constraint(equalTo: guide.topAnchor, constant: shrink - Spacing.sm)
+                .withPriority(.defaultHigh),
+            bar.bottomAnchor.constraint(lessThanOrEqualTo: host.topAnchor, constant: frame.maxY + shrink),
             band.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: sheetFrame.minX),
             band.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: sheetFrame.maxX - window.bounds.width),
-            band.topAnchor.constraint(equalTo: bar.topAnchor),
+            band.topAnchor.constraint(equalTo: bar.topAnchor, constant: shrink),
             band.bottomAnchor.constraint(equalTo: guide.topAnchor),
         ])
         host.layoutIfNeeded()
@@ -157,6 +168,7 @@ final class SnapCommentsDetachedComposer {
         source?.draftText = bar.draftText
         bar.endEditing(true)
         bar.removeFromSuperview()
+        bar.transform = .identity
         band.removeFromSuperview()
         host.removeFromSuperview()
         hideSource(false)
