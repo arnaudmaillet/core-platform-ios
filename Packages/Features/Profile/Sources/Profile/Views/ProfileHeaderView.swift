@@ -233,27 +233,35 @@ final class ProfileHeaderView: HeroHeaderView {
     }
 
     /// The avatar's mark (#2014, #2050): the one mapping, WHOLE — "+",
-    /// the pending clock, the check and the two people with their ring, as
-    /// the author pill and the inbox wear it (the owner, 2026-11-02,
-    /// reversing 2026-11-01's "never the '+'" to avoid exceptions). The "+"
-    /// follows, through the tray's own Follow.
+    /// the pending clock, the check and the two people, as the author pill
+    /// and the inbox wear it (the owner, 2026-11-02, reversing 2026-11-01's
+    /// "never the '+'" to avoid exceptions). The "+" follows, through the
+    /// tray's own Follow.
     ///
-    /// None for the viewer's own profile, one not read yet (the mapping's
-    /// nil) and someone blocked. A guest wears what the author pill shows a
-    /// guest: the "+" (their relation reads as not followed, #442), behind
+    /// None for good for the viewer's own profile (known at once, so it never
+    /// wears the skeleton's badge first), someone blocked, and a profile the
+    /// viewer cannot follow. A relation not read yet wears the skeleton's
+    /// badge (#2098), never nothing. A guest wears what the author pill shows
+    /// a guest: the "+" (their relation reads as not followed, #442), behind
     /// the member gate the tray's Follow already goes through. Pure, for
     /// tests.
     static func avatarMark(
-        for state: ProfileViewModel.FollowButton, mutual: Bool, blocked: Bool
+        for state: ProfileViewModel.FollowButton, mutual: Bool, blocked: Bool, isOwnProfile: Bool
     ) -> PersonPill.Badge {
-        guard !blocked else { return .none }
+        guard !blocked, !isOwnProfile else { return .none }
+        if state == .hidden { return .loading }
         return relationBadge(for: state, mutual: mutual) ?? .none
     }
 
     /// Wears the relationship on the avatar — through the badge's replace
-    /// and the ring's fade once on screen; the header never moves for it.
-    func configureRelationMark(_ state: ProfileViewModel.FollowButton, mutual: Bool, blocked: Bool) {
-        setRelationMark(Self.avatarMark(for: state, mutual: mutual, blocked: blocked), animated: window != nil)
+    /// once on screen; the header never moves for it.
+    func configureRelationMark(
+        _ state: ProfileViewModel.FollowButton, mutual: Bool, blocked: Bool, isOwnProfile: Bool
+    ) {
+        setRelationMark(
+            Self.avatarMark(for: state, mutual: mutual, blocked: blocked, isOwnProfile: isOwnProfile),
+            animated: window != nil
+        )
     }
 
     /// Shows or hides one of the tray's buttons — through its own motion when

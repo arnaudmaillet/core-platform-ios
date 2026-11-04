@@ -55,7 +55,9 @@ final class ConversationRowView: UIView {
         avatarTask = nil
         avatarPeerID = nil
         avatarView.setPicture(nil, pipeline: nil)
-        avatarView.setMark(.none, animated: false)
+        // A reused row starts unknown for its next person, never wearing
+        // the previous one's mark (#2098).
+        avatarView.setMark(.loading, animated: false)
         onFollowTapped = nil
     }
 
@@ -293,6 +295,8 @@ extension ConversationRowView {
     var debugGlyphs: [UIImageView] { [mutedIcon, pinnedIcon].filter { !$0.isHidden } }
     /// The face's badge. Tests.
     var debugBadge: RelationBadgeView? { avatarView.badge }
+    /// Whether the face has the badge's cutout taken out. Tests.
+    var debugFaceIsCutOut: Bool { avatarView.faceIsCutOut }
 }
 #endif
 

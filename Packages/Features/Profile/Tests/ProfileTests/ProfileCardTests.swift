@@ -182,7 +182,7 @@ struct ProfileCardTests {
         let card = try await makeCard(following: false, host: host)
         for state in [ProfileViewModel.FollowButton.follow, .requested, .following, .unavailable] {
             card.debugApplyFollowButton(state)
-            let expected = ProfileHeaderView.avatarMark(for: state, mutual: false, blocked: false)
+            let expected = ProfileHeaderView.avatarMark(for: state, mutual: false, blocked: false, isOwnProfile: false)
             #expect(card.headerView.relationMark == expected, "\(state)")
         }
     }

@@ -21,9 +21,10 @@ struct AuthorBadgeBindingTests {
         }
     }
 
-    /// An unknown relation draws nothing and is asked for once; its answer
-    /// redraws the pill — one not in any window included.
-    @Test func anUnknownRelationDrawsNothingIsAskedOnceAndItsAnswerLands() async {
+    /// An unknown relation draws the skeleton's badge (#2098) and is asked
+    /// for once; its answer redraws the pill — one not in any window
+    /// included.
+    @Test func anUnknownRelationDrawsTheSkeletonIsAskedOnceAndItsAnswerLands() async {
         let graph = AnsweringGraph(answers: [ava: .notFollowing])
         let store = SnapAuthorFollowStore(writer: graph, reader: graph)
         let binding = AuthorBadgeBinding(store: store)
@@ -33,7 +34,7 @@ struct AuthorBadgeBindingTests {
 
         binding.bind(pill, to: ava)
         binding.bind(twin, to: ava)
-        #expect(pill.drawn == [.none], "an unknown relation drew a badge")
+        #expect(pill.drawn == [.loading], "an unknown relation is the skeleton's badge (#2098)")
         await Self.settle { pill.drawn.last == .follow }
         #expect(graph.lookups == [ava], "asked more than once")
         #expect(pill.drawn.last == .follow, "the answer did not reach a pill out of every window")
@@ -50,7 +51,7 @@ struct AuthorBadgeBindingTests {
         binding.bind(pill, to: ava)
         binding.bind(pill, to: bo)
         store.setRelation(.following, for: ava)
-        #expect(pill.drawn.last == PersonPill.Badge.none, "a rebound pill drew the old author's answer")
+        #expect(pill.drawn.last == .loading, "a rebound pill drew the old author's answer")
         store.setRelation(.mutual, for: bo)
         #expect(pill.drawn.last == .friends)
         binding.bind(pill, to: nil)

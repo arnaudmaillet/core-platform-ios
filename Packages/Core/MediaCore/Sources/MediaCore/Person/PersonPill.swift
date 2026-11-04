@@ -40,9 +40,14 @@ public final class PersonPill: UIView {
     /// request a private account has not answered reads apart from both. A
     /// state mark takes no tap of its own: it falls through to the pill's.
     public enum Badge: Equatable, Sendable {
-        /// Nothing drawn: the viewer themself, someone blocked, a relation not
-        /// known yet, or a host that offers no follow at all.
+        /// Nothing drawn, for good: the viewer themself, someone blocked, or a
+        /// host that offers no follow at all. No disc, no cutout.
         case none
+        /// The relation is not known yet (#2098): the badge's place is held by
+        /// a skeleton bone, its cutout already taken out of the face, so the
+        /// mark that lands changes only what the disc draws. No symbol, no
+        /// tap, no accessibility element.
+        case loading
         /// "+": the viewer does not follow them. A tap follows.
         case follow
         /// The viewer follows them; they do not follow back.
@@ -67,7 +72,7 @@ public final class PersonPill: UIView {
         ///   the two marks a "+" can turn into share one construction.
         public var symbolName: String? {
             switch self {
-            case .none: nil
+            case .none, .loading: nil
             case .follow: "plus"
             case .following: "checkmark.circle.fill"
             case .friends: "person.2.fill"
@@ -79,7 +84,7 @@ public final class PersonPill: UIView {
         /// disc (#1199), so the disc and the mark move as one.
         public var circledSymbolName: String {
             switch self {
-            case .none, .follow: "plus.circle.fill"
+            case .none, .loading, .follow: "plus.circle.fill"
             case .following: "checkmark.circle.fill"
             case .friends: "person.2.circle.fill"
             case .pending: "clock.circle.fill"
@@ -93,19 +98,23 @@ public final class PersonPill: UIView {
             switch self {
             case .following, .pending: 13
             case .friends: 7
-            case .none, .follow: 9
+            case .none, .loading, .follow: 9
             }
         }
 
         public var accessibilityLabel: String? {
             switch self {
-            case .none: nil
+            case .none, .loading: nil
             case .follow: "Follow"
             case .following: "Following"
             case .friends: "Friends"
             case .pending: "Requested"
             }
         }
+
+        /// Whether the face loses the badge's disc: for every badge drawn, the
+        /// skeleton's included — only "no badge, for good" leaves it whole.
+        public var cutsTheFace: Bool { self != .none }
     }
 
     /// Called when the pill is tapped. Without one the pill takes no tap of
@@ -347,6 +356,9 @@ public final class PersonPill: UIView {
         guard let statusBadge else { return }
         self.badge = badge
         statusBadge.show(badge, animated: animated)
+        // Gone for good (the skeleton's relation turned out to be none): the
+        // cutout closes as the bone fades, in the same motion (#2098).
+        if !badge.cutsTheFace { faceCutout.close(avatar.layer, animated: animated && window != nil) }
         setNeedsLayout()
         updateAccessibility()
     }
@@ -359,7 +371,7 @@ public final class PersonPill: UIView {
     /// a face. A true cutout, never a stroke in a guessed colour: the pill
     /// is glass over moving video.
     public static let cutoutGap = RelationMarkMetrics.cutoutGap
-    private let faceCutout = CAShapeLayer()
+    private let faceCutout = FaceCutout()
     /// The row holding the face, laid out before the cutout is measured.
     private weak var faceRow: UIStackView?
 
@@ -373,42 +385,35 @@ public final class PersonPill: UIView {
         applyBadgeCutout()
     }
 
-    /// The badge's cutout as a disc in `view`'s space, nil with no badge
-    /// drawn.
-    private func cutoutCircle(in view: UIView) -> UIBezierPath? {
-        guard let statusBadge, badge != .none, !statusBadge.isHidden, statusBadge.bounds.width > 0 else { return nil }
-        let centre = statusBadge.convert(CGPoint(x: statusBadge.bounds.midX, y: statusBadge.bounds.midY), to: view)
-        return RelationMark.cutout(centre: centre, metrics: Self.markMetrics)
+    /// The badge's centre in `view`'s space — where its cutout is taken
+    /// out — nil with no badge drawn.
+    private func cutoutCentre(in view: UIView) -> CGPoint? {
+        guard let statusBadge, badge.cutsTheFace, !statusBadge.isHidden, statusBadge.bounds.width > 0 else { return nil }
+        return statusBadge.convert(CGPoint(x: statusBadge.bounds.midX, y: statusBadge.bounds.midY), to: view)
     }
 
     /// The face's mask. Everything the face draws is a layer's content or a
     /// shape — its skeleton's bone included (`SkeletonBoneView.fill`) — so the
     /// mask reaches all of it, loading or not.
     private func applyBadgeCutout() {
-        guard let circle = cutoutCircle(in: avatar) else {
-            avatar.layer.mask = nil
+        guard let centre = cutoutCentre(in: avatar) else {
+            if !faceCutout.isClosing { faceCutout.close(avatar.layer, animated: false) }
             return
         }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        faceCutout.fillRule = .evenOdd
-        faceCutout.frame = avatar.bounds
-        faceCutout.path = RelationMark.faceMaskPath(cutout: circle)
-        CATransaction.commit()
-        avatar.layer.mask = faceCutout
+        faceCutout.cut(avatar.layer, centre: centre, metrics: Self.markMetrics)
     }
 
     /// Whether the face's mask lets `point` (in the face's space) show.
     /// Tests.
     public func faceShows(at point: CGPoint) -> Bool {
-        guard avatar.layer.mask === faceCutout, let path = faceCutout.path else { return true }
+        guard faceCutout.isCut(avatar.layer), let path = faceCutout.mask.path else { return true }
         return path.contains(point, using: .evenOdd)
     }
 
     /// The badge's cutout as drawn on the face: its radius, nil without one.
     /// Tests.
     public var drawnCutoutRadius: CGFloat? {
-        guard avatar.layer.mask === faceCutout, faceCutout.path != nil else { return nil }
+        guard faceCutout.isCut(avatar.layer), faceCutout.mask.path != nil else { return nil }
         return Self.markMetrics.cutoutRadius
     }
 
@@ -424,6 +429,8 @@ public final class PersonPill: UIView {
     public var badgeReplaceCount: Int { statusBadge?.replaceCount ?? 0 }
     /// The badge's glyph image as drawn now. Tests (#968).
     public var drawnBadgeImage: UIImage? { statusBadge?.glyphImage }
+    /// Whether the badge shows the skeleton's bone. Tests (#2098).
+    public var debugBadgeShowsBone: Bool { statusBadge?.showsBone ?? false }
 
     // MARK: - Look
 

@@ -91,15 +91,38 @@ struct HeroHeaderRelationMarkTests {
         #expect(header.bounds.height == before.3)
     }
 
-    /// The skeleton wears no relation; the reveal brings the asked one.
-    @Test func theSkeletonWearsNoRelation() {
+    /// ⚠️ THE SKELETON WEARS THE SKELETON'S BADGE (#2098, reversing
+    /// #2014): a bone with its cutout under the bones; the reveal brings the
+    /// asked mark in the same place.
+    @Test func theSkeletonWearsTheSkeletonsBadge() throws {
         let header = makeHeader()
         header.setRedacted(true)
         header.setRelationMark(.follow, animated: false)
+        layOut(header)
+        #expect(header.shownRelationMark == .loading)
         #expect(header.debugRelationSymbol == nil)
+        #expect(header.debugRelationBadge?.showsBone == true)
+        #expect(header.debugAvatarIsCutOut, "the skeleton's badge with no cutout")
+        let place = try #require(header.debugRelationBadge).frame
         #expect(header.relationMark == .follow)
         header.setRedacted(false)
+        layOut(header)
         #expect(header.debugRelationSymbol == "plus")
+        #expect(header.debugRelationBadge?.showsBone == false)
+        #expect(header.debugRelationBadge?.frame == place, "the badge moved at the reveal")
+        #expect(header.debugAvatarIsCutOut)
+    }
+
+    /// A face that wears no badge for good — the viewer's own — wears none
+    /// under the bones either.
+    @Test func aFaceWithNoBadgeWearsNoneUnderTheBones() {
+        let header = makeHeader()
+        header.setRelationMark(.none, animated: false)
+        header.setRedacted(true)
+        layOut(header)
+        #expect(header.shownRelationMark == .none)
+        #expect(!header.debugAvatarIsCutOut)
+        #expect(header.debugRelationBadge?.showsBone == false)
     }
 
     /// A state mark takes no tap: it falls through to the disc's own, and

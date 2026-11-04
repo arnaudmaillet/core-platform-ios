@@ -161,12 +161,12 @@ struct InboxRelationMarkTests {
         #expect(PersonPill.Badge(relation: .mutual) == .friends)
         #expect(PersonPill.Badge(relation: .viewer) == .none)
         #expect(PersonPill.Badge(relation: .blocked) == .none)
-        #expect(PersonPill.Badge(relation: nil) == .none, "a relation not known yet drew a mark")
+        #expect(PersonPill.Badge(relation: nil) == .loading, "a relation not known yet is the skeleton's badge (#2098)")
     }
 
     /// NO RING ROUND THE FACE (#2082, the owner 2026-11-03), whatever the
     /// relation: the badge alone, its cutout kept.
-    @Test(arguments: [PersonPill.Badge.none, .follow, .pending, .following, .friends])
+    @Test(arguments: [PersonPill.Badge.none, .loading, .follow, .pending, .following, .friends])
     func theFaceWearsNoRing(_ mark: PersonPill.Badge) {
         let face = RelationMarkedAvatarView()
         face.frame = CGRect(x: 0, y: 0, width: 48, height: 48)
@@ -182,10 +182,25 @@ struct InboxRelationMarkTests {
         #expect(row.relationMark == .none)
     }
 
-    /// Before its relation is known, a one-to-one row wears nothing.
-    @Test func noMarkBeforeTheRelationIsKnown() {
+    /// Before its relation is known, a one-to-one row wears the skeleton's
+    /// badge, its cutout already out of the face (#2098) — never nothing.
+    @Test func theSkeletonsBadgeBeforeTheRelationIsKnown() {
         let relations = InboxRelations(entities: EntityStore(), reader: Graph([:]), writer: Graph([:]))
-        #expect(relations.mark(for: Self.peer) == .none)
+        #expect(relations.mark(for: Self.peer) == .loading)
+        let (row, _) = laidOutRow(model(), mark: relations.mark(for: Self.peer))
+        #expect(row.relationMark == .loading)
+        #expect(row.debugBadge?.showsBone == true)
+        #expect(row.debugFaceIsCutOut)
+    }
+
+    /// A reused row starts unknown for its next person (#2098): never the
+    /// previous person's mark, never an empty face.
+    @Test func aReusedRowStartsWithTheSkeletonsBadge() {
+        let (row, _) = laidOutRow(model(), mark: .friends)
+        row.prepareForReuse()
+        row.layoutIfNeeded()
+        #expect(row.relationMark == .loading)
+        #expect(row.debugFaceIsCutOut)
     }
 
     /// ⚠️ THE "+" IS THE BADGE'S ALONE: a touch on it reaches the badge, past
