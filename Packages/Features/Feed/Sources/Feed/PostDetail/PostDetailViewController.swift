@@ -157,7 +157,63 @@ final class PostDetailViewController: UIViewController {
         applyRailWayBack()
         onScrollAwayChange?(stream.showsScrollAwayReturn)
         syncDayUnderHeader()
+        if wearsSheetEdges { sheetEdgePocket.scrollView = stream.collectionView }
         onVisibleStreamChange?(stream.kind)
+    }
+
+    // MARK: - The comments sheet's edges (#2087)
+
+    /// Whether the panel wears the sheet's edges (`wearSheetEdges`).
+    private var wearsSheetEdges = false
+    /// The composer as the pocket over the visible list's bottom edge.
+    private let sheetEdgePocket = UIScrollEdgeElementContainerInteraction()
+
+    /// The panel's height for its visible stream as laid out — the engaged
+    /// top, the rows, the composer's band — what a sheet fitted to its content
+    /// asks for (#2087). Nil before the stream has rows or engaged insets.
+    var fittedHeight: CGFloat? {
+        guard let engaged = engagedStreamInsets else { return nil }
+        let rows = stream.collectionView.contentSize.height
+        guard rows > 0 else { return nil }
+        return engaged.top + rows + engaged.bottom
+    }
+
+    /// Whether Recent rides the keyboard, as a conversation does (#2007).
+    /// Not in the comments sheet (#2087): UIKit raises the sheet itself over
+    /// the keyboard, and Recent riding it too was pinned to its tail then
+    /// clamped back, inside the keyboard's animation — the rows slid under
+    /// the bar and back (measured, 2026-11-03).
+    var streamsRideKeyboard = true
+
+    /// A stream its room holds whole does not scroll at all, so a drag on it
+    /// is the sheet's own — the sheet stretches and springs back, as it does
+    /// under the grabber (#2087, the owner 2026-11-03). A longer stream
+    /// scrolls, as any list.
+    func letSheetTakeShortStreams() {
+        streams.forEach { $0.collectionView.alwaysBounceVertical = false }
+    }
+
+    /// The comments sheet's edges: UIKit's own SOFT edge effects, as the
+    /// app's other lists wear them (the owner, 2026-11-03) — the top one
+    /// under the sheet's bar, a titled screen's (`prefersSoftTopEdge`), the
+    /// bottom one under the composer, which stands over the visible list's
+    /// bottom edge as its pocket: `BottomEdgeBlurView`'s mechanism, the
+    /// composer being the content over the edge. The host's bar tracks
+    /// `stream.collectionView` (`onVisibleStreamChange`).
+    ///
+    /// ⚠️ On a window, not before: touching an edge effect materialises Liquid
+    /// Glass machinery (`StatusBarBlurView`).
+    func wearSheetEdges() {
+        guard !wearsSheetEdges else { return }
+        wearsSheetEdges = true
+        for stream in streams {
+            stream.collectionView.prefersSoftTopEdge()
+            stream.collectionView.bottomEdgeEffect.isHidden = false
+            stream.collectionView.bottomEdgeEffect.style = .soft
+        }
+        sheetEdgePocket.edge = .bottom
+        sheetEdgePocket.scrollView = stream.collectionView
+        composeBar.addInteraction(sheetEdgePocket)
     }
 
     // MARK: - The stream, as the panel's
@@ -338,12 +394,52 @@ final class PostDetailViewController: UIViewController {
         refitEmptyPageOnHeightChange()
         syncDayUnderHeader()
         // Rows realised as the engaged stream grows into its room (#1799).
-        let rise = composerRise
+        let rise = streamsRideKeyboard ? composerRise : 0
         streams.forEach {
             $0.syncBottomAnchor()
             $0.syncKeyboardRise(rise)
             $0.keepRestingEnd()
         }
+        syncStreamsClip()
+    }
+
+    /// Whether the streams end at the composer's foot (`setStreamsClippedAtComposer`).
+    private var clipsStreamsAtComposer = false
+    /// How far below the composer's foot the clipped streams end.
+    private var streamsClipBelowComposer: CGFloat = 0
+    private let streamsClip = UIView()
+
+    /// The streams end at the composer's foot, or run to the panel's bottom,
+    /// under the composer and its soft edge (the comments sheet, #2087). Clipped
+    /// while a keyboard is up only: the composer then moves within the sheet,
+    /// and rows were seen passing beneath it, in the band it leaves; at rest
+    /// the rows run to the sheet's foot (the owner, 2026-11-03).
+    ///
+    /// ⚠️ `below` CARRIES THEM ON UNDER THE KEYS (the owner, 2026-11-04): the
+    /// keyboard's top corners are rounded, and rows ending at the composer's
+    /// foot left a plain band there, its edge seen in the corners. Below the
+    /// composer they pass under its soft edge, at its fullest there.
+    func setStreamsClippedAtComposer(_ clipped: Bool, below: CGFloat = 0) {
+        guard clipped != clipsStreamsAtComposer else { return }
+        clipsStreamsAtComposer = clipped
+        streamsClipBelowComposer = below
+        streamsClip.backgroundColor = .black
+        // ⚠️ THE CLIP STARTS WHERE THE STREAMS ARE, NOT AT ZERO (measured,
+        // 2026-11-03): set inside the keyboard's animation, a clip born empty
+        // grew from nothing — the rows vanished, then came back from the top
+        // down, a flash at every keyboard. Its frame is set unanimated first.
+        UIView.performWithoutAnimation {
+            syncStreamsClip()
+            streamSurface.mask = clipped ? streamsClip : nil
+        }
+    }
+
+    /// The clip to the composer's foot, in this layout pass — inside a
+    /// keyboard's animation when one runs it, so the two move together.
+    private func syncStreamsClip() {
+        guard clipsStreamsAtComposer, streamSurface.bounds.width > 0 else { return }
+        let foot = composeBar.convert(composeBar.bounds, to: streamSurface).maxY + streamsClipBelowComposer
+        streamsClip.frame = CGRect(x: 0, y: 0, width: streamSurface.bounds.width, height: max(0, foot))
     }
 
     /// How far the keyboard holds the composer's input row above the bar's
@@ -1415,6 +1511,19 @@ final class PostDetailViewController: UIViewController {
         composeBar.postActions.setSaved(saved)
         composeBar.postActions.onSave = onSave
         composeBar.postActions.onShare = onShare
+    }
+
+    /// The composer alone — the avatar and the field, no column: no stake,
+    /// no slot, no post actions (the comments sheet, #2087, the owner
+    /// 2026-11-03). The field takes the column's width, as it does on a page
+    /// with no slot (#1999).
+    func setComposerBare() {
+        composeBar.hostsActionColumn = true
+        composeBar.showsStake = false
+        setPostActions(shown: false, saved: false, onSave: nil)
+        railShareAction = nil
+        railShareHoldArms = false
+        setRailSoundFace(nil, keepsSlot: false)
     }
 
     /// The composer's star after a save anywhere (#1681).

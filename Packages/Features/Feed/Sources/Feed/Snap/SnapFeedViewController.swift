@@ -479,6 +479,12 @@ final class SnapFeedViewController: UIViewController {
     private var isMaskedRevealActive = false
     private var isEngagedDismissalActive = false
     private var commentsEngagedID: PostID?
+    /// A media post's comments as a native sheet, while one is up (#2087,
+    /// `CommentsV2`): the engagement above stays nil meanwhile.
+    private var commentsSheet: SnapCommentsSheetSession?
+    /// The active page's sheet panel, built ahead of the tap on the settle
+    /// seam — the page's own warm, outside the page (#2087).
+    private var commentsSheetWarm: (id: PostID, panel: UIViewController)?
     /// The engaged comments UI — a child of THIS controller (thread data,
     /// scroll position, and reply drafts must never live in a recycled
     /// cell); the cell only hosts its view while engaged.
@@ -3539,13 +3545,16 @@ final class SnapFeedViewController: UIViewController {
     private func refreshWalletBadge() {
         guard let wallet else { return }
         let snapshot = wallet.snapshot()
-        walletBadge.update(
-            balance: snapshot.balance,
-            claimAvailable: makeWalletSheet != nil && snapshot.claimAvailable,
-            claimProgress: snapshot.claimCountdown.map {
-                WalletBadgeButton.ClaimProgress(fraction: $0.fraction, remaining: $0.remaining)
-            }
-        )
+        // The page's badge, and the comments sheet's while one is up (#2087).
+        for badge in [walletBadge, commentsSheet?.content.walletBadge].compactMap({ $0 }) {
+            badge.update(
+                balance: snapshot.balance,
+                claimAvailable: makeWalletSheet != nil && snapshot.claimAvailable,
+                claimProgress: snapshot.claimCountdown.map {
+                    WalletBadgeButton.ClaimProgress(fraction: $0.fraction, remaining: $0.remaining)
+                }
+            )
+        }
     }
 
     /// Presents the shell-vended wallet sheet over this screen — the badge's
@@ -3702,6 +3711,10 @@ final class SnapFeedViewController: UIViewController {
     /// reveal, the pager lock, and the toolbar swap all fire together;
     /// text pages take the pre-rendered resting path instead.
     private func presentComments(for id: PostID, animated: Bool = true) {
+        // The sheet is a media post's; a text post keeps its own space.
+        if CommentsV2.isEnabled, modelsByID[id]?.mediaURL != nil {
+            return presentCommentsSheet(for: id, animated: animated)
+        }
         guard commentsEngagedID == nil,
               let indexPath = dataSource.indexPath(for: id),
               let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell
@@ -3802,6 +3815,76 @@ final class SnapFeedViewController: UIViewController {
                          animated ? "yes" : "no"))
         }
         #endif
+    }
+
+    /// `CommentsV2` (#2087): the comments in a native sheet over the bottom
+    /// of the screen, the page's media shrunk whole into the room above it —
+    /// `SnapCommentsSheetSession`. Today's panel, built as the page's is; the
+    /// pager and the sector hold still while it is up.
+    private func presentCommentsSheet(for id: PostID, animated: Bool) {
+        guard commentsSheet == nil, commentsEngagedID == nil, presentedViewController == nil,
+              view.window != nil, modelsByID[id]?.mediaURL != nil,
+              let indexPath = dataSource.indexPath(for: id),
+              let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell,
+              let content = takeCommentsSheetWarm(for: id) ?? makeCommentsPanelContent?(id)
+        else { return }
+        let detail = content as? PostDetailViewController
+        // The panel learns here that its post turned out unavailable (#1409),
+        // as `applyRailSlot` tells the page's.
+        detail?.onPostUnavailable = { [weak self] id in self?.markPostUnavailable(id) }
+        // The avatar and the field alone: no like, no slot, no post actions.
+        detail?.setComposerBare()
+        // A short stream rests at its top: the sheet is fitted to it, and a
+        // stream anchored to the bottom moved its rows as the sheet settled.
+        detail?.anchorsShortStream = false
+        // …and, held whole, leaves a drag on it to the sheet.
+        detail?.letSheetTakeShortStreams()
+        // The sheet rises over the keyboard itself: Recent does not ride it.
+        detail?.streamsRideKeyboard = false
+        // The count the feed knows: no comment bones for a post with none (#1773).
+        detail?.seedCommentCount(modelsByID[id]?.cardMetrics?.comments)
+        detail?.setStreamTransitionProgress(0)
+        detail?.setComposerEntranceState(offstage: false)
+        collectionView.isScrollEnabled = false
+        (parent as? ForYouSectorViewController)?.setPagingEnabled(false)
+        // The balance moves to the sheet's bar (the page's leaves with its
+        // bar): a badge of its own, kept current with the page's.
+        let sheetBadge = walletBadgeItem != nil ? WalletBadgeButton() : nil
+        let makeWalletSheet = makeWalletSheet
+        let session = SnapCommentsSheetSession(
+            postID: id, panel: content, cell: cell, feed: self,
+            walletBadge: sheetBadge,
+            onWalletTap: makeWalletSheet.map { make in { [weak self] in
+                guard let sheet = self?.commentsSheet?.sheet, sheet.presentedViewController == nil else { return }
+                sheet.present(make(), animated: true)
+            } }
+        ) { [weak self] in
+            guard let self else { return }
+            commentsSheet = nil
+            collectionView.isScrollEnabled = true
+            (parent as? ForYouSectorViewController)?.setPagingEnabled(true)
+            // Reopening is as cheap as opening.
+            rewarmActivePageComments()
+        }
+        commentsSheet = session
+        refreshWalletBadge()
+        session.present(animated: animated)
+    }
+
+    /// Builds the sheet's panel for `id` before the tap: loading its view asks
+    /// for its first comments (`PostDetailViewController.viewDidLoad`), so the
+    /// sheet rises on rows, not bones — the page's own warm, without the page.
+    private func prewarmCommentsSheet(for id: PostID) {
+        guard commentsSheet == nil, commentsSheetWarm?.id != id, modelsByID[id]?.mediaURL != nil,
+              let content = makeCommentsPanelContent?(id) else { return }
+        content.loadViewIfNeeded()
+        commentsSheetWarm = (id, content)
+    }
+
+    /// The warm panel, if it is `id`'s; spent by the taking.
+    private func takeCommentsSheetWarm(for id: PostID) -> UIViewController? {
+        defer { commentsSheetWarm = nil }
+        return commentsSheetWarm?.id == id ? commentsSheetWarm?.panel : nil
     }
 
     /// The TEXT page's resting engagement, PHASE 1 (visual pre-render):
@@ -4418,6 +4501,8 @@ final class SnapFeedViewController: UIViewController {
         // across the flight for exactly this reason; so is this now, and
         // `zoomTransitionDidEnd` picks it up on landing.
         guard !isAwaitingZoomPresentation else { return }
+        // The sheet's panel waits beside the page, not in it (#2087).
+        guard !CommentsV2.isEnabled else { return prewarmCommentsSheet(for: id) }
         guard commentsEngagedID == nil, commentsContentVC == nil,
               prewarmedCommentsID == nil,
               modelsByID[id]?.mediaURL != nil else { return }
@@ -4487,6 +4572,7 @@ final class SnapFeedViewController: UIViewController {
     /// Drops a warm panel that was never engaged — the page moved on, or its
     /// cell is being recycled underneath it.
     private func discardPrewarmedComments() {
+        commentsSheetWarm = nil
         guard prewarmedCommentsID != nil, commentsEngagedID == nil else { return }
         prewarmedCommentsID = nil
         if let content = commentsContentVC {

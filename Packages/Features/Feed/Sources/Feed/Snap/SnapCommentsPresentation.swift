@@ -490,6 +490,11 @@ final class ProgressiveFrostView: UIVisualEffectView {
     /// physical length instead of stretching it. A fixed fraction cannot do
     /// that, and a stale one shears the ramp.
     private let topRampLength: CGFloat?
+    /// When set, the band's last this-many points hold full material and the
+    /// ramp spans the rest — a band carried on under something with rounded
+    /// corners (the keyboard's, #2087) keeps its ramp above it the same.
+    /// Its mask takes three stops (`[clear, opaque, opaque]`).
+    private let bottomHoldLength: CGFloat?
     private let maskColors: [UIColor]
     /// The ramp's strength (0…1): the mask's opacity scaled — the way to
     /// fade the band, since an effect view's own alpha stops its blur.
@@ -497,10 +502,11 @@ final class ProgressiveFrostView: UIVisualEffectView {
 
     /// `maskColors`/`maskLocations` describe the mask's OPACITY ramp
     /// top→bottom: opaque = full material, clear = none.
-    init(maskColors: [UIColor], maskLocations: [NSNumber], topRampLength: CGFloat? = nil) {
+    init(maskColors: [UIColor], maskLocations: [NSNumber], topRampLength: CGFloat? = nil, bottomHoldLength: CGFloat? = nil) {
         fadeMask = GradientView(colors: maskColors, locations: maskLocations)
         self.maskColors = maskColors
         self.topRampLength = topRampLength
+        self.bottomHoldLength = bottomHoldLength
         super.init(effect: nil)
         isUserInteractionEnabled = false
         mask = fadeMask
@@ -545,6 +551,11 @@ final class ProgressiveFrostView: UIVisualEffectView {
     override func layoutSubviews() {
         super.layoutSubviews()
         fadeMask.frame = bounds
+        if let bottomHoldLength, bounds.height > 0 {
+            let stop = min(1, max(0.05, (bounds.height - bottomHoldLength) / bounds.height))
+            fadeMask.setLocations([0, NSNumber(value: Double(stop)), 1])
+            return
+        }
         guard let topRampLength, bounds.height > 0 else { return }
         // Clamped under 1 so a band shorter than its own ramp still fades
         // rather than inverting into a hard edge.

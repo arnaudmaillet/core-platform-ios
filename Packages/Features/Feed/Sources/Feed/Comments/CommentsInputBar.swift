@@ -706,6 +706,8 @@ final class CommentsInputBar: UIView {
         )
         let fieldAtRest = field.bottomAnchor.constraint(equalTo: restingInputRow.bottomAnchor)
         fieldAtRest.priority = .defaultHigh
+        fieldAfterAvatar = field.leadingAnchor.constraint(equalTo: avatarBubble.trailingAnchor, constant: Spacing.sm)
+        fieldAtLeading = field.leadingAnchor.constraint(equalTo: leadingAnchor)
         NSLayoutConstraint.activate([
             fieldHeight,
             restingInputRow.leadingAnchor.constraint(equalTo: field.leadingAnchor),
@@ -717,7 +719,7 @@ final class CommentsInputBar: UIView {
             avatarBubble.bottomAnchor.constraint(equalTo: field.bottomAnchor),
             avatarBubble.widthAnchor.constraint(equalToConstant: Metrics.controlSize),
             avatarBubble.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
-            field.leadingAnchor.constraint(equalTo: avatarBubble.trailingAnchor, constant: Spacing.sm),
+            fieldAfterAvatar,
             fieldAtRest,
             fieldTrailing,
             railButton.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -1247,6 +1249,8 @@ final class CommentsInputBar: UIView {
     /// resolves. A nil identity (nobody signed in, no profile) leaves the
     /// neutral placeholder disc — never someone else's face.
     func setViewerIdentity(_ identity: ViewerIdentity?, imagePipeline: ImagePipeline?) {
+        viewerIdentity = identity
+        viewerImagePipeline = imagePipeline
         avatarView.setMonogram(Self.monogram(identity?.name))
         // The placeholder names the viewer, so a profile switch rewrites it
         // on the same beat as the face — one setter, both surfaces.
@@ -1286,6 +1290,9 @@ final class CommentsInputBar: UIView {
     /// placeholder is a function of.
     private var replyName: String?
     private var viewerName: String?
+    /// The viewer as last set, for a bar that mirrors this one.
+    private var viewerIdentity: ViewerIdentity?
+    private var viewerImagePipeline: ImagePipeline?
 
     /// The placeholder, resolved from BOTH axes in one place.
     ///
@@ -1370,6 +1377,48 @@ final class CommentsInputBar: UIView {
     /// Raises the keyboard into the composer — the row-tap reply trigger.
     func focusComposer() {
         textView.becomeFirstResponder()
+    }
+
+    /// The field after the avatar, or from the bar's leading edge with the
+    /// avatar gone (`showsAvatar`).
+    private var fieldAfterAvatar: NSLayoutConstraint!
+    private var fieldAtLeading: NSLayoutConstraint!
+
+    /// Whether the avatar leads the field. Off, it fades out and the field
+    /// takes its room — the detached composer over the keys (#2087, the
+    /// owner 2026-11-04). Inside an animation block, it follows it.
+    var showsAvatar = true {
+        didSet {
+            guard showsAvatar != oldValue else { return }
+            fieldAfterAvatar.isActive = showsAvatar
+            fieldAtLeading.isActive = !showsAvatar
+            avatarBubble.alpha = showsAvatar ? 1 : 0
+            layoutIfNeeded()
+        }
+    }
+
+    /// Asked as the field is about to edit, for a member: false keeps the
+    /// keyboard away — a host that edits in another bar instead (#2087's
+    /// detached composer, `SnapCommentsDetachedComposer`).
+    var shouldBeginEditing: (() -> Bool)?
+
+    /// Sends the draft, as a tap on send does.
+    func send() {
+        sendTapped()
+    }
+
+    /// Wears `other`'s look — its viewer, its prompt (a reply's included),
+    /// its column — for a bar that stands in for it (`SnapCommentsDetachedComposer`).
+    func mirrorLook(of other: CommentsInputBar) {
+        hostsActionColumn = other.hostsActionColumn
+        showsStake = other.showsStake
+        railFace = other.railFace
+        usesLikeFace = other.usesLikeFace
+        sendAccessibilityLabel = other.sendAccessibilityLabel
+        defaultPlaceholder = other.defaultPlaceholder
+        setViewerIdentity(other.viewerIdentity, imagePipeline: other.viewerImagePipeline)
+        replyName = other.replyName
+        applyPlaceholder()
     }
 
     #if DEBUG
@@ -2055,7 +2104,9 @@ extension CommentsInputBar: UITextViewDelegate {
     /// about to write. Every entry into editing passes here (a tap, a reply
     /// row, the emote panel), so this one check covers them all.
     func textViewShouldBeginEditing(_ textView: UITextView) -> Bool {
-        guard let gate = MemberGates.gate(from: self), !gate.isMember else { return true }
+        guard let gate = MemberGates.gate(from: self), !gate.isMember else {
+            return shouldBeginEditing?() ?? true
+        }
         Task { @MainActor [weak self] in
             guard await gate.requireMember(for: .comment) else { return }
             self?.textView.becomeFirstResponder()
