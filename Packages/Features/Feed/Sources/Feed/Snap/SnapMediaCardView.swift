@@ -175,13 +175,18 @@ final class SnapMediaCardView: UIView {
     /// the bounds on two sides for a single picture that fills the card — the
     /// card crops it to its own shape — so the comments sheet can show its
     /// whole width (#2087). A collection's is the card's own.
-    var wholePictureRect: CGRect {
-        guard !showsCollection, !framing.fits, let aspect = framingAspect,
-              bounds.width > 0, bounds.height > 0 else { return drawnPictureRect }
-        let scale = max(bounds.width / aspect.width, bounds.height / aspect.height)
+    var wholePictureRect: CGRect { wholePictureRect(in: bounds) }
+
+    /// `wholePictureRect` for the card laid out over `page` (its bounds'
+    /// coordinates): fitted in it, or filling it past two of its sides.
+    func wholePictureRect(in page: CGRect) -> CGRect {
+        guard !showsCollection, let aspect = framingAspect, page.width > 0, page.height > 0 else { return page }
+        let fit = min(page.width / aspect.width, page.height / aspect.height)
+        let fill = max(page.width / aspect.width, page.height / aspect.height)
+        let scale = framing.fits ? fit : fill
         let size = CGSize(width: aspect.width * scale, height: aspect.height * scale)
         return CGRect(
-            x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
+            x: page.midX - size.width / 2, y: page.midY - size.height / 2,
             width: size.width, height: size.height
         )
     }

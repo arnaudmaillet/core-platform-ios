@@ -1951,12 +1951,17 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         guard let stage = mediaCard.superview else { return }
         let mediaRegion = stage.convert(mediaRegion, from: nil)
         guard mediaRegion.width > 0, mediaRegion.height > 0 else { return }
-        if commentsSheetMask == nil { spreadCommentsSheetCard() }
+        // Every frame, and cheap when nothing changed: the picture's framing
+        // may change under the sheet (a clip's first frame telling its real
+        // shape), and the spread with it.
+        spreadCommentsSheetCard()
         let bounds = mediaCard.bounds
         // The page as it stands, in the card's bounds — the card less its
         // spread — and the picture it shows there.
         let page = bounds.insetBy(dx: commentsSheetSpread.width, dy: commentsSheetSpread.height)
-        let whole = mediaCard.wholePictureRect
+        // Within the card: a card that could not spread keeps its picture to
+        // what it draws.
+        let whole = mediaCard.wholePictureRect(in: page).intersection(bounds)
         let picture = whole.intersection(page)
         guard picture.width > 0, picture.height > 0, !picture.isNull else { return }
         let landscape = whole.width > whole.height
@@ -2088,15 +2093,23 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// ⚠️ BY THE PINS' CONSTANTS, not by a frame: a layout pass under the
     /// sheet keeps the spread. In one settled layout (`settleGeometry`): the
     /// sample-buffer layer animates its own content to a new size otherwise.
+    ///
+    /// Read off the PAGE, not the card's bounds: spread, the card's bounds are
+    /// the old shape's, and a framing changed under the sheet is redone from
+    /// the page — a picture that turned out to fit comes back to it.
     private func spreadCommentsSheetCard(_ spread: Bool = true) {
-        let whole = mediaCard.wholePictureRect
-        let bounds = mediaCard.bounds
+        let page = mediaCard.bounds.insetBy(dx: commentsSheetSpread.width, dy: commentsSheetSpread.height)
+        let whole = mediaCard.wholePictureRect(in: page)
         let size = spread
-            ? CGSize(width: max(0, bounds.minX - whole.minX), height: max(0, bounds.minY - whole.minY))
+            ? CGSize(width: max(0, page.minX - whole.minX), height: max(0, page.minY - whole.minY))
             : .zero
         guard size != commentsSheetSpread else { return }
+        let pins = pageStage.constraints.filter { $0.firstItem === mediaCard && $0.secondItem === pageStage }
+        // Pinned some other way, the card cannot spread: the layout keeps the
+        // picture within the card rather than open on sides nothing draws.
+        guard pins.count == 4 else { return }
         commentsSheetSpread = size
-        for pin in pageStage.constraints where pin.firstItem === mediaCard && pin.secondItem === pageStage {
+        for pin in pins {
             switch pin.firstAttribute {
             case .leading: pin.constant = -size.width
             case .trailing: pin.constant = size.width
