@@ -10,6 +10,7 @@ import MediaPlayback
 import Profile
 import MediaCore
 import UIKit
+import VoiceKit
 #if DEBUG
 import CoreNetworkingMocks
 #endif
@@ -101,6 +102,12 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // `-lens-lab`: the selector lens bench, alone in the window (#1748).
         if LensLab.isRequested {
             window.rootViewController = LensLab.makeRoot()
+            window.makeKeyAndVisible()
+            return
+        }
+        // `-voice-lab`: the voice messages' engine on a bench (#2101).
+        if VoiceLab.isRequested {
+            window.rootViewController = VoiceLab.makeRoot()
             window.makeKeyAndVisible()
             return
         }
