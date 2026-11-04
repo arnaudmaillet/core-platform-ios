@@ -35,11 +35,13 @@ enum CommentsSandbox {
         let detail: String
     }
 
-    /// Media posts only: the redesign is the media post's. Kinds and seeds
-    /// as `MockCommentService` writes them (index % 3: 0 video, 1 image).
+    /// The thread's density, which sets the sheet's height, its expanded
+    /// detent and so the preview, whatever the media's shape. Media posts
+    /// only: the redesign is the media post's. Kinds and seeds as
+    /// `MockCommentService` writes them.
     static let fixtures: [Fixture] = [
         Fixture(id: "post-0000", title: "Dense — video", detail: "18 reactions + 6 sentences: ticker and subtitles"),
-        Fixture(id: "post-0004", title: "Dense — image", detail: "18 reactions + 6 sentences: ticker and subtitles"),
+        Fixture(id: "post-0007", title: "Dense — image", detail: "18 reactions + 6 sentences: ticker and subtitles"),
         Fixture(id: "post-0054", title: "Dense — landscape video, 16:9", detail: "The sheet leaves the media its whole width"),
         Fixture(id: "post-0063", title: "Dense — landscape video, 4:3", detail: "The sheet at its floor, the media a little shrunk"),
         Fixture(id: "post-0001", title: "Sparse — image", detail: "Two comments"),
@@ -47,6 +49,28 @@ enum CommentsSandbox {
         Fixture(id: "post-0013", title: "Reactions only — image", detail: "W, 🔥🔥, GG: under the ticker's gate"),
         Fixture(id: "post-0009", title: "Empty — video", detail: "No comments yet"),
         Fixture(id: "post-0010", title: "Empty — image", detail: "No comments yet"),
+    ]
+
+    /// The media's shape under the sheet (2026-11-04): four cases, a video
+    /// and an image each where the corpus has one. The 2:3 and the tall
+    /// photo are fixtures of their own (`MockPhotoCatalog.fixtures`).
+    static let shapes: [Fixture] = [
+        Fixture(
+            id: "post-0000", title: "Taller than 3:4 — a 9:16 video",
+            detail: "Cut to 3:4, its whole width shown; expand: the preview is 3:4 too"
+        ),
+        Fixture(
+            id: "post-fixture-2x3", title: "Taller than 3:4 — a 2:3 photo",
+            detail: "Cut to 3:4, its whole width shown; expand: the preview is 3:4 too"
+        ),
+        Fixture(
+            id: "post-fixture-tall", title: "Taller than 9:16 — a 9:20 photo",
+            detail: "A quarter of its height cut at most: it stays a little taller than 3:4"
+        ),
+        Fixture(id: "post-0021", title: "3:4 to square — a square video", detail: "Shown whole"),
+        Fixture(id: "post-0001", title: "3:4 to square — a 4:5 photo", detail: "Shown whole"),
+        Fixture(id: "post-0054", title: "Landscape — a 16:9 video", detail: "Shown whole, its sides trimmed"),
+        Fixture(id: "post-0013", title: "Landscape — a photo", detail: "Shown whole, its sides trimmed"),
     ]
 
     /// The QA round's fixes (2026-11-04), each on the post that showed it,
@@ -68,21 +92,6 @@ enum CommentsSandbox {
             id: "post-0001", title: "Fix — a comment sent with the keys up",
             detail: "Collapsed, tap the field, send: the sheet holds, the field stays on the keys, the media above"
         ),
-    ]
-
-    /// The sheet's 3:4 cut (2026-11-04): a picture taller than 3:4 is cut
-    /// top and bottom to it, its whole width shown; 3:4 and wider whole.
-    static let cut: [Fixture] = [
-        Fixture(
-            id: "post-0000", title: "Cut — a 9:16 video",
-            detail: "Open the comments: the clip opens to its whole width as its top and bottom close, 3:4; expand: the preview is 3:4 too"
-        ),
-        Fixture(
-            id: "post-0012", title: "Cut — a 9:16 video, few comments",
-            detail: "3:4 above the sheet; tap the field: under the 64 pt floor, the preview takes it, 3:4 too"
-        ),
-        Fixture(id: "post-0001", title: "Not cut — a 4:5 image", detail: "Wider than 3:4: shown whole"),
-        Fixture(id: "post-0054", title: "Not cut — a 16:9 video", detail: "Landscape: shown whole, its sides trimmed"),
     ]
 
     /// The sandbox, opening where `arguments` say.
@@ -131,8 +140,8 @@ final class CommentsSandboxPostsViewController: UITableViewController {
     private let fixtures: [CommentsSandbox.Fixture]
     /// The table's sections after the fixtures: a title and its rows.
     private let more: [(title: String, rows: [CommentsSandbox.Fixture])] = [
+        ("The media's shape", CommentsSandbox.shapes),
         ("Fixes to check", CommentsSandbox.fixes),
-        ("The 3:4 cut", CommentsSandbox.cut),
     ]
     private let makeFeed: ([String]) -> UIViewController
 
@@ -172,7 +181,7 @@ final class CommentsSandboxPostsViewController: UITableViewController {
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        section == 0 ? "Media posts (mock)" : more[section - 1].title
+        section == 0 ? "Comment density" : more[section - 1].title
     }
 
     private func fixture(at indexPath: IndexPath) -> CommentsSandbox.Fixture {

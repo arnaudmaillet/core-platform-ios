@@ -1183,6 +1183,21 @@ public struct MockSocialDataset: Sendable {
     }
 
     public func post(for postID: String) -> PostRecord? {
-        posts.first { $0.postID == postID }
+        posts.first { $0.postID == postID } ?? fixturePosts.first { $0.postID == postID }
+    }
+
+    /// Posts for shapes the corpus lacks (the comments sandbox, #2087): one
+    /// per `MockPhotoCatalog.fixtures` photo, `post-<photo id>`, by the first
+    /// author, dated with the first post. Reached by their ids alone — no
+    /// timeline, profile, search or map lists them.
+    public var fixturePosts: [PostRecord] {
+        guard let author = authors.first, let first = posts.first else { return [] }
+        return MockPhotoCatalog.shared.fixtures.map { photo in
+            PostRecord(
+                postID: "post-\(photo.id)", authorProfileID: author.profileID,
+                caption: "A \(photo.width)×\(photo.height) photo", media: photo.media,
+                publishedAtMS: first.publishedAtMS, parentID: ""
+            )
+        }
     }
 }
