@@ -70,6 +70,21 @@ enum CommentsSandbox {
         ),
     ]
 
+    /// The sheet's 3:4 cut (2026-11-04): a picture taller than 3:4 is cut
+    /// top and bottom to it, its whole width shown; 3:4 and wider whole.
+    static let cut: [Fixture] = [
+        Fixture(
+            id: "post-0000", title: "Cut — a 9:16 video",
+            detail: "Open the comments: the clip opens to its whole width as its top and bottom close, 3:4; expand: the preview is 3:4 too"
+        ),
+        Fixture(
+            id: "post-0012", title: "Cut — a 9:16 video, few comments",
+            detail: "3:4 above the sheet; tap the field: under the 64 pt floor, the preview takes it, 3:4 too"
+        ),
+        Fixture(id: "post-0001", title: "Not cut — a 4:5 image", detail: "Wider than 3:4: shown whole"),
+        Fixture(id: "post-0054", title: "Not cut — a 16:9 video", detail: "Landscape: shown whole, its sides trimmed"),
+    ]
+
     /// The sandbox, opening where `arguments` say.
     @MainActor
     static func make(feed: any FeedFeatureBuilding, arguments: [String]) -> UIViewController {
@@ -114,7 +129,11 @@ enum CommentsSandbox {
 /// its post — the others after it, then those before, a swipe away.
 final class CommentsSandboxPostsViewController: UITableViewController {
     private let fixtures: [CommentsSandbox.Fixture]
-    private let fixes = CommentsSandbox.fixes
+    /// The table's sections after the fixtures: a title and its rows.
+    private let more: [(title: String, rows: [CommentsSandbox.Fixture])] = [
+        ("Fixes to check", CommentsSandbox.fixes),
+        ("The 3:4 cut", CommentsSandbox.cut),
+    ]
     private let makeFeed: ([String]) -> UIViewController
 
     init(fixtures: [CommentsSandbox.Fixture], makeFeed: @escaping ([String]) -> UIViewController) {
@@ -146,18 +165,18 @@ final class CommentsSandboxPostsViewController: UITableViewController {
         navigationController?.pushViewController(makeFeed(ids), animated: animated)
     }
 
-    override func numberOfSections(in tableView: UITableView) -> Int { 2 }
+    override func numberOfSections(in tableView: UITableView) -> Int { 1 + more.count }
 
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        section == 0 ? fixtures.count : fixes.count
+        section == 0 ? fixtures.count : more[section - 1].rows.count
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        section == 0 ? "Media posts (mock)" : "Fixes to check"
+        section == 0 ? "Media posts (mock)" : more[section - 1].title
     }
 
     private func fixture(at indexPath: IndexPath) -> CommentsSandbox.Fixture {
-        indexPath.section == 0 ? fixtures[indexPath.row] : fixes[indexPath.row]
+        indexPath.section == 0 ? fixtures[indexPath.row] : more[indexPath.section - 1].rows[indexPath.row]
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {

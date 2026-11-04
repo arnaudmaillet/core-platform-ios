@@ -171,6 +171,21 @@ final class SnapMediaCardView: UIView {
         )
     }
 
+    /// The picture uncut, in the card's bounds: `drawnPictureRect`, but past
+    /// the bounds on two sides for a single picture that fills the card — the
+    /// card crops it to its own shape — so the comments sheet can show its
+    /// whole width (#2087). A collection's is the card's own.
+    var wholePictureRect: CGRect {
+        guard !showsCollection, !framing.fits, let aspect = framingAspect,
+              bounds.width > 0, bounds.height > 0 else { return drawnPictureRect }
+        let scale = max(bounds.width / aspect.width, bounds.height / aspect.height)
+        let size = CGSize(width: aspect.width * scale, height: aspect.height * scale)
+        return CGRect(
+            x: bounds.midX - size.width / 2, y: bounds.midY - size.height / 2,
+            width: size.width, height: size.height
+        )
+    }
+
     /// The backdrop being drawn, nil when there is none.
     var backdropImage: UIImage? { backdropView.isHidden ? nil : backdropView.image }
 

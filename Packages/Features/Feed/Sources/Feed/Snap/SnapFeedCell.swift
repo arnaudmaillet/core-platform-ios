@@ -1878,14 +1878,33 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     private let commentsSheetLeftBand = UIView()
     private let commentsSheetRightBand = UIView()
 
-    /// What the comments sheet shrinks, as the page draws it now: the picture
-    /// between its bands, or the whole card when it fills — a landscape
-    /// picture less its trimmed sides.
+    /// What the comments sheet shrinks: the picture's sheet cut
+    /// (`commentsSheetCut`) — and so the preview's shape.
     var commentsSheetPictureSize: CGSize {
-        let picture = mediaCard.drawnPictureRect.size
-        guard picture.width > picture.height else { return picture }
-        return CGSize(width: picture.width - 2 * Self.landscapeSideTrim, height: picture.height)
+        Self.commentsSheetCut(of: mediaCard.wholePictureRect).size
     }
+
+    /// The part of the picture `whole` (the card's coordinates) the comments
+    /// sheet shows, centred in it: a landscape picture less its trimmed
+    /// sides; a picture taller than `commentsSheetCutAspect` cut top and
+    /// bottom down to it, by `commentsSheetMostCut` of its height at most;
+    /// anything between whole.
+    static func commentsSheetCut(of whole: CGRect) -> CGRect {
+        guard whole.width > 0, whole.height > 0 else { return whole }
+        if whole.width > whole.height { return whole.insetBy(dx: landscapeSideTrim, dy: 0) }
+        let kept = max(whole.width / commentsSheetCutAspect, whole.height * (1 - commentsSheetMostCut))
+        guard kept < whole.height else { return whole }
+        return whole.insetBy(dx: 0, dy: (whole.height - kept) / 2)
+    }
+
+    /// The comments sheet's shape for a tall picture (the owner, 2026-11-04):
+    /// above the collapsed sheet a 9:16 clip stood as a narrow column; cut to
+    /// 3:4, it stands a third larger in the same room.
+    static let commentsSheetCutAspect: CGFloat = 3.0 / 4.0
+    /// The most the cut takes off a picture's height, half at the top and
+    /// half at the bottom: a 9:16 clip reaches 3:4 by it exactly, a taller
+    /// one — a screenshot — keeps the rest of its height.
+    static let commentsSheetMostCut: CGFloat = 0.25
 
     /// What a landscape picture loses on each side once shrunk, in the card's
     /// points (the owner, 2026-11-03): a clip often carries a dark sliver
@@ -1896,13 +1915,17 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// The page under the comments sheet, at `progress` of the way from rest
     /// (0) to the sheet up (1): the page's interface fades out, and the media
-    /// shrinks WHOLE into `mediaRegion` (the window's coordinates) — the room
-    /// above the sheet — centred, never cropped. Driven every frame by the
+    /// shrinks into `mediaRegion` (the window's coordinates) — the room above
+    /// the sheet — centred, as its sheet cut (`commentsSheetCut`): from what
+    /// the page shows to that cut as the sheet rises, a tall picture's whole
+    /// width opening as its top and bottom close. Driven every frame by the
     /// sheet's own position, so it follows the finger on the way down.
     ///
     /// ⚠️ A TRANSFORM ON THE CARD, and nothing else moves: the card keeps its
-    /// full-bleed frame and its playback, and `clearCommentsSheetLayout` is
-    /// identity again.
+    /// playback, and `clearCommentsSheetLayout` is identity again. Its frame
+    /// moves once: a picture the card crops to its shape spreads it to the
+    /// picture's own, past the screen's sides, in the first frame
+    /// (`spreadCommentsSheetCard`) — the same pixels on the screen.
     ///
     /// THE PICTURE WEARS THE CORNERS, never the window round its bands (the
     /// owner, 2026-11-03): from the screen's own where it fills the screen —
@@ -1927,18 +1950,24 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         columnStage.alpha = 1 - t
         guard let stage = mediaCard.superview else { return }
         let mediaRegion = stage.convert(mediaRegion, from: nil)
+        guard mediaRegion.width > 0, mediaRegion.height > 0 else { return }
+        if commentsSheetMask == nil { spreadCommentsSheetCard() }
         let bounds = mediaCard.bounds
-        let picture = mediaCard.drawnPictureRect
-        guard picture.width > 0, picture.height > 0, mediaRegion.width > 0, mediaRegion.height > 0 else { return }
-        let landscape = picture.width > picture.height
-        // What lands in the region: a landscape picture, its sides trimmed.
-        let shown = landscape ? picture.insetBy(dx: Self.landscapeSideTrim, dy: 0) : picture
+        // The page as it stands, in the card's bounds — the card less its
+        // spread — and the picture it shows there.
+        let page = bounds.insetBy(dx: commentsSheetSpread.width, dy: commentsSheetSpread.height)
+        let whole = mediaCard.wholePictureRect
+        let picture = whole.intersection(page)
+        guard picture.width > 0, picture.height > 0, !picture.isNull else { return }
+        let landscape = whole.width > whole.height
+        // What lands in the region: the picture's sheet cut.
+        let shown = Self.commentsSheetCut(of: whole)
         // The scale that fits it in the region, and the move that centres it
         // there — about the card's centre, its transform's anchor.
         let fit = min(mediaRegion.width / shown.width, mediaRegion.height / shown.height, 1)
         let scale = 1 + (fit - 1) * t
         let cardCenter = mediaCard.center
-        let offset = CGPoint(x: picture.midX - bounds.midX, y: picture.midY - bounds.midY)
+        let offset = CGPoint(x: shown.midX - bounds.midX, y: shown.midY - bounds.midY)
         let landed = CGPoint(x: cardCenter.x + offset.x * fit, y: cardCenter.y + offset.y * fit)
         let move = CGPoint(x: (mediaRegion.midX - landed.x) * t, y: (mediaRegion.midY - landed.y) * t)
         // Scaled out where it stands, about the picture's own centre — the
@@ -1976,11 +2005,14 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // with it: divided by it.
         let unscale = 1 / max(scale, 0.01)
         let screenRadius = ScreenGeometry.cornerRadius(behind: self)
-        let fills = picture.width >= bounds.width - 0.5 && picture.height >= bounds.height - 0.5
+        let fills = picture.width >= page.width - 0.5 && picture.height >= page.height - 0.5
         let from = fills ? screenRadius : 0
         let to = landscape ? sheetCornerRadius : ChaoticSliceLayout.harmonisedCornerRadius
-        let framed = picture.offsetBy(dx: -bounds.minX, dy: -bounds.minY)
-        let window = landscape ? framed.insetBy(dx: Self.landscapeSideTrim * t, dy: 0) : framed
+        // In the mask's coordinates: the picture as the page shows it, going
+        // to its cut as the sheet rises.
+        let local = { (rect: CGRect) in rect.offsetBy(dx: -bounds.minX, dy: -bounds.minY) }
+        let cut = local(shown)
+        let window = Self.interpolate(local(picture), cut, t)
         // ⚠️ NEVER MORE THAN HALF ITS SHORTER SIDE (the owner, 2026-11-03):
         // a picture shrunk under its radius twice over read as a lozenge. A
         // pill at the very least.
@@ -2001,21 +2033,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // ⚠️ THE BANDS STOP AT THE PICTURE (the owner, 2026-11-03): one
         // window round both, fading, let the picture's square corners show
         // through its rounding until it had gone. They are the window that
-        // shrinks from the card onto the picture, less the picture, fading.
-        let card = CGRect(origin: .zero, size: bounds.size)
-        let bands = CGRect(
-            x: card.minX + (framed.minX - card.minX) * t,
-            y: card.minY + (framed.minY - card.minY) * t,
-            width: card.width + (framed.width - card.width) * t,
-            height: card.height + (framed.height - card.height) * t
-        )
-        let top = CGRect(x: bands.minX, y: bands.minY, width: bands.width, height: max(0, framed.minY - bands.minY))
+        // shrinks from the page onto the cut, less the picture's, fading.
+        let bands = Self.interpolate(local(page), cut, t)
+        let top = CGRect(x: bands.minX, y: bands.minY, width: bands.width, height: max(0, window.minY - bands.minY))
         let bottom = CGRect(
-            x: bands.minX, y: framed.maxY, width: bands.width, height: max(0, bands.maxY - framed.maxY)
+            x: bands.minX, y: window.maxY, width: bands.width, height: max(0, bands.maxY - window.maxY)
         )
-        let left = CGRect(x: bands.minX, y: framed.minY, width: max(0, framed.minX - bands.minX), height: framed.height)
+        let left = CGRect(x: bands.minX, y: window.minY, width: max(0, window.minX - bands.minX), height: window.height)
         let right = CGRect(
-            x: framed.maxX, y: framed.minY, width: max(0, bands.maxX - framed.maxX), height: framed.height
+            x: window.maxX, y: window.minY, width: max(0, bands.maxX - window.maxX), height: window.height
         )
         commentsSheetTopBand.frame = top
         commentsSheetBottomBand.frame = bottom
@@ -2036,6 +2062,50 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             band.alpha = 1 - t
             band.layer.cornerRadius = screenRadius * (1 - t) * unscale
         }
+    }
+
+    /// `from` at 0, `to` at 1, edge by edge.
+    private static func interpolate(_ from: CGRect, _ to: CGRect, _ t: CGFloat) -> CGRect {
+        CGRect(
+            x: from.minX + (to.minX - from.minX) * t,
+            y: from.minY + (to.minY - from.minY) * t,
+            width: from.width + (to.width - from.width) * t,
+            height: from.height + (to.height - from.height) * t
+        )
+    }
+
+    /// How far the card stands past the page on each side while the sheet is
+    /// up (`spreadCommentsSheetCard`), zero otherwise.
+    private var commentsSheetSpread: CGSize = .zero
+
+    /// The card spread to its picture's whole shape, or back to the page:
+    /// the card crops a filling picture to the page's shape (a 9:16 clip
+    /// loses its sides on a taller screen), and the sheet's cut opens its
+    /// whole width (the owner, 2026-11-04). Aspect fill in the picture's own
+    /// shape draws the same pixels where the page is — and the mask shows
+    /// the page only, at first — so nothing moves on the screen.
+    ///
+    /// ⚠️ BY THE PINS' CONSTANTS, not by a frame: a layout pass under the
+    /// sheet keeps the spread. In one settled layout (`settleGeometry`): the
+    /// sample-buffer layer animates its own content to a new size otherwise.
+    private func spreadCommentsSheetCard(_ spread: Bool = true) {
+        let whole = mediaCard.wholePictureRect
+        let bounds = mediaCard.bounds
+        let size = spread
+            ? CGSize(width: max(0, bounds.minX - whole.minX), height: max(0, bounds.minY - whole.minY))
+            : .zero
+        guard size != commentsSheetSpread else { return }
+        commentsSheetSpread = size
+        for pin in pageStage.constraints where pin.firstItem === mediaCard && pin.secondItem === pageStage {
+            switch pin.firstAttribute {
+            case .leading: pin.constant = -size.width
+            case .trailing: pin.constant = size.width
+            case .top: pin.constant = -size.height
+            case .bottom: pin.constant = size.height
+            default: break
+            }
+        }
+        mediaCard.renderView.settleGeometry { pageStage.layoutIfNeeded() }
     }
 
     /// The picture's edge while the sheet is up: one device pixel of a light
@@ -2074,6 +2144,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.alpha = 1
         columnStage.alpha = 1
         mediaCard.transform = .identity
+        // Back to the page before the mask goes: the spread's sides never
+        // show.
+        spreadCommentsSheetCard(false)
         mediaCard.mask = nil
         commentsSheetMask = nil
         commentsSheetEdge?.removeFromSuperview()
