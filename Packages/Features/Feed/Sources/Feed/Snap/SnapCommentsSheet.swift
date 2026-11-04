@@ -498,7 +498,15 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         // preview to take it, it scales out where it stands.
         let roomTop = window.safeAreaInsets.top
         let room = top - Self.mediaGap - roomTop
-        let smallest = SnapCommentsPreview.size(for: cell.commentsSheetPictureSize).height
+        // ⚠️ ON THE KEYS, THE MEDIA STAYS (the owner, 2026-11-04): a
+        // collapsed sheet the keys raise is held there — pulled, it gives a
+        // few points — and handing the picture to the preview for those left
+        // the room above empty. While the keys carry the sheet (and as they
+        // go), the media shrinks on with the room down to `keyboardFloor`;
+        // only a room smaller than that is the preview's.
+        let ridesKeys = (content.isKeyboardUp || isKeyboardHiding) && !content.editsDetached
+        let previewHeight = SnapCommentsPreview.size(for: cell.commentsSheetPictureSize).height
+        let smallest = ridesKeys ? min(previewHeight, Self.keyboardFloor) : previewHeight
         let region = CGRect(
             x: Self.mediaSideMargin, y: roomTop,
             width: window.bounds.width - 2 * Self.mediaSideMargin,
@@ -563,6 +571,8 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// (`isSheetAtRest`): one picture for one height, however it got there.
     private var previewOwnsMedia = false
     private static let previewTakesAt: CGFloat = 8
+    /// The media's smallest height while the keys carry the sheet.
+    private static let keyboardFloor: CGFloat = 64
     private static let mediaTakesBackAt: CGFloat = 24
     private static let mediaOutDuration: CFTimeInterval = 0.2
     /// How long the sheet stands still before it is at rest.
