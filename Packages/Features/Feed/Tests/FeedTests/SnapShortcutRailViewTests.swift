@@ -92,11 +92,19 @@ struct SnapShortcutRailViewTests {
     }
 
     /// The shortcuts are OUR animated emotes — every id resolves in the
-    /// catalogue, the map's GIF emotes among them — not SF Symbols.
+    /// catalogue — not SF Symbols. Noto only (#2099): the house laugh, blush
+    /// and LMAO sticker gave their slots to 😆 😳 🤣.
     @Test func payloadIsOurAnimatedReactions() {
         let pool = SnapShortcutRailView.reactionPool()
         #expect(pool.map(\.id) == SnapShortcutRailView.reactionIDs, "every reaction ships in the catalogue")
-        for gif in ["lol", "blush"] { #expect(pool.contains { $0.id == gif }, "the \(gif) GIF emote") }
+        #expect(Array(pool.prefix(3).map(\.id)) == ["noto:1f606", "noto:1f633", "noto:1f923"])
+        for emote in pool {
+            guard case .noto = emote.source else {
+                Issue.record("\(emote.id) is not a Noto emote")
+                continue
+            }
+            #expect(emote.section != .house, "\(emote.id) is a house emote")
+        }
         let rail = makeRail()
         let icons = rail.subviews.compactMap { $0 as? UIButton }
         #expect(icons.count == 9)

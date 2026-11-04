@@ -655,12 +655,13 @@ final class SnapShortcutRailView: UIScrollView {
     }
 
     /// Reaction-shaped emotes only — the wheel reads as "react", not "menu":
-    /// the house reactions (the map's two GIF emotes and the LMAO sticker),
-    /// then the Noto counterparts of the SF Symbols that held these slots
-    /// while the payload was a placeholder. 19 deep, so the wheel always has
-    /// plenty to discover past the resting window.
+    /// Noto only (#2099). The first three hold the slots the house reactions
+    /// had (laugh, blush, LMAO → 😆 😳 🤣; 😂 is already the last), then
+    /// the Noto counterparts of the SF Symbols that held these slots while
+    /// the payload was a placeholder. 19 deep, so the wheel always has plenty
+    /// to discover past the resting window.
     static let reactionIDs = [
-        "lol", "blush", "lmao",
+        "noto:1f606", "noto:1f633", "noto:1f923",
         "noto:2764_fe0f", "noto:1f525", "noto:1f44f", "noto:1f60a", "noto:26a1",
         "noto:2b50", "noto:1f389", "noto:1f44d", "noto:2728", "noto:1f44b",
         "noto:1f440", "noto:1f451", "noto:1f3c6", "noto:1f388", "noto:1f382",
