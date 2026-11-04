@@ -504,7 +504,9 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             width: window.bounds.width - 2 * Self.mediaSideMargin,
             height: max(room, smallest)
         )
-        if !previewOwnsMedia, room < smallest - Self.previewTakesAt {
+        if isSheetAtRest(top: top) {
+            previewOwnsMedia = room < smallest - Self.previewTakesAt
+        } else if !previewOwnsMedia, room < smallest - Self.previewTakesAt {
             previewOwnsMedia = true
         } else if previewOwnsMedia, room > smallest + Self.mediaTakesBackAt {
             previewOwnsMedia = false
@@ -552,10 +554,45 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// rests where UIKit puts it, and rested in it. Between the two
     /// thresholds the picture stays whose it was: the media, its smallest,
     /// a few points under the sheet's edge at most.
+    ///
+    /// ⚠️ AT REST, ONE THRESHOLD (the owner's video, 2026-11-04): the band
+    /// between the two is there for a finger at the threshold, and a sheet
+    /// the keys raise rests in it — pulled up and let go, it came back with
+    /// the preview and an empty room over it. Once the sheet stands still,
+    /// no finger on it, the picture is the media's wherever it fits
+    /// (`isSheetAtRest`): one picture for one height, however it got there.
     private var previewOwnsMedia = false
     private static let previewTakesAt: CGFloat = 8
     private static let mediaTakesBackAt: CGFloat = 24
     private static let mediaOutDuration: CFTimeInterval = 0.2
+    /// How long the sheet stands still before it is at rest.
+    private static let restAfter: CFTimeInterval = 0.12
+    /// The sheet's top since it last moved, and since when.
+    private var stillTop: (top: CGFloat, since: CFTimeInterval)?
+
+    /// The sheet still for `restAfter`, UIKit not animating it, no finger
+    /// dragging it.
+    private func isSheetAtRest(top: CGFloat) -> Bool {
+        let now = frameTiming?.now ?? CACurrentMediaTime()
+        if stillTop.map({ abs($0.top - top) >= 0.5 }) ?? true { stillTop = (top, now) }
+        guard let stillTop, now - stillTop.since >= Self.restAfter,
+              sheet.presentationController?.presentedView?.layer.animationKeys()?.isEmpty != false else { return false }
+        return !isSheetDragged
+    }
+
+    /// A pan on the sheet or its frame — UIKit's own drag — under way.
+    private var isSheetDragged: Bool {
+        let container = sheet.presentationController?.containerView
+        var view = sheet.presentationController?.presentedView
+        while let current = view, current !== container {
+            let dragging = current.gestureRecognizers?.contains {
+                $0 is UIPanGestureRecognizer && ($0.state == .began || $0.state == .changed)
+            } ?? false
+            if dragging { return true }
+            view = current.superview
+        }
+        return false
+    }
     /// The media's way out, 0 in, 1 out.
     private var mediaOutShare: CGFloat = 0
     private var lastMediaOutTime: CFTimeInterval?
