@@ -152,6 +152,14 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     func refresh() { viewModel.refresh() }
     func loadOlder() { viewModel.loadOlder() }
     func send(_ text: String) { viewModel.send(text) }
+
+    /// Voice messages (#2102): the conversation's composer records — the
+    /// thread's own sends, the one place a take becomes a message (#2103).
+    var sendsVoice: Bool { true }
+
+    func send(voice take: ConversationThreadVoiceTake) {
+        viewModel.send(voice: ChatVoiceUpload(fileURL: take.fileURL, duration: take.duration, waveform: take.waveform))
+    }
     func beginReply(to messageID: String) { viewModel.beginReply(to: messageID) }
     func cancelReply() { viewModel.cancelReply() }
     func forward(_ messageID: String) { viewModel.perform(.forward, on: messageID) }
