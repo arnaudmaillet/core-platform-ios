@@ -878,11 +878,16 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     private func holdDetent(_ hold: Bool) {
         guard hold != holdsDetent, let controller = sheet.sheetPresentationController else { return }
         holdsDetent = hold
+        // ⚠️ THE UNDIMMED DETENT WITH IT (the owner, 2026-11-04): left on the
+        // expanded one, missing from a list held at the collapsed one, UIKit
+        // dimmed the page at once — a black veil over the media.
         if hold {
             let current = controller.selectedDetentIdentifier ?? Self.detent
+            controller.largestUndimmedDetentIdentifier = current
             controller.detents = controller.detents.filter { $0.identifier == current }
         } else {
             controller.detents = detents(expandable: isExpandable)
+            controller.largestUndimmedDetentIdentifier = Self.expandedDetent
         }
     }
 

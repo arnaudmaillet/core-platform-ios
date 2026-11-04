@@ -1399,6 +1399,8 @@ final class CommentsInputBar: UIView {
         setViewerIdentity(other.viewerIdentity, imagePipeline: other.viewerImagePipeline)
         replyName = other.replyName
         applyPlaceholder()
+        // The avatar's profile switcher, anchored to this bar's face.
+        setProfileSwitch(other.onProfileSwitch)
     }
 
     #if DEBUG
