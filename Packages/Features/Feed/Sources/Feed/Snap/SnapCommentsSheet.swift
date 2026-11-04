@@ -183,6 +183,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             controller.prefersScrollingExpandsWhenScrolledToEdge = true
         }
         capTop = window.bounds.height - resting - bottomInset
+        content.onDetachedEditingChanged = { [weak self] editing in self?.holdDetent(editing) }
         content.onDismissed = { [weak self] in self?.end() }
         content.onClose = { [weak self] in self?.close() }
 
@@ -856,7 +857,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// the expanded detent offered, or taken back, as the comments outgrow
     /// the collapsed one or no longer do.
     private func refit() {
-        guard !isLeaving, let controller = sheet.sheetPresentationController else { return }
+        guard !isLeaving, !holdsDetent, let controller = sheet.sheetPresentationController else { return }
         let fitted = content.fittedHeight
         if let fitted, let last = fittedHeight, abs(fitted - last) < 1 { return }
         guard fitted != fittedHeight else { return }
@@ -867,6 +868,21 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
                 controller.detents = detents(expandable: expandable)
             }
             controller.invalidateDetents()
+        }
+    }
+
+    /// While the detached composer edits, the sheet holds its height: a drag
+    /// at the rows' top puts the keys away and leaves the sheet be.
+    private var holdsDetent = false
+
+    private func holdDetent(_ hold: Bool) {
+        guard hold != holdsDetent, let controller = sheet.sheetPresentationController else { return }
+        holdsDetent = hold
+        if hold {
+            let current = controller.selectedDetentIdentifier ?? Self.detent
+            controller.detents = controller.detents.filter { $0.identifier == current }
+        } else {
+            controller.detents = detents(expandable: isExpandable)
         }
     }
 
@@ -1119,6 +1135,10 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         detachedComposer?.endEditing()
     }
 
+    /// The detached composer began or ended editing.
+    var onDetachedEditingChanged: ((Bool) -> Void)?
+
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         detachedComposer?.tearDown()
@@ -1128,7 +1148,9 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
         super.viewWillAppear(animated)
         guard let detail = panel as? PostDetailViewController else { return }
         if CommentsV2.detachedComposer, detachedComposer == nil {
-            detachedComposer = SnapCommentsDetachedComposer(source: detail.composeBar)
+            let composer = SnapCommentsDetachedComposer(source: detail.composeBar, sheetView: view)
+            composer.onEditingChanged = { [weak self] editing in self?.onDetachedEditingChanged?(editing) }
+            detachedComposer = composer
         }
         // The app's soft edges, top and bottom; the bar follows the tab shown.
         detail.wearSheetEdges()
