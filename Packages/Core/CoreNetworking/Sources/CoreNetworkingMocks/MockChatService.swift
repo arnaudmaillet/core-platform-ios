@@ -227,7 +227,10 @@ public final class MockChatService: @unchecked Sendable {
                 preview.messageID = latest.messageID
                 preview.senderID = latest.senderID
                 preview.contentType = latest.contentType
-                preview.preview = String(latest.body.prefix(100))
+                // A voice message's preview is the server's own (backend#993).
+                preview.preview = latest.contentType == .media
+                    ? MockVoiceCatalog.preview(forReference: latest.mediaRef) ?? String(latest.body.prefix(100))
+                    : String(latest.body.prefix(100))
                 entry.lastMessage = preview
                 entry.unread = latest.senderID != viewer && (isRequest || viewerLastRead(in: id) != latest.messageID)
             }
@@ -431,7 +434,7 @@ public final class MockChatService: @unchecked Sendable {
         // A received PHOTO (#681): "Room 4 this time" is its caption, so the
         // thread draws a media message on a cold launch. conv-0 only.
         let photoAt: Int? = conversationID == "conv-0" ? 1 : nil
-        return specs.enumerated().map { index, spec in
+        let texts = specs.enumerated().map { index, spec in
             let (sender, body, minutesAgo) = spec
             var view = Chat_V1_MessageView()
             view.messageID = "\(conversationID)-m\(index)"
@@ -445,6 +448,34 @@ public final class MockChatService: @unchecked Sendable {
             } else {
                 view.contentType = .text
             }
+            return view
+        }
+        // In time order: a page is the newest `limit` by POSITION.
+        return (texts + Self.seededVoices(in: conversationID, other: other, viewer: viewer, now: nowMs, minute: minute))
+            .sorted { $0.createdAtMs < $1.createdAtMs }
+    }
+
+    /// Voice messages for the thread's voice bubble (#2103, #2104): in conv-0
+    /// a received short one (unplayed), a received long one and one of the
+    /// viewer's; in conv-1 two received back to back (autoplay). Each older
+    /// than its thread's last message, so the inbox rows read as before.
+    static func seededVoices(
+        in conversationID: String, other: String, viewer: String, now nowMs: Int64, minute: Int64
+    ) -> [Chat_V1_MessageView] {
+        let seeds: [(sender: String, voice: String, minutesAgo: Int64)] = switch conversationID {
+        case "conv-0": [(other, "voice-short", 50), (other, "voice-long", 49), (viewer, "voice-mine", 48)]
+        case "conv-1": [(other, "voice-pair1", 59), (other, "voice-pair2", 59)]
+        default: []
+        }
+        return seeds.enumerated().compactMap { index, seed in
+            guard let reference = MockVoiceCatalog.shared.reference(voiceID: seed.voice) else { return nil }
+            var view = Chat_V1_MessageView()
+            view.messageID = "\(conversationID)-v\(index)"
+            view.senderID = seed.sender
+            view.contentType = .media
+            view.mediaRef = reference
+            // Back to back: a second apart.
+            view.createdAtMs = nowMs - seed.minutesAgo * minute + Int64(index) * 1_000
             return view
         }
     }

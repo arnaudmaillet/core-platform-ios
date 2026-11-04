@@ -60,13 +60,13 @@ public struct MessageDisplayModel: Equatable, Sendable, Identifiable {
     /// The id of the message this one replies to, if any — resolved into a
     /// quoted preview by the transcript builder.
     public let replyToID: String?
-    /// A MEDIA message's photo or video (#681).
+    /// A MEDIA message's photo, video or voice message (#681, #2103).
     public let media: MediaDisplay?
 
     /// The message in one line, for a quote: its text, or what it carries.
     public var summary: String {
         guard body.isEmpty, let media else { return body }
-        return media.kind.label
+        return ChatMedia.summary(kind: media.kind, duration: media.duration)
     }
     public let delivery: Delivery
 
@@ -88,6 +88,13 @@ public struct MessageDisplayModel: Equatable, Sendable, Identifiable {
         public let preview: UIImage?
         public let aspectRatio: CGFloat?
         public let duration: TimeInterval?
+        /// A voice message's 100 levels (#2103).
+        public var waveform: [UInt8]? = nil
+        /// A voice message's asset — the key its audio is cached by.
+        public var assetID: String? = nil
+        /// The viewer's own take while it is on its way: it plays from here,
+        /// never waiting on the upload (#2103).
+        public var localFileURL: URL? = nil
     }
 
     public init(message: ChatMessage, preview: UIImage? = nil) {
@@ -101,13 +108,14 @@ public struct MessageDisplayModel: Equatable, Sendable, Identifiable {
             MediaDisplay(
                 kind: media.kind, url: media.url, posterURL: media.posterURL, preview: preview,
                 aspectRatio: media.aspectRatio ?? preview.map { $0.size.width / max($0.size.height, 1) },
-                duration: media.duration
+                duration: media.duration, waveform: media.waveform, assetID: media.assetID
             )
         }
         delivery = .sent
     }
 
-    /// A photo or video of the viewer's still on its way, or failed.
+    /// A photo, video or voice message of the viewer's still on its way, or
+    /// failed.
     init(pending id: String, upload: ChatMediaUpload, sender: ProfileID, sentAt: Date, failed: Bool) {
         self.id = id
         senderID = sender
@@ -118,12 +126,22 @@ public struct MessageDisplayModel: Equatable, Sendable, Identifiable {
         let ratio: CGFloat? = switch upload {
         case .image(let image): image.size.width / max(image.size.height, 1)
         case .video(let video): video.pixelHeight > 0 ? CGFloat(video.pixelWidth) / CGFloat(video.pixelHeight) : nil
+        case .voice: nil
         }
-        let duration: TimeInterval? = if case .video(let video) = upload { video.duration } else { nil }
-        media = MediaDisplay(
+        let duration: TimeInterval? = switch upload {
+        case .image: nil
+        case .video(let video): video.duration
+        case .voice(let voice): voice.duration
+        }
+        var display = MediaDisplay(
             kind: upload.kind, url: nil, posterURL: nil, preview: upload.preview,
             aspectRatio: ratio, duration: duration
         )
+        if case .voice(let voice) = upload {
+            display.waveform = voice.waveform
+            display.localFileURL = voice.fileURL
+        }
+        media = display
         delivery = failed ? .failed : .sending
     }
 

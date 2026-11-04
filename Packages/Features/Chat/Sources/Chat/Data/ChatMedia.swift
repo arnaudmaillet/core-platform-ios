@@ -1,12 +1,16 @@
 import CryptoKit
 import Foundation
+import FeedInterface
 import UIKit
 
-/// A photo or a video carried by a chat message (#681).
+/// A photo, a video or a voice message carried by a chat message (#681,
+/// #2103).
 public struct ChatMedia: Equatable, Sendable {
     public enum Kind: String, Sendable {
         case image
         case video
+        /// A voice message (#2103): an `.m4a`, its length and its waveform.
+        case voice
     }
 
     public let kind: Kind
@@ -18,12 +22,19 @@ public struct ChatMedia: Equatable, Sendable {
     /// Zero when unknown (a reference from another client).
     public let pixelWidth: Int
     public let pixelHeight: Int
-    /// A video's length in seconds.
+    /// A video's or a voice message's length in seconds.
     public let duration: TimeInterval?
+    /// A voice message's waveform: 100 levels, 0–31 (#2101). Nil when the
+    /// sender's client gave none — drawn from the file once it is here.
+    public let waveform: [UInt8]?
+    /// The media asset, when the reference names it: the key a voice
+    /// message's audio is cached by (#2101's `VoiceFileCache`).
+    public let assetID: String?
 
     public init(
         kind: Kind, url: URL, posterURL: URL? = nil,
-        pixelWidth: Int = 0, pixelHeight: Int = 0, duration: TimeInterval? = nil
+        pixelWidth: Int = 0, pixelHeight: Int = 0, duration: TimeInterval? = nil,
+        waveform: [UInt8]? = nil, assetID: String? = nil
     ) {
         self.kind = kind
         self.url = url
@@ -31,6 +42,8 @@ public struct ChatMedia: Equatable, Sendable {
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
         self.duration = duration
+        self.waveform = waveform
+        self.assetID = assetID
     }
 
     /// Width over height, or nil when the size is unknown.
@@ -46,16 +59,29 @@ extension ChatMedia.Kind {
         switch self {
         case .image: "Photo"
         case .video: "Video"
+        case .voice: "Voice message"
         }
     }
 }
 
+extension ChatMedia {
+    /// What a caption-less message carrying this reads as in a preview or a
+    /// quote: "Photo", "Video", "🎤 Voice message (0:12)" (#2103).
+    public var summary: String { Self.summary(kind: kind, duration: duration) }
+
+    /// `summary` for a kind and a length — a bubble that has no `ChatMedia`.
+    public static func summary(kind: Kind, duration: TimeInterval?) -> String {
+        guard kind == .voice else { return kind.label }
+        return ConversationThreadMedia.voiceSummary(duration: duration)
+    }
+}
+
 extension ChatMessage {
-    /// The message in one line: its text, or — a caption-less photo or
-    /// video — what it carries (#681).
+    /// The message in one line: its text, or — a caption-less photo, video
+    /// or voice message — what it carries (#681, #2103).
     public var summary: String {
         guard body.isEmpty, let media else { return body }
-        return media.kind.label
+        return media.summary
     }
 }
 
@@ -70,7 +96,15 @@ extension ChatMessage {
 /// ```
 /// cpmedia://v1?kind=image&url=<delivery>&w=1080&h=1350
 /// cpmedia://v1?kind=video&url=<clip>&poster=<still>&w=…&h=…&d=12.4
+/// cpmedia://v1?kind=voice&url=<audio>&d=12.4&wf=<100 levels>&a=<asset id>
 /// ```
+///
+/// ⚠️ THE VOICE MESSAGE'S SHAPE IS THE CLIENT'S UNTIL THE CONTRACT HAS ONE
+/// (#2103, the owner 2026-11-04: client first). chat.v1 and media.v1 carry no
+/// audio yet (backend#993); the length, the waveform and the asset travel in
+/// this reference, and THIS is the one place to switch to the contract's
+/// fields once they land. The waveform is one character per level, 0–31 as
+/// `0`–`9` then `a`–`v`: 100 characters.
 ///
 /// A bare URL — a client that wrote the delivery URL alone — reads as a photo
 /// of unknown size.
@@ -91,6 +125,8 @@ public enum ChatMediaRef {
             items.append(URLQueryItem(name: "h", value: String(media.pixelHeight)))
         }
         if let duration = media.duration { items.append(URLQueryItem(name: "d", value: String(format: "%.1f", duration))) }
+        if let waveform = media.waveform { items.append(URLQueryItem(name: "wf", value: Waveform.encode(waveform))) }
+        if let assetID = media.assetID { items.append(URLQueryItem(name: "a", value: assetID)) }
         // Encoded by hand: `queryItems` leaves `&` and `=` inside a value
         // alone, and a delivery URL with its own query must not split this one.
         components.percentEncodedQuery = items.map { item in
@@ -116,8 +152,24 @@ public enum ChatMediaRef {
             posterURL: values["poster"].flatMap(URL.init(string:)),
             pixelWidth: values["w"].flatMap(Int.init) ?? 0,
             pixelHeight: values["h"].flatMap(Int.init) ?? 0,
-            duration: values["d"].flatMap(TimeInterval.init)
+            duration: values["d"].flatMap(TimeInterval.init),
+            waveform: values["wf"].flatMap(Waveform.decode),
+            assetID: values["a"].flatMap { $0.isEmpty ? nil : $0 }
         )
+    }
+
+    /// A waveform as text: one base-32 digit per level.
+    enum Waveform {
+        static let digits = Array("0123456789abcdefghijklmnopqrstuv")
+
+        static func encode(_ levels: [UInt8]) -> String {
+            String(levels.map { digits[Int(min($0, 31))] })
+        }
+
+        static func decode(_ text: String) -> [UInt8]? {
+            let levels = text.compactMap { character in digits.firstIndex(of: character).map(UInt8.init) }
+            return levels.count == text.count && !levels.isEmpty ? levels : nil
+        }
     }
 }
 
@@ -137,12 +189,15 @@ public enum ChatMediaUpload: Sendable {
     /// A clip already exported for upload (H.264 in an MP4), with its
     /// still, its pixel size and its length.
     case video(ChatVideoUpload)
+    /// A finished take (#2101's draft): its file, length and waveform.
+    case voice(ChatVoiceUpload)
 
     /// The picture to show while the message is on its way.
     public var preview: UIImage? {
         switch self {
         case .image(let image): image
         case .video(let video): video.poster
+        case .voice: nil
         }
     }
 
@@ -150,7 +205,29 @@ public enum ChatMediaUpload: Sendable {
         switch self {
         case .image: .image
         case .video: .video
+        case .voice: .voice
         }
+    }
+}
+
+/// A take to send as a voice message (#2103): AAC in an `.m4a` (#2101).
+public struct ChatVoiceUpload: Sendable {
+    public let fileURL: URL
+    public let mimeType: String
+    public let duration: TimeInterval
+    /// 100 levels, 0–31.
+    public let waveform: [UInt8]
+
+    public init(fileURL: URL, mimeType: String = "audio/mp4", duration: TimeInterval, waveform: [UInt8]) {
+        self.fileURL = fileURL
+        self.mimeType = mimeType
+        self.duration = duration
+        self.waveform = waveform
+    }
+
+    /// The file's size and SHA-256, read in chunks.
+    func fingerprint() throws -> (size: UInt64, sha256: String) {
+        try FileFingerprint.of(fileURL)
     }
 }
 
@@ -183,6 +260,13 @@ public struct ChatVideoUpload: Sendable {
 
     /// The file's size and SHA-256, read in chunks.
     func fingerprint() throws -> (size: UInt64, sha256: String) {
+        try FileFingerprint.of(fileURL)
+    }
+}
+
+/// A file's size and SHA-256, read a megabyte at a time.
+enum FileFingerprint {
+    static func of(_ fileURL: URL) throws -> (size: UInt64, sha256: String) {
         let handle = try FileHandle(forReadingFrom: fileURL)
         defer { try? handle.close() }
         var hasher = SHA256()

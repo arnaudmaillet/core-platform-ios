@@ -27,6 +27,8 @@ let package = Package(
         // Where the viewer stands with each person, the app's one copy
         // (#2049): the rows' relation marks read and write it.
         .package(path: "../../Core/EntityStore"),
+        // Voice messages (#2103): a sent take is kept as its message's audio.
+        .package(path: "../../Core/VoiceKit"),
         // The conversation is drawn by Feed's text-post screen. The INTERFACE
         // only — features never import each other — the same edge Maps and
         // Profile already have.
@@ -49,7 +51,8 @@ let package = Package(
                 "EmoteKit",
                 "FeedInterface",
                 "MediaCore",
-                "EntityStore"
+                "EntityStore",
+                "VoiceKit"
             ]
         ),
         .testTarget(
@@ -66,6 +69,8 @@ let package = Package(
                 // `ChatLocalCacheTests` opens a store in a temporary folder.
                 "CacheKit",
                 "LocalStore",
+                // `ChatMediaTests` keeps a sent take in a voice cache (#2103).
+                "VoiceKit",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
         )

@@ -10,6 +10,7 @@ import MediaCore
 import Testing
 import UIKit
 @testable import Chat
+import VoiceKit
 
 /// A photo or video in a conversation (#681): the reference chat.v1 carries,
 /// the upload then the MEDIA send against the mock BFF, and the thread's
@@ -320,6 +321,127 @@ struct ChatMediaTests {
         #expect(keys[0] == keys[1], "the retry went up under a new key: \(keys)")
         #expect(keys[2] != keys[0], "a second photo reused the first one's key")
         #expect(!keys[0].isEmpty)
+    }
+
+    // MARK: - Voice messages (#2103)
+
+    private static let levels: [UInt8] = (0..<100).map { UInt8($0 % 32) }
+
+    private static func take(seconds: TimeInterval = 12.4) throws -> ChatVoiceUpload {
+        let url = FileManager.default.temporaryDirectory.appending(path: "take-\(UUID().uuidString).m4a")
+        try Data(repeating: 7, count: 2_048).write(to: url)
+        return ChatVoiceUpload(fileURL: url, duration: seconds, waveform: levels)
+    }
+
+    /// ⚠️ THE CLIENT'S SHAPE UNTIL THE CONTRACT HAS ONE (backend#993): the
+    /// length, the 100 levels and the asset travel in the reference, and
+    /// come back whole.
+    @Test func aVoiceMessagesReferenceCarriesItsLengthWaveformAndAsset() throws {
+        let voice = ChatMedia(
+            kind: .voice, url: try #require(URL(string: "https://cdn.test/a.m4a?sig=1&exp=2")),
+            duration: 12.4, waveform: Self.levels, assetID: "asset-9"
+        )
+        let reference = ChatMediaRef.encode(voice)
+        #expect(reference.contains("kind=voice"))
+        #expect(ChatMediaRef.decode(reference) == voice)
+        #expect(ChatMediaRef.Waveform.encode(Self.levels).count == 100, "one character per level")
+        #expect(ChatMediaRef.decode("cpmedia://v1?kind=voice&url=https%3A%2F%2Fx%2Fa.m4a&wf=zz")?.waveform == nil,
+                "a waveform out of range was read")
+    }
+
+    @Test func aVoiceMessageReadsAsItsLength() {
+        let url = URL(fileURLWithPath: "/a.m4a")
+        #expect(ChatMedia(kind: .voice, url: url, duration: 12.4).summary == "🎤 Voice message (0:12)")
+        #expect(ChatMedia(kind: .voice, url: url, duration: 65).summary == "🎤 Voice message (1:05)")
+        #expect(ChatMedia(kind: .voice, url: url).summary == "🎤 Voice message")
+        let message = ChatMessage(
+            id: "m", senderID: ProfileID("me"), body: "", createdAt: Date(), isMine: true,
+            media: ChatMedia(kind: .voice, url: url, duration: 4)
+        )
+        #expect(message.summary == "🎤 Voice message (0:04)")
+        #expect(ConversationViewModel.sendFailureNotice(ChatError.transport(message: "x"), isMedia: true, isVoice: true)
+            .message == "Your voice message wasn\u{2019}t sent. Tap it to try again.")
+    }
+
+    /// Uploaded SIGNED, sent as MEDIA naming its asset, echoed back by the
+    /// history whole — and the take kept as the asset's audio, so the sender
+    /// never downloads their own message.
+    @Test func aTakeIsUploadedThenSentAsAVoiceMessage() async throws {
+        let relay = WireRecorder()
+        let repository = repository(relay: relay)
+        let conversation = try await repository.directConversation(with: ProfileID("prof-31"))
+        let take = try Self.take()
+        let sent = try await repository.send(
+            media: .voice(take), caption: "", to: conversation, replyingTo: nil, idempotencyKey: "k-voice"
+        )
+        let media = try #require(sent.media)
+        #expect(media.kind == .voice)
+        #expect(media.duration == 12.4)
+        #expect(media.waveform == Self.levels)
+        #expect(relay.ticketVisibilities == [.mediaDeliveryVisibilitySigned])
+        let assetID = try #require(media.assetID)
+        #expect(relay.sentMediaAssetIDs == [assetID])
+        #expect(sent.summary == "🎤 Voice message (0:12)")
+
+        let history = try await repository.loadMessages(in: conversation)
+        #expect(history.first { $0.id == sent.id }?.media == media, "the voice message did not come back as sent")
+    }
+
+    @Test func aSentTakeIsKeptAsItsAssetsAudio() throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "voice-cache-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = try VoiceFileCache.open(root: root)
+        let take = try Self.take()
+        ChatRepository.keepSentTake(take.fileURL, as: "asset-1", in: cache)
+        let kept = try #require(cache.fileURL(forAsset: "asset-1"))
+        #expect(try Data(contentsOf: kept) == Data(contentsOf: take.fileURL))
+        #expect(FileManager.default.fileExists(atPath: take.fileURL.path), "the take left before its bubble did")
+    }
+
+    /// A take shows at once — playable from its file, its waveform drawn —
+    /// fails, and is retried under the same key.
+    @Test func aTakeShowsAtOnceFailsAndIsRetriedUnderItsKey() async throws {
+        let provider = MediaStubProvider(failures: 1)
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c"), repository: provider)
+        var phases: [ConversationViewModel.Phase] = []
+        viewModel.onPhaseChange = { phases.append($0) }
+        viewModel.viewDidLoad()
+        #expect(await settle { if case .content = phases.last { true } else { false } })
+
+        let take = try Self.take()
+        viewModel.send(voice: take)
+        guard case .content(let pending) = phases.last, let bubble = pending.last else {
+            Issue.record("no pending bubble"); return
+        }
+        #expect(bubble.delivery == .sending)
+        #expect(bubble.media?.kind == .voice)
+        #expect(bubble.media?.localFileURL == take.fileURL)
+        #expect(bubble.media?.waveform == Self.levels)
+        #expect(bubble.media?.duration == 12.4)
+        #expect(await settle {
+            if case .content(let models) = phases.last { models.last?.delivery == .failed } else { false }
+        })
+        viewModel.retry(bubble.id)
+        #expect(await settle {
+            if case .content(let models) = phases.last { models.last?.delivery == .sent } else { false }
+        })
+        let keys = await provider.keys
+        #expect(keys.count == 2 && keys[0] == keys[1], "the retry went up under a new key: \(keys)")
+    }
+
+    /// The seeds (#2103): conv-0 and conv-1 hold voice messages the thread
+    /// can play with no recording.
+    @Test func theSeededThreadsHaveVoiceMessages() async throws {
+        let repository = repository()
+        for (conversation, count) in [("conv-0", 3), ("conv-1", 2)] {
+            let history = try await repository.loadMessages(in: ConversationID(conversation))
+            let voices = history.compactMap(\.media).filter { $0.kind == .voice }
+            #expect(voices.count == count, "\(conversation): \(voices.count) voice messages")
+            for voice in voices {
+                #expect(voice.waveform?.count == 100)
+                #expect(FileManager.default.fileExists(atPath: voice.url.path), "a seed's file is not bundled")
+            }
+        }
     }
 
     /// The driver spells it for the screen: media, delivery, and whether the

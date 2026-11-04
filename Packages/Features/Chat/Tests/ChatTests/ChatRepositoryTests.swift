@@ -75,11 +75,13 @@ struct ChatRepositoryTests {
     @Test func loadsMessagesWithMineFlag() async throws {
         let repository = makeRepository()
 
-        // conv-1 keeps the short 3-message seed (conv-0 is the dense
-        // thread-screen demo seed and grows with it).
+        // conv-1 keeps the short 3-message seed, plus its two back-to-back
+        // voice messages (#2103) — conv-0 is the dense thread-screen demo
+        // seed and grows with it.
         let messages = try await repository.loadMessages(in: ConversationID("conv-1"))
 
-        #expect(messages.count == 3)
+        #expect(messages.count == 5)
+        #expect(messages.filter { $0.media?.kind == .voice }.count == 2)
         // Ordered oldest → newest.
         #expect(messages.map(\.createdAt) == messages.map(\.createdAt).sorted())
         // The seeded history includes one message from the viewer.

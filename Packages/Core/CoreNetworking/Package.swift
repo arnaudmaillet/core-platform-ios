@@ -52,7 +52,9 @@ let package = Package(
             resources: [
                 .copy("Resources/MockClips"),
                 .copy("Resources/MockSongs"),
-                .copy("Resources/MockPhotos")
+                .copy("Resources/MockPhotos"),
+                // The seeded voice messages (#2103, `MockVoiceCatalog`).
+                .copy("Resources/MockVoices")
             ]
         ),
         .testTarget(

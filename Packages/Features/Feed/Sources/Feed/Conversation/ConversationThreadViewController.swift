@@ -1318,6 +1318,12 @@ final class ConversationThreadViewController: UIViewController {
     private func configure(_ cell: ThreadRowCell, messageID: String) {
         guard let message = messagesByID[messageID] else { return }
         renderedRows[messageID] = rowSignature(for: message)
+        // ⚠️ A VOICE MESSAGE READS AS ITS LINE until its bubble lands (#2104):
+        // "🎤 Voice message (0:12)", with a text's delivery and retry. The
+        // media view draws only photos and videos.
+        let voice = message.media?.kind == .voice
+        let drawnMedia = voice ? nil : message.media
+        let body = voice ? ConversationThreadMedia.voiceSummary(duration: message.media?.duration) : message.body
         #if DEBUG
         debugConfiguredIDs.append(messageID)
         #endif
@@ -1341,7 +1347,7 @@ final class ConversationThreadViewController: UIViewController {
                 // A text of the viewer's on its way, or failed, has no time
                 // yet: the spinner or the mark stands in its place (#725).
                 metaText: isAwaitingDelivery(message) ? "" : Self.timeFormatter.string(from: message.sentAt),
-                body: message.body,
+                body: body,
                 avatarURL: name == "Member" ? nil : author.avatarURL
             ),
             imagePipeline: imagePipeline
@@ -1361,15 +1367,15 @@ final class ConversationThreadViewController: UIViewController {
         } else {
             cell.setQuote(nil)
         }
-        cell.mediaView.configure(message.media, delivery: message.delivery, pipeline: imagePipeline)
+        cell.mediaView.configure(drawnMedia, delivery: message.delivery, pipeline: imagePipeline)
         // A text message of the viewer's shows whether it is on its way
         // (#719); a failed one is sent again by a tap.
         cell.loaderDelay = sendingLoaderDelay
         cell.setDelivery(
-            message.isMine && message.media == nil ? message.delivery : nil,
+            message.isMine && drawnMedia == nil ? message.delivery : nil,
             time: Self.timeFormatter.string(from: message.sentAt)
         )
-        if message.isMine, message.media == nil, message.delivery == .failed {
+        if message.isMine, drawnMedia == nil, message.delivery == .failed {
             cell.row.onReplyTap = { [weak self] in self?.driver.retry(messageID) }
         }
         if arrivingIDs.remove(messageID) != nil {
@@ -1378,7 +1384,7 @@ final class ConversationThreadViewController: UIViewController {
         } else if deliveredIDs.remove(messageID) != nil {
             cell.playDelivered(revealing: Self.timeFormatter.string(from: message.sentAt))
         }
-        cell.mediaView.onTap = message.media == nil ? nil : { [weak self, weak cell] in
+        cell.mediaView.onTap = drawnMedia == nil ? nil : { [weak self, weak cell] in
             guard let self, let cell else { return }
             self.tapMedia(of: messageID, in: cell)
         }
@@ -1513,6 +1519,11 @@ final class ConversationThreadViewController: UIViewController {
         }
         let delete = UIAction(title: "Delete", image: UIImage(systemName: "trash"), attributes: .destructive) {
             [weak self] _ in self?.confirmDelete(id)
+        }
+        // A voice message has no text to copy or select, and forwarding it
+        // waits for a later issue (#2103): Reply and Delete.
+        if message.media?.kind == .voice {
+            return UIMenu(children: [reply, UIMenu(options: .displayInline, children: [delete])])
         }
         return UIMenu(children: [reply, copy, select, forward, UIMenu(options: .displayInline, children: [delete])])
     }
@@ -2066,6 +2077,19 @@ extension ConversationThreadViewController {
 
     /// The pill's relation badge. Tests.
     var debugPeerFollowBadge: SnapAuthorIdentityView.FollowBadge { peerPill.followBadge }
+
+    #if DEBUG
+    /// The long-press menu's titles for a message, flattened. Tests.
+    func debugMenuTitles(for messageID: String) -> [String] {
+        guard let indexPath = dataSource.indexPath(for: .message(messageID)),
+              let menu = menu(at: indexPath) else { return [] }
+        func titles(_ element: UIMenuElement) -> [String] {
+            if let menu = element as? UIMenu { return menu.children.flatMap(titles) }
+            return [element.title]
+        }
+        return menu.children.flatMap(titles)
+    }
+    #endif
 }
 
 // MARK: - The swipe chain (#1525)

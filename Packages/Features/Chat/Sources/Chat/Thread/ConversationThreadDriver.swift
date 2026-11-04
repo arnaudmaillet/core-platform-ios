@@ -210,13 +210,22 @@ final class ConversationThreadDriver: ConversationThreadDriving {
                 sentAt: model.sentAt, isMine: model.isMine, quote: quote,
                 media: model.media.map { media in
                     ConversationThreadMedia(
-                        kind: media.kind == .video ? .video : .image, url: media.url,
+                        kind: Self.kind(media.kind), url: media.url,
                         posterURL: media.posterURL, preview: media.preview,
-                        aspectRatio: media.aspectRatio, duration: media.duration
+                        aspectRatio: media.aspectRatio, duration: media.duration,
+                        waveform: media.waveform, assetID: media.assetID, localFileURL: media.localFileURL
                     )
                 },
                 delivery: Self.delivery(model.delivery)
             )
+        }
+    }
+
+    private static func kind(_ kind: ChatMedia.Kind) -> ConversationThreadMedia.Kind {
+        switch kind {
+        case .image: .image
+        case .video: .video
+        case .voice: .voice
         }
     }
 
