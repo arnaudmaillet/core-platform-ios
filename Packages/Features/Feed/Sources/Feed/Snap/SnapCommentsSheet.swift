@@ -169,9 +169,11 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         if let controller = sheet.sheetPresentationController {
             collapsedDetent = .custom(identifier: Self.detent) { [weak self, weak content] context in
                 MainActor.assumeIsolated {
+                    if let held = self?.keysHeldHeight { return min(held, context.maximumDetentValue) }
                     let cap = min(context.maximumDetentValue, resting + Self.capCorrection)
                     let height = content?.fittedHeight.map { min(cap, $0 - bottomInset) } ?? cap
                     self?.restsAtCap = height == cap && cap < context.maximumDetentValue
+                    self?.collapsedHeight = height
                     return height
                 }
             }
@@ -379,14 +381,32 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     fileprivate var frameTiming: (now: CFTimeInterval, shown: CFTimeInterval)?
     /// The sheet's top as last read, and when.
     private var lastTopReading: (top: CGFloat, at: CFTimeInterval)?
+    /// A reading on the model frame from afar, held back a frame (`follow`).
+    private var pendingEndRead: CGFloat?
+    private static let endReadFar: CGFloat = 40
+    /// The top last shown while UIKit animates the sheet, and towards where.
+    private var lastShownTop: (top: CGFloat, towards: CGFloat)?
 
     private func predictedTop(drawn: CGFloat, model: CGFloat) -> CGFloat {
         defer { if let frameTiming { lastTopReading = (drawn, frameTiming.now) } }
         guard let frameTiming, abs(drawn - model) > 0.5,
-              let last = lastTopReading, frameTiming.now > last.at else { return drawn }
+              let last = lastTopReading, frameTiming.now > last.at else {
+            if abs(drawn - model) <= 0.5 { lastShownTop = nil }
+            return drawn
+        }
         let speed = (drawn - last.top) / CGFloat(frameTiming.now - last.at)
         let ahead = drawn + speed * CGFloat(frameTiming.shown - frameTiming.now)
-        return min(max(ahead, min(drawn, model)), max(drawn, model))
+        var shown = min(max(ahead, min(drawn, model)), max(drawn, model))
+        // ⚠️ NEVER BACK ON THE WAY (measured, 2026-11-04): frames come at
+        // uneven times, and the speed read from them with them — a top
+        // carried far ahead one frame, less the next, went back (254, 276,
+        // 260 pt) and the preview riding it shook. On the way to one end the
+        // shown top only goes on towards it.
+        if let previous = lastShownTop, abs(previous.towards - model) < 0.5 {
+            shown = model > drawn ? max(shown, min(previous.top, model)) : min(shown, max(previous.top, model))
+        }
+        lastShownTop = (shown, model)
+        return shown
     }
 
     /// Before each commit: a sheet moved under a finger since the link's call
@@ -446,6 +466,20 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             if read >= window.safeAreaInsets.top - 1 { drawnTop = read }
         } else {
             drawnTop = modelTop
+        }
+        // ⚠️ ONE FRAME AT THE END BEFORE THE MOVE (measured, 2026-11-04):
+        // as the keys go, the sheet read where it is going (62 → 361 pt) for
+        // one frame — its new place set, the animation to it not yet
+        // attached — then back where it stood (66 pt), and on. The media and
+        // its preview swapped for that frame, the preview thrown 300 pt. A
+        // reading landing on the model frame from far, no finger on the
+        // sheet, waits a frame: still there, the sheet did move at once.
+        if let last = lastDrawnTop, abs(drawnTop - modelTop) < 0.5, abs(last - modelTop) > Self.endReadFar,
+           pendingEndRead != modelTop, !isSheetDragged {
+            pendingEndRead = modelTop
+            drawnTop = last
+        } else if abs(drawnTop - modelTop) >= 0.5 || pendingEndRead != modelTop {
+            pendingEndRead = nil
         }
         lastDrawnTop = drawnTop
         // ⚠️ ONE FRAME AHEAD (measured on a device, 2026-11-03): read at the
@@ -920,6 +954,17 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// the collapsed one or no longer do.
     private func refit() {
         guard !isLeaving, !holdsDetent, let controller = sheet.sheetPresentationController else { return }
+        // ⚠️ NOT WHILE THE KEYS CARRY THE SHEET (measured, 2026-11-04): a
+        // comment sent with the keys up grew the rows, the sheet refitted
+        // over the keys and its composer, pinned at its height for them,
+        // stood 85 pt above them — the media handed to its preview besides.
+        // The collapsed detent holds its height until the keys have gone;
+        // the refit comes then.
+        if content.isKeyboardUp || isKeyboardHiding {
+            if keysHeldHeight == nil { keysHeldHeight = collapsedHeight }
+            return
+        }
+        keysHeldHeight = nil
         let fitted = content.fittedHeight
         if let fitted, let last = fittedHeight, abs(fitted - last) < 1 { return }
         guard fitted != fittedHeight else { return }
@@ -932,6 +977,11 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             controller.invalidateDetents()
         }
     }
+
+    /// The collapsed detent's height as last resolved, and as held while the
+    /// keys carry the sheet (`refit`).
+    private var collapsedHeight: CGFloat?
+    private var keysHeldHeight: CGFloat?
 
     /// While the detached composer edits, the sheet holds its height: a drag
     /// at the rows' top puts the keys away and leaves the sheet be.
@@ -1325,7 +1375,21 @@ final class SnapCommentsSheetViewController: UIViewController, UINavigationBarDe
     }
 
     /// The panel's height for what it shows (`PostDetailViewController.fittedHeight`).
-    var fittedHeight: CGFloat? { (panel as? PostDetailViewController)?.fittedHeight }
+    ///
+    /// ⚠️ AN EMPTY PAGE, BY ITS OWN BLOCK (measured, 2026-11-04): the "No
+    /// comments yet" page stretches over the room it is given, so its rows
+    /// measured the sheet's cap — the sheet opened ~140 pt too tall and sank
+    /// to its height over a second. Its block's own height decides, as the
+    /// text post's composer sizes its sheet.
+    var fittedHeight: CGFloat? {
+        guard let detail = panel as? PostDetailViewController else { return nil }
+        if let empty = detail.viewHeightShowingEmptyPage(
+            contentSizeCategory: traitCollection.preferredContentSizeCategory
+        ) {
+            return empty
+        }
+        return detail.fittedHeight
+    }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()

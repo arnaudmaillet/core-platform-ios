@@ -49,6 +49,27 @@ enum CommentsSandbox {
         Fixture(id: "post-0010", title: "Empty — image", detail: "No comments yet"),
     ]
 
+    /// The QA round's fixes (2026-11-04), each on the post that showed it,
+    /// with the steps that did.
+    static let fixes: [Fixture] = [
+        Fixture(
+            id: "post-0010", title: "Fix — an empty thread opens at its height",
+            detail: "Open the comments: the sheet rises straight to its height (it rose ~140 pt too high, then sank)"
+        ),
+        Fixture(
+            id: "post-0063", title: "Fix — the keys going with the preview up",
+            detail: "Collapsed, tap the field (the preview takes the media), tap the rows: no flash, no jump of the preview"
+        ),
+        Fixture(
+            id: "post-0054", title: "Fix — back to collapsed from the preview",
+            detail: "Expand, then the preview's expand button: the preview rides the sheet down without shaking"
+        ),
+        Fixture(
+            id: "post-0001", title: "Fix — a comment sent with the keys up",
+            detail: "Collapsed, tap the field, send: the sheet holds, the field stays on the keys, the media above"
+        ),
+    ]
+
     /// The sandbox, opening where `arguments` say.
     @MainActor
     static func make(feed: any FeedFeatureBuilding, arguments: [String]) -> UIViewController {
@@ -93,6 +114,7 @@ enum CommentsSandbox {
 /// its post — the others after it, then those before, a swipe away.
 final class CommentsSandboxPostsViewController: UITableViewController {
     private let fixtures: [CommentsSandbox.Fixture]
+    private let fixes = CommentsSandbox.fixes
     private let makeFeed: ([String]) -> UIViewController
 
     init(fixtures: [CommentsSandbox.Fixture], makeFeed: @escaping ([String]) -> UIViewController) {
@@ -124,17 +146,23 @@ final class CommentsSandboxPostsViewController: UITableViewController {
         navigationController?.pushViewController(makeFeed(ids), animated: animated)
     }
 
+    override func numberOfSections(in tableView: UITableView) -> Int { 2 }
+
     override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        fixtures.count
+        section == 0 ? fixtures.count : fixes.count
     }
 
     override func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        "Media posts (mock)"
+        section == 0 ? "Media posts (mock)" : "Fixes to check"
+    }
+
+    private func fixture(at indexPath: IndexPath) -> CommentsSandbox.Fixture {
+        indexPath.section == 0 ? fixtures[indexPath.row] : fixes[indexPath.row]
     }
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "fixture", for: indexPath)
-        let fixture = fixtures[indexPath.row]
+        let fixture = fixture(at: indexPath)
         var content = UIListContentConfiguration.subtitleCell()
         content.text = fixture.title
         content.secondaryText = "\(fixture.id) · \(fixture.detail)"
@@ -146,7 +174,7 @@ final class CommentsSandboxPostsViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        open(fixtures[indexPath.row].id, animated: true)
+        open(fixture(at: indexPath).id, animated: true)
     }
 }
 #endif
