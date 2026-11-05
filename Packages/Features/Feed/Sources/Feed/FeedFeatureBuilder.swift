@@ -1170,6 +1170,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // feed, so the answer is nil — UIKit's slide — said explicitly, as
             // the window's path says it. No `revealGeometry` either: no window.
             dismissal.heroLandingAcceptsHero = { false }
+            // And its vertical closes are PULLS (#2045, #2046): the page lifts
+            // under a fixed bar, and a release past the threshold is the same
+            // native pop — never a page sliding up or down over the map.
+            dismissal.closesByPull = true
         }
         // A place page beneath a semantic cluster's feed: the VERTICAL
         // dismissal's landing, slid under the feed at swipe-begin — the

@@ -244,6 +244,39 @@ struct PlainPushDismissalTests {
         #expect(slide.heroLandingAcceptsHero?() == false, "a hero page could take this push's close")
         #expect(slide.revealGeometry == nil, "a plain push closes as a window")
         #expect(!slide.revealPresents)
+        // Its vertical closes are pulls, released into that same pop (#2045,
+        // #2046) — never a page sliding up or down over what is beneath.
+        #expect(slide.closesByPull, "a plain push's vertical close still slides")
+    }
+
+    /// The pull lifts only the page — the bar stays — and a release short of
+    /// the threshold settles it back where it rested (#2045, #2046).
+    @Test func thePullLiftsThePageAndSettlesItBack() throws {
+        let stack = Stack()
+        stack.builder.pushSnapFeed(postIDs: [PostID("t1"), PostID("t2")], from: stack.presenter)
+        for _ in 0..<300 where stack.nav.transitionCoordinator != nil {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        let feed = try #require(stack.nav.viewControllers.last as? SnapFeedViewController)
+        feed.view.layoutIfNeeded()
+        let list = try #require(feed.view.subviews.compactMap { $0 as? UICollectionView }.first)
+        let rest = list.contentOffset.y
+        let lift = feed.pullToClose(travel: 200, along: .upward)
+        #expect(lift > 0 && lift < 200, "no resistance: \(lift)")
+        #expect(abs(list.contentOffset.y - (rest + lift)) < 0.5)
+        let indicator = try #require(feed.debugPullIndicator)
+        #expect(indicator.direction == .up)
+        // Pinned over the toolbar, whatever the lift: never riding behind it.
+        let toolbar = stack.nav.toolbar!
+        if !stack.nav.isToolbarHidden, toolbar.window != nil, toolbar.bounds.height > 0 {
+            let toolbarTop = toolbar.convert(toolbar.bounds, to: feed.view).minY
+            #expect(indicator.frame.maxY <= toolbarTop, "the indicator went behind the toolbar")
+        }
+        let pinned = indicator.center.y
+        feed.pullToClose(travel: 120, along: .upward)
+        #expect(abs(indicator.center.y - pinned) < 0.5, "the indicator rode the lift")
+        feed.endPullToClose(commit: false)
+        #expect(feed.debugPullIndicator == nil)
     }
 
     /// A map marker's place page BENEATH a plain push (#2015): built at once
@@ -279,6 +312,38 @@ struct PlainPushDismissalTests {
         let feed = try #require(stack.nav.viewControllers.last)
         let index = try #require(stack.nav.viewControllers.firstIndex(of: place), "a downward close did not insert it")
         #expect(stack.nav.viewControllers[index + 1] === feed, "the place page is not right under the feed")
+    }
+
+    /// The downward PULL (#2046): the place page goes under the feed only at
+    /// a committed release, and the native pop lands on it; a pull let go
+    /// short inserts nothing.
+    @Test func aDownwardPullInsertsThePageBeneathOnlyAtACommittedRelease() async throws {
+        let stack = Stack()
+        let place = UIViewController()
+        stack.builder.pushSnapFeed(
+            postIDs: [PostID("t1")], from: stack.presenter, sourceIsComplete: true,
+            beneath: { _ in place }
+        )
+        // The push lands first: a release commits only when the pop can run
+        // at once. Awaited, not run-loop spun: a spin keeps the main actor
+        // and lets a full suite's other tests starve the landing.
+        for _ in 0..<1500 where stack.nav.transitionCoordinator != nil {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(stack.nav.transitionCoordinator == nil, "the push never landed")
+        let slide = try #require(stack.nav.leasedDelegate as? InteractiveSlideDismissal)
+        let feed = try #require(stack.nav.viewControllers.last as? SnapFeedViewController)
+        feed.view.layoutIfNeeded()
+
+        #expect(slide.debugPerformPull(travel: 40, axis: .vertical))
+        #expect(!stack.nav.viewControllers.contains(place), "a pull let go short inserted the place page")
+        #expect(stack.nav.topViewController === feed)
+
+        #expect(slide.debugPerformPull(travel: 900, axis: .vertical))
+        for _ in 0..<1500 where stack.nav.transitionCoordinator != nil || stack.nav.topViewController === feed {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(stack.nav.topViewController === place, "the committed pull did not land on the place page")
     }
 
     @Test func anOriginLessPushHidesTheTabBar() {
