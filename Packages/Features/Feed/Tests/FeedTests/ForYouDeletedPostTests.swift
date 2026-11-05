@@ -59,6 +59,25 @@ struct ForYouDeletedPostTests {
         #expect(resets() == before + 1, "a removal re-derives the pages")
     }
 
+    /// A post the server withholds, learnt on a feed (#2048), leaves the
+    /// grid and the rows, as a deleted one does.
+    @Test func aPostLearntUnavailableOnAFeedLeavesTheGridAndTheRows() async {
+        let unavailable = UnavailablePosts()
+        let provider = DeletedPostStubProvider(
+            following: [post("a1", by: "sofia"), post("b1", by: "marcus")],
+            discovery: [post("a1", by: "sofia"), post("d1", by: "lena")]
+        )
+        let model = ForYouViewModel(repository: provider, entities: EntityStore(), unavailablePosts: unavailable)
+        model.viewDidLoad()
+        #expect(await settle { !model.followingPosts.isEmpty }, "the grid never loaded")
+
+        unavailable.insert([PostID("a1")])
+
+        #expect(model.followingPosts.map(\.id.rawValue) == ["b1"])
+        #expect(model.discoverPosts.map(\.id.rawValue) == ["d1"])
+        #expect(model.post(for: PostID("a1")) == nil)
+    }
+
     @Test func aRefreshAndALaterPageServingItAgainKeepItOut() async {
         let entities = EntityStore()
         let provider = DeletedPostStubProvider(

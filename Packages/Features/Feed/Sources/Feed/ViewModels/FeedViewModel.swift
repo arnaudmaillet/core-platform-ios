@@ -182,6 +182,9 @@ public final class FeedViewModel {
     /// Unregisters itself when the view model goes: a block observer's
     /// token is not `Sendable`, so the nonisolated `deinit` can't touch it.
     private let preferencesObservation = NotificationObservation()
+    /// The posts the server withholds from this viewer (#2048): the app's
+    /// one record, which this feed adds to and reads.
+    let unavailablePosts: UnavailablePosts
 
     /// What the network's first page does to a first page rendered from the
     /// device (#1765).
@@ -204,9 +207,11 @@ public final class FeedViewModel {
         router: (any Router)? = nil,
         commentPreferences: MediaCommentPreferencesStore = .standard,
         entities: EntityStore? = nil,
+        unavailablePosts: UnavailablePosts? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.entities = entities ?? EntityStore()
+        self.unavailablePosts = unavailablePosts ?? UnavailablePosts()
         self.commentPreferences = commentPreferences
         self.repository = repository
         self.cacheRevalidation = cacheRevalidation
@@ -668,6 +673,8 @@ public final class FeedViewModel {
             let page = try await repository.loadFirstPage()
             // Superseded: its successor owns the slot, the posts and the phase.
             guard isCurrentInitialLoad(generation) else { return }
+            await learnGonePosts()
+            guard isCurrentInitialLoad(generation) else { return }
             let built = await build(page.entries)
             guard isCurrentInitialLoad(generation) else { return }
             guard let models = built else {
@@ -720,6 +727,7 @@ public final class FeedViewModel {
         var addedNothing = false
         do {
             let page = try await repository.loadPage(afterToken: token)
+            await learnGonePosts()
             if let models = await build(page.entries) {
                 // A page that lands while the side list drives the card is
                 // the SET-ASIDE feed's (#1509): it joins that, not the list.
@@ -933,8 +941,44 @@ public final class FeedViewModel {
     }
 
     /// A page fetched before a delete still lists the post: it stays out.
+    /// …and without the posts the server withholds (#2048): a page never
+    /// brings one in. The page in front when one is learnt is the screen's
+    /// to keep (`SnapFeedViewController.render`).
     private func withoutDeleted(_ models: [FeedItemDisplayModel]) -> [FeedItemDisplayModel] {
-        models.filter { !entities.isDeleted($0.id) }
+        models.filter { !entities.isDeleted($0.id) && !unavailablePosts.contains($0.id) }
+    }
+
+    /// Whether a post the server withholds is among the items, other than
+    /// `active` (#2048).
+    func holdsUnavailable(except active: PostID?) -> Bool {
+        items.contains { $0.id != active && unavailablePosts.contains($0.id) }
+    }
+
+    /// Takes the posts the server withholds out of the items, but `active`:
+    /// only the page in front keeps "This post isn't available", and only
+    /// until the viewer leaves it (#2048). Whether anything left.
+    @discardableResult
+    func dropUnavailable(except active: PostID?) -> Bool {
+        guard holdsUnavailable(except: active) else { return false }
+        items.removeAll { $0.id != active && unavailablePosts.contains($0.id) }
+        emit()
+        return true
+    }
+
+    /// A post the screen learnt the server withholds (#1409, #2048): recorded
+    /// for every surface, and gone from this feed now — unless it is the page
+    /// in front, which keeps it until the viewer leaves it.
+    public func postBecameUnavailable(_ id: PostID, onShow active: PostID?) {
+        unavailablePosts.insert([id])
+        dropUnavailable(except: active)
+    }
+
+    /// What the window's hydration learnt the server withholds (#2048),
+    /// recorded before the page renders, so the feed knows why a post left.
+    private func learnGonePosts() async {
+        guard let reporting = repository as? any GonePostsReporting else { return }
+        let gone = await reporting.takeGoneIDs()
+        if !gone.isEmpty { unavailablePosts.insert(gone) }
     }
 
     private func emit() {

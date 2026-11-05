@@ -266,6 +266,10 @@ public final class ForYouViewModel {
     /// serves decides.
     private let entities: EntityStore?
     private var entityObservation: EntityObservation?
+    /// The posts the server withholds from this viewer, learnt on a feed
+    /// (#2048): their tiles leave the grid and the rows.
+    private let unavailablePosts: UnavailablePosts?
+    private let unavailableObservation = NotificationObservation()
 
     public init(
         repository: any ForYouProviding,
@@ -273,8 +277,10 @@ public final class ForYouViewModel {
         seenStore: ForYouSeenPostsStore = ForYouSeenPostsStore(),
         followRelations: (any SocialGraphReading)? = nil,
         followEvents: FollowGraphEvents? = nil,
-        entities: EntityStore? = nil
+        entities: EntityStore? = nil,
+        unavailablePosts: UnavailablePosts? = nil
     ) {
+        self.unavailablePosts = unavailablePosts
         self.repository = repository
         self.unreadStore = unreadStore
         self.seenStore = seenStore
@@ -286,6 +292,14 @@ public final class ForYouViewModel {
         }
         entityObservation = entities?.observePosts { [weak self] change in
             self?.dropDeleted(change)
+        }
+        if let unavailablePosts {
+            unavailableObservation.token = NotificationCenter.default.addObserver(
+                forName: UnavailablePosts.didChange, object: unavailablePosts, queue: .main
+            ) { [weak self] note in
+                let ids = note.userInfo?[UnavailablePosts.idsKey] as? Set<PostID> ?? []
+                MainActor.assumeIsolated { self?.drop(ids) }
+            }
         }
     }
 
@@ -396,7 +410,12 @@ public final class ForYouViewModel {
         // `.everything` is a viewer change wiping the viewer's facts: nothing
         // was deleted.
         guard let entities, case .some(let ids) = change else { return }
-        let deleted = ids.filter(entities.isDeleted)
+        drop(ids.filter(entities.isDeleted))
+    }
+
+    /// Takes `deleted` out of the grid and the rows: deleted this session
+    /// (#896), or withheld by the server (#2048).
+    private func drop(_ deleted: Set<PostID>) {
         guard !deleted.isEmpty else { return }
         let shown = (corpus ?? []).contains { deleted.contains($0.id) }
             || (discovery ?? []).contains { deleted.contains($0.id) }
@@ -411,8 +430,7 @@ public final class ForYouViewModel {
     /// fetched before the delete, or the device's copy of one, still carries
     /// them.
     private func withoutDeleted(_ posts: [GalleryPost]) -> [GalleryPost] {
-        guard let entities else { return posts }
-        return posts.filter { !entities.isDeleted($0.id) }
+        posts.filter { !(entities?.isDeleted($0.id) ?? false) && !(unavailablePosts?.contains($0.id) ?? false) }
     }
 
     /// Puts an author back in their rows after an unfollow was taken back
