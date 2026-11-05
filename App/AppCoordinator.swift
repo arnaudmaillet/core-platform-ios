@@ -101,6 +101,9 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         InteractionLatency.installIfRequested()
         #endif
         container.memberGate.presenter = self
+        // The link detector's first match, off the main thread, before the
+        // first profile renders a bio (#2116).
+        TextEntityScanner.prewarmLinks()
         #if DEBUG
         // `-latency-bench`: UIKit's own floor per kind of response (#2116).
         if LatencyBench.isRequested {

@@ -141,6 +141,16 @@ public enum TextEntityScanner {
         types: NSTextCheckingResult.CheckingType.link.rawValue
     )
 
+    /// Builds the detector and runs it once, OFF the main thread, early
+    /// (#2116): its first match loads the data detectors and cost ~20 ms
+    /// inside the first profile header's render — the tap's turn of the
+    /// first profile pushed. A detector matches safely from any thread.
+    public static func prewarmLinks() {
+        DispatchQueue.global(qos: .utility).async {
+            _ = linkDetector?.numberOfMatches(in: "example.com", range: NSRange(location: 0, length: 11))
+        }
+    }
+
     /// The web addresses in `text` (#1174): styled like a token, routed
     /// nowhere.
     public static func links(in text: String) -> [NSRange] {
