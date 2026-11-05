@@ -143,6 +143,9 @@ public struct InteractionLatencyTracker: Sendable {
     /// Any response yet: an animation can no longer change the record.
     public var hasResponse: Bool { first != nil }
 
+    /// The strongest response so far has been committed.
+    public var hasCommittedResponse: Bool { best?.commitAt != nil }
+
     public var needsFrame: Bool {
         (best?.commitAt != nil && best?.frameAt == nil) || (first?.commitAt != nil && first?.frameAt == nil)
     }
@@ -315,6 +318,23 @@ public enum InteractionLatency {
         probe.isUserInteractionEnabled = false
         probe.accessibilityIdentifier = "latency;n=0;over=0;worst=none:0;last=none:0"
         emit("[latency] START budget=\(Int(budgetMs))ms at-risk=\(Int(atRiskMs))ms hud=\(showHUD)")
+    }
+
+    /// How long after an input a stronger response still counts (1.2 s).
+    /// A test lengthens it, so a slow host's deferred response is never
+    /// dropped before it lands, and ends the input itself (`finishInput`).
+    static var responseWindow: TimeInterval {
+        get { tracker.window }
+        set { tracker.window = newValue }
+    }
+
+    /// Whether the current input's strongest response has been committed.
+    static var hasCommittedResponse: Bool { tracker.hasCommittedResponse }
+
+    /// Ends the current input now, recording it if it has a committed
+    /// response — a test's deterministic end, instead of the window's.
+    static func finishInput() {
+        if let done = tracker.finish() { record(done) }
     }
 
     /// The tracker's state, for a test that reads none of its records.

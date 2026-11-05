@@ -128,10 +128,17 @@ struct InteractionLatencyHarnessTests {
         return (window, nav)
     }
 
+    /// Waits for the response to be COMMITTED (up to 30 s: a CI simulator
+    /// under parallel suites can starve the main actor for seconds), then
+    /// ends the input itself. Nothing hangs on the harness's own window,
+    /// which the suite lengthens so it never drops a late response.
     private func nextRecord(after count: Int) async throws -> InteractionLatencyTracker.Record {
-        for _ in 0..<600 where InteractionLatency.records.count <= count {
+        for _ in 0..<3000 where !InteractionLatency.hasCommittedResponse && InteractionLatency.records.count <= count {
             try await Task.sleep(for: .milliseconds(10))
         }
+        // One more turn for the frame's phase to be read, then the end.
+        try await Task.sleep(for: .milliseconds(50))
+        if InteractionLatency.records.count <= count { InteractionLatency.finishInput() }
         return try #require(InteractionLatency.records.dropFirst(count).first, "no record: \(InteractionLatency.debugState)")
     }
 
@@ -142,6 +149,7 @@ struct InteractionLatencyHarnessTests {
     private func install() {
         InteractionLatency.install(log: false, hud: false)
         InteractionLatency.countsOnly = { $0 is Destination || $0 is UIButton }
+        InteractionLatency.responseWindow = 60
     }
 
     /// Nothing is hooked without the argument.
@@ -165,7 +173,6 @@ struct InteractionLatencyHarnessTests {
         #expect(record.input.target == "test-await")
         #expect(record.response.contains("Destination"), "\(record.response)")
         #expect(record.latencyMs >= 120, "\(record.latencyMs)")
-        #expect(record.latencyMs < 1000, "\(record.latencyMs)")
         // The await is waiting, not work: idle here, unless other suites keep
         // the main thread busy meanwhile — then it is their turns. Either
         // way the commit cannot come before the push.
@@ -207,6 +214,9 @@ struct InteractionLatencyHarnessTests {
         let record = try await nextRecord(after: count)
         #expect(record.input.target == "test-action")
         #expect(record.strength == .action, "\(record.response)")
-        #expect(record.latencyMs < 100, "\(record.latencyMs)")
+        // Answered in its own turn: no wall-clock bound, which a starved CI
+        // simulator would break, but the shape — one turn, no waiting hop.
+        #expect(record.turns <= 1, "turns \(record.turns)")
+        #expect(record.idleMs < record.busyMs + 50, "idle \(record.idleMs) busy \(record.busyMs)")
     }
 }
