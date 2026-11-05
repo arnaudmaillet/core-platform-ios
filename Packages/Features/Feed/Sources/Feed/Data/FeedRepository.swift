@@ -180,6 +180,9 @@ public actor FeedRepository: FeedProviding {
     /// In-flight hydrations, so a prewarm sweep and a real tap for the same id
     /// share one network fetch instead of racing (single-flight).
     private var inFlightPosts: [PostID: Task<FeedEntry, any Error>] = [:]
+    /// Bumped on every viewer change (#2047): a read started for the previous
+    /// viewer stores nothing — see `viewerDidChange`.
+    private var viewerGeneration = 0
 
     public init(
         timelineClient: any Timeline_V1_TimelineServiceClientInterface,
@@ -263,12 +266,13 @@ public actor FeedRepository: FeedProviding {
     ///   served it once.
     public func revalidatePost(_ id: PostID) async throws -> FeedEntry {
         let warm = cachedPost(id)
+        let generation = viewerGeneration
         do {
             let entry: FeedEntry
             if let warm {
                 let post = try await fetchPost(id)
                 entry = FeedEntry(post: post, author: warm.author, likeCount: warm.likeCount)
-                storeInCache(entry)
+                if generation == viewerGeneration { storeInCache(entry) }
             } else {
                 entry = try await loadPost(id)
             }
@@ -276,7 +280,8 @@ public actor FeedRepository: FeedProviding {
             return entry
         } catch FeedError.notFound {
             if rememberedPosts.contains(id), let warm { return warm }
-            forgetPosts([id])
+            // The last viewer's answer forgets nothing of the next one's.
+            if generation == viewerGeneration { forgetPosts([id]) }
             throw FeedError.notFound
         }
     }
@@ -289,11 +294,15 @@ public actor FeedRepository: FeedProviding {
         if let inFlight = inFlightPosts[id] {
             return try await inFlight.value
         }
+        let generation = viewerGeneration
         let task = Task { try await hydratePost(id) }
         inFlightPosts[id] = task
-        defer { inFlightPosts[id] = nil }
+        // Only this read's slot: after a viewer change the slot may hold the
+        // next viewer's read of the same post.
+        defer { if inFlightPosts[id] == task { inFlightPosts[id] = nil } }
         let entry = try await task.value
-        storeInCache(entry)
+        // Read for a viewer who has since left: theirs, not the next one's.
+        if generation == viewerGeneration { storeInCache(entry) }
         return entry
     }
 
@@ -409,6 +418,7 @@ public actor FeedRepository: FeedProviding {
     /// Fetches (and caches) a single author, reusing the page-hydration cache.
     private func fetchAuthor(id: ProfileID) async -> AuthorSummary? {
         if let cached = authorCache[id] { return cached }
+        let generation = viewerGeneration
         var request = Profile_V1_GetProfileByIdRequest()
         request.profileID = id.rawValue
         let response = await profileClient.getProfileByID(request: request, headers: [:])
@@ -420,7 +430,7 @@ public actor FeedRepository: FeedProviding {
             avatarURL: URL(string: view.avatarURL),
             avatarFrameID: view.avatarFrameID.isEmpty ? nil : view.avatarFrameID
         )
-        authorCache[author.id] = author
+        if generation == viewerGeneration { authorCache[author.id] = author }
         return author
     }
 
@@ -458,7 +468,13 @@ public actor FeedRepository: FeedProviding {
     /// or author can't be hydrated are dropped (logged) rather than failing
     /// the page — one deleted post must not blank the feed.
     private func hydrate(items: [Timeline_V1_FeedItem]) async -> [FeedEntry] {
-        let missingAuthorIDs = Set(items.map { ProfileID($0.authorID) }).filter { authorCache[$0] == nil }
+        let generation = viewerGeneration
+        // ⚠️ THIS PAGE'S AUTHORS, HELD HERE (#2047): `authorCache` is emptied
+        // by a viewer change, which can land at any of the awaits below, and
+        // the entries were built with a force-unwrap read of it.
+        let pageAuthorIDs = Set(items.map { ProfileID($0.authorID) })
+        var authors = authorCache.filter { pageAuthorIDs.contains($0.key) }
+        let missingAuthorIDs = pageAuthorIDs.filter { authors[$0] == nil }
         if !missingAuthorIDs.isEmpty {
             let client = profileClient
             let fetched = await withTaskGroup(of: AuthorSummary?.self) { group in
@@ -482,7 +498,8 @@ public actor FeedRepository: FeedProviding {
                 }
             }
             for author in fetched {
-                authorCache[author.id] = author
+                authors[author.id] = author
+                if generation == viewerGeneration { authorCache[author.id] = author }
             }
         }
 
@@ -513,7 +530,7 @@ public actor FeedRepository: FeedProviding {
 
         var hydrated: [(Timeline_V1_FeedItem, Post)] = []
         for (item, post) in zip(items, posts) {
-            guard let post, authorCache[ProfileID(item.authorID)] != nil else {
+            guard let post, authors[ProfileID(item.authorID)] != nil else {
                 logger.info("dropping feed item \(item.postID): hydration incomplete")
                 continue
             }
@@ -526,7 +543,7 @@ public actor FeedRepository: FeedProviding {
         return hydrated.map { item, post in
             FeedEntry(
                 post: post,
-                author: authorCache[ProfileID(item.authorID)]!,
+                author: authors[ProfileID(item.authorID)]!,
                 likeCount: counts[post.id] ?? 0
             )
         }
@@ -671,5 +688,31 @@ private final class LockedPostCacheMirror: @unchecked Sendable {
 
     func remove(_ id: PostID) {
         lock.withLock { entries[id] = nil }
+    }
+
+    func removeAll() {
+        lock.withLock { entries.removeAll() }
+    }
+}
+
+// MARK: - Viewer change (#2047)
+
+/// ⚠️ THE POSTS THIS REPOSITORY HOLDS WERE READ FOR A VIEWER. A post a member
+/// may read (a private author they follow) is one a guest may not, and a block
+/// differs from one profile to the next. The post and author caches survived
+/// a sign-out, so a guest's For You hydrated a member's private posts from
+/// memory: tiles no fresh guest ever sees, which read "This post isn't
+/// available" once opened (#2048). A viewer change empties them; a read in
+/// flight lands nothing (`viewerGeneration`). It is not cancelled: a caller
+/// that joined it still gets its answer, and only the next read starts anew.
+extension FeedRepository: ViewerScoped {
+    public func viewerDidChange(_ state: ViewerState) async {
+        viewerGeneration += 1
+        inFlightPosts.removeAll()
+        postCache.removeAll()
+        postCacheOrder.removeAll()
+        peekablePostCache.removeAll()
+        authorCache.removeAll()
+        rememberedPosts.removeAll()
     }
 }

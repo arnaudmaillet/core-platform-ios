@@ -509,6 +509,14 @@ public final class MockSocialServices: @unchecked Sendable {
         // but its author.
         let removed = lock.withLock { takenDownPosts }
         var pool = timelineFeed.filter { !removed.contains($0.postID) || readers.contains($0.authorID) }
+        // ⚠️ A GUEST'S POOL HOLDS ONLY WHAT A GUEST MAY READ (#2047). The
+        // fleet's feeds never carry a private author's posts to a stranger
+        // (`mayRead`), and `GetPost` already refuses them to a guest; this pool
+        // served them, so a guest's tiles opened on "This post isn't
+        // available". Members keep every author, as before.
+        if readers.isEmpty {
+            pool = pool.filter { mayRead($0.authorID, readers: [], privacy: true) }
+        }
         if request.ranking != .recent, let counters {
             let likes = Dictionary(pool.map { ($0.postID, counters.likeCount(for: $0.postID)) },
                                    uniquingKeysWith: { first, _ in first })
