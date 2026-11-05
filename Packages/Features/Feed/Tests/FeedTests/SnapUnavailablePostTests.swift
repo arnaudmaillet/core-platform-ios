@@ -125,7 +125,7 @@ struct SnapUnavailablePostTests {
     }
 
     /// The page showing `id`, among the cells on screen.
-    private func page(_ feed: SnapFeedViewController, showing id: PostID) throws -> SnapFeedCell {
+    private func cell(_ feed: SnapFeedViewController, showing id: PostID) throws -> SnapFeedCell {
         let collection = try pager(of: feed)
         collection.layoutIfNeeded()
         let found = collection.visibleCells.compactMap { $0 as? SnapFeedCell }.first { $0.representedPostID == id }
@@ -239,7 +239,7 @@ struct SnapUnavailablePostTests {
         #expect(await eventually { feed.orderedIDs == rest }, "the page outlived the viewer leaving it")
         for (index, id) in rest.enumerated() {
             try settle(feed, on: index)
-            let other = try page(feed, showing: id)
+            let other = try cell(feed, showing: id)
             #expect(!other.debugShowsUnavailableBlock, "page \(index) caught it")
             #expect(!postActions(on: other).isEmpty, "page \(index) lost its actions")
             #expect(feed.debugToolbarPostActions.allSatisfy { $0.isEnabled }, "page \(index)'s toolbar is off")
@@ -259,9 +259,9 @@ struct SnapUnavailablePostTests {
         feed.markPostUnavailable(PostID("b"))
         #expect(feed.orderedIDs == [PostID("a"), PostID("c")])
         try settle(feed, on: 1)
-        let page = try page(feed, showing: PostID("c"))
-        #expect(!page.debugShowsUnavailableBlock)
-        #expect(!postActions(on: page).isEmpty)
+        let shown = try cell(feed, showing: PostID("c"))
+        #expect(!shown.debugShowsUnavailableBlock)
+        #expect(!postActions(on: shown).isEmpty)
         withExtendedLifetime(feed) {}
     }
 
