@@ -97,6 +97,81 @@ struct InteractionLatencyTrackerTests {
         #expect(finished == nil)
     }
 
+    /// A fling: the scroll moving on is the response, on the next frame.
+    /// The animation it ends on, hundreds of ms later, is not (the device
+    /// run of 2026-11-05 read 300–875 ms OVERs from those).
+    @Test func aFlingIsNotAnsweredByTheAnimationItEndsOn() throws {
+        var tracker = Tracker()
+        _ = tracker.begin(.init(kind: "release", target: "feed", at: 0))
+        tracker.respond("animation:opacity", strength: .animation, at: 0.004)
+        tracker.dropAnimations()
+        tracker.turnEnded(start: 0.001, end: 0.006)
+        tracker.respond("animation:match-corner-radius", strength: .animation, at: 0.65)
+        tracker.turnEnded(start: 0.64, end: 0.66)
+        let fling = tracker.finish()
+        #expect(fling == nil, "a fling with only animations leaves no record")
+
+        _ = tracker.begin(.init(kind: "release", target: "feed", at: 1))
+        tracker.dropAnimations()
+        tracker.respond("appear:Detail", strength: .screen, at: 1.05)
+        tracker.turnEnded(start: 1.04, end: 1.06, presentedAt: 1.07)
+        let afterFling = tracker.finish()
+        let screen = try #require(afterFling, "an action or a screen still counts")
+        #expect(screen.response == "appear:Detail")
+
+        _ = tracker.begin(.init(kind: "release", target: "card", at: 2))
+        tracker.respond("animation:spring", strength: .animation, at: 2.01)
+        tracker.turnEnded(start: 2.0, end: 2.02, presentedAt: 2.03)
+        let next = tracker.finish()
+        let spring = try #require(next, "the next release starts clean")
+        #expect(spring.response == "animation:spring")
+    }
+
+    /// The keyboard's own controllers are not screens: its dismissal calls
+    /// their `viewWillDisappear` as the slide ends (408–596 ms on device).
+    /// The system's screens an app shows still are.
+    @Test func theSystemsPlumbingIsNotAScreen() {
+        for name in ["UIInputWindowController", "UICompatibilityInputViewController", "_UICursorAccessoryViewController",
+                     "UIPredictionViewController", "_UISceneHostingViewController", "UITrackingElementWindowController",
+                     "UIEditingOverlayViewController", "PrewarmingViewController"] {
+            #expect(InteractionLatency.isSystemPlumbing(name: name, isSystem: true), "\(name)")
+        }
+        for name in ["UIViewController", "UINavigationController", "_UIContextMenuActionsOnlyViewController",
+                     "UIAlertController", "UIActivityViewController", "PHPickerViewController",
+                     "UIHostingController<AnyView>", "SFSafariViewController", "UISearchController"] {
+            #expect(!InteractionLatency.isSystemPlumbing(name: name, isSystem: true), "\(name) is a screen")
+        }
+        #expect(!InteractionLatency.isSystemPlumbing(name: "PrewarmingViewController", isSystem: false),
+                "the app's own controllers are screens whatever their name")
+        #expect(!InteractionLatency.isSystemPlumbing(UIViewController()))
+    }
+
+    /// A swipe back let go: the screen reports at the end of the animation,
+    /// after a wait. A slow screen behind a release shows busy time instead.
+    @Test func aReleaseWhoseScreenCameAfterAWaitIsAnInteractiveEnd() {
+        func record(kind: String, strength: Tracker.Strength, commit: Double, idle: Double) -> Tracker.Record {
+            Tracker.Record(input: .init(kind: kind, target: "", at: 0), response: "appear:X", strength: strength,
+                           latencyMs: commit + 20, commitMs: commit, turns: 2, busyMs: commit - idle, idleMs: idle,
+                           worstTurnMs: 0, firstResponse: "animation:opacity", firstLatencyMs: 60)
+        }
+        #expect(InteractionLatency.isInteractiveEnd(record(kind: "release", strength: .screen, commit: 537, idle: 485)))
+        #expect(!InteractionLatency.isInteractiveEnd(record(kind: "release", strength: .screen, commit: 300, idle: 60)),
+                "busy, not waiting: a slow screen")
+        #expect(!InteractionLatency.isInteractiveEnd(record(kind: "tap", strength: .screen, commit: 537, idle: 485)))
+        #expect(!InteractionLatency.isInteractiveEnd(record(kind: "release", strength: .animation, commit: 537, idle: 485)))
+    }
+
+    /// A pulse or a looping avatar runs whatever the finger does.
+    @Test func aRepeatingAnimationIsNobodysResponse() {
+        let pulse = CABasicAnimation(keyPath: "opacity")
+        pulse.repeatCount = .infinity
+        let sweep = CABasicAnimation(keyPath: "position")
+        sweep.repeatDuration = 10
+        #expect(InteractionLatency.isAmbient(pulse))
+        #expect(InteractionLatency.isAmbient(sweep))
+        #expect(!InteractionLatency.isAmbient(CABasicAnimation(keyPath: "bounds")))
+    }
+
     @Test func theWindowEndsTheInputOnceItsFrameIsIn() {
         var tracker = Tracker(window: 2)
         _ = tracker.begin(.init(kind: "tap", target: "a", at: 0))

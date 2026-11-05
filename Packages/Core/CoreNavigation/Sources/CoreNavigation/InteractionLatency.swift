@@ -28,7 +28,10 @@ import UIKit
 ///   - `.action`: a control sends its action, a tap recognizer fires — the
 ///     app's own state change, measured at the turn that ran it;
 ///   - `.animation`: any animation added after the input — the last resort,
-///     for a release that only springs something back.
+///     for a release that only springs something back. Not for a release
+///     that set a scroll view decelerating: the content moving on is its
+///     response, on the next frame, and the first animation after it is
+///     whatever the scroll ends on (`dropAnimations`).
 ///
 /// The first response is kept beside it, so a log line shows both the
 /// instant feedback and the screen that came after.
@@ -90,6 +93,7 @@ public struct InteractionLatencyTracker: Sendable {
     public private(set) var input: Input?
     private var best: Response?
     private var first: Response?
+    private var ignoresAnimations = false
     private var turns: [(start: TimeInterval, end: TimeInterval)] = []
 
     /// 1.2 s: past it a response is ten times over the budget anyway, and a
@@ -106,7 +110,7 @@ public struct InteractionLatencyTracker: Sendable {
     }
 
     public mutating func respond(_ name: String, strength: Strength, at time: TimeInterval) {
-        guard let input, time >= input.at else { return }
+        guard let input, time >= input.at, !(ignoresAnimations && strength == .animation) else { return }
         if first == nil { first = Response(name: name, strength: strength, at: time) }
         if let best, best.strength >= strength { return }
         best = Response(name: name, strength: strength, at: time)
@@ -138,6 +142,15 @@ public struct InteractionLatencyTracker: Sendable {
     public mutating func frame(vsync: TimeInterval, target: TimeInterval) {
         present(&best, vsync: vsync, target: target)
         present(&first, vsync: vsync, target: target)
+    }
+
+    /// The input set a scroll view decelerating: no animation is its
+    /// response from now on, and one already noted is dropped. Only an
+    /// action or a screen can still make it a record.
+    public mutating func dropAnimations() {
+        ignoresAnimations = true
+        if best?.strength == .animation { best = nil }
+        if first?.strength == .animation { first = best }
     }
 
     /// Any response yet: an animation can no longer change the record.
@@ -178,6 +191,7 @@ public struct InteractionLatencyTracker: Sendable {
             input = nil
             best = nil
             first = nil
+            ignoresAnimations = false
             turns.removeAll(keepingCapacity: true)
         }
         guard let input, let best, let commit = best.commitAt else { return nil }
@@ -405,6 +419,8 @@ public enum InteractionLatency {
         // A view in a system container can be gone from the touch by its
         // end: the window's hit test names it then.
         let view = touch.view ?? touch.window?.hitTest(touch.location(in: touch.window), with: nil)
+        // A key of the system's keyboard: the keyboard answers, not the app.
+        if let view, String(describing: type(of: view)).hasPrefix("UIKeyboard") { return }
         // First: beginning this input records the previous one, which names
         // its own view from `targetView`.
         noteInput(kind: travel > 10 ? "release" : "tap", target: "", at: event.timestamp)
@@ -523,8 +539,10 @@ public enum InteractionLatency {
         }
         records.append(record)
         if records.count > 2000 { records.removeFirst(records.count - 2000) }
-        let verdict = record.latencyMs > budgetMs ? "OVER" : record.latencyMs >= atRiskMs ? "AT-RISK" : "ok"
-        if record.latencyMs > budgetMs { over += 1 }
+        let interactiveEnd = isInteractiveEnd(record)
+        let verdict = interactiveEnd ? "INTERACTIVE-END"
+            : record.latencyMs > budgetMs ? "OVER" : record.latencyMs >= atRiskMs ? "AT-RISK" : "ok"
+        if record.latencyMs > budgetMs, !interactiveEnd { over += 1 }
         if record.latencyMs > (worst?.latencyMs ?? 0) { worst = record }
         var line = "[latency] \(format(record.latencyMs))ms \(verdict) \(record.input.kind) \(record.input.target)"
         line += " → \(record.response) (\(record.strength))"
@@ -536,7 +554,7 @@ public enum InteractionLatency {
         emit(line)
         publishProbe(last: record)
         // A scroll's release that only met an animation is not an action.
-        if showsHUD, record.latencyMs >= atRiskMs, record.strength >= .action { showBadge(record) }
+        if showsHUD, record.latencyMs >= atRiskMs, record.strength >= .action, !interactiveEnd { showBadge(record) }
         onRecord?(record)
     }
 
@@ -604,6 +622,69 @@ public enum InteractionLatency {
         return "?"
     }
 
+    /// After the event that ended a release was delivered: a scroll view
+    /// under the finger decelerating now took it as a fling.
+    fileprivate static func delivered(_ event: UIEvent) {
+        guard let input = tracker.input, input.kind == "release", input.at == event.timestamp,
+              targetAt == event.timestamp else { return }
+        var view = targetView
+        while let current = view {
+            if let scroll = current as? UIScrollView, scroll.isDecelerating {
+                tracker.dropAnimations()
+                return
+            }
+            view = current.superview
+        }
+    }
+
+    /// Per class: whether a controller of it is the system's plumbing (the
+    /// keyboard's window, accessory, prediction and editing bars, its
+    /// prewarming, its remote host…) rather than a screen. Its appearing is
+    /// not a response: a keyboard's dismissal calls its `viewWillDisappear`
+    /// as the slide ends, not as it starts, and on a tap that also presents
+    /// a sheet it would take the sheet's name. Cached, like `menuClasses`.
+    private static var plumbingClasses: [ObjectIdentifier: Bool] = [:]
+
+    static func isSystemPlumbing(_ controller: UIViewController) -> Bool {
+        let cls: AnyClass = type(of: controller)
+        if let known = plumbingClasses[ObjectIdentifier(cls)] { return known }
+        // The system's classes live in its frameworks (a simulator's under
+        // its runtime root); the app's and a test bundle's, elsewhere.
+        let isSystem = Bundle(for: cls).bundlePath.contains("/System/Library/")
+        let found = isSystemPlumbing(name: String(describing: cls), isSystem: isSystem)
+        plumbingClasses[ObjectIdentifier(cls)] = found
+        return found
+    }
+
+    /// The system's screens an app shows (containers, alerts, menus, share
+    /// and pickers…). Any other system controller is plumbing: the device
+    /// runs of 2026-11-05 met a new private name around the keyboard on each
+    /// run, so the rule lists what counts, not what does not.
+    static func isSystemPlumbing(name: String, isSystem: Bool) -> Bool {
+        guard isSystem else { return false }
+        let screens = ["UIViewController", "TableViewController", "CollectionViewController", "Navigation", "TabBar",
+                       "Split", "PageViewController", "UIHostingController", "Alert", "Activity", "ContextMenu",
+                       "Menu", "Popover", "Picker", "Safari", "Search", "Document", "Mail", "Message", "Preview",
+                       "Camera"]
+        return !screens.contains { name.contains($0) }
+    }
+
+    /// A release whose screen came after a wait: the end of an interactive
+    /// transition (a swipe back, a sheet or a drawer let go, a pull to go
+    /// back). The motion was on screen from the first frame; the screen
+    /// reports at the end of the animation. Logged `INTERACTIVE-END`, not
+    /// counted over the budget, no badge. A real slow screen behind a
+    /// release would show busy time, not waiting.
+    static func isInteractiveEnd(_ record: InteractionLatencyTracker.Record) -> Bool {
+        record.input.kind == "release" && record.strength == .screen && record.idleMs > record.commitMs * 0.8
+    }
+
+    /// A repeating animation (a pulse, a looping avatar, a skeleton's sweep)
+    /// runs whatever the finger does: it is nobody's response.
+    static func isAmbient(_ animation: CAAnimation) -> Bool {
+        animation.repeatCount > 0 || animation.repeatDuration > 0
+    }
+
     // MARK: - Hooks
 
     private static func hookEvents() {
@@ -612,6 +693,7 @@ public enum InteractionLatency {
             let block: @convention(block) (UIApplication, UIEvent) -> Void = { application, event in
                 MainActor.assumeIsolated { observe(event) }
                 original(application, selector, event)
+                MainActor.assumeIsolated { delivered(event) }
             }
             return block
         }
@@ -634,7 +716,7 @@ public enum InteractionLatency {
             replace(UIViewController.self, selector) { (original: Appearance, selector) in
                 let block: @convention(block) (UIViewController, Bool) -> Void = { controller, animated in
                     MainActor.assumeIsolated {
-                        if isArmed, countsOnly?(controller) ?? true {
+                        if isArmed, countsOnly?(controller) ?? true, !isSystemPlumbing(controller) {
                             let name = "\(verb):\(type(of: controller))"
                             respond(name, .screen)
                             if verb == "appear" { tracker.preferName(name) }
@@ -688,7 +770,7 @@ public enum InteractionLatency {
                 original(layer, selector, animation, key)
                 guard Thread.isMainThread else { return }
                 MainActor.assumeIsolated {
-                    if isArmed, !tracker.hasResponse, countsOnly == nil {
+                    if isArmed, !tracker.hasResponse, countsOnly == nil, !isAmbient(animation) {
                         respond("animation:\(key.map { $0 as String } ?? "?")", .animation)
                     }
                 }
