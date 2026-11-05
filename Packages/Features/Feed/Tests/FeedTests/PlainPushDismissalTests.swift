@@ -134,6 +134,8 @@ struct PlainPushDismissalTests {
         stack.builder.presentSnapFeedHero(
             postIDs: [PostID("m1")], from: stack.presenter, origin: origin(hasHero: true)
         )
+        // The push hides the dock once its first frame is committed (#2126).
+        RunLoopTurn.runPendingNow()
 
         #expect(stack.nav.leasedDelegate is ZoomTransitionController,
                 "a flyable post lost its flight")

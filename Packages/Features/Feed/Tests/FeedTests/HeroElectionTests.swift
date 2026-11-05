@@ -162,6 +162,8 @@ struct HeroElectionTests {
         )
         let transition = try #require(stack.nav.leasedDelegate as? ZoomTransitionController)
         #expect(stack.nav.leasedDelegate !== previousDelegate, "precondition: the flight took the slot")
+        // The push hides the dock once its first frame is committed (#2126).
+        RunLoopTurn.runPendingNow()
         #expect(stack.tabs.isTabBarHidden, "precondition: the push took the bar down")
 
         transition.onSourceReturned?()

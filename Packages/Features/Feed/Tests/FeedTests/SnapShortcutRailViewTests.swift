@@ -819,6 +819,27 @@ struct SnapShortcutRailFlightTests {
                 "a shortcut bounced in at the landing")
     }
 
+    /// A wheel off screen — the For You pager's Shots page beside the list
+    /// a post opens from — hides for the flight without its bounce: nobody
+    /// sees it, and the animation was the opening's first frame (#2126).
+    @Test func aWheelOffScreenHidesForTheFlightWithoutItsBounce() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let rail = SnapShortcutRailView(frame: CGRect(x: 740, y: 100, width: 44, height: 520))
+        rail.setEmotes(Array(SnapShortcutRailView.reactionPool().prefix(5)))
+        window.addSubview(rail)
+        rail.layoutIfNeeded()
+        let layers = rail.debugDressedTileLayers
+        #expect(!layers.isEmpty, "precondition: the wheel shows shortcuts")
+
+        let flight = FlightActivity.begin(in: window)
+        defer { flight.release() }
+        #expect(rail.debugConcealedForFlight)
+        #expect(rail.debugTileAlphas.allSatisfy { $0 == 0 })
+        #expect(layers.allSatisfy { ($0.animationKeys() ?? []).isEmpty }, "an off-screen shortcut bounced out")
+    }
+
     /// The flight REPLICA's rail shows its shortcuts during the flight —
     /// still, dressed — where the live page's sits it out (#2004).
     @Test func theReplicasRailShowsItsShortcutsInTheFlight() {

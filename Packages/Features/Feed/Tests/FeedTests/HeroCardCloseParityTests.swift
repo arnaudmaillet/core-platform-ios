@@ -138,6 +138,8 @@ struct HeroCardCloseParityTests {
             postIDs: [PostID("m1")], from: stack.presenter,
             origin: origin(reveal: reveal(Box()))
         )
+        // The push hides the dock once its first frame is committed (#2126).
+        RunLoopTurn.runPendingNow()
         #expect(stack.tabs.isTabBarHidden, "precondition: the push hides the dock")
 
         (stack.nav.leasedDelegate as? InteractiveSlideDismissal)?.onWillBeginPop?(.vertical)
@@ -157,6 +159,8 @@ struct HeroCardCloseParityTests {
         stack.builder.presentSnapFeedHero(
             postIDs: [PostID("m1")], from: stack.presenter, origin: origin(reveal: nil)
         )
+        // The push hides the dock once its first frame is committed (#2126).
+        RunLoopTurn.runPendingNow()
         let feed = try #require(stack.nav.viewControllers.last as? SnapFeedViewController)
         #expect(stack.tabs.isTabBarHidden, "precondition: the push hides the dock")
 
@@ -173,6 +177,8 @@ struct HeroCardCloseParityTests {
         stack.builder.presentSnapFeedHero(
             postIDs: [PostID("m1")], from: stack.presenter, origin: origin(reveal: nil)
         )
+        // The push hides the dock once its first frame is committed (#2126).
+        RunLoopTurn.runPendingNow()
         let feed = try #require(stack.nav.viewControllers.last as? SnapFeedViewController)
         feed.hidesBottomBarWhenPushed = true
 
@@ -284,3 +290,4 @@ private struct SilentProvider: FeedProviding {
         throw FeedError.transport(message: "unused")
     }
 }
+
