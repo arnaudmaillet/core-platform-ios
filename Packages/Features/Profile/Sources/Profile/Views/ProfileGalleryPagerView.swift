@@ -42,45 +42,53 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
     /// The tab is the page's: History adds its own row (#1344).
     var authorMenuActions: ((PostGridAuthorMenuContext, ProfileTab) -> [PostCardMenuAction])?
 
-    /// - Parameter makePage: For You's own grid page, in a style (#1273,
-    ///   epic #1269): every page of the profile is For You's, its tiles For
-    ///   You's tiles.
+    /// - Parameters:
+    ///   - shown: the tabs on show from the start; every tab when nil. A
+    ///     tab's page is built the first time it is shown (#2125): a push
+    ///     opens on Posts alone, and the sources with nothing in them — most
+    ///     of someone else's — never build theirs.
+    ///   - makePage: For You's own grid page, in a style (#1273, epic #1269):
+    ///     every page of the profile is For You's, its tiles For You's tiles.
     init(
         tabs: [ProfileTab] = ProfileTab.publicTabs,
-        makePage: (PostGridPageStyle) -> any PostGridPage
+        shown: [ProfileTab]? = nil,
+        makePage: @escaping (PostGridPageStyle) -> any PostGridPage
     ) {
-        let built = tabs.map { tab in
+        super.init(tabs: tabs, shown: shown) { tab in
             let page = makePage(ProfileGalleryPagerView.style(for: tab))
             // Post info by size on every tile (`PostTileInfo`'s three
             // levels) — the one tile contract.
             page.showsTileInfo = true
             return page
         }
-        super.init(tabs: tabs, pages: built)
-        for (tab, page) in zip(allTabs, allPages) {
-            page.onPostTapped = { [weak self] post, stream, comments in
-                guard let self else { return }
-                if comments, let onItemCommentsTapped {
-                    onItemCommentsTapped(post, stream)
-                } else {
-                    onItemTapped?(post, stream)
-                }
-            }
-            // Every page that pages: the format pages and, on someone else's
-            // profile, Reposts and Tagged (#696). Saved and Liked do not.
-            if tab.pages {
-                page.onNearEnd = { [weak self, weak page] in
-                    guard let self, let page, isActive(page) else { return }
-                    onNearEnd?()
-                }
-            }
-            page.onViewAllTapped = { [weak self] in self?.onViewAllTapped?() }
-            page.onRefresh = { [weak self] in self?.onRetry?() }
-            page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
-            page.postMenuActions = { [weak self] context in
-                self?.authorMenuActions?(context, tab) ?? []
+    }
+
+    override func didBuildPage(_ page: any PostGridPage, for tab: ProfileTab) {
+        page.onPostTapped = { [weak self] post, stream, comments in
+            guard let self else { return }
+            if comments, let onItemCommentsTapped {
+                onItemCommentsTapped(post, stream)
+            } else {
+                onItemTapped?(post, stream)
             }
         }
+        // Every page that pages: the format pages and, on someone else's
+        // profile, Reposts and Tagged (#696). Saved and Liked do not.
+        if tab.pages {
+            page.onNearEnd = { [weak self, weak page] in
+                guard let self, let page, isActive(page) else { return }
+                onNearEnd?()
+            }
+        }
+        page.onViewAllTapped = { [weak self] in self?.onViewAllTapped?() }
+        page.onRefresh = { [weak self] in self?.onRetry?() }
+        page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
+        page.postMenuActions = { [weak self] context in
+            self?.authorMenuActions?(context, tab) ?? []
+        }
+        // A page built late is told what its elders were.
+        page.staking = staking
+        if let lastSnapshot { show(lastSnapshot, for: tab, on: page, screen: presenceScreen()) }
     }
 
     @available(*, unavailable)
@@ -101,15 +109,17 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
     /// at each render: nil leaves every tab its bones.
     var presenceScreen: () -> String? = { nil }
     var presence: SectionPresenceStore = .shared
+    /// What the pages were last shown, for a page built after it.
+    private var lastSnapshot: ProfileViewModel.GallerySnapshot?
 
     func render(_ snapshot: ProfileViewModel.GallerySnapshot) {
+        lastSnapshot = snapshot
         let screen = presenceScreen()
-        for (index, tab) in allTabs.enumerated() {
-            // Whether more pages are coming decides the Discover list's tail
-            // chunk, so it is told before the posts.
-            allPages[index].setCorpusComplete(snapshot.isComplete(for: tab))
+        for tab in allTabs {
             let state = snapshot.state(for: tab)
             let section = String(describing: tab)
+            // Every tab's count, built or not: it decides the bones the tab
+            // gets when it is.
             if let screen {
                 switch state {
                 case .content(let posts): presence.remember(posts.count, screen: screen, section: section)
@@ -117,12 +127,28 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
                 default: break
                 }
             }
-            allPages[index].show(Self.pageState(
-                state, for: tab,
-                groups: tab == .history ? snapshot.historyGroups : [],
-                remembered: screen.flatMap { presence.count(screen: $0, section: section) }
-            ))
         }
+        for (tab, page) in builtPages { show(snapshot, for: tab, on: page, screen: screen) }
+    }
+
+    /// The pages built so far, with their tabs.
+    private var builtPages: [(ProfileTab, any PostGridPage)] {
+        allTabs.compactMap { tab in builtPage(for: tab).map { (tab, $0) } }
+    }
+
+    private func show(
+        _ snapshot: ProfileViewModel.GallerySnapshot, for tab: ProfileTab, on page: any PostGridPage,
+        screen: String?
+    ) {
+        // Whether more pages are coming decides the Discover list's tail
+        // chunk, so it is told before the posts.
+        page.setCorpusComplete(snapshot.isComplete(for: tab))
+        let section = String(describing: tab)
+        page.show(Self.pageState(
+            snapshot.state(for: tab), for: tab,
+            groups: tab == .history ? snapshot.historyGroups : [],
+            remembered: screen.flatMap { presence.count(screen: $0, section: section) }
+        ))
     }
 
     /// A profile page's state, as the page draws it: the tab's own words

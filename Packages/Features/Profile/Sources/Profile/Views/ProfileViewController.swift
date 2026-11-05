@@ -300,8 +300,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         let shown = allTabs.filter { $0 == .format(.activity) }
         self.tabs = shown
         let savesPosts = viewModel.bookmarks != nil
-        let pager = ProfileGalleryPagerView(tabs: allTabs) { style in makeGridPage(style, savesPosts) }
-        pager.setVisibleTabs(shown)
+        // A tab's page is built the first time it is shown (#2125).
+        let pager = ProfileGalleryPagerView(tabs: allTabs, shown: shown) { style in makeGridPage(style, savesPosts) }
         pager.presenceScreen = { [weak viewModel] in viewModel?.presenceScreen }
         galleryPager = pager
         // The gallery's format selector — the SAME `PagedTabBar` For You and

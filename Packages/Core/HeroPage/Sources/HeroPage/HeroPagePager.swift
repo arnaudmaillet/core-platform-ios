@@ -33,9 +33,16 @@ open class HeroPagePager<Tab: Equatable>: UIView {
     public private(set) var pageOrder: [Tab]
     /// Every tab the page has, whether shown or not.
     public let allTabs: [Tab]
-    /// Every page, in `allTabs` order, shown or not — for the page kind to
-    /// wire what its pages show.
-    public let allPages: [any PostGridPage]
+    /// Every page built so far, in `allTabs` order, shown or not — for the
+    /// page kind to wire what its pages show. A pager that builds its pages
+    /// itself (`init(tabs:shown:makePage:)`) builds a tab's the first time
+    /// that tab is shown (#2125), so a tab never shown costs nothing.
+    public var allPages: [any PostGridPage] { slots.compactMap { $0 } }
+    /// One per tab, in `allTabs` order: nil until that tab's page is built.
+    private var slots: [(any PostGridPage)?]
+    /// Builds a tab's page the first time it is shown; nil for a pager handed
+    /// every page built.
+    private let makePage: ((Tab) -> any PostGridPage)?
 
     /// Fired when a swipe settles on a page (not for programmatic paging) —
     /// the selector mirrors it.
@@ -131,9 +138,9 @@ open class HeroPagePager<Tab: Equatable>: UIView {
     /// layout pass landing mid-drag snaps the pages back under the finger while
     /// the pill keeps following it.
     private var isScrubbing = false
-    /// The pages on show, in `pageOrder`. Every page is built up front
-    /// (`allPages`) and configured alike; only these are laid out and paged.
-    private var pages: [any PostGridPage]
+    /// The pages on show, in `pageOrder`. Every page built is configured
+    /// alike (`adopt`); only these are laid out and paged.
+    private var pages: [any PostGridPage] = []
     /// The horizontal chain the shown pages hang from — rebuilt when a tab
     /// comes or goes.
     private var chainConstraints: [NSLayoutConstraint] = []
@@ -154,19 +161,38 @@ open class HeroPagePager<Tab: Equatable>: UIView {
         precondition(tabs.count == built.count && !tabs.isEmpty, "one page per tab")
         pageOrder = tabs
         allTabs = tabs
-        for page in built {
-            // The header draws the pull's indicator (`HeroPullToRefreshView`).
-            page.handPullToHost()
-            // Hosted from birth: the header floats over the pages and their
-            // insets are this screen's (`contentInsetAdjustmentBehavior =
-            // .never`), the minimum travel counted before the header has
-            // measured.
-            page.setHostedInsets(top: 0, bottom: 0)
-        }
-        allPages = built
-        pages = built
+        slots = built
+        makePage = nil
         super.init(frame: .zero)
+        setUp()
+    }
 
+    /// A pager that builds its own pages, each the first time its tab is
+    /// shown (#2125).
+    ///
+    /// ⚠️ **A page built late is told everything its elders were**: the
+    /// hosted insets, the occlusion, the travel, the detents, the pin line
+    /// (`adopt`), and then whatever the page kind replays in `didBuildPage`.
+    /// Anything new this pager tells its pages has to be remembered for the
+    /// pages still to come.
+    ///
+    /// - Parameters:
+    ///   - tabs: every tab the page has, in order.
+    ///   - shown: the tabs on show from the start (`setVisibleTabs`); every
+    ///     tab when nil.
+    ///   - makePage: a tab's page, built by the page kind.
+    public init(tabs: [Tab], shown: [Tab]? = nil, makePage: @escaping (Tab) -> any PostGridPage) {
+        let ordered = shown.map { shown in tabs.filter(shown.contains) } ?? tabs
+        precondition(!ordered.isEmpty, "a pager shows at least one tab")
+        pageOrder = ordered
+        allTabs = tabs
+        slots = tabs.map { _ in nil }
+        self.makePage = makePage
+        super.init(frame: .zero)
+        setUp()
+    }
+
+    private func setUp() {
         scrollView.isPagingEnabled = true
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.showsVerticalScrollIndicator = false
@@ -183,22 +209,68 @@ open class HeroPagePager<Tab: Equatable>: UIView {
         scrollView.contentInsetAdjustmentBehavior = .never
         scrollView.pin(to: self)
 
-        // What makes the pages one surface; what they show is the page
-        // kind's to wire (`allPages`).
-        for page in allPages {
-            page.onVerticalScroll = { [weak self] offset in
-                guard let self, page === pages[activeIndex] else { return }
-                onVerticalScroll?(offset)
-            }
-            page.onRefresh = { [weak self] in self?.onPullToRefresh?() }
-            page.onPinnedSectionChanged = { [weak self] _ in self?.publishPinnedSection() }
-            page.onPullReleased = { [weak self] distance in
-                guard let self, page === pages[activeIndex] else { return }
-                onPullReleased?(distance)
-            }
+        for (tab, page) in zip(allTabs, slots) {
+            if let page { adopt(page, for: tab) }
         }
+        pages = pageOrder.compactMap(page(for:))
         installPages()
     }
+
+    /// A tab's page, built the first time it is asked for.
+    private func page(for tab: Tab) -> (any PostGridPage)? {
+        guard let index = allTabs.firstIndex(of: tab) else { return nil }
+        if let page = slots[index] { return page }
+        guard let makePage else { preconditionFailure("a page handed in built went missing") }
+        let page = makePage(tab)
+        slots[index] = page
+        adopt(page, for: tab)
+        return page
+    }
+
+    /// Makes a page one of the surface, built up front or late: what makes the
+    /// pages one surface is here; what they show is the page kind's to wire
+    /// (`didBuildPage`).
+    private func adopt(_ page: any PostGridPage, for tab: Tab) {
+        // The header draws the pull's indicator (`HeroPullToRefreshView`).
+        page.handPullToHost()
+        // Hosted from birth: the header floats over the pages and their
+        // insets are this screen's (`contentInsetAdjustmentBehavior =
+        // .never`), the minimum travel counted before the header has
+        // measured.
+        page.setHostedInsets(top: hostedTopInset, bottom: hostedBottomInset)
+        // A page built late takes what its elders were told; one built up
+        // front has been told nothing yet.
+        if let chromeOcclusion { page.setChromeOcclusion(chromeOcclusion) }
+        if let minimumScrollTravel { page.setMinimumScrollTravel(minimumScrollTravel) }
+        if let detents {
+            page.snapDetents = detents.snap
+            page.catchDetents = detents.catching
+        }
+        if let pinLineInset { page.setPinLineInset(pinLineInset) }
+        // `isActive`, not `pages[activeIndex]`: a page is adopted before
+        // `pages` holds it, at birth while `pages` is still empty.
+        page.onVerticalScroll = { [weak self] offset in
+            guard let self, isActive(page) else { return }
+            onVerticalScroll?(offset)
+        }
+        page.onRefresh = { [weak self] in self?.onPullToRefresh?() }
+        page.onPinnedSectionChanged = { [weak self] _ in self?.publishPinnedSection() }
+        page.onPullReleased = { [weak self] distance in
+            guard let self, isActive(page) else { return }
+            onPullReleased?(distance)
+        }
+        didBuildPage(page, for: tab)
+    }
+
+    /// A tab's page, if it has been built.
+    public func builtPage(for tab: Tab) -> (any PostGridPage)? {
+        allTabs.firstIndex(of: tab).flatMap { slots[$0] }
+    }
+
+    /// A page joined the pager — handed in built, or built the first time
+    /// its tab was shown. The page kind wires what the page shows here, and
+    /// tells it what it already told the others.
+    open func didBuildPage(_ page: any PostGridPage, for tab: Tab) {}
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -248,7 +320,7 @@ open class HeroPagePager<Tab: Equatable>: UIView {
         guard !ordered.isEmpty, ordered != pageOrder else { return }
         let active = pageOrder.indices.contains(activeIndex) ? pageOrder[activeIndex] : ordered[0]
         pageOrder = ordered
-        pages = ordered.compactMap { tab in allTabs.firstIndex(of: tab).map { allPages[$0] } }
+        pages = ordered.compactMap(page(for:))
         installPages()
         let index = ordered.firstIndex(of: active) ?? 0
         activeIndex = index
@@ -308,9 +380,16 @@ open class HeroPagePager<Tab: Equatable>: UIView {
     private var stickyTopOcclusion: CGFloat = 0
     private var hostedTopInset: CGFloat = 0
     private var hostedBottomInset: CGFloat = 0
+    /// What the pages were last told, for the pages still to be built
+    /// (`adopt`): nil, nothing yet.
+    private var chromeOcclusion: UIEdgeInsets?
+    private var minimumScrollTravel: CGFloat?
+    private var detents: (snap: [CGFloat], catching: [CGFloat])?
+    private var pinLineInset: CGFloat?
 
     private func applyOcclusion() {
         let occlusion = UIEdgeInsets(top: stickyTopOcclusion, left: 0, bottom: hostedBottomInset, right: 0)
+        chromeOcclusion = occlusion
         allPages.forEach { $0.setChromeOcclusion(occlusion) }
     }
 
@@ -346,6 +425,7 @@ open class HeroPagePager<Tab: Equatable>: UIView {
 
     /// How far every page must be able to travel — the header's distance.
     public func setMinimumScrollTravel(_ travel: CGFloat) {
+        minimumScrollTravel = travel
         allPages.forEach { $0.setMinimumScrollTravel(travel) }
     }
 
@@ -430,6 +510,7 @@ open class HeroPagePager<Tab: Equatable>: UIView {
     /// Where a release rests while the header is on screen — the same
     /// detents on every page, since the header is one object.
     public func setSnapDetents(_ detents: [CGFloat], catching: [CGFloat] = []) {
+        self.detents = (detents, catching)
         for page in allPages {
             page.snapDetents = detents
             page.catchDetents = catching
@@ -541,7 +622,8 @@ open class HeroPagePager<Tab: Equatable>: UIView {
         publishActiveScrollView()
         // The pages are inset by the whole floating header, but their titles
         // go under the BAR — the header docks away (#1344).
-        for page in allPages { page.setPinLineInset(safeAreaInsets.top) }
+        pinLineInset = safeAreaInsets.top
+        for case let page? in slots { page.setPinLineInset(safeAreaInsets.top) }
         // Keep the offset page-aligned through width changes (first layout,
         // rotation) — offsets are in points, not page indices.
         let target = CGFloat(activeIndex) * bounds.width

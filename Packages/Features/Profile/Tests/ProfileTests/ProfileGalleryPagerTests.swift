@@ -1,3 +1,4 @@
+import CoreModels
 import CoreStorage
 import Foundation
 import MediaCore
@@ -415,5 +416,46 @@ struct ProfileRememberedTabsTests {
         snapshot.saved = .content([])
         #expect(ProfileViewController.rememberedTabs(tabs, in: snapshot, screen: "profile.ada", presence: presence).isEmpty,
                 "an answered source decides its own tab")
+    }
+}
+
+/// A tab's page is built the first time the tab is shown (#2125): a push
+/// opens on Posts alone, and a source that answers later starts its page on
+/// what the gallery already said.
+@MainActor
+struct ProfileGalleryLatePagesTests {
+    @Test func aTabsPageIsBuiltWhenShownOnWhatTheGalleryAlreadySaid() throws {
+        var built = 0
+        let make = TestGridPages.pageMaker()
+        let pager = ProfileGalleryPagerView(tabs: ProfileTab.ownTabs, shown: [.format(.activity)]) { style in
+            built += 1
+            return make(style)
+        }
+        pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
+        pager.layoutIfNeeded()
+        #expect(built == 1, "the tabs not on show built their pages")
+
+        var tapped: GalleryPost?
+        pager.onItemTapped = { post, _ in tapped = post }
+        let defaults = try #require(UserDefaults(suiteName: "late-pages-\(UUID().uuidString)"))
+        let staking = PostCardStaking(wallet: WalletStore(defaults: defaults))
+        pager.staking = staking
+        let snapshot = ProfileViewModel.GallerySnapshot(activity: .empty(message: ""), media: .empty(message: ""))
+        pager.render(snapshot)
+        pager.setVisibleTabs([.format(.activity), .saved])
+        #expect(built == 2)
+        #expect(pager.builtPage(for: .reactions) == nil, "a tab never shown built its page")
+
+        let saved = try #require(pager.builtPage(for: .saved) as? ForYouGridPage)
+        pager.layoutIfNeeded()
+        saved.layoutIfNeeded()
+        #expect(saved.debugStatusFrame != nil, "the late page was not shown Saved's empty state")
+        #expect(saved.showsTileInfo, "the late page lost the tile contract")
+        #expect(saved.staking === staking, "the late page has no undo window")
+        let post = GalleryPost(
+            id: PostID("p1"), kind: .photo, isRepost: false, thumbnailURL: nil, caption: "p1", publishedAtMS: 1
+        )
+        saved.onPostTapped?(post, [post], false)
+        #expect(tapped?.id == PostID("p1"), "the late page's taps are not wired")
     }
 }
