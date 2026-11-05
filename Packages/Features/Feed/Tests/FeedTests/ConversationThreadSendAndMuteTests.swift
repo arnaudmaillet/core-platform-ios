@@ -119,6 +119,29 @@ struct ConversationThreadSendAndMuteTests {
         cells(in: screen.view).first { $0.row.bodyTextLabel.text == body }
     }
 
+    // MARK: - The opening (#2121)
+
+    /// A long conversation opens on its newest message having built only the
+    /// rows around it: the first layout is aimed at the estimated tail, so
+    /// the top of the transcript is never built and measured for a screen
+    /// that does not show it.
+    @Test func aLongConversationOpensAtItsTailBuildingOnlyItsRows() throws {
+        let messages = (0..<40).map { Self.message("m\($0)", mine: $0.isMultiple(of: 2), minutes: Double($0)) }
+        let (screen, _, window) = makeScreen(phase: .content(messages))
+        defer { window.isHidden = true }
+        screen.view.layoutIfNeeded()
+
+        #expect(screen.debugConfiguredIDs.contains("m39"), "the newest message was not built")
+        #expect(!screen.debugConfiguredIDs.contains("m0"),
+                "the opening built the top of the transcript: \(screen.debugConfiguredIDs)")
+        #expect(screen.debugConfiguredIDs.count < messages.count / 2,
+                "\(screen.debugConfiguredIDs.count) of \(messages.count) rows built for one screen")
+        let newest = try #require(cell("Message m39", in: screen))
+        let frame = newest.convert(newest.bounds, to: screen.view)
+        #expect(frame.minY >= 0 && frame.maxY <= screen.view.bounds.height,
+                "the newest message is not on screen: \(frame)")
+    }
+
     // MARK: - The bell
 
     /// The bell takes the bar's trailing corner and follows the mute,
