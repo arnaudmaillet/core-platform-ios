@@ -199,6 +199,13 @@ final class ForYouGridPage: UIView {
     /// the feed with, so paging from a tile runs through the rest of its chunk
     /// and on down the list, exactly as the viewer sees it.
     private(set) var posts: [GalleryPost] = []
+    /// What a host (a profile's gallery) last showed through
+    /// `PostGridPage.show`, as it was handed over — shown again, without
+    /// them, when a post it holds is learnt unavailable (#2048).
+    var hostedState: PostGridPageState?
+    /// The record those posts are read from: the app's; a test's own.
+    var withheldPosts: UnavailablePosts = .shared
+    let withheldObservation = NotificationObservation()
     /// The order the view model handed over, kept so an append can be
     /// recognised as one before arrangement permutes it.
     private var rawPosts: [GalleryPost] = []
