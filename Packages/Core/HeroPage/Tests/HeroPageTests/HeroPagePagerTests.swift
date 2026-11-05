@@ -80,6 +80,51 @@ struct HeroPagePagerTests {
         let (_, pages) = makePager()
         #expect(pages.allSatisfy { $0.handedPull && $0.hostedInsets == .zero })
     }
+
+    /// A pager that builds its own pages builds a tab's the first time it is
+    /// shown (#2125), once, and tells it everything its elders were told.
+    @Test func aTabsPageIsBuiltWhenFirstShownAndToldWhatTheOthersWere() {
+        var built: [Tab] = []
+        var made: [StubPage] = []
+        let pager = HeroPagePager<Tab>(tabs: [.posts, .saved, .liked], shown: [.posts]) { tab in
+            built.append(tab)
+            let page = StubPage()
+            made.append(page)
+            return page
+        }
+        pager.frame = CGRect(x: 0, y: 0, width: 400, height: 800)
+        pager.layoutIfNeeded()
+        #expect(built == [.posts], "a tab not on show built its page")
+
+        pager.setContentTopInset(300)
+        pager.setContentBottomInset(40)
+        pager.setStickyTopOcclusion(100)
+        pager.setMinimumScrollTravel(500)
+        pager.setSnapDetents([0, 200], catching: [120])
+        pager.setVisibleTabs([.posts, .liked])
+        #expect(built == [.posts, .liked])
+        let late = made[1]
+        #expect(late.handedPull)
+        #expect(late.hostedInsets == UIEdgeInsets(top: 300, left: 0, bottom: 40, right: 0))
+        #expect(late.chromeOcclusion == UIEdgeInsets(top: 100, left: 0, bottom: 40, right: 0))
+        #expect(late.minimumScrollTravel == 500)
+        #expect(late.snapDetents == [0, 200] && late.catchDetents == [120])
+        #expect(late.pinLineInset != nil, "the late page never heard where titles pin")
+        #expect(made[0].chromeOcclusion == late.chromeOcclusion)
+
+        var told: [CGFloat] = []
+        pager.onVerticalScroll = { told.append($0) }
+        pager.setActivePage(.liked, animated: false)
+        told = []
+        late.onVerticalScroll?(80)
+        #expect(told == [80], "the late page does not drive the header")
+
+        pager.setVisibleTabs([.posts])
+        pager.setVisibleTabs([.posts, .liked])
+        #expect(built == [.posts, .liked], "a page shown again was built again")
+        #expect(pager.builtPage(for: .saved) == nil)
+        #expect(pager.allPages.count == 2)
+    }
 }
 
 /// The hero page's selector (#1653): placed once in its home, removed when
@@ -135,6 +180,9 @@ final class StubPage: UIView, PostGridPage {
     private(set) var verticalOffset: CGFloat = 0
     private(set) var handedPull = false
     private(set) var hostedInsets: UIEdgeInsets?
+    private(set) var chromeOcclusion: UIEdgeInsets?
+    private(set) var minimumScrollTravel: CGFloat?
+    private(set) var pinLineInset: CGFloat?
     let scrollView = UIScrollView()
 
     func show(_ state: PostGridPageState) {}
@@ -154,12 +202,12 @@ final class StubPage: UIView, PostGridPage {
     func setHostedInsets(top: CGFloat, bottom: CGFloat) {
         hostedInsets = UIEdgeInsets(top: top, left: 0, bottom: bottom, right: 0)
     }
-    func setMinimumScrollTravel(_ travel: CGFloat) {}
-    func setChromeOcclusion(_ occlusion: UIEdgeInsets?) {}
+    func setMinimumScrollTravel(_ travel: CGFloat) { minimumScrollTravel = travel }
+    func setChromeOcclusion(_ occlusion: UIEdgeInsets?) { chromeOcclusion = occlusion }
     var snapDetents: [CGFloat] = []
     var catchDetents: [CGFloat] = []
     func handPullToHost() { handedPull = true }
-    func setPinLineInset(_ inset: CGFloat?) {}
+    func setPinLineInset(_ inset: CGFloat?) { pinLineInset = inset }
     var onPinnedSectionChanged: ((PostGridPinnedSection?) -> Void)?
     var pinnedSection: PostGridPinnedSection?
     func scrollToSection(_ index: Int) {}
