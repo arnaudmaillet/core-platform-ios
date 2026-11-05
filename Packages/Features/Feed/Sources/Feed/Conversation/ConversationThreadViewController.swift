@@ -6,6 +6,7 @@ import EntityStore
 import FeedInterface
 import MediaCore
 import UIKit
+import VoiceKit
 
 /// A conversation, drawn as a text post's screen.
 ///
@@ -172,6 +173,15 @@ final class ConversationThreadViewController: UIViewController {
 
     private var phase: ConversationThreadPhase = .loading
     private var messagesByID: [String: ConversationThreadMessage] = [:]
+    /// Where each voice message was left, 0…1, for the conversation's life
+    /// on screen (#2104): coming back to one mid-way shows — and plays from —
+    /// where it was.
+    private var voicePositions: [String: Double] = [:]
+    /// The voice message the one player last spoke for: its position is kept
+    /// when another starts.
+    private var voiceShownID: String?
+    private let voicePlayer = VoicePlayer.shared
+    private let voicePlayed = VoicePlayedStore.shared
     /// The viewer's messages that just appeared on their way — they rise into
     /// place as their cell is configured (#719).
     private var arrivingIDs: Set<String> = []
@@ -367,6 +377,10 @@ final class ConversationThreadViewController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         contextMenu.endTextSelection()
+        // Leaving the conversation stops its voice message (#2104).
+        if isMovingFromParent || isBeingDismissed || navigationController?.isBeingDismissed == true {
+            stopVoice()
+        }
         guard mode == .full else { return }
         // Taken away on the way out, or the inbox inherits an empty bar.
         navigationController?.setToolbarHidden(true, animated: animated)
@@ -1318,12 +1332,11 @@ final class ConversationThreadViewController: UIViewController {
     private func configure(_ cell: ThreadRowCell, messageID: String) {
         guard let message = messagesByID[messageID] else { return }
         renderedRows[messageID] = rowSignature(for: message)
-        // ⚠️ A VOICE MESSAGE READS AS ITS LINE until its bubble lands (#2104):
-        // "🎤 Voice message (0:12)", with a text's delivery and retry. The
-        // media view draws only photos and videos.
+        // A voice message is its bubble (#2104), under the row: no body, no
+        // photo bubble, and its own sending, failed and retry.
         let voice = message.media?.kind == .voice
         let drawnMedia = voice ? nil : message.media
-        let body = voice ? ConversationThreadMedia.voiceSummary(duration: message.media?.duration) : message.body
+        let body = message.body
         #if DEBUG
         debugConfiguredIDs.append(messageID)
         #endif
@@ -1372,10 +1385,10 @@ final class ConversationThreadViewController: UIViewController {
         // (#719); a failed one is sent again by a tap.
         cell.loaderDelay = sendingLoaderDelay
         cell.setDelivery(
-            message.isMine && drawnMedia == nil ? message.delivery : nil,
+            message.isMine && message.media == nil ? message.delivery : nil,
             time: Self.timeFormatter.string(from: message.sentAt)
         )
-        if message.isMine, drawnMedia == nil, message.delivery == .failed {
+        if message.isMine, message.media == nil, message.delivery == .failed {
             cell.row.onReplyTap = { [weak self] in self?.driver.retry(messageID) }
         }
         if arrivingIDs.remove(messageID) != nil {
@@ -1384,6 +1397,7 @@ final class ConversationThreadViewController: UIViewController {
         } else if deliveredIDs.remove(messageID) != nil {
             cell.playDelivered(revealing: Self.timeFormatter.string(from: message.sentAt))
         }
+        configureVoice(cell.voiceView, for: message)
         cell.mediaView.onTap = drawnMedia == nil ? nil : { [weak self, weak cell] in
             guard let self, let cell else { return }
             self.tapMedia(of: messageID, in: cell)
@@ -2128,4 +2142,153 @@ extension ConversationThreadViewController: SwipeStageHosting {
 
 extension ConversationThreadViewController: StackScreen {
     var leaving: ScreenLeaving { .nativeBack }
+}
+
+// MARK: - Voice messages (#2104)
+
+extension ConversationThreadViewController {
+    /// The bubble's state for `message`: what the one player says when it is
+    /// the one it speaks for, where it was left otherwise.
+    private func voiceState(for message: ConversationThreadMessage) -> ThreadVoiceView.State? {
+        guard let media = message.media, media.kind == .voice else { return nil }
+        var state = ThreadVoiceView.State()
+        state.delivery = message.isMine ? message.delivery : .sent
+        state.levels = media.waveform
+        state.duration = media.duration ?? (voicePlayer.messageID == message.id ? voicePlayer.duration : nil) ?? 0
+        state.unplayed = !message.isMine && !voicePlayed.isPlayed(message.id)
+        state.speedLabel = voicePlayer.speed.label
+        if voicePlayer.messageID == message.id {
+            let progress = voicePlayer.progress ?? voicePositions[message.id] ?? 0
+            state.playback = switch voicePlayer.state {
+            case .loading: .loading
+            case .playing: .playing(progress: progress)
+            case .paused: progress > 0 ? .paused(progress: progress) : .rest
+            case .failed: .failed
+            case .idle, .ended: .rest
+            }
+        } else if let position = voicePositions[message.id], position > 0 {
+            state.playback = .paused(progress: position)
+        }
+        return state
+    }
+
+    private func configureVoice(_ view: ThreadVoiceView, for message: ConversationThreadMessage) {
+        let state = voiceState(for: message)
+        view.configure(state, senderName: message.isMine ? nil : (peer.name.isEmpty ? nil : peer.name))
+        guard state != nil else { return }
+        let id = message.id
+        view.onPlayTap = { [weak self] in self?.toggleVoice(id) }
+        view.onSeek = { [weak self] fraction, scrubbing in self?.seekVoice(id, to: fraction, scrubbing: scrubbing) }
+        view.onSpeedTap = { [weak self] in
+            guard let self else { return }
+            voicePlayer.setSpeed(voicePlayer.speed.next)
+        }
+        view.onRetry = { [weak self] in self?.driver.retry(id) }
+    }
+
+    /// Where the message's audio is: the viewer's own take while it is on
+    /// its way, the device's copy, else its delivery.
+    private func voiceURL(of media: ConversationThreadMedia) -> URL? {
+        media.localFileURL
+            ?? media.assetID.flatMap { VoiceFileCache.shared?.fileURL(forAsset: $0) }
+            ?? media.url
+    }
+
+    private func toggleVoice(_ id: String) {
+        guard let message = messagesByID[id], let media = message.media, let url = voiceURL(of: media) else { return }
+        if voicePlayer.messageID == id, voicePlayer.state == .playing {
+            voicePlayer.pause()
+            return
+        }
+        playVoice(id, url: url)
+    }
+
+    private func playVoice(_ id: String, url: URL) {
+        rememberShownVoice()
+        listenToVoicePlayer()
+        voiceShownID = id
+        let resume = voicePlayer.messageID == id && voicePlayer.state == .paused
+        voicePlayer.play(id, url: url, from: resume ? nil : voicePositions[id])
+        if let message = messagesByID[id], !message.isMine { voicePlayed.markPlayed(id) }
+        refreshVoices()
+    }
+
+    /// A tap seeks there; a drag scrubs. On a message not playing, it moves
+    /// its position without playing.
+    private func seekVoice(_ id: String, to fraction: Double, scrubbing: Bool) {
+        if voicePlayer.messageID == id {
+            voicePlayer.seek(to: fraction)
+        }
+        voicePositions[id] = fraction
+        refreshVoices()
+    }
+
+    /// The message the player spoke for keeps where it was.
+    private func rememberShownVoice() {
+        guard let shown = voiceShownID, voicePlayer.messageID == shown else { return }
+        switch voicePlayer.state {
+        case .playing, .paused:
+            if let progress = voicePlayer.progress { voicePositions[shown] = progress }
+        case .ended:
+            voicePositions[shown] = nil
+        default:
+            break
+        }
+    }
+
+    private func listenToVoicePlayer() {
+        voicePlayer.onChange = { [weak self] in self?.voicePlayerChanged() }
+    }
+
+    private func voicePlayerChanged() {
+        if voicePlayer.state == .ended, let id = voicePlayer.messageID {
+            voicePositions[id] = nil
+            if let next = Self.nextVoice(after: id, in: orderedMessages, isPlayed: { self.voicePlayed.isPlayed($0) }),
+               let media = messagesByID[next]?.media, let url = voiceURL(of: media) {
+                playVoice(next, url: url)
+                return
+            }
+        }
+        refreshVoices()
+    }
+
+    /// The next one plays on its own (Telegram's playlist): the message
+    /// RIGHT AFTER a received voice message that ended, when it is a received
+    /// voice message not played yet — anything else stops it.
+    static func nextVoice(
+        after id: String, in messages: [ConversationThreadMessage], isPlayed: (String) -> Bool
+    ) -> String? {
+        guard let index = messages.firstIndex(where: { $0.id == id }), !messages[index].isMine,
+              messages.indices.contains(index + 1) else { return nil }
+        let next = messages[index + 1]
+        guard next.media?.kind == .voice, !next.isMine, !isPlayed(next.id) else { return nil }
+        return next.id
+    }
+
+    private var orderedMessages: [ConversationThreadMessage] {
+        if case .content(let messages) = phase { return messages }
+        return []
+    }
+
+    /// Every voice bubble on screen, from the player's state — no reload.
+    private func refreshVoices() {
+        for case let cell as ThreadRowCell in collectionView.visibleCells {
+            guard case .message(let id) = dataSource.itemIdentifier(for: collectionView.indexPath(for: cell) ?? IndexPath()),
+                  let message = messagesByID[id], let state = voiceState(for: message) else { continue }
+            cell.voiceView.update(state)
+        }
+    }
+
+    private func stopVoice() {
+        guard voiceShownID != nil else { return }
+        voicePlayer.stop()
+        voicePlayer.onChange = nil
+        voiceShownID = nil
+    }
+
+    #if DEBUG
+    func debugToggleVoice(_ id: String) { toggleVoice(id) }
+    func debugVoiceState(_ id: String) -> ThreadVoiceView.State? { messagesByID[id].flatMap(voiceState(for:)) }
+    func debugVoiceEnded() { voicePlayerChanged() }
+    #endif
 }

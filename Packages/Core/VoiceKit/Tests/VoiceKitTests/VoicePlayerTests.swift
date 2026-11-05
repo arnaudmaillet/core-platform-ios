@@ -113,6 +113,25 @@ struct VoicePlayerTests {
         #expect(player.state == .paused)
     }
 
+    /// A message come back to mid-way starts where it was left — once the
+    /// file says its length.
+    @Test func aSeekBeforeTheLengthIsKnownWaitsForIt() {
+        let engines = Box()
+        let player = VoicePlayer(session: session, makeEngine: {
+            let engine = FakeEngine()
+            engine.duration = nil
+            engines.all.append(engine)
+            return engine
+        }, defaults: defaults, notifications: center)
+        player.play("a", url: a, from: 0.5)
+        #expect(engines.all[0].seeks.isEmpty)
+        engines.all[0].duration = 8
+        player.tick()
+        #expect(engines.all[0].seeks == [4])
+        player.tick()
+        #expect(engines.all[0].seeks == [4], "the waiting seek ran twice")
+    }
+
     @Test func seekMovesWithinTheLength() {
         let engines = Box()
         let player = player(engines)
