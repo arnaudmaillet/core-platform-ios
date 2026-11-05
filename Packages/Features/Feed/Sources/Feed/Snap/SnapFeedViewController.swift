@@ -6476,7 +6476,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // mask that opens from the row's rect. That is the shape of the answer
         // here too, and it is not a line of code — see the notes on this
         // commit.
-        let chrome = SnapChromeView()
+        // A spare when one is ready (#2126): this runs in the tap's turn.
+        let chrome = SnapChromeView.make()
         chrome.isUserInteractionEnabled = false
         chrome.markAsFlightReplica()
         // Captured, not ambient: the replica must render at the live cell's

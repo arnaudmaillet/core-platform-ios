@@ -109,6 +109,9 @@ struct SnapShortcutRailViewTests {
         let icons = rail.subviews.compactMap { $0 as? UIButton }
         #expect(icons.count == 9)
         #expect(icons.allSatisfy { $0.configuration?.image == nil }, "no symbol")
+        // Custom, not configured (#2126): a configuration builds a background
+        // the shortcut never shows, in the opening tap's turn.
+        #expect(icons.allSatisfy { $0.configuration == nil && $0.buttonType == .custom })
         #expect(icons.allSatisfy { $0.subviews.contains { $0 is EmoteTileView } })
         // The emote is exactly the shortcut's box, not grown past it.
         for icon in icons {
