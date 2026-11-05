@@ -67,8 +67,9 @@ public enum DebugTools {
         guard !others.isEmpty else { return nil }
         let total = others.reduce(tool.costMs) { $0 + $1.costMs }
         let names = (others.map(\.title) + [tool.title]).joined(separator: ", ")
-        return "\(others.count + 1) costly tools would run (\(names)): about \(format(total)) added per interaction."
-            + " Measurements taken meanwhile are labelled. Turn on only what you need now."
+        let added: String = format(total)
+        return "\(others.count + 1) costly tools would run (\(names)): about \(added) added per interaction. "
+            + "Measurements taken meanwhile are labelled. Turn on only what you need now."
     }
 
     /// The badge's line while costly tools run, nil when none does.

@@ -337,10 +337,11 @@ final class DebugLogViewController: UITableViewController, UISearchResultsUpdati
         footer.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         footer.textColor = .secondaryLabel
         footer.textAlignment = .center
-        footer.text = (isReading ? "Reading…\n" : "")
-            + "\(shown.count) of \(all.count) entries · \(sinceLaunch ? "since launch" : "last 5 min")"
-            + " · console capture \(ConsoleCapture.shared.isOn ? "on" : "off")"
-            + (readError.map { "\nunified log: \($0)" } ?? "")
+        let reading: String = isReading ? "Reading…\n" : ""
+        let window: String = sinceLaunch ? "since launch" : "last 5 min"
+        let capture: String = ConsoleCapture.shared.isOn ? "on" : "off"
+        let error: String = readError.map { "\nunified log: \($0)" } ?? ""
+        footer.text = "\(reading)\(shown.count) of \(all.count) entries · \(window) · console capture \(capture)\(error)"
         footer.frame = CGRect(x: 0, y: 0, width: tableView.bounds.width, height: 54)
         tableView.tableFooterView = footer
     }
@@ -369,9 +370,9 @@ final class DebugLogViewController: UITableViewController, UISearchResultsUpdati
         let entries = shown
         Task { [weak self] in
             let url = await Task.detached(priority: .userInitiated) { () -> URL? in
-                let text = entries.reversed().map { entry in
-                    "\(entry.date.ISO8601Format()) [\(Self.levelName(entry.level))] \(entry.subsystem) \(entry.category): "
-                        + DebugRedaction.redact(entry.message)
+                let text = entries.reversed().map { entry -> String in
+                    let message: String = DebugRedaction.redact(entry.message)
+                    return "\(entry.date.ISO8601Format()) [\(Self.levelName(entry.level))] \(entry.subsystem) \(entry.category): \(message)"
                 }.joined(separator: "\n")
                 let url = FileManager.default.temporaryDirectory.appendingPathComponent("app-log.txt")
                 return (try? text.write(to: url, atomically: true, encoding: .utf8)) == nil ? nil : url

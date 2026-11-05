@@ -39,11 +39,11 @@ public enum DebugDashboard {
     /// is up does nothing.
     public static func present(in scene: UIWindowScene? = nil) {
         guard !isPresented, let scene = scene ?? foregroundScene() else { return }
-        let window = window ?? DashboardWindow(windowScene: scene)
-        self.window = window
+        let host = window ?? DashboardWindow(windowScene: scene)
+        window = host
         captureScreen()
         InteractionLatency.isPaused = true
-        window.isHidden = false
+        host.isHidden = false
         let root = DebugListViewController(title: "Debug") { rootSections() }
         root.navigationItem.rightBarButtonItem = UIBarButtonItem(
             systemItem: .close, primaryAction: UIAction { _ in close() }
@@ -51,8 +51,8 @@ public enum DebugDashboard {
         let navigation = UINavigationController(rootViewController: root)
         navigation.navigationBar.prefersLargeTitles = true
         navigation.sheetPresentationController?.detents = [.large()]
-        navigation.presentationController?.delegate = window
-        window.rootViewController?.present(navigation, animated: true)
+        navigation.presentationController?.delegate = host
+        host.rootViewController?.present(navigation, animated: true)
     }
 
     public static func close() {

@@ -118,9 +118,9 @@ public final class FrameRateOverlay: NSObject {
             let fps = Double(frames) / elapsed
             let hitchRatio = hitchSeconds * 1000 / elapsed
             let perFrame = tickCost / Double(max(1, frames)) * 1000
-            line = "\(Int(fps.rounded())) fps · hitch \(Int(hitchRatio.rounded())) ms/s"
-                + (hangs > 0 ? " · \(hangs) hang" : "")
-                + "\n\(stats) · overlay \(String(format: "%.2f", perFrame)) ms/frame"
+            let hangText: String = hangs > 0 ? " · \(hangs) hang" : ""
+            let cost: String = String(format: "%.2f", perFrame)
+            line = "\(Int(fps.rounded())) fps · hitch \(Int(hitchRatio.rounded())) ms/s\(hangText)\n\(stats) · overlay \(cost) ms/frame"
             window?.show(line)
             reset(at: link.timestamp)
         }
@@ -187,9 +187,9 @@ public final class DebugTextViewController: UIViewController {
         textView.text = text
         textView.backgroundColor = .systemBackground
         view.addSubview(textView)
-        let text = self.text
+        let shared = text
         navigationItem.rightBarButtonItem = UIBarButtonItem(
-            systemItem: .action, primaryAction: UIAction { _ in DebugDashboard.share([text]) }
+            systemItem: .action, primaryAction: UIAction { _ in DebugDashboard.share([shared]) }
         )
     }
 }

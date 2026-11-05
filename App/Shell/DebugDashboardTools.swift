@@ -114,18 +114,20 @@ enum DebugDashboardTools {
 
     private static func body(_ data: Data?) -> String {
         guard let data, !data.isEmpty else { return "(empty)" }
-        return DebugRedaction.redact(ProtoWireDump.dump(data))
-            + (data.count >= NetworkLog.bodyCap ? "\n… cut at \(NetworkLog.bodyCap / 1024) KB" : "")
+        let dump: String = DebugRedaction.redact(ProtoWireDump.dump(data))
+        let cut: String = data.count >= NetworkLog.bodyCap ? "\n… cut at \(NetworkLog.bodyCap / 1024) KB" : ""
+        return dump + cut
     }
 
     private static func shareSession(calls: [NetworkLog.Call]) {
         Task {
             let url = await Task.detached(priority: .userInitiated) { () -> URL? in
-                let text = calls.map { call in
-                    "\(call.started.ISO8601Format()) \(call.path) \(call.code.map { "\($0)" } ?? "pending") "
-                        + "\(call.duration.map { "\(Int(($0 * 1000).rounded()))ms" } ?? "")\n"
-                        + "request:\n\(call.requestBody.map { DebugRedaction.redact(ProtoWireDump.dump($0)) } ?? "(empty)")\n"
-                        + "response:\n\(call.responseBody.map { DebugRedaction.redact(ProtoWireDump.dump($0)) } ?? "(empty)")\n"
+                let text = calls.map { call -> String in
+                    let code: String = call.code.map { "\($0)" } ?? "pending"
+                    let duration: String = call.duration.map { "\(Int(($0 * 1000).rounded()))ms" } ?? ""
+                    let request: String = call.requestBody.map { DebugRedaction.redact(ProtoWireDump.dump($0)) } ?? "(empty)"
+                    let response: String = call.responseBody.map { DebugRedaction.redact(ProtoWireDump.dump($0)) } ?? "(empty)"
+                    return "\(call.started.ISO8601Format()) \(call.path) \(code) \(duration)\nrequest:\n\(request)\nresponse:\n\(response)\n"
                 }.joined(separator: "\n")
                 let url = FileManager.default.temporaryDirectory.appendingPathComponent("network-log.txt")
                 return (try? text.write(to: url, atomically: true, encoding: .utf8)) == nil ? nil : url

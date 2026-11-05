@@ -45,7 +45,7 @@ struct DebugDashboardTests {
         // Built at run time: no source line holds a whole token, which a
         // secret scanner reads as a real one.
         let jwt = ["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxMjMifQ", "c2lnbmF0dXJl"].joined(separator: ".")
-        let text = "Authorization: Bearer abc.def-123 token=s3cr3t user ava@example.com +33 6 12 34 56 78 "
+        let text: String = "Authorization: Bearer abc.def-123 token=s3cr3t user ava@example.com +33 6 12 34 56 78 "
             + "jwt \(jwt) password: hunter2"
         let masked = DebugRedaction.redact(text)
         for secret in ["abc.def-123", "s3cr3t", "ava@example.com", "12 34 56 78", "eyJhbGciOiJIUzI1NiJ9", "hunter2"] {

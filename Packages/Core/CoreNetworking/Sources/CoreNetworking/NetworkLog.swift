@@ -117,9 +117,9 @@ public struct NetworkLogClient: HTTPClientInterface {
         guard let id = log.begin(path: request.url.path, body: request.message) else {
             return inner.unary(request: request, onMetrics: onMetrics, onResponse: onResponse)
         }
-        let log = self.log
+        let sink = log
         return inner.unary(request: request, onMetrics: onMetrics) { response in
-            log.end(id, response: response)
+            sink.end(id, response: response)
             onResponse(response)
         }
     }

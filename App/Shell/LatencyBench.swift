@@ -128,10 +128,11 @@ final class LatencyBenchViewController: UIViewController {
             }
             let sorted = pushes.dropFirst().sorted()
             func at(_ q: Double) -> String { String(format: "%.2f", sorted[min(sorted.count - 1, Int(Double(sorted.count) * q))]) }
-            print("[bench-auto] latency=\(InteractionLatency.isActive ? "on" : InteractionLatency.isInstalled ? "off" : "never")"
-                  + " dashboard=\(arguments.contains("-debug-dashboard") ? "opened-closed" : "never")"
-                  + " tools=\(tools.isEmpty ? "none" : tools.map(\.id).joined(separator: ","))"
-                  + (tools.isEmpty ? "" : arguments.contains("-latency-bench-tools-off") ? "(on-off)" : "(on)")
+            let latency: String = InteractionLatency.isActive ? "on" : InteractionLatency.isInstalled ? "off" : "never"
+            let dashboard: String = arguments.contains("-debug-dashboard") ? "opened-closed" : "never"
+            let toolIDs: String = tools.isEmpty ? "none" : tools.map(\.id).joined(separator: ",")
+            let toolState: String = tools.isEmpty ? "" : arguments.contains("-latency-bench-tools-off") ? "(on-off)" : "(on)"
+            print("[bench-auto] latency=\(latency) dashboard=\(dashboard) tools=\(toolIDs)\(toolState)"
                   + " pushes=\(sorted.count) p50=\(at(0.5))ms p90=\(at(0.9))ms")
         }
     }

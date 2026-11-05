@@ -135,10 +135,10 @@ final class DebugReportViewController: UIViewController {
         }
     }
 
-    private func texts() -> [(name: String, text: String)] {
-        let records = InteractionLatency.records.suffix(50).map { record in
-            "\(Int(record.latencyMs.rounded())) ms \(record.response) ← \(record.input.kind) \(record.input.target)"
-                + (record.context.map { " [\($0)]" } ?? "")
+    private func makeTexts() -> [(name: String, text: String)] {
+        let records = InteractionLatency.records.suffix(50).map { record -> String in
+            let context: String = record.context.map { " [\($0)]" } ?? ""
+            return "\(Int(record.latencyMs.rounded())) ms \(record.response) ← \(record.input.kind) \(record.input.target)\(context)"
         }
         let latency = records.isEmpty && !InteractionLatency.isActive ? ["(the latency tool was off)"] : records
         let hangs = InteractionLatency.hangs.suffix(20).map { "\($0.at.ISO8601Format()) \(Int($0.ms.rounded())) ms \($0.during)" }
@@ -165,7 +165,7 @@ final class DebugReportViewController: UIViewController {
 
     private func send() {
         let image = annotated?.jpegData(compressionQuality: 0.8)
-        let texts = texts()
+        let texts = makeTexts()
         Task { [weak self] in
             let zip = await Task.detached(priority: .userInitiated) { () -> URL? in
                 Self.makeZip(image: image, texts: texts)
