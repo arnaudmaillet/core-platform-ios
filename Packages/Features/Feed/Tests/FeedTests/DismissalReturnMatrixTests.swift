@@ -124,6 +124,28 @@ struct DismissalReturnMatrixTests {
         #expect(source.zoomHeroFrame(in: page) == landingRect(of: before[1], in: page))
     }
 
+    /// ⚠️ A TAPPED TILE THAT LEFT THE GRID (#2048: the server stopped showing
+    /// its post) still gets a flight: to the middle of the screen, dissolving
+    /// — never UIKit's plain pop, the cut the owner saw. A text row that is
+    /// still there keeps refusing the picture it cannot hold.
+    @Test func aTappedTileThatLeftTheGridFliesToTheMiddle() {
+        let page = page(style: .list)
+        let posts = page.posts
+        let tapped = posts[0].id
+        page.render(.content(Array(posts.dropFirst())))
+        page.layoutIfNeeded()
+        let source = stageDismissal(on: page, tapped: tapped, landed: posts[3].id)
+        #expect(source.zoomLandingAcceptsHero, "the close fell back to UIKit's pop")
+        #expect(!source.zoomSourceIsOnScreen)
+        let landing = source.zoomHeroFrame(in: page)
+        #expect(abs(landing.midX - page.bounds.midX) < 1 && abs(landing.midY - page.bounds.midY) < 1,
+                "it lands at \(landing), not the middle")
+
+        let text = posts.first { $0.kind == .text && $0.id != tapped }!.id
+        let textSource = stageDismissal(on: page, tapped: text, landed: text)
+        #expect(!textSource.zoomLandingAcceptsHero, "a text row took a picture")
+    }
+
     /// A post the page does not hold (dropped by a refresh, or never there)
     /// changes nothing: the close goes home.
     @Test func aPostNobodyHoldsLeavesTheGridAlone() {

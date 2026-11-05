@@ -203,7 +203,8 @@ struct SnapUnavailablePostTests {
     @Test func aPageWhosePostTurnsUnavailableHasNoEnabledLikeBoostOrSound() async throws {
         let wallet = makeWallet()
         let panels = Panels(posts: Posts(gone: [PostID("a")]))
-        let feed = makeFeed([media("a"), media("b")], panels: panels, wallet: wallet)
+        // Alone: with another post to show, the page would give way (#2048).
+        let feed = makeFeed([media("a")], panels: panels, wallet: wallet)
         try settle(feed, on: 0)
         let page = try cell(feed, at: 0)
         try #require(!postActions(on: page).isEmpty, "the premise: the page shows its like and its rail")
@@ -223,20 +224,17 @@ struct SnapUnavailablePostTests {
         withExtendedLifetime(feed) {}
     }
 
-    /// Paged away, the unavailable post is gone (#2048): only the page in
-    /// front keeps the block, and only until the viewer leaves it. The other
-    /// pages keep their actions, and paging back does not find it.
-    @Test func pagingAwayRemovesItAndLeavesTheOtherPagesAlone() async throws {
+    /// The page in front learnt unavailable gives way to the next at once,
+    /// with a toast (#2048, the owner 2026-11-05); the other pages keep their
+    /// actions, and paging back does not find it.
+    @Test func thePageInFrontGivesWayAndTheOtherPagesStayAlone() async throws {
         let panels = Panels(posts: Posts(gone: [PostID("a")]))
         let feed = makeFeed(["a", "b", "c", "d", "e"].map(media), panels: panels)
         try settle(feed, on: 0)
         mountPanel(feed, for: PostID("a"), panels: panels)
-        #expect(await eventually { feed.unavailablePostIDs.contains(PostID("a")) })
-        #expect(try cell(feed, at: 0).debugShowsUnavailableBlock, "the page in front lost the block")
-
-        try settle(feed, on: 1)
         let rest = ["b", "c", "d", "e"].map { PostID($0) }
-        #expect(await eventually { feed.orderedIDs == rest }, "the page outlived the viewer leaving it")
+        #expect(await eventually { feed.orderedIDs == rest }, "the page in front stayed")
+        #expect(feed.debugUnavailableToastsShown == 1)
         for (index, id) in rest.enumerated() {
             try settle(feed, on: index)
             let other = try cell(feed, showing: id)

@@ -3010,20 +3010,27 @@ final class SnapFeedViewController: UIViewController {
             !notInterestedIDs.contains($0) || $0 == activePostID
         }
         var models = Dictionary(uniqueKeysWithValues: state.items.map { ($0.id, $0) })
-        // ⚠️ THE POST IN FRONT IS NEVER PULLED FROM UNDER THE VIEWER (#2048).
-        // A window that came back without it because the server withholds
-        // it used to hand its index to the next post: the departed post's
-        // clip kept playing under another's caption, the bar kept its author,
-        // and a text post that took its place rested in its comments over
-        // the video. It stays where it is, unavailable (#1409), until the
-        // viewer pages away (`FeedViewModel.pageDidBecomeActive`).
+        // ⚠️ THE POST IN FRONT, GONE FROM THE SERVER, GIVES WAY WITH A WORD
+        // (#2048, the owner 2026-11-05). A window that came back without it
+        // used to hand its index to the next post silently, and that was not
+        // a page change: the departed post's clip kept playing under another's
+        // caption, the bar kept its author, and a text post that took its
+        // place rested in its comments over the video. Now the next post (the
+        // previous one at the end) takes the page AS a page change, below,
+        // and a toast says why. Only a post with nothing else to show stays,
+        // unavailable (#1409) — a post opened alone, from a link.
         var keptUnavailable: PostID?
+        var skippedUnavailable = false
         if let held, models[held] == nil, let model = previousModels[held],
            viewModel.unavailablePosts.contains(held) || unavailablePostIDs.contains(held) {
-            ids.insert(held, at: min(previousOrder.firstIndex(of: held) ?? ids.count, ids.count))
-            models[held] = model
-            keptUnavailable = held
-            keptUnavailableID = held
+            if ids.isEmpty {
+                ids = [held]
+                models[held] = model
+                keptUnavailable = held
+                keptUnavailableID = held
+            } else {
+                skippedUnavailable = true
+            }
         }
         orderedIDs = ids
         modelsByID = models
@@ -3089,7 +3096,15 @@ final class SnapFeedViewController: UIViewController {
             if let held, lifecycle.activeIndex != nil, !orderedIDs.contains(held) {
                 apply(lifecycle.setPageIndex(nil))
                 lifecycleActiveID = nil
+                // The last page gone: the one before it takes the screen.
+                let page = Int((collectionView.contentOffset.y / max(collectionView.bounds.height, 1)).rounded())
+                if page >= orderedIDs.count, !orderedIDs.isEmpty {
+                    collectionView.setContentOffset(
+                        CGPoint(x: 0, y: CGFloat(orderedIDs.count - 1) * collectionView.bounds.height), animated: false
+                    )
+                }
             }
+            if skippedUnavailable { showPostUnavailableToast() }
             // ⚠️ NOT `keepOnShow(held)` here: this completion can run late,
             // after a later render, and a post captured then is stale (#1580).
             updateActiveItem()
@@ -3327,6 +3342,10 @@ final class SnapFeedViewController: UIViewController {
     private var lastRenderState: FeedViewModel.RenderState?
     /// Hears posts learnt unavailable on other surfaces (#2048).
     private let unavailableObservation = NotificationObservation()
+    #if DEBUG
+    /// "This post isn't available" toasts shown (#2048).
+    private(set) var debugUnavailableToastsShown = 0
+    #endif
 
     /// Takes `id`'s actions away, in place: its page, its bars when it is
     /// the page in front, what it plays, and the like still inside its undo
@@ -3338,7 +3357,13 @@ final class SnapFeedViewController: UIViewController {
     /// on show, the other feeds' and the For You grid. `recording: false`
     /// for a post the record already holds (`render`).
     func markPostUnavailable(_ id: PostID, recording: Bool = true) {
-        if recording { viewModel.postBecameUnavailable(id, onShow: activePostID) }
+        if recording {
+            // The page in front gives way to the next at once (#2048), unless
+            // its comments are open over it — the viewer is reading them —
+            // or it is the only post: then it stays, as the block, until left.
+            let givesWay = id == activePostID && presentedViewController == nil && orderedIDs.count > 1
+            viewModel.postBecameUnavailable(id, onShow: givesWay ? nil : activePostID)
+        }
         guard unavailablePostIDs.insert(id).inserted else { return }
         takeBackSessionStake(on: id, feedbackCell: snapCell(for: id), withFeedback: false)
         // On screen now; a page already dequeued but not yet shown is told
@@ -6925,6 +6950,14 @@ extension SnapFeedViewController: ZoomTransitionDestination {
             collectionView.indexPath(for: cell).map { orderedIDs[$0.item] }
         } ?? orderedIDs.first
         return isTextPage(activeID) ? .systemBackground : .black
+    }
+
+    /// "This post isn't available", for the page that just gave way (#2048).
+    private func showPostUnavailableToast() {
+        #if DEBUG
+        debugUnavailableToastsShown += 1
+        #endif
+        Feedback.info("This post isn't available", symbol: "eye.slash", from: self, id: "post-unavailable")
     }
 
     /// Whether `id`'s page is a TEXT page — false while its model is unknown

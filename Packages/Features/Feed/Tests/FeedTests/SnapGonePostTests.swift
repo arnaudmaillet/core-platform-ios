@@ -6,9 +6,9 @@ import UIKit
 @testable import Feed
 
 /// A post the server stops showing, on the feed it is shown in (#2048): the
-/// page in front turns unavailable IN PLACE and leaves once the viewer pages
-/// away; any other post replacing the one on show is a page change; a page
-/// with no model is never read as a text page.
+/// page in front gives way to the next with a toast (the block only for a
+/// post with nothing else to show); any other post replacing the one on show
+/// is a page change; a page with no model is never read as a text page.
 @MainActor
 @Suite(.serialized)
 struct SnapGonePostTests {
@@ -92,35 +92,58 @@ struct SnapGonePostTests {
 
     private func ids(_ raw: String...) -> [PostID] { raw.map { PostID($0) } }
 
-    /// A window read again without the post on show, because the server
-    /// withholds it: the page stays where it is, as the block, with its
-    /// author — no other post's caption, no clip of its own. Paged away, it is
-    /// gone; paging back finds the post that followed it.
-    @Test func thePostInFrontStaysUnavailableUntilTheViewerLeavesIt() async throws {
+    private func goneFeed(
+        _ window: [PostID]
+    ) async throws -> (Server, FeedViewModel, UnavailablePosts, SnapFeedViewController) {
         let server = Server()
         let unavailable = UnavailablePosts()
         let viewModel = FeedViewModel(
-            repository: FixedPostsFeedProvider(base: server, ids: ids("a", "b", "c")),
-            unavailablePosts: unavailable
+            repository: FixedPostsFeedProvider(base: server, ids: window), unavailablePosts: unavailable
         )
         let feed = makeFeed(viewModel)
-        #expect(await eventually { feed.orderedIDs == ids("a", "b", "c") }, "the window never loaded")
-        try settle(feed, on: 0)
-        #expect(feed.activePostID == PostID("a"))
+        try #require(await eventually { feed.orderedIDs == window }, "the window never loaded")
+        return (server, viewModel, unavailable, feed)
+    }
 
+    /// A window read again without the post on show, because the server
+    /// withholds it (the owner, 2026-11-05): the next post takes the page AS
+    /// a page change, and a toast says why. Paging back does not find it.
+    @Test func thePostInFrontGivesWayToTheNextWithAToast() async throws {
+        let (server, viewModel, unavailable, feed) = try await goneFeed(ids("a", "b", "c"))
+        try settle(feed, on: 0)
+        server.gone = [PostID("a")]
+        viewModel.refresh()
+        #expect(await eventually { feed.orderedIDs == ids("b", "c") }, "the post on show stayed")
+        #expect(feed.activePostID == PostID("b"))
+        #expect(await eventually { feed.view.layoutIfNeeded(); return feed.debugActivations.last == PostID("b") })
+        #expect(feed.debugUnavailableToastsShown == 1, "no word for the post that went")
+        #expect(unavailable.contains(PostID("a")))
+        withExtendedLifetime(feed) {}
+    }
+
+    /// The last post gone: the one before it takes the screen.
+    @Test func theLastPostGivesWayToThePrevious() async throws {
+        let (server, viewModel, _, feed) = try await goneFeed(ids("a", "b", "c"))
+        try settle(feed, on: 2)
+        server.gone = [PostID("c")]
+        viewModel.refresh()
+        #expect(await eventually { feed.orderedIDs == ids("a", "b") })
+        #expect(await eventually { feed.view.layoutIfNeeded(); return feed.activePostID == PostID("b") })
+        #expect(feed.debugUnavailableToastsShown == 1)
+        withExtendedLifetime(feed) {}
+    }
+
+    /// A post opened alone, with nothing else to show, stays as the block
+    /// (#1409): there is no next post to give way to.
+    @Test func aPostOpenedAloneStaysAsTheBlock() async throws {
+        let (server, viewModel, _, feed) = try await goneFeed(ids("a"))
+        try settle(feed, on: 0)
         server.gone = [PostID("a")]
         viewModel.refresh()
         #expect(await eventually { feed.unavailablePostIDs.contains(PostID("a")) }, "the page never turned unavailable")
-        #expect(feed.orderedIDs == ids("a", "b", "c"), "the post on show was pulled from under the viewer")
-        #expect(feed.activePostID == PostID("a"))
-        #expect(unavailable.contains(PostID("a")))
+        #expect(feed.orderedIDs == ids("a"))
         #expect(try page(feed, showing: PostID("a")).debugShowsUnavailableBlock)
-
-        try settle(feed, on: 1)
-        #expect(await eventually { feed.orderedIDs == ids("b", "c") }, "the page outlived the viewer leaving it")
-        #expect(feed.activePostID == PostID("b"), "the post on show moved with the removal")
-        try settle(feed, on: 0)
-        #expect(feed.activePostID == PostID("b"), "paging back found it")
+        #expect(feed.debugUnavailableToastsShown == 0)
         withExtendedLifetime(feed) {}
     }
 
@@ -164,11 +187,11 @@ struct SnapGonePostTests {
         feed.markPostUnavailable(PostID("b"))
         #expect(feed.orderedIDs == ids("a", "c"))
         #expect(unavailable.contains(PostID("b")), "the other surfaces were not told")
-        // The one on show stays, as the block, until it is left.
+        #expect(feed.debugUnavailableToastsShown == 0, "a page never seen got a toast")
+        // The one on show gives way to the next, with a word.
         feed.markPostUnavailable(PostID("a"))
-        #expect(feed.orderedIDs == ids("a", "c"))
-        try settle(feed, on: 1)
         #expect(await eventually { feed.orderedIDs == ids("c") })
+        #expect(feed.debugUnavailableToastsShown == 1)
         withExtendedLifetime(feed) {}
     }
 
