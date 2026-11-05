@@ -32,11 +32,16 @@ struct ViewerScopedGuardTests {
         guard let start = text.range(of: "let scoped: [any ViewerScoped] = ["),
               let end = text.range(of: "]", range: start.upperBound..<text.endIndex)
         else { return nil }
-        let body = text[start.upperBound..<end.lowerBound]
-            .split(separator: "\n")
-            .map { $0.split(separator: "//", maxSplits: 1, omittingEmptySubsequences: false).first ?? "" }
-            .joined(separator: " ")
-        return Set(body.split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "_" }).map(String.init))
+        // Line by line, comments dropped; one step per statement, so the
+        // type-checker of Xcode 26 (CI) never has to infer a chain.
+        var names: Set<String> = []
+        for line in text[start.upperBound..<end.lowerBound].split(separator: "\n") {
+            let code: String = line.components(separatedBy: "//")[0]
+            for word in code.split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "_" }) {
+                names.insert(String(word))
+            }
+        }
+        return names
     }
 
     static func propertyName(of type: String) -> String {

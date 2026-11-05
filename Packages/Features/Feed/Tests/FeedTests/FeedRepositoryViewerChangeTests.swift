@@ -27,10 +27,10 @@ struct FeedRepositoryViewerChangeTests {
         var isParked: Bool { lock.withLock { parked } }
 
         func release() {
-            let continuation = lock.withLock {
-                holding = false
-                defer { held = nil }
-                return held
+            let continuation: CheckedContinuation<Void, Never>? = lock.withLock {
+                self.holding = false
+                defer { self.held = nil }
+                return self.held
             }
             continuation?.resume()
         }
@@ -38,16 +38,19 @@ struct FeedRepositoryViewerChangeTests {
         func validAccessToken() async throws -> String? {
             // The token is the one the read STARTED with: the member's read in
             // flight is the member's, whoever the viewer is by its answer.
-            let (token, wait) = lock.withLock { (token, holding) }
-            if wait {
+            // ⚠️ No local named like a stored property, and the tuple's type
+            // spelt out: Xcode 26 (CI) gives up on `let (token, wait) =
+            // lock.withLock { (token, holding) }`.
+            let (startToken, mustWait): (String, Bool) = lock.withLock { (self.token, self.holding) }
+            if mustWait {
                 await withCheckedContinuation { continuation in
-                    lock.withLock {
-                        held = continuation
-                        parked = true
+                    self.lock.withLock {
+                        self.held = continuation
+                        self.parked = true
                     }
                 }
             }
-            return token
+            return startToken
         }
     }
 
