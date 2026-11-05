@@ -513,6 +513,11 @@ final class WalletSheetViewController: UIViewController {
         let height = (barClearance() + Self.topInset + cell.frame.maxY + margin).rounded()
         guard force || abs(height - detentHeight) > 0.5 else { return }
         detentHeight = height
+        // ⚠️ NOT BEFORE THE SHEET IS UP (#2122). Measured from `viewDidLoad`,
+        // the sheet has not asked its first detent yet: the resolver reads
+        // `detentHeight` when it does. Invalidating here resolved the detents
+        // once for nobody, ~15 ms of the opening tap's turn.
+        guard view.window != nil else { return }
         sheet.animateChanges { sheet.invalidateDetents() }
     }
 
