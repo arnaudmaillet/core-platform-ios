@@ -78,6 +78,9 @@ public struct InteractionLatencyTracker: Sendable {
         public var worstTurnMs: Double
         public var firstResponse: String
         public var firstLatencyMs: Double
+        /// What else was measuring while this was taken ("under Presentation
+        /// budget"): a costly tool distorts the number (#2131).
+        public var context: String?
     }
 
     struct Response {
@@ -220,7 +223,8 @@ public struct InteractionLatencyTracker: Sendable {
             idleMs: max(0, (commit - input.at) - busy) * 1000,
             worstTurnMs: worst * 1000,
             firstResponse: first?.name ?? best.name,
-            firstLatencyMs: (firstShown - input.at) * 1000
+            firstLatencyMs: (firstShown - input.at) * 1000,
+            context: nil
         )
     }
 
@@ -282,13 +286,27 @@ public enum InteractionLatency {
     public static let atRiskMs: Double = 60
 
     public private(set) static var isInstalled = false
+    /// Measuring now. Installed once, the hooks stay; switched off from the
+    /// debug dashboard (#2132) every one of them returns on this flag first,
+    /// the frame clock stops, and nothing is recorded.
+    public private(set) static var isActive = false
+    /// Held while the debug dashboard is up: its own taps and sheets are
+    /// never the app's (#2131).
+    public static var isPaused = false {
+        didSet { if isPaused { _ = tracker.finish() } }
+    }
     public private(set) static var records: [InteractionLatencyTracker.Record] = []
+    /// The last `HANG` lines: a turn of 100 ms or more, when, and during what.
+    public private(set) static var hangs: [(at: Date, ms: Double, during: String)] = []
     /// Called with every record, on the main actor (tests, the HUD).
     public static var onRecord: ((InteractionLatencyTracker.Record) -> Void)?
     /// A test's own objects only: the controller appearing, the control
     /// sending. Other suites push and tap in the same process, and the
     /// harness is one global clock. Nil (the app): everything counts.
     static var countsOnly: ((AnyObject) -> Bool)?
+    /// The costly tools running beside this one, read as each record is
+    /// made (the debug dashboard sets it).
+    public static var measuredUnder: (() -> String?)?
 
     private static var tracker = InteractionLatencyTracker()
     private static var turnStart: TimeInterval = 0
@@ -322,9 +340,39 @@ public enum InteractionLatency {
         install(log: true, hud: arguments.contains("-interaction-latency-hud"))
     }
 
+    /// Turns the harness on or off at run time (the debug dashboard).
+    public static func setActive(_ on: Bool, badge: Bool) {
+        if on, !isInstalled {
+            install(log: true, hud: badge)
+            return
+        }
+        showsHUD = badge
+        guard on != isActive else { return }
+        isActive = on
+        if on {
+            clock.start()
+            emit("[latency] RESUMED badge=\(badge)")
+        } else {
+            _ = tracker.finish()
+            clock.stop()
+            Self.hud?.isHidden = true
+            emit("[latency] STOPPED")
+        }
+    }
+
+    /// Shows or hides the badge while measuring.
+    public static var showsBadge: Bool {
+        get { showsHUD }
+        set {
+            showsHUD = newValue
+            if !newValue { hud?.isHidden = true }
+        }
+    }
+
     public static func install(log: Bool, hud showHUD: Bool) {
         guard !isInstalled else { return }
         isInstalled = true
+        isActive = true
         installedAt = CACurrentMediaTime()
         showsHUD = showHUD
         writesLog = log
@@ -370,7 +418,7 @@ public enum InteractionLatency {
 
     /// An input from a test or a script, on the same clock as `UIEvent`.
     public static func noteInput(kind: String, target: String, at time: TimeInterval = CACurrentMediaTime()) {
-        guard isInstalled else { return }
+        guard isInstalled, isActive, !isPaused else { return }
         if let flushed = tracker.begin(.init(kind: kind, target: target, at: time)) { record(flushed) }
         let window = tracker.window
         DispatchQueue.main.asyncAfter(deadline: .now() + window + 0.05) {
@@ -380,12 +428,12 @@ public enum InteractionLatency {
 
     /// A response the hooks cannot see (a test, a custom surface).
     public static func noteResponse(_ name: String, strength: InteractionLatencyTracker.Strength = .screen) {
-        guard isInstalled else { return }
+        guard isInstalled, isActive, !isPaused else { return }
         tracker.respond(name, strength: strength, at: CACurrentMediaTime())
     }
 
     fileprivate static func observe(_ event: UIEvent) {
-        guard event.type == .touches, let touches = event.allTouches, !touches.isEmpty else { return }
+        guard isActive, !isPaused, event.type == .touches, let touches = event.allTouches, !touches.isEmpty else { return }
         var ended: UITouch?
         var allUp = true
         for touch in touches {
@@ -439,6 +487,7 @@ public enum InteractionLatency {
     }
 
     fileprivate static func observe(_ recognizer: UIGestureRecognizer, entering state: Int) {
+        guard isActive, !isPaused else { return }
         let name = String(describing: type(of: recognizer))
         // A press recognizer that begins on touch-down (a segmented bar's,
         // a text field's) is a tap's tracking, not a long press: the finger
@@ -460,7 +509,7 @@ public enum InteractionLatency {
 
     // MARK: - Responses
 
-    fileprivate static var isArmed: Bool { tracker.input != nil }
+    fileprivate static var isArmed: Bool { isActive && tracker.input != nil }
 
     fileprivate static func respond(_ name: String, _ strength: InteractionLatencyTracker.Strength) {
         tracker.respond(name, strength: strength, at: CACurrentMediaTime())
@@ -503,12 +552,13 @@ public enum InteractionLatency {
     }
 
     private static func beginTurn() {
-        guard !inTurn else { return }
+        guard isActive, !inTurn else { return }
         inTurn = true
         turnStart = CACurrentMediaTime()
     }
 
     private static func endTurn() {
+        guard isActive else { return }
         let end = CACurrentMediaTime()
         let start = inTurn ? turnStart : end
         inTurn = false
@@ -519,6 +569,8 @@ public enum InteractionLatency {
         if ms >= budgetMs, end - installedAt > 5 {
             let during = touchDown.isEmpty ? (end - lastTouchUp < 1 ? "after-touch" : "idle") : "touch-down"
             emit("[latency] HANG turn=\(format(ms))ms during=\(during)")
+            hangs.append((Date(), ms, during))
+            if hangs.count > 50 { hangs.removeFirst(hangs.count - 50) }
         }
         let presented = phase.map {
             InteractionLatencyTracker.presented(commit: end, vsync: $0.vsync, period: $0.period)
@@ -528,6 +580,7 @@ public enum InteractionLatency {
     }
 
     fileprivate static func frame(vsync: TimeInterval, target: TimeInterval) {
+        guard isActive else { return }
         phase = (vsync, target - vsync)
         tracker.frame(vsync: vsync, target: target)
         if tracker.input != nil { expireIfDue() }
@@ -547,6 +600,7 @@ public enum InteractionLatency {
         if record.input.target.isEmpty, record.input.at == targetAt {
             record.input.target = describe(targetView)
         }
+        record.context = measuredUnder?()
         records.append(record)
         if records.count > 2000 { records.removeFirst(records.count - 2000) }
         let interactiveEnd = isInteractiveEnd(record)
@@ -561,6 +615,7 @@ public enum InteractionLatency {
         if record.firstResponse != record.response {
             line += " first=\(record.firstResponse)@\(format(record.firstLatencyMs))ms"
         }
+        if let context = record.context { line += " [\(context)]" }
         emit(line)
         publishProbe(last: record)
         // A scroll's release that only met an animation is not an action.
@@ -804,11 +859,15 @@ public enum InteractionLatency {
     }
 }
 
-/// The display link that keeps the display's phase, for as long as the
-/// harness is installed.
+/// The display link that keeps the display's phase while the harness
+/// measures; paused while it is switched off.
 @MainActor
 private final class FrameClock: NSObject {
     private var link: CADisplayLink?
+
+    func stop() {
+        link?.isPaused = true
+    }
 
     func start() {
         if link == nil {
@@ -828,7 +887,7 @@ private final class FrameClock: NSObject {
 /// over the budget (red) or at risk (amber), for 2.5 s. No animation: an
 /// animation of its own would read as the next input's response.
 @MainActor
-private final class HUDWindow: AppWindow {
+private final class HUDWindow: AppWindow, DebugOverlayWindow {
     private let label = UILabel()
     private var generation = 0
 

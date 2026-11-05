@@ -110,10 +110,27 @@ enum PresentationBudget {
     nonisolated(unsafe) private static var mainStackTop: UInt = 0
     nonisolated(unsafe) private static var mainStackBottom: UInt = 0
 
+    /// Measuring now: installed once, it goes inert when the debug dashboard
+    /// turns it off (#2132) — no turn timed, the sampler never armed.
+    private(set) static var isActive = false
+
     static func installIfRequested() {
+        guard ProcessInfo.processInfo.arguments.contains("-presentation-budget") else { return }
+        install()
+    }
+
+    /// Turns the budget on or off at run time (the debug dashboard).
+    static func setActive(_ on: Bool) {
+        if on, !isInstalled { return install() }
+        isActive = on
+        emit(on ? "[budget] RESUMED" : "[budget] STOPPED")
+    }
+
+    private static func install() {
         let arguments = ProcessInfo.processInfo.arguments
-        guard arguments.contains("-presentation-budget"), !isInstalled else { return }
+        guard !isInstalled else { return }
         isInstalled = true
+        isActive = true
         if let index = arguments.firstIndex(of: "-presentation-budget-ms"), index + 1 < arguments.count,
            let value = Double(arguments[index + 1]) {
             budgetMs = value
@@ -178,7 +195,7 @@ enum PresentationBudget {
     }
 
     private static func beginTurn() {
-        guard !inTurn else { return }
+        guard isActive, !inTurn else { return }
         inTurn = true
         turnStart = CFAbsoluteTimeGetCurrent()
         turnEvents.removeAll(keepingCapacity: true)
@@ -191,7 +208,7 @@ enum PresentationBudget {
     }
 
     private static func endTurn() {
-        guard inTurn else { return }
+        guard isActive, inTurn else { return }
         inTurn = false
         let elapsed = (CFAbsoluteTimeGetCurrent() - turnStart) * 1000
         samplerLock.lock()
@@ -320,6 +337,7 @@ enum PresentationBudget {
     /// a mode the observers are not in) opens one late rather than vanishing:
     /// the number is then a floor, and the line says so.
     private static func note(_ event: String) {
+        guard isActive else { return }
         if !inTurn {
             beginTurn()
             turnEvents.append("(late-start)")

@@ -1,4 +1,5 @@
 #if DEBUG
+import CoreNavigation
 import CoreNetworkingMocks
 #endif
 import DesignSystem
@@ -30,18 +31,18 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         ScrollIndicatorStyle.hideAppWide()
 
         #if DEBUG
-        // Shake for the mock network's switch (#790).
+        // Shake for the debug dashboard (#2131, #2132; the mock network's
+        // switch of #790 is one of its sections). `-debug-dashboard` opens it
+        // at launch, for the simulator.
         let shakeWindow = DebugShakeWindow(windowScene: windowScene)
-        let container = AppContainer.shared
-        if container.environment == .mock {
-            shakeWindow.onShake = { [weak shakeWindow] in
-                guard var top = shakeWindow?.rootViewController else { return }
-                while let presented = top.presentedViewController { top = presented }
-                // A second shake while the sheet is up does nothing.
-                guard !(top is UIAlertController) else { return }
-                NetworkConditionsMenu.present(
-                    from: top, faults: container.mockNetworkFaults, bff: container.mockBackend.bff
-                )
+        DebugDashboardWiring.install(container: AppContainer.shared)
+        shakeWindow.onShake = { [weak windowScene] in
+            guard let windowScene else { return }
+            DebugDashboardWiring.handleShake(in: windowScene)
+        }
+        if ProcessInfo.processInfo.arguments.contains("-debug-dashboard") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak windowScene] in
+                DebugDashboard.present(in: windowScene)
             }
         }
         let window: UIWindow = shakeWindow
@@ -59,7 +60,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // moving for QA that watches an animation without touching.
         var restsWhenIdle = true
         #if DEBUG
-        restsWhenIdle = !ProcessInfo.processInfo.arguments.contains("-idle-calm-off")
+        restsWhenIdle = !DebugFlags.isOn("-idle-calm-off")
         #endif
         if restsWhenIdle {
             IdleCalmMonitor.shared.install(on: window)

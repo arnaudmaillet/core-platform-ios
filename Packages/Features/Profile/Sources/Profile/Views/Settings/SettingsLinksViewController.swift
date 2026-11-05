@@ -1,3 +1,6 @@
+#if DEBUG
+import CoreNavigation
+#endif
 import DesignSystem
 import SafariServices
 import UIKit
@@ -140,7 +143,23 @@ final class SettingsLinksViewController: UIViewController {
         snapshot.appendSections([0])
         snapshot.appendItems(rows)
         dataSource.apply(snapshot, animatingDifferences: false)
+        #if DEBUG
+        // A long press on the version opens the debug dashboard (#2132): the
+        // entry that never steals a shake from a text field's undo.
+        let press = UILongPressGestureRecognizer(target: self, action: #selector(versionPressed(_:)))
+        collectionView.addGestureRecognizer(press)
+        #endif
     }
+
+    #if DEBUG
+    @objc private func versionPressed(_ press: UILongPressGestureRecognizer) {
+        guard press.state == .began,
+              let indexPath = collectionView.indexPathForItem(at: press.location(in: collectionView)),
+              dataSource.itemIdentifier(for: indexPath)?.title == "Version"
+        else { return }
+        DebugDashboard.present(in: view.window?.windowScene)
+    }
+    #endif
 
     private func open(_ url: URL) {
         if url.scheme == "http" || url.scheme == "https" {

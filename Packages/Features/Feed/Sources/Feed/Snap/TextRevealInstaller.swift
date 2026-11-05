@@ -1,4 +1,5 @@
 import CoreNavigation
+import DesignSystem
 import EmoteKit
 import FeedInterface
 import MediaCore
@@ -49,7 +50,7 @@ enum TextRevealInstaller {
     /// that no argument settles, so the prototype exposes both.
     static var matchesAnchor: Bool {
         #if DEBUG
-        !ProcessInfo.processInfo.arguments.contains("-text-reveal-plain")
+        !DebugFlags.isOn("-text-reveal-plain")
         #else
         true
         #endif

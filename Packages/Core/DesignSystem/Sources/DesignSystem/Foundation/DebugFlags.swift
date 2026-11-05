@@ -1,0 +1,84 @@
+import Foundation
+
+/// The app's DEBUG feature switches (#2132): what used to be a launch
+/// argument alone — `-voice-messages`, `-viewport-share`, … — read in one
+/// place, so the debug dashboard can turn each on for good.
+///
+/// - **The launch argument wins** when it is passed: a QA run, a script and
+///   a UI test behave exactly as before.
+/// - **DEBUG:** without the argument, the dashboard's persisted switch.
+/// - **Release:** the argument alone, as before — nothing persisted is read.
+public enum DebugFlags {
+    public struct Flag: Sendable, Identifiable, Equatable {
+        /// The launch argument, `-voice-messages`.
+        public let argument: String
+        public let title: String
+        /// What turning it on does, in a line.
+        public let detail: String
+        /// Read once at launch (a `static let`, the app's environment): the
+        /// switch takes effect on the next launch.
+        public let appliesAtLaunch: Bool
+        public var id: String { argument }
+    }
+
+    /// Every switchable flag. A flag read anywhere else than through
+    /// `isOn(_:)` cannot be switched, so a new one is added here and read
+    /// through it.
+    public static let all: [Flag] = [
+        Flag(argument: "-voice-messages", title: "Voice messages composer",
+             detail: "The hold-to-record composer in threads (#2105)", appliesAtLaunch: false),
+        Flag(argument: "-viewport-share", title: "Viewport share trace",
+             detail: "Logs the half-the-display playback measure (#1914)", appliesAtLaunch: false),
+        Flag(argument: "-still-video-backdrop", title: "Still video backdrops",
+             detail: "Video tiles' frosted backdrop stays a still", appliesAtLaunch: false),
+        Flag(argument: "-text-reveal-plain", title: "Plain text-post push",
+             detail: "Text posts open with the native push, no window", appliesAtLaunch: false),
+        Flag(argument: "-toast-overlay", title: "Toasts in an overlay",
+             detail: "Toasts in their own window, not the navigation bar", appliesAtLaunch: true),
+        Flag(argument: "-idle-calm-off", title: "Idle calm off",
+             detail: "Endless decoration never rests when untouched (#580)", appliesAtLaunch: true),
+        Flag(argument: "-video-cache-remote", title: "Remote mock clips",
+             detail: "The mock serves its clips from the network", appliesAtLaunch: true),
+        Flag(argument: "-sound-cache-remote", title: "Remote mock sounds",
+             detail: "The mock serves its songs from the network", appliesAtLaunch: true),
+        Flag(argument: "-console-capture", title: "Console capture from launch",
+             detail: "Logs keeps print, stdout and stderr from the first line", appliesAtLaunch: true),
+        Flag(argument: "-use-local-fleet", title: "Local fleet",
+             detail: "Talks to a local backend instead of the mock", appliesAtLaunch: true),
+    ]
+
+    /// Whether `argument` is on: passed at launch, or (DEBUG) switched on.
+    public static func isOn(_ argument: String, arguments: [String] = ProcessInfo.processInfo.arguments,
+                            defaults: UserDefaults = .standard) -> Bool {
+        if arguments.contains(argument) { return true }
+        #if DEBUG
+        return defaults.bool(forKey: key(argument))
+        #else
+        return false
+        #endif
+    }
+
+    #if DEBUG
+    /// Whether the launch argument itself turns it on: the switch cannot
+    /// turn it off.
+    public static func isPassedAtLaunch(_ argument: String,
+                                        arguments: [String] = ProcessInfo.processInfo.arguments) -> Bool {
+        arguments.contains(argument)
+    }
+
+    public static func set(_ argument: String, on: Bool, defaults: UserDefaults = .standard) {
+        if on {
+            defaults.set(true, forKey: key(argument))
+        } else {
+            defaults.removeObject(forKey: key(argument))
+        }
+    }
+
+    /// Every switch back to off.
+    public static func reset(defaults: UserDefaults = .standard) {
+        all.forEach { defaults.removeObject(forKey: key($0.argument)) }
+    }
+    #endif
+
+    static func key(_ argument: String) -> String { "debugFlag\(argument)" }
+}

@@ -79,7 +79,7 @@ import UIKit
 @MainActor
 final class NavigationBarToasts {
     /// Whether toasts go to the bar at all (off: the overlay everywhere).
-    static var isEnabled = !ProcessInfo.processInfo.arguments.contains("-toast-overlay")
+    static var isEnabled = !DebugFlags.isOn("-toast-overlay")
     private static let traces = ProcessInfo.processInfo.arguments.contains("-toast-navbar-trace")
 
     /// One per navigation controller showing toasts.

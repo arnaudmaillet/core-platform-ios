@@ -96,7 +96,7 @@ public final class LiveMediaBackdrop: VideoFrameCompanion {
     /// Off for the whole process under `-still-video-backdrop`: the A/B arm
     /// for measuring what the live band costs, in any build.
     public static let isEnabledByProcess: Bool =
-        !ProcessInfo.processInfo.arguments.contains("-still-video-backdrop")
+        !DebugFlags.isOn("-still-video-backdrop")
 
     private weak var target: UIImageView?
     /// Whether the band may follow the surface's frames — see the protocol.

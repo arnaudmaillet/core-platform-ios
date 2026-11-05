@@ -71,6 +71,7 @@ final class LatencyBenchViewController: UIViewController {
                 }
             },
         ])
+        if title == "Bench", let cycles = Self.autoCycles { runAuto(cycles) }
         stack.axis = .vertical
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -79,6 +80,61 @@ final class LatencyBenchViewController: UIViewController {
             stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 60),
         ])
+    }
+
+    // MARK: - The overhead run (#2131)
+
+    /// `-latency-bench-auto N`: N push/pop cycles, each push timed from the
+    /// call through its layout and commit — the synchronous work every hook
+    /// on the way adds to. The debug dashboard's cost is read by running it
+    /// with and without its tools: `-interaction-latency` (on),
+    /// `-latency-bench-auto-off` (installed, then switched off as the
+    /// dashboard does), `-debug-dashboard` (opened, then closed first),
+    /// `-latency-bench-tools frame-rate,touches` (those tools on, by id) and
+    /// `-latency-bench-tools-off` (on, then off again: back to the baseline).
+    private static var autoCycles: Int? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-latency-bench-auto"), index + 1 < arguments.count else { return nil }
+        return Int(arguments[index + 1])
+    }
+
+    private static var benchTools: [String] {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-latency-bench-tools"), index + 1 < arguments.count else { return [] }
+        return arguments[index + 1].split(separator: ",").map(String.init)
+    }
+
+    private func runAuto(_ cycles: Int) {
+        let arguments = ProcessInfo.processInfo.arguments
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            if arguments.contains("-latency-bench-auto-off") { InteractionLatency.setActive(false, badge: false) }
+            DebugDashboard.close()
+            let tools = Self.benchTools.compactMap(DebugTools.tool)
+            tools.forEach { $0.set(true) }
+            if arguments.contains("-latency-bench-tools-off") { tools.forEach { $0.set(false) } }
+            try? await Task.sleep(for: .seconds(1))
+            var pushes: [Double] = []
+            for _ in 0..<cycles {
+                guard let self, let navigation = self.navigationController else { return }
+                let started = CACurrentMediaTime()
+                navigation.pushViewController(LatencyBenchViewController(title: "Pushed"), animated: true)
+                navigation.view.layoutIfNeeded()
+                CATransaction.flush()
+                pushes.append((CACurrentMediaTime() - started) * 1000)
+                try? await Task.sleep(for: .milliseconds(700))
+                navigation.popViewController(animated: true)
+                try? await Task.sleep(for: .milliseconds(700))
+            }
+            let sorted = pushes.dropFirst().sorted()
+            func at(_ q: Double) -> String { String(format: "%.2f", sorted[min(sorted.count - 1, Int(Double(sorted.count) * q))]) }
+            let latency: String = InteractionLatency.isActive ? "on" : InteractionLatency.isInstalled ? "off" : "never"
+            let dashboard: String = arguments.contains("-debug-dashboard") ? "opened-closed" : "never"
+            let toolIDs: String = tools.isEmpty ? "none" : tools.map(\.id).joined(separator: ",")
+            let toolState: String = tools.isEmpty ? "" : arguments.contains("-latency-bench-tools-off") ? "(on-off)" : "(on)"
+            print("[bench-auto] latency=\(latency) dashboard=\(dashboard) tools=\(toolIDs)\(toolState)"
+                  + " pushes=\(sorted.count) p50=\(at(0.5))ms p90=\(at(0.9))ms")
+        }
     }
 
     private func button(_ title: String, _ action: @escaping () -> Void) -> UIButton {

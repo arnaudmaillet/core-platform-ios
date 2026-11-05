@@ -29,6 +29,7 @@ struct StackCloseGuardTests {
         "ContentFittingNavigationController.swift": "holds UIKit's pop while a sign-in call runs",
         "PresentationClose.swift": "the guarded presentation close",
         "LatencyBench.swift": "the DEBUG latency bench (#2116): UIKit's own pop and dismiss, unarbitrated on purpose",
+        "DebugDashboard.swift": "the DEBUG dashboard (#2131) closes its own sheet in its own window, off the app's stacks",
         // Not UIKit's `dismiss(animated:)`: a toast's own, on a view.
         "ToastView.swift": "the toast's own dismiss",
         "NavigationBarToasts.swift": "the toast's own dismiss",

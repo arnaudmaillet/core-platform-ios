@@ -50,10 +50,18 @@ final class AppContainer {
     /// The transport for Connect RPCs: the in-process mock, or the real
     /// URLSession client pointed at the Envoy gateway.
     private lazy var rpcHTTPClient: any HTTPClientInterface = {
+        let transport: any HTTPClientInterface
         switch environment {
-        case .mock: mockBackend.bff
-        case .localFleet: URLSessionHTTPClient()
+        case .mock: transport = mockBackend.bff
+        case .localFleet: transport = URLSessionHTTPClient()
         }
+        #if DEBUG
+        // The debug dashboard's network log (#2133): one flag read per call
+        // while it is off.
+        return NetworkLogClient(wrapping: transport)
+        #else
+        return transport
+        #endif
     }()
 
     /// The whole in-process backend (dataset + stores + fully registered
@@ -628,7 +636,7 @@ final class AppContainer {
     /// feed's preload (#895) run in the simulator without a fleet. Each post
     /// gets its own `qa` query item, so two posts never share a cache key.
     /// Needs network; pair it with `-cache-audit` to read the cache's log.
-    static let servesRemoteClips = ProcessInfo.processInfo.arguments.contains("-video-cache-remote")
+    static let servesRemoteClips = DebugFlags.isOn("-video-cache-remote")
 
     /// Verified with a ranged GET (206, `video/mp4`), as `DebugMediaLibrary`'s
     /// real clips are.
