@@ -24,6 +24,8 @@ struct ImageCachesOutsidePipelineGuardTests {
         "NewPostViewController.swift:clipSheets": "the composer's sampled frames of the picked clips (budgeted in place)",
         "ConversationViewModel.swift:localPreviews": "the pictures the viewer just sent, drawn until the upload lands",
         "CountryShopViewController.swift:flags": "emoji glyphs drawn for the shop's rows (a UI asset), freed with the screen",
+        // Bounded UI assets, drawn once for the app's life.
+        "TabGlyph.swift:faces": "the tab bar's glyph faces (#2118): three glyphs × selected × badged × the bake's style, contrast and scale — a dozen small images",
         "MapSubFilterBarView.swift:headerImageCache": "circle crops drawn from the pipeline's avatars for the pill menus",
         "DebugMediaLibrary.swift:videoPosters": "DEBUG only: the fake photo library's posters",
         // Locals inside one function.

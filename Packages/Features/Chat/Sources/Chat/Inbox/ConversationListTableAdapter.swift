@@ -97,8 +97,15 @@ final class ConversationListTableAdapter: NSObject, UITableViewDataSource {
     func apply(_ sections: InboxListSections, animated: Bool) {
         let new = [sections.new.map(\.id), sections.earlier.map(\.id)]
         guard let tableView, animated, !(rows.allSatisfy(\.isEmpty)) else {
+            // The same rows in the same places: nothing to reload. The inbox
+            // reloads its catalog on every appearance, and a full
+            // `reloadData` of an unchanged list re-dequeued every visible row
+            // in the turn after a tab switch or a pop — a ~70 ms hang right
+            // as the screen arrived (#2116). Content changes reach the live
+            // cells through the controller's `reconfigureVisible`.
+            let unchanged = new == rows && !new.allSatisfy(\.isEmpty)
             rows = new
-            tableView?.reloadData()
+            if !unchanged { tableView?.reloadData() }
             return
         }
 

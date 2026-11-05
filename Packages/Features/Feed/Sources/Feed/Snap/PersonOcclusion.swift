@@ -97,7 +97,12 @@ enum PersonOcclusionGeometry {
 /// Finds people in a frame, off the main thread, one frame at a time.
 final class PersonSegmenter: @unchecked Sendable {
     private let queue = DispatchQueue(label: "cn.wynn.person-segmentation", qos: .userInitiated)
-    private let context = CIContext(options: [.cacheIntermediates: false])
+    /// ONE context for every page, made on the first mask, off the main
+    /// thread (#2116): a context per segmenter was built in every feed
+    /// cell's init — ~20 ms on the first page a pin opened, a few ms on each
+    /// page after, in the turn that brings the page on. `CIContext` is
+    /// thread-safe.
+    private static let context = CIContext(options: [.cacheIntermediates: false])
     private let lock = NSLock()
     private var busy = false
 
@@ -114,7 +119,7 @@ final class PersonSegmenter: @unchecked Sendable {
         nonisolated(unsafe) let frame = buffer
         return await withCheckedContinuation { continuation in
             queue.async { [self] in
-                let image = Self.invertedMask(frame, context: context)
+                let image = Self.invertedMask(frame, context: Self.context)
                 lock.withLock { busy = false }
                 continuation.resume(returning: image)
             }
@@ -162,7 +167,8 @@ final class PersonOcclusionDriver {
 
     /// Asked on every beat; `.segment` when unset.
     var decide: (() -> Decision)?
-    private let segmenter = PersonSegmenter()
+    /// Made on the first beat that segments, not with the cell (#2116).
+    private lazy var segmenter = PersonSegmenter()
     private var timer: Timer?
     private weak var surface: VideoRenderView?
     private weak var band: UIView?

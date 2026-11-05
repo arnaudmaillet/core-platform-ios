@@ -50,7 +50,8 @@ public extension UITab {
         setValue(fill, forKey: "selectedImage")
     }
 
-    /// The selected face, nil when unset or unsupported. Tests.
+    /// The selected face, nil when unset or unsupported: tests, and the
+    /// shell skipping a re-send of the faces a tab already wears (#2116).
     @MainActor
     var selectedFace: UIImage? {
         guard responds(to: NSSelectorFromString("selectedImage")) else { return nil }

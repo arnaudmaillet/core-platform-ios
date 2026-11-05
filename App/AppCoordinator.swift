@@ -96,9 +96,23 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // `-presentation-budget`: times the run-loop turn that brings each
         // screen on and names the frames it spent it in (charter P2).
         PresentationBudget.installIfRequested()
+        // `-interaction-latency`: every input's time to its first frame on
+        // screen, against the 100 ms rule (#2116, charter P16).
+        InteractionLatency.installIfRequested()
         #endif
         container.memberGate.presenter = self
+        // The link detector's first match, off the main thread, before the
+        // first profile renders a bio (#2116).
+        TextEntityScanner.prewarmLinks()
+        // And what the device unlocks with, for App Lock's settings (#2116).
+        DeviceAuthenticator.prewarm()
         #if DEBUG
+        // `-latency-bench`: UIKit's own floor per kind of response (#2116).
+        if LatencyBench.isRequested {
+            window.rootViewController = LatencyBench.makeRoot()
+            window.makeKeyAndVisible()
+            return
+        }
         // `-lens-lab`: the selector lens bench, alone in the window (#1748).
         if LensLab.isRequested {
             window.rootViewController = LensLab.makeRoot()

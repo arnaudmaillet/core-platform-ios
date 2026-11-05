@@ -3649,8 +3649,11 @@ final class SnapFeedViewController: UIViewController {
             commentsSheet = nil
             collectionView.isScrollEnabled = true
             (parent as? ForYouSectorViewController)?.setPagingEnabled(true)
-            // Reopening is as cheap as opening.
-            rewarmActivePageComments()
+            // Reopening is as cheap as opening — warmed once the screen is
+            // still, never in the close's own turn: ~100 ms of panel build
+            // there held the first frames of whatever the finger did next
+            // (#2116).
+            scheduleIdleCommentsWarm()
         }
         commentsSheet = session
         refreshWalletBadge()
@@ -4805,8 +4808,9 @@ final class SnapFeedViewController: UIViewController {
         // REOPENING must be as cheap as opening. The warm is consumed by the
         // engagement, and no further activation is coming for a page that
         // never moved — so without this, engage → close → engage pays the
-        // full ~115ms on the second tap.
-        rewarmActivePageComments()
+        // full ~115ms on the second tap. On the idle clock (#2116): the build
+        // in the teardown's own turn was a ~100 ms hang after every close.
+        scheduleIdleCommentsWarm()
         // The bar's pixels were never touched (keep-and-stack), but its
         // ITEMS are engagement context — settle them for the paths that
         // never ran the animated mirror (orphaned teardown, instant

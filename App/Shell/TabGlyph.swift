@@ -23,8 +23,38 @@ extension TabGlyph {
     /// ⚠️ NOT the badge symbol with its badge clear: its glyph is NOTCHED
     /// around the badge, and the paper plane showed its tip cut off with no
     /// badge in sight (the owner, on a device).
+    ///
+    /// Drawn once per face (#2116): the bar asks again on every move between
+    /// Shots' dark bar and the app's own, and redrawing six identical images
+    /// sat in that tab switch's turn. The unbadged template is the same
+    /// whatever the traits; the badged one is keyed on what its bake reads.
     @MainActor
     func image(selected: Bool, badged: Bool, traits: UITraitCollection = .current) -> UIImage? {
+        let key = FaceKey(
+            glyph: self, selected: selected, badged: badged,
+            style: badged ? traits.userInterfaceStyle.rawValue : 0,
+            contrast: badged ? traits.accessibilityContrast.rawValue : 0,
+            scale: traits.displayScale
+        )
+        if let drawn = Self.faces[key] { return drawn }
+        let drawn = draw(selected: selected, badged: badged, traits: traits)
+        Self.faces[key] = drawn
+        return drawn
+    }
+
+    private struct FaceKey: Hashable {
+        let glyph: TabGlyph
+        let selected: Bool
+        let badged: Bool
+        let style: Int
+        let contrast: Int
+        let scale: CGFloat
+    }
+
+    @MainActor private static var faces: [FaceKey: UIImage] = [:]
+
+    @MainActor
+    private func draw(selected: Bool, badged: Bool, traits: UITraitCollection) -> UIImage? {
         let badge = symbol(selected: selected, badged: true)
         if badged {
             let config = TabGlyph.symbolConfiguration

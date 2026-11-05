@@ -115,6 +115,15 @@ dressed up as one.
 - **P15 — The first layout never runs inside someone else's animation block.**
   Already enforced (PR #189, `-first-layout-trace`): a screen "unfolding from
   the top-left" is this clause failing.
+- **P16 — Every action answers on screen within 100 ms (#2116, the owner's
+  rule 2026-11-05).** From the input's own timestamp to the first presented
+  frame showing the response: a push's first frame (on its loading state), a
+  sheet starting to rise, a toggle's new state, a loading state for work of
+  unknown length. The animation starts in that time; it need not finish.
+  Measured by `-interaction-latency` (input → frame, the turns and the
+  waiting in between, `HANG` lines for any turn of 100 ms or more) with
+  `-interaction-latency-hud` on a device; UIKit's own floor by
+  `-latency-bench`. The audit and its offenders: `dev/RESPONSIVENESS_AUDIT.md`.
 
 ---
 
