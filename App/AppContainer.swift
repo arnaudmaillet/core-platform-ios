@@ -226,7 +226,10 @@ final class AppContainer {
             // What notification lookups answered, missing posts included (#978).
             notificationsRepository,
             // A teen's time not yet reported is that account's (#417).
-            supervisedScreenTime
+            supervisedScreenTime,
+            // The posts and authors read for the viewer (#2047): a member's
+            // private authors were served to the guest after a sign-out.
+            feedRepository
         ]
         viewerTransitionsTask = Task {
             for await state in await viewer.transitions() {

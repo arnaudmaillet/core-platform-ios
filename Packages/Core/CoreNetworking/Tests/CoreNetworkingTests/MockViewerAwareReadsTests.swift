@@ -105,4 +105,35 @@ struct MockViewerAwareReadsTests {
         #expect(try await member.getPost(request: request, headers: [:]).result.get().status == .deleted)
         #expect(await read(postID, with: guest) == .notFound)
     }
+
+    /// Every page of the discovery pool, as `token` reads it.
+    private func discovery(as token: String) async throws -> [(postID: String, authorID: String)] {
+        let timeline = Timeline_V1_TimelineServiceClient(client: ConnectClientFactory.makeAuthenticated(
+            host: "https://mock.bff.local", tokenProvider: Token(token: token), httpClient: backend.bff
+        ))
+        var items: [(postID: String, authorID: String)] = []
+        var pageToken = ""
+        repeat {
+            var request = Timeline_V1_GetDiscoveryFeedRequest()
+            request.ranking = .recent
+            request.limit = 50
+            request.pageToken = pageToken
+            let response = try await timeline.getDiscoveryFeed(request: request, headers: [:]).result.get()
+            items += response.items.map { ($0.postID, $0.authorID) }
+            pageToken = response.nextPageToken
+        } while !pageToken.isEmpty
+        return items
+    }
+
+    /// The pool a guest reads holds no post a guest may not open (#2047):
+    /// prof-1 is private, so its posts are a member's alone; a public
+    /// author's reach the guest too.
+    @Test func aGuestsDiscoveryHoldsNoPrivateAuthorsPost() async throws {
+        let guestPool = try await discovery(as: "gt-guest")
+        let memberPool = try await discovery(as: "member-token")
+        #expect(memberPool.contains { $0.authorID == "prof-1" })
+        #expect(!guestPool.contains { $0.authorID == "prof-1" })
+        #expect(guestPool.contains { $0.authorID == "prof-4" })
+        #expect(guestPool.allSatisfy { backend.socialServices.mayReadPost($0.postID, readers: [], privacy: true) })
+    }
 }
