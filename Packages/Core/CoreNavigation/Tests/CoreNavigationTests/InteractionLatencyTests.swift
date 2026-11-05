@@ -161,6 +161,29 @@ struct InteractionLatencyTrackerTests {
         #expect(!InteractionLatency.isInteractiveEnd(record(kind: "release", strength: .animation, commit: 537, idle: 485)))
     }
 
+    /// A tap in a thread, then a swipe back: the inbox appears while the
+    /// swipe's finger is down, and is the swipe's, not the tap's (the owner's
+    /// device run of 2026-11-05 read 558–700 ms "closes" from it).
+    @Test func whatHappensOnceTheNextTouchIsDownIsNotThePreviousInputs() throws {
+        var tracker = Tracker()
+        _ = tracker.begin(.init(kind: "tap", target: "thread", at: 0))
+        tracker.respond("tap-recognizer@Thread", strength: .action, at: 0.06)
+        tracker.stopResponses()
+        tracker.turnEnded(start: 0.05, end: 0.07, presentedAt: 0.08)
+        tracker.respond("appear:Inbox", strength: .screen, at: 0.5)
+        tracker.turnEnded(start: 0.49, end: 0.52, presentedAt: 0.53)
+        let finished = tracker.finish()
+        let record = try #require(finished, "what it had still commits")
+        #expect(record.response == "tap-recognizer@Thread")
+        #expect(abs(record.latencyMs - 80) < 0.01)
+
+        _ = tracker.begin(.init(kind: "tap", target: "row", at: 1))
+        tracker.respond("appear:Thread", strength: .screen, at: 1.05)
+        tracker.turnEnded(start: 1.04, end: 1.06, presentedAt: 1.07)
+        let next = tracker.finish()
+        #expect(next?.response == "appear:Thread", "the next input takes responses again")
+    }
+
     /// A pulse or a looping avatar runs whatever the finger does.
     @Test func aRepeatingAnimationIsNobodysResponse() {
         let pulse = CABasicAnimation(keyPath: "opacity")

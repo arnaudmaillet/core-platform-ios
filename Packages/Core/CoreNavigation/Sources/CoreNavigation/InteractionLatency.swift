@@ -94,6 +94,7 @@ public struct InteractionLatencyTracker: Sendable {
     private var best: Response?
     private var first: Response?
     private var ignoresAnimations = false
+    private var closed = false
     private var turns: [(start: TimeInterval, end: TimeInterval)] = []
 
     /// 1.2 s: past it a response is ten times over the budget anyway, and a
@@ -110,7 +111,7 @@ public struct InteractionLatencyTracker: Sendable {
     }
 
     public mutating func respond(_ name: String, strength: Strength, at time: TimeInterval) {
-        guard let input, time >= input.at, !(ignoresAnimations && strength == .animation) else { return }
+        guard let input, time >= input.at, !closed, !(ignoresAnimations && strength == .animation) else { return }
         if first == nil { first = Response(name: name, strength: strength, at: time) }
         if let best, best.strength >= strength { return }
         best = Response(name: name, strength: strength, at: time)
@@ -153,6 +154,13 @@ public struct InteractionLatencyTracker: Sendable {
         if first?.strength == .animation { first = best }
     }
 
+    /// The next touch went down: what happens from now on is that touch's
+    /// (a swipe back's screen appears while the finger is still down). The
+    /// responses already noted still commit and reach their frame.
+    public mutating func stopResponses() {
+        closed = true
+    }
+
     /// Any response yet: an animation can no longer change the record.
     public var hasResponse: Bool { first != nil }
 
@@ -192,6 +200,7 @@ public struct InteractionLatencyTracker: Sendable {
             best = nil
             first = nil
             ignoresAnimations = false
+            closed = false
             turns.removeAll(keepingCapacity: true)
         }
         guard let input, let best, let commit = best.commitAt else { return nil }
@@ -389,6 +398,7 @@ public enum InteractionLatency {
                 if touchDown.isEmpty {
                     touchDownAt = touch.timestamp
                     pressedDuringTouch = false
+                    tracker.stopResponses()
                 }
                 touchDown[id] = touch.location(in: nil)
                 allUp = false
