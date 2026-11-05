@@ -35,6 +35,7 @@ struct StackScreenGuardTests {
         "SideDrawerContainerViewController": "the drawer's container",
         "LensLabPage": "a page of the DEBUG lens bench",
         "VoiceLabViewController": "the DEBUG voice bench's root, alone in the window (#2101)",
+        "LatencyBenchViewController": "the DEBUG latency bench (#2116): a bare UIKit screen on purpose, it measures UIKit's own floor",
         // A sheet's or a modal's root: left by its own close or swipe-down.
         "WalletSheetViewController": "a sheet",
         "ToastMessageSheet": "a sheet",

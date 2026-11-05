@@ -28,6 +28,7 @@ struct StackCloseGuardTests {
         // call — it only refuses UIKit's pop while a call runs.
         "ContentFittingNavigationController.swift": "holds UIKit's pop while a sign-in call runs",
         "PresentationClose.swift": "the guarded presentation close",
+        "LatencyBench.swift": "the DEBUG latency bench (#2116): UIKit's own pop and dismiss, unarbitrated on purpose",
         // Not UIKit's `dismiss(animated:)`: a toast's own, on a view.
         "ToastView.swift": "the toast's own dismiss",
         "NavigationBarToasts.swift": "the toast's own dismiss",

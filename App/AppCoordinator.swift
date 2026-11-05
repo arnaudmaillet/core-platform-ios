@@ -102,6 +102,12 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         #endif
         container.memberGate.presenter = self
         #if DEBUG
+        // `-latency-bench`: UIKit's own floor per kind of response (#2116).
+        if LatencyBench.isRequested {
+            window.rootViewController = LatencyBench.makeRoot()
+            window.makeKeyAndVisible()
+            return
+        }
         // `-lens-lab`: the selector lens bench, alone in the window (#1748).
         if LensLab.isRequested {
             window.rootViewController = LensLab.makeRoot()
