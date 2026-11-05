@@ -162,7 +162,10 @@ struct InteractionLatencyHarnessTests {
     @Test func aPushDeferredByAnAwaitIsMeasuredFromTheInput() async throws {
         install()
         let (window, nav) = stack()
-        defer { window.isHidden = true }
+        defer {
+            window.isHidden = true
+            InteractionLatency.responseWindow = 1.2
+        }
         let count = InteractionLatency.records.count
         InteractionLatency.noteInput(kind: "tap", target: "test-await")
         Task { @MainActor in
@@ -184,7 +187,10 @@ struct InteractionLatencyHarnessTests {
     @Test func aPushAfterBusyMainWorkCountsTheWork() async throws {
         install()
         let (window, nav) = stack()
-        defer { window.isHidden = true }
+        defer {
+            window.isHidden = true
+            InteractionLatency.responseWindow = 1.2
+        }
         let count = InteractionLatency.records.count
         InteractionLatency.noteInput(kind: "tap", target: "test-busy")
         DispatchQueue.main.async {
@@ -204,7 +210,10 @@ struct InteractionLatencyHarnessTests {
     @Test func aControlActionAnswersAtItsOwnTurn() async throws {
         install()
         let (window, nav) = stack()
-        defer { window.isHidden = true }
+        defer {
+            window.isHidden = true
+            InteractionLatency.responseWindow = 1.2
+        }
         let button = UIButton(type: .system)
         button.addAction(UIAction { _ in }, for: .touchUpInside)
         nav.topViewController?.view.addSubview(button)
