@@ -173,6 +173,15 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// cannot.
     var zoomLandingAcceptsHero: Bool {
         guard let page else { return true }
+        // ⚠️ A TILE THAT IS GONE IS NOT A TEXT ROW (#2048, the owner
+        // 2026-11-05). Its post left the grid — the server stopped showing it
+        // — so there is no row to refuse a picture, and refusing handed the
+        // close to UIKit's plain pop: the feed cut to the grid with no flight
+        // at all. The card flies the page being left to the middle of the
+        // screen and dissolves on the way (`ZoomAnimator`'s off-screen
+        // landing, `centeredFallback`), as UIKit's own zoom does when its
+        // source view is gone.
+        if page.post(for: anchorID) == nil { return true }
         let accepts = page.heroAppearance(for: anchorID) != nil
         #if DEBUG
         // Said out loud because a refusal here hands the drag to the OTHER

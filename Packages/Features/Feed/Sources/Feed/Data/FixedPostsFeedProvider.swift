@@ -48,7 +48,7 @@ enum SnapFeedKindScope: Equatable, Sendable {
     func admits(_ entry: FeedEntry) -> Bool { Self(entry) == self }
 }
 
-actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
+actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding, GonePostsReporting {
     private let base: any FeedProviding
     private var ids: [PostID]
     /// The source's next posts after a given one — see `SnapFeedContinuation`.
@@ -75,6 +75,11 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
     /// that was another opening's. Nil: no scope (not kept, or the opening
     /// post did not hydrate — then nothing is filtered rather than everything).
     private(set) var scope: SnapFeedKindScope?
+    /// The opening post's kind as the opener knew it (the tile it flew from),
+    /// for a window whose opening post did not come back (#2048).
+    private var openingKind: SnapFeedKindScope?
+    /// Posts the server answered GONE since the feed last asked (#2048).
+    private var gone: Set<PostID> = []
     /// A scoped page the source cut short is filled from the continuation up
     /// to this many posts, in at most `maxFillRounds` asks — text posts are
     /// rarer, and a page with one post on it reads as the end.
@@ -83,8 +88,10 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
 
     init(
         base: any FeedProviding, ids: [PostID], continuation: SnapFeedContinuation? = nil,
-        isCompleteSet: Bool = false, keepsToOpeningKind: Bool = false
+        isCompleteSet: Bool = false, keepsToOpeningKind: Bool = false,
+        openingKind: SnapFeedKindScope? = nil
     ) {
+        self.openingKind = openingKind
         self.base = base
         self.ids = ids
         self.continuation = continuation
@@ -102,6 +109,7 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
         lastServed = nil
         // Read again off the new opening post (`loadFirstPage`).
         scope = nil
+        openingKind = nil
         // A re-aimed window is somebody's window, not a whole set.
         isCompleteSet = false
     }
@@ -130,7 +138,15 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
         var ended = false
         if keepsToOpeningKind {
             // The opening post is the window's first, and always its own kind.
-            scope = ids.first.flatMap { first in entries.first { $0.post.id == first } }.map(SnapFeedKindScope.init)
+            //
+            // ⚠️ AS IT WAS OPENED, EVEN GONE (#2048). The kind used to be read
+            // off the window's entry alone, so an opening post the server no
+            // longer shows left no scope: text posts entered a media feed,
+            // and the text page that took the opening post's place rested in
+            // its comments panel over the departed video. The device's copy
+            // (the tile's) or the kind the opener passed says it instead.
+            let opening = ids.first.flatMap { first in entries.first { $0.post.id == first } ?? base.peekPost(first) }
+            scope = opening.map(SnapFeedKindScope.init) ?? openingKind
             entries = kept(entries)
             // A short window is filled from what follows, so the feed does
             // not read "the end" while the source has more of this kind.
@@ -227,7 +243,7 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
         for (id, read) in await hydrate(ids) {
             switch read {
             case .loaded(let entry): entries.append(entry)
-            case .gone: continue
+            case .gone: gone.insert(id)
             case .failed(let error):
                 if let held = base.peekPost(id) {
                     entries.append(held)
@@ -263,6 +279,11 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
 
     func loadPost(_ id: PostID) async throws -> FeedEntry {
         try await base.loadPost(id)
+    }
+
+    func takeGoneIDs() async -> Set<PostID> {
+        defer { gone.removeAll() }
+        return gone
     }
 
     func revalidatePost(_ id: PostID) async throws -> FeedEntry {

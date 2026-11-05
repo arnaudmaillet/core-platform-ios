@@ -62,6 +62,20 @@ struct SnapFeedKindScopeTests {
         #expect(served(page) == ["m1", "m2", "m3"])
     }
 
+    /// The opening post gone from the server (#2048): the window keeps the
+    /// kind it was opened as — no text post enters a media feed — and the
+    /// feed hears which post the server withholds.
+    @Test func aGoneOpeningPostKeepsTheKindItWasOpenedAs() async throws {
+        let window = FixedPostsFeedProvider(
+            base: KindHydrating(), ids: ids("x1", "t1", "m1", "t2", "m2"),
+            isCompleteSet: true, keepsToOpeningKind: true, openingKind: .media
+        )
+        let page = try await window.loadFirstPage()
+        #expect(served(page) == ["m1", "m2"])
+        #expect(await window.takeGoneIDs() == [PostID("x1")])
+        #expect(await window.takeGoneIDs().isEmpty, "taken twice")
+    }
+
     /// Opened on a text post: text only.
     @Test func aTextOpeningKeepsTextOnly() async throws {
         let page = try await provider(ids("t1", "m1", "t2", "m2"), complete: true).loadFirstPage()

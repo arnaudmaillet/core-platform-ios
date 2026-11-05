@@ -681,6 +681,16 @@ final class SnapFeedViewController: UIViewController {
         observeAppLifecycle()
 
         viewModel.onStateChange = { [weak self] state in self?.render(state) }
+        // A post learnt unavailable on ANOTHER surface leaves this feed's
+        // pages too (#2048) — at once, but for the page on show.
+        unavailableObservation.token = NotificationCenter.default.addObserver(
+            forName: UnavailablePosts.didChange, object: viewModel.unavailablePosts, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.viewModel.dropUnavailable(except: self.activePostID)
+            }
+        }
         // The like pill's count is the post's live one (#896): a like placed
         // on a card, in the comments bar or on this rail, a realtime tick —
         // whoever moved it, the page showing the post re-draws it.
@@ -2986,6 +2996,7 @@ final class SnapFeedViewController: UIViewController {
     // MARK: - Rendering
 
     private func render(_ state: FeedViewModel.RenderState) {
+        lastRenderState = state
         let previousModels = modelsByID
         // The post on show, to keep on show through a reorder (#1580) — the
         // ACTIVE post by identity: read off an index, a render nested in
@@ -2994,10 +3005,35 @@ final class SnapFeedViewController: UIViewController {
         // The viewer's "not interested" applies HERE, one render late by
         // design: the post they were on when they asked stays until they leave
         // it, and never comes back.
-        orderedIDs = state.items.map(\.id).filter {
+        let previousOrder = orderedIDs
+        var ids = state.items.map(\.id).filter {
             !notInterestedIDs.contains($0) || $0 == activePostID
         }
-        modelsByID = Dictionary(uniqueKeysWithValues: state.items.map { ($0.id, $0) })
+        var models = Dictionary(uniqueKeysWithValues: state.items.map { ($0.id, $0) })
+        // ⚠️ THE POST IN FRONT, GONE FROM THE SERVER, GIVES WAY WITH A WORD
+        // (#2048, the owner 2026-11-05). A window that came back without it
+        // used to hand its index to the next post silently, and that was not
+        // a page change: the departed post's clip kept playing under another's
+        // caption, the bar kept its author, and a text post that took its
+        // place rested in its comments over the video. Now the next post (the
+        // previous one at the end) takes the page AS a page change, below,
+        // and a toast says why. Only a post with nothing else to show stays,
+        // unavailable (#1409) — a post opened alone, from a link.
+        var keptUnavailable: PostID?
+        var skippedUnavailable = false
+        if let held, models[held] == nil, let model = previousModels[held],
+           viewModel.unavailablePosts.contains(held) || unavailablePostIDs.contains(held) {
+            if ids.isEmpty {
+                ids = [held]
+                models[held] = model
+                keptUnavailable = held
+                keptUnavailableID = held
+            } else {
+                skippedUnavailable = true
+            }
+        }
+        orderedIDs = ids
+        modelsByID = models
         // ⚠️ BEFORE `dataSource.apply`. `willDisplay` fires inside the apply's
         // own layout pass and asks for a resting panel, so the parked one has
         // to already be in the slot by then.
@@ -3052,6 +3088,23 @@ final class SnapFeedViewController: UIViewController {
             // to black without waiting for a settle that may be a frame away.
             applyGrounds()
             finishLoadingPageHandover()
+            // ⚠️ ANOTHER POST AT THE INDEX ON SHOW IS A PAGE CHANGE (#2048).
+            // The tracker follows the INDEX, so a post that replaced the one on
+            // show (a refresh, a window without it) was never activated: the
+            // page kept the departed post's clip and the bar its author. The
+            // page is resigned here so the next line activates the new one.
+            if let held, lifecycle.activeIndex != nil, !orderedIDs.contains(held) {
+                apply(lifecycle.setPageIndex(nil))
+                lifecycleActiveID = nil
+                // The last page gone: the one before it takes the screen.
+                let page = Int((collectionView.contentOffset.y / max(collectionView.bounds.height, 1)).rounded())
+                if page >= orderedIDs.count, !orderedIDs.isEmpty {
+                    collectionView.setContentOffset(
+                        CGPoint(x: 0, y: CGFloat(orderedIDs.count - 1) * collectionView.bounds.height), animated: false
+                    )
+                }
+            }
+            if skippedUnavailable { showPostUnavailableToast() }
             // ⚠️ NOT `keepOnShow(held)` here: this completion can run late,
             // after a later render, and a post captured then is stale (#1580).
             updateActiveItem()
@@ -3074,6 +3127,8 @@ final class SnapFeedViewController: UIViewController {
                 updateBarChrome(at: active)
             }
         }
+        // Turned unavailable in place, now that its page is in the items.
+        if let keptUnavailable { markPostUnavailable(keptUnavailable, recording: false) }
         // The new items are in (the apply is synchronous here): the pager
         // back on the post on show, then the settle it was held from.
         if reorders {
@@ -3280,13 +3335,35 @@ final class SnapFeedViewController: UIViewController {
     /// Their pages read "This post isn't available" with nothing to act on,
     /// on every page they land on; other posts are untouched.
     private(set) var unavailablePostIDs: Set<PostID> = []
+    /// The page in front that the server's answer no longer carries, kept
+    /// until the viewer leaves it (`render`, #2048).
+    private var keptUnavailableID: PostID?
+    /// The last state rendered — rendered again when the kept page goes.
+    private var lastRenderState: FeedViewModel.RenderState?
+    /// Hears posts learnt unavailable on other surfaces (#2048).
+    private let unavailableObservation = NotificationObservation()
+    #if DEBUG
+    /// "This post isn't available" toasts shown (#2048).
+    private(set) var debugUnavailableToastsShown = 0
+    #endif
 
     /// Takes `id`'s actions away, in place: its page, its bars when it is
     /// the page in front, what it plays, and the like still inside its undo
     /// window, which goes back to the wallet. A burst its toast has already
     /// sent comes back through the outbox: the server refuses the stake and
     /// its answer refunds it (`WalletStore.settleCommittedStake`, #676).
-    func markPostUnavailable(_ id: PostID) {
+    ///
+    /// Recorded for every surface (#2048): it leaves this feed's pages not
+    /// on show, the other feeds' and the For You grid. `recording: false`
+    /// for a post the record already holds (`render`).
+    func markPostUnavailable(_ id: PostID, recording: Bool = true) {
+        if recording {
+            // The page in front gives way to the next at once (#2048), unless
+            // its comments are open over it — the viewer is reading them —
+            // or it is the only post: then it stays, as the block, until left.
+            let givesWay = id == activePostID && presentedViewController == nil && orderedIDs.count > 1
+            viewModel.postBecameUnavailable(id, onShow: givesWay ? nil : activePostID)
+        }
         guard unavailablePostIDs.insert(id).inserted else { return }
         takeBackSessionStake(on: id, feedbackCell: snapCell(for: id), withFeedback: false)
         // On screen now; a page already dequeued but not yet shown is told
@@ -3781,7 +3858,7 @@ final class SnapFeedViewController: UIViewController {
     private func prewarmRestingComments(for id: PostID) {
         guard !isAwaitingAnyFlight,
               !restingWarm.contains(id),
-              modelsByID[id]?.mediaURL == nil,
+              isTextPage(id),
               let makeCommentsPanelContent else { return }
         let content = (makeRestingCommentsPanelContent ?? makeCommentsPanelContent)(id)
         applyRailSlot(to: content)
@@ -3891,7 +3968,7 @@ final class SnapFeedViewController: UIViewController {
         guard let panel = loadingPage else { return }
         let head = orderedIDs.first
         let handsOver = head != nil && head == loadingPageID
-            && modelsByID[head!]?.mediaURL == nil
+            && isTextPage(head)
             && commentsEngagedID == nil && commentsContentVC == nil
             && restingWarm.isEmpty
         loadingPage = nil
@@ -4329,7 +4406,7 @@ final class SnapFeedViewController: UIViewController {
     /// the session.
     private func reconcileRestingInterface(activeIndex: Int) {
         let activeID = orderedIDs.indices.contains(activeIndex) ? orderedIDs[activeIndex] : nil
-        let activeIsText = activeID.flatMap { modelsByID[$0]?.mediaURL == nil } ?? false
+        let activeIsText = isTextPage(activeID)
         #if DEBUG
         // `-grab-log`: what the reconcile saw. An interface that survives its
         // page is invisible in every other line — the screen looks settled and
@@ -4568,7 +4645,7 @@ final class SnapFeedViewController: UIViewController {
         // compare then no-ops once this animated swap has landed default.
         let changesPage = step != 0 && target != startIndex
         let targetReEngages = orderedIDs.indices.contains(target)
-            && modelsByID[orderedIDs[target]]?.mediaURL == nil
+            && isTextPage(orderedIDs[target])
         if changesPage && !targetReEngages {
             setEngagedChrome(false, hasMedia: true, animated: true)
         }
@@ -5052,6 +5129,19 @@ final class SnapFeedViewController: UIViewController {
             if orderedIDs.indices.contains(activate) {
                 let id = orderedIDs[activate]
                 viewModel.pageDidBecomeActive(id)
+                // The posts the server withholds leave once the viewer is off
+                // them (#2048) — a turn later, outside this activation: the
+                // ones the items hold, and the page kept on show (`render`).
+                let leavesKept = keptUnavailableID.map { $0 != id } ?? false
+                if leavesKept || viewModel.holdsUnavailable(except: id) {
+                    if leavesKept { keptUnavailableID = nil }
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        if !viewModel.dropUnavailable(except: activePostID), let state = lastRenderState {
+                            render(state)
+                        }
+                    }
+                }
                 viewHistory?.record(id.rawValue)
                 // Text-only pages REST in the comments layout — the format
                 // itself is the trigger, no user gesture. The VISUAL
@@ -6859,8 +6949,25 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         let activeID = activeSnapCell.flatMap { cell in
             collectionView.indexPath(for: cell).map { orderedIDs[$0.item] }
         } ?? orderedIDs.first
-        return activeID.flatMap { modelsByID[$0]?.mediaURL == nil } == true
-            ? .systemBackground : .black
+        return isTextPage(activeID) ? .systemBackground : .black
+    }
+
+    /// "This post isn't available", for the page that just gave way (#2048).
+    private func showPostUnavailableToast() {
+        #if DEBUG
+        debugUnavailableToastsShown += 1
+        #endif
+        Feedback.info("This post isn't available", symbol: "eye.slash", from: self, id: "post-unavailable")
+    }
+
+    /// Whether `id`'s page is a TEXT page — false while its model is unknown
+    /// (#2048). `modelsByID[id]?.mediaURL == nil` reads a missing model as
+    /// text: a post that had left was rested in its comments panel, on a
+    /// white ground, over the clip still on screen. A source guard refuses
+    /// that spelling in this file (`SnapUnknownIsNeverTextTests`).
+    func isTextPage(_ id: PostID?) -> Bool {
+        guard let id, let model = modelsByID[id] else { return false }
+        return model.mediaURL == nil
     }
 
     /// ⚠️ GUARDED, because a flight needs both floors CLEAR. A masked reveal

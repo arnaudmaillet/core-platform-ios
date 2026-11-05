@@ -76,6 +76,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// the viewer's relation to an author from it, so a follow on one feed
     /// is the badge of all of them.
     private let entities: EntityStore
+    /// The posts the server withholds from this viewer, learnt on any feed
+    /// (#2048): every feed and the For You grid drop the ones not on show.
+    private let unavailablePosts = UnavailablePosts()
     /// The Text Post page's drafts. The app hands in its one store (built
     /// once in `AppContainer`, charter P4); a test hands in one of its own.
     /// Nil is the fallback for a caller that has neither, and it costs a file
@@ -207,7 +210,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 realtime: realtime,
                 composedPosts: composedPosts,
                 router: router,
-                entities: entities
+                entities: entities,
+                unavailablePosts: unavailablePosts
             )
         )
     }
@@ -232,7 +236,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 // would land in a media-only feed (#1699).
                 composedPosts: nil,
                 router: router,
-                entities: entities
+                entities: entities,
+                unavailablePosts: unavailablePosts
             )
         )
         (feed as? SnapFeedViewController)?.isForYouRoot = true
@@ -457,7 +462,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 followEvents: followEvents,
                 // A post deleted anywhere (the author's profile) leaves the
                 // grid and the rows (#896).
-                entities: entities
+                entities: entities,
+                // And one the server withholds, learnt on a feed (#2048).
+                unavailablePosts: unavailablePosts
             ),
             imagePipeline: imagePipeline,
             // Deliberately the SAME pool the snap feed uses. The grid parks a
@@ -1565,12 +1572,16 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 // window and every continuation page.
                 repository: FixedPostsFeedProvider(
                     base: repository, ids: postIDs, continuation: continuation, isCompleteSet: isCompleteSet,
-                    keepsToOpeningKind: true
+                    keepsToOpeningKind: true,
+                    // The kind it was opened as, should the opening post not
+                    // come back (#2048).
+                    openingKind: postIDs.first.flatMap(heldEntry).map(SnapFeedKindScope.init)
                 ),
                 engagementProvider: engagementProvider,
                 commentsProvider: commentsProvider,
                 router: router,
-                entities: entities
+                entities: entities,
+                unavailablePosts: unavailablePosts
             )
         )
         (feed as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = ownsInteractiveDismissal

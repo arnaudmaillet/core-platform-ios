@@ -124,6 +124,14 @@ struct SnapUnavailablePostTests {
         return try #require(found, "no page for \(id.rawValue): \(where_)")
     }
 
+    /// The page showing `id`, among the cells on screen.
+    private func cell(_ feed: SnapFeedViewController, showing id: PostID) throws -> SnapFeedCell {
+        let collection = try pager(of: feed)
+        collection.layoutIfNeeded()
+        let found = collection.visibleCells.compactMap { $0 as? SnapFeedCell }.first { $0.representedPostID == id }
+        return try #require(found, "no page for \(id.rawValue)")
+    }
+
     /// Waits for STATE, in looks (6,000 × 10 ms), never wall-clock time.
     private func eventually(_ condition: () -> Bool) async -> Bool {
         for _ in 0..<6_000 {
@@ -195,7 +203,8 @@ struct SnapUnavailablePostTests {
     @Test func aPageWhosePostTurnsUnavailableHasNoEnabledLikeBoostOrSound() async throws {
         let wallet = makeWallet()
         let panels = Panels(posts: Posts(gone: [PostID("a")]))
-        let feed = makeFeed([media("a"), media("b")], panels: panels, wallet: wallet)
+        // Alone: with another post to show, the page would give way (#2048).
+        let feed = makeFeed([media("a")], panels: panels, wallet: wallet)
         try settle(feed, on: 0)
         let page = try cell(feed, at: 0)
         try #require(!postActions(on: page).isEmpty, "the premise: the page shows its like and its rail")
@@ -215,48 +224,42 @@ struct SnapUnavailablePostTests {
         withExtendedLifetime(feed) {}
     }
 
-    /// AC2: paging away and back keeps it — whatever cell the post lands
-    /// on — and the other pages keep their actions.
-    @Test func pagingAwayAndBackKeepsItAndLeavesTheOtherPagesAlone() async throws {
+    /// The page in front learnt unavailable gives way to the next at once,
+    /// with a toast (#2048, the owner 2026-11-05); the other pages keep their
+    /// actions, and paging back does not find it.
+    @Test func thePageInFrontGivesWayAndTheOtherPagesStayAlone() async throws {
         let panels = Panels(posts: Posts(gone: [PostID("a")]))
         let feed = makeFeed(["a", "b", "c", "d", "e"].map(media), panels: panels)
         try settle(feed, on: 0)
         mountPanel(feed, for: PostID("a"), panels: panels)
-        #expect(await eventually { feed.unavailablePostIDs.contains(PostID("a")) })
-        // Away, far enough for a's cell to be recycled.
-        for index in 1...4 {
+        let rest = ["b", "c", "d", "e"].map { PostID($0) }
+        #expect(await eventually { feed.orderedIDs == rest }, "the page in front stayed")
+        #expect(feed.debugUnavailableToastsShown == 1)
+        for (index, id) in rest.enumerated() {
             try settle(feed, on: index)
-            let other = try cell(feed, at: index)
+            let other = try cell(feed, showing: id)
             #expect(!other.debugShowsUnavailableBlock, "page \(index) caught it")
             #expect(!postActions(on: other).isEmpty, "page \(index) lost its actions")
             #expect(feed.debugToolbarPostActions.allSatisfy { $0.isEnabled }, "page \(index)'s toolbar is off")
         }
-        #expect(feed.unavailablePostIDs == [PostID("a")])
-
-        // And back.
-        for index in stride(from: 3, through: 0, by: -1) { try settle(feed, on: index) }
-        let page = try cell(feed, at: 0)
-        #expect(page.debugShowsUnavailableBlock)
-        #expect(postActions(on: page).isEmpty)
-        #expect(feed.debugToolbarPostActions.allSatisfy { !$0.isEnabled })
-        #expect(feed.unavailablePostIDs == [PostID("a")])
+        try settle(feed, on: 0)
+        #expect(feed.activePostID == PostID("b"), "paging back found it")
         withExtendedLifetime(feed) {}
     }
 
-    /// A page learnt unavailable while off screen — its cell perhaps already
-    /// configured ahead of the swipe (a neighbour's panel prewarmed) —
-    /// arrives as the block, never as the post.
-    @Test func aPageLearntUnavailableOffScreenArrivesAsTheBlock() throws {
+    /// A page learnt unavailable while off screen — a neighbour's panel
+    /// revalidated it — never arrives (#2048): the viewer is not shown a post
+    /// known to be unavailable. It leaves the pages at once.
+    @Test func aPageLearntUnavailableOffScreenLeavesThePages() throws {
         let panels = Panels(posts: Posts(gone: []))
         let feed = makeFeed(["a", "b", "c"].map(media), panels: panels)
         try settle(feed, on: 0)
         feed.markPostUnavailable(PostID("b"))
+        #expect(feed.orderedIDs == [PostID("a"), PostID("c")])
         try settle(feed, on: 1)
-        let page = try cell(feed, at: 1)
-        #expect(page.debugShowsUnavailableBlock)
-        #expect(postActions(on: page).isEmpty)
-        #expect(!page.canTogglePlayback)
-        #expect(feed.debugToolbarPostActions.allSatisfy { !$0.isEnabled })
+        let shown = try cell(feed, showing: PostID("c"))
+        #expect(!shown.debugShowsUnavailableBlock)
+        #expect(!postActions(on: shown).isEmpty)
         withExtendedLifetime(feed) {}
     }
 
