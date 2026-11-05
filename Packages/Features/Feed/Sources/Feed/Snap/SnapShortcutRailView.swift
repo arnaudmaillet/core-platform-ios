@@ -660,8 +660,13 @@ final class SnapShortcutRailView: UIScrollView {
     /// `UIControl`) holding the emote's tile edge to edge, with NOTHING
     /// behind it — no bubble, no backdrop. Tap behavior arrives with the
     /// react feature itself.
+    ///
+    /// A CUSTOM button, not a configured one: a configuration builds a visual
+    /// provider and a background view the shortcut never shows, nine times a
+    /// rail, twice per opened post (its page and the flight's replica) —
+    /// in the tap's turn (#2126).
     private static func makeIcon(emote: Emote, tile: EmoteTileView) -> UIButton {
-        let button = UIButton(configuration: .plain())
+        let button = UIButton(type: .custom)
         button.backgroundColor = .clear
         button.accessibilityLabel = emote.name
         // ⚠️ The button at its final size BEFORE the tile goes in: an

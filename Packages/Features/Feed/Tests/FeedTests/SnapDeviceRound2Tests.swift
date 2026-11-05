@@ -69,6 +69,27 @@ struct SnapDeviceRound2Tests {
         #expect(replica.overrideUserInterfaceStyle == .dark)
     }
 
+    /// The replica is built in the opening tap's turn, so it takes a spare
+    /// built at rest (#2126) — and is configured all the same.
+    @Test func theFlightReplicaTakesASpare() throws {
+        let feed = SnapFeedViewController(
+            viewModel: FeedViewModel(repository: RoundTwoSilentProvider()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        feed.loadViewIfNeeded()
+        feed.view.frame = Layout.screen
+        feed.seedProjection([Self.media()])
+        feed.view.layoutIfNeeded()
+
+        SnapChromeView.debugRestock()
+        let replica = try #require(feed.zoomFlightChrome() as? SnapChromeView)
+        #expect(SnapChromeView.debugSpareCount == SnapChromeView.spareCapacity - 1, "the replica built its own")
+        replica.frame = Layout.screen
+        replica.layoutIfNeeded()
+        #expect(!replica.debugSoundBubble.isHidden)
+        #expect(replica.overrideUserInterfaceStyle == .dark, "a spare replica was left unconfigured")
+    }
+
     /// The record turns while asked to, and stops when asked to — the host
     /// asks for play AND sound on (#683).
     @Test func theRecordTurnsWhileTheSoundPlays() {

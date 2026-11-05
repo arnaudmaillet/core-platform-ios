@@ -40,7 +40,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// Whether this cell has pages a dismissal has to freeze — diagnostics.
     var hasMediaCarousel: Bool { mediaCard.showsCollection }
-    private let chrome = SnapChromeView()
+    /// A spare when one is ready (#2126): a pushed feed builds its first
+    /// cell in the tap's turn.
+    private let chrome = SnapChromeView.make()
 
     /// The bucket the caption's emotes are drawn at (#1504).
     var captionEmotePixelSide: Int { chrome.captionEmotePixelSide }
