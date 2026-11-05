@@ -95,6 +95,38 @@ struct FeedRepositoryViewerChangeTests {
         await #expect(throws: FeedError.notFound) { _ = try await repository.loadPost(id) }
     }
 
+    /// A sign-in after a guest session: the member's private authors are
+    /// back, read from the server for the member.
+    @Test func aSignInReadsTheMembersOwnPosts() async throws {
+        viewer.become("gt-guest")
+        let repository = makeRepository()
+        let id = try privatePost()
+        await #expect(throws: FeedError.notFound) { _ = try await repository.loadPost(id) }
+
+        viewer.become("member-token")
+        await repository.viewerDidChange(.member(AccountID(MockAuthService.accountID), activeProfile: nil))
+
+        #expect(try await repository.loadPost(id).post.id == id)
+    }
+
+    /// A profile switch is another viewer: a post the next profile may not
+    /// read is not served from the copy the last one read. The seeded block
+    /// (prof-4 blocks the viewer) stands for the next profile's.
+    @Test func aProfileSwitchDoesNotServeTheLastProfilesCopy() async throws {
+        let repository = makeRepository()
+        let id = PostID(try #require(backend.dataset.posts.first { $0.authorProfileID == "prof-4" }?.postID))
+        _ = try await repository.loadPost(id)
+
+        var block = SocialGraph_V1_BlockRequest()
+        block.actorID = "prof-4"
+        block.targetID = MockSocialDataset.viewerProfileID
+        _ = await SocialGraph_V1_SocialGraphServiceClient(client: backend.makeRPCClient()).block(request: block, headers: [:])
+        await repository.viewerDidChange(.member(AccountID(MockAuthService.accountID), activeProfile: ProfileID("prof-2")))
+
+        #expect(repository.peekPost(id) == nil)
+        await #expect(throws: FeedError.notFound) { _ = try await repository.loadPost(id) }
+    }
+
     /// A public author's post is still the guest's to read after the change.
     @Test func aPublicPostReadsAgainForTheNextViewer() async throws {
         let repository = makeRepository()
