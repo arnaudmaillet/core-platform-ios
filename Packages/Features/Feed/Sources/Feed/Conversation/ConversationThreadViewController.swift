@@ -411,6 +411,8 @@ final class ConversationThreadViewController: UIViewController {
         // the keyboard (no transition then).
         let layOut = {
             self.syncBottomClearance()
+            // The opening starts at the tail (#2121): see `aimAtEstimatedTail`.
+            if self.owesTailPin, self.hasEstablishedClearance { self.aimAtEstimatedTail() }
             // In the same pass as the clearance (#1799): a composer the
             // keyboard or a growing field moves carries a short transcript
             // with it, the slack absorbing the travel. A finger scrubbing the
@@ -1697,6 +1699,26 @@ final class ConversationThreadViewController: UIViewController {
                 collectionView.layoutIfNeeded()
                 if abs(collectionView.contentSize.height - heightBefore) < 0.5 { break }
             }
+        }
+    }
+
+    /// Puts the opening's offset at the tail its ESTIMATED layout gives,
+    /// before the first layout realises any row (#2121).
+    ///
+    /// The first layout used to run at the top — the bottom anchor's — and
+    /// realised the transcript's first screen, then the tail pin scrolled
+    /// down and realised its last: every row of an 18-message conversation
+    /// was built and measured (~2.3 ms each on the simulator) for the ~9 on
+    /// screen. Aimed here, the first layout realises the tail's rows only,
+    /// and `pinToTail` refines them exactly as before — the screen settles
+    /// where it always did, in the same pass, before the frame is committed.
+    private func aimAtEstimatedTail() {
+        guard let section = (0..<collectionView.numberOfSections).last(where: {
+            collectionView.numberOfItems(inSection: $0) > 0
+        }) else { return }
+        let last = IndexPath(item: collectionView.numberOfItems(inSection: section) - 1, section: section)
+        UIView.performWithoutAnimation {
+            collectionView.scrollToItem(at: last, at: .bottom, animated: false)
         }
     }
 
