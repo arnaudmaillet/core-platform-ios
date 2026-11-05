@@ -469,6 +469,9 @@ final class SnapFeedViewController: UIViewController {
     /// The active page's sheet panel, built ahead of the tap on the settle
     /// seam — the page's own warm, outside the page (#2087).
     private var commentsSheetWarm: (id: PostID, panel: UIViewController)?
+    /// The page whose sheet warm is on its way, over the turns after its
+    /// settle (`stageCommentsSheetWarm`).
+    private var stagedCommentsWarm: PostID?
     /// The engaged comments UI — a child of THIS controller (thread data,
     /// scroll position, and reply drafts must never live in a recycled
     /// cell); the cell only hosts its view while engaged.
@@ -3664,8 +3667,15 @@ final class SnapFeedViewController: UIViewController {
     /// for its first comments (`PostDetailViewController.viewDidLoad`), so the
     /// sheet rises on rows, not bones — the page's own warm, without the page.
     private func prewarmCommentsSheet(for id: PostID) {
-        guard commentsSheet == nil, commentsSheetWarm?.id != id, modelsByID[id]?.mediaURL != nil,
-              let content = makeCommentsPanelContent?(id) else { return }
+        guard needsCommentsSheetWarm(id), let content = makeCommentsPanelContent?(id) else { return }
+        loadCommentsSheetWarm(content, for: id)
+    }
+
+    private func needsCommentsSheetWarm(_ id: PostID) -> Bool {
+        commentsSheet == nil && commentsSheetWarm?.id != id && modelsByID[id]?.mediaURL != nil
+    }
+
+    private func loadCommentsSheetWarm(_ content: UIViewController, for id: PostID) {
         // ⚠️ THE WARM IS WHERE THE PAGE LEARNS ITS POST HAS GONE (#1409):
         // loading the panel revalidates the post, and a page whose post
         // turned unavailable blocks its like, boost and sound from here —
@@ -3675,6 +3685,52 @@ final class SnapFeedViewController: UIViewController {
         }
         content.loadViewIfNeeded()
         commentsSheetWarm = (id, content)
+    }
+
+    /// `prewarmCommentsSheet`, in two turns after the current one's commit:
+    /// the panel's construction in the first, its view (the first comments,
+    /// their layout) in the second (#2136).
+    ///
+    /// ⚠️ NOT IN THE SETTLE'S OWN TURN. The settle runs in the scroll's last
+    /// deceleration frame, and the whole warm there (~30 ms of CPU: a 39–46
+    /// ms turn on the simulator, `-O`) held whatever the finger did next — a
+    /// tap, the next swipe. Spread out, the settle's turn is 3–9 ms, the
+    /// construction 6–9 ms, the view 22–31 ms. Each step re-asks: the same page, still active, no
+    /// sheet open, the screen still; a step that finds the screen moving
+    /// hands over to the idle warm, which waits for quiet. A tap on the
+    /// comments before the second step builds the sheet then, as it would
+    /// without a warm.
+    private func stageCommentsSheetWarm(for id: PostID) {
+        guard needsCommentsSheetWarm(id), stagedCommentsWarm != id else { return }
+        stagedCommentsWarm = id
+        RunLoopTurn.afterCommit { [weak self] in
+            guard let self, mayTakeStagedWarmStep(id) else { return }
+            guard let content = makeCommentsPanelContent?(id) else {
+                stagedCommentsWarm = nil
+                return
+            }
+            RunLoopTurn.afterCommit { [weak self] in
+                guard let self, mayTakeStagedWarmStep(id) else { return }
+                stagedCommentsWarm = nil
+                loadCommentsSheetWarm(content, for: id)
+            }
+        }
+    }
+
+    /// Whether the staged warm of `id` may take its next step; called off
+    /// when the page moved on, the sheet opened or the screen is moving.
+    private func mayTakeStagedWarmStep(_ id: PostID) -> Bool {
+        guard stagedCommentsWarm == id else { return false }
+        guard activePostID == id, needsCommentsSheetWarm(id) else {
+            stagedCommentsWarm = nil
+            return false
+        }
+        guard isQuietForCommentsWarm else {
+            stagedCommentsWarm = nil
+            scheduleIdleCommentsWarm()
+            return false
+        }
+        return true
     }
 
     /// The warm panel, if it is `id`'s; spent by the taking.
@@ -3754,9 +3810,11 @@ final class SnapFeedViewController: UIViewController {
     /// they produce together is an ORDER between two seams, and a test that
     /// could not put them in that order could not see it.
     func debugPrewarmComments(for id: PostID) {
-        guard let cell = collectionView.visibleCells.compactMap({ $0 as? SnapFeedCell }).first
-        else { return }
-        prewarmComments(for: id, host: cell)
+        guard collectionView.visibleCells.contains(where: { $0 is SnapFeedCell }),
+              !isAwaitingZoomPresentation else { return }
+        // The whole warm at once: the turns the app spreads it over (#2136)
+        // are `RunLoopTurn`'s, not this test seam's.
+        prewarmCommentsSheet(for: id)
     }
 
     func debugMountRestingComments(for id: PostID) {
@@ -4175,8 +4233,9 @@ final class SnapFeedViewController: UIViewController {
         // across the flight for exactly this reason; so is this now, and
         // `zoomTransitionDidEnd` picks it up on landing.
         guard !isAwaitingZoomPresentation else { return }
-        // The sheet's panel waits beside the page, not in it (#2087).
-        prewarmCommentsSheet(for: id)
+        // The sheet's panel waits beside the page, not in it (#2087), and is
+        // built over the turns after this one (#2136).
+        stageCommentsSheetWarm(for: id)
     }
 
     /// How long after a transition the warm waits for genuine idle.
@@ -4241,6 +4300,7 @@ final class SnapFeedViewController: UIViewController {
     /// cell is being recycled underneath it.
     private func discardPrewarmedComments() {
         commentsSheetWarm = nil
+        stagedCommentsWarm = nil
     }
 
     /// The TEXT page's resting engagement, PHASE 2 (settle lock): once the
