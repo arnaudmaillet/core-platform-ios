@@ -166,6 +166,21 @@ public struct ConversationThreadReplyDraft: Equatable, Sendable {
     }
 }
 
+/// A finished take to send as a voice message (#2102): the recorder's draft
+/// (#2101), carried to the driver, which sends it as #2103 does.
+public struct ConversationThreadVoiceTake: Equatable, Sendable {
+    public let fileURL: URL
+    public let duration: TimeInterval
+    /// 100 levels, 0–31.
+    public let waveform: [UInt8]
+
+    public init(fileURL: URL, duration: TimeInterval, waveform: [UInt8]) {
+        self.fileURL = fileURL
+        self.duration = duration
+        self.waveform = waveform
+    }
+}
+
 /// The thread's data plane, as the screen drives it.
 @MainActor
 public protocol ConversationThreadDriving: AnyObject {
@@ -200,6 +215,10 @@ public protocol ConversationThreadDriving: AnyObject {
     /// none, or while a page is on its way.
     func loadOlder()
     func send(_ text: String)
+    /// Whether the composer records voice messages (#2102).
+    var sendsVoice: Bool { get }
+    /// Sends a finished take as a voice message (#2102, #2103).
+    func send(voice: ConversationThreadVoiceTake)
     func beginReply(to messageID: String)
     func cancelReply()
     func forward(_ messageID: String)
@@ -239,6 +258,11 @@ public protocol ConversationThreadDriving: AnyObject {
 }
 
 public extension ConversationThreadDriving {
+    /// Whether the composer records voice messages (#2102). False: the
+    /// waveform keeps "not available".
+    var sendsVoice: Bool { false }
+    func send(voice: ConversationThreadVoiceTake) {}
+
     /// Drivers with no mute (#719): no bell.
     var onMutedChange: ((Bool?) -> Void)? {
         get { nil }

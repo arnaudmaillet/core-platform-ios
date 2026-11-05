@@ -177,6 +177,9 @@ final class ConversationThreadViewController: UIViewController {
     /// on screen (#2104): coming back to one mid-way shows — and plays from —
     /// where it was.
     private var voicePositions: [String: Double] = [:]
+    /// Hold the waveform to record (#2102) — behind `-voice-messages` until
+    /// the owner approves the flow on a device.
+    private(set) var voiceComposer: VoiceComposer?
     /// The voice message the one player last spoke for: its position is kept
     /// when another starts.
     private var voiceShownID: String?
@@ -377,9 +380,11 @@ final class ConversationThreadViewController: UIViewController {
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         contextMenu.endTextSelection()
-        // Leaving the conversation stops its voice message (#2104).
+        // Leaving the conversation stops its voice message (#2104), and keeps
+        // a locked or paused take as its draft (#2102).
         if isMovingFromParent || isBeingDismissed || navigationController?.isBeingDismissed == true {
             stopVoice()
+            voiceComposer?.leave()
         }
         guard mode == .full else { return }
         // Taken away on the way out, or the inbox inherits an empty bar.
@@ -730,6 +735,7 @@ final class ConversationThreadViewController: UIViewController {
         composeBar.onVoiceNote = { [weak self] in
             self?.presentNotice("Voice Messages", "Voice messages aren't available yet.")
         }
+        installVoiceComposer()
         // No stake: a conversation has nothing to like. The column keeps its
         // slot where it was: the pin.
         composeBar.showsStake = false
@@ -2291,4 +2297,45 @@ extension ConversationThreadViewController {
     func debugVoiceState(_ id: String) -> ThreadVoiceView.State? { messagesByID[id].flatMap(voiceState(for:)) }
     func debugVoiceEnded() { voicePlayerChanged() }
     #endif
+}
+
+// MARK: - Recording (#2102)
+
+extension ConversationThreadViewController {
+    /// Whether the composer records: the driver sends voice, the screen is
+    /// the full conversation, and — until the owner approves the flow on a
+    /// device — DEBUG's `-voice-messages` asks for it.
+    static var recordsVoice: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains("-voice-messages")
+        #else
+        false
+        #endif
+    }
+
+    func installVoiceComposer(forced: Bool = false) {
+        guard mode == .full, driver.sendsVoice, forced || Self.recordsVoice, voiceComposer == nil else { return }
+        let composer = VoiceComposer(draftKey: driver.presenceKey ?? peer.id?.rawValue)
+        composer.onSend = { [weak self] take in self?.driver.send(voice: take) }
+        composer.onHint = { [weak self] hint in
+            guard let self else { return }
+            Feedback.info(hint, symbol: "mic", from: self)
+        }
+        composer.onPermissionDenied = { [weak self] in self?.offerMicrophoneSettings() }
+        composer.attach(to: composeBar, host: view)
+        voiceComposer = composer
+    }
+
+    /// Once refused, a hold offers Settings (#2102).
+    private func offerMicrophoneSettings() {
+        let alert = UIAlertController(
+            title: "Microphone Access", message: "Allow microphone access to record voice messages.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Not Now", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { _ in
+            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+        })
+        present(alert, animated: true)
+    }
 }

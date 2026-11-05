@@ -67,6 +67,88 @@ final class CommentsInputBar: UIView {
     /// voice-note seam. Unwired for now — an honest affordance whose capture
     /// flow does not exist yet.
     var onVoiceNote: (() -> Void)?
+
+    /// The hold on the waveform (#2102), conversations only: a post's
+    /// comments leave it off and keep `onVoiceNote`'s tap.
+    enum VoiceHoldEvent: Equatable {
+        /// Touch-down on the waveform over an empty field.
+        case began
+        /// The finger's travel from touch-down: `leading` toward the leading
+        /// edge (mirrored right-to-left), `up` upward.
+        case moved(leading: CGFloat, up: CGFloat)
+        case ended(leading: CGFloat)
+        /// The system took the touch.
+        case cancelled
+        /// VoiceOver's double-tap: holding is impractical, so it records
+        /// straight away, locked.
+        case accessibilityStart
+    }
+
+    /// Whether the waveform records on a hold (#2102). Off: its tap is
+    /// `onVoiceNote`, as before.
+    var holdsToRecord = false {
+        didSet {
+            voiceHold.isEnabled = holdsToRecord
+            updateFieldAction()
+        }
+    }
+    var onVoiceHold: ((VoiceHoldEvent) -> Void)?
+
+    private lazy var voiceHold: UILongPressGestureRecognizer = {
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(voiceHeld(_:)))
+        hold.minimumPressDuration = 0
+        hold.delegate = self
+        hold.isEnabled = false
+        return hold
+    }()
+    private var voiceHoldStart: CGPoint = .zero
+
+    /// The waveform's button, where the mic disc and the lock stand (#2102).
+    var voiceHoldAnchor: UIView { fieldActionButton }
+
+    /// Shows a recording strip or bar in the field's place (#2102): the text,
+    /// the emote button — and the field's own button when `coversButton`
+    /// (the locked and paused bars carry their own). Nil gives the field back.
+    func showVoiceOverlay(_ overlay: UIView?, coversButton: Bool = false) {
+        voiceOverlay?.removeFromSuperview()
+        voiceOverlay = overlay
+        let showing = overlay != nil
+        textView.isHidden = showing
+        emotes.toggleButton.isHidden = showing
+        placeholderLabel.isHidden = showing || hasDraft
+        fieldActionButton.isHidden = showing && coversButton
+        guard let overlay else { return }
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        field.contentView.addSubview(overlay)
+        NSLayoutConstraint.activate([
+            overlay.leadingAnchor.constraint(equalTo: field.contentView.leadingAnchor, constant: Spacing.md),
+            overlay.trailingAnchor.constraint(
+                equalTo: coversButton ? field.contentView.trailingAnchor : fieldActionButton.leadingAnchor,
+                constant: coversButton ? -Spacing.xs : 0
+            ),
+            overlay.topAnchor.constraint(equalTo: field.contentView.topAnchor),
+            overlay.bottomAnchor.constraint(equalTo: field.contentView.bottomAnchor),
+        ])
+    }
+    private(set) var voiceOverlay: UIView?
+
+    @objc private func voiceHeld(_ hold: UILongPressGestureRecognizer) {
+        let point = hold.location(in: self)
+        let rightToLeft = effectiveUserInterfaceLayoutDirection == .rightToLeft
+        let leading = rightToLeft ? point.x - voiceHoldStart.x : voiceHoldStart.x - point.x
+        let up = voiceHoldStart.y - point.y
+        switch hold.state {
+        case .began:
+            voiceHoldStart = point
+            onVoiceHold?(.began)
+        case .changed:
+            onVoiceHold?(.moved(leading: leading, up: up))
+        case .ended:
+            onVoiceHold?(.ended(leading: leading))
+        default:
+            onVoiceHold?(.cancelled)
+        }
+    }
     /// One phase of an interactive vertical page-swipe born on the bar.
     enum PageSwipePhase { case began, changed, ended }
     /// A vertical drag anywhere on the bar (field, buttons, gaps) drives the
@@ -508,6 +590,7 @@ final class CommentsInputBar: UIView {
         action.symbolContentTransition = Self.fieldActionTransition
         fieldActionButton.configuration = action
         fieldActionButton.addAction(UIAction { [weak self] _ in self?.fieldActionTapped() }, for: .primaryActionTriggered)
+        fieldActionButton.addGestureRecognizer(voiceHold)
         fieldActionButton.translatesAutoresizingMaskIntoConstraints = false
         field.contentView.addSubview(fieldActionButton)
         NSLayoutConstraint.activate([
@@ -794,6 +877,8 @@ final class CommentsInputBar: UIView {
     /// Vertical-intent gate for the swipe-exit pan only; every other
     /// recognizer keeps UIKit's default answer.
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        // The waveform's hold (#2102): over an empty field, nothing on its way.
+        if gestureRecognizer === voiceHold { return holdsToRecord && !hasDraft && !isSending }
         guard gestureRecognizer === swipeRecognizer,
               let pan = gestureRecognizer as? UIPanGestureRecognizer else {
             return super.gestureRecognizerShouldBegin(gestureRecognizer)
@@ -1222,7 +1307,11 @@ final class CommentsInputBar: UIView {
         if hasDraft {
             sendTapped()
         } else if !isSending {
-            onVoiceNote?()
+            if holdsToRecord, UIAccessibility.isVoiceOverRunning {
+                onVoiceHold?(.accessibilityStart)
+            } else {
+                onVoiceNote?()
+            }
         }
     }
 
@@ -1880,7 +1969,7 @@ final class CommentsInputBar: UIView {
         }
         fieldActionButton.accessibilityLabel = sends
             ? sendAccessibilityLabel ?? "Send comment"
-            : "Record voice comment"
+            : holdsToRecord ? "Record voice message" : "Record voice comment"
         fieldActionButton.isEnabled = !isSending
     }
 
@@ -2097,6 +2186,9 @@ final class CommentsInputBar: UIView {
         return superview
     }
 }
+
+/// The waveform's hold asks the bar whether it may begin (#2102).
+extension CommentsInputBar: UIGestureRecognizerDelegate {}
 
 extension CommentsInputBar: UITextViewDelegate {
     /// A guest cannot write: the field opens the sign-up sheet instead of the
