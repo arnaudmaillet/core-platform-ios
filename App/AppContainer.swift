@@ -628,7 +628,7 @@ final class AppContainer {
     /// feed's preload (#895) run in the simulator without a fleet. Each post
     /// gets its own `qa` query item, so two posts never share a cache key.
     /// Needs network; pair it with `-cache-audit` to read the cache's log.
-    static let servesRemoteClips = ProcessInfo.processInfo.arguments.contains("-video-cache-remote")
+    static let servesRemoteClips = DebugFlags.isOn("-video-cache-remote")
 
     /// Verified with a ranged GET (206, `video/mp4`), as `DebugMediaLibrary`'s
     /// real clips are.

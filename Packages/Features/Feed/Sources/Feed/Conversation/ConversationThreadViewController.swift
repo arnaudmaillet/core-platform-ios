@@ -2307,7 +2307,7 @@ extension ConversationThreadViewController {
     /// device — DEBUG's `-voice-messages` asks for it.
     static var recordsVoice: Bool {
         #if DEBUG
-        ProcessInfo.processInfo.arguments.contains("-voice-messages")
+        DebugFlags.isOn("-voice-messages")
         #else
         false
         #endif

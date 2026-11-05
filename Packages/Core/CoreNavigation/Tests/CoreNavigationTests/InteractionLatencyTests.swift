@@ -304,6 +304,27 @@ struct InteractionLatencyHarnessTests {
         #expect(record.worstTurnMs >= 140)
     }
 
+    /// Off, the latency harness records nothing; paused (the dashboard up),
+    /// the app's taps are not measured.
+    @Test func switchedOffOrPausedItRecordsNothing() {
+        InteractionLatency.install(log: false, hud: false)
+        let wasActive = InteractionLatency.isActive
+        defer { InteractionLatency.setActive(wasActive, badge: false) }
+        InteractionLatency.setActive(false, badge: false)
+        let count = InteractionLatency.records.count
+        InteractionLatency.noteInput(kind: "tap", target: "off")
+        InteractionLatency.noteResponse("appear:Off")
+        InteractionLatency.finishInput()
+        #expect(InteractionLatency.records.count == count, "recorded while off")
+        InteractionLatency.setActive(true, badge: false)
+        InteractionLatency.isPaused = true
+        InteractionLatency.noteInput(kind: "tap", target: "paused")
+        InteractionLatency.noteResponse("appear:Paused")
+        InteractionLatency.finishInput()
+        InteractionLatency.isPaused = false
+        #expect(InteractionLatency.records.count == count, "recorded while the dashboard was up")
+    }
+
     /// An action at once is an action-strength response within a frame or two.
     @Test func aControlActionAnswersAtItsOwnTurn() async throws {
         install()

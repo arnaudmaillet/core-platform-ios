@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNetworkingMocks
+import DesignSystem
 import FeedInterface
 import Foundation
 
@@ -194,7 +195,7 @@ struct MockPostSoundProvider: PostSoundProviding {
     /// without a fleet, as `-video-cache-remote` does for clips. Each song
     /// gets its own `qa` query item, so two songs never share a cache key.
     /// Needs network.
-    private static let servesRemoteSongs = ProcessInfo.processInfo.arguments.contains("-sound-cache-remote")
+    private static let servesRemoteSongs = DebugFlags.isOn("-sound-cache-remote")
 
     /// Verified with a ranged GET (206, `audio/mpeg`).
     private static let remoteSongs = [

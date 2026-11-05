@@ -1,4 +1,5 @@
 import CoreNetworking
+import DesignSystem
 import Foundation
 
 /// Selects where the app's RPCs go. Defaults to the in-process mock (used by
@@ -12,7 +13,7 @@ enum AppEnvironment: Equatable {
     case localFleet
 
     static var current: AppEnvironment {
-        ProcessInfo.processInfo.arguments.contains("-use-local-fleet") ? .localFleet : .mock
+        DebugFlags.isOn("-use-local-fleet") ? .localFleet : .mock
     }
 
     /// Single host: the mock routes by path in-process; the Envoy gateway

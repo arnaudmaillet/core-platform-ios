@@ -1,3 +1,4 @@
+import DesignSystem
 import QuartzCore
 import UIKit
 
@@ -307,7 +308,7 @@ public final class ViewportShare {
     /// `-viewport-share`: the host's screen and what happened to its share.
     func trace(_ event: @autoclosure () -> String) {
         #if DEBUG
-        guard ProcessInfo.processInfo.arguments.contains("-viewport-share") else { return }
+        guard DebugFlags.isOn("-viewport-share") else { return }
         let owner = host.map { String(describing: type(of: $0.next ?? $0)) } ?? "gone"
         print("[viewport-share] \(owner) \(event())")
         #endif
