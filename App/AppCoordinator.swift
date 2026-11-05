@@ -104,6 +104,8 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // The link detector's first match, off the main thread, before the
         // first profile renders a bio (#2116).
         TextEntityScanner.prewarmLinks()
+        // And what the device unlocks with, for App Lock's settings (#2116).
+        DeviceAuthenticator.prewarm()
         #if DEBUG
         // `-latency-bench`: UIKit's own floor per kind of response (#2116).
         if LatencyBench.isRequested {

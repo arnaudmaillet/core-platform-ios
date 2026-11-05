@@ -60,7 +60,45 @@ public protocol DeviceAuthenticating: AnyObject {
 public final class DeviceAuthenticator: DeviceAuthenticating {
     public init() {}
 
+    /// ⚠️ ASKED ONCE PER ACTIVE SESSION, AND FIRST OFF THE MAIN THREAD (#2116).
+    /// `canEvaluatePolicy` is a synchronous call into the authentication
+    /// daemon; the first one after a launch took ~500 ms inside Security and
+    /// Login's first cell — the tap's turn. Face ID, Touch ID and the
+    /// passcode are set up outside the app, so the answer holds until the
+    /// app becomes active again.
     public func availableMethod() -> String? {
+        if let known = Self.knownMethod { return known }
+        let method = Self.probe()
+        Self.remember(method)
+        return method
+    }
+
+    /// Asks ahead of the first screen that needs it, off the main thread.
+    public static func prewarm() {
+        DispatchQueue.global(qos: .utility).async {
+            let method = probe()
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    if knownMethod == nil { remember(method) }
+                }
+            }
+        }
+    }
+
+    private static var knownMethod: String??
+    private static var activation: NSObjectProtocol?
+
+    private static func remember(_ method: String?) {
+        knownMethod = .some(method)
+        guard activation == nil else { return }
+        activation = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { knownMethod = nil }
+        }
+    }
+
+    nonisolated private static func probe() -> String? {
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else { return nil }
