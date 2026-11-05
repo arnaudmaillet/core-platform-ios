@@ -648,10 +648,13 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
             // Baked for the BAR's traits (#1501): the app's appearance, or the
             // dark Shots gives the bar (#1697).
             let traits = barTraits
-            tab.setFaces(
-                outline: glyphTab.glyph.image(selected: false, badged: glyphTab.hasUnread, traits: traits),
-                fill: glyphTab.glyph.image(selected: true, badged: glyphTab.hasUnread, traits: traits)
-            )
+            let outline = glyphTab.glyph.image(selected: false, badged: glyphTab.hasUnread, traits: traits)
+            let fill = glyphTab.glyph.image(selected: true, badged: glyphTab.hasUnread, traits: traits)
+            // The same faces (a template between the dark bar and the light):
+            // nothing to send, and the bar redraws an item it is handed (#2116).
+            if tab.image !== outline || tab.selectedFace !== fill {
+                tab.setFaces(outline: outline, fill: fill)
+            }
             // The badge said aloud (#1196): an image tells VoiceOver nothing.
             tab.accessibilityValue = glyphTab.hasUnread ? glyphTab.glyph.unreadAccessibilityValue : nil
         }
