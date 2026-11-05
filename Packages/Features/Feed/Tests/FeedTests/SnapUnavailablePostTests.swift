@@ -1,6 +1,7 @@
 import AuthInterface
 import CoreContracts
 import CoreModels
+import CoreNavigation
 import CoreNetworking
 import CoreNetworkingMocks
 import CoreStorage
@@ -151,6 +152,40 @@ struct SnapUnavailablePostTests {
     private func mountPanel(_ feed: SnapFeedViewController, for id: PostID, panels: Panels) {
         if panels.byPost[id] == nil { feed.debugPrewarmComments(for: id) }
         panels.byPost[id]?.loadViewIfNeeded()
+    }
+
+    // MARK: - The settle's warm (#2136)
+
+    /// A settled media page's comments sheet is warmed over the two turns
+    /// after its settle, never in it: the settle is the scroll's last frame,
+    /// and the whole warm there held whatever the finger did next.
+    @Test func theSettleWarmsTheSheetOverTheNextTwoTurnsNotItsOwn() throws {
+        let panels = Panels(posts: Posts(gone: []))
+        let feed = makeFeed([media("a"), media("b")], panels: panels)
+        RunLoopTurn.runPendingNow()
+        try settle(feed, on: 1)
+        let id = PostID("b")
+        #expect(panels.byPost[id] == nil, "the panel was built in the settle's own turn")
+
+        RunLoopTurn.runPendingNow()
+        let panel = try #require(panels.byPost[id], "the first turn after the settle built no panel")
+        #expect(!panel.isViewLoaded, "the panel's view was loaded in the same turn as its construction")
+
+        RunLoopTurn.runPendingNow()
+        #expect(panel.isViewLoaded, "the second turn did not load the panel")
+    }
+
+    /// The page moved on before the warm's turn: nothing is built for it.
+    @Test func aWarmWhosePageMovedOnBuildsNothing() throws {
+        let panels = Panels(posts: Posts(gone: []))
+        let feed = makeFeed([media("a"), media("b"), media("c")], panels: panels)
+        RunLoopTurn.runPendingNow()
+        try settle(feed, on: 1)
+        try settle(feed, on: 2)
+        RunLoopTurn.runPendingNow()
+        RunLoopTurn.runPendingNow()
+        #expect(panels.byPost[PostID("b")] == nil, "a page left behind was warmed")
+        #expect(panels.byPost[PostID("c")]?.isViewLoaded == true, "the page settled on was not warmed")
     }
 
     // MARK: - Acceptance
