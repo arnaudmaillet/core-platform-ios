@@ -15,13 +15,21 @@ import Synchronization
 /// two lists show — For You's grid and the vertical feed's lookahead window —
 /// is one entity (#970).
 ///
-/// Two lifetimes, four `ManagedCache` namespaces (`managedCaches`):
-/// - the CONTENT — posts and profiles, their counters — is the same for every
-///   viewer and survives a viewer change, like the hydrated posts
-///   `FeedRepository` keeps on purpose (`public` scope);
-/// - the VIEWER'S FACTS — where they stand with a person, what they saved —
-///   are `viewer`-scoped: the coordinator's `.viewerChanged` wipes them and
-///   every observer hears `.everything`.
+/// Four `ManagedCache` namespaces (`managedCaches`), all `viewer`-scoped: the
+/// coordinator's `.viewerChanged` wipes them and every observer hears
+/// `.everything`.
+/// - the CONTENT — posts and profiles, their counters;
+/// - the VIEWER'S FACTS — where they stand with a person, what they saved.
+///
+/// ⚠️ THE CONTENT IS THE VIEWER'S TOO (#2152). A post's fields are the same
+/// for everyone, but WHETHER a viewer may see it is not: a private author's
+/// posts are their followers' alone, and a block hides a person and their
+/// posts from one profile and not the next. The content used to be `public`
+/// and survive a viewer change, so a post a member read was still held for
+/// the guest after a sign-out, and served without the server wherever a
+/// screen reads what is held (`FeedFeatureBuilder.heldEntry`: a place's
+/// gallery, a map cluster). `FeedRepository`'s caches went the same way
+/// (#2047). Deletions are everyone's and stay (`isDeleted`).
 /// The viewer's stake on a post stays in `WalletStore`, which already is one
 /// ledger per viewer, persisted and announced; a stake reaches the post's
 /// count here through `addLikes`.
@@ -35,8 +43,8 @@ import Synchronization
 /// (charter P7), and a like or a realtime tick must reach every visible cell
 /// in the same frame; an observation per cell is a SQLite read per change per
 /// cell, delivered a hop later. The LocalStore is a budgeted cache wiped on
-/// every viewer change, while posts here outlive the viewer; and the viewer's
-/// facts (stakes, saves) are not in its rows. The device copy stays the
+/// every viewer change, as everything here is; and the viewer's facts
+/// (stakes, saves) are not in its rows. The device copy stays the
 /// LocalStore's job: lists persist their pages there (`FeedLocalCache`), the
 /// posts it holds are rebuilt here as copies at a cold start, and a delete
 /// reaches it (`EntityDeviceBacking`, in Feed, which owns the codec).
@@ -50,8 +58,8 @@ public final class EntityStore: Sendable {
     public static let defaultPostLimit = 2_000
     public static let defaultProfileLimit = 1_000
 
-    let posts: MemoryCache<PostID, PostEntity>
-    let profiles: MemoryCache<ProfileID, ProfileEntity>
+    let posts: ViewerFacts<PostID, PostEntity>
+    let profiles: ViewerFacts<ProfileID, ProfileEntity>
     let relations: ViewerFacts<ProfileID, FollowRelation>
     let saved: ViewerFacts<PostID, Bool>
 
@@ -66,21 +74,15 @@ public final class EntityStore: Sendable {
         tombstoneLimit: Int = 1_000,
         clock: any CacheClock = SystemCacheClock()
     ) {
-        posts = MemoryCache(
-            namespace: CacheNamespace("entities.posts", category: .other, scope: .public, priorityClass: .preferred),
-            budget: .fixed(bytes: postLimit),
-            limits: CacheLimits(bytes: postLimit, speculativeShare: CacheCoordinator.speculativeShare),
-            clock: clock
-        )
-        profiles = MemoryCache(
-            namespace: CacheNamespace("entities.profiles", category: .other, scope: .public, priorityClass: .preferred),
-            budget: .fixed(bytes: profileLimit),
-            limits: CacheLimits(bytes: profileLimit, speculativeShare: CacheCoordinator.speculativeShare),
-            clock: clock
-        )
+        posts = ViewerFacts("entities.posts", limit: postLimit, clock: clock)
+        profiles = ViewerFacts("entities.profiles", limit: profileLimit, clock: clock)
         relations = ViewerFacts("entities.relations", limit: profileLimit, clock: clock)
         saved = ViewerFacts("entities.saved", limit: postLimit, clock: clock)
         state = Mutex(State(tombstoneLimit: tombstoneLimit))
+        // ONE ANNOUNCEMENT PER KIND, AFTER BOTH OF ITS NAMESPACES ARE GONE:
+        // the facts are wiped after the content (registration order, and
+        // `viewerDidChange`), so they say it. Announcing the content too drew
+        // every observer twice, the first time with the last viewer's facts.
         relations.setOnWipe { [weak self] in self?.notifyProfiles(.everything) }
         saved.setOnWipe { [weak self] in self?.notifyPosts(.everything) }
     }
@@ -92,10 +94,12 @@ public final class EntityStore: Sendable {
         for cache in managedCaches { coordinator.register(cache) }
     }
 
-    /// Forgets every viewer's fact at once — what the coordinator's
-    /// `.viewerChanged` does through the `viewer`-scoped namespaces; for a
-    /// host without one.
+    /// Forgets everything read for the viewer at once — what the
+    /// coordinator's `.viewerChanged` does through the `viewer`-scoped
+    /// namespaces; for a host without one.
     public func viewerDidChange() {
+        posts.removeAll()
+        profiles.removeAll()
         relations.removeAll()
         saved.removeAll()
     }
@@ -104,7 +108,7 @@ public final class EntityStore: Sendable {
 
     /// The post, as a use: it becomes the most recently used of its tier.
     public func post(_ id: PostID) -> PostEntity? {
-        posts.value(for: id)
+        posts.cache.value(for: id)
     }
 
     /// Whether the post was deleted in this session: no write brings it back.
@@ -205,7 +209,7 @@ public final class EntityStore: Sendable {
     /// tick — brings it back. Lists drop it on `isDeleted`.
     public func deletePost(_ id: PostID) {
         let inserted = writes.withLock { _ -> Bool in
-            posts.removeValue(for: id)
+            posts.cache.removeValue(for: id)
             saved.cache.removeValue(for: id)
             return state.withLock { $0.addTombstone(id) }
         }
@@ -224,7 +228,7 @@ public final class EntityStore: Sendable {
     // MARK: - Profiles
 
     public func profile(_ id: ProfileID) -> ProfileEntity? {
-        profiles.value(for: id)
+        profiles.cache.value(for: id)
     }
 
     /// A person as a screen showed them.
@@ -276,7 +280,7 @@ public final class EntityStore: Sendable {
     /// follow state from the viewer's relation. Nil only when neither knows
     /// the person. Nothing is invented: an unknown field stays nil.
     public func knownIdentity(of id: ProfileID, stub: ProfileIdentityStub?) -> ProfileIdentityStub? {
-        Self.identity(stub: stub, summary: profiles.value(for: id)?.summary, relation: relations.cache.value(for: id))
+        Self.identity(stub: stub, summary: profiles.cache.value(for: id)?.summary, relation: relations.cache.value(for: id))
     }
 
     /// The resolver's rule, pure.
@@ -407,7 +411,7 @@ public final class EntityStore: Sendable {
         let observer = Observer(handler)
         let token = writes.withLock { _ -> UInt64 in
             let isFirst = state.withLock { $0.posts.observers[id]?.isEmpty ?? true }
-            let leases = isFirst ? [posts.lease(id), saved.cache.lease(id)].compactMap { $0 } : []
+            let leases = isFirst ? [posts.cache.lease(id), saved.cache.lease(id)].compactMap { $0 } : []
             return state.withLock { state in
                 let token = state.nextToken()
                 state.posts.add(observer, for: id, pinning: leases, token: token)
@@ -425,7 +429,7 @@ public final class EntityStore: Sendable {
         let observer = Observer(handler)
         let token = writes.withLock { _ -> UInt64 in
             let isFirst = state.withLock { $0.profiles.observers[id]?.isEmpty ?? true }
-            let leases = isFirst ? [profiles.lease(id), relations.cache.lease(id)].compactMap { $0 } : []
+            let leases = isFirst ? [profiles.cache.lease(id), relations.cache.lease(id)].compactMap { $0 } : []
             return state.withLock { state in
                 let token = state.nextToken()
                 state.profiles.add(observer, for: id, pinning: leases, token: token)
@@ -473,16 +477,16 @@ public final class EntityStore: Sendable {
     /// the post was deleted.
     private func writePost(_ id: PostID, tier: CacheTier, _ transform: (PostEntity?) -> PostEntity?) -> Bool {
         guard !state.withLock({ $0.tombstones.contains(id) }) else { return false }
-        let current = posts.peek(id)
+        let current = posts.cache.peek(id)
         guard let next = transform(current), next != current else { return false }
-        storeFact(next, for: id, in: posts, registry: \.posts, tier: tier)
+        storeFact(next, for: id, in: posts.cache, registry: \.posts, tier: tier)
         return true
     }
 
     private func writeProfile(_ id: ProfileID, tier: CacheTier, _ transform: (ProfileEntity?) -> ProfileEntity?) -> Bool {
-        let current = profiles.peek(id)
+        let current = profiles.cache.peek(id)
         guard let next = transform(current), next != current else { return false }
-        storeFact(next, for: id, in: profiles, registry: \.profiles, tier: tier)
+        storeFact(next, for: id, in: profiles.cache, registry: \.profiles, tier: tier)
         return true
     }
 
