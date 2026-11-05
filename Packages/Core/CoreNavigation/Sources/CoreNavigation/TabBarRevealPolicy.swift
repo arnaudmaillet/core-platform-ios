@@ -140,6 +140,62 @@ public extension UITabBarController {
         guard !isTabBarHidden else { return }
         setTabBarHidden(true, animated: true)
     }
+
+    /// `hideTabBarNatively`, once the current turn's Core Animation commit is
+    /// out: for a hide that rides beside a push, so the bar's own work (its
+    /// animation set-up and a visibility walk of its whole subtree, 7–10 ms
+    /// measured on the simulator) is not in the turn that draws the push's
+    /// first frame (#2126). The bar starts leaving one frame later, on
+    /// UIKit's animation.
+    ///
+    /// ⚠️ RE-ASKED WHEN IT RUNS, like `showTabBarNativelyNextTurn`: a close
+    /// that came first already decided the bar, and `stillWanted` says
+    /// whether the screen that wanted it gone is still the one on top.
+    func hideTabBarNativelyAfterCommit(while stillWanted: @escaping @MainActor () -> Bool) {
+        RunLoopTurn.afterCommit { [weak self] in
+            guard let self, stillWanted() else { return }
+            self.hideTabBarNatively()
+        }
+    }
+}
+
+/// The main run loop's turns, for work that must not hold the current
+/// frame.
+@MainActor
+public enum RunLoopTurn {
+    private static var pending: [@MainActor () -> Void] = []
+
+    /// Runs `body` in the next turn, once the current turn's Core Animation
+    /// commit has gone out: a one-shot observer after the commit (order
+    /// 2 000 000) wakes the loop with a main-queue block, so `body`'s changes
+    /// are committed with the NEXT frame, not this one. A plain `main.async`
+    /// can be drained in the same turn, before the commit.
+    public static func afterCommit(_ body: @escaping @MainActor () -> Void) {
+        pending.append(body)
+        // One observer for every body asked in the same turn.
+        guard pending.count == 1 else { return }
+        let observer = CFRunLoopObserverCreateWithHandler(
+            kCFAllocatorDefault, CFRunLoopActivity.beforeWaiting.rawValue, false, 2_000_001
+        ) { _, _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { runPending() } }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+    }
+
+    private static func runPending() {
+        let bodies = pending
+        pending.removeAll()
+        bodies.forEach { $0() }
+    }
+
+    #if DEBUG
+    /// A test's deterministic end of the turn: what `afterCommit` deferred,
+    /// now. An awaited wait would let Swift Testing's other tests run in
+    /// between, on the same main actor.
+    public static func runPendingNow() {
+        runPending()
+    }
+    #endif
 }
 
 @MainActor

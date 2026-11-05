@@ -405,8 +405,11 @@ final class SnapShortcutRailView: UIScrollView {
         // At rest before it comes in: in place, dressed for what it shows.
         if !concealed { UIView.performWithoutAnimation { layoutIfNeeded() } }
         // Only a take-off animates (the bounce out): a landing comes back at
-        // once, under the replica's identical picture (#2004).
-        let shown = animated && changed && concealed && window != nil ? tiles.indices.filter { dressed[$0] } : []
+        // once, under the replica's identical picture (#2004). And only a
+        // rail on screen: the For You pager's Shots page, beside the list a
+        // post was opened from, played its bounce off screen in the opening's
+        // first frame (#2126).
+        let shown = animated && changed && concealed && isOnScreen ? tiles.indices.filter { dressed[$0] } : []
         let delays = Self.staggerDelays(count: shown.count, entering: false)
         for (index, tile) in tiles.enumerated() {
             tile.layer.removeAllAnimations()
@@ -419,6 +422,12 @@ final class SnapShortcutRailView: UIScrollView {
             }
             Self.bounceOut(tile, delay: delays[slot])
         }
+    }
+
+    /// In a window and inside its bounds.
+    private var isOnScreen: Bool {
+        guard let window else { return false }
+        return convert(bounds, to: window).intersects(window.bounds)
     }
 
     /// ⚠️ ANIMATIONS FORCED ON: a flight stages with view animations off

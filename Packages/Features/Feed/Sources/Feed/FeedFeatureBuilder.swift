@@ -716,22 +716,23 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // Nothing else was hiding it here: `syncTabBarVisibility` runs on tab
         // selection, never on a push, and this push replaces the navigation
         // delegate with the flight — so the shell hears nothing either.
+        //
+        // ⚠️ AFTER THE PUSH'S FIRST FRAME (#2126): the hide's own work was 7–10
+        // ms of the tap's turn, ahead of the card's first movement. Asked
+        // here, before the push changes the top; done once the turn's commit
+        // is out, and only while this feed is still the one on top.
         #if DEBUG
         // `-tabbar-flag`: the A/B this decision rests on. Swaps the hand-managed
         // hide for `hidesBottomBarWhenPushed`, so the two can be filmed against
         // each other on the same grab rather than argued about.
-        if ProcessInfo.processInfo.arguments.contains("-tabbar-flag") {
-            destination.hidesBottomBarWhenPushed = true
-        } else if !nav.flagHidesAppTabBar(at: nav.topViewController) {
-            nav.tabBarController?.setTabBarHidden(true, animated: true)
-        }
+        let usesFlag = ProcessInfo.processInfo.arguments.contains("-tabbar-flag")
+        if usesFlag { destination.hidesBottomBarWhenPushed = true }
+        let hidesBar = !usesFlag && !nav.flagHidesAppTabBar(at: nav.topViewController)
         #else
         // ⚠️ NOT UNDER `hidesBottomBarWhenPushed` (#769): a profile over a
         // conversation has handed the bar to UIKit already, and an explicit
         // hide there outlived the pops (`flagHidesAppTabBar`).
-        if !nav.flagHidesAppTabBar(at: nav.topViewController) {
-            nav.tabBarController?.setTabBarHidden(true, animated: true)
-        }
+        let hidesBar = !nav.flagHidesAppTabBar(at: nav.topViewController)
         #endif
         session.takeDelegateSlot()
         // No `session.prepareDestination()`: this feed is built fresh on every
@@ -739,7 +740,18 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // finger lifting and the flight starting — the map measured that as a
         // pause before the animation (see `MapsViewController`). Only a REUSED
         // destination (For You's) gains from it.
+        // ⚠️ THE STACK SETTLED FIRST: a push in the same turn as one that has
+        // not been laid out yet (a screen pushed without animation, a host
+        // just presented) is dropped by UIKit. The bar's hide used to settle
+        // the stack by the way, before it moved after the push (#2126). On a
+        // settled stack this lays nothing out.
+        nav.view.layoutIfNeeded()
         nav.pushViewController(destination, animated: true)
+        if hidesBar {
+            nav.tabBarController?.hideTabBarNativelyAfterCommit { [weak nav, weak destination] in
+                destination != nil && nav?.topViewController === destination
+            }
+        }
         // ⚠️ AFTER THE PUSH, and that is the whole of whether it works. The
         // line above hands the stack's delegate to the flight, so a driver
         // installed before it captures a slot it is about to lose — and a

@@ -212,3 +212,23 @@ struct ShowsAppTabBarTests {
         }
     }
 }
+
+/// `RunLoopTurn.afterCommit` (#2126): never in the caller's own turn — the
+/// work it defers must miss the frame being committed.
+@MainActor
+struct RunLoopTurnTests {
+    @MainActor
+    final class Box {
+        var ran = false
+    }
+
+    @Test func afterCommitRunsInALaterTurnNeverInline() async {
+        let box = Box()
+        RunLoopTurn.afterCommit { box.ran = true }
+        #expect(!box.ran, "ran inside the turn it was meant to miss")
+        for _ in 0..<100 where !box.ran {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(box.ran, "never ran")
+    }
+}
