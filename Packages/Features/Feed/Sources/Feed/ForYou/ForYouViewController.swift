@@ -1434,6 +1434,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // no flight (`HeroMotionPolicy`).
         let reducesMotion = HeroMotionPolicy.prefersNativePush
         let revealing = !reducesMotion && installTextReveal(feed: feed, postID: tapped.id)
+        // No window: the stack's own push, so its vertical closes are pulls
+        // (#2045, #2046) and the release is that push's pop.
+        textSlideDismissal.closesByPull = !revealing
         // ⚠️ NOT REBUILT FOR THE POST THE VIEWER ENDS ON, and NOT adopted into
         // the tapped post's slot. The list keeps its order; the window travels
         // to wherever the arrival row actually is.

@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// Interactive rightward swipe-to-pop for a screen pushed WITHOUT a hero —
@@ -151,6 +152,18 @@ public final class InteractiveSlideDismissal: NSObject {
     /// post's kind from opposite sides.
     public var arbitratesWithHeroGrab = false
 
+    /// ⚠️ THE SCREEN CAME IN WITH THE NATIVE PUSH (#2045, #2046): a vertical
+    /// close is a PULL, not a scrubbed pop. No pop starts at the drag's begin;
+    /// the screen lifts its own page (`VerticalPullClosing`) under a fixed bar,
+    /// and a release past `HeroPullToRefreshView.threshold` of visible lift
+    /// pops through the chevron's path — the page leaves to the right as it
+    /// came in. A window or a flight keeps its grab: set by whoever pushes,
+    /// on every opening (`resetForNewPresentation` clears it).
+    public var closesByPull = false
+
+    /// The vertical pull under way, and its axis.
+    private var pulling: ZoomDismissAxis?
+
     /// Whether the HERO grab would accept this dismissal's landing, asked so
     /// this driver can claim the drags the hero declines.
     ///
@@ -302,6 +315,7 @@ public final class InteractiveSlideDismissal: NSObject {
     /// come through here: the capture is what makes a three-level unwind land
     /// on the right screen, and moving it there is its own bug.
     public func resetForNewPresentation() {
+        closesByPull = false
         hasCapturedSavedDelegate = false
         hasSeenFeedOnStack = false
         prepareForDismissal = nil
@@ -402,11 +416,14 @@ public final class InteractiveSlideDismissal: NSObject {
         let translation = gesture.translation(in: view)
         switch gesture.state {
         case .began:
+            if beginPull() { return }
             // Direction was vetted in gestureRecognizerShouldBegin — claim
             // immediately so the screen is under the finger at frame 0.
             beginSwipe()
         case .changed:
-            if let revealGrab {
+            if let pulling {
+                pullHost?.pullToClose(travel: max(0, pulling.along(translation)), along: pulling)
+            } else if let revealGrab {
                 revealGrab.update(translation: translation, in: view)
             } else {
                 interaction?.update(ZoomTransitionGeometry.dismissProgress(
@@ -415,6 +432,10 @@ public final class InteractiveSlideDismissal: NSObject {
                 ))
             }
         case .ended, .cancelled:
+            if pulling != nil {
+                releasePull(translation: translation, ended: gesture.state == .ended)
+                return
+            }
             releaseSwipe(
                 translation: translation,
                 velocity: gesture.velocity(in: view),
@@ -424,6 +445,55 @@ public final class InteractiveSlideDismissal: NSObject {
         default:
             break
         }
+    }
+
+    // MARK: - The pull (#2045, #2046)
+
+    private var pullHost: (any VerticalPullClosing)? { feedViewController as? any VerticalPullClosing }
+
+    /// A vertical close on a native push starts a pull, not a pop. False:
+    /// everything else, which `beginSwipe` takes.
+    private func beginPull() -> Bool {
+        guard closesByPull, activeAxis != .horizontal, let host = pullHost,
+              let nav = navigationController, let feed = feedViewController, nav.topViewController === feed,
+              !nav.arbiter.isPending else { return false }
+        pulling = activeAxis
+        (feed as? any ZoomTransitionDestination)?.setContentScrollEnabled(false)
+        host.pullToClose(travel: 0, along: activeAxis)
+        return true
+    }
+
+    /// The release takes DISTANCE ONLY, not speed: a fast flick short of the
+    /// threshold stays (a fling at the end of a list never leaves by
+    /// accident). Past it, the page leaves as it is, still lifted.
+    private func releasePull(translation: CGPoint, ended: Bool) {
+        guard let axis = pulling else { return }
+        pulling = nil
+        let feed = feedViewController
+        defer { (feed as? any ZoomTransitionDestination)?.setContentScrollEnabled(true) }
+        let lift = pullHost?.pullToClose(travel: max(0, axis.along(translation)), along: axis) ?? 0
+        // ⚠️ Committed only when the pop can run NOW: a page left lifted for
+        // a close the arbiter drops (a close pending, a transition running)
+        // would stay lifted for good.
+        guard ended, Self.pullCommits(lift: lift), let nav = navigationController, let feed,
+              nav.topViewController === feed, !nav.arbiter.isPending, nav.transitionCoordinator == nil else {
+            pullHost?.endPullToClose(commit: false)
+            return
+        }
+        pullHost?.endPullToClose(commit: true)
+        // The landing beneath (a text-faced place's page, #2015) is staged
+        // only now, at a committed release: a pull let go short inserts
+        // nothing (#2046).
+        onWillBeginPop?(axis)
+        // The chevron's path: no interaction, no grab — the slide out to the
+        // right, the bars arriving with it.
+        nav.arbiter.close(feed, whenBusy: .drop)
+    }
+
+    /// Whether a pull's visible lift closes: the app's pull distance, the
+    /// pull-to-refresh's (`HeroPullToRefreshView.threshold`), shared.
+    static func pullCommits(lift: CGFloat) -> Bool {
+        lift >= HeroPullToRefreshView.threshold
     }
 
     private func beginSwipe() {
@@ -528,6 +598,23 @@ public final class InteractiveSlideDismissal: NSObject {
     static let releaseDamping: CGFloat = 1
 
     #if DEBUG
+    /// A scripted pull (#2045, #2046): begin, travel `travel` points along
+    /// `axis`, release. Returns whether it was taken as a pull (a native
+    /// push) rather than a swipe; `whilePulling` runs mid-pull, the moment a
+    /// test reads that no pop has started.
+    @discardableResult
+    public func debugPerformPull(
+        travel: CGFloat, axis: ZoomDismissAxis, ended: Bool = true, whilePulling: () -> Void = {}
+    ) -> Bool {
+        guard ZoomDismissAxis.withUpward(axes).contains(axis) else { return false }
+        activeAxis = axis
+        guard beginPull() else { return false }
+        pullHost?.pullToClose(travel: travel, along: axis)
+        whilePulling()
+        releasePull(translation: axis.offset(along: travel, across: 0), ended: ended)
+        return true
+    }
+
     /// Scripted swipe for sim recordings (`-feed-swipe-demo`): touch injection
     /// is impossible in the simulator, so this walks the exact
     /// begin/update/release path a finger drives. Whether it completes or
@@ -1084,3 +1171,17 @@ struct LayerCornerStyle: Equatable {
 
 /// The slide's pan, marked as a custom back popper (`NativePopSubordination`).
 final class SlideDismissalPan: UIPanGestureRecognizer, CustomBackPopper {}
+
+/// A screen that lifts its own page for a pull-to-close (#2045, #2046): only
+/// its content moves, under a navigation bar that stays, over its own ground.
+@MainActor
+public protocol VerticalPullClosing: AnyObject {
+    /// The finger has travelled `travel` points along `axis` (`.upward` or
+    /// `.vertical`, downward), from 0 at the drag's begin. Returns the page's
+    /// visible lift, after the screen's resistance.
+    @discardableResult
+    func pullToClose(travel: CGFloat, along axis: ZoomDismissAxis) -> CGFloat
+    /// Released: `commit` — the page stays as it is and the pop follows —
+    /// or it settles back.
+    func endPullToClose(commit: Bool)
+}

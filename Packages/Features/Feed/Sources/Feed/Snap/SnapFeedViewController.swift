@@ -163,6 +163,10 @@ final class SnapFeedViewController: UIViewController {
     /// `.black` by default, so every route that does not lend one is byte for
     /// byte what it was.
     private var emptyGround: UIColor = .black
+    /// The pull-to-close under way on a native push (#2045, #2046): where the
+    /// page rested, and the indicator in the gap it opens.
+    private var pullBaseOffset: CGFloat?
+    private var pullIndicator: PullToGoBackIndicator?
     /// The arrival screen's own LOADING state, drawn while the corpus is in
     /// flight — a SUBVIEW, never a ground.
     ///
@@ -4444,7 +4448,9 @@ final class SnapFeedViewController: UIViewController {
     /// running from the moment it begins — THIS stack's pop, not a sheet
     /// presented or dismissed over the feed (`isTransitioningItsStack`).
     private var pageDriveYieldsToClose: Bool {
-        navigationController?.isTransitioningItsStack == true
+        // A pop under way — or, on a native push, a pull, which starts no pop
+        // (#2045, #2046).
+        navigationController?.isTransitioningItsStack == true || pullBaseOffset != nil
     }
 
     private func beginPageDrive() {
@@ -8282,4 +8288,92 @@ private final class BarAuthorBadge: AuthorBadgeDrawing {
 extension SnapFeedViewController: StackScreen {
     /// Its hero or slide owns the way back when it was opened by one; a plain push goes back natively.
     var leaving: ScreenLeaving { zoomOwnsInteractiveDismissal ? .ownGesture : .nativeBack }
+}
+
+// MARK: - The pull to go back (#2045, #2046)
+
+/// On a feed that came in with the native push, a vertical close is a pull:
+/// only the page's content moves — with the end of the list's own rubber
+/// band — under a navigation bar that stays, over the feed's own ground. No
+/// map, no dim, no parallax. The indicator rides in the gap: at the bottom
+/// for a page pulled up, under the bar for one pulled down. (In the back
+/// chevron instead was tried on the owner's device, 2026-11-05, and set
+/// aside: the native item stays.)
+extension SnapFeedViewController: VerticalPullClosing {
+    @discardableResult
+    func pullToClose(travel: CGFloat, along axis: ZoomDismissAxis) -> CGFloat {
+        let base: CGFloat
+        if let pullBaseOffset {
+            base = pullBaseOffset
+        } else {
+            // Where the page rested: a page drive that began on the same drag
+            // has already moved it a little.
+            base = pageDriveStartOffset ?? collectionView.contentOffset.y
+            pullBaseOffset = base
+            let indicator = PullToGoBackIndicator(direction: axis == .upward ? .up : .down)
+            indicator.prepare()
+            view.addSubview(indicator)
+            pullIndicator = indicator
+        }
+        let lift = Self.rubberBand(travel, dimension: max(1, view.bounds.height))
+        collectionView.contentOffset.y = axis == .upward ? base + lift : base - lift
+        placePullIndicator(lift: lift, axis: axis)
+        pullIndicator?.setPull(lift)
+        return lift
+    }
+
+    func endPullToClose(commit: Bool) {
+        guard let base = pullBaseOffset else { return }
+        pullBaseOffset = nil
+        let indicator = pullIndicator
+        pullIndicator = nil
+        // Past the threshold the page leaves AS IT IS, lifted, with its
+        // indicator — no drop back first, no diagonal.
+        guard !commit else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { indicator?.removeFromSuperview() }
+            return
+        }
+        UIView.animate(
+            withDuration: 0.4, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.collectionView.contentOffset.y = base
+            indicator?.alpha = 0
+        } completion: { _ in indicator?.removeFromSuperview() }
+    }
+
+    /// Pinned to the chrome, in the gap: over the toolbar for a page lifted
+    /// from the bottom, under the bar for a page pulled down — it never rides
+    /// the lift behind either (the owner's recording, 2026-11-05).
+    private func placePullIndicator(lift: CGFloat, axis: ZoomDismissAxis) {
+        guard let indicator = pullIndicator else { return }
+        let width = view.bounds.width - 2 * Spacing.lg
+        let size = indicator.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        let centreY: CGFloat
+        if axis == .upward {
+            let pageBottom = view.bounds.maxY - lift
+            let toolbarTop = pullChromeEdge(bottom: true) ?? view.bounds.maxY - view.safeAreaInsets.bottom
+            centreY = min(toolbarTop - size.height / 2 - Spacing.sm, (pageBottom + toolbarTop) / 2)
+        } else {
+            let barBottom = pullChromeEdge(bottom: false) ?? view.safeAreaInsets.top
+            centreY = max(barBottom + size.height / 2 + Spacing.sm, lift / 2 + barBottom / 2)
+        }
+        indicator.bounds = CGRect(origin: .zero, size: CGSize(width: width, height: size.height))
+        indicator.center = CGPoint(x: view.bounds.midX, y: centreY)
+    }
+
+    /// The navigation bar's bottom, or the shown toolbar's top, in the
+    /// page's space.
+    private func pullChromeEdge(bottom: Bool) -> CGFloat? {
+        guard let nav = navigationController else { return nil }
+        if bottom {
+            guard !nav.isToolbarHidden, nav.toolbar.window != nil, nav.toolbar.bounds.height > 0 else { return nil }
+            return nav.toolbar.convert(nav.toolbar.bounds, to: view).minY
+        }
+        return nav.navigationBar.convert(nav.navigationBar.bounds, to: view).maxY
+    }
+
+    #if DEBUG
+    var debugPullIndicator: PullToGoBackIndicator? { pullIndicator }
+    #endif
 }
