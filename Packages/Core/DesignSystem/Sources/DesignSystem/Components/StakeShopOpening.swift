@@ -24,7 +24,7 @@ public protocol StakeShopOpening: AnyObject {
 public enum StakeShop {
     /// The first `StakeShopOpening` up `source`'s responder chain.
     public static func opener(from source: UIResponder) -> (any StakeShopOpening)? {
-        sequence(first: source, next: \.next).lazy.compactMap { $0 as? any StakeShopOpening }.first
+        source.firstController(as: (any StakeShopOpening).self)
     }
 
     /// The empty-pack row's action from `source`: pushes the Shop on the stack

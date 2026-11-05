@@ -20,7 +20,7 @@ public protocol TextEntityOpening: AnyObject {
 public enum TextEntityLinks {
     /// The first `TextEntityOpening` up `source`'s responder chain.
     public static func opener(from source: UIResponder) -> (any TextEntityOpening)? {
-        sequence(first: source, next: \.next).lazy.compactMap { $0 as? any TextEntityOpening }.first
+        source.firstController(as: (any TextEntityOpening).self)
     }
 
     /// The `textEntity` mark of the character under `point` in `label`, laid

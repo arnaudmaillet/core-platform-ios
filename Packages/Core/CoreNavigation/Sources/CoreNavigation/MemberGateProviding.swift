@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import UIKit
 
 /// Whoever holds the app's `MemberGating`, found up the responder chain.
@@ -19,9 +20,7 @@ public enum MemberGates {
     /// The gate up `source`'s responder chain, or nil off-screen (a control not
     /// in a window has no chain to the shell).
     public static func gate(from source: UIResponder) -> (any MemberGating)? {
-        sequence(first: source, next: \.next).lazy
-            .compactMap { ($0 as? any MemberGateProviding)?.memberGate }
-            .first
+        source.firstController(as: (any MemberGateProviding).self)?.memberGate
     }
 
     /// Whether the viewer up `source`'s chain is a GUEST: a gate found, and

@@ -311,8 +311,6 @@ public protocol TextCompletionSource: AnyObject {
 public enum TextCompletions {
     /// The first provider up `source`'s responder chain.
     public static func provider(from source: UIResponder) -> (any TextCompletionProviding)? {
-        sequence(first: source, next: \.next).lazy
-            .compactMap { ($0 as? any TextCompletionSource)?.textCompletions }
-            .first
+        source.firstController(as: (any TextCompletionSource).self)?.textCompletions
     }
 }
