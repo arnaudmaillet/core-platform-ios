@@ -41,6 +41,7 @@ public enum DebugDashboard {
         guard !isPresented, let scene = scene ?? foregroundScene() else { return }
         let window = window ?? DashboardWindow(windowScene: scene)
         self.window = window
+        captureScreen()
         InteractionLatency.isPaused = true
         window.isHidden = false
         let root = DebugListViewController(title: "Debug") { rootSections() }
@@ -90,7 +91,7 @@ public enum DebugDashboard {
 
     /// A clear window above the app, below the latency and cost badges, that
     /// hosts the dashboard's sheet.
-    private final class DashboardWindow: AppWindow, UIAdaptivePresentationControllerDelegate {
+    private final class DashboardWindow: AppWindow, DebugOverlayWindow, UIAdaptivePresentationControllerDelegate {
         override init(windowScene: UIWindowScene) {
             super.init(windowScene: windowScene)
             windowLevel = .alert - 1

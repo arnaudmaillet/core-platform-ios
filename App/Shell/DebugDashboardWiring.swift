@@ -26,9 +26,10 @@ enum DebugDashboardWiring {
         var entries: [DebugDashboard.Entry] = [
             DebugDashboard.Entry(title: "Context", symbol: "info.circle") {
                 let controller = DebugListViewController(title: "Context") { contextSections(container: container) }
-                Task { await refreshViewer(container: container, then: controller) }
+                Task { await refreshViewer(container: container); controller.reload() }
                 return controller
             },
+            DebugDashboard.bugReportEntry,
             DebugDashboard.Entry(title: "Routes", symbol: "arrow.triangle.turn.up.right.diamond") {
                 DebugListViewController(title: "Routes") { routeSections(container: container) }
             },
@@ -36,8 +37,17 @@ enum DebugDashboardWiring {
         if container.environment == .mock {
             entries.append(NetworkConditionsMenu.entry(faults: container.mockNetworkFaults, bff: container.mockBackend.bff))
         }
-        entries += [DebugDashboard.flagsEntry, DebugDashboard.performanceEntry, DebugDashboard.logsEntry]
+        entries += [DebugDashboard.flagsEntry, DebugDashboard.performanceEntry, DebugDashboard.interfaceEntry]
+        entries += DebugDashboardTools.entries(container: container)
+        entries.append(DebugDashboard.logsEntry)
         DebugDashboard.entries = entries
+        Task { await refreshViewer(container: container) }
+        DebugDashboard.reportAttachments = {
+            [
+                ("context.txt", contextText(container: container)),
+                ("failed-calls.txt", DebugDashboardTools.failedCallsText()),
+            ]
+        }
     }
 
     /// The shake: the dashboard — unless a text field is being edited, where
@@ -62,14 +72,27 @@ enum DebugDashboardWiring {
 
     private static var viewer = "…"
 
-    private static func refreshViewer(container: AppContainer, then controller: DebugListViewController) async {
+    /// Read when Context opens and when the dashboard is installed, so a
+    /// bug report made without opening Context still names the viewer.
+    private static func refreshViewer(container: AppContainer) async {
         switch await container.viewerSession.current() {
         case .guest:
             viewer = "guest"
         case .member(let account, let profile):
             viewer = "member · account \(account.rawValue) · profile \(profile?.rawValue ?? "unresolved")"
         }
-        controller.reload()
+    }
+
+    private static func text(of rows: [DebugRow]) -> String {
+        rows.compactMap { row -> String? in
+            if case .info(let title, let value) = row { return "\(title): \(value)" }
+            return nil
+        }.joined(separator: "\n")
+    }
+
+    /// The context as text, for a bug report.
+    private static func contextText(container: AppContainer) -> String {
+        text(of: contextSections(container: container).flatMap(\.rows))
     }
 
     private static func contextSections(container: AppContainer) -> [DebugSection] {
@@ -104,10 +127,7 @@ enum DebugDashboardWiring {
             .info("Appearance", traits.userInterfaceStyle == .dark ? "dark" : "light"),
             .info("Language", Locale.preferredLanguages.first ?? "—"),
         ]
-        let summary = rows.compactMap { row -> String? in
-            if case .info(let title, let value) = row { return "\(title): \(value)" }
-            return nil
-        }.joined(separator: "\n")
+        let summary = text(of: rows)
         return [
             DebugSection(title: nil, footer: "Tap a row to copy it. Tokens are never shown.", rows: rows),
             DebugSection(title: nil, rows: [

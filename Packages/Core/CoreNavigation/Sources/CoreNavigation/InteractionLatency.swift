@@ -887,7 +887,7 @@ private final class FrameClock: NSObject {
 /// over the budget (red) or at risk (amber), for 2.5 s. No animation: an
 /// animation of its own would read as the next input's response.
 @MainActor
-private final class HUDWindow: AppWindow {
+private final class HUDWindow: AppWindow, DebugOverlayWindow {
     private let label = UILabel()
     private var generation = 0
 

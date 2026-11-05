@@ -38,6 +38,8 @@ struct StackScreenGuardTests {
         "LatencyBenchViewController": "the DEBUG latency bench (#2116): a bare UIKit screen on purpose, it measures UIKit's own floor",
         "DebugListViewController": "the DEBUG dashboard's own stack (#2131), in its own window, never on the app's",
         "DebugLogViewController": "the DEBUG dashboard's log viewer (#2132), in its own window, never on the app's",
+        "DebugTextViewController": "the DEBUG dashboard's text viewer (#2133), in its own window, never on the app's",
+        "DebugReportViewController": "the DEBUG dashboard's bug report (#2134), in its own window, never on the app's",
         // A sheet's or a modal's root: left by its own close or swipe-down.
         "WalletSheetViewController": "a sheet",
         "ToastMessageSheet": "a sheet",

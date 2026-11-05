@@ -76,7 +76,7 @@ public enum DebugTools {
         let tools = running
         guard !tools.isEmpty else { return nil }
         let total = tools.reduce(0) { $0 + $1.costMs }
-        return "⚙︎ \(tools.count) tool\(tools.count == 1 ? "" : "s") · ~\(format(total))"
+        return "⚙︎ \(tools.count) tool\(tools.count == 1 ? "" : "s") · \(total < 1 ? "" : "~")\(format(total))"
     }
 
     static func didChange() {
@@ -88,9 +88,9 @@ public enum DebugTools {
     }
 }
 
-/// The persistent cost indicator: a small badge at the screen's top-leading
-/// corner while any costly tool runs, so nobody forgets that the numbers are
-/// distorted. A passthrough window; no animation (an animation of its own
+/// The persistent cost indicator: a small badge at the screen's
+/// bottom-trailing corner, above the tab bar, while any costly tool runs, so
+/// nobody forgets that the numbers are distorted. A passthrough window; no animation (an animation of its own
 /// would read as the next input's response).
 @MainActor
 enum DebugCostBadge {
@@ -111,7 +111,7 @@ enum DebugCostBadge {
         badge.show(line)
     }
 
-    private final class BadgeWindow: AppWindow {
+    private final class BadgeWindow: AppWindow, DebugOverlayWindow {
         private let label = UILabel()
 
         override init(windowScene: UIWindowScene) {
@@ -135,8 +135,11 @@ enum DebugCostBadge {
         func show(_ line: String) {
             label.text = line
             let size = label.sizeThatFits(CGSize(width: 240, height: 18))
-            let top = windowScene?.statusBarManager?.statusBarFrame.maxY ?? 44
-            label.frame = CGRect(x: 12, y: top + 2, width: size.width + 14, height: 18)
+            let width = size.width + 14
+            // Above the tab bar, clear of the bars' items: it must never
+            // cover a control.
+            let y = bounds.height - safeAreaInsets.bottom - 96
+            label.frame = CGRect(x: bounds.width - width - 12, y: y, width: width, height: 18)
             isHidden = false
         }
     }

@@ -89,11 +89,19 @@ final class LatencyBenchViewController: UIViewController {
     /// on the way adds to. The debug dashboard's cost is read by running it
     /// with and without its tools: `-interaction-latency` (on),
     /// `-latency-bench-auto-off` (installed, then switched off as the
-    /// dashboard does), `-debug-dashboard` (opened, then closed first).
+    /// dashboard does), `-debug-dashboard` (opened, then closed first),
+    /// `-latency-bench-tools frame-rate,touches` (those tools on, by id) and
+    /// `-latency-bench-tools-off` (on, then off again: back to the baseline).
     private static var autoCycles: Int? {
         let arguments = ProcessInfo.processInfo.arguments
         guard let index = arguments.firstIndex(of: "-latency-bench-auto"), index + 1 < arguments.count else { return nil }
         return Int(arguments[index + 1])
+    }
+
+    private static var benchTools: [String] {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-latency-bench-tools"), index + 1 < arguments.count else { return [] }
+        return arguments[index + 1].split(separator: ",").map(String.init)
     }
 
     private func runAuto(_ cycles: Int) {
@@ -102,6 +110,9 @@ final class LatencyBenchViewController: UIViewController {
             try? await Task.sleep(for: .seconds(4))
             if arguments.contains("-latency-bench-auto-off") { InteractionLatency.setActive(false, badge: false) }
             DebugDashboard.close()
+            let tools = Self.benchTools.compactMap(DebugTools.tool)
+            tools.forEach { $0.set(true) }
+            if arguments.contains("-latency-bench-tools-off") { tools.forEach { $0.set(false) } }
             try? await Task.sleep(for: .seconds(1))
             var pushes: [Double] = []
             for _ in 0..<cycles {
@@ -119,6 +130,8 @@ final class LatencyBenchViewController: UIViewController {
             func at(_ q: Double) -> String { String(format: "%.2f", sorted[min(sorted.count - 1, Int(Double(sorted.count) * q))]) }
             print("[bench-auto] latency=\(InteractionLatency.isActive ? "on" : InteractionLatency.isInstalled ? "off" : "never")"
                   + " dashboard=\(arguments.contains("-debug-dashboard") ? "opened-closed" : "never")"
+                  + " tools=\(tools.isEmpty ? "none" : tools.map(\.id).joined(separator: ","))"
+                  + (tools.isEmpty ? "" : arguments.contains("-latency-bench-tools-off") ? "(on-off)" : "(on)")
                   + " pushes=\(sorted.count) p50=\(at(0.5))ms p90=\(at(0.9))ms")
         }
     }

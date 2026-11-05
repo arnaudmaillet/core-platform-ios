@@ -46,16 +46,26 @@ public extension DebugDashboard {
     /// hangs; plus the tools the app registers (the presentation budget).
     static var performanceEntry: Entry {
         registerLatencyTool()
+        DebugTools.register(DebugTool(
+            id: "frame-rate",
+            title: "Frames, hitches, memory",
+            detail: "A corner badge: fps, hitch ms per second, hangs, footprint and CPU (#2133)",
+            cost: "a display link while shown; its own ms per frame is on it",
+            costMs: 0.1,
+            isOn: { FrameRateOverlay.shared.isOn },
+            apply: { FrameRateOverlay.shared.setOn($0) }
+        ))
         return Entry(title: "Performance", symbol: "gauge.with.dots.needle.67percent") {
             DebugListViewController(title: "Performance") { performanceSections() }
         }
     }
 
     private static func registerLatencyTool() {
-        // A record taken beside another costly tool says so.
+        // A record taken beside another costly tool, or under a quick
+        // switch, says so.
         InteractionLatency.measuredUnder = {
-            let others = DebugTools.running.filter { $0.id != "interaction-latency" }
-            return others.isEmpty ? nil : "under " + others.map(\.title).joined(separator: ", ")
+            let others = DebugTools.running.filter { $0.id != "interaction-latency" }.map(\.title) + switchesOn
+            return others.isEmpty ? nil : "under " + others.joined(separator: ", ")
         }
         DebugTools.register(DebugTool(
             id: "interaction-latency",
@@ -83,6 +93,15 @@ public extension DebugDashboard {
                 )),
             ]
         )]
+        let memory = DebugSystemStats.footprintMB().map { "\(Int($0.rounded())) MB" } ?? "—"
+        let cpu = DebugSystemStats.cpuPercent().map { "\(Int($0.rounded()))% of a core" } ?? "—"
+        sections.append(DebugSection(title: "Now", footer: "Read when this screen opens; the badge reads them once a second.", rows: [
+            .info("Memory (footprint)", memory),
+            .info("CPU", cpu),
+            .action("Simulate a Memory Warning", detail: "Posts didReceiveMemoryWarning to the app's observers", run: {
+                NotificationCenter.default.post(name: UIApplication.didReceiveMemoryWarningNotification, object: UIApplication.shared)
+            }),
+        ]))
         let records = InteractionLatency.records.suffix(50).reversed()
         sections.append(DebugSection(
             title: "Last interactions",
