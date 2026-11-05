@@ -78,7 +78,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     private let entities: EntityStore
     /// The posts the server withholds from this viewer, learnt on any feed
     /// (#2048): every feed and the For You grid drop the ones not on show.
-    private let unavailablePosts = UnavailablePosts()
+    private let unavailablePosts = UnavailablePosts.shared
     /// The Text Post page's drafts. The app hands in its one store (built
     /// once in `AppContainer`, charter P4); a test hands in one of its own.
     /// Nil is the fallback for a caller that has neither, and it costs a file

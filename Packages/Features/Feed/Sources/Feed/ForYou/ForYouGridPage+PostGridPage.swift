@@ -1,3 +1,4 @@
+import CoreModels
 import FeedInterface
 import MediaCore
 import MediaPlayback
@@ -9,16 +10,26 @@ import UIKit
 /// becomes public for it.
 extension ForYouGridPage: PostGridPage {
     func show(_ state: PostGridPageState) {
+        hostedState = state
+        observeWithheldPosts()
+        // ⚠️ NEVER A POST THE SERVER WITHHOLDS (#2048). A profile's gallery
+        // holds its corpus from its own reads, so a post learnt unavailable on
+        // a feed kept its tile here — and its tap opened "This post isn't
+        // available". The page leaves them out of whatever it is handed.
+        let withheld = withheldPosts
         switch state {
         case .loading:
             render(ForYouViewModel.PageState.loading)
         case .content(let posts):
-            render(ForYouViewModel.PageState.content(posts))
+            render(ForYouViewModel.PageState.content(posts.filter { !withheld.contains($0.id) }))
         // Through the cold load's gate, as `render`'s states (#1900): a lock
         // shown before the delay had the bones land under it, and "taking
         // longer" replace it at 10 s.
         case .sections(let groups):
-            settle { [weak self] in self?.applyGroups(groups) }
+            let kept = groups
+                .map { PostGridPageSection(title: $0.title, posts: $0.posts.filter { !withheld.contains($0.id) }) }
+                .filter { !$0.posts.isEmpty }
+            settle { [weak self] in self?.applyGroups(kept) }
         case .status(let status):
             settle { [weak self] in
                 self?.showStatus(
@@ -27,6 +38,31 @@ extension ForYouGridPage: PostGridPage {
                     action: status.actionTitle == nil ? nil : { [weak self] in self?.retry() }
                 )
             }
+        }
+    }
+
+    /// Hears the record once a host has shown something: a post learnt
+    /// unavailable that this page holds leaves it at once.
+    private func observeWithheldPosts() {
+        guard withheldObservation.token == nil else { return }
+        withheldObservation.token = NotificationCenter.default.addObserver(
+            forName: UnavailablePosts.didChange, object: nil, queue: .main
+        ) { [weak self] note in
+            let ids = note.userInfo?[UnavailablePosts.idsKey] as? Set<PostID> ?? []
+            let sender = note.object.map { ObjectIdentifier($0 as AnyObject) }
+            MainActor.assumeIsolated {
+                guard let self, sender == ObjectIdentifier(self.withheldPosts),
+                      let state = self.hostedState, Self.holds(state, anyOf: ids) else { return }
+                self.show(state)
+            }
+        }
+    }
+
+    private static func holds(_ state: PostGridPageState, anyOf ids: Set<PostID>) -> Bool {
+        switch state {
+        case .content(let posts): posts.contains { ids.contains($0.id) }
+        case .sections(let groups): groups.contains { $0.posts.contains { ids.contains($0.id) } }
+        case .loading, .status: false
         }
     }
 

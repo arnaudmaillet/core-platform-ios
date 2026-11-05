@@ -17,6 +17,9 @@ import Foundation
 /// session.
 @MainActor
 public final class UnavailablePosts {
+    /// The app's one record. A test builds its own.
+    static let shared = UnavailablePosts()
+
     /// Posted with the posts just learnt under `idsKey`.
     static let didChange = Notification.Name("UnavailablePostsDidChange")
     static let idsKey = "ids"
