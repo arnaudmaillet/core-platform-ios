@@ -97,7 +97,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // screen on and names the frames it spent it in (charter P2).
         PresentationBudget.installIfRequested()
         // `-interaction-latency`: every input's time to its first frame on
-        // screen, against the 100 ms rule (#2116, charter P15).
+        // screen, against the 100 ms rule (#2116, charter P16).
         InteractionLatency.installIfRequested()
         #endif
         container.memberGate.presenter = self

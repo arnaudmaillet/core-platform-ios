@@ -213,7 +213,7 @@ public struct InteractionLatencyTracker: Sendable {
 }
 
 /// `-interaction-latency` (#2116): every input's time to its first frame on
-/// screen, against the 100 ms rule (`dev/PRESENTATION_CHARTER.md` P15).
+/// screen, against the 100 ms rule (`dev/PRESENTATION_CHARTER.md` P16).
 ///
 /// `-presentation-budget` times the turn that BUILDS a screen; it cannot see
 /// a response deferred to a later turn by a `Task`, a `main.async`, an
