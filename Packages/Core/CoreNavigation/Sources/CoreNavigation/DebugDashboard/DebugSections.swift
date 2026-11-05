@@ -61,8 +61,10 @@ public extension DebugDashboard {
             id: "interaction-latency",
             title: "Interaction latency",
             detail: "Input → first frame for every tap, and HANG lines (#2116)",
-            cost: "about 1 ms per interaction",
-            costMs: 1,
+            // Measured with -latency-bench-auto (#2132): +0.2–0.5 ms per push
+            // at p50 on the iPhone 18 Pro simulator, inside the noise.
+            cost: "about 0.3 ms per push (measured)",
+            costMs: 0.3,
             isOn: { InteractionLatency.isActive },
             apply: { InteractionLatency.setActive($0, badge: InteractionLatency.showsBadge) }
         ))
