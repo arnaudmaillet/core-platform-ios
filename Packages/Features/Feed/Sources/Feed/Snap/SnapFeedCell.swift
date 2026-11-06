@@ -899,7 +899,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.onScrubPreviewRequested = { [weak self] fraction in
             self?.playback.updateScrubPreview(fraction)
         }
-        // Exact, drag or tap — see `SnapCellPlayback.seek(toFraction:)`.
+        // A tap on the bar, exact — see `SnapCellPlayback.seek(toFraction:)`.
+        // A drag seeks only at its release (`endScrub(at:)`, #2150).
         chrome.onMediaSeekRequested = { [weak self] fraction in
             self?.playback.seek(toFraction: fraction)
         }

@@ -191,44 +191,58 @@ struct SnapCellPlaybackTests {
 
     // MARK: - The scrub
 
-    @Test func aScrubPausesTheClipAndTheReleaseResumesIt() async {
+    /// #2150 (the owner, 2026-11-05): the clip is left as it is while the
+    /// thumb moves, and goes where it let go on the release.
+    @Test func aDragLeavesAPlayingClipPlaying() async {
         let (playback, pool, page) = await Self.playingPage()
+        playback.beginScrub()
+        #expect(pool.isAdvancing(in: page.surface), "the drag paused the clip")
+    }
 
+    @Test func aDragLeavesAPausedClipPaused() async {
+        let (playback, pool, page) = await Self.playingPage()
+        _ = playback.toggle()
         playback.beginScrub()
         #expect(pool.isAdvancing(in: page.surface) == false)
+    }
 
-        // No seek in flight: the release resumes at once.
+    /// A cancelled drag (nil) touches nothing: no seek, no pause.
+    @Test func aCancelledDragChangesNothing() async {
+        let (playback, pool, page) = await Self.playingPage()
+        playback.beginScrub()
         playback.endScrub(at: nil)
+        #expect(playback.debugSeekRequests.isEmpty)
         #expect(pool.isAdvancing(in: page.surface))
     }
 
-    @Test func aClipPausedBeforeTheScrubStaysPausedAfterIt() async {
+    /// The release seeks once, exactly, and a playing clip plays on once it
+    /// has landed.
+    @Test func theReleaseSeeksOnceAndAPlayingClipPlaysOn() async {
+        let (playback, pool, page) = await Self.playingPage()
+        playback.beginScrub()
+        playback.endScrub(at: 0.4)
+        #expect(playback.debugSeekRequests == [0.4])
+        await Self.settle { pool.isAdvancing(in: page.surface) }
+        #expect(pool.isAdvancing(in: page.surface))
+    }
+
+    /// A paused clip stays paused after the release, on its new frame.
+    @Test func theReleaseKeepsAPausedClipPaused() async {
         let (playback, pool, page) = await Self.playingPage()
         _ = playback.toggle()
-
         playback.beginScrub()
-        playback.endScrub(at: nil)
-
+        playback.endScrub(at: 0.4)
+        #expect(playback.debugSeekRequests == [0.4])
+        await Self.settle(looks: 100) { false }
         #expect(pool.isAdvancing(in: page.surface) == false)
     }
 
-    @Test func aPageThatStoppedBeingWatchedMidScrubStaysStopped() async {
+    @Test func aPageThatStoppedBeingWatchedBeforeTheReleaseStaysStopped() async {
         let (playback, pool, page) = await Self.playingPage()
-
         playback.beginScrub()
         page.isActive = false
-        playback.endScrub(at: nil)
-
-        #expect(pool.isAdvancing(in: page.surface) == false)
-    }
-
-    @Test func aRecycledPageOwesNoResumeToTheDragBeforeIt() async {
-        let (playback, pool, page) = await Self.playingPage()
-
-        playback.beginScrub()
-        playback.reset()
-        playback.endScrub(at: nil)
-
+        playback.endScrub(at: 0.4)
+        await Self.settle(looks: 100) { false }
         #expect(pool.isAdvancing(in: page.surface) == false)
     }
 
