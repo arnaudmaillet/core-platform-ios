@@ -279,6 +279,97 @@ struct SnapCommentTickerViewTests {
         }
     }
 
+    // MARK: - The past is what was shown (#2154)
+
+    /// A band just started: lane 0's first bubble, grabbed where it entered.
+    /// The spawn timers stop at the grab, so nothing else comes.
+    private func grabbedAtStart(_ ticker: SnapCommentTickerView) -> UIView? {
+        ticker.setActive(true)
+        guard run(until: { !bubbleViews(ticker).isEmpty }) else { return nil }
+        ticker.beginScrub()
+        return bubbleViews(ticker).first
+    }
+
+    private func texts(_ ticker: SnapCommentTickerView) -> [String] {
+        bubbleViews(ticker).compactMap { view in view.subviews.compactMap { ($0 as? UILabel)?.text }.first }
+    }
+
+    /// The owner's recording (2026-11-05): a drag in the first second filled
+    /// both lanes edge to edge, the left backfill rewinding into reactions
+    /// that never crossed the band.
+    @Test func aScrubBackRightAfterActivationAddsNothingOnTheLeft() throws {
+        try hosting { window in
+            let ticker = makeTicker(in: window)
+            let first = try #require(grabbedAtStart(ticker))
+            let x = first.layer.position.x
+            ticker.applyScrubTranslation(20)
+            #expect(bubbleViews(ticker) == [first], "a backward scrub conjured \(texts(ticker))")
+            #expect(abs(first.layer.position.x - (x + 20)) < 0.5)
+        }
+    }
+
+    @Test func aScrubForwardAtTheStartBackfillsOnlyTheRight() throws {
+        try hosting { window in
+            let ticker = makeTicker(in: window)
+            let first = try #require(grabbedAtStart(ticker))
+            let left = first.frame.minX
+            ticker.applyScrubTranslation(-150)
+            let views = bubbleViews(ticker)
+            #expect(views.count > 1, "nothing came in from the right")
+            let leftmost = views.map(\.frame.minX).min() ?? 0
+            #expect(abs(leftmost - (left - 150)) < 0.5, "a bubble appeared left of the first one")
+        }
+    }
+
+    /// Scrubbed forward and back the same distance, the band is as it was:
+    /// the first reaction where it stood, and nothing before it.
+    @Test func aScrubBackRewindsExactlyWhatWasShown() throws {
+        try hosting { window in
+            let ticker = makeTicker(in: window)
+            let first = try #require(grabbedAtStart(ticker))
+            let text = texts(ticker).first
+            let left = first.frame.minX
+            for _ in 0..<6 { ticker.applyScrubTranslation(-50) }
+            for _ in 0..<6 { ticker.applyScrubTranslation(50) }
+            let views = bubbleViews(ticker)
+            let leftmost = try #require(views.min { $0.frame.minX < $1.frame.minX })
+            #expect(abs(leftmost.frame.minX - left) < 0.5)
+            #expect(leftmost.subviews.compactMap { ($0 as? UILabel)?.text }.first == text)
+        }
+    }
+
+    /// A drag that carries a lane's only bubble out on the right leaves the
+    /// lane empty: it used to put the next one whole at the entry edge.
+    @Test func anEmptiedLaneStaysEmptyOnABackwardDrag() throws {
+        try hosting { window in
+            let ticker = makeTicker(in: window)
+            _ = try #require(grabbedAtStart(ticker))
+            ticker.applyScrubTranslation(120)
+            #expect(bubbleViews(ticker).isEmpty, "conjured \(texts(ticker))")
+        }
+    }
+
+    /// A small pool, scrubbed back and forth: no reaction in both lanes.
+    @Test func noReactionShowsInBothLanes() throws {
+        try hosting { window in
+            let ticker = makeTicker(itemCount: 3, in: window)
+            _ = try #require(grabbedAtStart(ticker))
+            let moves: [CGFloat] = Array(repeating: -80, count: 10) + Array(repeating: 80, count: 10) + [-200, 200, -300, 120]
+            for dx in moves {
+                ticker.applyScrubTranslation(dx)
+                // Per lane (its y): a small pool repeats within a lane.
+                var lanes: [Int: Set<String>] = [:]
+                for view in bubbleViews(ticker) {
+                    let text = view.subviews.compactMap { ($0 as? UILabel)?.text }.first ?? ""
+                    lanes[Int(view.layer.position.y.rounded()), default: []].insert(text)
+                }
+                let sets = Array(lanes.values)
+                let twins = sets.count < 2 ? [] : sets[0].intersection(sets[1])
+                #expect(twins.isEmpty, "in both lanes after \(dx): \(twins)")
+            }
+        }
+    }
+
     /// Dragging displaces the surviving bubbles exactly with the finger, and
     /// backfill keeps the band covered right up to the entry edge in both
     /// scrub directions.
