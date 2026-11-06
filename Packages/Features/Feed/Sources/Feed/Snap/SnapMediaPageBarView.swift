@@ -1137,11 +1137,12 @@ final class SnapMediaPageBarView: UIView {
         guard let seekAnchor, let bar = barWidth, bar > 0 else { return }
         let moved = Double((x - touchDownX) / bar)
         let fraction = min(max(seekAnchor + moved, 0), 1)
-        // The fill follows the finger in THIS event, 1:1 — before the seek is
-        // even asked for, and whatever the player does with it.
+        // The fill follows the finger in THIS event, 1:1. The clip does not
+        // (#2150, the owner 2026-11-05): it plays on, or stays paused, while
+        // the thumb moves, and the card is the only picture of the target.
+        // The clip goes there on the release (`onScrubEnded`).
         heldPlayhead = fraction
         layoutSegments()
-        onSeekRequested?(fraction)
         onScrubPreview((fraction: fraction, x: x))
     }
 

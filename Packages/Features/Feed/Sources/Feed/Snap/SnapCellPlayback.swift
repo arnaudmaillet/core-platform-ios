@@ -339,107 +339,82 @@ final class SnapCellPlayback: NSObject {
         return 0
     }()
 
-    /// The bar asked for a moment of the clip — a drag or a tap on it.
+    /// The bar asked for a moment of the clip: a tap on it, or a drag's
+    /// release (`endScrub(at:)`).
     func seek(toFraction fraction: Double) {
         guard let pool, let view = surface() else { return }
-        // ⚠️ EXACT, drag or tap. The quarter-second tolerance this used to
-        // take let the player answer with whichever frame it had nearest —
-        // usually a keyframe — so the picture jumped between keyframes
-        // while the thumb moved smoothly: "it skips a lot of frames". The
-        // controller's chase keeps ONE seek in flight and goes to the
-        // latest position when it lands, so exact seeks never queue up
-        // behind the finger; they just land as fast as the decoder can.
-        // Measured in the PR (`-scrub-log`).
+        // ⚠️ EXACT. A tolerant seek let the player answer with whichever
+        // frame it had nearest, usually a keyframe: the picture landed
+        // somewhere near the moment, not on it.
         pool.seek(toFraction: fraction, in: view,
                   toleranceSeconds: Self.scrubSeekTolerance)
         #if DEBUG
-        scrubTrace?.requests += 1
+        debugSeekRequests.append(fraction)
         #endif
-        // The bar draws the finger itself while it drags (see
+        // The bar draws the finger itself (see
         // `SnapMediaPageBarView.heldPlayhead`); the fed playhead takes over
         // once the player has caught up.
     }
 
-    /// Whether the clip was running when a drag took its playhead, so the
-    /// release knows to start it again — and leaves a clip the viewer had
-    /// paused, paused.
-    private var resumesAfterScrub = false
-
     /// A recycled page owes nothing to the post it showed: no resume to its
-    /// hold, its sheet or its drag, and no preview it was waiting for.
+    /// hold or its sheet, and no preview it was waiting for.
     ///
-    /// ⚠️ ALL OF THEM, not only the drag's (#857). Before, only
-    /// `resumesAfterScrub` was cleared, so a cell recycled mid-hold kept
-    /// `isHeldPaused`, and the next post's hold ending in `.failed` or
-    /// `.cancelled` resumed a clip the viewer had paused.
+    /// ⚠️ ALL OF THEM (#857). Before, only the drag's resume was cleared, so
+    /// a cell recycled mid-hold kept `isHeldPaused`, and the next post's hold
+    /// ending in `.failed` or `.cancelled` resumed a clip the viewer had
+    /// paused. (A drag owes no resume any more: it never pauses, #2150.)
     func reset() {
         isHeldPaused = false
         isSheetPaused = false
         wantedPreviewFraction = nil
         isFetchingPreview = false
-        resumesAfterScrub = false
     }
 
-    /// ⚠️ THE CLIP STOPS UNDER THE THUMB. Left running, it advanced between
-    /// seeks and every landing was followed by a few frames of playback the
-    /// finger never asked for — the picture shuffling forward and back while
-    /// the thumb moved one way.
+    #if DEBUG
+    /// Tests only: every moment this page asked its player to go to.
+    private(set) var debugSeekRequests: [Double] = []
+    #endif
+
+    /// A drag took the bar's thumb (#2150, the owner 2026-11-05): the clip
+    /// is left as it is, playing (picture and sound) or paused, while the
+    /// thumb moves. Only the card shows the target (`updateScrubPreview`).
     func beginScrub() {
-        guard let pool, let view = surface() else { return }
-        resumesAfterScrub = pool.isPaused(in: view) == false
-        pool.setPaused(true, in: view)
         #if DEBUG
+        guard let pool, let view = surface() else { return }
         if ProcessInfo.processInfo.arguments.contains("-scrub-log") {
-            scrubTrace = ScrubTrace(start: CACurrentMediaTime(),
-                                    landedAtStart: pool.debugSeeksLanded,
-                                    cancelledAtStart: pool.debugSeeksCancelled)
+            print(String(format: "[scrub] %.3f began paused=%@", CACurrentMediaTime(),
+                         pool.isPaused(in: view) == true ? "Y" : "N"))
         }
         #endif
     }
 
-    /// Lands exactly where the thumb let go, and only THEN starts the clip
-    /// again — see `VideoPlaybackController.whenSeeksSettle` for what resuming
-    /// under a seek still in flight looked like.
+    /// The release: the clip goes exactly where the thumb let go and keeps
+    /// the state it had. A playing clip holds still under the seek and runs
+    /// again only once it has landed (see `VideoPlaybackController
+    /// .whenSeeksSettle`: resumed under a seek still in flight, the old
+    /// picture played a few frames first). A cancel (nil) changes nothing:
+    /// nothing was seeked.
     func endScrub(at fraction: Double?) {
-        guard let pool, let view = surface() else { return }
-        if let fraction {
-            pool.seek(toFraction: fraction, in: view, toleranceSeconds: 0)
-        }
-        let resumes = resumesAfterScrub
-        resumesAfterScrub = false
+        guard let fraction, let pool, let view = surface() else { return }
+        let resumes = pool.isPaused(in: view) == false
+        if resumes { pool.setPaused(true, in: view) }
+        pool.seek(toFraction: fraction, in: view, toleranceSeconds: 0)
         #if DEBUG
-        let trace = scrubTrace
-        scrubTrace = nil
+        debugSeekRequests.append(fraction)
+        let start = CACurrentMediaTime()
         #endif
         pool.whenSeeksSettle(in: view) { [weak self] in
             guard let self else { return }
             #if DEBUG
-            if let trace {
-                let seconds = CACurrentMediaTime() - trace.start
-                let landed = pool.debugSeeksLanded - trace.landedAtStart
-                print(String(format: "[scrub] %.3f %.2fs requests=%d landed=%d (%.1f/s) cancelled=%d "
-                             + "tolerance=%.3fs head=%@",
-                             CACurrentMediaTime(), seconds, trace.requests, landed,
-                             Double(landed) / max(seconds, 0.001),
-                             pool.debugSeeksCancelled - trace.cancelledAtStart,
-                             Self.scrubSeekTolerance,
+            if ProcessInfo.processInfo.arguments.contains("-scrub-log") {
+                print(String(format: "[scrub] %.3f landed in %.0f ms head=%@", CACurrentMediaTime(),
+                             (CACurrentMediaTime() - start) * 1000,
                              pool.playhead(in: view).map { String(format: "%.4f", $0.fraction) } ?? "nil"))
             }
             #endif
-            // A page that stopped being watched mid-scrub stays stopped.
+            // A page that stopped being watched meanwhile stays stopped.
             guard resumes, self.isActive(), self.surface() === view else { return }
             pool.setPaused(false, in: view)
         }
     }
-
-    #if DEBUG
-    /// `-scrub-log`: what one drag asked of the player and what it got.
-    private struct ScrubTrace {
-        let start: CFTimeInterval
-        let landedAtStart: Int
-        let cancelledAtStart: Int
-        var requests = 0
-    }
-    private var scrubTrace: ScrubTrace?
-    #endif
 }

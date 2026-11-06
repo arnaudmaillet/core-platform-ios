@@ -669,10 +669,11 @@ struct SnapMediaPageBarTests {
         view.debugScrub(.changed, atX: 100 + barWidth * 0.25)
 
         #expect(pages.isEmpty)
-        #expect(seeks.count == 1)
+        // No seek while the finger moves (#2150): the thumb is drawn there.
+        #expect(seeks.isEmpty)
         // Relative to where the touch went down: half way, plus a quarter of
         // the bar, is three quarters — nothing jumped when the thumb landed.
-        #expect(abs((seeks.first ?? 0) - 0.75) < 0.02)
+        #expect(abs((view.debugHeldPlayhead ?? 0) - 0.75) < 0.02)
     }
 
     // MARK: - The thumb is the clock while it drags
@@ -784,12 +785,18 @@ struct SnapMediaPageBarTests {
         var seeks: [Double] = []
         view.onSeekRequested = { seeks.append($0) }
 
+        var ended: [Double?] = []
+        view.onScrubEnded = { ended.append($0) }
+
         view.debugScrub(.began, atX: 100)
         view.debugScrub(.changed, atX: 100 + 10_000)
+        #expect(view.debugHeldPlayhead == 1)
         view.debugScrub(.changed, atX: 100 - 10_000)
+        #expect(view.debugHeldPlayhead == 0)
+        view.debugScrub(.ended, atX: 100 - 10_000)
 
-        #expect(seeks.first == 1)
-        #expect(seeks.last == 0)
+        #expect(seeks.isEmpty)
+        #expect(ended == [0])
     }
 
     /// ⚠️ THE RUN HANDS NOTHING BACK AT THE END OF A SWIPE.
@@ -1442,11 +1449,15 @@ struct SnapStripBrowseTests {
         var seeks: [Double] = []
         view.onBrowse = { browsed.append($0) }
         view.onSeekRequested = { seeks.append($0) }
+        var ended: [Double?] = []
+        view.onScrubEnded = { ended.append($0) }
         view.debugScrub(.began, atX: frame.midX)
         view.debugScrub(.changed, atX: frame.midX + 40)
         view.debugScrub(.ended, atX: frame.midX + 40)
         #expect(browsed.isEmpty)
-        #expect(!seeks.isEmpty)
+        // The playhead, at the release (#2150), never during the drag.
+        #expect(seeks.isEmpty)
+        #expect(ended.count == 1 && ended.first! != nil)
     }
 
     /// The chrome: the page's talk recedes and the previews come up over the
