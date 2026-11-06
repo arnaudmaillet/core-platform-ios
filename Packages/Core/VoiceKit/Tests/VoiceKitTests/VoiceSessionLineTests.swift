@@ -26,27 +26,24 @@ struct VoiceSessionLineTests {
     }
 
     /// A claim cancels a release that has not begun: a play right after a
-    /// pause keeps the session.
+    /// pause keeps the session. Deterministic: the line is held by a first
+    /// release while a second waits behind it, and the claim's cancelling
+    /// step runs before the line is let go — no timing (CI run 42277429531
+    /// raced a sleep).
     @Test func aClaimCancelsAReleaseNotBegun() {
         let line = VoiceSessionLine()
         let log = Log()
         let gate = DispatchSemaphore(value: 0)
-        let claimed = DispatchSemaphore(value: 0)
         let holding = DispatchSemaphore(value: 0)
         line.release {                        // holds the line
             holding.signal()
             gate.wait()
         }
         holding.wait()
-        line.release { log.add("release") }   // queued behind it
-        DispatchQueue.global().async {
-            line.claim { log.add("claim") }
-            claimed.signal()
-        }
-        Thread.sleep(forTimeInterval: 0.05)   // the claim has taken its ticket
+        line.release { log.add("release") }   // queued behind it, not begun
+        line.cancelPendingReleases()          // what a claim does first
         gate.signal()
-        claimed.wait()
-        line.claim {}
+        line.claim { log.add("claim") }
         #expect(log.all == ["claim"], "the queued release was cancelled")
     }
 

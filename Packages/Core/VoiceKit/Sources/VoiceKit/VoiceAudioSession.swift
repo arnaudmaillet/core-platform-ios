@@ -71,8 +71,14 @@ final class VoiceSessionLine: @unchecked Sendable {
     }
 
     func claim<T>(_ work: () throws -> T) rethrows -> T {
-        lock.withLock { ticket += 1 }
+        cancelPendingReleases()
         return try queue.sync(execute: work)
+    }
+
+    /// Every release queued and not begun will skip its work. One already
+    /// running finishes: a claim then waits for it on the queue.
+    func cancelPendingReleases() {
+        lock.withLock { ticket += 1 }
     }
 }
 
