@@ -92,16 +92,19 @@ public struct BrandTheme: Sendable, Equatable {
     /// (`BrandAssetsGuardTests`); no code draws it since #2089.
     public let signatureGradient: [UInt32]
     public let signatureLocations: [Double]
+    /// Each stop's opacity in the app icon's blob (`circle.svg`): what makes
+    /// the icon soft, the colours mixing into the ground under them. The
+    /// loader wears the signature at these (#2147).
+    public let signatureOpacities: [Double]
     /// The unseen-story ring's gradient (#2089, the owner 2026-11-03): the
     /// raspberry to the violet, no mint — the signature's first two colours,
     /// at 0 and 1.
     public let storyRingGradient: [UInt32]
     public let storyRingLocations: [Double]
-    /// The branded loader's three pills, left to right (#2083, the owner
-    /// 2026-11-03): one solid colour each, the primary's raspberry to the
-    /// violet, with the colour halfway between them (in OKLCH: lightness,
-    /// chroma and hue each at the midpoint) in the middle.
-    public let loaderTones: [UInt32]
+    /// The loader's stops with Increased Contrast (#2147): the signature
+    /// opaque, its mint deepened to reach 3:1 on the light page (`F2F2F7`) —
+    /// the icon's own mint is 1.3:1 there. The crown's precedent (#2071).
+    public let loaderContrastStops: [UInt32]
 
     // MARK: - The assets (checked by `BrandAssetsGuardTests`)
 
@@ -137,9 +140,10 @@ public struct BrandTheme: Sendable, Equatable {
         saveGold: 0xFFC53D,
         signatureGradient: [0xEC1C75, 0x9B5CFF, 0x2EF0A8],
         signatureLocations: [0, 0.5, 1],
+        signatureOpacities: [0.75, 0.6, 0.55],
         storyRingGradient: [0xEC1C75, 0x9B5CFF],
         storyRingLocations: [0, 1],
-        loaderTones: [0xEC1C75, 0xCF3DC7, 0x9B5CFF],
+        loaderContrastStops: [0xEC1C75, 0x9B5CFF, 0x0E9E6E],
         launchLogoStops: [0xF699C1, 0xD2B6FF, 0xA1F8D8],
         iconStops: [0xEC1C75, 0x9B5CFF, 0x2EF0A8]
     )

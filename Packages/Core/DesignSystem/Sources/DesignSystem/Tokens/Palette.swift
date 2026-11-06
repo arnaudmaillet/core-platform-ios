@@ -42,9 +42,9 @@ import UIKit
 ///   never a gradient, under a white count.
 /// - **A filled button wears white** (`onPrimary`) in both appearances.
 /// - **There is no secondary colour any more** (#2062). The violet appears
-///   only inside the signature gradient, as the mint does, and on the
-///   loader's last pill (`loaderTones`, #2083) (#2071: the gems wear the
-///   crown's yellow — `gem`, `gemText`, `gemGround`). Links,
+///   only inside the signature gradient, as the mint does — which the loader
+///   wears (`loaderGradient`, #2147) (#2071: the gems wear the crown's
+///   yellow — `gem`, `gemText`, `gemGround`). Links,
 ///   mentions and hashtags are a neutral grey (`entityInk`).
 /// - **Dark mode is not an inversion.** Every role has an Increased
 ///   Contrast value where its contrast is close to the line.
@@ -161,39 +161,29 @@ public enum Palette {
 
     // MARK: - The loader (#1329)
 
-    /// The branded loader's three pills (#1795, #2083), left to right: the
-    /// primary's raspberry `EC1C75`, an orchid `CF3DC7` halfway to the
-    /// violet, the violet `9B5CFF` — one solid colour each, the owner's call
-    /// (2026-11-03) over a gradient and over the signature's mint. The same
-    /// in both appearances — the mark is a logo, not text (owner,
-    /// 2026-10-17); each is past a graphic's 3:1 on white and on black.
-    /// Read through `AppLoaderView`.
-    public static let loaderTones: [UIColor] = theme.loaderTones.map(rgb)
-
-    /// Each pill's lead — its pale wake (#1795): the pill's tone mixed
-    /// `loaderLeadMix` toward the page (`F2F2F7` light, black dark), so it
-    /// resolves per appearance.
-    public static let loaderLeadTones: [UIColor] = loaderTones.map { tone in
-        UIColor { traits in
-            mixed(tone, toward: traits.userInterfaceStyle == .dark ? .black : rgb(BrandNeutrals.pageLight), by: loaderLeadMix)
-        }
+    /// The loader's gradient (#2147, the owner 2026-11-05): the app icon's
+    /// — raspberry → violet → mint, at the icon's own opacities — one layer
+    /// across the mark that the pills mask, so the left pill is raspberry,
+    /// the middle violet, the right mint. Real alpha, as the icon: pastel on
+    /// the light page, deeper on the dark one. With Increased Contrast, the
+    /// stops are opaque and the mint deepened (`loaderContrastStops`). The
+    /// same in both appearances otherwise: the mark is a logo, not text.
+    public static func loaderGradient(highContrast: Bool) -> [UIColor] {
+        guard !highContrast else { return theme.loaderContrastStops.map(rgb) }
+        return zip(theme.signatureGradient, theme.signatureOpacities).map { rgb($0).withAlphaComponent($1) }
     }
 
-    /// How far a lead is mixed toward the page.
-    static let loaderLeadMix: CGFloat = 0.55
+    /// Where the loader's stops sit: the signature's.
+    public static var loaderGradientLocations: [NSNumber] { brandGradientLocations }
 
-    /// `color` moved `amount` (0…1) of the way to `target`, in sRGB — an
-    /// opaque colour, through `rgb`.
-    static func mixed(_ color: UIColor, toward target: UIColor, by amount: CGFloat) -> UIColor {
-        var from: (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
-        var to: (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
-        color.getRed(&from.0, green: &from.1, blue: &from.2, alpha: &from.3)
-        target.getRed(&to.0, green: &to.1, blue: &to.2, alpha: &to.3)
-        func channel(_ a: CGFloat, _ b: CGFloat) -> UInt32 {
-            UInt32((min(1, max(0, a + (b - a) * amount)) * 255).rounded())
-        }
-        return rgb(channel(from.0, to.0) << 16 | channel(from.1, to.1) << 8 | channel(from.2, to.2))
-    }
+    /// The loader's direction: the icon's blob's (`circle.svg`, `(0, 0.2) →
+    /// (1, 1.03)` in its box), in a layer's unit coordinates.
+    public static let loaderGradientStart = CGPoint(x: 0, y: 0.2)
+    public static let loaderGradientEnd = CGPoint(x: 1, y: 1.03)
+
+    /// Each pill's lead — its pale wake (#1795): the same gradient, at this
+    /// share of the pills' opacity (#2147).
+    public static let loaderLeadOpacity: Float = 0.45
 
     // MARK: - Economy
 

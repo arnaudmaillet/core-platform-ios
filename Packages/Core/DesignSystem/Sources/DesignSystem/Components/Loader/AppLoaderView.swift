@@ -28,6 +28,13 @@ import UIKit
 ///
 /// Reduce Motion, the app's switch or Low Power Mode (`MotionPreference`): no
 /// wave — three dots, fading in with the pull and pulsing slowly while loading.
+///
+/// ⚠️ **ONE GRADIENT, MASKED BY THE PILLS (#2147, the owner 2026-11-05).** The
+/// app icon's gradient, raspberry → violet → mint at the icon's opacities,
+/// spans the whole mark; the pills are its mask, so a pill growing in the
+/// wave shows more of it along its height, as a cut through the logo would.
+/// The leads mask the same gradient at a lower opacity. It replaced one solid
+/// colour per pill (#2083), too loud.
 public final class AppLoaderView: UIView {
     public enum Size: Sendable {
         /// Paging footers, rows, buttons: `UIActivityIndicatorView.medium`'s 20pt.
@@ -55,7 +62,13 @@ public final class AppLoaderView: UIView {
 
     private let side: CGFloat
     private let mark = CALayer()
-    /// The pills, left to right, each over its lead.
+    /// The gradient the pills show, and the one under it the leads show.
+    private let pillGradient = CAGradientLayer()
+    private let leadGradient = CAGradientLayer()
+    /// The pills, left to right, as `pillGradient`'s mask; the leads as
+    /// `leadGradient`'s. Opaque shapes: their alpha is the mask's.
+    private let pillMask = CALayer()
+    private let leadMask = CALayer()
     private let pills: [CALayer]
     private let leads: [CALayer]
     private var progress: CGFloat = 0
@@ -80,23 +93,33 @@ public final class AppLoaderView: UIView {
 
     public init(side: CGFloat) {
         self.side = side
-        pills = Palette.loaderTones.map { _ in CALayer() }
-        leads = Palette.loaderLeadTones.map { _ in CALayer() }
+        pills = (0..<AppLoaderGeometry.pillCount).map { _ in CALayer() }
+        leads = (0..<AppLoaderGeometry.pillCount).map { _ in CALayer() }
         super.init(frame: CGRect(x: 0, y: 0, width: side, height: side))
         isUserInteractionEnabled = false
         isAccessibilityElement = true
         accessibilityLabel = "Loading"
         layer.addSublayer(mark)
         let width = AppLoaderGeometry.pillWidth(side: side)
-        for (lead, pill) in zip(leads, pills) {
-            for piece in [lead, pill] {
+        let box = CGRect(x: 0, y: 0, width: side, height: side)
+        for (gradient, mask, pieces) in [(leadGradient, leadMask, leads), (pillGradient, pillMask, pills)] {
+            gradient.frame = box
+            gradient.startPoint = Palette.loaderGradientStart
+            gradient.endPoint = Palette.loaderGradientEnd
+            gradient.locations = Palette.loaderGradientLocations
+            mask.frame = box
+            for piece in pieces {
+                piece.backgroundColor = UIColor.black.cgColor
                 piece.cornerRadius = width / 2
                 piece.cornerCurve = .circular
-                mark.addSublayer(piece)
+                mask.addSublayer(piece)
             }
+            gradient.mask = mask
+            mark.addSublayer(gradient)
         }
+        leadGradient.opacity = Palette.loaderLeadOpacity
         applyTones()
-        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _: UITraitCollection) in
+        registerForTraitChanges([UITraitAccessibilityContrast.self]) { (self: Self, _: UITraitCollection) in
             self.applyTones()
         }
         apply(AppLoaderTimeline.pull(0))
@@ -117,14 +140,13 @@ public final class AppLoaderView: UIView {
         CATransaction.commit()
     }
 
-    /// The pills' tones; the leads' resolve against the page, per appearance.
+    /// The gradient's stops: the icon's, or opaque with Increased Contrast.
     private func applyTones() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        for (pill, tone) in zip(pills, Palette.loaderTones) { pill.backgroundColor = tone.cgColor }
-        for (lead, tone) in zip(leads, Palette.loaderLeadTones) {
-            lead.backgroundColor = tone.resolvedColor(with: traitCollection).cgColor
-        }
+        let colors = Palette.loaderGradient(highContrast: traitCollection.accessibilityContrast == .high).map(\.cgColor)
+        pillGradient.colors = colors
+        leadGradient.colors = colors
         CATransaction.commit()
     }
 
@@ -338,7 +360,11 @@ public final class AppLoaderView: UIView {
         return AppLoaderTimeline.Frame(heights: pills.map(fraction), leadHeights: leads.map(fraction))
     }
     var debugOpacity: Float { mark.opacity }
-    /// The tones the pills and their leads wear now.
-    var debugTones: (pills: [CGColor?], leads: [CGColor?]) { (pills.map(\.backgroundColor), leads.map(\.backgroundColor)) }
+    /// The gradient the pills show and the one the leads show, and their
+    /// masks: what a test reads of the look.
+    var debugPillGradient: CAGradientLayer { pillGradient }
+    var debugLeadGradient: CAGradientLayer { leadGradient }
+    var debugPillsMaskTheGradient: Bool { pillGradient.mask === pillMask && pills.allSatisfy { $0.superlayer === pillMask } }
+    var debugLeadsMaskTheGradient: Bool { leadGradient.mask === leadMask && leads.allSatisfy { $0.superlayer === leadMask } }
     #endif
 }

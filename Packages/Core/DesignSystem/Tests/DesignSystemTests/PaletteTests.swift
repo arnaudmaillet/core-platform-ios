@@ -137,7 +137,8 @@ struct PaletteTests {
         #expect(Palette.brandGradientLocations.map(\.doubleValue) == theme.signatureLocations)
         #expect(Palette.storyRingGradient.map { Self.hex($0, Self.light) } == theme.storyRingGradient)
         #expect(Palette.storyRingGradientLocations.map(\.doubleValue) == theme.storyRingLocations)
-        #expect(Palette.loaderTones.map { Self.hex($0, Self.light) } == theme.loaderTones)
+        #expect(Palette.loaderGradient(highContrast: false).map { Self.hex($0, Self.light) } == theme.signatureGradient)
+        #expect(Palette.loaderGradient(highContrast: true).map { Self.hex($0, Self.light) } == theme.loaderContrastStops)
     }
 
     /// The owner's values (#2062), as asked.
