@@ -40,6 +40,28 @@ public final class FeedSoundSession {
     public static let didTurnOn = Notification.Name("FeedSoundSession.didTurnOn")
     /// Posted on the main queue when the phone was put on silent again.
     public static let didTurnOff = Notification.Name("FeedSoundSession.didTurnOff")
+    /// Posted on the main queue when `isHeard` changed without a volume key:
+    /// the switch moved while the sound follows the device.
+    public static let audibilityDidChange = Notification.Name("FeedSoundSession.audibilityDidChange")
+
+    /// Whether the feed is heard now (#483): the sound turned on, or, before
+    /// any volume key, a phone that rings, which hears the `.ambient` session.
+    ///
+    /// ⚠️ FOR WHAT MAKES THE SESSION `.playback` WITHOUT A KEY: Background
+    /// Play and Picture in Picture. Under `.playback` the silent switch no
+    /// longer silences, so on a silent phone they would be the first thing
+    /// heard. The ringer is read for them while the sound follows the device
+    /// (`setWatching(_:by:readsRinger:)`), and never over another app's
+    /// audio, which `.playback` would stop.
+    public var isHeard: Bool {
+        isTurnedOn || (ringsWhileFollowing == true && !readsOtherAudio())
+    }
+
+    /// What the last ringer check read while the sound follows the device:
+    /// true when the phone rings; nil before any.
+    private var ringsWhileFollowing: Bool?
+    /// The watchers that need the ringer read while the sound is off.
+    private var ringerReaders: Set<ObjectIdentifier> = []
 
     /// The volume's observation while listening — a token kept alive.
     private var observation: AnyObject?
@@ -105,10 +127,17 @@ public final class FeedSoundSession {
 
     /// Listens for a volume key while a feed screen is on screen, in the
     /// foreground, with its sound playing — and only until the sound is on.
-    public func setWatching(_ watching: Bool, by owner: AnyObject) {
+    /// `readsRinger`: the screen needs `isHeard` before any key (Background
+    /// Play or Picture in Picture is on), so the ringer is read meanwhile.
+    public func setWatching(_ watching: Bool, by owner: AnyObject, readsRinger: Bool = false) {
         let key = ObjectIdentifier(owner)
         if watching { watchers.insert(key) } else { watchers.remove(key) }
+        let readerBefore = !ringerReaders.isDisjoint(with: watchers)
+        if watching, readsRinger { ringerReaders.insert(key) } else { ringerReaders.remove(key) }
         settleWatch()
+        // A reader arriving reads at once: the first tick is a second away,
+        // and the app may leave before it.
+        if !isTurnedOn, !readerBefore, !ringerReaders.isDisjoint(with: watchers) { checkRinger() }
     }
 
     /// What is listened for now: a volume key while the sound is off, the
@@ -119,7 +148,8 @@ public final class FeedSoundSession {
         } else if observation == nil {
             observation = startsObserving { [weak self] in self?.volumeDidChange() }
         }
-        if watchers.isEmpty || !isTurnedOn {
+        let readsRinger = isTurnedOn || !ringerReaders.isDisjoint(with: watchers)
+        if watchers.isEmpty || !readsRinger {
             stopRingerTicks()
         } else if ringerTicks == nil {
             ringerTicks = startsTicking { [weak self] in self?.checkRinger() }
@@ -133,13 +163,24 @@ public final class FeedSoundSession {
 
     /// One ringer check, unless one is under way.
     func checkRinger() {
-        guard isTurnedOn, !isProbing else { return }
+        guard !isProbing, isTurnedOn || !ringerReaders.isDisjoint(with: watchers) else { return }
         isProbing = true
         probesSilent { [weak self] silent in
             guard let self else { return }
             isProbing = false
-            ringerRead(silent: silent)
+            if isTurnedOn {
+                ringerRead(silent: silent)
+            } else {
+                followingRingerRead(silent: silent)
+            }
         }
+    }
+
+    /// The ringer while the sound follows the device: what `isHeard` reads.
+    func followingRingerRead(silent: Bool) {
+        guard !isTurnedOn, ringsWhileFollowing != !silent else { return }
+        ringsWhileFollowing = !silent
+        NotificationCenter.default.post(name: Self.audibilityDidChange, object: self)
     }
 
     /// ⚠️ A CHANGE TO SILENT, NEVER THE STATE. A phone already on silent is
@@ -159,6 +200,7 @@ public final class FeedSoundSession {
     private func ringerWentSilent() {
         isTurnedOn = false
         lastReadSilent = nil
+        ringsWhileFollowing = false
         settleWatch()
         NotificationCenter.default.post(name: Self.didTurnOff, object: self)
     }
@@ -180,6 +222,8 @@ public final class FeedSoundSession {
     /// Tests start from a fresh launch.
     public func debugReset() {
         isTurnedOn = false
+        ringsWhileFollowing = nil
+        ringerReaders = []
         observation = nil
         stopRingerTicks()
         watchers = []

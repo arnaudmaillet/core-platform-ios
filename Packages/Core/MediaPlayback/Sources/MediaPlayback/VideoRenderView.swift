@@ -1,4 +1,5 @@
 import AVFoundation
+import AVKit
 import CoreMedia
 import QuartzCore
 import UIKit
@@ -33,6 +34,17 @@ public final class VideoRenderView: UIView {
     private var sampleBufferLayer: AVSampleBufferDisplayLayer? { layer as? AVSampleBufferDisplayLayer }
 
     private let posterView = UIImageView()
+    /// This surface's floating-window controller, made the first time it is
+    /// readied and kept for the surface's life (#483).
+    ///
+    /// ⚠️ ONE PER LAYER, NEVER RELEASED BEFORE IT. AVKit hangs a helper off
+    /// the sample-buffer layer that it does not retain; a controller released
+    /// while its layer lived, then another made for the same layer, left the
+    /// layer pointing at freed memory, and the next layout crashed the app
+    /// (`EXC_BAD_ACCESS` in `avkit_sampleBufferDisplayLayerPlayerController`,
+    /// the owner's device, 2026-11-06). Readying another surface now only
+    /// turns this one's automatic start off.
+    var pictureInPictureController: AVPictureInPictureController?
     /// Gates the poster fade's terminal completion — see the note in
     /// `updatePosterVisibility`.
     private var posterGeneration = 0
