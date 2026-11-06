@@ -191,18 +191,22 @@ struct ConversationThreadSendAndMuteTests {
 
     // MARK: - The bell's transition, durations and toast (#729)
 
-    /// ⚠️ A STATE IS ITS OWN ITEM, WITH ITS OWN IDENTIFIER: one identifier
-    /// for both swaps in a frame; two get the native glass morph.
-    @Test func eachBellStateIsItsOwnItemForTheGlassMorph() throws {
+    /// ⚠️ ONE ITEM FOR BOTH STATES, ITS GLYPH REPLACED IN PLACE (#2143):
+    /// an item per state morphed through an empty bubble. The bubble stays;
+    /// the symbol, the spoken value and the menu follow the mute.
+    @Test func theBellIsOneItemWhoseGlyphFollowsTheMute() throws {
         let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
         defer { window.isHidden = true }
         let on = try #require(bell(screen))
+        #expect(on.image == UIImage(systemName: "bell"))
+        #expect(on.accessibilityValue == "On")
         driver.toggleMuted()
         let off = try #require(bell(screen))
-        #expect(on !== off, "the bell was edited in place: no morph")
-        #expect(on.identifier != off.identifier, "one identifier for both states: no morph")
-        #expect(on.identifier == ConversationThreadViewController.bellID)
-        #expect(off.identifier == ConversationThreadViewController.mutedBellID)
+        #expect(on === off, "a new item per state: the glass morphs through an empty bubble")
+        #expect(off.identifier == ConversationThreadViewController.bellID)
+        #expect(off.image == UIImage(systemName: "bell.slash"))
+        #expect(off.accessibilityValue == "Muted")
+        #expect(off.menu?.children.first?.title == "Unmute", "the menu did not follow the mute")
     }
 
     /// A long press offers the durations; each mutes until that time.

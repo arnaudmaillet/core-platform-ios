@@ -157,11 +157,14 @@ final class ConversationThreadViewController: UIViewController {
     /// the points badge: `bell`, or `bell.slash` once muted. Hidden while
     /// there is nothing to mute (a draft).
     ///
-    /// ⚠️ ONE ITEM PER STATE, EACH WITH ITS OWN IDENTIFIER (#729). Two bar
-    /// items with one identifier are the same item to UIKit, and swap in a
-    /// frame; distinct identifiers get the native Liquid Glass morph when
-    /// one replaces the other (`setRightBarButtonItems(_:animated:)`).
-    private var muteItem = UIBarButtonItem()
+    /// ⚠️ ONE ITEM FOR BOTH STATES, ITS GLYPH REPLACED IN PLACE (#2143, the
+    /// owner's device check). One item per state (#729) got the glass morph
+    /// between two items, whose middle is an EMPTY bubble — hidden while bar
+    /// toasts covered the bell, plain to see once they left the bar. The
+    /// system's own mute buttons keep their bubble and redraw the symbol
+    /// (`setSymbolImage(_:contentTransition: .replace)`: the slash drawn
+    /// across the bell).
+    private lazy var muteItem = makeMuteItem()
     /// Keeps the bell and the badge two bubbles.
     private let muteSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     /// The conversation's mute; nil hides the bell.
@@ -904,25 +907,40 @@ final class ConversationThreadViewController: UIViewController {
         item.identifier?.hasPrefix("conversation.day.") == true
     }
 
-    /// The bell for `muted`: a tap toggles, a long press offers how long
-    /// (#729). Its identifier names its state, so the bar morphs between
-    /// the two.
-    private func makeMuteItem(muted: Bool) -> UIBarButtonItem {
+    /// The bell: a tap toggles the mute it shows when tapped, a long press
+    /// offers how long (#729). Made once; `applyBellLook` dresses it for the
+    /// mute. The action carries no image (`BarItems.icon`'s note: an
+    /// action's image is re-applied to its item when it fires).
+    private func makeMuteItem() -> UIBarButtonItem {
         let item = UIBarButtonItem(
             title: nil,
-            image: UIImage(systemName: muted ? "bell.slash" : "bell"),
-            primaryAction: UIAction { [weak self] _ in self?.setMuted(!muted, until: nil) },
-            menu: muteMenu(muted: muted)
+            image: UIImage(systemName: "bell"),
+            primaryAction: UIAction { [weak self] _ in
+                guard let self, let muted else { return }
+                setMuted(!muted, until: nil)
+            },
+            menu: nil
         )
-        item.identifier = muted ? Self.mutedBellID : Self.bellID
+        item.identifier = Self.bellID
         item.tintColor = .label
         item.accessibilityLabel = "Notifications"
-        item.accessibilityValue = muted ? "Muted" : "On"
         return item
     }
 
+    /// The bell's glyph, spoken value and menu for the mute now. Animated:
+    /// the symbol is replaced in place, its bubble kept (see `muteItem`).
+    private func applyBellLook(muted: Bool, animated: Bool) {
+        let image = UIImage(systemName: muted ? "bell.slash" : "bell")
+        if animated, let image {
+            muteItem.setSymbolImage(image, contentTransition: .replace)
+        } else {
+            muteItem.image = image
+        }
+        muteItem.accessibilityValue = muted ? "Muted" : "On"
+        muteItem.menu = muteMenu(muted: muted)
+    }
+
     static let bellID = "conversation.bell"
-    static let mutedBellID = "conversation.bell.muted"
 
     /// How long a mute lasts, as the long press offers it (#729).
     static let muteDurations: [(title: String, toast: String, seconds: TimeInterval?)] = [
@@ -1019,17 +1037,12 @@ final class ConversationThreadViewController: UIViewController {
             return
         }
         guard was != muted else { return }
-        // A first appearance lands; a change morphs, glass to glass.
-        showBell(animated: was != nil)
-        if was == nil { fitTrailingRun() }
-    }
-
-    /// The bell for the conversation's mute now, if it shows another.
-    private func showBell(animated: Bool) {
-        guard let muted, muteItem.identifier != (muted ? Self.mutedBellID : Self.bellID) else { return }
-        let old = muteItem
-        muteItem = makeMuteItem(muted: muted)
-        placeMuteItem(replacing: old, animated: animated)
+        // A change redraws the glyph in place; a first appearance lands.
+        applyBellLook(muted: muted, animated: was != nil)
+        if was == nil {
+            placeMuteItem()
+            fitTrailingRun()
+        }
     }
 
     #if DEBUG

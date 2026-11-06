@@ -60,6 +60,21 @@ struct ToastStackTests {
         }
     }
 
+    /// A result replacing one that has arrived takes over its capsule where
+    /// it stands — no slide, the old one gone at once — so two capsules never
+    /// cross on the same line (#2143, the owner's device check).
+    @Test func aReplacementTakesOverTheCapsule() {
+        hosting { container, _ in
+            let muted = toast("Notifications muted", undoable: .init(commit: {}, undo: {}), in: container)
+            container.layoutIfNeeded()
+            let on = toast("Notifications on", in: container)
+            #expect(muted.superview == nil, "the replaced capsule is still there")
+            #expect(on.tookOver)
+            #expect(on.entranceTravel == 0, "the replacement slid in")
+            #expect(ToastView.stack(in: container) == [on])
+        }
+    }
+
     /// A condition holds its line: results come and go under it, and none
     /// replaces it; a second condition takes a line of its own.
     @Test func aConditionHoldsItsLine() {

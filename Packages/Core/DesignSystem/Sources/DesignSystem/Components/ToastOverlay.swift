@@ -272,6 +272,13 @@ final class ToastOverlay {
     }
 
     fileprivate func tick() {
+        // The app window gone (a test host's window, released), there is
+        // nothing to follow: the link stops, and the next toast starts it.
+        guard appWindow != nil else {
+            followLink?.invalidate()
+            followLink = nil
+            return
+        }
         follow()
         paceLink()
     }

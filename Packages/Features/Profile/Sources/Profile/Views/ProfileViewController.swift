@@ -120,6 +120,11 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// Mute-change toasts shown (#1951): their ARRIVAL, which a test cannot
     /// miss, where their presence on the bar lasts only a few seconds.
     private(set) var debugMuteToastsShown = 0
+    /// The Undo toasts this screen has shown, and the latest — counted at
+    /// their arrival: on a starved runner one can come and go between two
+    /// looks (#1951). Tests.
+    private(set) var debugUndoToastsShown = 0
+    private(set) weak var debugLastUndoToast: ToastView?
     #endif
 
     /// The own-profile settings gear; pushes `AccountSettingsViewController`.
@@ -454,10 +459,16 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // Undo in the toast; sent when its countdown runs out (#957).
         viewModel.onUndoable = { [weak self] action in
             guard let self else { return }
-            Feedback.undoable(
+            let toast = Feedback.undoable(
                 action.message, symbol: action.symbol, from: self,
                 commit: action.commit, undo: action.undo
             )
+            #if DEBUG
+            debugUndoToastsShown += 1
+            debugLastUndoToast = toast
+            #else
+            _ = toast
+            #endif
         }
         viewModel.onDismissRequested = { [weak self] in
             self?.leaveAfterBlock()

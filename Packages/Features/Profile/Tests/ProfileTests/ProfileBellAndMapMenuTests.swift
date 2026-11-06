@@ -255,12 +255,13 @@ struct ProfileBellAndMapMenuTests {
         try #require(await settle { screen.debugMuteBellItem?.image == UIImage(systemName: "bell.slash") },
                      "the bell waited")
         #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains(where: isToast), "a toast took the bar")
-        try #require(await settle { Self.shownToast(for: screen) != nil }, "no toast for the mute")
-        let undo = try #require(Self.shownToast(for: screen))
-        #expect(screen.debugMuteBellItem?.isEnabled != false, "the bell is not tappable under its toast")
+        // ⚠️ THE TOAST'S ARRIVAL, NOT ITS PRESENCE (#1951): counted, it
+        // cannot be missed between two looks on a starved runner.
+        try #require(await settle { screen.debugUndoToastsShown == 1 }, "no toast for the mute")
+        #expect(screen.debugMuteBellItem?.isEnabled != false, "the bell is not tappable beside its toast")
 
-        // Let the Undo run out: the mute is sent.
-        undo.debugDismiss()
+        // Let the Undo run out (if its time has not already): the mute is sent.
+        screen.debugLastUndoToast?.debugDismiss()
         try #require(await settle { repository.lastScopes == MuteScopes(posts: true) })
 
         screen.debugToggleMute(.posts)
@@ -269,21 +270,6 @@ struct ProfileBellAndMapMenuTests {
         // a poll gap outlasted it. Counted, it cannot be missed.
         try #require(await settle { screen.debugMuteToastsShown == 1 }, "no toast for the unmute")
         #expect(screen.debugMuteBellItem?.image == UIImage(systemName: "bell"))
-    }
-
-    /// The toast up for `screen`: in its view (a window that is not key), or
-    /// in the scene's overlay window (a test window that became key).
-    private static func shownToast(for screen: UIViewController) -> ToastView? {
-        let windows = screen.view.window?.windowScene?.windows ?? []
-        return firstToast(under: screen.view) ?? windows.lazy.compactMap { firstToast(under: $0) }.first
-    }
-
-    private static func firstToast(under view: UIView) -> ToastView? {
-        if let toast = view as? ToastView, !toast.isDismissing { return toast }
-        for subview in view.subviews {
-            if let toast = firstToast(under: subview) { return toast }
-        }
-        return nil
     }
 
     /// Not followed: NO bell (the owner, 2026-10-15 — nothing of theirs to

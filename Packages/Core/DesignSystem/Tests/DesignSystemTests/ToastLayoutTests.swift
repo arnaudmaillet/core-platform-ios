@@ -41,17 +41,30 @@ struct ToastLayoutTests {
         container.layoutIfNeeded()
     }
 
-    /// With an action, as wide as the margins allow — and Undo at the
-    /// trailing edge, not mid-capsule.
-    @Test func anUndoToastSpansTheMarginsWithItsControlTrailing() throws {
+    /// With an action too, the capsule hugs its content (#2143, the owner's
+    /// device check) — and Undo sits at its trailing edge, not mid-capsule.
+    @Test func anUndoToastHugsItsContentWithItsControlTrailing() throws {
         try hosting { _, container in
             let toast = undoable("Post deleted", in: container)
             settled(container)
             let margins = container.layoutMarginsGuide.layoutFrame.width
-            #expect(abs(toast.bounds.width - min(margins, ToastView.Metrics.maximumWidth)) < 1)
+            #expect(toast.bounds.width < margins - 60, "an action toast spans the screen: \(toast.bounds.width) of \(margins)")
             let control = try #require(toast.undoButton)
             let trailing = toast.bounds.maxX - control.convert(control.bounds, to: toast).maxX
             #expect(trailing <= Spacing.sm + 1, "\(trailing) pt after the control")
+        }
+    }
+
+    /// A long message meets the margins and truncates; the action stays
+    /// whole, at the trailing edge.
+    @Test func aLongActionToastStopsAtTheMarginsWithItsControlWhole() throws {
+        try hosting { _, container in
+            let toast = undoable(String(repeating: "A very long message ", count: 8), in: container)
+            settled(container)
+            let margins = container.layoutMarginsGuide.layoutFrame.width
+            #expect(abs(toast.bounds.width - min(margins, ToastView.Metrics.maximumWidth)) < 1)
+            let control = try #require(toast.undoButton)
+            #expect(control.bounds.width >= control.intrinsicContentSize.width - 0.5, "Undo was squeezed")
         }
     }
 

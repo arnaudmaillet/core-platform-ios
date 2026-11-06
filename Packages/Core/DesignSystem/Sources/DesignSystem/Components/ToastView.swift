@@ -34,8 +34,12 @@ import UIKit
 /// No second text line: one idea per toast, the references' rule (Polaris,
 /// Material's snackbar, Avaya); two levels made it too big (owner, #1034).
 ///
-/// A toast with an action spans the margins (capped at `maximumWidth`), its
-/// control flush with the trailing edge; without one, the capsule hugs its
+/// The capsule HUGS its content, with an action or without (#2143, the
+/// owner's device check: an action toast spanning the screen read as a
+/// banner): glyph, text, then the action flush with its trailing edge — the
+/// system pills' shape. It never grows past the margins or `maximumWidth`;
+/// there the text truncates and the action stays whole. Before #2143 a toast
+/// with an action spanned the margins (#1034); without one, it hugged its
 /// text. 48 pt tall with an action, 44 pt without.
 ///
 /// ## Time (`duration(for:message:hasAction:assistiveTechnologyRunning:)`)
@@ -395,11 +399,22 @@ public final class ToastView: UIView {
             existing.update(to: content)
             return existing
         }
-        // One result at a time: the one up gives way — the overlay's own
-        // exit, while this one arrives. A condition replaces nothing.
+        // One result at a time, and ONE CAPSULE (#2143, the owner's device
+        // check): a result that has arrived hands its place to this one,
+        // which takes over its capsule where it stands — glass on, at its
+        // width — and only the content and the width change. Two capsules
+        // crossing on the same line (one leaving, one arriving) read as a
+        // glitch on a fast toggle. A result still arriving leaves the usual
+        // way. A condition replaces nothing.
+        var takenOverWidth: CGFloat?
         if !isCondition {
             for toast in shown where !toast.holdsOwnLine {
-                toast.dismiss(animated: true)
+                if takenOverWidth == nil, toast.hasArrived, toast.bounds.width > 0 {
+                    takenOverWidth = toast.bounds.width
+                    toast.dismiss(animated: false)
+                } else {
+                    toast.dismiss(animated: true)
+                }
             }
         }
 
@@ -433,11 +448,47 @@ public final class ToastView: UIView {
         // Its line first (under a condition, lower), then where it comes
         // from: `travel` above it — or right there under Reduce Motion.
         restack(in: container, animated: true)
+        if let takenOverWidth {
+            toast.offConstant = toast.restConstant
+            slide.constant = toast.restConstant
+            toast.takeOver(fromWidth: takenOverWidth)
+            return toast
+        }
         toast.offConstant = MotionPreference.reducesMotion ? toast.restConstant : toast.restConstant - Metrics.travel
         slide.constant = toast.offConstant
         toast.animateIn()
         return toast
     }
+
+    /// Arrives in the capsule of the result toast it replaced: already there,
+    /// glass on, at that toast's `width`, then springs to its own width while
+    /// its content fades in — through layout, never a transform on glass.
+    private func takeOver(fromWidth width: CGFloat) {
+        tookOver = true
+        let lock = widthAnchor.constraint(equalToConstant: width)
+        lock.isActive = true
+        // Off a window, the glass waits for one (`didMoveToWindow`).
+        if window != nil { backdrop.effect = Self.makeGlass() }
+        layer.shadowOpacity = Metrics.shadowOpacity
+        row.alpha = 0
+        hasArrived = true
+        superview?.layoutIfNeeded()
+        lock.isActive = false
+        let reduces = MotionPreference.reducesMotion
+        UIView.animate(
+            withDuration: reduces ? 0.2 : 0.4, delay: 0, usingSpringWithDamping: reduces ? 1 : 0.82,
+            initialSpringVelocity: 0, options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.superview?.layoutIfNeeded()
+        }
+        UIView.animate(withDuration: 0.2, delay: 0.05, options: [.curveEaseOut, .allowUserInteraction]) {
+            self.row.alpha = 1
+        }
+        countdown?.start()
+    }
+
+    /// It arrived in the capsule of the toast it replaced (tests).
+    private(set) var tookOver = false
 
     /// Replaces this toast's content in place: a loading toast becomes its
     /// outcome, a repeat restarts its time.
@@ -703,9 +754,8 @@ public final class ToastView: UIView {
         title.textColor = .label
         title.numberOfLines = 1
         title.lineBreakMode = .byTruncatingTail
-        // The message takes the room the control leaves — with an action the
-        // toast spans the margins and the control sits flush trailing — and
-        // is the one thing that gives way.
+        // The message takes the room the control leaves and is the one thing
+        // that gives way, once the capsule meets the margins.
         title.setContentHuggingPriority(.defaultLow, for: .horizontal)
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let texts = title
@@ -824,14 +874,9 @@ public final class ToastView: UIView {
         return button
     }
 
-    /// The width it asks for: with an action, all the margins allow (capped
-    /// at `maximumWidth`), so the control sits flush trailing (#1034);
-    /// without one, its row with the text on its one line.
+    /// The width it asks for: its row with the text on its one line — the
+    /// action, if any, flush after it (#2143).
     private func measureIdealWidth() {
-        if content.action != nil {
-            idealWidth.constant = Metrics.maximumWidth
-            return
-        }
         let width = row.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
         idealWidth.constant = ceil(width + rowInsets)
     }
