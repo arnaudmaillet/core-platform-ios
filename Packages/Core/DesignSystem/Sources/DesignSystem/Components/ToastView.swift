@@ -108,6 +108,19 @@ public final class ToastView: UIView {
     /// keeps it — the Points heart its pink, the saved star its gold (#1190:
     /// a like's toast drew its heart in the label's ink) — on a toast that
     /// says things went well; any other glyph takes the style's ink.
+    /// The leading disc's fill and its glyph's ink (`ToastBadge`): the
+    /// glyph's own colour where it has one, else the style's — the app's
+    /// primary for what went well.
+    static func badgeColours(symbol: String, style: Style) -> (fill: UIColor, ink: UIColor) {
+        switch style {
+        case .failure: return (.systemRed, .white)
+        case .warning: return (Warning.glyphTint, .black)
+        case .confirmation, .loading:
+            let own = glyphTint(symbol: symbol, style: style)
+            return own == style.glyphTint ? (Palette.primaryFill, Palette.onPrimary) : (own, .white)
+        }
+    }
+
     static func glyphTint(symbol: String, style: Style) -> UIColor {
         guard style == .confirmation else { return style.glyphTint }
         switch symbol {
@@ -137,14 +150,17 @@ public final class ToastView: UIView {
         /// Resting shadow strength. Soft and low-contrast: the glass already
         /// separates itself; the shadow only grounds it.
         static let shadowOpacity: Float = 0.22
-        /// The height of a toast without an action — the touch target's
-        /// floor — and with one (#1034), at the default text size.
-        static let minimumHeight: CGFloat = 44
+        /// ONE HEIGHT for every toast at the default text size (the owner,
+        /// 2026-11-06, after the system's pills): the leading disc and the
+        /// action capsule (`ToastBadge.side`) with the same `inset` all round
+        /// — concentric with the toast.
+        static let minimumHeight: CGFloat = 48
         static let actionHeight: CGFloat = 48
-        /// Between the glyph and the message, and between the message and
-        /// the trailing control (#1034: ≥ 16 pt, the references' gap).
+        static let inset: CGFloat = (minimumHeight - ToastBadge.side) / 2
+        /// Between the disc and the message, and between the message and the
+        /// trailing control.
         static let glyphGap: CGFloat = 10
-        static let controlGap: CGFloat = Spacing.lg
+        static let controlGap: CGFloat = 12
         /// Never wider than this, however wide the screen (iPad).
         static let maximumWidth: CGFloat = 420
         /// A swipe up dismisses past this distance…
@@ -312,6 +328,8 @@ public final class ToastView: UIView {
     private lazy var idealWidth = widthAnchor.constraint(equalToConstant: 0)
     private var rowInsets: CGFloat = 0
     private var textLabels: [UILabel] = []
+    /// The words' slot in the row (`apply`).
+    private var textSlot: ToastWords?
     /// The text's own vertical inset, rebuilt with the label (#1034).
     private var textInset: NSLayoutConstraint?
     /// Below required: the entrance/exit morph squeezes the capsule past it.
@@ -328,6 +346,7 @@ public final class ToastView: UIView {
     /// An undoable toast's trailing control: the ring and "Undo".
     private(set) var undoButton: ToastUndoButton?
     private var rowTrailing: NSLayoutConstraint?
+    private var rowLeading: NSLayoutConstraint?
     private var isLeaving = false
     private var sceneObservers: [NSObjectProtocol] = []
 
@@ -406,11 +425,11 @@ public final class ToastView: UIView {
         // crossing on the same line (one leaving, one arriving) read as a
         // glitch on a fast toggle. A result still arriving leaves the usual
         // way. A condition replaces nothing.
-        var takenOverWidth: CGFloat?
+        var takenOver: (width: CGFloat, content: [Leaving], changedAt: CFTimeInterval)?
         if !isCondition {
             for toast in shown where !toast.holdsOwnLine {
-                if takenOverWidth == nil, toast.hasArrived, toast.bounds.width > 0 {
-                    takenOverWidth = toast.bounds.width
+                if takenOver == nil, toast.hasArrived, toast.bounds.width > 0 {
+                    takenOver = (toast.widthOnScreen, toast.takeContentOut(), toast.lastChange)
                     toast.dismiss(animated: false)
                 } else {
                     toast.dismiss(animated: true)
@@ -448,10 +467,11 @@ public final class ToastView: UIView {
         // Its line first (under a condition, lower), then where it comes
         // from: `travel` above it — or right there under Reduce Motion.
         restack(in: container, animated: true)
-        if let takenOverWidth {
+        if let takenOver {
             toast.offConstant = toast.restConstant
             slide.constant = toast.restConstant
-            toast.takeOver(fromWidth: takenOverWidth)
+            toast.lastChange = takenOver.changedAt
+            toast.takeOver(fromWidth: takenOver.width, replacing: takenOver.content)
             return toast
         }
         toast.offConstant = MotionPreference.reducesMotion ? toast.restConstant : toast.restConstant - Metrics.travel
@@ -461,31 +481,275 @@ public final class ToastView: UIView {
     }
 
     /// Arrives in the capsule of the result toast it replaced: already there,
-    /// glass on, at that toast's `width`, then springs to its own width while
-    /// its content fades in — through layout, never a transform on glass.
-    private func takeOver(fromWidth width: CGFloat) {
+    /// glass on, at that toast's `width`, holding its content; then the
+    /// content changes the way one capsule's does (`flowContent`).
+    private func takeOver(fromWidth width: CGFloat, replacing old: [Leaving]) {
         tookOver = true
-        let lock = widthAnchor.constraint(equalToConstant: width)
-        lock.isActive = true
         // Off a window, the glass waits for one (`didMoveToWindow`).
         if window != nil { backdrop.effect = Self.makeGlass() }
         layer.shadowOpacity = Metrics.shadowOpacity
-        row.alpha = 0
+        row.alpha = 1
         hasArrived = true
-        superview?.layoutIfNeeded()
-        lock.isActive = false
-        let reduces = MotionPreference.reducesMotion
-        UIView.animate(
-            withDuration: reduces ? 0.2 : 0.4, delay: 0, usingSpringWithDamping: reduces ? 1 : 0.82,
-            initialSpringVelocity: 0, options: [.allowUserInteraction, .beginFromCurrentState]
-        ) {
-            self.superview?.layoutIfNeeded()
-        }
-        UIView.animate(withDuration: 0.2, delay: 0.05, options: [.curveEaseOut, .allowUserInteraction]) {
-            self.row.alpha = 1
-        }
+        apply(content, reusingMark: old.lazy.compactMap { $0.view as? ToastBadge }.first)
+        flowContent(fromWidth: width, leaving: old)
         countdown?.start()
     }
+
+    /// A piece of the content on its way out of a change: the very view, out
+    /// of the row, where it stood — pinned to its end of the capsule.
+    struct Leaving {
+        enum Role { case mark, text, control }
+        let view: UIView
+        let role: Role
+    }
+
+    /// Takes the content out of the row for a change: each piece stays
+    /// where it stands, the mark pinned to the capsule's leading end, the
+    /// control to its trailing end, the words to its middle — so as the
+    /// capsule resizes about its centre, none of them travels sideways.
+    func takeContentOut() -> [Leaving] {
+        row.arrangedSubviews.map { view in
+            let frame = view.convert(view.bounds, to: backdrop.contentView)
+            let role: Leaving.Role = view === textSlot ? .text
+                : (view is ToastBadge || view is AppLoaderView) ? .mark : .control
+            row.removeArrangedSubview(view)
+            view.removeFromSuperview()
+            view.translatesAutoresizingMaskIntoConstraints = true
+            view.frame = frame
+            view.autoresizingMask = switch role {
+            case .mark: [.flexibleRightMargin, .flexibleTopMargin, .flexibleBottomMargin]
+            case .control: [.flexibleLeftMargin, .flexibleTopMargin, .flexibleBottomMargin]
+            case .text: [.flexibleLeftMargin, .flexibleRightMargin, .flexibleTopMargin, .flexibleBottomMargin]
+            }
+            view.isUserInteractionEnabled = false
+            return Leaving(view: view, role: role)
+        }
+    }
+
+    static let flowDuration: TimeInterval = 0.4
+
+    /// The pieces of a change still on their way out.
+    private var flowLeaving: [UIView] = []
+    private var flowGeneration = 0
+
+    /// ONE CAPSULE CHANGING ITS MIND, THE DYNAMIC ISLAND'S WAY (the owner,
+    /// 2026-11-06, after a fast toggle filmed twice): the mark stays at the
+    /// leading end and the action at the trailing one, each going with its
+    /// end as the capsule springs from `width` to its own; the words open
+    /// FROM THE MIDDLE outward, behind a soft-edged mask, as the old ones
+    /// close toward it and fade.
+    ///
+    /// - A disc in both states is ONE disc (`apply(_:reusingMark:)`): its
+    ///   glyph is replaced in place (the symbol transition), its colour
+    ///   eased — never two discs cross-fading through a dip.
+    /// - A control that comes or goes, or changes, fades where it stands.
+    /// - Only real views move, inside the glass: a picture of them, taken
+    ///   out of the glass, lost the glass's own ink (white words), and its
+    ///   hand-over to the real content jumped a few points (filmed).
+    /// - A change mid-change starts from the width on screen, and what was
+    ///   still leaving keeps leaving.
+    /// - Under Reduce Motion: the same fades, no reveal, no spring.
+    private func flowContent(fromWidth width: CGFloat, leaving: [Leaving]) {
+        flowGeneration += 1
+        // ⚠️ THE LATEST WINS, FROM WHAT IS ON SCREEN (the owner, 2026-11-06,
+        // a toggle spammed: pieces of three states piled in one capsule, an
+        // old Undo over the new words). A change that comes mid-change does
+        // not start a whole change over: what was still leaving goes at once,
+        // the content that was arriving — still blurred — goes at once too,
+        // the new one comes out of the blur straight away, and the capsule
+        // springs on from its width on screen without swelling again.
+        // Nothing is lost: the latest state always shows, at once.
+        let now = CACurrentMediaTime()
+        let midChange = now - lastChange < Self.flowSettle
+        lastChange = now
+        flowLeaving.forEach { $0.removeFromSuperview() }
+        flowLeaving = []
+        stopSwell()
+        superview?.layoutIfNeeded()
+        let reduces = MotionPreference.reducesMotion
+        let finalSize = bounds.size
+        // ⚠️ THE WORDS AT THEIR WHOLE WIDTH, FROM THE FIRST FRAME (filmed: held
+        // to the narrow start, they showed "Notifica" until the change ended,
+        // then jumped whole).
+        let words = textSlot
+        words?.holdWhole()
+        let startsAt = widthAnchor.constraint(equalToConstant: width)
+        startsAt.isActive = true
+        superview?.layoutIfNeeded()
+        let kept = row.arrangedSubviews.first { view in leaving.contains { $0.view === view } }
+        let leavingViews = leaving.map(\.view).filter { $0 !== kept }
+        leavingViews.forEach { backdrop.contentView.addSubview($0) }
+        flowLeaving.append(contentsOf: leavingViews)
+        let arriving = row.arrangedSubviews.filter { $0 !== kept && $0 !== textSlot }
+        arriving.forEach { $0.alpha = 0 }
+        startsAt.isActive = false
+        if midChange {
+            leavingViews.forEach { $0.removeFromSuperview() }
+            flowLeaving.removeAll()
+        }
+
+        // The capsule: its width on a spring, swelling as it goes (`swell`),
+        // through its constraints frame by frame — never a transform on glass.
+        if reduces {
+            UIView.animate(withDuration: 0.25, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState]) {
+                self.superview?.layoutIfNeeded()
+            }
+        } else {
+            startSwell(from: width, to: finalSize.width, height: finalSize.height, swells: !midChange)
+        }
+
+        // The words: the old ones blur away first, the new ones come out of a
+        // blur just after — the two never stand sharp on each other.
+        let scale = max(1, window?.screen.scale ?? traitCollection.displayScale)
+        let peak = Self.flowBlurRadius * scale
+        let closing = leaving.compactMap { $0.role == .text ? $0.view as? ToastWords : nil }
+        if !reduces, midChange {
+            words?.blur(appearing: true, peak: peak, delay: 0, duration: 0.24)
+        } else if !reduces {
+            closing.forEach { $0.blur(appearing: false, peak: peak, delay: 0, duration: 0.18) }
+            words?.blur(appearing: true, peak: peak, delay: 0.1, duration: 0.3)
+        } else {
+            words?.alpha = 0
+        }
+        // A control on its way out goes quickly: pinned to the trailing end
+        // of a capsule that may be shrinking, it must be gone before the new
+        // words reach it.
+        let leavingControls = leaving.filter { $0.role == .control }.map(\.view)
+        UIView.animate(withDuration: 0.1, delay: 0, options: [.curveEaseIn, .allowUserInteraction]) {
+            leavingControls.forEach { $0.alpha = 0 }
+        }
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseIn, .allowUserInteraction]) {
+            leavingViews.forEach { $0.alpha = 0 }
+        } completion: { [weak self] _ in
+            leavingViews.forEach { $0.removeFromSuperview() }
+            self?.flowLeaving.removeAll { view in leavingViews.contains { $0 === view } }
+        }
+        UIView.animate(withDuration: 0.24, delay: 0.08, options: [.curveEaseOut, .allowUserInteraction]) {
+            arriving.forEach { $0.alpha = 1 }
+            words?.alpha = 1
+        }
+        let generation = flowGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.flowSettle) { [weak self, weak words] in
+            guard let self, flowGeneration == generation else { return }
+            words?.settle()
+        }
+    }
+
+    /// The blur's peak, in points, as the system's bubbles.
+    static let flowBlurRadius: CGFloat = 5
+    /// When a change has settled: its spring, its swell, its blur.
+    static let flowSettle: TimeInterval = 0.55
+    /// How far the capsule swells as it changes: the least for a change in
+    /// place, the most for one of `swellReach` points or more — gentler
+    /// than a bar item's (`AppButton.MorphMetrics.morphSwell`), for a wider
+    /// capsule.
+    static let swellBase: CGFloat = 0.03
+    static let swellMost: CGFloat = 0.08
+    static let swellReach: CGFloat = 100
+
+    /// The swell under way: when it began, the width it springs between,
+    /// the height it swells from, how deep, and the constraints it drives.
+    private struct Swell {
+        let start: CFTimeInterval
+        let from: CGFloat
+        let to: CGFloat
+        let height: CGFloat
+        let depth: CGFloat
+        let width: NSLayoutConstraint
+        let tall: NSLayoutConstraint
+    }
+
+    private var swell: Swell?
+    private var swellLink: CADisplayLink?
+    /// How far a swell hangs the capsule up now: half its growth.
+    private var swellLift: CGFloat {
+        guard let swell else { return 0 }
+        return (swell.tall.constant - swell.height) / 2
+    }
+    /// When the content last changed: a change within `flowSettle` of it
+    /// is a change mid-change.
+    fileprivate(set) var lastChange: CFTimeInterval = 0
+
+    /// THE CAPSULE MORPHS AS THE SYSTEM'S GLASS BUBBLES DO (the owner,
+    /// 2026-11-06): its width springs from `from` to `to` while the whole
+    /// capsule swells — up to its crest at an eighth of a second, back by a
+    /// quarter, a touch under, settled by half (`AppButton`'s measured
+    /// curve) — about its centre, frame by frame through its constraints.
+    private func startSwell(from: CGFloat, to: CGFloat, height: CGFloat, swells: Bool = true) {
+        // Just under required: a capsule at its widest keeps its cap
+        // (`maximumWidth`) and swells in height alone.
+        let width = widthAnchor.constraint(equalToConstant: from)
+        let tall = heightAnchor.constraint(equalToConstant: height)
+        width.priority = .required - 1
+        tall.priority = .required - 1
+        NSLayoutConstraint.activate([width, tall])
+        let reach = min(1, abs(to - from) / Self.swellReach)
+        swell = Swell(
+            start: CACurrentMediaTime(), from: from, to: to, height: height,
+            depth: swells ? Self.swellBase + (Self.swellMost - Self.swellBase) * reach : 0, width: width, tall: tall
+        )
+        let link = CADisplayLink(target: SwellTick(self), selector: #selector(SwellTick.tick))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        link.add(to: .main, forMode: .common)
+        swellLink = link
+        swellTick()
+    }
+
+    fileprivate func swellTick() {
+        guard let swell else { return }
+        let time = CACurrentMediaTime() - swell.start
+        guard time < Self.flowSettle else {
+            stopSwell()
+            return
+        }
+        let progress = AppButtonBlur.springProgress(at: time, duration: Self.flowDuration, bounce: 0.1)
+        let grown = 1 + swell.depth * Self.swellShare(at: time)
+        swell.width.constant = (swell.from + (swell.to - swell.from) * progress) * grown
+        swell.tall.constant = swell.height * grown
+        // About its centre: the top hangs up by half the growth.
+        slide?.constant = restConstant - (swell.height * grown - swell.height) / 2
+        superview?.layoutIfNeeded()
+    }
+
+    /// The swell's share of its depth at `time` (`AppButton`'s curve).
+    static func swellShare(at time: TimeInterval) -> CGFloat {
+        let curve = AppButton.MorphMetrics.morphSwellCurve
+        guard let next = curve.firstIndex(where: { $0.time >= time }), next > 0 else { return 0 }
+        let (a, b) = (curve[next - 1], curve[next])
+        let share = CGFloat((time - a.time) / (b.time - a.time))
+        return a.share + (b.share - a.share) * share
+    }
+
+    private func stopSwell() {
+        swellLink?.invalidate()
+        swellLink = nil
+        guard let swell else { return }
+        NSLayoutConstraint.deactivate([swell.width, swell.tall])
+        self.swell = nil
+        if !isLeaving { slide?.constant = restConstant }
+        superview?.layoutIfNeeded()
+    }
+
+    /// The display link's target: it holds the toast weakly (a link retains
+    /// its target).
+    @MainActor
+    private final class SwellTick: NSObject {
+        weak var toast: ToastView?
+        init(_ toast: ToastView) { self.toast = toast }
+        @objc func tick() { toast?.swellTick() }
+    }
+
+    /// A change's last pieces leave at once (the toast itself is leaving).
+    private func endFlow() {
+        flowLeaving.forEach { $0.removeFromSuperview() }
+        flowLeaving = []
+        textSlot?.settle()
+        textSlot?.alpha = 1
+        row.arrangedSubviews.forEach { $0.alpha = 1 }
+    }
+
+    /// The capsule's width as it shows — mid-spring, where the spring is.
+    private var widthOnScreen: CGFloat { layer.presentation()?.bounds.width ?? bounds.width }
 
     /// It arrived in the capsule of the toast it replaced (tests).
     private(set) var tookOver = false
@@ -501,8 +765,14 @@ public final class ToastView: UIView {
         if Self.pendingUndo === self, content.undoable == nil { Self.pendingUndo = nil }
         if content.undoable != nil { Self.pendingUndo = self }
         superview?.bringSubviewToFront(self)
-        UIView.transition(with: row, duration: 0.25, options: [.transitionCrossDissolve, .allowUserInteraction]) {
-            self.apply(content)
+        // The same flow as a replacement: one capsule changing its mind.
+        let width = widthOnScreen
+        if hasArrived, width > 0 {
+            let old = takeContentOut()
+            apply(content, reusingMark: old.lazy.compactMap { $0.view as? ToastBadge }.first)
+            flowContent(fromWidth: width, leaving: old)
+        } else {
+            apply(content)
         }
         if let container = superview {
             Self.restack(in: container, animated: true)
@@ -534,7 +804,9 @@ public final class ToastView: UIView {
         for toast in toasts {
             toast.restConstant = toast.baseConstant + offset
             offset += toast.bounds.height + stackGap
-            if toast.hasArrived { toast.slide?.constant = toast.restConstant }
+            // A swelling toast keeps the half of its growth it hangs up by
+            // (`swellTick` goes on from its new `restConstant`).
+            if toast.hasArrived { toast.slide?.constant = toast.restConstant - toast.swellLift }
         }
         let settle = { container.layoutIfNeeded() }
         if animated, !MotionPreference.reducesMotion {
@@ -687,6 +959,8 @@ public final class ToastView: UIView {
         row.alpha = 0
         let trailing = row.trailingAnchor.constraint(equalTo: backdrop.contentView.trailingAnchor)
         rowTrailing = trailing
+        let leading = row.leadingAnchor.constraint(equalTo: backdrop.contentView.leadingAnchor, constant: Spacing.lg)
+        rowLeading = leading
         // Thin: the height is the toast's own (44/48 pt, #1034), and the
         // trailing control must not push it — the TEXT keeps its own inset
         // (`textInset`), which matters at large text sizes. Below required,
@@ -695,7 +969,7 @@ public final class ToastView: UIView {
         let edges = [
             row.topAnchor.constraint(equalTo: backdrop.contentView.topAnchor, constant: Spacing.xs / 2),
             row.bottomAnchor.constraint(equalTo: backdrop.contentView.bottomAnchor, constant: -Spacing.xs / 2),
-            row.leadingAnchor.constraint(equalTo: backdrop.contentView.leadingAnchor, constant: Spacing.lg),
+            leading,
             trailing,
         ]
         edges.forEach { $0.priority = .required - 1 }
@@ -740,13 +1014,18 @@ public final class ToastView: UIView {
 
     /// Builds the row, the trailing control, VoiceOver's element and the
     /// countdown for `content` — at birth, and again for an update by `id`.
-    private func apply(_ content: Content) {
+    /// - Parameter reusingMark: a disc a change keeps (`flowContent`): it
+    ///   takes this content's glyph and colour in place.
+    private func apply(_ content: Content, reusingMark reused: ToastBadge? = nil) {
         self.content = content
         row.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
         let title = UILabel()
         title.text = content.message
-        title.font = .appFont(forTextStyle: .subheadline)
+        // A title's weight, centred between the disc and the action — the
+        // system pills' text (the owner, 2026-11-06).
+        title.font = .scaledFont(forTextStyle: .subheadline, weight: .semibold)
+        title.textAlignment = .center
         title.adjustsFontForContentSizeCategory = true
         // Adaptive colors over an adaptive material: `UIGlassEffect` resolves
         // its own luminance against whatever it sits over, so the label tracks
@@ -756,27 +1035,31 @@ public final class ToastView: UIView {
         title.lineBreakMode = .byTruncatingTail
         // The message takes the room the control leaves and is the one thing
         // that gives way, once the capsule meets the margins.
-        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        title.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let texts = title
+        // The words' slot takes the room between the mark and the control;
+        // the words hold their own width at its middle, in a clip a change
+        // opens from there (`flowContent`).
+        let texts = ToastWords(label: title)
+        textSlot = texts
 
         var arranged: [UIView] = []
+        var leadsWithDisc = false
         if content.style == .loading {
             let spinner = AppLoaderView(size: .medium)
             spinner.startAnimating()
             arranged.append(spinner)
         } else if let symbol = content.symbol, let image = UIImage.symbol(named: symbol) {
-            let tint = Self.glyphTint(symbol: symbol, style: content.style)
-            // A glyph with a colour of its own carries it (`.alwaysOriginal`):
-            // the toast's glass would wash a tinted template out to a pale
-            // version of it (`sheet-glass-vibrancy-ink`).
-            let ownsColour = tint != content.style.glyphTint
-            let glyph = UIImageView(image: ownsColour ? image.withTintColor(tint, renderingMode: .alwaysOriginal) : image)
-            glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .body, scale: .medium)
-            glyph.tintColor = tint
-            glyph.contentMode = .scaleAspectFit
-            glyph.setContentHuggingPriority(.required, for: .horizontal)
-            arranged.append(glyph)
+            let colours = Self.badgeColours(symbol: symbol, style: content.style)
+            if let reused {
+                reused.update(image: image, fill: colours.fill, ink: colours.ink, animated: true)
+                reused.translatesAutoresizingMaskIntoConstraints = false
+                reused.autoresizingMask = []
+                arranged.append(reused)
+            } else {
+                arranged.append(ToastBadge(image: image, fill: colours.fill, ink: colours.ink))
+            }
+            leadsWithDisc = true
         }
         arranged.append(texts)
 
@@ -807,9 +1090,13 @@ public final class ToastView: UIView {
         textInset?.priority = .required - 1
         textInset?.isActive = true
         let hasControl = actionButton != nil || closeButton != nil || undoButton != nil
-        let trailing = hasControl ? Spacing.sm : Spacing.lg
+        // The disc and the control sit `inset` from the capsule's ends, as
+        // from its top and foot; text alone keeps a wider margin.
+        let leading = leadsWithDisc ? Metrics.inset : Spacing.lg
+        let trailing = hasControl ? Metrics.inset : Spacing.lg
+        rowLeading?.constant = leading
         rowTrailing?.constant = -trailing
-        rowInsets = Spacing.lg + trailing
+        rowInsets = leading + trailing
         textLabels = [title]
         measureIdealWidth()
 
@@ -833,11 +1120,6 @@ public final class ToastView: UIView {
             let countdown = ToastCountdown(seconds: duration, clock: ToastClock.current) { [weak self] in
                 self?.dismiss(animated: true)
             }
-            if let undoButton {
-                countdown.onChange = { [weak undoButton, weak countdown] running, remaining in
-                    undoButton?.follow(isRunning: running, remaining: remaining, total: countdown?.total ?? 0)
-                }
-            }
             self.countdown = countdown
             // Updated in place under its open sheet: the new time waits too.
             if fullMessageSheet != nil { countdown.hold(.sheet) }
@@ -845,33 +1127,11 @@ public final class ToastView: UIView {
     }
 
     private static func makeActionButton(title: String) -> UIButton {
-        var configuration = UIButton.Configuration.plain()
-        configuration.title = title
-        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var attributes = attributes
-            attributes.font = .scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline)
-            return attributes
-        }
-        configuration.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8)
-        let button = UIButton(configuration: configuration)
-        button.setContentHuggingPriority(.required, for: .horizontal)
-        button.setContentCompressionResistancePriority(.required, for: .horizontal)
-        let floor = button.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumHeight)
-        floor.priority = .required - 1
-        floor.isActive = true
-        return button
+        ToastActionButton(title: title)
     }
 
     private static func makeCloseButton() -> UIButton {
-        var configuration = UIButton.Configuration.plain()
-        configuration.image = UIImage(systemName: "xmark")
-        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(textStyle: .footnote, scale: .medium)
-        configuration.baseForegroundColor = .secondaryLabel
-        configuration.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)
-        let button = UIButton(configuration: configuration)
-        button.accessibilityLabel = "Dismiss"
-        button.setContentHuggingPriority(.required, for: .horizontal)
-        return button
+        ToastCloseButton()
     }
 
     /// The width it asks for: its row with the text on its one line — the
@@ -995,6 +1255,13 @@ public final class ToastView: UIView {
     public func debugDismiss() { dismiss(animated: false) }
     /// A tap on the toast's body. Tests.
     func debugTap() { tapped() }
+    /// Whether a change of content is under way: the words opening from
+    /// their middle (`flowContent`). Tests.
+    var debugIsFlowing: Bool { textSlot?.isOpening == true }
+    /// The pieces still leaving a change. Tests.
+    var debugLeaving: [UIView] { flowLeaving }
+    /// The leading mark in the row now. Tests.
+    var debugMark: UIView? { row.arrangedSubviews.first { $0 is ToastBadge || $0 is AppLoaderView } }
     /// Lays the toast out where it rests now. Tests.
     func debugSettle() { superview?.layoutIfNeeded() }
     /// Whether it is crossing to its anchor's new place. Tests.
@@ -1249,6 +1516,9 @@ public final class ToastView: UIView {
 
     private func leave(animated: Bool, moving: Bool) {
         guard !isLeaving else { return }
+        // A change under way gives way to the real content, which leaves.
+        stopSwell()
+        endFlow()
         isLeaving = true
         // Any way out but Undo commits: time, close, swipe, a replacement,
         // a second undoable toast, the background.

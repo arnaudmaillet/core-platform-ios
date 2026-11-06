@@ -75,6 +75,63 @@ struct ToastStackTests {
         }
     }
 
+    /// An update by `id` flows like a replacement: the old content blurs
+    /// away and the new one comes out of a blur, centred, in the same capsule
+    /// (the owner, 2026-11-06: the change was a cut, the text sliding).
+    @Test func anUpdateFlowsItsContent() {
+        hosting { container, _ in
+            let loading = toast("Posting…", style: .loading, id: "post", in: container)
+            container.layoutIfNeeded()
+            let posted = toast("Posted", id: "post", in: container)
+            #expect(posted === loading)
+            #expect(posted.debugIsFlowing, "the words were cut in, not opened from the middle")
+            // The old words leave from where they stand, about the middle.
+            let words = posted.debugLeaving.filter { !($0 is ToastBadge) && !($0 is AppLoaderView) }
+            #expect(words.allSatisfy { $0.autoresizingMask.contains([.flexibleLeftMargin, .flexibleRightMargin]) })
+        }
+    }
+
+    /// A disc in both states is ONE disc: its glyph and colour change in
+    /// place; the mark keeps the leading end and the action the trailing one
+    /// while they leave.
+    @Test func aChangeKeepsItsDiscAndPinsItsEnds() {
+        hosting { container, _ in
+            let muted = ToastView.present(
+                "Notifications muted", symbol: "bell.slash.fill", style: .confirmation,
+                undoable: .init(commit: {}, undo: {}), in: container
+            )
+            container.layoutIfNeeded()
+            let disc = muted.debugMark
+            #expect(disc is ToastBadge)
+            let on = ToastView.present("Notifications on", symbol: "bell.fill", style: .confirmation, in: container)
+            #expect(on.debugMark === disc, "the disc was swapped for another")
+            let control = on.debugLeaving.first { $0 is ToastActionButton }
+            #expect(control?.autoresizingMask.contains(.flexibleLeftMargin) == true, "the action does not keep the trailing end")
+        }
+    }
+
+    /// A toggle spammed: the latest wins, from what is on screen — never
+    /// more than one set of pieces leaving, the latest content showing at
+    /// once (the owner, 2026-11-06).
+    @Test func aSpammedToggleKeepsOnePieceSetLeaving() {
+        hosting { container, _ in
+            var last: ToastView?
+            for index in 0..<8 {
+                let muted = index.isMultiple(of: 2)
+                last = ToastView.present(
+                    muted ? "Notifications muted" : "Notifications on",
+                    symbol: muted ? "bell.slash.fill" : "bell.fill", style: .confirmation,
+                    undoable: muted ? .init(commit: {}, undo: {}) : nil, in: container
+                )
+            }
+            let shown = ToastView.stack(in: container)
+            #expect(shown.count == 1 && shown.first === last)
+            #expect(last?.message == "Notifications on")
+            let leaving = last?.debugLeaving ?? []
+            #expect(leaving.count <= 2, "pieces of several states piled up: \(leaving.count)")
+        }
+    }
+
     /// A condition holds its line: results come and go under it, and none
     /// replaces it; a second condition takes a line of its own.
     @Test func aConditionHoldsItsLine() {

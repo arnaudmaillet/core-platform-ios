@@ -47,20 +47,30 @@ struct ToastUndoTests {
         )
     }
 
-    // MARK: - The countdown is visible
+    // MARK: - The countdown
 
-    @Test func itWaitsTheUndoDurationWithAVisibleRing() throws {
+    /// Undo is a filled grey capsule with its word alone — no glyph, no ring
+    /// (the owner, 2026-11-06); the countdown still runs the undo duration, and a hold
+    /// still holds it.
+    @Test func itWaitsTheUndoDurationBehindAFilledUndo() throws {
         try hosting { container, advance in
             let ledger = Ledger()
             let toast = undoable(ledger, in: container)
             #expect(toast.duration == ToastView.undoDuration)
-            let ring = try #require(toast.undoButton)
+            let undo = try #require(toast.undoButton)
             #expect(toast.closeButton == nil && toast.actionButton == nil)
-            #expect(ring.layer.superlayer != nil)
-            // Held halfway: the ring stops where the time is.
+            #expect(undo.configuration?.title == "Undo")
+            #expect(undo.configuration?.image == nil, "Undo has a glyph again")
+            #expect(undo.configuration?.baseBackgroundColor == ToastActionButton.ground, "Undo is not on its grey ground")
+            #expect(undo.configuration?.baseForegroundColor == Palette.brandText, "Undo's word is not in the primary ink")
+            #expect(!(undo.layer.sublayers ?? []).contains { $0 is CAShapeLayer }, "the ring is back")
             advance(4)
             toast.countdown?.hold(.touch)
-            #expect(abs(ring.ringFraction - 0.5) < 0.01)
+            advance(60)
+            #expect(ledger.commits == 0, "a hold did not hold the countdown")
+            toast.countdown?.release(.touch)
+            advance(4.1)
+            #expect(ledger.commits == 1)
         }
     }
 

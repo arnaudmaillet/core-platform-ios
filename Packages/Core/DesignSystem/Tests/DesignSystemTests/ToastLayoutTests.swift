@@ -4,7 +4,7 @@ import UIKit
 
 /// The toast's one-line layout (#1034): one line of text, a toast with an
 /// action as wide as the margins allow with its control flush trailing, one
-/// without hugging its text; 48 pt with an action, 44 pt without.
+/// hugging its text; 48 pt, with an action or without (one height, 2026-11-06).
 @MainActor
 @Suite(.serialized)
 struct ToastLayoutTests {
@@ -68,6 +68,26 @@ struct ToastLayoutTests {
         }
     }
 
+    /// The action is a filled capsule inside the toast's, concentric — as far
+    /// from the toast's trailing edge as from its top — and takes touches
+    /// up to 44 pt around it.
+    @Test func theActionIsAFilledConcentricCapsuleWithAFullTarget() throws {
+        try hosting { _, container in
+            let toast = ToastView.present(
+                "Couldn't send", symbol: nil, style: .failure, action: .init("Retry") {}, in: container
+            )
+            settled(container)
+            let action = try #require(toast.actionButton as? ToastActionButton)
+            #expect(action.configuration?.baseBackgroundColor == ToastActionButton.ground)
+            let frame = action.convert(action.bounds, to: toast)
+            let trailing = toast.bounds.maxX - frame.maxX
+            let top = frame.minY - toast.bounds.minY
+            #expect(abs(trailing - top) <= 1.5, "not concentric: \(trailing) pt trailing, \(top) pt on top")
+            #expect(action.bounds.height < ToastActionButton.touchTarget)
+            #expect(action.point(inside: CGPoint(x: action.bounds.midX, y: -4), with: nil), "the target is the capsule only")
+        }
+    }
+
     /// Without one, the capsule hugs its text.
     @Test func aPlainToastHugsItsText() {
         hosting { _, container in
@@ -77,14 +97,15 @@ struct ToastLayoutTests {
         }
     }
 
-    /// 48 pt with an action, 44 pt without, at the default text size.
+    /// 48 pt, with an action or without, at the default text size: the
+    /// disc and the action capsule concentric with the toast (2026-11-06).
     @Test func theHeightsAreCompact() {
         // Each measured at rest before the next replaces it (one result
         // toast at a time, #2143).
         hosting { _, container in
             let plain = ToastView.present("Copied", symbol: nil, style: .confirmation, in: container)
             settled(container)
-            #expect(abs(plain.bounds.height - 44) < 0.5)
+            #expect(abs(plain.bounds.height - 48) < 0.5)
             let withUndo = undoable("Unfollowed @ava", in: container)
             settled(container)
             #expect(abs(withUndo.bounds.height - 48) < 0.5)
