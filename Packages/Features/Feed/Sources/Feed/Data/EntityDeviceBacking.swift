@@ -40,8 +40,8 @@ public final class EntityDeviceBacking: Sendable {
         self.entities = entities
         self.cache = cache
         observation = entities.observePosts { [weak entities] change in
-            // `.everything` is a viewer change wiping the viewer's facts:
-            // nothing was deleted.
+            // `.everything` is a viewer change wiping what was read for
+            // the viewer: nothing was deleted.
             guard let entities, case .some(let ids) = change else { return }
             let deleted = ids.filter(entities.isDeleted)
             guard !deleted.isEmpty else { return }

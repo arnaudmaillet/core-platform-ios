@@ -142,11 +142,15 @@ struct EntityStoreTests {
 
     // MARK: - Viewer reset
 
-    @Test func aViewerChangeWipesTheViewersFactsAndKeepsTheContent() {
+    /// Everything here was read for the viewer (#2152): a post a member may
+    /// see is not one a guest may, so the content goes with the facts.
+    /// Deletions are everyone's and stay.
+    @Test func aViewerChangeWipesWhatWasReadForTheViewer() {
         let store = EntityStore()
         let coordinator = CacheCoordinator(device: device)
         store.register(with: coordinator)
-        store.upsert([entry("p1", author: "a1", likes: 10)])
+        store.upsert([entry("p1", author: "a1", likes: 10), entry("p2", author: "a2")])
+        store.deletePost(PostID("p2"))
         store.setRelation(.following, for: ProfileID("a1"))
         store.setSaved(true, for: PostID("p1"))
         var postCalls = 0
@@ -158,21 +162,40 @@ struct EntityStoreTests {
 
         #expect(store.relation(to: ProfileID("a1")) == nil)
         #expect(store.isSaved(PostID("p1")) == nil)
-        #expect(store.post(PostID("p1"))?.likeCount == 10, "the content is the same for every viewer")
-        #expect(store.profile(ProfileID("a1"))?.summary?.handle == "a1")
-        #expect(postCalls == 1, "a screen drawing the saved glyph re-draws")
+        #expect(store.post(PostID("p1")) == nil, "the viewer's post, observed or not")
+        #expect(store.profile(ProfileID("a1")) == nil)
+        #expect(store.isDeleted(PostID("p2")), "a deletion is everyone's")
+        // Once per kind, after everything is gone.
+        #expect(postCalls == 1, "a screen drawing the post re-draws")
         #expect(profileChanges == [.everything])
         // `-cache-audit` (#900) reads the wipe through the wrapper.
-        let relations = coordinator.usage().lines.first { $0.namespace.name == "entities.relations" }
-        #expect(relations?.statistics.removals[.viewerChanged] == 1)
+        for name in ["entities.posts", "entities.relations"] {
+            let line = coordinator.usage().lines.first { $0.namespace.name == name }
+            #expect(line?.statistics.removals[.viewerChanged] == 1, "\(name)")
+        }
         withExtendedLifetime((post, profiles)) {}
     }
 
-    @Test func theViewersFactsAreViewerScopedNamespacesAndTheContentIsPublic() {
+    /// A post read again after the change is stored and observed as before.
+    @Test func theNextViewerFillsTheStoreAgain() {
+        let store = EntityStore()
+        store.upsert([entry("p1", likes: 10)])
+        var calls = 0
+        let post = store.observePost(PostID("p1")) { _ in calls += 1 }
+        store.viewerDidChange()
+        #expect(store.post(PostID("p1")) == nil)
+
+        store.upsert([entry("p1", likes: 4)])
+        #expect(store.post(PostID("p1"))?.likeCount == 4)
+        #expect(calls == 2, "the wipe, then the next viewer's write")
+        withExtendedLifetime(post) {}
+    }
+
+    @Test func everyNamespaceIsTheViewers() {
         let store = EntityStore()
         let scopes = Dictionary(uniqueKeysWithValues: store.managedCaches.map { ($0.namespace.name, $0.namespace.scope) })
         #expect(scopes == [
-            "entities.posts": .public, "entities.profiles": .public,
+            "entities.posts": .viewer, "entities.profiles": .viewer,
             "entities.relations": .viewer, "entities.saved": .viewer
         ])
         #expect(store.managedCaches.allSatisfy { $0.medium == .memory && $0.namespace.priorityClass == .preferred })
@@ -183,8 +206,8 @@ struct EntityStoreTests {
     @Test func theStoreKeepsItsCountBudget() {
         let store = EntityStore(postLimit: 10, profileLimit: 5)
         store.upsert((0..<20).map { entry("p\($0)", author: "a\($0)") })
-        #expect(store.posts.usage.count == 10)
-        #expect(store.profiles.usage.count == 5)
+        #expect(store.posts.cache.usage.count == 10)
+        #expect(store.profiles.cache.usage.count == 5)
         #expect(store.post(PostID("p19")) != nil, "the newest stay")
         #expect(store.post(PostID("p0")) == nil, "the oldest went first")
     }
@@ -201,7 +224,7 @@ struct EntityStoreTests {
 
         coordinator.trim(.memoryCritical)
         #expect(store.post(PostID("shown")) != nil, "nor does a critical trim")
-        #expect(store.posts.usage.count == 1)
+        #expect(store.posts.cache.usage.count == 1)
 
         observation.cancel()
         coordinator.trim(.memoryCritical)
@@ -238,9 +261,9 @@ struct EntityStoreTests {
         store.upsert([entry("p1", author: "a1", likes: 10), entry("p2", author: "a1")])
         store.upsert([entry("p1", author: "a1", likes: 10)], tier: .speculative)
 
-        #expect(store.posts.usage.count == 2)
-        #expect(store.profiles.usage.count == 1, "the author too")
-        #expect(store.posts.tier(of: PostID("p1")) == .recent, "a lookahead never demotes what was seen")
+        #expect(store.posts.cache.usage.count == 2)
+        #expect(store.profiles.cache.usage.count == 1, "the author too")
+        #expect(store.posts.cache.tier(of: PostID("p1")) == .recent, "a lookahead never demotes what was seen")
 
         var gridHeard: [Int64?] = []
         let grid = store.observePost(PostID("p1")) { id in gridHeard.append(store.post(id)?.likeCount) }

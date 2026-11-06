@@ -1,10 +1,10 @@
 import CoreModels
 import Foundation
 
-/// One post as every screen sees it: its content and its counters, the same
-/// for every viewer. What the VIEWER did to it (saved it, staked on it) is not
-/// here: those facts are wiped on a viewer change, the content is not
-/// (`EntityStore`).
+/// One post as every screen sees it: its content and its counters. What the
+/// VIEWER did to it (saved it, staked on it) is not here. Both are wiped on a
+/// viewer change: whether a viewer may see the post at all is theirs
+/// (`EntityStore`, #2152).
 public struct PostEntity: Sendable, Equatable {
     public let id: PostID
     /// Nil while only the counters are known: a grid's tile or a realtime

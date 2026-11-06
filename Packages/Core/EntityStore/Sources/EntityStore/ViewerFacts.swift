@@ -2,11 +2,11 @@ import CacheKit
 import Foundation
 import Synchronization
 
-/// What the viewer did to, or is to, an entity — followed a person, saved a
-/// post — in a memory cache of its own `viewer`-scoped namespace, so the
-/// coordinator's `.viewerChanged` wipes it while the content stays
+/// What was read for the viewer — a post or a person they may see, where they
+/// stand with a person, what they saved — in a memory cache of its own
+/// `viewer`-scoped namespace, so the coordinator's `.viewerChanged` wipes it
 /// (`EntityStore`). A plain `MemoryCache` would wipe in silence; this one says
-/// so, and every screen drawing one of these facts re-draws.
+/// so, and every screen drawing one of these entities re-draws.
 final class ViewerFacts<Key: Hashable & Sendable, Value: Sendable>: ManagedCache {
     let cache: MemoryCache<Key, Value>
     private let onWipe = Mutex<(@Sendable () -> Void)?>(nil)
