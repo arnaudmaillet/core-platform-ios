@@ -335,15 +335,68 @@ struct ToastOverlayTests {
         }
     }
 
-    /// The window is up only while it holds a toast.
-    @Test func theWindowHidesWithItsLastToast() {
+    /// The window is up only while it holds a toast — hidden a turn after
+    /// its last one leaves, so a toast taking over another's capsule (which
+    /// removes it first) never blinks the window out for a frame.
+    @Test func theWindowHidesWithItsLastToast() async {
         let screen = UIViewController()
-        hosting(screen) { _, overlay in
-            let toast = Feedback.info("Saved", from: screen)
-            #expect(!overlay.window.isHidden)
-            toast.dismiss(animated: false)
-            #expect(overlay.window.isHidden)
+        let window = UIWindow(frame: bounds)
+        window.rootViewController = screen
+        window.isHidden = false
+        window.layoutIfNeeded()
+        let overlay = ToastOverlay(window: ToastOverlayWindow(frame: bounds), appWindow: window)
+        // Its own clock, captured by the toast as it is made and put back
+        // before any `await`: another suite's hand-driven clock must not run
+        // this toast out (`global-test-state-await-trap`).
+        let previousMake = ToastOverlay.makeForTests
+        let previousClock = ToastClock.current
+        ToastOverlay.makeForTests = { _ in overlay }
+        ToastClock.current = ToastClock.manual().0
+        _ = HapticRecorder.recording { _ = Feedback.info("Saved", from: screen) }
+        ToastOverlay.makeForTests = previousMake
+        ToastClock.current = previousClock
+        #expect(!overlay.window.isHidden)
+        overlay.toasts.forEach { $0.dismiss(animated: false) }
+        #expect(!overlay.window.isHidden, "hidden in the turn its toast left")
+        for _ in 0..<50 where !overlay.window.isHidden { await Task.yield() }
+        #expect(overlay.window.isHidden)
+        overlay.window.isHidden = true
+        window.rootViewController = nil
+        window.isHidden = true
+        window.layoutIfNeeded()
+    }
+
+    /// A toast taking over another's capsule keeps the window up through
+    /// the turn after: the one it replaced left first.
+    @Test func aTakeOverNeverHidesTheWindow() async {
+        let screen = UIViewController()
+        let window = UIWindow(frame: bounds)
+        window.rootViewController = screen
+        window.isHidden = false
+        window.layoutIfNeeded()
+        let overlay = ToastOverlay(window: ToastOverlayWindow(frame: bounds), appWindow: window)
+        // Its own clock, as above.
+        let previousMake = ToastOverlay.makeForTests
+        let previousClock = ToastClock.current
+        ToastOverlay.makeForTests = { _ in overlay }
+        ToastClock.current = ToastClock.manual().0
+        _ = HapticRecorder.recording {
+            _ = Feedback.info("Notifications muted", symbol: "bell.slash.fill", from: screen)
+            overlay.window.layoutIfNeeded()
+            _ = Feedback.info("Notifications on", symbol: "bell.fill", from: screen)
         }
+        ToastOverlay.makeForTests = previousMake
+        ToastClock.current = previousClock
+        let toastsUp = overlay.toasts.count
+        let hiddenNow = overlay.window.isHidden
+        for _ in 0..<10 { await Task.yield() }
+        let hiddenAfter = overlay.window.isHidden
+        #expect(toastsUp == 1 && !hiddenNow && !hiddenAfter, "toasts \(toastsUp), hidden now \(hiddenNow), after a turn \(hiddenAfter)")
+        overlay.toasts.forEach { $0.dismiss(animated: false) }
+        overlay.window.isHidden = true
+        window.rootViewController = nil
+        window.isHidden = true
+        window.layoutIfNeeded()
     }
 
     // MARK: - Touches

@@ -114,6 +114,20 @@ extension MainTabCoordinator {
                     }
                 }
             }
+            // `-toast-demo spam`: a toggle spammed — "Notifications muted"
+            // (with Undo) and "on" every 0.12 s, ten times, twice over:
+            // the latest must win, from what is on screen.
+            for shot in 0..<20 where mode == "spam" {
+                let delay = 2.5 + Double(shot) * 0.12 + (shot >= 10 ? 2.5 : 0)
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    guard let top = self?.debugToastSource() else { return }
+                    if shot.isMultiple(of: 2) {
+                        Feedback.undoable("Notifications muted", symbol: "bell.slash.fill", from: top, commit: {}, undo: {})
+                    } else {
+                        Feedback.success("Notifications on", symbol: "bell.fill", from: top)
+                    }
+                }
+            }
             // `-toast-demo long` (#1449): a failure whose message is cut,
             // with Retry — a tap on its body opens the whole message. Fired
             // again every 5 s for 20 s: a toast lasts 4 s.
@@ -131,7 +145,7 @@ extension MainTabCoordinator {
                     self?.debugToastAfterPop()
                 }
             }
-            for round in 0..<200 where !["kinds", "undo", "condition", "long", "pop"].contains(mode) {
+            for round in 0..<200 where !["kinds", "undo", "condition", "long", "pop", "spam"].contains(mode) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(round) * 3) { [weak self] in
                     guard let top = self?.debugToastSource() else { return }
                     Feedback.success("Saved to your profile", from: top)

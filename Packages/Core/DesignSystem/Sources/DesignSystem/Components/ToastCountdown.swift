@@ -28,8 +28,9 @@ final class ToastCountdown {
     /// The whole time it started with.
     let total: TimeInterval
     /// Told whenever it starts running or stops: whether it runs now, and
-    /// what was left at that moment — what an on-screen countdown (the undo
-    /// ring) animates from.
+    /// what was left at that moment — what an on-screen countdown would
+    /// animate from (none is drawn since Undo became a filled capsule,
+    /// 2026-11-06).
     var onChange: ((_ isRunning: Bool, _ remaining: TimeInterval) -> Void)?
     private(set) var holds: Set<Hold> = []
     private(set) var hasExpired = false

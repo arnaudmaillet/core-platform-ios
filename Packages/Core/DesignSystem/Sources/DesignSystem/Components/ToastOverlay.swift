@@ -161,10 +161,15 @@ final class ToastOverlay {
             message, symbol: symbol, style: style, action: action, undoable: undoable,
             id: id, isCondition: isCondition, length: length, in: container, ceiling: ceiling.bottomAnchor
         )
-        toast.onRemoved = { [weak self] in self?.hideIfEmpty() }
+        // ⚠️ ON THE NEXT TURN, NOT AT ONCE (filmed, 2026-11-06): a toast
+        // taking over another's capsule removes it before it is added
+        // itself, and a window hidden and shown again in one turn missed a
+        // whole frame — the toast blinked out on a fast toggle.
+        toast.onRemoved = { [weak self] in
+            DispatchQueue.main.async { self?.hideIfEmpty() }
+        }
         // ⚠️ AGAIN, AFTER: the toast this one replaced may have left inside
-        // `ToastView.present`, before this one was added — the window was
-        // empty for that instant and hid itself, and stopped following.
+        // `ToastView.present`, before this one was added.
         window.isHidden = false
         startFollowing()
         return toast
