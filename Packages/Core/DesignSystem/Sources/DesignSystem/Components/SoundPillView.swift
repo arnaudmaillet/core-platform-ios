@@ -84,7 +84,7 @@ public final class SoundPillView: UIControl {
         // compile on. A shared component should not lean on an ambient helper
         // anyway. This is the descriptor edit those helpers perform: a weight at
         // the font's own size, keeping whatever Dynamic Type already scaled it to.
-        let base = UIFont.preferredFont(forTextStyle: .footnote, compatibleWith: traits)
+        let base = UIFont.appFont(forTextStyle: .footnote, compatibleWith: traits)
         label.font = UIFont(
             descriptor: base.fontDescriptor.addingAttributes([
                 .traits: [UIFontDescriptor.TraitKey.weight: UIFont.Weight.semibold]

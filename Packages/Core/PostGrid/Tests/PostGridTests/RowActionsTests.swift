@@ -83,7 +83,7 @@ struct RowActionsTests {
     @Test func everyControlButTheOverflowIsInTheClosingLine() throws {
         let cell = row()
         let captionLabel = try #require(labels(in: cell.contentView).first {
-            $0.font == .preferredFont(forTextStyle: .body)
+            $0.font == .appFont(forTextStyle: .body)
         })
         let caption = captionLabel.convert(captionLabel.bounds, to: cell.contentView)
         let controls = buttons(in: cell.contentView)
@@ -205,7 +205,7 @@ struct RowActionsTests {
         }
         let name = try #require(labels(cell.contentView).first { $0.text == "Sofía" })
         let handle = try #require(labels(cell.contentView).first { $0.text?.hasPrefix("@sofia") == true })
-        #expect(name.font.pointSize == UIFont.preferredFont(forTextStyle: .body).pointSize)
+        #expect(name.font.pointSize == UIFont.appFont(forTextStyle: .body).pointSize)
         #expect(name.font.fontDescriptor.symbolicTraits.contains(.traitBold))
         #expect(handle.font.pointSize < name.font.pointSize)
     }
@@ -301,7 +301,7 @@ struct RowActionsTests {
         #expect(cell.authorBandModel == nil)
         #expect(buttons(in: cell.contentView).isEmpty)
         let caption = try #require(labels(in: cell.contentView).first {
-            $0.font == .preferredFont(forTextStyle: .body)
+            $0.font == .appFont(forTextStyle: .body)
         })
         #expect(abs(caption.convert(caption.bounds, to: cell.contentView).minY
             - PostGridListRowCell.captionTopInset) < 0.5)

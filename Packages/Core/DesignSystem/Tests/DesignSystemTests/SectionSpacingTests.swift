@@ -38,9 +38,15 @@ struct SectionSpacingTests {
     /// at the default size and at a large one.
     @Test func theTitleBarKeepsTheSectionSpacing() {
         #expect(SectionTitleView.barHeight() == SectionTitleView.Metrics.height)
-        let air = (SectionTitleView.Metrics.height - line) / 2
+        // The line the bar draws: the app's scale (#2149), not Apple's 20 pt.
+        let drawn = SectionTitleView.titleFont(.standard, traits: SectionTitleView.defaultTraits).lineHeight
+        let air = (SectionTitleView.Metrics.height - drawn) / 2
         #expect(abs(SectionTitleView.gapAbove() + air - Spacing.section) <= 0.5)
-        #expect(abs(SectionTitleView.gapBelow() + air - Spacing.sectionTitle) <= 0.5)
+        // Under the line: the bar's 44 pt floor holds a smaller title (scale
+        // B, #2149) with a little more air than `Spacing.sectionTitle` —
+        // measured 10.7 pt, nothing added under the bar.
+        #expect(SectionTitleView.gapBelow() == 0)
+        #expect(abs(SectionTitleView.gapBelow() + air - 10.66) < 0.1, "the line is \(air) pt over the content")
 
         let large = UITraitCollection(preferredContentSizeCategory: .accessibilityLarge)
         let bigLine = SectionTitleView.titleFont(.standard, traits: large).lineHeight
@@ -63,7 +69,7 @@ struct SectionSpacingTests {
             CGSize(width: 320, height: UIView.layoutFittingCompressedSize.height)
         ).height
         let lineTop = SectionHeaderPillButton.inlineTitleTop(traits: pill.traitCollection)
-        let inline = UIFont.preferredFont(forTextStyle: .title3, compatibleWith: pill.traitCollection).lineHeight
+        let inline = SectionTitleView.titleFont(.standard, traits: pill.traitCollection).lineHeight
         #expect(abs(height - (lineTop + inline) - Spacing.sectionTitle) <= 0.6,
                 "the title's line is \(height - lineTop - inline) over the first row")
         #expect(pill.frame.minY == SectionHeaderPillButton.Metrics.float, "the pill moved")

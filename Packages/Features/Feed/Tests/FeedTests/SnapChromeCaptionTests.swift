@@ -98,7 +98,7 @@ struct SnapChromeCaptionTests {
     /// is exactly one line and a two-line one exactly two — the smaller
     /// footnote time never shrinks the line it ends.
     @Test func captionContainerIsWholeBodyLines() {
-        let bodyLineHeight = UIFont.preferredFont(forTextStyle: SnapChromeView.CaptionRegister.textStyle).lineHeight
+        let bodyLineHeight = UIFont.appFont(forTextStyle: SnapChromeView.CaptionRegister.textStyle).lineHeight
         let cases: [(String, Int)] = [
             ("Golden hour.", 1), // A — one line, time inline
             ("Rebuilt the whole deploy pipeline over a slow rainy weekend.", 2), // B — inline on line two

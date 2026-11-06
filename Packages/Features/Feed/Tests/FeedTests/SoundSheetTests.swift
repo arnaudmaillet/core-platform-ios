@@ -992,9 +992,11 @@ struct SoundSheetTests {
         #expect(centredGap < Spacing.xs, "centred on the record would clear the bar: \(centredGap)")
     }
 
-    /// At the app's largest text size the lines outgrow the record: the
-    /// header grows, and the bar stays under them at its bottom, never over
-    /// them — on an iPhone 18 Pro and an SE alike.
+    /// At the app's largest text size the bar stays under the lines at the
+    /// header's bottom, never over them — on an iPhone 18 Pro and an SE
+    /// alike. On the app's scale B (#2149) the lines still fit the record
+    /// there (measured: the header stays 96 pt); on Apple's sizes they
+    /// outgrew it and the header grew.
     @Test func atTheLargestTextSizeTheBarStaysUnderTheLines() {
         for screen: CGFloat in [402, 375] {
             let width = screen - 2 * Sheet.headerInset
@@ -1014,7 +1016,7 @@ struct SoundSheetTests {
             ).height.rounded(.up)
             header.frame.size.height = height
             header.layoutIfNeeded()
-            #expect(height > SoundSheetHeaderView.artworkSide, "the lines did not outgrow the record: \(height)")
+            #expect(height == SoundSheetHeaderView.artworkSide, "the header is not the record's height: \(height)")
             #expect(header.debugLinesFrame.minY >= -0.5, "the lines run off the header's top")
             #expect(header.debugLinesFrame.maxY <= header.debugTrackFrame.minY - Spacing.xs + 0.5,
                     "the lines run into the bar on a \(screen) pt screen")
@@ -1265,9 +1267,12 @@ struct SoundSheetTests {
         let controller = sheet(tiles: 23)
         try laidOut(controller)
         let metrics = try #require(controller.detentMetrics)
-        let line = UIFont.preferredFont(forTextStyle: .title3).lineHeight
+        let line = SectionTitleView.titleFont(.standard, traits: SectionTitleView.defaultTraits).lineHeight
         let air = (metrics.sectionHeaderHeight - line) / 2
-        #expect(abs(air - Spacing.sectionTitle) <= 0.5, "the title's line is \(air) over its posts")
+        // The bar's 44 pt floor holds the app's smaller title (scale B,
+        // #2149) with a little more air than `Spacing.sectionTitle`:
+        // measured 10.7 pt, as `SectionSpacingTests` has it.
+        #expect(abs(air - 10.66) < 0.1, "the title's line is \(air) over its posts")
         #expect(abs(metrics.sectionGap + air - Spacing.section) <= 0.5,
                 "the title's line is \(metrics.sectionGap + air) under what is above it")
     }

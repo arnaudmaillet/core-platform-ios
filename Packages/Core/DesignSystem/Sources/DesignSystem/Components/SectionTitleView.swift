@@ -171,8 +171,8 @@ public final class SectionTitleView: UIView {
     /// The title's font in `style` at `traits`' text size.
     nonisolated public static func titleFont(_ style: Style, traits: UITraitCollection) -> UIFont {
         switch style {
-        case .standard: .preferredFont(forTextStyle: .title3, compatibleWith: traits).withWeight(.bold)
-        case .compact: .preferredFont(forTextStyle: .subheadline, compatibleWith: traits).withWeight(.semibold)
+        case .standard: .appFont(forTextStyle: .title3, compatibleWith: traits).withWeight(.bold)
+        case .compact: .appFont(forTextStyle: .subheadline, compatibleWith: traits).withWeight(.semibold)
         }
     }
 

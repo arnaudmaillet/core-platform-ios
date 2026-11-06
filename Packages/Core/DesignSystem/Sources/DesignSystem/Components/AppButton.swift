@@ -322,7 +322,11 @@ open class AppButton: AppControl {
         let scratch = UIButton(configuration: configuration(for: content, phase: .content))
         scratch.updateConfiguration()
         let fitted = scratch.sizeThatFits(UIView.layoutFittingCompressedSize)
-        return CGSize(width: ceil(fitted.width), height: ceil(fitted.height))
+        // Up to the pixel, as layout rounds the real button — never the
+        // whole point: on the app's own sizes (#2149) a reserved width a
+        // point wider than the answer moved its neighbours when it landed.
+        let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 3
+        return CGSize(width: ceil(fitted.width * scale) / scale, height: ceil(fitted.height * scale) / scale)
     }
 
     // MARK: - Content

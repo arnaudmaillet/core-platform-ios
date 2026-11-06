@@ -77,6 +77,14 @@ extension UIFont {
         appFont(forTextStyle: style, scale: AppTypeScale.current, compatibleWith: TextSizeCeiling.currentTraits)
     }
 
+    /// `appFont` at `traits`' text size — for a measure made for a trait
+    /// collection (a row's height, an avatar's side) rather than for a label
+    /// that resolves its own. ⚠️ Not `preferredFont(forTextStyle:
+    /// compatibleWith:)`: that is Apple's size, not the app's (#2149).
+    public static func appFont(forTextStyle style: TextStyle, compatibleWith traits: UITraitCollection?) -> UIFont {
+        appFont(forTextStyle: style, scale: AppTypeScale.current, compatibleWith: traits ?? TextSizeCeiling.currentTraits)
+    }
+
     /// `appFont` on a given scale, at given traits (nil: the system's). Tests.
     static func appFont(
         forTextStyle style: TextStyle, scale: AppTypeScale, compatibleWith traits: UITraitCollection?,
