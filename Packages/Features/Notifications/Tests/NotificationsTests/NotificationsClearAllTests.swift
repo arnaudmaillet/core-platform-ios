@@ -228,7 +228,7 @@ struct NotificationsClearItemTests {
 
             controller.debugTapClear()
             #expect(list.isHidden, "the list empties at once")
-            let toast = try #require(controller.navigationItem.rightBarButtonItems?.first?.customView as? ToastView)
+            let toast = try #require(Self.firstToast(under: controller.view))
             let undo = try #require(toast.undoButton)
             undo.sendActions(for: .primaryActionTriggered)
 
@@ -241,7 +241,9 @@ struct NotificationsClearItemTests {
         }
     }
 
-    @Test func itsToastTakesTheTrailingItemsAndGivesThemBack() async throws {
+    /// The trash stays in the bar and changes at once, beside its toast
+    /// (#2143): disabled, nothing left to clear.
+    @Test func theTrashChangesAtOnceBesideItsToast() async throws {
         let provider = ClearingProvider([row("n1", minutesAgo: 1), row("n2", minutesAgo: 4)])
         try await hosting(provider) { controller, viewModel in
             let trash = try #require(controller.debugClearItem)
@@ -251,16 +253,24 @@ struct NotificationsClearItemTests {
             controller.debugTapClear()
 
             let bar = controller.navigationItem.rightBarButtonItems ?? []
-            let toast = try #require(bar.first?.customView as? ToastView)
-            #expect(!bar.contains { $0 === trash }, "the toast holds the trailing slot")
+            #expect(bar.count == 1 && bar.first === trash, "a toast took the trash's place")
+            #expect(!trash.isEnabled, "the trash waited for its toast")
+            let toast = try #require(Self.firstToast(under: controller.view))
             #expect(toast.message == "Notifications cleared")
-            #expect(!trash.isEnabled, "the trash comes back disabled: nothing left")
 
             toast.dismiss(animated: false)
-            let back = controller.navigationItem.rightBarButtonItems ?? []
-            #expect(back.count == 1 && back.first === trash)
             await viewModel.clearCall?.value
             #expect(await provider.clears.count == 1, "the toast leaving on its own commits")
         }
+    }
+
+    /// The first toast up in `view`'s tree: in a package test host,
+    /// `Feedback` draws it in the screen (no scene overlay).
+    private static func firstToast(under view: UIView) -> ToastView? {
+        if let toast = view as? ToastView, !toast.isDismissing { return toast }
+        for subview in view.subviews {
+            if let toast = firstToast(under: subview) { return toast }
+        }
+        return nil
     }
 }

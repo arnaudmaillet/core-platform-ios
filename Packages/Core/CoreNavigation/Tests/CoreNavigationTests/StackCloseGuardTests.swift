@@ -32,7 +32,6 @@ struct StackCloseGuardTests {
         "DebugDashboard.swift": "the DEBUG dashboard (#2131) closes its own sheet in its own window, off the app's stacks",
         // Not UIKit's `dismiss(animated:)`: a toast's own, on a view.
         "ToastView.swift": "the toast's own dismiss",
-        "NavigationBarToasts.swift": "the toast's own dismiss",
         "PendingFeedback.swift": "the loading toast's own dismiss",
         "StakeMenu.swift": "the toast's own dismiss",
     ]

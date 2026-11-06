@@ -33,8 +33,6 @@ public enum DebugFlags {
              detail: "Video tiles' frosted backdrop stays a still", appliesAtLaunch: false),
         Flag(argument: "-text-reveal-plain", title: "Plain text-post push",
              detail: "Text posts open with the native push, no window", appliesAtLaunch: false),
-        Flag(argument: "-toast-overlay", title: "Toasts in an overlay",
-             detail: "Toasts in their own window, not the navigation bar", appliesAtLaunch: true),
         Flag(argument: "-idle-calm-off", title: "Idle calm off",
              detail: "Endless decoration never rests when untouched (#580)", appliesAtLaunch: true),
         Flag(argument: "-video-cache-remote", title: "Remote mock clips",

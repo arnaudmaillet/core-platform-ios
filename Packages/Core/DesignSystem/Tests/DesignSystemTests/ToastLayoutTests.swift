@@ -28,7 +28,7 @@ struct ToastLayoutTests {
     private func undoable(_ message: String, in container: UIView) -> ToastView {
         ToastView.present(
             message, symbol: "trash.fill", style: .confirmation,
-            undoable: ToastView.Undoable(commit: {}, undo: {}), position: .bottom, in: container
+            undoable: ToastView.Undoable(commit: {}, undo: {}), in: container
         )
     }
 
@@ -41,24 +41,37 @@ struct ToastLayoutTests {
         container.layoutIfNeeded()
     }
 
-    /// With an action, as wide as the margins allow — and Undo at the
-    /// trailing edge, not mid-capsule.
-    @Test func anUndoToastSpansTheMarginsWithItsControlTrailing() throws {
+    /// With an action too, the capsule hugs its content (#2143, the owner's
+    /// device check) — and Undo sits at its trailing edge, not mid-capsule.
+    @Test func anUndoToastHugsItsContentWithItsControlTrailing() throws {
         try hosting { _, container in
             let toast = undoable("Post deleted", in: container)
             settled(container)
             let margins = container.layoutMarginsGuide.layoutFrame.width
-            #expect(abs(toast.bounds.width - min(margins, ToastView.Metrics.maximumWidth)) < 1)
+            #expect(toast.bounds.width < margins - 60, "an action toast spans the screen: \(toast.bounds.width) of \(margins)")
             let control = try #require(toast.undoButton)
             let trailing = toast.bounds.maxX - control.convert(control.bounds, to: toast).maxX
             #expect(trailing <= Spacing.sm + 1, "\(trailing) pt after the control")
         }
     }
 
+    /// A long message meets the margins and truncates; the action stays
+    /// whole, at the trailing edge.
+    @Test func aLongActionToastStopsAtTheMarginsWithItsControlWhole() throws {
+        try hosting { _, container in
+            let toast = undoable(String(repeating: "A very long message ", count: 8), in: container)
+            settled(container)
+            let margins = container.layoutMarginsGuide.layoutFrame.width
+            #expect(abs(toast.bounds.width - min(margins, ToastView.Metrics.maximumWidth)) < 1)
+            let control = try #require(toast.undoButton)
+            #expect(control.bounds.width >= control.intrinsicContentSize.width - 0.5, "Undo was squeezed")
+        }
+    }
+
     /// Without one, the capsule hugs its text.
     @Test func aPlainToastHugsItsText() {
         hosting { _, container in
-            let toast = ToastView.present("Copied", symbol: "doc.on.doc.fill", style: .confirmation, position: .bottom, in: container)
+            let toast = ToastView.present("Copied", symbol: "doc.on.doc.fill", style: .confirmation, in: container)
             settled(container)
             #expect(toast.bounds.width < container.layoutMarginsGuide.layoutFrame.width / 2)
         }
@@ -66,15 +79,19 @@ struct ToastLayoutTests {
 
     /// 48 pt with an action, 44 pt without, at the default text size.
     @Test func theHeightsAreCompact() {
+        // Each measured at rest before the next replaces it (one result
+        // toast at a time, #2143).
         hosting { _, container in
-            let plain = ToastView.present("Copied", symbol: nil, style: .confirmation, position: .top, in: container)
-            let withUndo = undoable("Unfollowed @ava", in: container)
-            let withRetry = ToastView.present(
-                "Couldn't send", symbol: nil, style: .failure, action: .init("Retry") {}, position: .bottomLeading, in: container
-            )
+            let plain = ToastView.present("Copied", symbol: nil, style: .confirmation, in: container)
             settled(container)
             #expect(abs(plain.bounds.height - 44) < 0.5)
+            let withUndo = undoable("Unfollowed @ava", in: container)
+            settled(container)
             #expect(abs(withUndo.bounds.height - 48) < 0.5)
+            let withRetry = ToastView.present(
+                "Couldn't send", symbol: nil, style: .failure, action: .init("Retry") {}, in: container
+            )
+            settled(container)
             #expect(abs(withRetry.bounds.height - 48) < 0.5)
         }
     }
@@ -93,16 +110,16 @@ struct ToastLayoutTests {
         }
     }
 
-    /// At accessibility text sizes, two lines, so the message is not cut to
-    /// nothing.
-    @Test func accessibilitySizesGetTwoLines() throws {
+    /// At accessibility text sizes too, one line: it truncates, never wraps
+    /// (#2143) — the whole message is a tap away (#1449).
+    @Test func accessibilitySizesStayOneLine() throws {
         try hosting { window, container in
             window.traitOverrides.preferredContentSizeCategory = .accessibilityLarge
             window.layoutIfNeeded()
             let toast = undoable("Post deleted", in: container)
             settled(container)
             let text = try #require(labels(in: toast).first { $0.text == "Post deleted" })
-            #expect(text.numberOfLines == 2)
+            #expect(text.numberOfLines == 1)
         }
     }
 }

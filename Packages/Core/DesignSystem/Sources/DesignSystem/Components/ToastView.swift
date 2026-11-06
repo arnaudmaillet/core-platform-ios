@@ -2,7 +2,8 @@ import UIKit
 
 /// A toast — the answer to actions whose only evidence is off-screen
 /// ("Copied", "Report sent", "Couldn't follow @ava"). A floating, interactive
-/// Liquid Glass bubble at one of six positions (#954).
+/// Liquid Glass bubble, in one place on every screen: just under the top bar
+/// of the screen in view (#2143, `ToastAnchor`).
 ///
 /// Deliberately not a `UIAlertController`: those demand a dismissal tap for
 /// something the user has already finished doing. Deliberately not a nav-bar
@@ -15,9 +16,10 @@ import UIKit
 /// draws. `FeedbackTests` fails the suite if `present` is called anywhere
 /// else.
 ///
-/// Toasts are self-owning: the caller fires and forgets. Only one shows at a
-/// time per position in a container — a second replaces the first rather
-/// than stacking, so a fast double-tap can't build a tower. `Feedback` draws
+/// Toasts are self-owning: the caller fires and forgets. ONE result toast
+/// shows at a time (#2143): a new one replaces the one up, and the same `id`
+/// updates it in place. A CONDITION ("Offline") is its own line: it holds the
+/// place, and a result fired meanwhile hangs just under it. `Feedback` draws
 /// them in the scene's `ToastOverlay`; drawing in the screen itself is the
 /// fallback for a window that is not the scene's key one (a package test
 /// host's).
@@ -25,15 +27,19 @@ import UIKit
 /// ## Content
 ///
 /// ONE LINE (#1034): a glyph (the kind's, or the caller's), a short message
-/// — tail-truncated, two lines only at accessibility text sizes — and in the
+/// — tail-truncated, never wrapped, at every text size (#2143) — and in the
 /// trailing slot ONE of: an action ("Retry", "View", Undo) or a close button,
 /// the close button whenever the toast does not leave on its own and has no
 /// action (none since #1448: a failure leaves on the common timer).
 /// No second text line: one idea per toast, the references' rule (Polaris,
 /// Material's snackbar, Avaya); two levels made it too big (owner, #1034).
 ///
-/// A toast with an action spans the margins (capped at `maximumWidth`), its
-/// control flush with the trailing edge; without one, the capsule hugs its
+/// The capsule HUGS its content, with an action or without (#2143, the
+/// owner's device check: an action toast spanning the screen read as a
+/// banner): glyph, text, then the action flush with its trailing edge — the
+/// system pills' shape. It never grows past the margins or `maximumWidth`;
+/// there the text truncates and the action stays whole. Before #2143 a toast
+/// with an action spanned the margins (#1034); without one, it hugged its
 /// text. 48 pt tall with an action, 44 pt without.
 ///
 /// ## Time (`duration(for:message:hasAction:assistiveTechnologyRunning:)`)
@@ -54,16 +60,14 @@ import UIKit
 ///
 /// ## Touch
 ///
-/// The glass is interactive (it flexes under the finger). A swipe toward the
-/// toast's own edge dismisses it — down for a bottom toast, up for a top one,
-/// and sideways toward its side for a leading or trailing one — on distance
-/// or velocity; any other way it rubber-bands and springs back. A tap runs
+/// The glass is interactive (it flexes under the finger). A swipe up
+/// dismisses it, on distance or velocity; any other way it rubber-bands and
+/// springs back. A tap runs
 /// the action, if there is one — unless the message is cut (#1449): then a
 /// tap on the toast's body opens its whole message in a bottom sheet
 /// (`ToastMessageSheet`), and the action runs from its own trailing control
 /// or from the sheet. Cut is measured at the label's width now, not by the
-/// message's length: the same words can fit as the front toast and be cut
-/// in a crowded bar. A collapsed toast's first tap still brings it forward.
+/// message's length.
 ///
 /// ## VoiceOver
 ///
@@ -113,8 +117,8 @@ public final class ToastView: UIView {
         }
     }
     enum Metrics {
-        /// Gap between the capsule and the edge it stands on (or hangs from).
-        static let bottomGap: CGFloat = Spacing.lg
+        /// Gap between the capsule and the anchor it hangs from (#2143).
+        static let topGap: CGFloat = Spacing.sm
         /// How far the capsule travels on entrance/exit.
         static let travel: CGFloat = 24
         static let transitionDuration: TimeInterval = 0.32
@@ -130,10 +134,6 @@ public final class ToastView: UIView {
         /// The content's scale on the way in and out (ordinary content: a
         /// transform is fine there).
         static let contentScale: CGFloat = 0.9
-        /// A bar item toast (#1058): its height inside the bar's platter, and
-        /// its row's leading inset there.
-        static let barHeight: CGFloat = 36
-        static let barInset: CGFloat = 10
         /// Resting shadow strength. Soft and low-contrast: the glass already
         /// separates itself; the shadow only grounds it.
         static let shadowOpacity: Float = 0.22
@@ -147,7 +147,7 @@ public final class ToastView: UIView {
         static let controlGap: CGFloat = Spacing.lg
         /// Never wider than this, however wide the screen (iPad).
         static let maximumWidth: CGFloat = 420
-        /// A swipe toward the edge dismisses past this distance…
+        /// A swipe up dismisses past this distance…
         static let dismissDistance: CGFloat = 44
         /// …or this speed (points per second).
         static let dismissVelocity: CGFloat = 500
@@ -237,9 +237,8 @@ public final class ToastView: UIView {
         /// or else its style and words.
         var key: String
         /// A CONDITION ("Offline", #955): it stays, with no close button,
-        /// until the same `id` says the condition has cleared; it takes
-        /// priority over the plain confirmations at its position, and nothing
-        /// preempts it.
+        /// until the same `id` says the condition has cleared; it holds the
+        /// top line, a result toast hangs under it, and nothing replaces it.
         var isCondition = false
 
         init(
@@ -269,8 +268,12 @@ public final class ToastView: UIView {
     public var style: Style { content.style }
     /// Its one line of text.
     public var message: String { content.message }
-    /// Where the toast sits (#954).
-    public private(set) var position: ToastPosition = .bottom
+    /// A condition ("Offline"), which holds its own line (#2143).
+    public var isCondition: Bool { content.isCondition }
+    /// Born a condition, so on its own line for good: "Back online", the
+    /// same toast updated in place, keeps the top line it held and leaves on
+    /// its timer, rather than swapping lines with a result up under it.
+    private(set) var holdsOwnLine = false
     /// How long it stays up, in seconds; nil: until closed (`duration`).
     public var duration: TimeInterval? { content.duration }
     var action: Action? { content.action }
@@ -278,44 +281,8 @@ public final class ToastView: UIView {
     /// Once settled, never again.
     private(set) var resolution: Resolution?
     /// The undoable toast on screen, if any: a second one commits it (one
-    /// undo slot) — wherever it is drawn (`NavigationBarToasts` too).
+    /// undo slot) — wherever it is drawn.
     static weak var pendingUndo: ToastView?
-
-    /// Where the toast is drawn.
-    enum Chrome {
-        /// Its own glass capsule, in the scene's overlay (the default).
-        case capsule
-        /// A navigation bar item's content (#1058, `-toast-in-navbar`): the
-        /// bar's own platter is the glass, so no capsule, shadow, slide or
-        /// swipe; `NavigationBarToasts` places it, sizes it and takes it away.
-        case barItem
-    }
-    let chrome: Chrome
-    /// Bar items only: glyph alone, a perfect bubble, when the bar has no
-    /// room for its text (`NavigationBarToasts`).
-    var isCollapsedInBar = false {
-        didSet {
-            guard isCollapsedInBar != oldValue else { return }
-            row.arrangedSubviews.dropFirst(hasGlyph ? 1 : 0).forEach { $0.isHidden = isCollapsedInBar }
-            // The glyph alone sits at the bubble's exact centre (owner,
-            // #1058), not at the expanded row's leading inset.
-            collapsedCentre.isActive = isCollapsedInBar
-        }
-    }
-    /// Centres the row — the glyph alone — in a collapsed bar item; required,
-    /// over the row's edges (`.required - 1`).
-    private lazy var collapsedCentre = row.centerXAnchor.constraint(equalTo: backdrop.contentView.centerXAnchor)
-    /// Bar items only: what the bar is told — it left, a collapsed one was
-    /// tapped, its content changed (its width may have).
-    var onBarLeave: ((ToastView) -> Void)?
-    var onBarTap: ((ToastView) -> Void)?
-    var onBarContentChange: ((ToastView) -> Void)?
-    /// Left the window while still up: its screen may have been pushed over
-    /// or popped (`NavigationBarToasts` follows the screen on top).
-    var onBarDetached: ((ToastView) -> Void)?
-    /// Bar items only: its row's width with the text on one line.
-    private(set) var barIdealWidth: CGFloat = 0
-    private var hasGlyph = false
 
     /// Called once the toast has left its superview — so the scene overlay
     /// that holds it can hide its window when it holds no more (#954).
@@ -325,27 +292,20 @@ public final class ToastView: UIView {
     private(set) var countdown: ToastCountdown?
 
     private let backdrop = UIVisualEffectView(effect: nil)
-    /// Pins the capsule to its edge. Driven instead of a transform (see the
-    /// type doc): `offConstant` while off — `travel` further out than its
-    /// resting place, below it for a bottom toast, above it for a top one —
-    /// and `restConstant` at rest. The swipe moves it too.
+    /// Hangs the capsule from the ceiling. Driven instead of a transform (see
+    /// the type doc): `offConstant` while off — `travel` above its resting
+    /// place — and `restConstant` at rest. The swipe moves it too.
     private var slide: NSLayoutConstraint?
-    /// The slide's resting constant for the front of the stack…
+    /// The slide's resting constant on the top line…
     private var baseConstant: CGFloat = 0
-    /// …and for this toast where it stands in it (`restack`).
+    /// …and for this toast on its own line (`restack`): under a condition,
+    /// a result hangs lower.
     private var restConstant: CGFloat = 0
     private var offConstant: CGFloat = 0
-    /// Pins the capsule along its edge; the sideways swipe moves it.
+    /// Centres the capsule; a sideways pull stretches it.
     private var along: NSLayoutConstraint?
     /// Keep it between the container's margins; off while a swipe moves it.
     private var marginConstraints: [NSLayoutConstraint] = []
-    /// Its size and place behind the front toast, while it is collapsed
-    /// there (`restack`).
-    private var stackLocks: [NSLayoutConstraint] = []
-    /// Behind the front toast, its content hidden.
-    private(set) var isCollapsedBehind = false {
-        didSet { accessibilityElementsHidden = isCollapsedBehind }
-    }
     /// Its entrance has begun: from then on `restack` moves it.
     private var hasArrived = false
     /// The bubble's one-line width (`measureIdealWidth`).
@@ -382,41 +342,35 @@ public final class ToastView: UIView {
 
     // MARK: - Presenting
 
-    /// Shows `message` over `host`, replacing any toast already up there.
+    /// Shows `message` at the top of `host`, replacing any result toast
+    /// already up there.
     ///
     /// - Parameters:
     ///   - message: the text — short, past-tense, no punctuation.
     ///   - symbol: an optional SF Symbol leading the text.
     ///   - host: the view to present in. Pass the view controller's `view`;
-    ///     the capsule pins to its safe area, so it clears tab and tool bars.
-    ///   - floor: what the capsule stands on instead of the safe area — the
-    ///     top of a composer resting on it, which would otherwise cover it
-    ///     (#729).
+    ///     the capsule hangs under its safe area top.
     ///   - style: a confirmation, a failure (#804) or a warning.
     @discardableResult
     public static func present(
         _ message: String,
         symbol: String? = "checkmark.circle.fill",
         in host: UIView,
-        above floor: NSLayoutYAxisAnchor? = nil,
         style: Style = .confirmation
     ) -> ToastView {
-        present(
-            message, symbol: symbol, style: style, action: nil, position: .bottom, in: host,
-            edge: floor ?? host.safeAreaLayoutGuide.bottomAnchor
-        )
+        present(message, symbol: symbol, style: style, action: nil, in: host)
     }
 
-    /// Shows a toast at `position` in `container` (#954):
+    /// Shows a toast in `container`, hanging under `ceiling` (#954, #2143):
     /// - the same toast again — the same `id`, or with none the same style
     ///   and words — UPDATES the one up there in place (a loading toast turns
-    ///   into its outcome; a repeat restarts its time) instead of stacking;
-    /// - a failure PREEMPTS the plain confirmations up at its position;
-    /// - otherwise it goes in front of the position's STACK, at most
-    ///   `maximumStack` visible, the oldest leaving first.
+    ///   into its outcome; a repeat restarts its time);
+    /// - a condition takes its own line, at the top;
+    /// - any other toast REPLACES the result toast up (an undo it replaces
+    ///   commits), and hangs under the conditions.
     ///
-    /// - Parameter edge: what the capsule hangs from (a top position) or
-    ///   stands on (a bottom one). The container's own safe area edge unless
+    /// - Parameter ceiling: what the capsule hangs from — the anchor's foot
+    ///   (`ToastOverlay.ceiling`); the container's own safe area top unless
     ///   told otherwise.
     static func present(
         _ message: String,
@@ -427,15 +381,15 @@ public final class ToastView: UIView {
         id: String? = nil,
         isCondition: Bool = false,
         length: Length = .standard,
-        position: ToastPosition,
         in container: UIView,
-        edge: NSLayoutYAxisAnchor? = nil
+        ceiling: NSLayoutYAxisAnchor? = nil
     ) -> ToastView {
         let content = Content(
             message: message, symbol: symbol, style: style, action: action,
             undoable: undoable, id: id, isCondition: isCondition, length: length
         )
-        let existing = stack(at: position, in: container).last { $0.content.key == content.key }
+        let shown = stack(in: container)
+        let existing = shown.last { $0.content.key == content.key }
         // One undo slot: a second undoable action commits the first at once
         // (unless it is the same toast, being updated).
         if undoable != nil, let pending = pendingUndo, pending !== existing {
@@ -445,45 +399,40 @@ public final class ToastView: UIView {
             existing.update(to: content)
             return existing
         }
-        // A failure, or a condition, preempts the plain confirmations there —
-        // never an undo, which must be settled, nor a condition.
-        if style == .failure || isCondition {
-            for toast in stack(at: position, in: container)
-            where toast.style == .confirmation && toast.undoable == nil && !toast.content.isCondition {
-                toast.dismiss(animated: true)
+        // One result at a time, and ONE CAPSULE (#2143, the owner's device
+        // check): a result that has arrived hands its place to this one,
+        // which takes over its capsule where it stands — glass on, at its
+        // width — and only the content and the width change. Two capsules
+        // crossing on the same line (one leaving, one arriving) read as a
+        // glitch on a fast toggle. A result still arriving leaves the usual
+        // way. A condition replaces nothing.
+        var takenOverWidth: CGFloat?
+        if !isCondition {
+            for toast in shown where !toast.holdsOwnLine {
+                if takenOverWidth == nil, toast.hasArrived, toast.bounds.width > 0 {
+                    takenOverWidth = toast.bounds.width
+                    toast.dismiss(animated: false)
+                } else {
+                    toast.dismiss(animated: true)
+                }
             }
         }
 
         let toast = ToastView(content: content)
+        toast.holdsOwnLine = isCondition
         if undoable != nil { pendingUndo = toast }
-        toast.position = position
-        let reduces = MotionPreference.reducesMotion
-        let slide: NSLayoutConstraint
-        if position.isTop {
-            toast.baseConstant = Metrics.bottomGap
-            toast.offConstant = reduces ? toast.baseConstant : Metrics.bottomGap - Metrics.travel
-            slide = toast.topAnchor.constraint(
-                equalTo: edge ?? container.safeAreaLayoutGuide.topAnchor, constant: toast.offConstant
-            )
-        } else {
-            toast.baseConstant = -Metrics.bottomGap
-            toast.offConstant = reduces ? toast.baseConstant : -Metrics.bottomGap + Metrics.travel
-            slide = toast.bottomAnchor.constraint(
-                equalTo: edge ?? container.safeAreaLayoutGuide.bottomAnchor, constant: toast.offConstant
-            )
-        }
+        toast.baseConstant = Metrics.topGap
         toast.restConstant = toast.baseConstant
+        let slide = toast.topAnchor.constraint(
+            equalTo: ceiling ?? container.safeAreaLayoutGuide.topAnchor, constant: toast.baseConstant
+        )
         toast.slide = slide
-        let margins = container.layoutMarginsGuide
-        let along: NSLayoutConstraint = switch position.alignment {
-        case .leading: toast.leadingAnchor.constraint(equalTo: margins.leadingAnchor)
-        case .center: toast.centerXAnchor.constraint(equalTo: container.centerXAnchor)
-        case .trailing: toast.trailingAnchor.constraint(equalTo: margins.trailingAnchor)
-        }
+        let along = toast.centerXAnchor.constraint(equalTo: container.centerXAnchor)
         toast.along = along
         // The margins hold, above the labels' compression resistance (they
-        // wrap at the margins, not before) — except while a swipe carries the
-        // toast past them (`swiped`).
+        // truncate at the margins, not before) — except while a swipe carries
+        // the toast past them (`swiped`).
+        let margins = container.layoutMarginsGuide
         let keepsLeading = toast.leadingAnchor.constraint(greaterThanOrEqualTo: margins.leadingAnchor)
         let keepsTrailing = toast.trailingAnchor.constraint(lessThanOrEqualTo: margins.trailingAnchor)
         keepsLeading.priority = .required - 1
@@ -496,47 +445,53 @@ public final class ToastView: UIView {
             keepsLeading
             keepsTrailing
         }
-        // The ones behind it step back before it arrives — and into a spread
-        // stack it arrives held, like the others.
-        if isSpread(at: position, in: container) { toast.countdown?.hold(.spread) }
-        restack(at: position, in: container, animated: true)
+        // Its line first (under a condition, lower), then where it comes
+        // from: `travel` above it — or right there under Reduce Motion.
+        restack(in: container, animated: true)
+        if let takenOverWidth {
+            toast.offConstant = toast.restConstant
+            slide.constant = toast.restConstant
+            toast.takeOver(fromWidth: takenOverWidth)
+            return toast
+        }
+        toast.offConstant = MotionPreference.reducesMotion ? toast.restConstant : toast.restConstant - Metrics.travel
+        slide.constant = toast.offConstant
         toast.animateIn()
         return toast
     }
 
-    /// A toast drawn as a navigation bar item's content (#1058), for
-    /// `NavigationBarToasts`.
-    static func makeForBar(_ content: Content) -> ToastView {
-        let toast = ToastView(content: content, chrome: .barItem)
-        // It is at the top of the screen, in its bar.
-        toast.position = .top
-        toast.measureIdealWidth()
-        return toast
-    }
-
-    /// Bar items only: the size the bar gave it, as REQUIRED constraints —
-    /// a frame alone loses to the row's own fitting width, which UIKit reads
-    /// and then sweeps the item into `•••` (#1058). The text gives way.
-    private var barSize: [NSLayoutConstraint] = []
-
-    func sizeInBar(width: CGFloat) {
-        NSLayoutConstraint.deactivate(barSize)
-        barSize = [
-            widthAnchor.constraint(equalToConstant: width),
-            heightAnchor.constraint(equalToConstant: Metrics.barHeight),
-        ]
-        NSLayoutConstraint.activate(barSize)
-        frame = CGRect(x: 0, y: 0, width: width, height: Metrics.barHeight)
-    }
-
-    /// Starts a bar item toast's time — its arrival is the bar's.
-    func startInBar() {
+    /// Arrives in the capsule of the result toast it replaced: already there,
+    /// glass on, at that toast's `width`, then springs to its own width while
+    /// its content fades in — through layout, never a transform on glass.
+    private func takeOver(fromWidth width: CGFloat) {
+        tookOver = true
+        let lock = widthAnchor.constraint(equalToConstant: width)
+        lock.isActive = true
+        // Off a window, the glass waits for one (`didMoveToWindow`).
+        if window != nil { backdrop.effect = Self.makeGlass() }
+        layer.shadowOpacity = Metrics.shadowOpacity
+        row.alpha = 0
         hasArrived = true
+        superview?.layoutIfNeeded()
+        lock.isActive = false
+        let reduces = MotionPreference.reducesMotion
+        UIView.animate(
+            withDuration: reduces ? 0.2 : 0.4, delay: 0, usingSpringWithDamping: reduces ? 1 : 0.82,
+            initialSpringVelocity: 0, options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.superview?.layoutIfNeeded()
+        }
+        UIView.animate(withDuration: 0.2, delay: 0.05, options: [.curveEaseOut, .allowUserInteraction]) {
+            self.row.alpha = 1
+        }
         countdown?.start()
     }
 
+    /// It arrived in the capsule of the toast it replaced (tests).
+    private(set) var tookOver = false
+
     /// Replaces this toast's content in place: a loading toast becomes its
-    /// outcome, a repeat restarts its time. Brought to the front of its stack.
+    /// outcome, a repeat restarts its time.
     func update(to content: Content) {
         guard !isLeaving else { return }
         // A change away from an unsettled undo commits it first: the action
@@ -545,119 +500,43 @@ public final class ToastView: UIView {
         resolution = nil
         if Self.pendingUndo === self, content.undoable == nil { Self.pendingUndo = nil }
         if content.undoable != nil { Self.pendingUndo = self }
-        if chrome == .capsule { superview?.bringSubviewToFront(self) }
+        superview?.bringSubviewToFront(self)
         UIView.transition(with: row, duration: 0.25, options: [.transitionCrossDissolve, .allowUserInteraction]) {
             self.apply(content)
         }
-        if chrome == .barItem {
-            onBarContentChange?(self)
-        } else if let container = superview {
-            Self.restack(at: position, in: container, animated: true)
+        if let container = superview {
+            Self.restack(in: container, animated: true)
         }
         countdown?.start()
         Self.announce(content.message, style: content.style)
     }
 
-    // MARK: - The stack
+    // MARK: - The lines
 
-    /// How many toasts one position shows at once.
-    static let maximumStack = 3
-    /// How far each toast behind the front one peeks out, and how much
-    /// narrower it is on each side.
-    static let stackPeek: CGFloat = 8
-    static let stackInset: CGFloat = 10
-    /// The gap between toasts when the stack is spread out.
+    /// The gap between a condition and the result under it.
     static let stackGap: CGFloat = Spacing.sm
 
-    /// The toasts up at `position` in `container`, oldest first (the last is
-    /// in front).
-    static func stack(at position: ToastPosition, in container: UIView) -> [ToastView] {
-        container.subviews.compactMap { $0 as? ToastView }.filter { $0.position == position && !$0.isLeaving }
+    /// The toasts up in `container`, top line first: the conditions (and a
+    /// condition updated into its outcome), oldest first, then the result
+    /// toast — never more than one (#2143).
+    static func stack(in container: UIView) -> [ToastView] {
+        let up = container.subviews.compactMap { $0 as? ToastView }.filter { !$0.isLeaving }
+        return up.filter(\.holdsOwnLine) + up.filter { !$0.holdsOwnLine }
     }
 
-    /// The stacks that are spread out, by container and position.
-    private static var spreadStacks: Set<String> = []
-
-    private static func stackKey(_ position: ToastPosition, _ container: UIView) -> String {
-        "\(ObjectIdentifier(container).hashValue)-\(position.rawValue)"
-    }
-
-    /// Whether the stack at `position` is spread out (tests).
-    static func isSpread(at position: ToastPosition, in container: UIView) -> Bool {
-        spreadStacks.contains(stackKey(position, container))
-    }
-
-    /// Spreads the stack out — every toast readable, one above the other —
-    /// or collapses it back behind its front toast. Spread, their time is
-    /// held: the viewer is reading them.
-    static func setSpread(_ spread: Bool, at position: ToastPosition, in container: UIView) {
-        let key = stackKey(position, container)
-        guard spread != spreadStacks.contains(key) else { return }
-        if spread { spreadStacks.insert(key) } else { spreadStacks.remove(key) }
-        for toast in stack(at: position, in: container) {
-            if spread { toast.countdown?.hold(.spread) } else { toast.countdown?.release(.spread) }
-        }
-        restack(at: position, in: container, animated: true)
-    }
-
-    /// Lays the stack at `position` out: the front toast at its place, the
-    /// ones behind it peeking out narrower above it (below it for a top
-    /// position), their content hidden — or, spread, all of them one above
-    /// the other. Never a transform: constraints, as for the slide.
-    static func restack(at position: ToastPosition, in container: UIView, animated: Bool) {
-        var toasts = stack(at: position, in: container)
-        // The oldest leave first past the limit — failures included.
-        while toasts.count > maximumStack {
-            toasts.removeFirst().dismiss(animated: animated)
-        }
-        // A lone toast is never spread: fold back, and let its time run.
-        if toasts.count < 2, spreadStacks.remove(stackKey(position, container)) != nil {
-            toasts.forEach { $0.countdown?.release(.spread) }
-        }
-        let spread = isSpread(at: position, in: container)
-        guard let front = toasts.last else { return }
-        // Spread, each toast stands at its own height: free them all from
-        // the front's size BEFORE measuring, or a two-line toast behind a
-        // one-line front is measured one line tall and overlaps.
-        if spread {
-            for toast in toasts {
-                NSLayoutConstraint.deactivate(toast.stackLocks)
-                toast.stackLocks = []
-                toast.along?.isActive = true
-            }
-        }
+    /// Lays the lines out: each toast under the one above it. Never a
+    /// transform: constraints, as for the slide.
+    static func restack(in container: UIView, animated: Bool) {
+        let toasts = stack(in: container)
+        guard !toasts.isEmpty else { return }
         container.layoutIfNeeded()
-        let away: CGFloat = position.isTop ? 1 : -1
         var offset: CGFloat = 0
-        for (depth, toast) in toasts.reversed().enumerated() {
-            NSLayoutConstraint.deactivate(toast.stackLocks)
-            toast.stackLocks = []
-            if depth == 0 || spread {
-                toast.restConstant = toast.baseConstant + away * offset
-                toast.along?.isActive = true
-                toast.isCollapsedBehind = false
-                offset += toast.bounds.height + stackGap
-            } else {
-                // Behind: the front's size less an inset, peeking out.
-                let inset = stackInset * CGFloat(depth)
-                toast.restConstant = toast.baseConstant + away * stackPeek * CGFloat(depth)
-                toast.along?.isActive = false
-                toast.stackLocks = [
-                    toast.widthAnchor.constraint(equalTo: front.widthAnchor, constant: -2 * inset),
-                    toast.heightAnchor.constraint(equalTo: front.heightAnchor),
-                    toast.centerXAnchor.constraint(equalTo: front.centerXAnchor),
-                ]
-                NSLayoutConstraint.activate(toast.stackLocks)
-                toast.isCollapsedBehind = true
-            }
+        for toast in toasts {
+            toast.restConstant = toast.baseConstant + offset
+            offset += toast.bounds.height + stackGap
             if toast.hasArrived { toast.slide?.constant = toast.restConstant }
         }
-        let settle = {
-            container.layoutIfNeeded()
-            for toast in toasts where toast.hasArrived {
-                toast.row.alpha = toast.isCollapsedBehind ? 0 : 1
-            }
-        }
+        let settle = { container.layoutIfNeeded() }
         if animated, !MotionPreference.reducesMotion {
             UIView.animate(
                 withDuration: 0.35, delay: 0, usingSpringWithDamping: 0.85, initialSpringVelocity: 0,
@@ -666,6 +545,40 @@ public final class ToastView: UIView {
         } else {
             settle()
         }
+    }
+
+    /// Carries `toasts` to where `container`'s layout now puts them through a
+    /// quick cross-fade (#2143) — far from where they were, a slide would
+    /// cross the screen. The glass dissolves and comes back, as it arrives
+    /// and leaves; never faded through an ancestor's alpha (see the type doc).
+    static func crossFade(_ toasts: [ToastView], in container: UIView) {
+        let moving = toasts.filter { $0.hasArrived && !$0.isLeaving }
+        guard !moving.isEmpty else {
+            container.layoutIfNeeded()
+            return
+        }
+        moving.forEach { $0.isCrossFading = true }
+        UIView.animate(withDuration: 0.12, delay: 0, options: [.curveEaseIn, .beginFromCurrentState]) {
+            moving.forEach { $0.showGlass(false) }
+        } completion: { _ in
+            container.layoutIfNeeded()
+            let back = moving.filter { !$0.isLeaving }
+            UIView.animate(withDuration: 0.18, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) {
+                back.forEach { $0.showGlass(true) }
+            } completion: { _ in
+                moving.forEach { $0.isCrossFading = false }
+            }
+        }
+    }
+
+    /// Between the two halves of a cross-fade.
+    private var isCrossFading = false
+
+    /// The capsule shown or dissolved: its glass, its content and its shadow.
+    private func showGlass(_ shown: Bool) {
+        backdrop.effect = shown ? Self.makeGlass() : nil
+        row.alpha = shown ? 1 : 0
+        layer.shadowOpacity = shown ? Metrics.shadowOpacity : 0
     }
 
     // MARK: - Time
@@ -725,8 +638,14 @@ public final class ToastView: UIView {
     private static func announce(_ message: String, style: Style) {
         // A task, so it runs on a LATER turn of the main actor, never inline.
         Task { @MainActor in
-            UIAccessibility.post(notification: .announcement, argument: announcement(message, style: style))
+            postAnnouncement(announcement(message, style: style))
         }
+    }
+
+    /// Hands VoiceOver an announcement, without moving its focus.
+    /// Swappable: tests read what was announced.
+    static var postAnnouncement: @MainActor (NSAttributedString) -> Void = { announcement in
+        UIAccessibility.post(notification: .announcement, argument: announcement)
     }
 
     public override func accessibilityPerformEscape() -> Bool {
@@ -746,9 +665,8 @@ public final class ToastView: UIView {
 
     // MARK: - Building
 
-    private init(content: Content, chrome: Chrome = .capsule) {
+    private init(content: Content) {
         self.content = content
-        self.chrome = chrome
         super.init(frame: .zero)
 
         // The capsule's shape is driven by the corner CONFIGURATION, not a
@@ -777,9 +695,7 @@ public final class ToastView: UIView {
         let edges = [
             row.topAnchor.constraint(equalTo: backdrop.contentView.topAnchor, constant: Spacing.xs / 2),
             row.bottomAnchor.constraint(equalTo: backdrop.contentView.bottomAnchor, constant: -Spacing.xs / 2),
-            row.leadingAnchor.constraint(
-                equalTo: backdrop.contentView.leadingAnchor, constant: chrome == .barItem ? Metrics.barInset : Spacing.lg
-            ),
+            row.leadingAnchor.constraint(equalTo: backdrop.contentView.leadingAnchor, constant: Spacing.lg),
             trailing,
         ]
         edges.forEach { $0.priority = .required - 1 }
@@ -793,17 +709,11 @@ public final class ToastView: UIView {
         // labels' compression resistance and below the margins — so the text
         // wraps only where the margins stop it.
         idealWidth.priority = .defaultHigh + 10
-        if chrome == .capsule {
-            NSLayoutConstraint.activate([
-                minimumHeightConstraint,
-                widthAnchor.constraint(lessThanOrEqualToConstant: Metrics.maximumWidth),
-                idealWidth,
-            ])
-        } else {
-            // In the bar from the first frame: no entrance of its own — the
-            // bar's replace transition is the arrival.
-            row.alpha = 1
-        }
+        NSLayoutConstraint.activate([
+            minimumHeightConstraint,
+            widthAnchor.constraint(lessThanOrEqualToConstant: Metrics.maximumWidth),
+            idealWidth,
+        ])
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (toast: ToastView, _) in
             toast.measureIdealWidth()
         }
@@ -819,9 +729,7 @@ public final class ToastView: UIView {
         isAccessibilityElement = true
         accessibilityTraits = .staticText
 
-        if chrome == .capsule {
-            addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(swiped(_:))))
-        }
+        addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(swiped(_:))))
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
 
         apply(content)
@@ -844,23 +752,19 @@ public final class ToastView: UIView {
         // its own luminance against whatever it sits over, so the label tracks
         // it in both appearances without a hand-picked color.
         title.textColor = .label
-        title.numberOfLines = textLineCount
+        title.numberOfLines = 1
         title.lineBreakMode = .byTruncatingTail
-        // The message takes the room the control leaves — with an action the
-        // toast spans the margins and the control sits flush trailing — and
-        // is the one thing that gives way.
+        // The message takes the room the control leaves and is the one thing
+        // that gives way, once the capsule meets the margins.
         title.setContentHuggingPriority(.defaultLow, for: .horizontal)
         title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let texts = title
 
         var arranged: [UIView] = []
-        hasGlyph = false
         if content.style == .loading {
             let spinner = AppLoaderView(size: .medium)
             spinner.startAnimating()
             arranged.append(spinner)
-            // The leading mark a collapsed bar item keeps (#1058).
-            hasGlyph = true
         } else if let symbol = content.symbol, let image = UIImage.symbol(named: symbol) {
             let tint = Self.glyphTint(symbol: symbol, style: content.style)
             // A glyph with a colour of its own carries it (`.alwaysOriginal`):
@@ -873,12 +777,10 @@ public final class ToastView: UIView {
             glyph.contentMode = .scaleAspectFit
             glyph.setContentHuggingPriority(.required, for: .horizontal)
             arranged.append(glyph)
-            hasGlyph = true
         }
         arranged.append(texts)
 
         undoButton = content.undoable != nil ? ToastUndoButton() : nil
-        undoButton?.showsTitle = chrome == .capsule
         actionButton = content.undoable == nil ? content.action.map { Self.makeActionButton(title: $0.title) } : nil
         // Something has to close a toast that does not leave on its own — a
         // loading one leaves when its outcome replaces it.
@@ -901,19 +803,13 @@ public final class ToastView: UIView {
         row.setCustomSpacing(Metrics.controlGap, after: texts)
         minimumHeightConstraint.constant = content.action != nil ? Metrics.actionHeight : Metrics.minimumHeight
         textInset?.isActive = false
-        if chrome == .capsule {
-            textInset = heightAnchor.constraint(greaterThanOrEqualTo: title.heightAnchor, constant: 2 * Spacing.md)
-            textInset?.priority = .required - 1
-            textInset?.isActive = true
-        }
-        if chrome == .barItem, isCollapsedInBar {
-            arranged.dropFirst(hasGlyph ? 1 : 0).forEach { $0.isHidden = true }
-        }
+        textInset = heightAnchor.constraint(greaterThanOrEqualTo: title.heightAnchor, constant: 2 * Spacing.md)
+        textInset?.priority = .required - 1
+        textInset?.isActive = true
         let hasControl = actionButton != nil || closeButton != nil || undoButton != nil
-        let leading = chrome == .barItem ? Metrics.barInset : Spacing.lg
-        let trailing = chrome == .barItem ? (hasControl ? Spacing.xs : Metrics.barInset) : (hasControl ? Spacing.sm : Spacing.lg)
+        let trailing = hasControl ? Spacing.sm : Spacing.lg
         rowTrailing?.constant = -trailing
-        rowInsets = leading + trailing
+        rowInsets = Spacing.lg + trailing
         textLabels = [title]
         measureIdealWidth()
 
@@ -961,7 +857,7 @@ public final class ToastView: UIView {
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
         let floor = button.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumHeight)
-        floor.priority = .required - 1 // a bar item (#1058) is shorter; its platter is the target
+        floor.priority = .required - 1
         floor.isActive = true
         return button
     }
@@ -978,33 +874,10 @@ public final class ToastView: UIView {
         return button
     }
 
-    /// One line; two at accessibility text sizes, where one would cut most
-    /// of the message.
-    private var textLineCount: Int {
-        traitCollection.preferredContentSizeCategory.isAccessibilityCategory ? 2 : 1
-    }
-
-    /// The width it asks for: with an action, all the margins allow (capped
-    /// at `maximumWidth`), so the control sits flush trailing (#1034);
-    /// without one, its row with the text on one line.
+    /// The width it asks for: its row with the text on its one line — the
+    /// action, if any, flush after it (#2143).
     private func measureIdealWidth() {
-        textLabels.forEach { $0.numberOfLines = textLineCount }
-        if chrome == .barItem {
-            // One line, always: the bar is one line high.
-            textLabels.forEach { $0.numberOfLines = 1 }
-            let collapsed = isCollapsedInBar
-            if collapsed { row.arrangedSubviews.forEach { $0.isHidden = false } }
-            barIdealWidth = ceil(row.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + rowInsets)
-            if collapsed { row.arrangedSubviews.dropFirst(hasGlyph ? 1 : 0).forEach { $0.isHidden = true } }
-            return
-        }
-        if content.action != nil {
-            idealWidth.constant = Metrics.maximumWidth
-            return
-        }
-        textLabels.forEach { $0.numberOfLines = 1 }
         let width = row.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
-        textLabels.forEach { $0.numberOfLines = textLineCount }
         idealWidth.constant = ceil(width + rowInsets)
     }
 
@@ -1012,9 +885,8 @@ public final class ToastView: UIView {
     public override func didMoveToWindow() {
         super.didMoveToWindow()
         // Built before it had a window: the text size it was measured at may
-        // not be the window's (one line, or two at accessibility sizes).
+        // not be the window's.
         if window != nil { measureIdealWidth() }
-        if chrome == .barItem, window == nil, !isLeaving { onBarDetached?(self) }
         // Materialized on window attach, never in init: building a real effect
         // off-screen contacts the render server and stalls the main actor for
         // tens of seconds on headless CI simulators (the rule `CommentsInputBar`
@@ -1025,7 +897,7 @@ public final class ToastView: UIView {
         // deliberately mid-dissolve.
         guard window != nil else { return }
         observeScene()
-        guard !hasMaterialized, chrome == .capsule else { return }
+        guard !hasMaterialized else { return }
         hasMaterialized = true
         backdrop.effect = Self.makeGlass()
     }
@@ -1048,7 +920,6 @@ public final class ToastView: UIView {
         // Trace the shadow onto the capsule the corner configuration actually
         // resolved, rather than assuming height/2 — `.capsule()` clamps itself
         // on very short or very wide bounds.
-        guard chrome == .capsule else { return }
         let radius = backdrop.effectiveRadius(corner: .allCorners)
         layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: radius).cgPath
     }
@@ -1104,33 +975,14 @@ public final class ToastView: UIView {
         if !isSwiping { countdown?.release(.touch) }
     }
 
-    /// A tap: on a stack still collapsed, it spreads the stack out (unless
-    /// it lands on the front toast's action); on a toast whose message is
-    /// cut, it opens the whole message (#1449); on a toast with an action,
-    /// it runs it; on a spread stack otherwise, it collapses it.
+    /// A tap: on a toast whose message is cut, it opens the whole message
+    /// (#1449); on a toast with an action, it runs it.
     @objc private func tapped() {
-        if chrome == .barItem {
-            guard !isLeaving else { return }
-            if isCollapsedInBar {
-                onBarTap?(self)
-            } else if isMessageTruncated {
-                showFullMessage()
-            } else if action != nil {
-                runAction()
-            }
-            return
-        }
-        guard !isLeaving, let container = superview else { return }
-        let count = Self.stack(at: position, in: container).count
-        let spread = Self.isSpread(at: position, in: container)
-        if isCollapsedBehind || (count > 1 && !spread && action == nil) {
-            Self.setSpread(true, at: position, in: container)
-        } else if isMessageTruncated {
+        guard !isLeaving else { return }
+        if isMessageTruncated {
             showFullMessage()
         } else if action != nil {
             runAction()
-        } else if spread {
-            Self.setSpread(false, at: position, in: container)
         }
     }
 
@@ -1143,13 +995,16 @@ public final class ToastView: UIView {
     public func debugDismiss() { dismiss(animated: false) }
     /// A tap on the toast's body. Tests.
     func debugTap() { tapped() }
+    /// Lays the toast out where it rests now. Tests.
+    func debugSettle() { superview?.layoutIfNeeded() }
+    /// Whether it is crossing to its anchor's new place. Tests.
+    var debugIsCrossFading: Bool { isCrossFading }
     #endif
 
     // MARK: - The whole message (#1449)
 
     /// Whether the message is cut at the label's width now: it would need
-    /// more lines than the label draws. A label hidden (a collapsed bar
-    /// toast) or not laid out yet is not cut.
+    /// more lines than the label draws. A label not laid out yet is not cut.
     ///
     /// ⚠️ MEASURED FROM THE TEXT, NOT FROM `UILabel.textRect` — which on iOS
     /// 26 never reported the cut (CI, #1449) — and against the width the
@@ -1269,26 +1124,6 @@ public final class ToastView: UIView {
 
     private var isSwiping = false
 
-    /// Which way a swipe dismisses: toward the toast's own edge, and toward
-    /// its side for a leading or trailing one (in screen terms: right to
-    /// left flips the side).
-    struct SwipeDirections: Equatable {
-        /// +1 down, -1 up.
-        var vertical: CGFloat
-        /// +1 right, -1 left, 0 none.
-        var horizontal: CGFloat
-    }
-
-    static func swipeDirections(for position: ToastPosition, rightToLeft: Bool) -> SwipeDirections {
-        let vertical: CGFloat = position.isTop ? -1 : 1
-        let side: CGFloat = switch position.alignment {
-        case .leading: -1
-        case .center: 0
-        case .trailing: 1
-        }
-        return SwipeDirections(vertical: vertical, horizontal: rightToLeft ? -side : side)
-    }
-
     /// How far the toast follows a pull of `distance` along an axis whose
     /// dismissing direction is `direction` (±1; 0: no dismissal that way):
     /// all the way toward it, a stretching fraction the other way.
@@ -1299,22 +1134,14 @@ public final class ToastView: UIView {
         return distance < 0 ? -stretched : stretched
     }
 
-    /// Whether a swipe that ended at `translation` with `velocity` dismisses.
-    static func dismisses(translation: CGPoint, velocity: CGPoint, directions: SwipeDirections) -> Bool {
-        let towardY = translation.y * directions.vertical
-        let speedY = velocity.y * directions.vertical
-        if towardY > Metrics.dismissDistance || speedY > Metrics.dismissVelocity { return true }
-        guard directions.horizontal != 0 else { return false }
-        let towardX = translation.x * directions.horizontal
-        let speedX = velocity.x * directions.horizontal
-        return towardX > Metrics.dismissDistance || speedX > Metrics.dismissVelocity
+    /// Whether a swipe that ended at `translation` with `velocity` dismisses:
+    /// up, far or fast enough.
+    static func dismisses(translation: CGPoint, velocity: CGPoint) -> Bool {
+        -translation.y > Metrics.dismissDistance || -velocity.y > Metrics.dismissVelocity
     }
 
     @objc private func swiped(_ pan: UIPanGestureRecognizer) {
-        guard !isLeaving, !isCollapsedBehind, let container = superview else { return }
-        let directions = Self.swipeDirections(
-            for: position, rightToLeft: container.effectiveUserInterfaceLayoutDirection == .rightToLeft
-        )
+        guard !isLeaving, let container = superview else { return }
         let translation = pan.translation(in: container)
         switch pan.state {
         case .began:
@@ -1322,13 +1149,13 @@ public final class ToastView: UIView {
             countdown?.hold(.touch)
             NSLayoutConstraint.deactivate(marginConstraints)
         case .changed:
-            slide?.constant = restConstant + Self.followed(translation.y, direction: directions.vertical)
-            along?.constant = alongSign * Self.followed(translation.x, direction: directions.horizontal)
+            slide?.constant = restConstant + Self.followed(translation.y, direction: -1)
+            along?.constant = Self.followed(translation.x, direction: 0)
         case .ended, .cancelled, .failed:
             isSwiping = false
             let velocity = pan.velocity(in: container)
-            if pan.state == .ended, Self.dismisses(translation: translation, velocity: velocity, directions: directions) {
-                leaveBySwipe(translation: translation, directions: directions)
+            if pan.state == .ended, Self.dismisses(translation: translation, velocity: velocity) {
+                leaveBySwipe()
             } else {
                 countdown?.release(.touch)
                 slide?.constant = restConstant
@@ -1346,21 +1173,9 @@ public final class ToastView: UIView {
         }
     }
 
-    /// Screen points to `along`'s constant: a leading or trailing anchor's
-    /// constant grows toward the trailing side, which is the LEFT in a
-    /// right-to-left layout — the swipe works in screen points.
-    private var alongSign: CGFloat {
-        position.alignment != .center && effectiveUserInterfaceLayoutDirection == .rightToLeft ? -1 : 1
-    }
-
-    /// Carries the toast off the way it was swiped, dissolving the glass.
-    private func leaveBySwipe(translation: CGPoint, directions: SwipeDirections) {
-        let sideways = directions.horizontal != 0 && abs(translation.x) > abs(translation.y)
-        if sideways {
-            along?.constant = alongSign * directions.horizontal * (bounds.width + Metrics.bottomGap)
-        } else {
-            slide?.constant = restConstant + directions.vertical * (bounds.height + Metrics.bottomGap)
-        }
+    /// Carries the toast off upward, dissolving the glass.
+    private func leaveBySwipe() {
+        slide?.constant = restConstant - (bounds.height + Metrics.topGap)
         leave(animated: true, moving: false)
     }
 
@@ -1413,7 +1228,7 @@ public final class ToastView: UIView {
     private func morph(to scale: CGSize?) {
         NSLayoutConstraint.deactivate(morphConstraints)
         morphConstraints = []
-        guard let scale, bounds.width > 0, stackLocks.isEmpty else { return }
+        guard let scale, bounds.width > 0 else { return }
         let content = backdrop.contentView
         morphConstraints = [
             widthAnchor.constraint(equalToConstant: bounds.width * scale.width),
@@ -1441,18 +1256,10 @@ public final class ToastView: UIView {
         countdown?.cancel()
         stopObservingScene()
         isUserInteractionEnabled = false
-        if chrome == .barItem {
-            // The bar takes the item away, with its own transition.
-            onBarLeave?(self)
-            let removed = onRemoved
-            onRemoved = nil
-            removed?()
-            return
-        }
-        // The ones behind it move up as it leaves (it is out of the stack
+        // The one under it moves up as it leaves (it is out of the lines
         // already: `isLeaving`).
         if let container = superview {
-            Self.restack(at: position, in: container, animated: animated)
+            Self.restack(in: container, animated: animated)
         }
         guard animated else {
             finish()
@@ -1472,9 +1279,8 @@ public final class ToastView: UIView {
             withDuration: reduces ? Metrics.transitionDuration : Metrics.exitDuration, delay: 0,
             options: [.curveEaseIn, .beginFromCurrentState]
         ) {
-            // The way it came, back: squeezed, its content shrinking — unless
-            // it is collapsed behind another, whose size it is locked to.
-            if !reduces, !self.isCollapsedBehind {
+            // The way it came, back: squeezed, its content shrinking.
+            if !reduces {
                 self.morph(to: Metrics.morphScale)
                 self.row.transform = CGAffineTransform(scaleX: Metrics.contentScale, y: Metrics.contentScale)
             }

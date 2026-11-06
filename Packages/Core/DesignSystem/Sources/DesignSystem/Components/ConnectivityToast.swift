@@ -1,8 +1,8 @@
 import UIKit
 
 /// The app-wide answer to "is it me or the network?" (#793), as a toast
-/// (#955): "Offline" at the top for as long as the network is gone — a
-/// condition toast, which stays — then, when it returns, the same toast
+/// (#955): "Offline" under the top bar for as long as the network is gone —
+/// a condition toast, which holds its own line (#2143) — then, when it returns, the same toast
 /// updated in place to "Back online", which leaves on its own.
 ///
 /// It only says what it is told (`follow(isOnline:)`); the app wires it to
@@ -34,7 +34,7 @@ public final class ConnectivityToast {
             saidOffline = false
             // The way back is part of the message: the same toast, updated —
             // a notice, with no haptic (nothing the viewer did succeeded).
-            shown = Feedback.info("Back online", symbol: "wifi", from: source, at: .top, id: Self.id)
+            shown = Feedback.info("Back online", symbol: "wifi", from: source, id: Self.id)
         }
     }
 }

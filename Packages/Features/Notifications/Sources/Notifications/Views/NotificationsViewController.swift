@@ -57,12 +57,12 @@ final class NotificationsViewController: UIViewController {
 
     // The mute toolbar (#1575): see `NotificationsViewController+Mute`.
     let muteModel: NotificationsMuteModel?
-    /// The pause the toolbar SHOWS — the server's, handed over by a toast's
-    /// reveal (#1447: the old look holds while a write is on its way).
+    /// The pause the toolbar SHOWS — the server's, once it has answered: the
+    /// new look comes with its toast (#2143).
     var shownPause: PushPause = .off
     var shownMuteLook: MuteLook?
-    /// A mute or unmute on its way, until its toast hands the bar the new
-    /// look or it fails (#1775): the wide button wears the loader.
+    /// A mute or unmute on its way, until the server answers (#1775): the
+    /// wide button wears the loader.
     var isWritingMute = false
     weak var muteButton: StretchedBarLabel?
     var muteTimerItem: UIBarButtonItem?
@@ -74,9 +74,6 @@ final class NotificationsViewController: UIViewController {
     /// The trash, trailing (#1574): clears the list behind an Undo toast.
     /// Nil where the server cannot clear.
     private let clearItem: UIBarButtonItem?
-    /// The trash's look is the toast's to reveal (#1447): from the tap until
-    /// its toast takes the bar, it stays as it was.
-    private var holdsClearItemLook = false
 
     /// - Parameters:
     ///   - muteModel: the mute toolbar; nil shows none.
@@ -177,42 +174,32 @@ final class NotificationsViewController: UIViewController {
     // MARK: - Clear all (#1574)
 
     /// The list empties at once — content changes under the finger — and
-    /// the trash turns into its Undo toast. Nothing is deleted until the
-    /// toast runs out on its own.
+    /// the trash follows it at once, beside its Undo toast (#2143). Nothing
+    /// is deleted until the toast runs out on its own.
     private func clearTapped() {
-        holdsClearItemLook = true
-        guard viewModel.clearAll() else {
-            holdsClearItemLook = false
-            return
-        }
+        guard viewModel.clearAll() else { return }
+        updateClearItem()
         let viewModel = viewModel
         Feedback.undoable(
             "Notifications cleared",
             symbol: "trash.fill",
             from: self,
             id: "notifications.clear",
-            revealing: { [weak self] in self?.releaseClearItemLook() },
-            // Released here too: however the toast went, the trash follows
-            // the list again.
+            // However the toast went, the trash follows the list.
             commit: { [weak self] in
                 viewModel.commitClearAll()
-                self?.releaseClearItemLook()
+                self?.updateClearItem()
             },
             undo: { [weak self] in
                 viewModel.undoClearAll()
-                self?.releaseClearItemLook()
+                self?.updateClearItem()
             }
         )
     }
 
-    private func releaseClearItemLook() {
-        holdsClearItemLook = false
-        updateClearItem()
-    }
-
     /// Enabled while there is something to clear.
     private func updateClearItem() {
-        guard let clearItem, !holdsClearItemLook else { return }
+        guard let clearItem else { return }
         clearItem.isEnabled = viewModel.canClearAll
     }
 

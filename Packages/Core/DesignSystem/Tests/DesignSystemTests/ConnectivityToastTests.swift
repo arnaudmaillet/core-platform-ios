@@ -34,7 +34,7 @@ struct ConnectivityToastTests {
             toast.follow(isOnline: true)
             toast.follow(isOnline: true)
             #expect(toast.shown == nil)
-            #expect(ToastView.stack(at: .top, in: screen.view).isEmpty)
+            #expect(ToastView.stack(in: screen.view).isEmpty)
         }
     }
 
@@ -44,12 +44,12 @@ struct ConnectivityToastTests {
             toast.follow(isOnline: false)
             let shown = try #require(toast.shown)
             #expect(shown.message == "Offline")
-            #expect(shown.position == .top)
+            #expect(shown.isCondition)
             #expect(shown.countdown == nil && shown.closeButton == nil)
             advance(600)
             toast.follow(isOnline: false) // told again: still the one toast
             #expect(!shown.isDismissing)
-            #expect(ToastView.stack(at: .top, in: screen.view).count == 1)
+            #expect(ToastView.stack(in: screen.view).count == 1)
         }
     }
 
@@ -66,15 +66,33 @@ struct ConnectivityToastTests {
         }
     }
 
-    /// The condition takes priority over the confirmations at the top.
-    @Test func offlinePreemptsConfirmationsAtTheTop() {
-        hosting { screen, toast, _ in
-            let info = Feedback.info("Saved", from: screen, at: .top)
+    /// "Back online" — the same toast, updated — keeps the top line with a
+    /// result up under it: no swap, and the result is not replaced.
+    @Test func backOnlineKeepsTheTopLine() throws {
+        try hosting { screen, toast, _ in
             toast.follow(isOnline: false)
+            let offline = try #require(toast.shown)
+            let saved = Feedback.success("Saved", from: screen)
+            toast.follow(isOnline: true)
+            #expect(offline.message == "Back online")
+            #expect(!saved.isDismissing)
+            #expect(ToastView.stack(in: screen.view) == [offline, saved])
+        }
+    }
+
+    /// "Offline" holds the top line (#2143): a result toast up stays, under
+    /// it, and one fired meanwhile replaces that one — never "Offline".
+    @Test func offlineHoldsTheTopLineWithAResultUnderIt() throws {
+        try hosting { screen, toast, _ in
+            let info = Feedback.info("Saved", from: screen)
+            toast.follow(isOnline: false)
+            let offline = try #require(toast.shown)
+            #expect(!info.isDismissing)
+            #expect(ToastView.stack(in: screen.view) == [offline, info])
+            let failure = Feedback.failure("Couldn't send", from: screen)
+            #expect(!offline.isDismissing)
             #expect(info.isDismissing)
-            // …and a failure there does not preempt it.
-            _ = Feedback.failure("Couldn't send", from: screen, at: .top)
-            #expect(toast.shown?.isDismissing == false)
+            #expect(ToastView.stack(in: screen.view) == [offline, failure])
         }
     }
 }

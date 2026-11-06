@@ -47,11 +47,9 @@ struct ToastBehaviourTests {
 
     private func toast(
         _ message: String = "Saved", style: ToastView.Style = .confirmation,
-        action: ToastView.Action? = nil, position: ToastPosition = .bottom, in container: UIView
+        action: ToastView.Action? = nil, in container: UIView
     ) -> ToastView {
-        ToastView.present(
-            message, symbol: nil, style: style, action: action, position: position, in: container
-        )
+        ToastView.present(message, symbol: nil, style: style, action: action, in: container)
     }
 
     // MARK: - How long
@@ -196,15 +194,6 @@ struct ToastBehaviourTests {
 
     // MARK: - The swipe
 
-    /// Toward the toast's own edge, and toward its side when it has one.
-    @Test func eachPositionSwipesTowardItsEdge() {
-        #expect(ToastView.swipeDirections(for: .bottom, rightToLeft: false) == .init(vertical: 1, horizontal: 0))
-        #expect(ToastView.swipeDirections(for: .top, rightToLeft: false) == .init(vertical: -1, horizontal: 0))
-        #expect(ToastView.swipeDirections(for: .bottomLeading, rightToLeft: false) == .init(vertical: 1, horizontal: -1))
-        #expect(ToastView.swipeDirections(for: .topTrailing, rightToLeft: false) == .init(vertical: -1, horizontal: 1))
-        #expect(ToastView.swipeDirections(for: .bottomLeading, rightToLeft: true) == .init(vertical: 1, horizontal: 1))
-    }
-
     /// A pull toward the edge is followed; the other way it stretches, and
     /// never past the limit.
     @Test func theWrongWayRubberBands() {
@@ -215,15 +204,13 @@ struct ToastBehaviourTests {
         #expect(sideways > 0 && sideways < ToastView.Metrics.rubberBandLimit)
     }
 
-    /// On distance or speed toward the edge; never away from it.
-    @Test func aSwipeDismissesOnDistanceOrSpeed() {
-        let down = ToastView.SwipeDirections(vertical: 1, horizontal: 0)
-        #expect(ToastView.dismisses(translation: CGPoint(x: 0, y: 60), velocity: .zero, directions: down))
-        #expect(ToastView.dismisses(translation: CGPoint(x: 0, y: 10), velocity: CGPoint(x: 0, y: 900), directions: down))
-        #expect(!ToastView.dismisses(translation: CGPoint(x: 0, y: -80), velocity: CGPoint(x: 0, y: -900), directions: down))
-        #expect(!ToastView.dismisses(translation: CGPoint(x: 200, y: 0), velocity: .zero, directions: down))
-        let leading = ToastView.SwipeDirections(vertical: 1, horizontal: -1)
-        #expect(ToastView.dismisses(translation: CGPoint(x: -60, y: 0), velocity: .zero, directions: leading))
+    /// Up, on distance or speed (#2143: every toast hangs from the top);
+    /// never down, never sideways.
+    @Test func aSwipeUpDismissesOnDistanceOrSpeed() {
+        #expect(ToastView.dismisses(translation: CGPoint(x: 0, y: -60), velocity: .zero))
+        #expect(ToastView.dismisses(translation: CGPoint(x: 0, y: -10), velocity: CGPoint(x: 0, y: -900)))
+        #expect(!ToastView.dismisses(translation: CGPoint(x: 0, y: 80), velocity: CGPoint(x: 0, y: 900)))
+        #expect(!ToastView.dismisses(translation: CGPoint(x: 200, y: 0), velocity: CGPoint(x: 900, y: 0)))
     }
 
     // MARK: - VoiceOver

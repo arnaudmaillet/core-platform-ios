@@ -191,18 +191,22 @@ struct ConversationThreadSendAndMuteTests {
 
     // MARK: - The bell's transition, durations and toast (#729)
 
-    /// ⚠️ A STATE IS ITS OWN ITEM, WITH ITS OWN IDENTIFIER: one identifier
-    /// for both swaps in a frame; two get the native glass morph.
-    @Test func eachBellStateIsItsOwnItemForTheGlassMorph() throws {
+    /// ⚠️ ONE ITEM FOR BOTH STATES, ITS GLYPH REPLACED IN PLACE (#2143):
+    /// an item per state morphed through an empty bubble. The bubble stays;
+    /// the symbol, the spoken value and the menu follow the mute.
+    @Test func theBellIsOneItemWhoseGlyphFollowsTheMute() throws {
         let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
         defer { window.isHidden = true }
         let on = try #require(bell(screen))
+        #expect(on.image == UIImage(systemName: "bell"))
+        #expect(on.accessibilityValue == "On")
         driver.toggleMuted()
         let off = try #require(bell(screen))
-        #expect(on !== off, "the bell was edited in place: no morph")
-        #expect(on.identifier != off.identifier, "one identifier for both states: no morph")
-        #expect(on.identifier == ConversationThreadViewController.bellID)
-        #expect(off.identifier == ConversationThreadViewController.mutedBellID)
+        #expect(on === off, "a new item per state: the glass morphs through an empty bubble")
+        #expect(off.identifier == ConversationThreadViewController.bellID)
+        #expect(off.image == UIImage(systemName: "bell.slash"))
+        #expect(off.accessibilityValue == "Muted")
+        #expect(off.menu?.children.first?.title == "Unmute", "the menu did not follow the mute")
     }
 
     /// A long press offers the durations; each mutes until that time.
@@ -250,30 +254,21 @@ struct ConversationThreadSendAndMuteTests {
         #expect(abs(until.timeIntervalSinceNow - 3_600) < 5)
     }
 
-    /// ⚠️ UNDO ON THE MUTE'S BAR TOAST (#1420): the bell flips back while the
-    /// toast still holds the bar. The thread used to rebuild its items from
-    /// the bar's list, kept the toast's item, and the toast stayed for good
-    /// beside the bell — the bar spilling into •••. Undone, the bar holds
-    /// exactly the items it had, the toast gone.
-    @Test func undoingTheMuteBringsBackExactlyTheBarsItems() async throws {
+    /// Undo on the mute's toast: the bar holds exactly the items it had,
+    /// and no toast ever stood among them (#1420, #2143).
+    @Test func undoingTheMuteBringsBackExactlyTheBarsItems() throws {
         let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
         defer { window.isHidden = true }
         let before = (screen.navigationItem.rightBarButtonItems ?? []).map(\.identifier)
         screen.debugTapBell()
         driver.answerMute(true)
+        let isToast: (UIBarButtonItem) -> Bool = { $0.customView is ToastView }
+        #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains(where: isToast), "a toast took the bar")
         let toast = try #require(Self.firstToast(in: screen.view), "no toast confirmed the mute")
         // Its Undo, through the toast's own action path.
         toast.debugTapAction()
         driver.answerMute(true)
-        let isToast: (UIBarButtonItem) -> Bool = { $0.customView is ToastView }
-        // The toast's leave is animated: looked at until it has gone, on a
-        // look budget.
-        for _ in 0..<400 where (screen.navigationItem.rightBarButtonItems ?? []).contains(where: isToast) {
-            try await Task.sleep(for: .milliseconds(5))
-            window.layoutIfNeeded()
-        }
         let after = screen.navigationItem.rightBarButtonItems ?? []
-        #expect(!after.contains(where: isToast), "the undone toast stayed in the bar")
         #expect(after.map(\.identifier) == before, "the bar did not get back the items it had: \(after.map(\.identifier))")
         #expect(bell(screen)?.image == UIImage(systemName: "bell"), "Undo did not turn the notifications back on")
     }
@@ -287,66 +282,54 @@ struct ConversationThreadSendAndMuteTests {
         #expect(Self.firstToast(in: screen.view)?.style == .confirmation, "the copy said nothing")
     }
 
-    /// A refused mute never moved the bell, and says it failed (#802,
-    /// #1447).
+    /// A refused mute rolls the bell back, and says it failed (#802).
     @Test func aRefusedMuteRollsBackWithAFailureToast() throws {
         let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
         defer { window.isHidden = true }
         screen.debugTapBell()
-        #expect(bell(screen)?.image == UIImage(systemName: "bell"), "the bell flipped before its answer")
+        #expect(bell(screen)?.image == UIImage(systemName: "bell.slash"), "the bell waited for its answer")
         driver.answerMute(false)
-        #expect(Self.ownBell(screen)?.image == UIImage(systemName: "bell"), "the refused mute stayed on")
+        #expect(bell(screen)?.image == UIImage(systemName: "bell"), "the refused mute stayed on")
         let toast = try #require(Self.firstToast(in: screen.view), "the refusal was silent")
         #expect(toast.style == .failure)
     }
 
-    /// ⚠️ OLD LOOK → TOAST → NEW LOOK (#1447). The mute's toast takes the
-    /// bell's place in the bar: the bell keeps its look until then — no
-    /// bell.slash before the toast — and comes back muted when it leaves.
-    /// A second tap while the write is on its way does nothing.
-    @Test func theBellChangesUnderItsToastNeverBefore() throws {
+    /// The bell changes AT ONCE (#2143): no toast takes its place in the
+    /// bar, so it shows the change on the tap (#2116's rule), and its toast
+    /// says what happened once the server answered. A second tap while the
+    /// write is on its way does nothing.
+    @Test func theBellChangesAtOnceBesideItsToast() throws {
         let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
         defer { window.isHidden = true }
-        // In its window, so the toast goes to its bar.
         window.layoutIfNeeded()
         try #require(screen.view.window != nil)
         screen.debugTapBell()
         #expect(driver.muted == true, "the write did not go out")
-        #expect(bell(screen)?.image == UIImage(systemName: "bell"), "bell.slash showed before the toast")
+        #expect(bell(screen)?.image == UIImage(systemName: "bell.slash"), "the bell waited for its toast")
         screen.debugTapBell()
         #expect(driver.mutes.count == 1, "a second tap went out while the first was on its way")
 
         driver.answerMute(true)
         let shown = screen.navigationItem.rightBarButtonItems ?? []
-        #expect(shown.contains { $0.customView is ToastView }, "no toast took the bell's place")
-        #expect(bell(screen) == nil, "a bell stayed beside its toast")
-        #expect(Self.ownBell(screen)?.image == UIImage(systemName: "bell.slash"), "the new look does not come back")
+        #expect(!shown.contains { $0.customView is ToastView }, "a toast took the bell's place")
+        #expect(bell(screen)?.image == UIImage(systemName: "bell.slash"), "the bell left with its toast")
+        let toast = try #require(Self.firstToast(in: screen.view), "no toast confirmed the mute")
 
-        // Unmuting: the same order, the other way.
-        let toast = try #require(shown.compactMap { $0.customView as? ToastView }.first)
+        // Unmuting: at once too.
         toast.debugDismiss()
-        #expect(bell(screen)?.image == UIImage(systemName: "bell.slash"))
         screen.debugTapBell()
-        #expect(bell(screen)?.image == UIImage(systemName: "bell.slash"), "bell showed before the toast")
+        #expect(bell(screen)?.image == UIImage(systemName: "bell"), "the bell waited for its toast")
         driver.answerMute(true)
-        #expect(Self.ownBell(screen)?.image == UIImage(systemName: "bell"))
+        #expect(bell(screen)?.image == UIImage(systemName: "bell"))
     }
 
-    /// The bell among the screen's own items — the ones that come back from
-    /// under a toast.
-    private static func ownBell(_ screen: ConversationThreadViewController) -> UIBarButtonItem? {
-        screen.ownTrailingBarItems.first { $0.accessibilityLabel == "Notifications" }
-    }
-
-    /// Looked for from the WINDOW: a screen with a bar shows its toasts as
-    /// that bar's items (#1058), outside the screen's own view.
     private static func firstToast(in view: UIView) -> ToastView? {
         guard let window = view.window, window !== view else { return firstToast(under: view) }
         return firstToast(under: window)
     }
 
     private static func firstToast(under view: UIView) -> ToastView? {
-        if let toast = view as? ToastView { return toast }
+        if let toast = view as? ToastView, !toast.isDismissing { return toast }
         for subview in view.subviews {
             if let toast = firstToast(under: subview) { return toast }
         }

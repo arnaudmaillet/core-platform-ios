@@ -14,19 +14,16 @@ public final class PendingFeedback {
     /// The toasts' shared identity: the answer takes the loading toast's place.
     public let id = "pending-" + UUID().uuidString
     private weak var source: UIViewController?
-    private let position: ToastPosition
     private var loading: ToastView?
     private var isDone = false
 
     public init(
-        _ message: String, from source: UIViewController, at position: ToastPosition = .bottom,
-        clock: LoadingClock = .system
+        _ message: String, from source: UIViewController, clock: LoadingClock = .system
     ) {
         self.source = source
-        self.position = position
         clock.after(LoadingTiming.loaderGrace) { [weak self] in
             guard let self, !isDone, let source = self.source else { return }
-            loading = Feedback.loading(message, id: id, from: source, at: position)
+            loading = Feedback.loading(message, id: id, from: source)
         }
     }
 
@@ -37,7 +34,7 @@ public final class PendingFeedback {
     public func succeed(
         _ message: String, symbol: String? = Feedback.Kind.success.defaultSymbol, action: ToastView.Action? = nil
     ) -> ToastView? {
-        finish { source in Feedback.success(message, symbol: symbol, from: source, at: position, action: action, id: id) }
+        finish { source in Feedback.success(message, symbol: symbol, from: source, action: action, id: id) }
     }
 
     @discardableResult
@@ -46,18 +43,18 @@ public final class PendingFeedback {
         commit: @escaping @MainActor () -> Void, undo: @escaping @MainActor () -> Void
     ) -> ToastView? {
         finish { source in
-            Feedback.undoable(message, symbol: symbol, from: source, at: position, id: id, commit: commit, undo: undo)
+            Feedback.undoable(message, symbol: symbol, from: source, id: id, commit: commit, undo: undo)
         }
     }
 
     @discardableResult
     public func fail(_ message: String) -> ToastView? {
-        finish { source in Feedback.failure(message, from: source, at: position, id: id) }
+        finish { source in Feedback.failure(message, from: source, id: id) }
     }
 
     @discardableResult
     public func warn(_ message: String) -> ToastView? {
-        finish { source in Feedback.warning(message, from: source, at: position, id: id) }
+        finish { source in Feedback.warning(message, from: source, id: id) }
     }
 
     /// Ends with no word: the loading toast leaves.

@@ -201,8 +201,8 @@ public enum StakeMenu {
     /// tap; one per surface, whose tally it shows.
     ///
     /// ⚠️ THE TOAST IS THE UNDO WINDOW (#1375, the owner 2026-10-18). It
-    /// follows the screen on top through a push or a pop
-    /// (`NavigationBarToasts`), its Undo working until its countdown ends —
+    /// follows the screen on top through a push or a pop (`ToastOverlay`),
+    /// its Undo working until its countdown ends —
     /// and `commit` runs when it ends without an undo (time, a swipe, the
     /// background, another undoable toast): that is when the burst is sent.
     /// Leaving the screen that staked no longer closes it. A caller numbers
@@ -213,12 +213,11 @@ public enum StakeMenu {
         staked amount: Int,
         on targetID: String,
         from source: UIViewController,
-        above floor: UIView? = nil,
         commit: @escaping @MainActor () -> Void = {},
         undo: @escaping @MainActor () -> Void
     ) -> ToastView {
         Feedback.undoable(
-            stakedToastMessage(amount), symbol: LikesSymbol.glyph, from: source, above: floor,
+            stakedToastMessage(amount), symbol: LikesSymbol.glyph, from: source,
             // Per surface too: each keeps its own tally, and a burst on the
             // same post from another surface is its own toast (the one undo
             // slot settles the other).

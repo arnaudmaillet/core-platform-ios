@@ -98,11 +98,6 @@ struct FeedbackTests {
         tabs.selectedIndex = 0
         hosting(tabs) {
             #expect(Feedback.host(for: tabs) === first)
-            // The overlay's hosting rule; with a bar the toast goes there
-            // (#1058, `NavigationBarToastsTests`).
-            let previousBar = NavigationBarToasts.isEnabled
-            NavigationBarToasts.isEnabled = false
-            defer { NavigationBarToasts.isEnabled = previousBar }
             _ = recordingHaptics {
                 let toast = Feedback.success("Posted", from: tabs)
                 #expect(toast.superview === first.view)
@@ -240,16 +235,16 @@ struct FeedbackTests {
         #expect(queued == true)
     }
 
-    /// A failure takes the place of the confirmation before it (#954: a
-    /// failure preempts info) — a fast double-tap still cannot build a tower.
-    @Test func aFailurePreemptsTheConfirmationBeforeIt() {
+    /// One result at a time (#2143): a failure takes the place of the
+    /// confirmation before it — a fast double-tap cannot build a tower.
+    @Test func aFailureReplacesTheConfirmationBeforeIt() {
         let (root, screen) = shell()
         hosting(root) {
             _ = recordingHaptics {
                 Feedback.success("Copied", from: screen)
                 Feedback.failure("Couldn't copy", from: screen)
             }
-            #expect(ToastView.stack(at: .bottom, in: screen.view).map(\.message) == ["Couldn't copy"])
+            #expect(ToastView.stack(in: screen.view).map(\.message) == ["Couldn't copy"])
         }
     }
 
@@ -261,11 +256,69 @@ struct FeedbackTests {
                 Feedback.success("Copied", from: screen)
                 Feedback.success("Copied", from: screen)
             }
-            #expect(ToastView.stack(at: .bottom, in: screen.view).count == 1)
+            #expect(ToastView.stack(in: screen.view).count == 1)
         }
     }
 
+    /// Every toast is announced — and again when its `id` updates it — with
+    /// its words, a turn later, without moving VoiceOver's focus.
+    @Test func eachToastIsAnnounced() async {
+        let (root, screen) = shell()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = root
+        window.isHidden = false
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+            window.layoutIfNeeded()
+        }
+        var heard: [String] = []
+        let previous = ToastView.postAnnouncement
+        ToastView.postAnnouncement = { heard.append($0.string) }
+        _ = recordingHaptics {
+            Feedback.loading("Posting…", id: "post", from: screen)
+            Feedback.success("Posted", from: screen, id: "post")
+        }
+        #expect(heard.isEmpty, "announced inline, where a menu's dismissal drops it")
+        // The announcement is a later turn of the main actor, so this awaits
+        // it. No other suite swaps `postAnnouncement`; their toasts may be
+        // heard meanwhile, and only these two count.
+        let ours = ["Posting…", "Posted"]
+        for _ in 0..<200 where heard.filter(ours.contains).count < 2 {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        ToastView.postAnnouncement = previous
+        #expect(heard.filter(ours.contains) == ours)
+        ToastView.stack(in: screen.view).forEach { $0.dismiss(animated: false) }
+    }
+
     // MARK: - The guard
+
+    /// ⚠️ One host (#2143): the bar host and the positions are gone, and
+    /// nothing brings them back — no `NavigationBarToasts`, no
+    /// `ToastPosition`.
+    @Test func noBarToastsLeft() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // DesignSystemTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // DesignSystem
+            .deletingLastPathComponent() // Core
+            .deletingLastPathComponent() // Packages
+            .deletingLastPathComponent() // repository root
+        let pattern = try Regex(#"\bNavigationBarToasts\b|\bToastPosition\b"#)
+        var offenders: [String] = []
+        for folder in ["App", "Packages"] {
+            let enumerator = FileManager.default.enumerator(at: root.appendingPathComponent(folder), includingPropertiesForKeys: nil)
+            while let url = enumerator?.nextObject() as? URL {
+                let path = url.path
+                guard url.pathExtension == "swift", !path.contains("/.build/"),
+                      url.lastPathComponent != "FeedbackTests.swift" else { continue }
+                let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+                if text.contains(pattern) { offenders.append(url.lastPathComponent) }
+            }
+        }
+        #expect(offenders.isEmpty, "the bar toasts are back in: \(offenders)")
+    }
 
     /// ⚠️ The presenter only works if NOTHING bypasses it. Scans the app's and
     /// the packages' sources for `ToastView.present(` anywhere but `Feedback`

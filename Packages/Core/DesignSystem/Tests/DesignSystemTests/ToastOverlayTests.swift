@@ -2,9 +2,11 @@ import Testing
 import UIKit
 @testable import DesignSystem
 
-/// The scene-level toast overlay (#954): the band it spans, where each of the
-/// six positions puts a toast, that a toast outlives the screen it was fired
-/// from, and that the window takes a touch only on a toast.
+/// The scene-level toast overlay (#954), the only host since #2143: the band
+/// it spans, the ONE place it puts a toast — under the top bar of the screen
+/// in view (`ToastAnchor`) — following that anchor while the toast is up, a
+/// toast outliving the screen it was fired from, and the window taking a
+/// touch only on a toast.
 ///
 /// A package test host has no scene, so the overlay under test is built over
 /// a plain window (`ToastOverlay.makeForTests`), set and restored inside each
@@ -27,13 +29,8 @@ struct ToastOverlayTests {
         window.layoutIfNeeded()
         let overlay = ToastOverlay(window: ToastOverlayWindow(frame: bounds), appWindow: window)
         let previousMake = ToastOverlay.makeForTests
-        // The overlay's own suite: a screen with a bar would take its toast
-        // into the bar (#1058, `NavigationBarToastsTests`).
-        let previousBar = NavigationBarToasts.isEnabled
-        NavigationBarToasts.isEnabled = false
         ToastOverlay.makeForTests = { _ in overlay }
         defer {
-            NavigationBarToasts.isEnabled = previousBar
             ToastOverlay.makeForTests = previousMake
             overlay.toasts.forEach { $0.dismiss(animated: false) }
             overlay.window.isHidden = true
@@ -48,216 +45,280 @@ struct ToastOverlayTests {
 
     // MARK: - The band
 
-    /// From the foot of the status band to the screen's floor.
-    @Test func theBandRunsFromTheStatusBandToTheFloor() {
-        let band = ToastOverlay.band(in: bounds, safeArea: safeArea, screenFloorY: 780, keyboardTopY: nil)
-        #expect(band == CGRect(x: 0, y: 62, width: 402, height: 780 - 62))
+    /// From the foot of the status band to the safe area bottom: never the
+    /// status bar, whose appearance a window over it would take.
+    @Test func theBandRunsFromTheStatusBandToTheSafeAreaBottom() {
+        let band = ToastOverlay.band(in: bounds, safeArea: safeArea)
+        #expect(band == CGRect(x: 0, y: 62, width: 402, height: 874 - 34 - 62))
     }
 
-    /// With no floor measured, the window's safe area bottom.
-    @Test func withoutAFloorTheBandEndsAtTheSafeArea() {
-        let band = ToastOverlay.band(in: bounds, safeArea: safeArea, screenFloorY: nil, keyboardTopY: nil)
-        #expect(abs(band.maxY - (874 - 34)) < 0.001)
+    // MARK: - The anchor (#2143)
+
+    /// A screen in a stack whose bar shows: the bar's bottom edge.
+    @Test func aVisibleBarIsTheAnchor() {
+        let screen = UIViewController()
+        let stack = UINavigationController(rootViewController: screen)
+        hosting(stack) { window, _ in
+            let bar = stack.navigationBar
+            let foot = bar.convert(bar.bounds, to: window).maxY
+            #expect(foot > window.safeAreaInsets.top)
+            #expect(ToastAnchor.anchorY(in: window) == foot)
+        }
     }
 
-    /// The keyboard is a floor too: the higher of the two wins.
-    @Test func theKeyboardRaisesTheFloor() {
-        let band = ToastOverlay.band(in: bounds, safeArea: safeArea, screenFloorY: 780, keyboardTopY: 540)
-        #expect(band.maxY == 540)
-        let below = ToastOverlay.band(in: bounds, safeArea: safeArea, screenFloorY: 500, keyboardTopY: 540)
-        #expect(below.maxY == 500)
+    /// A large title: the bar's foot, expanded, and again once collapsed —
+    /// whatever its height, the toast hangs under it.
+    @Test func aLargeTitleIsFollowedExpandedAndCollapsed() {
+        let screen = UIViewController()
+        screen.navigationItem.title = "Messages"
+        screen.navigationItem.largeTitleDisplayMode = .always
+        let stack = UINavigationController(rootViewController: screen)
+        stack.navigationBar.prefersLargeTitles = true
+        hosting(stack) { window, _ in
+            let bar = stack.navigationBar
+            let expanded = bar.convert(bar.bounds, to: window).maxY
+            #expect(ToastAnchor.anchorY(in: window) == expanded)
+            screen.navigationItem.largeTitleDisplayMode = .never
+            stack.view.setNeedsLayout()
+            window.layoutIfNeeded()
+            let collapsed = bar.convert(bar.bounds, to: window).maxY
+            #expect(ToastAnchor.anchorY(in: window) == collapsed)
+            #expect(collapsed < expanded, "the bar never collapsed: the test proves nothing")
+        }
     }
 
-    /// Under a navigation bar the band starts at its foot, so a top toast
-    /// hangs below the bar's buttons (#955); never above the status band.
-    @Test func theBandStartsUnderTheScreensBar() {
-        let band = ToastOverlay.band(
-            in: bounds, safeArea: safeArea, screenFloorY: 780, keyboardTopY: nil, screenCeilingY: 116
-        )
-        #expect(band.minY == 116)
-        let above = ToastOverlay.band(
-            in: bounds, safeArea: safeArea, screenFloorY: 780, keyboardTopY: nil, screenCeilingY: 20
-        )
-        #expect(above.minY == 62)
+    /// A screen with its own top chrome: under that chrome while it shows,
+    /// the bar again once it hides.
+    @Test func ownTopChromeIsTheAnchorWhileItShows() {
+        let screen = AnchoringScreen()
+        let stack = UINavigationController(rootViewController: screen)
+        hosting(stack) { window, _ in
+            screen.chrome.frame = CGRect(x: 0, y: 200, width: 402, height: 40)
+            screen.view.addSubview(screen.chrome)
+            #expect(ToastAnchor.anchorY(in: window) == screen.chrome.convert(screen.chrome.bounds, to: window).maxY)
+            screen.chrome.isHidden = true
+            let bar = stack.navigationBar
+            #expect(ToastAnchor.anchorY(in: window) == bar.convert(bar.bounds, to: window).maxY)
+        }
     }
 
-    /// A floor above the status band never makes a negative band.
-    @Test func aFloorNeverRisesAboveTheTop() {
-        let band = ToastOverlay.band(in: bounds, safeArea: safeArea, screenFloorY: 10, keyboardTopY: nil)
-        #expect(band.height == 0)
-        #expect(band.minY == 62)
+    /// No bar and no chrome: the top safe area — under the status bar and
+    /// the Dynamic Island.
+    @Test func withNothingOnTopTheSafeAreaIsTheAnchor() {
+        let screen = UIViewController()
+        let stack = UINavigationController(rootViewController: screen)
+        stack.setNavigationBarHidden(true, animated: false)
+        hosting(stack) { window, _ in
+            #expect(ToastAnchor.anchorY(in: window) == window.bounds.minY + window.safeAreaInsets.top)
+        }
+    }
+
+    /// Fired from the app's root, a custom container around the screens (the
+    /// notifications drawer's): the anchor is the bar of the screen showing
+    /// inside it.
+    @Test func aCustomContainerIsLookedThrough() {
+        let stack = UINavigationController(rootViewController: UIViewController())
+        let container = UIViewController()
+        hosting(container) { window, _ in
+            container.addChild(stack)
+            stack.view.frame = container.view.bounds
+            container.view.addSubview(stack.view)
+            stack.didMove(toParent: container)
+            window.layoutIfNeeded()
+            let bar = stack.navigationBar
+            #expect(ToastAnchor.anchorY(in: window) == bar.convert(bar.bounds, to: window).maxY)
+        }
+    }
+
+    /// A drawer that takes most of the container but not all of it (the
+    /// notifications drawer, the shell it pushed aside still showing at the
+    /// edge): the anchor is the drawer's bar, never the status bar under it.
+    @Test func aDrawerTakingMostOfTheScreenIsLookedThrough() {
+        let drawer = UINavigationController(rootViewController: UIViewController())
+        let shell = UIViewController()
+        let container = UIViewController()
+        hosting(container) { window, _ in
+            for (child, frame) in [
+                (shell, CGRect(x: 342, y: 0, width: 402, height: 874)),
+                (drawer, CGRect(x: 0, y: 0, width: 342, height: 874)),
+            ] {
+                container.addChild(child)
+                child.view.frame = frame
+                container.view.addSubview(child.view)
+                child.didMove(toParent: container)
+            }
+            window.layoutIfNeeded()
+            let bar = drawer.navigationBar
+            #expect(ToastAnchor.anchorY(in: window) == bar.convert(bar.bounds, to: window).maxY)
+        }
+    }
+
+    /// A sheet at a medium detent leaves the top of the screen behind in
+    /// view: the toast stays there, over neither the sheet nor its content.
+    /// A large one covers it: the toast goes into the sheet. (Decided on the
+    /// tops: a package test host never completes a presentation,
+    /// `test-host-modal-never-completes`.)
+    @Test func aMediumSheetKeepsTheScreenBehindALargeOneTakesIt() {
+        let anchors: [CGFloat] = [116, 140, 160]
+        func holder(_ tops: [CGFloat?]) -> Int {
+            ToastAnchor.holder(presentationTops: tops) { anchors[$0] }
+        }
+        #expect(holder([nil, 437]) == 0, "a medium sheet took the toast")
+        #expect(holder([nil, 72]) == 1, "a large sheet left the toast behind it")
+        #expect(holder([nil, 437, 72]) == 2, "a large sheet over a medium one left it behind")
+        #expect(holder([nil, 72, 437]) == 1, "a medium sheet over a large one took it")
+        #expect(holder([nil, nil]) == 0, "a presentation not on screen took it")
+        // Just clear of the room a toast needs: behind.
+        #expect(holder([nil, 116 + ToastAnchor.roomAboveSheet]) == 0)
+    }
+
+    /// A large sheet with no bar: its grabber's area; with one, its bar.
+    @Test func aSheetWithoutABarHangsItUnderItsGrabber() {
+        let screen = UIViewController()
+        hosting(screen) { window, _ in
+            let anchor = ToastAnchor.anchorY(of: screen, in: window, sheetTop: 80)
+            #expect(anchor == 80 + ToastAnchor.grabberRoom)
+        }
+        let stack = UINavigationController(rootViewController: UIViewController())
+        hosting(stack) { window, _ in
+            let bar = stack.navigationBar
+            let anchor = ToastAnchor.anchorY(of: stack.topViewController, in: window, sheetTop: 0.5)
+            #expect(anchor == bar.convert(bar.bounds, to: window).maxY)
+        }
     }
 
     // MARK: - Feedback through the overlay
 
-    /// A toast is drawn in the overlay, not in the screen, and the overlay's
-    /// window stands on the screen's floor.
-    @Test func aToastIsDrawnInTheOverlay() {
+    /// A toast is drawn in the overlay, not in the screen, and hangs its gap
+    /// under the bar — never in it.
+    @Test func aToastHangsUnderTheBar() {
         let screen = UIViewController()
-        hosting(screen) { window, overlay in
+        let stack = UINavigationController(rootViewController: screen)
+        hosting(stack) { window, overlay in
             let toast = Feedback.success("Copied", from: screen)
             #expect(toast.superview === overlay.container)
             #expect(!screen.view.subviews.contains { $0 is ToastView })
+            #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains { $0.customView is ToastView })
             #expect(!overlay.window.isHidden)
-            let floor = Feedback.floorY(of: screen, above: nil, in: window)
-            #expect(overlay.window.frame.maxY == floor)
+            toast.debugSettle()
+            let bar = stack.navigationBar
+            let foot = bar.convert(bar.bounds, to: window).maxY
+            #expect(overlay.placedAnchorY == foot)
+            let frame = toast.frame.offsetBy(dx: overlay.window.frame.minX, dy: overlay.window.frame.minY)
+            #expect(abs(frame.minY - (foot + ToastView.Metrics.topGap)) < 0.5)
+            #expect(abs(frame.midX - window.bounds.midX) < 0.5)
         }
     }
 
     /// ⚠️ The point of the overlay: a pop takes the screen away, not its
-    /// toast.
-    @Test func aToastOutlivesThePopOfItsScreen() {
-        let stack = UINavigationController(rootViewController: UIViewController())
+    /// toast — which then hangs under the bar of the screen now on top.
+    @Test func aToastOutlivesThePopOfItsScreenAndFollowsTheBar() {
+        let root = UIViewController()
+        root.navigationItem.title = "Root"
+        root.navigationItem.largeTitleDisplayMode = .always
+        let stack = UINavigationController(rootViewController: root)
+        stack.navigationBar.prefersLargeTitles = true
         hosting(stack) { window, overlay in
             let pushed = UIViewController()
+            pushed.navigationItem.largeTitleDisplayMode = .never
             stack.pushViewController(pushed, animated: false)
             window.layoutIfNeeded()
             let toast = Feedback.info("Hidden from this feed", from: pushed)
+            let pushedFoot = overlay.placedAnchorY
             stack.popViewController(animated: false)
             window.layoutIfNeeded()
+            overlay.follow(animated: false)
             #expect(toast.superview === overlay.container)
+            #expect(!toast.isDismissing)
             #expect(!overlay.window.isHidden)
+            let bar = stack.navigationBar
+            #expect(overlay.placedAnchorY == bar.convert(bar.bounds, to: window).maxY)
+            #expect(overlay.placedAnchorY > pushedFoot, "the root's large title is no lower: the test proves nothing")
         }
     }
 
-    /// After the pop, the floor is the screen now on top: a toast fired on a
-    /// pushed screen with no tab accessory moves up over the root's.
-    @Test func afterAPopTheFloorIsTheScreenNowOnTop() {
-        let root = UIViewController()
-        root.additionalSafeAreaInsets.bottom = 120 // the root's accessory
-        let stack = UINavigationController(rootViewController: root)
-        hosting(stack) { window, overlay in
-            let pushed = UIViewController()
-            stack.pushViewController(pushed, animated: false)
-            window.layoutIfNeeded()
-            pushed.additionalSafeAreaInsets.bottom = 0
-            _ = Feedback.info("Saved", from: pushed)
-            let pushedFloor = overlay.window.frame.maxY
-            stack.popViewController(animated: false)
-            window.layoutIfNeeded()
-            overlay.refloor(animated: false)
-            let rootFloor = Feedback.floorY(of: root, above: nil, in: window)
-            #expect(overlay.window.frame.maxY == rootFloor)
-            #expect(rootFloor < pushedFloor)
+    /// Following the anchor: a step a frame can take moves the toast at
+    /// once; a bigger one is animated; a jump further than `farAway` is a
+    /// cross-fade — the glass dissolves on its way and comes back.
+    @Test func theToastFollowsItsAnchorByHowFarItWent() {
+        let screen = AnchoringScreen()
+        hosting(screen) { window, overlay in
+            screen.chrome.frame = CGRect(x: 0, y: 100, width: 402, height: 40)
+            screen.view.addSubview(screen.chrome)
+            let toast = Feedback.info("Saved", from: screen)
+            toast.debugSettle()
+            #expect(overlay.placedAnchorY == 140)
+
+            screen.chrome.frame.origin.y += 8
+            overlay.follow()
+            #expect(overlay.placedAnchorY == 148)
+            #expect(abs(toast.frame.minY + overlay.window.frame.minY - (148 + ToastView.Metrics.topGap)) < 0.5)
+
+            screen.chrome.frame.origin.y += 40
+            overlay.follow()
+            #expect(overlay.placedAnchorY == 188)
+            #expect(!toast.debugIsCrossFading, "a slide was a cross-fade")
+            #expect(toast.glassView.effect != nil, "a slide dissolved the glass")
+
+            screen.chrome.frame.origin.y += ToastOverlay.farAway + 10
+            overlay.follow()
+            #expect(overlay.placedAnchorY == 188 + ToastOverlay.farAway + 10)
+            #expect(toast.debugIsCrossFading, "a jump across the screen was not a cross-fade")
         }
     }
 
-    /// A rotation re-places the band: as wide as the window, standing on
-    /// the new floor.
+    /// A rotation re-places the band: as wide as the window.
     @Test func aRotationReplacesTheBand() {
         let screen = UIViewController()
         hosting(screen) { window, overlay in
             _ = Feedback.info("Saved", from: screen)
             window.frame = CGRect(x: 0, y: 0, width: 874, height: 402)
             window.layoutIfNeeded()
-            overlay.refloor(animated: false)
+            overlay.follow(animated: false)
             #expect(overlay.window.frame.width == 874)
-            #expect(overlay.window.frame.maxY == Feedback.floorY(of: screen, above: nil, in: window))
+            #expect(overlay.window.frame == ToastOverlay.band(in: window.bounds, safeArea: window.safeAreaInsets))
         }
     }
 
-    /// Fired from the app's root, a custom container around the screens
-    /// (the notifications drawer's), the toast stands on the screen that
-    /// shows inside it — under its bar, over its accessory (#955).
-    @Test func aCustomContainerIsLookedThrough() {
-        let screen = UIViewController()
-        screen.additionalSafeAreaInsets = UIEdgeInsets(top: 54, left: 0, bottom: 120, right: 0)
-        let container = UIViewController()
-        hosting(container) { window, overlay in
-            container.addChild(screen)
-            screen.view.frame = container.view.bounds
-            container.view.addSubview(screen.view)
-            screen.didMove(toParent: container)
-            window.layoutIfNeeded()
-            _ = Feedback.info("Offline", from: container, at: .top)
-            let safe = screen.view.convert(screen.view.safeAreaLayoutGuide.layoutFrame, to: window)
-            #expect(overlay.window.frame.minY == safe.minY)
-            #expect(overlay.window.frame.maxY == safe.maxY)
-        }
-    }
+    // MARK: - One at a time
 
-    /// A composer's top is the floor when the screen names it.
-    @Test func aComposerIsTheFloor() {
-        let screen = UIViewController()
-        hosting(screen) { window, overlay in
-            let composer = UIView(frame: CGRect(x: 0, y: 700, width: 402, height: 60))
-            screen.view.addSubview(composer)
-            _ = Feedback.success("Copied", from: screen, above: composer)
-            #expect(overlay.window.frame.maxY == 700)
-        }
-    }
-
-    // MARK: - Positions
-
-    /// Top toasts hang from the band's top, bottom ones stand on its bottom;
-    /// leading and trailing sit at the margins, centre in the middle.
-    @Test func eachPositionLandsInItsPlace() {
-        let screen = UIViewController()
-        hosting(screen) { _, overlay in
-            var placed: [ToastPosition: ToastView] = [:]
-            for position in ToastPosition.allCases {
-                placed[position] = Feedback.info("Saved", from: screen, at: position)
-            }
-            overlay.window.layoutIfNeeded()
-            let container = overlay.container
-            let margin = container.directionalLayoutMargins.leading
-            for (position, toast) in placed {
-                #expect(toast.superview === container)
-                #expect(toast.position == position)
-                let frame = toast.frame
-                // Mid-entrance: within one travel of its edge.
-                if position.isTop {
-                    #expect(frame.minY < container.bounds.midY)
-                } else {
-                    #expect(frame.maxY > container.bounds.midY)
-                }
-                switch position.alignment {
-                case .leading: #expect(abs(frame.minX - margin) < 0.5)
-                case .center: #expect(abs(frame.midX - container.bounds.midX) < 0.5)
-                case .trailing: #expect(abs(frame.maxX - (container.bounds.maxX - margin)) < 0.5)
-                }
-            }
-        }
-    }
-
-    /// Right to left: leading is the right-hand side.
-    @Test func leadingFollowsTheLayoutDirection() {
-        let screen = UIViewController()
-        hosting(screen) { _, overlay in
-            overlay.container.semanticContentAttribute = .forceRightToLeft
-            defer { overlay.container.semanticContentAttribute = .unspecified }
-            let toast = Feedback.info("Saved", from: screen, at: .bottomLeading)
-            overlay.window.layoutIfNeeded()
-            #expect(toast.frame.midX > overlay.container.bounds.midX)
-        }
-    }
-
-    /// A position stacks its toasts and leaves the other positions alone.
-    @Test func toastsStackAtTheirOwnPosition() {
+    /// One result toast: a second replaces the first, which leaves.
+    @Test func oneResultToastReplacesAnother() {
         let screen = UIViewController()
         hosting(screen) { _, overlay in
             let first = Feedback.info("One", from: screen)
-            let top = Feedback.info("Top", from: screen, at: .top)
             let second = Feedback.info("Two", from: screen)
-            #expect(ToastView.stack(at: .bottom, in: overlay.container) == [first, second])
-            #expect(ToastView.stack(at: .top, in: overlay.container) == [top])
-        }
-    }
-
-    /// ⚠️ A toast that takes another's place keeps the window up: the one it
-    /// pushed out leaves first, and an empty window hides itself.
-    @Test func aReplacementKeepsTheWindowUp() {
-        let screen = UIViewController()
-        hosting(screen) { _, overlay in
-            _ = Feedback.info("One", from: screen)
-            let second = Feedback.info("Two", from: screen)
+            #expect(first.isDismissing)
+            #expect(ToastView.stack(in: overlay.container) == [second])
+            // ⚠️ The replacement keeps the window up: the one it pushed out
+            // leaves first, and an empty window hides itself.
             #expect(second.superview === overlay.container)
             #expect(!overlay.window.isHidden)
         }
     }
 
-    /// Retry fires the next toast at the same position, from its action: the
-    /// next toast shows, in the overlay, with the window up.
+    /// A condition holds the top line; a result fired meanwhile hangs just
+    /// under it, and nothing replaces the condition.
+    @Test func aConditionAndAResultTakeALineEach() {
+        let screen = UIViewController()
+        hosting(screen) { _, overlay in
+            let offline = Feedback.condition("Offline", symbol: "wifi.slash", id: "connectivity", from: screen)
+            let saved = Feedback.success("Saved", from: screen)
+            let sent = Feedback.success("Sent", from: screen)
+            #expect(!offline.isDismissing)
+            #expect(saved.isDismissing)
+            #expect(ToastView.stack(in: overlay.container) == [offline, sent])
+            offline.debugSettle()
+            sent.debugSettle()
+            #expect(sent.frame.minY >= offline.frame.maxY + ToastView.stackGap - 0.5, "the result overlaps the condition")
+            offline.dismiss(animated: false)
+            sent.debugSettle()
+            #expect(abs(sent.frame.minY - offline.frame.minY) < 0.5, "the result did not take the top line back")
+        }
+    }
+
+    /// Retry fires the next toast from its action: the next toast shows, in
+    /// the overlay, with the window up.
     @Test func anActionCanFireTheNextToast() throws {
         let screen = UIViewController()
         try hosting(screen) { _, overlay in
@@ -270,7 +331,7 @@ struct ToastOverlayTests {
             #expect(sent.superview === overlay.container)
             #expect(!sent.isDismissing)
             #expect(!overlay.window.isHidden)
-            #expect(ToastView.stack(at: .bottom, in: overlay.container).map(\.message) == ["Sent"])
+            #expect(ToastView.stack(in: overlay.container).map(\.message) == ["Sent"])
         }
     }
 
@@ -334,4 +395,10 @@ struct ToastOverlayTests {
             #expect(overlay.window.overrideUserInterfaceStyle == .dark)
         }
     }
+}
+
+/// A screen with its own top chrome (`ToastAnchoring`).
+private final class AnchoringScreen: UIViewController, ToastAnchoring {
+    let chrome = UIView()
+    var toastAnchorView: UIView? { chrome }
 }

@@ -186,7 +186,7 @@ public final class NotificationsMuteModel {
         }
     }
 
-    /// The bar toast confirming a change.
+    /// The toast confirming a change.
     public static func confirmation(for pause: PushPause, now: Date, calendar: Calendar = .current) -> String {
         switch pause {
         case .off: return "Notifications unmuted"

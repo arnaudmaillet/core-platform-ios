@@ -27,8 +27,7 @@ import UIKit
 ///   or first when there are none, then the screen's other leading items
 ///   (`leadingItems`);
 /// - `.trailing`: before the screen's own trailing items (`trailingItems`),
-///   through `setOwnTrailingBarItems` — a bar toast that holds the trailing
-///   group gives them back with the section item in place.
+///   through `setOwnTrailingBarItems`.
 ///
 /// A `separator` (a fixed space) keeps the section item in its own glass
 /// bubble beside the screen's items: adjacent items otherwise share one.
@@ -208,8 +207,6 @@ public final class PinnedSectionBarBinding {
             // The same rule on this side: an identical group is not handed
             // back (the profile's `appliedBarItems`, now here).
             guard !viewController.ownTrailingBarItems.elementsEqual(items, by: ===) else { return }
-            // ⚠️ Through the toasts' door: while a toast holds the trailing
-            // group, these are what come back when it leaves.
             viewController.setOwnTrailingBarItems(items, animated: animated)
         }
     }

@@ -819,7 +819,6 @@ final class PostDetailViewController: UIViewController {
                     let key = postID.rawValue
                     self.stakeToast = StakeMenu.undoToast(
                         staked: amount, on: key, from: self,
-                        above: self.composeBar.inputRowView,
                         commit: { [weak self] in
                             guard burst.isCurrent(generation) else { return }
                             wallet.commitStakes(on: key)
@@ -1742,11 +1741,9 @@ final class PostDetailViewController: UIViewController {
         composeBar.setReplyPlaceholder(name: nil)
     }
 
-    /// A comment's Copy says so (#803) — over the composer, which rests where
-    /// the toast would, as in a conversation. Internal for tests.
+    /// A comment's Copy says so (#803). Internal for tests.
     func confirmCopied() {
-        let floor = composeBar.superview != nil && !composeBar.isHidden ? composeBar.inputRowView : nil
-        Feedback.success("Copied", symbol: "doc.on.doc.fill", from: self, above: floor)
+        Feedback.success("Copied", symbol: "doc.on.doc.fill", from: self)
     }
 
     func presentCommentShare(_ model: CommentDisplayModel) {
