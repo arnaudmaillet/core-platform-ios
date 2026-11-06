@@ -195,11 +195,8 @@ final class ForYouPostListViewController: UIViewController {
     /// `[‹][New · 3] … [points][search]`, nothing back at the top, and no
     /// capsule pinned under the bar (the headers leave as they pin). Minted,
     /// placed once per turn and held past a push by the contract
-    /// (`PinnedSectionBarBinding`, #1573).
-    ///
-    /// ⚠️ ONLY THE LEADING GROUP: toasts own the trailing one while they show
-    /// (`NavigationBarToasts`, #1066), and when they need room they keep the
-    /// first leading item only — this one, after the chevron.
+    /// (`PinnedSectionBarBinding`, #1573). Only the leading group, after the
+    /// chevron.
     private var sectionBinding: PinnedSectionBarBinding?
 
     #if DEBUG

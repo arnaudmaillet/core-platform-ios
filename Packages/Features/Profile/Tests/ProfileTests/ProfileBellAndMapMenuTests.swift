@@ -237,45 +237,53 @@ struct ProfileBellAndMapMenuTests {
         #expect((screen.debugMuteMenuElements().first as? UIMenu)?.title == "Mute")
     }
 
-    /// ⚠️ OLD LOOK → TOAST → NEW LOOK (#1447). The mute's toast takes the
-    /// bell's place in the bar: the bell on the bar keeps its glyph — never
-    /// `bell.slash` before the toast — and the bell that comes back when it
-    /// leaves wears the new one. Muting more (Undo, on the tap) and
-    /// unmuting (once the server answered) alike.
-    @Test func theBellChangesUnderItsToastNeverBefore() async throws {
+    /// The bell changes AT ONCE, beside its toast (#2143): no toast takes
+    /// its place in the bar any more, so it shows its new look on the tap
+    /// (#2116's rule) — muting more (Undo, on the tap) and unmuting (once the
+    /// server answered) alike — and stays tappable while the toast is up.
+    @Test func theBellChangesAtOnceBesideItsToast() async throws {
         let (screen, viewModel, repository) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
         let navigation = UINavigationController(rootViewController: screen)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         window.rootViewController = navigation
         window.isHidden = false
         defer { window.isHidden = true }
-        let bell = try #require(
-            await settle { screen.debugMuteBellItem != nil && viewModel.canModerate } ? screen.debugMuteBellItem : nil
-        )
+        try #require(await settle { screen.debugMuteBellItem != nil && viewModel.canModerate })
         let isToast: (UIBarButtonItem) -> Bool = { $0.customView is ToastView }
 
         screen.debugToggleMute(.posts)
-        #expect(bell.image == UIImage(systemName: "bell"), "the bell on the bar flipped with its toast")
-        #expect((screen.navigationItem.rightBarButtonItems ?? []).contains(where: isToast), "no toast took the bar")
-        let muted = try #require(screen.debugMuteBellItem, "no bell comes back")
-        #expect(muted !== bell)
-        #expect(muted.image == UIImage(systemName: "bell.slash"))
+        try #require(await settle { screen.debugMuteBellItem?.image == UIImage(systemName: "bell.slash") },
+                     "the bell waited")
+        #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains(where: isToast), "a toast took the bar")
+        try #require(await settle { Self.shownToast(for: screen) != nil }, "no toast for the mute")
+        let undo = try #require(Self.shownToast(for: screen))
+        #expect(screen.debugMuteBellItem?.isEnabled != false, "the bell is not tappable under its toast")
 
         // Let the Undo run out: the mute is sent.
-        let undo = try #require((screen.navigationItem.rightBarButtonItems ?? []).compactMap { $0.customView as? ToastView }.first)
         undo.debugDismiss()
         try #require(await settle { repository.lastScopes == MuteScopes(posts: true) })
-        try #require(await settle { !(screen.navigationItem.rightBarButtonItems ?? []).contains(where: isToast) })
 
         screen.debugToggleMute(.posts)
-        #expect(screen.debugMuteBellItem?.image == UIImage(systemName: "bell.slash"), "bell showed before the toast")
         // ⚠️ THE TOAST'S ARRIVAL, NOT ITS PRESENCE (#1951). It shows once the
         // server answered and leaves after a few seconds; on a starved runner
-        // (179 s for this test) a poll gap outlasted it, and a presence poll
-        // missed a toast that had come and gone. Counted, it cannot be missed.
+        // a poll gap outlasted it. Counted, it cannot be missed.
         try #require(await settle { screen.debugMuteToastsShown == 1 }, "no toast for the unmute")
-        #expect(muted.image == UIImage(systemName: "bell.slash"), "the bell on the bar flipped with its toast")
         #expect(screen.debugMuteBellItem?.image == UIImage(systemName: "bell"))
+    }
+
+    /// The toast up for `screen`: in its view (a window that is not key), or
+    /// in the scene's overlay window (a test window that became key).
+    private static func shownToast(for screen: UIViewController) -> ToastView? {
+        let windows = screen.view.window?.windowScene?.windows ?? []
+        return firstToast(under: screen.view) ?? windows.lazy.compactMap { firstToast(under: $0) }.first
+    }
+
+    private static func firstToast(under view: UIView) -> ToastView? {
+        if let toast = view as? ToastView, !toast.isDismissing { return toast }
+        for subview in view.subviews {
+            if let toast = firstToast(under: subview) { return toast }
+        }
+        return nil
     }
 
     /// Not followed: NO bell (the owner, 2026-10-15 — nothing of theirs to

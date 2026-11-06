@@ -941,8 +941,8 @@ struct CaptureFlowTests {
     }
 
     /// ⚠️ Under Reduce Motion the focus ring fades without scaling; with
-    /// motion it springs from a scale. The toast is the app's own (#955): at
-    /// the top, never moved by a transform — its Reduce Motion handling is
+    /// motion it springs from a scale. The toast is the app's own (#955):
+    /// under the top bar (#2143), never moved by a transform — its Reduce Motion handling is
     /// the component's (`ToastBehaviourTests.reduceMotionRemovesTheSlide`).
     @Test func reduceMotionFadesTheFocusRingWithoutScalingAndTheToastIsTheAppsOwn() async throws {
         let still = try await open()
@@ -951,7 +951,7 @@ struct CaptureFlowTests {
         try await record(still, seconds: 0.6)
         still.camera.debugSelector.debugTap(CaptureOption.ratio.rawValue)
         let toast = try #require(still.camera.debugLastToastView)
-        #expect(toast.position == .top)
+        #expect(toast.superview != nil)
         #expect(toast.transform == .identity)
 
         let moving = try await open(motion: true)

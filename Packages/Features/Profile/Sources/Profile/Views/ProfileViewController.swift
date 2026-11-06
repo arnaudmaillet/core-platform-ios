@@ -131,15 +131,10 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// anything is muted. Kept: the trailing run is compared by reference
     /// (the bar's identical-group guard), so a fresh item is a rebuild — made
     /// when its glyph changes (#1679, R3: under the same identifier, the bar
-    /// morphs one into the other), or when the viewer's own change is
-    /// revealed under its toast (#1447).
+    /// morphs one into the other).
     private lazy var muteBellItem = makeMuteBellItem()
     /// Whether the bell on the bar shows `bell.slash`.
     private var muteBellShowsMuted = false
-    /// While the viewer's own mute change is on its way (#1447), the scopes
-    /// the bell still shows: its toast reveals the new look; a refusal or an
-    /// Undo, back to these, releases it as it is.
-    private var bellHeldAt: MuteScopes?
     /// Keeps the bell and the shell's balance two bubbles: iOS 26 groups
     /// adjacent bar items into one platter (the feed's note on
     /// `setEngagedChrome`). Kept for the same by-reference reason.
@@ -421,12 +416,10 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
                 self?.noteLandingMilestone()
             }
         }
-        viewModel.onMuteScopesChange = { [weak self] scopes in
-            guard let self else { return }
-            // Back to what the held bell shows (refused, undone): nothing to
-            // reveal any more.
-            if bellHeldAt == scopes { bellHeldAt = nil }
-            refreshMuteBell()
+        viewModel.onMuteScopesChange = { [weak self] _ in
+            // The bell changes at once — on the tap, and back on a refusal or
+            // an Undo — beside its toast, never under it (#2143).
+            self?.refreshMuteBell()
         }
         headerView.onFollowTapped = { [weak self] in
             guard let self else { return }
@@ -463,7 +456,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             guard let self else { return }
             Feedback.undoable(
                 action.message, symbol: action.symbol, from: self,
-                revealing: { [weak self] in self?.revealMuteBell() },
                 commit: action.commit, undo: action.undo
             )
         }
@@ -1301,19 +1293,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// The scoped Mute menu for the current scopes (`ProfileMenuBuilder`).
     private func muteMenuElements() -> [UIMenuElement] {
         ProfileMenuBuilder.muteMenuElements(viewModel.muteScopes) { [weak self] scope in
-            self?.toggleMuteHoldingBell(scope)
+            self?.viewModel.toggleMute(scope)
         }
-    }
-
-    /// The menu's mute: the bell keeps its look until the change's toast
-    /// takes its place, and comes back changed when it leaves (#1447) —
-    /// whether the toast comes on the tap (Undo) or once the server answered.
-    private func toggleMuteHoldingBell(_ scope: MuteScope) {
-        let before = viewModel.muteScopes
-        bellHeldAt = before
-        viewModel.toggleMute(scope)
-        // Nothing changed (a change already on its way): nothing held.
-        if viewModel.muteScopes == before { bellHeldAt = nil }
     }
 
     static let muteBellID = "profile.mute-bell"
@@ -1328,10 +1309,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
     /// The spoken value follows the scopes in place; a new glyph is a new
     /// item under the same identifier, set animated — the bar morphs the
-    /// bell (#1679, R3), never an image swapped on the item it shows. Not
-    /// while the viewer's own change is held (#1447).
+    /// bell (#1679, R3), never an image swapped on the item it shows.
     private func refreshMuteBell() {
-        guard bellHeldAt == nil else { return }
         let muted = !viewModel.muteScopes.isEmpty
         guard muted != muteBellShowsMuted, isShowingMuteBell else {
             applyMuteLook(to: muteBellItem)
@@ -1353,18 +1332,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         item.image = UIImage(systemName: scopes.isEmpty ? "bell" : "bell.slash")
         item.accessibilityValue = scopes.isEmpty ? "Nothing muted" : "Muted: " + scopes.summary
         muteBellShowsMuted = !scopes.isEmpty
-    }
-
-    /// The held bell's new look, under its toast (#1447): a FRESH item, so
-    /// the one the toast is replacing leaves the bar as it was, and the new
-    /// one is among the items that come back.
-    private func revealMuteBell() {
-        guard bellHeldAt != nil else { return }
-        bellHeldAt = nil
-        let item = makeMuteBellItem()
-        applyMuteLook(to: item)
-        muteBellItem = item
-        updateActionBarItem(followButtonState, animated: view.window != nil)
     }
 
     #if DEBUG
@@ -1390,7 +1357,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         ownTrailingBarItems.first { $0 === muteBellItem }
     }
     /// What picking the bell menu's `scope` does. Tests.
-    func debugToggleMute(_ scope: MuteScope) { toggleMuteHoldingBell(scope) }
+    func debugToggleMute(_ scope: MuteScope) { viewModel.toggleMute(scope) }
     func debugMuteMenuElements() -> [UIMenuElement] { muteMenuElements() }
     func debugMoreMenuElements() -> [UIMenuElement] { moreMenuElements() }
     /// The map pin's rows, for `-profile-map-pin-audit` (+QA).
@@ -1612,8 +1579,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             Feedback.success(
                 ProfileViewModel.muteMessage(handle: handle, scopes: scopes),
                 symbol: scopes.isEmpty ? "speaker.wave.2.fill" : "speaker.slash.fill",
-                from: self,
-                revealing: { [weak self] in self?.revealMuteBell() }
+                from: self
             )
         case .restrictChanged(let handle, let restricted):
             Feedback.success(
@@ -1726,8 +1692,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     ///
     /// - Someone else's profile: innermost of the TRAILING group (#1590) —
     ///   the identity pill holds the leading one — through
-    ///   `setOwnTrailingBarItems`, so a bar toast that takes the group
-    ///   (#1066) gives it back with the day in place.
+    ///   `setOwnTrailingBarItems`.
     /// - The viewer's own (`dayLeads`): LEADING, after the bell (the owner,
     ///   2026-10-23, #1642) — the Messages inbox's arrangement. The leading
     ///   group is then the contract's to write.
@@ -2172,8 +2137,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         }
         #endif
         // Written now, so they ride a push they arrive in; the contract
-        // composes the group with the day and writes it through the toasts'
-        // door — under bar toasts, the ones that come back (#1420, #1447).
+        // composes the group with the day and writes it.
         #if DEBUG
         debugBarWrites.append(animated && UIView.areAnimationsEnabled)
         #endif

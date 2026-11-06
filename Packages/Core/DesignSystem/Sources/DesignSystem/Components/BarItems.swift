@@ -12,7 +12,7 @@ import UIKit
 ///   here takes one; there is no way to make an anonymous item through them.
 /// - **R3 — UIKit animates.** A change rebuilds the group and sets it with
 ///   `setToolbarItems(_:animated:)` / `set…BarButtonItems(_:animated:)`
-///   (`setOwnTrailingBarItems` for the trailing group, which toasts share).
+///   (`setOwnTrailingBarItems` for the trailing group).
 /// - **R5 — wide items** are `stretched(…)`: a plain view whose bubble the
 ///   BAR draws (glass, press, `.prominent` tint), stretched to the free width
 ///   — never a `UIButton` with a glass of its own (`hidesSharedBackground`).

@@ -514,10 +514,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// becoming "Recent · 18" is UIKit's Liquid Glass morph. Minted, placed
     /// once per turn and held past a push by the contract
     /// (`PinnedSectionBarBinding`, #1573); the bell is its `leadingPrefix`.
-    ///
-    /// ⚠️ ONLY THE LEADING GROUP. Toasts own the trailing one while they show
-    /// (`NavigationBarToasts`, #1066); rewriting the whole resting bar on every
-    /// change would put the balance back over a toast.
+    /// Only the leading group: the trailing one is the balance's.
     private lazy var sectionBinding: PinnedSectionBarBinding = {
         let binding = PinnedSectionBarBinding(
             viewController: self, placement: .leading, scope: "inbox", countNoun: "unread"

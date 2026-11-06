@@ -242,7 +242,8 @@ struct NotificationsMuteTests {
     }
 
     /// A write on its way (#1775): the wide button wears the loader and takes
-    /// no second tap; the toast hands it the new look, a refusal the old one.
+    /// no second tap; the answer gives it the new look with its toast, a
+    /// refusal the old one.
     @Test(arguments: [false, true]) func theMuteWearsTheLoaderWhileItSaves(refused: Bool) async throws {
         let server = PauseServer(refuses: refused, holds: true)
         let (window, controller) = hosting(server)
@@ -251,7 +252,7 @@ struct NotificationsMuteTests {
 
         controller.muteButton?.debugTap()
         #expect(controller.debugMuteButtonIsBusy, "the mute sat unchanged while it saved")
-        #expect(controller.debugMuteButtonTitle == "Mute", "the new look came before the answer (#1447)")
+        #expect(controller.debugMuteButtonTitle == "Mute", "the new look came before the answer")
         controller.muteButton?.debugTap()
         while await server.heldWrites == 0 { await Task.yield() }
         #expect(await server.sent.count == 1, "a second tap went out")

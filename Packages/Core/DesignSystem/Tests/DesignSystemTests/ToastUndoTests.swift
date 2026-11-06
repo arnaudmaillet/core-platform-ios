@@ -38,12 +38,12 @@ struct ToastUndoTests {
     }
 
     private func undoable(
-        _ ledger: Ledger, position: ToastPosition = .bottom, in container: UIView
+        _ ledger: Ledger, in container: UIView
     ) -> ToastView {
         ToastView.present(
             "Unfollowed @ava", symbol: nil, style: .confirmation,
             undoable: ToastView.Undoable(commit: { ledger.commits += 1 }, undo: { ledger.undos += 1 }),
-            position: position, in: container
+            in: container
         )
     }
 
@@ -109,13 +109,12 @@ struct ToastUndoTests {
         }
     }
 
-    /// One undo slot: a second undoable action commits the first at once —
-    /// at any position.
+    /// One undo slot: a second undoable action commits the first at once.
     @Test func aSecondUndoableToastCommitsTheFirst() {
         hosting { container, _ in
             let first = Ledger()
             let second = Ledger()
-            _ = undoable(first, position: .top, in: container)
+            _ = undoable(first, in: container)
             _ = undoable(second, in: container)
             #expect(first.commits == 1)
             #expect(second.commits == 0 && second.undos == 0)
@@ -147,21 +146,19 @@ struct ToastUndoTests {
         }
     }
 
-    /// Every other way out commits: a swipe or a close, being pushed out of
-    /// its stack.
+    /// Every other way out commits: a swipe or a close, being replaced by
+    /// the next result toast (#2143).
     @Test func leavingAnyOtherWayCommits() {
         hosting { container, _ in
             let dismissed = Ledger()
             undoable(dismissed, in: container).dismiss(animated: false)
             #expect(dismissed.commits == 1)
 
-            // Pushed out of its stack by three newer toasts.
-            let pushedOut = Ledger()
-            _ = undoable(pushedOut, position: .top, in: container)
-            for word in ["One", "Two", "Three"] {
-                _ = ToastView.present(word, symbol: nil, style: .confirmation, position: .top, in: container)
-            }
-            #expect(pushedOut.commits == 1)
+            // Replaced by the next result toast.
+            let replaced = Ledger()
+            _ = undoable(replaced, in: container)
+            _ = ToastView.present("Copied", symbol: nil, style: .confirmation, in: container)
+            #expect(replaced.commits == 1)
         }
     }
 

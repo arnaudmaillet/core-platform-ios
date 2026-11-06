@@ -1668,11 +1668,10 @@ struct NewPostTests {
         }
     }
 
-    /// The toast the tab shows: one of its bar's items (#1058) — read from
-    /// the items, the bar may not have drawn yet — or else over the tab.
+    /// The toast the tab shows: over the tab (a package test host has no
+    /// scene overlay).
     private static func shownToast(on tab: UINavigationController) -> ToastView? {
-        let items = tab.topViewController?.navigationItem.rightBarButtonItems ?? []
-        return items.compactMap { $0.customView as? ToastView }.first ?? toasts(under: tab.view).first
+        toasts(under: tab.view).first
     }
 
     /// Every toast anywhere under `view`.

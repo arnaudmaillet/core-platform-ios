@@ -43,7 +43,7 @@ struct StakeUndoToastTests {
             let second = StakeMenu.undoToast(staked: 3, on: "post-1", from: screen) { ledger.undos += 1 }
             #expect(first === second)
             #expect(second.message == "Staked 3 likes")
-            #expect(ToastView.stack(at: .bottom, in: screen.view).count == 1)
+            #expect(ToastView.stack(in: screen.view).count == 1)
             #expect(ledger.haptics == 0, "each tap already played its own")
             #expect(ledger.undos == 0)
         }

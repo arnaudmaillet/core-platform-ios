@@ -20,21 +20,15 @@ import UIKit
 /// Wording (the toast's own rule): short, past tense for a result, no
 /// trailing period — "Copied", "Report sent", "Couldn't follow @ava".
 ///
-/// ## A confirmed control: old look → toast → new look (#1447)
+/// ## One place (#2143)
 ///
-/// A toast in the top bar takes the screen's trailing items' place — the very
-/// control (a bell, a Follow) whose change it confirms. Had the control
-/// flipped on the tap, the viewer would see its new look, then the toast over
-/// it, then the new look again: the answer twice, in the wrong order. So a
-/// screen that confirms a BAR control keeps the control's old look while its
-/// write is on its way, and hands the new look to the toast (`revealing`):
-/// - in the bar, it is applied under the toast, in the same turn the toast
-///   takes the control's place, so it shows when the toast leaves;
-/// - in the overlay (no bar), it is applied as the toast appears;
-/// - a refusal gets `failure`, with no `revealing`: the control never moved.
-///
-/// Controls in the content (follow capsules, rows) stay beside their toast
-/// and keep changing at once.
+/// Every toast is drawn by the scene's `ToastOverlay`, just under the top bar
+/// of the screen in view (`ToastAnchor`), and follows it through a push, a
+/// pop, a tab switch or a sheet. It never takes a bar item's place, so a
+/// control a toast confirms (a bell, a Follow) shows its new look at once —
+/// #2116's rule — and the toast says what happened; a refusal rolls it back
+/// and says why with `failure`. (Until #2143 a toast took the bar's trailing
+/// items, and such a control held its old look under it, #1447.)
 ///
 /// ⚠️ NEVER CALL `ToastView.present` DIRECTLY. `FeedbackTests` scans the
 /// sources and fails if anything but this file does: a presenter honoured by
@@ -93,30 +87,17 @@ public enum Feedback {
     ///   - source: the screen the action was taken on. The toast goes to the
     ///     topmost presented screen over it, or to `source` itself when
     ///     nothing covers it (see `host(for:)`).
-    ///   - floor: what the capsule stands on instead of the safe area — the
-    ///     top of a composer resting there (#729). Only used when the toast
-    ///     lands on `source` itself: on a sheet above it, the floor belongs to
-    ///     a screen that is no longer in view.
-    ///   - position: one of six places (#954); the bottom centre by default.
     ///   - action: one trailing action ("Retry", "View"); the toast leaves
     ///     once it has run.
-    ///   - revealing: the new look of the control this toast confirms (#1447)
-    ///     — see "A confirmed control" above.
     @discardableResult
     public static func success(
         _ message: String,
         symbol: String? = Kind.success.defaultSymbol,
         from source: UIViewController,
-        above floor: UIView? = nil,
-        at position: ToastPosition = .bottom,
         action: ToastView.Action? = nil,
-        id: String? = nil,
-        revealing: (@MainActor () -> Void)? = nil
+        id: String? = nil
     ) -> ToastView {
-        show(
-            .success, message, symbol: symbol, from: source, above: floor, at: position, action: action, id: id,
-            revealing: revealing
-        )
+        show(.success, message, symbol: symbol, from: source, action: action, id: id)
     }
 
     /// The action did not happen: a failure-style toast and an error haptic.
@@ -128,13 +109,11 @@ public enum Feedback {
         _ message: String,
         symbol: String? = Kind.failure.defaultSymbol,
         from source: UIViewController,
-        above floor: UIView? = nil,
-        at position: ToastPosition = .bottom,
         action: ToastView.Action? = nil,
         id: String? = nil,
         length: ToastView.Length = .standard
     ) -> ToastView {
-        show(.failure, message, symbol: symbol, from: source, above: floor, at: position, action: action, id: id, length: length)
+        show(.failure, message, symbol: symbol, from: source, action: action, id: id, length: length)
     }
 
     /// It happened, with a catch: a warning-style toast and a warning haptic.
@@ -143,12 +122,10 @@ public enum Feedback {
         _ message: String,
         symbol: String? = Kind.warning.defaultSymbol,
         from source: UIViewController,
-        above floor: UIView? = nil,
-        at position: ToastPosition = .bottom,
         action: ToastView.Action? = nil,
         id: String? = nil
     ) -> ToastView {
-        show(.warning, message, symbol: symbol, from: source, above: floor, at: position, action: action, id: id)
+        show(.warning, message, symbol: symbol, from: source, action: action, id: id)
     }
 
     /// An action the viewer can take back (#954): a confirmation toast with
@@ -159,41 +136,35 @@ public enum Feedback {
     /// - Parameters:
     ///   - playsHaptic: false where the action already played its own (a
     ///     stake's impact, on every tap of a burst).
-    ///   - revealing: the new look of the control this toast confirms (#1447)
-    ///     — see "A confirmed control" above.
     @discardableResult
     public static func undoable(
         _ message: String,
         symbol: String? = Kind.success.defaultSymbol,
         from source: UIViewController,
-        above floor: UIView? = nil,
-        at position: ToastPosition = .bottom,
         id: String? = nil,
         playsHaptic: Bool = true,
-        revealing: (@MainActor () -> Void)? = nil,
         commit: @escaping @MainActor () -> Void,
         undo: @escaping @MainActor () -> Void
     ) -> ToastView {
         show(
-            .success, message, symbol: symbol, from: source, above: floor, at: position,
+            .success, message, symbol: symbol, from: source,
             action: nil, undoable: ToastView.Undoable(commit: commit, undo: undo), id: id,
-            playsHaptic: playsHaptic, revealing: revealing
+            playsHaptic: playsHaptic
         )
     }
 
     /// A condition the viewer should know while it lasts ("Offline", #955):
     /// no haptic, no timer and no close button — it stays until a toast with
-    /// the same `id` replaces it in place ("Back online"). It takes priority
-    /// over the plain confirmations at its position.
+    /// the same `id` replaces it in place ("Back online"). It holds its own
+    /// line: a result toast fired meanwhile hangs just under it.
     @discardableResult
     public static func condition(
         _ message: String,
         symbol: String? = Kind.info.defaultSymbol,
         id: String,
-        from source: UIViewController,
-        at position: ToastPosition = .top
+        from source: UIViewController
     ) -> ToastView {
-        show(.info, message, symbol: symbol, from: source, above: nil, at: position, action: nil, id: id, isCondition: true)
+        show(.info, message, symbol: symbol, from: source, action: nil, id: id, isCondition: true)
     }
 
     /// Something is under way ("Posting…"): a spinner, no haptic, and no
@@ -203,11 +174,9 @@ public enum Feedback {
     public static func loading(
         _ message: String,
         id: String,
-        from source: UIViewController,
-        above floor: UIView? = nil,
-        at position: ToastPosition = .bottom
+        from source: UIViewController
     ) -> ToastView {
-        show(.loading, message, symbol: nil, from: source, above: floor, at: position, action: nil, id: id)
+        show(.loading, message, symbol: nil, from: source, action: nil, id: id)
     }
 
     /// A neutral notice: a confirmation-style toast, no haptic.
@@ -216,12 +185,10 @@ public enum Feedback {
         _ message: String,
         symbol: String? = Kind.info.defaultSymbol,
         from source: UIViewController,
-        above floor: UIView? = nil,
-        at position: ToastPosition = .bottom,
         action: ToastView.Action? = nil,
         id: String? = nil
     ) -> ToastView {
-        show(.info, message, symbol: symbol, from: source, above: floor, at: position, action: action, id: id)
+        show(.info, message, symbol: symbol, from: source, action: action, id: id)
     }
 
     /// A state that shows on the control itself — a bookmark filling — was
@@ -240,51 +207,29 @@ public enum Feedback {
         _ message: String,
         symbol: String?,
         from source: UIViewController,
-        above floor: UIView?,
-        at position: ToastPosition,
         action: ToastView.Action?,
         undoable: ToastView.Undoable? = nil,
         id: String? = nil,
         isCondition: Bool = false,
         playsHaptic: Bool = true,
-        revealing: (@MainActor () -> Void)? = nil,
         length: ToastView.Length = .standard
     ) -> ToastView {
         let host = host(for: source)
-        // In the top bar, as its trailing items, when the screen shows one
-        // (#1058). The control's new look goes in under the toast.
-        if NavigationBarToasts.isEnabled, let toast = NavigationBarToasts.present(
-            ToastView.Content(
-                message: message, symbol: symbol, style: kind.style, action: action,
-                undoable: undoable, id: id, isCondition: isCondition, length: length
-            ),
-            from: host,
-            revealing: revealing
-        ) {
-            if playsHaptic, let haptic = kind.haptic { Haptics.play(haptic) }
-            return toast
-        }
-        let floor = host === source && floor?.window != nil ? floor : nil
         let toast: ToastView
         if let window = host.viewIfLoaded?.window, let overlay = ToastOverlay.overlay(for: window) {
-            // The scene's overlay (#954): the toast outlives the screen.
+            // The scene's overlay (#954), under the top bar of the screen in
+            // view (#2143): the toast outlives the screen.
             toast = overlay.present(
                 message, symbol: symbol, style: kind.style, action: action, undoable: undoable,
-                id: id, isCondition: isCondition, length: length, position: position,
-                from: host, above: floor,
-                keyboardTopY: keyboardTopY(of: host, in: window),
-                interfaceStyle: pinnedStyle(of: host)
+                id: id, isCondition: isCondition, length: length, interfaceStyle: pinnedStyle(of: host)
             )
         } else {
             // No scene to draw over (a package test host): in the screen.
             toast = ToastView.present(
                 message, symbol: symbol, style: kind.style, action: action, undoable: undoable,
-                id: id, isCondition: isCondition, length: length, position: position, in: host.view,
-                edge: position.isTop ? nil : floor?.topAnchor
+                id: id, isCondition: isCondition, length: length, in: host.view
             )
         }
-        // Over the content, the control changes as its toast appears.
-        revealing?()
         if playsHaptic, let haptic = kind.haptic { Haptics.play(haptic) }
         return toast
     }
@@ -299,28 +244,6 @@ public enum Feedback {
             controller = current.parent
         }
         return .unspecified
-    }
-
-    /// Where a bottom toast from `host` stands, in `window`'s coordinates:
-    /// the top of `floor` (a composer), or else the host's safe area bottom —
-    /// which clears its tab bar, toolbar and tab accessory. The keyboard is
-    /// the overlay's to follow (`keyboardTopY(of:in:)`).
-    static func floorY(of host: UIViewController?, above floor: UIView?, in window: UIWindow) -> CGFloat {
-        if let floor {
-            return floor.convert(floor.bounds, to: window).minY
-        }
-        guard let view = host?.viewIfLoaded else { return window.bounds.maxY - window.safeAreaInsets.bottom }
-        return view.convert(view.safeAreaLayoutGuide.layoutFrame, to: window).maxY
-    }
-
-    /// The keyboard's top in `window`'s coordinates while it is up over
-    /// `host`, else nil — the overlay's starting point; it follows the
-    /// keyboard's moves from there.
-    static func keyboardTopY(of host: UIViewController, in window: UIWindow) -> CGFloat? {
-        let view = host.view!
-        let safe = view.convert(view.safeAreaLayoutGuide.layoutFrame, to: window).maxY
-        let keyboard = view.convert(view.keyboardLayoutGuide.layoutFrame, to: window).minY
-        return keyboard < safe - 1 ? keyboard : nil
     }
 
     /// Where a toast from `source` is drawn.
@@ -384,8 +307,7 @@ public enum Feedback {
     }
 
     /// A toast's own full-message sheet (#1449): never a toast's host. A toast
-    /// fired while it is up goes to the screen under it — in that screen's
-    /// bar, never in the sheet's, where it took the ✕'s place.
+    /// fired while it is up goes to the screen under it.
     static func isToastMessageSheet(_ controller: UIViewController) -> Bool {
         let root = (controller as? UINavigationController)?.viewControllers.first ?? controller
         return root is ToastMessageSheet

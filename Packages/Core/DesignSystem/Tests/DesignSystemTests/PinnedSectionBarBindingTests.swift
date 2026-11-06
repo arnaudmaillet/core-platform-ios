@@ -247,22 +247,21 @@ struct PinnedSectionBarBindingTests {
         #expect(screen.navigationItem.leftBarButtonItems?.first?.title == "Yesterday")
     }
 
-    /// A bar toast holding the trailing group gives the screen's items back
-    /// with the section item in place.
-    @Test func aToastGivesTheTrailingGroupBackWithTheSection() throws {
+    /// A toast never takes the trailing group (#2143): the section item goes
+    /// in beside the screen's items while it is up.
+    @Test func aToastLeavesTheTrailingGroupToTheScreen() throws {
         try hosting { screen in
             let binding = PinnedSectionBarBinding(viewController: screen, placement: .trailing, scope: "test")
             let trash = UIBarButtonItem(systemItem: .trash)
             binding.trailingItems = [trash]
             binding.debugPlaceNow()
             let toast = Feedback.info("Cleared", from: screen)
+            defer { toast.dismiss(animated: false) }
             binding.update(sections: sections, sectionTops: tops, pinLine: 300)
             binding.debugPlaceNow()
-            let during = screen.navigationItem.rightBarButtonItems ?? []
-            #expect(during.allSatisfy(NavigationBarToasts.isToastItem), "the section item pushed into the toast's bar")
-            toast.dismiss(animated: false)
-            let back = try #require(screen.navigationItem.rightBarButtonItems)
-            #expect(back.count == 2 && back[0] === trash && back[1] === binding.item)
+            let during = try #require(screen.navigationItem.rightBarButtonItems)
+            #expect(during.count == 2 && during[0] === trash && during[1] === binding.item)
+            #expect(!during.contains { $0.customView is ToastView }, "a toast took a bar item's place")
         }
     }
 }

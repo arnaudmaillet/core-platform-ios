@@ -28,7 +28,7 @@ struct ToastLayoutTests {
     private func undoable(_ message: String, in container: UIView) -> ToastView {
         ToastView.present(
             message, symbol: "trash.fill", style: .confirmation,
-            undoable: ToastView.Undoable(commit: {}, undo: {}), position: .bottom, in: container
+            undoable: ToastView.Undoable(commit: {}, undo: {}), in: container
         )
     }
 
@@ -58,7 +58,7 @@ struct ToastLayoutTests {
     /// Without one, the capsule hugs its text.
     @Test func aPlainToastHugsItsText() {
         hosting { _, container in
-            let toast = ToastView.present("Copied", symbol: "doc.on.doc.fill", style: .confirmation, position: .bottom, in: container)
+            let toast = ToastView.present("Copied", symbol: "doc.on.doc.fill", style: .confirmation, in: container)
             settled(container)
             #expect(toast.bounds.width < container.layoutMarginsGuide.layoutFrame.width / 2)
         }
@@ -66,15 +66,19 @@ struct ToastLayoutTests {
 
     /// 48 pt with an action, 44 pt without, at the default text size.
     @Test func theHeightsAreCompact() {
+        // Each measured at rest before the next replaces it (one result
+        // toast at a time, #2143).
         hosting { _, container in
-            let plain = ToastView.present("Copied", symbol: nil, style: .confirmation, position: .top, in: container)
-            let withUndo = undoable("Unfollowed @ava", in: container)
-            let withRetry = ToastView.present(
-                "Couldn't send", symbol: nil, style: .failure, action: .init("Retry") {}, position: .bottomLeading, in: container
-            )
+            let plain = ToastView.present("Copied", symbol: nil, style: .confirmation, in: container)
             settled(container)
             #expect(abs(plain.bounds.height - 44) < 0.5)
+            let withUndo = undoable("Unfollowed @ava", in: container)
+            settled(container)
             #expect(abs(withUndo.bounds.height - 48) < 0.5)
+            let withRetry = ToastView.present(
+                "Couldn't send", symbol: nil, style: .failure, action: .init("Retry") {}, in: container
+            )
+            settled(container)
             #expect(abs(withRetry.bounds.height - 48) < 0.5)
         }
     }
@@ -93,16 +97,16 @@ struct ToastLayoutTests {
         }
     }
 
-    /// At accessibility text sizes, two lines, so the message is not cut to
-    /// nothing.
-    @Test func accessibilitySizesGetTwoLines() throws {
+    /// At accessibility text sizes too, one line: it truncates, never wraps
+    /// (#2143) — the whole message is a tap away (#1449).
+    @Test func accessibilitySizesStayOneLine() throws {
         try hosting { window, container in
             window.traitOverrides.preferredContentSizeCategory = .accessibilityLarge
             window.layoutIfNeeded()
             let toast = undoable("Post deleted", in: container)
             settled(container)
             let text = try #require(labels(in: toast).first { $0.text == "Post deleted" })
-            #expect(text.numberOfLines == 2)
+            #expect(text.numberOfLines == 1)
         }
     }
 }

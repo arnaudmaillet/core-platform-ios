@@ -69,16 +69,17 @@ extension MainTabCoordinator {
         if arguments.contains("-open-feed") {
             DispatchQueue.main.async { [weak self] in self?.openFeed() }
         }
-        // `-toast-demo` (#954): a toast at each of the six positions, from the
-        // selected tab's top screen, fired again every 1.5 s for 20 s so a
-        // screenshot catches them all. `-toast-demo pop` instead fires one
-        // from a screen pushed for the purpose and pops it in the same turn:
-        // the toast must stay (it lives in the scene's overlay, not in the
-        // screen).
+        // `-toast-demo` (#954, #2143): one toast held up — the same words
+        // fired again every 3 s for 10 min, which restarts its time in place —
+        // from the selected tab's top screen, so screenshots and recordings
+        // catch it on every screen the viewer goes to. `-toast-demo pop`
+        // instead fires one from a screen pushed for the purpose and pops it
+        // in the same turn: the toast must stay (it lives in the scene's
+        // overlay, not in the screen).
         if let index = arguments.firstIndex(of: "-toast-demo") {
             let mode = index + 1 < arguments.count ? arguments[index + 1] : ""
-            // `-toast-demo kinds`: one of each kind, once — a success, a
-            // failure with Retry (it stays), a warning, an info.
+            // `-toast-demo kinds`: one of each kind, a beat apart — each
+            // replacing the one before (one result toast at a time).
             if mode == "kinds" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                     self?.debugToastKinds()
@@ -88,8 +89,7 @@ extension MainTabCoordinator {
             // then it commits (or a tap on it undoes). Logged either way.
             if mode == "undo" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-                    guard let stack = self?.tabBarController.selectedViewController as? UINavigationController,
-                          let top = stack.topViewController else { return }
+                    guard let top = self?.debugToastSource() else { return }
                     Feedback.undoable(
                         "Unfollowed @ava.moreau", from: top,
                         commit: { print("[toast-demo] committed") },
@@ -97,59 +97,44 @@ extension MainTabCoordinator {
                     )
                 }
             }
-            // `-toast-demo stack`: three toasts at the bottom a beat apart
-            // (they stack, the older collapsed behind), and a top
-            // "Posting…" that becomes "Posted" 4 s later (update by id).
-            if mode == "stack" {
-                let messages = ["Saved to your profile", "Link copied", "Hidden from this feed"]
-                for (index, message) in messages.enumerated() {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(index) * 0.7) { [weak self] in
-                        guard let top = (self?.tabBarController.selectedViewController as? UINavigationController)?
-                            .topViewController else { return }
-                        Feedback.info(message, from: top)
-                        if index == 0 { Feedback.loading("Posting…", id: "demo-post", from: top, at: .top) }
+            // `-toast-demo condition`: "Offline" (a condition, its own line),
+            // a "Posting…" that becomes "Posted" under it (update by id), and
+            // "Back online" 14 s in.
+            if mode == "condition" {
+                let shots: [(TimeInterval, @MainActor (UIViewController) -> Void)] = [
+                    (2.5, { Feedback.condition("Offline", symbol: "wifi.slash", id: "demo-connectivity", from: $0) }),
+                    (4, { Feedback.loading("Posting…", id: "demo-post", from: $0) }),
+                    (8, { Feedback.success("Posted", from: $0, id: "demo-post") }),
+                    (14, { Feedback.info("Back online", symbol: "wifi", from: $0, id: "demo-connectivity") }),
+                ]
+                for (delay, fire) in shots {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                        guard let top = self?.debugToastSource() else { return }
+                        fire(top)
                     }
                 }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 6.5) { [weak self] in
-                    guard let top = (self?.tabBarController.selectedViewController as? UINavigationController)?
-                        .topViewController else { return }
-                    Feedback.success("Posted", from: top, at: .top, id: "demo-post")
-                }
             }
-            // `-toast-demo long` (#1449): a failure whose message the bar
-            // cuts, with Retry — a tap on its body opens the whole message.
-            // Fired again every 5 s for 20 s: a toast lasts 4 s.
+            // `-toast-demo long` (#1449): a failure whose message is cut,
+            // with Retry — a tap on its body opens the whole message. Fired
+            // again every 5 s for 20 s: a toast lasts 4 s.
             for shot in 0..<4 where mode == "long" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3 + Double(shot) * 5) { [weak self] in
-                    guard let top = (self?.tabBarController.selectedViewController as? UINavigationController)?
-                        .topViewController else { return }
+                    guard let top = self?.debugToastSource() else { return }
                     Feedback.failure(
                         "Couldn't ask to follow @ava.moreau: the server did not answer in time",
                         from: top, action: ToastView.Action("Retry") { print("[toast-demo] retried") }
                     )
                 }
             }
-            // `-toast-demo navbar` (#1058): an
-            // undo, an info, a warning a beat apart — the bar shows 1, 2 then
-            // 3 — then a failure with Retry, which preempts the info.
-            if mode == "navbar" {
-                let shots: [(TimeInterval, @MainActor (UIViewController) -> Void)] = [
-                    (3, { Feedback.undoable("Unfollowed @ava.moreau", symbol: "person.badge.minus", from: $0, commit: {}, undo: {}) }),
-                    (4.5, { Feedback.info("Link copied", symbol: "link", from: $0) }),
-                    (6, { Feedback.warning("Posted without its sound", from: $0) }),
-                    (9, { top in Feedback.failure("Couldn't send", from: top, action: ToastView.Action("Retry") {}) }),
-                ]
-                for (delay, fire) in shots {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                        guard let top = (self?.tabBarController.selectedViewController as? UINavigationController)?
-                            .topViewController else { return }
-                        fire(top)
-                    }
+            if mode == "pop" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                    self?.debugToastAfterPop()
                 }
             }
-            for round in 0..<14 where !["kinds", "undo", "stack", "navbar", "long"].contains(mode) {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(round) * 1.5) { [weak self] in
-                    self?.debugToastDemo(pops: mode == "pop")
+            for round in 0..<200 where !["kinds", "undo", "condition", "long", "pop"].contains(mode) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(round) * 3) { [weak self] in
+                    guard let top = self?.debugToastSource() else { return }
+                    Feedback.success("Saved to your profile", from: top)
                 }
             }
         }
@@ -549,37 +534,48 @@ extension MainTabCoordinator {
 // MARK: - Toast demo (#954)
 
 extension MainTabCoordinator {
-    fileprivate func debugToastKinds() {
-        guard let stack = tabBarController.selectedViewController as? UINavigationController,
-              let top = stack.topViewController else { return }
-        Feedback.success("Saved to your profile", from: top, at: .topLeading)
-        Feedback.warning("Posted without its sound", from: top, at: .top)
-        Feedback.info("Hidden from this feed", from: top, at: .bottomTrailing)
-        Feedback.failure("Couldn't send", from: top, action: ToastView.Action("Retry") {
-            Feedback.success("Sent", from: top)
-        })
+    /// The screen a demo toast is fired from: the top screen of whatever is
+    /// presented highest (the camera, a sheet), else of the selected tab — a
+    /// screen a full-screen presentation took out of the window keeps its
+    /// toast to itself (`Feedback.host(for:)`).
+    fileprivate func debugToastSource() -> UIViewController? {
+        var top: UIViewController = tabBarController
+        while let presented = top.presentedViewController, !presented.isBeingDismissed { top = presented }
+        if top === tabBarController {
+            return (tabBarController.selectedViewController as? UINavigationController)?.topViewController
+                ?? tabBarController.selectedViewController
+        }
+        return (top as? UINavigationController)?.topViewController ?? top
     }
 
-    fileprivate func debugToastDemo(pops: Bool) {
-        guard let stack = tabBarController.selectedViewController as? UINavigationController,
-              let top = stack.topViewController else { return }
-        if pops {
-            let pushed = UIViewController()
-            pushed.view.backgroundColor = .systemBackground
-            stack.pushViewController(pushed, animated: false)
-            // In the window, as a screen firing a toast is.
-            stack.view.layoutIfNeeded()
-            Feedback.success("Still here after the pop", from: pushed)
-            pushed.closeScreen(animated: false)
-            return
-        }
-        let names: [ToastPosition: String] = [
-            .topLeading: "Top leading", .top: "Top", .topTrailing: "Top trailing",
-            .bottomLeading: "Bottom leading", .bottom: "Bottom", .bottomTrailing: "Bottom trailing",
+    fileprivate func debugToastKinds() {
+        let shots: [(TimeInterval, @MainActor (UIViewController) -> Void)] = [
+            (0, { Feedback.success("Saved to your profile", from: $0) }),
+            (2, { Feedback.warning("Posted without its sound", from: $0) }),
+            (4, { Feedback.info("Hidden from this feed", from: $0) }),
+            (6, { top in
+                Feedback.failure("Couldn't send", from: top, action: ToastView.Action("Retry") {
+                    Feedback.success("Sent", from: top)
+                })
+            }),
         ]
-        for position in ToastPosition.allCases {
-            Feedback.info(names[position] ?? "", symbol: nil, from: top, at: position)
+        for (delay, fire) in shots {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let top = self?.debugToastSource() else { return }
+                fire(top)
+            }
         }
+    }
+
+    fileprivate func debugToastAfterPop() {
+        guard let stack = tabBarController.selectedViewController as? UINavigationController else { return }
+        let pushed = UIViewController()
+        pushed.view.backgroundColor = .systemBackground
+        stack.pushViewController(pushed, animated: false)
+        // In the window, as a screen firing a toast is.
+        stack.view.layoutIfNeeded()
+        Feedback.success("Still here after the pop", from: pushed)
+        pushed.closeScreen(animated: false)
     }
 }
 

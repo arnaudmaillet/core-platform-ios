@@ -140,10 +140,10 @@ extension NotificationsViewController {
         write(muteModel.target(for: choice))
     }
 
-    /// #1447's order: the bar keeps its old look while the write is on its
-    /// way — its wide button wearing the loader (#1775) — and the toast's
-    /// reveal hands it the new one. A refusal is a failure toast and the
-    /// look stays (#802).
+    /// The bar keeps its old look while the write is on its way — its wide
+    /// button wearing the loader (#1775) — and takes the new one the moment
+    /// the server answers, with its toast (#2143). A refusal is a failure
+    /// toast and the look stays (#802).
     private func write(_ target: PushPause) {
         guard let muteModel, !muteModel.isSaving, !isWritingMute else { return }
         setWritingMute(true)
@@ -151,14 +151,12 @@ extension NotificationsViewController {
             do {
                 let held = try await muteModel.set(target)
                 guard let self else { return }
+                shownPause = held
+                setWritingMute(false)
                 Feedback.success(
                     NotificationsMuteModel.confirmation(for: held, now: muteModel.clock),
                     symbol: held.isPaused ? "bell.slash.fill" : "bell.fill",
-                    from: self,
-                    revealing: { [weak self] in
-                        self?.shownPause = held
-                        self?.setWritingMute(false)
-                    }
+                    from: self
                 )
             } catch is CancellationError {
                 self?.setWritingMute(false)

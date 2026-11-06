@@ -1488,7 +1488,6 @@ final class CaptureViewController: UIViewController {
             items.append(close)
             if let nextItem { items.append(nextItem) }
         }
-        // The screen's own items, never a bar toast's (#1420).
         let current = ownTrailingBarItems
         guard current.map(\.identifier) != items.map(\.identifier) else { return }
         setOwnTrailingBarItems(items.isEmpty ? nil : items, animated: animated)
@@ -1808,7 +1807,8 @@ final class CaptureViewController: UIViewController {
     }
 
     /// Says something over the camera — through the app's one toast (#955):
-    /// at the top, clear of the shutter and the selector, with its own
+    /// under the bar, or under the time pill while it shows (#2143,
+    /// `ToastAnchoring`), clear of the shutter and the selector, with its own
     /// motion, Reduce Motion handling and announcement. A `failure` (a photo
     /// or a clip that could not be made) is drawn as one and plays the error
     /// haptic.
@@ -1816,8 +1816,8 @@ final class CaptureViewController: UIViewController {
         debugLastToast = text
         debugToasts.append(text)
         debugLastToastView = failure
-            ? Feedback.failure(text, from: self, at: .top)
-            : Feedback.info(text, from: self, at: .top)
+            ? Feedback.failure(text, from: self)
+            : Feedback.info(text, from: self)
     }
 
     // MARK: - Appearing and leaving
@@ -1989,4 +1989,10 @@ private extension UIFont {
         guard let descriptor = fontDescriptor.withDesign(.rounded) else { return self }
         return UIFont(descriptor: descriptor, size: pointSize)
     }
+}
+
+/// The recording time pill sits under the bar: a toast hangs under it while
+/// it shows, never over it (#2143).
+extension CaptureViewController: ToastAnchoring {
+    var toastAnchorView: UIView? { timePill }
 }

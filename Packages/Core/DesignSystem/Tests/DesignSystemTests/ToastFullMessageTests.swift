@@ -29,15 +29,15 @@ struct ToastFullMessageTests {
         try body(window.rootViewController!.view)
     }
 
-    private func barToast(_ message: String, action: ToastView.Action? = nil, width: CGFloat, in container: UIView) -> ToastView {
-        let toast = ToastView.makeForBar(ToastView.Content(
-            message: message, symbol: "exclamationmark.circle.fill", style: .warning, action: action,
-            undoable: nil, id: nil
-        ))
-        container.addSubview(toast)
-        toast.sizeInBar(width: width)
-        toast.layoutIfNeeded()
-        toast.startInBar()
+    /// A toast in a slot `width` wide (its own container, inside
+    /// `container`), laid out.
+    private func slotToast(_ message: String, action: ToastView.Action? = nil, width: CGFloat, in container: UIView) -> ToastView {
+        let slot = UIView(frame: CGRect(x: 0, y: 0, width: width, height: 100))
+        container.addSubview(slot)
+        let toast = ToastView.present(
+            message, symbol: "exclamationmark.circle.fill", style: .warning, action: action, in: slot
+        )
+        slot.layoutIfNeeded()
         return toast
     }
 
@@ -46,8 +46,8 @@ struct ToastFullMessageTests {
     /// The same words: whole in a wide slot, cut in a narrow one.
     @Test func cutIsMeasuredAtTheLabelsWidth() {
         let container = UIView(frame: CGRect(x: 0, y: 0, width: 402, height: 100))
-        let wide = barToast("Couldn't follow @ava", width: 360, in: container)
-        let narrow = barToast("Couldn't follow @ava", width: 110, in: container)
+        let wide = slotToast("Couldn't follow @ava", width: 360, in: container)
+        let narrow = slotToast("Couldn't follow @ava", width: 110, in: container)
         #expect(!wide.isMessageTruncated, "a message that fits read as cut")
         #expect(narrow.isMessageTruncated, "a cut message read as whole: width \(narrow.debugMessageWidth) in \(narrow.bounds)")
     }
@@ -64,7 +64,7 @@ struct ToastFullMessageTests {
         defer { ToastView.presentFullMessage = previous }
         try hosting { container in
             var runs = 0
-            let toast = barToast(Self.long, action: ToastView.Action("Retry") { runs += 1 }, width: 180, in: container)
+            let toast = slotToast(Self.long, action: ToastView.Action("Retry") { runs += 1 }, width: 180, in: container)
             try #require(toast.isMessageTruncated, "width \(toast.debugMessageWidth) in \(toast.bounds)")
             toast.debugTap()
             #expect(runs == 0, "the body's tap ran the action")
@@ -100,7 +100,7 @@ struct ToastFullMessageTests {
         ToastView.presentFullMessage = { sheet, _ in caught.append(sheet) }
         defer { ToastView.presentFullMessage = previous }
         try hosting { container in
-            let toast = barToast(Self.long, width: 180, in: container)
+            let toast = slotToast(Self.long, width: 180, in: container)
             try #require(toast.isMessageTruncated, "width \(toast.debugMessageWidth) in \(toast.bounds)")
             toast.debugTap()
             let sheet = try #require((caught.first as? UINavigationController)?.viewControllers.first as? ToastMessageSheet)
@@ -122,29 +122,11 @@ struct ToastFullMessageTests {
         defer { ToastView.presentFullMessage = previous }
         hosting { container in
             var runs = 0
-            let toast = barToast("Couldn't send", action: ToastView.Action("Retry") { runs += 1 }, width: 300, in: container)
+            let toast = slotToast("Couldn't send", action: ToastView.Action("Retry") { runs += 1 }, width: 300, in: container)
             #expect(!toast.isMessageTruncated)
             toast.debugTap()
             #expect(caught.isEmpty, "a sheet for a message that fits")
             #expect(runs == 1)
-        }
-    }
-
-    /// A collapsed bar toast: the first tap brings it forward, no sheet.
-    @Test func aCollapsedBarToastsFirstTapBringsItForward() {
-        var caught: [UIViewController] = []
-        let previous = ToastView.presentFullMessage
-        ToastView.presentFullMessage = { sheet, _ in caught.append(sheet) }
-        defer { ToastView.presentFullMessage = previous }
-        hosting { container in
-            let toast = barToast(Self.long, width: 180, in: container)
-            var forwarded = 0
-            toast.onBarTap = { _ in forwarded += 1 }
-            toast.isCollapsedInBar = true
-            toast.layoutIfNeeded()
-            toast.debugTap()
-            #expect(forwarded == 1)
-            #expect(caught.isEmpty)
         }
     }
 
@@ -156,7 +138,7 @@ struct ToastFullMessageTests {
         defer { ToastView.presentFullMessage = previous }
         try hosting { container in
             let message = Array(repeating: Self.long, count: 3).joined(separator: " ")
-            let toast = ToastView.present(message, symbol: nil, style: .failure, action: nil, position: .bottom, in: container)
+            let toast = ToastView.present(message, symbol: nil, style: .failure, action: nil, in: container)
             container.layoutIfNeeded()
             try #require(toast.isMessageTruncated, "a three-sentence toast fits on one line: width \(toast.debugMessageWidth) in \(toast.bounds)")
             toast.debugTap()
@@ -185,8 +167,8 @@ struct ToastFullMessageTests {
     /// otherwise.
     @Test func voiceOverOffersTheFullMessageWhileCut() {
         let container = UIView(frame: CGRect(x: 0, y: 0, width: 402, height: 100))
-        let cut = barToast(Self.long, width: 180, in: container)
-        let whole = barToast("Copied", width: 300, in: container)
+        let cut = slotToast(Self.long, width: 180, in: container)
+        let whole = slotToast("Copied", width: 300, in: container)
         #expect(cut.accessibilityCustomActions?.first?.name == "Show Full Message", "width \(cut.debugMessageWidth) in \(cut.bounds)")
         #expect(cut.accessibilityCustomActions?.contains { $0.name == "Dismiss" } == true)
         #expect(whole.accessibilityCustomActions?.contains { $0.name == "Show Full Message" } == false)
