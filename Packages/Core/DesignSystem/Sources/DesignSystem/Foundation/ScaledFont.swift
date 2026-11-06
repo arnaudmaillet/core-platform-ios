@@ -70,8 +70,23 @@ extension UIFont {
     /// ignores the app's XXXL ceiling and Care Mode (#482) wherever the label
     /// doesn't re-resolve its font from its own traits. A source scan in
     /// `ScaledFontTests` keeps it that way.
+    ///
+    /// On the app's own type scale (`AppTypeScale`, #2149), the style's
+    /// designed size, scaled like the style.
     public static func appFont(forTextStyle style: TextStyle) -> UIFont {
-        preferredFont(forTextStyle: style, compatibleWith: TextSizeCeiling.currentTraits)
+        appFont(forTextStyle: style, scale: AppTypeScale.current, compatibleWith: TextSizeCeiling.currentTraits)
+    }
+
+    /// `appFont` on a given scale, at given traits (nil: the system's). Tests.
+    static func appFont(
+        forTextStyle style: TextStyle, scale: AppTypeScale, compatibleWith traits: UITraitCollection?,
+        boldText: Bool = AppTypeScale.boldText
+    ) -> UIFont {
+        guard let size = scale.size(for: style) else {
+            return preferredFont(forTextStyle: style, compatibleWith: traits)
+        }
+        let font = UIFont.systemFont(ofSize: size, weight: AppTypeScale.weight(for: style, boldText: boldText))
+        return UIFontMetrics(forTextStyle: style).scaledFont(for: font, compatibleWith: traits)
     }
 
     /// A text style at another weight, scaled like the style.
@@ -92,7 +107,12 @@ extension UIFont {
     /// size to hand `scaledSystemFont` when matching a style with a different
     /// weight.
     public static func defaultPointSize(for style: TextStyle) -> CGFloat {
-        UIFont.preferredFont(
+        defaultPointSize(for: style, scale: AppTypeScale.current)
+    }
+
+    /// On a given scale (`AppTypeScale`, #2149).
+    static func defaultPointSize(for style: TextStyle, scale: AppTypeScale) -> CGFloat {
+        scale.size(for: style) ?? UIFont.preferredFont(
             forTextStyle: style, compatibleWith: UITraitCollection(preferredContentSizeCategory: .large)
         ).pointSize
     }

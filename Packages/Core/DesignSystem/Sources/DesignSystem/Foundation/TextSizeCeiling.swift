@@ -43,6 +43,7 @@ public enum TextSizeCeiling {
     @MainActor
     public static func apply(to windows: [UIWindow]) {
         observeSystemTextSize()
+        AppTypeScale.boldText = UIAccessibility.isBoldTextEnabled
         apply(
             to: windows, system: UIApplication.shared.preferredContentSizeCategory,
             careMode: CareModePreference.isOn, recordsCurrent: !windows.isEmpty
@@ -75,6 +76,7 @@ public enum TextSizeCeiling {
     /// The override is a fixed size, so a change to the iPhone's setting must
     /// recompute it.
     @MainActor private static var systemTextSizeObserver: NSObjectProtocol?
+    @MainActor private static var boldTextObserver: NSObjectProtocol?
 
     @MainActor
     private static func observeSystemTextSize() {
@@ -83,6 +85,12 @@ public enum TextSizeCeiling {
             forName: UIContentSizeCategory.didChangeNotification, object: nil, queue: .main
         ) { _ in
             MainActor.assumeIsolated { applyToAllWindows() }
+        }
+        // Bold Text, for the app's own scale (#2149).
+        boldTextObserver = NotificationCenter.default.addObserver(
+            forName: UIAccessibility.boldTextStatusDidChangeNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { AppTypeScale.boldText = UIAccessibility.isBoldTextEnabled }
         }
     }
 }
