@@ -161,6 +161,16 @@ final class SnapCommentTickerView: UIView {
     private var tapeStarts = 0
     /// Per lane: the tape index the next right-edge spawn will show.
     private var laneNextIndex: [Int] = Array(repeating: 0, count: SnapCommentTickerView.laneCount)
+    /// Per lane: the lowest tape index that has entered the band — 0 when the
+    /// tape starts (#2154).
+    ///
+    /// ⚠️ THE PAST IS WHAT WAS SHOWN. The tape answers below its start (it
+    /// deals cycles backward), so a scrub back rewound into reactions that
+    /// never crossed the band: in a page's first seconds, the band's empty
+    /// left part filled in one pass on the first move of the finger, both
+    /// lanes edge to edge (the owner's device, 2026-11-05). The left backfill
+    /// stops here.
+    private var lanePastFloor: [Int] = Array(repeating: 0, count: SnapCommentTickerView.laneCount)
     /// The reactions shown since the tape started, and the pool size the
     /// band last asked more for (#2005).
     private var shownIDs = Set<String>()
@@ -569,6 +579,8 @@ final class SnapCommentTickerView: UIView {
         for timer in spawnTimers { timer?.invalidate() }
         let phases: [TimeInterval] = [0.3, 1.5, 2.7]
         let bandWidth = bounds.width
+        // A band 15 s in has a past: a scrub back rewinds into it.
+        lanePastFloor = Array(repeating: Int.min / 2, count: Self.laneCount)
         for lane in 0..<Self.laneCount where !queue.isEmpty {
             let speed = Self.laneSpeeds[lane]
             var cursor = -CGFloat(phases[lane]) * speed
@@ -876,12 +888,18 @@ final class SnapCommentTickerView: UIView {
             for bubble in laneBubbles[lane] {
                 bubble.view.layer.position.x += laneDx[lane]
             }
-            normalizeLaneEdges(lane, bandWidth: bandWidth)
+            normalizeLaneEdges(lane, bandWidth: bandWidth, forward: laneDx[lane] < 0)
         }
         CATransaction.commit()
     }
 
-    private func normalizeLaneEdges(_ lane: Int, bandWidth: CGFloat) {
+    /// The ids on screen in every lane but `lane`: a backfill never puts a
+    /// reaction in two lanes at once (#2154).
+    private func idsOnScreen(outside lane: Int) -> Set<String> {
+        Set(laneBubbles.indices.filter { $0 != lane }.flatMap { laneBubbles[$0].map(\.itemID) })
+    }
+
+    private func normalizeLaneEdges(_ lane: Int, bandWidth: CGFloat, forward: Bool) {
         // Retire beyond the margins. A right-edge retire "un-consumes" its
         // queue slot so the item reappears when scrubbed back.
         while let first = laneBubbles[lane].first,
@@ -896,35 +914,66 @@ final class SnapCommentTickerView: UIView {
             laneNextIndex[lane] = last.itemIndex
         }
 
-        // An emptied lane re-anchors at the entry edge before backfilling.
+        // An emptied lane re-anchors before backfilling:
+        // - scrubbed forward, its next reaction waits just outside the entry
+        //   edge and comes in with the drag;
+        // - scrubbed backward with a past, the last reaction carried out
+        //   stands at the entry edge and the past rewinds from it (#2005);
+        // - scrubbed backward with no past (a band that has just started),
+        //   nothing is conjured (#2154): the next one used to land whole at
+        //   the right edge.
         if laneBubbles[lane].isEmpty {
+            let hasPast = laneNextIndex[lane] - 1 >= lanePastFloor[lane]
+            guard forward || hasPast else { return }
             let itemIndex = laneNextIndex[lane]
             let item = laneItem(lane, at: itemIndex)
             laneNextIndex[lane] = itemIndex + 1
             let width = measuredBubbleWidth(for: item.text, in: bandWidth)
-            laneBubbles[lane] = [materializeBubble(item, atIndex: itemIndex, lane: lane, leftEdge: bandWidth - width, width: width)]
+            let leftEdge = forward ? bandWidth : bandWidth - width
+            laneBubbles[lane] = [materializeBubble(item, atIndex: itemIndex, lane: lane, leftEdge: leftEdge, width: width)]
         }
 
-        // Backfill right (scrubbing forward pulls future items in early).
+        // Backfill right (scrubbing forward pulls future items in early). A
+        // reaction on screen in the other lane is passed over: the future
+        // has no fixed order to keep.
+        var passedOver = 0
         while let last = laneBubbles[lane].last {
             let lastRight = last.view.layer.position.x + last.width / 2
             guard lastRight + Self.interItemGap < bandWidth + Self.scrubMargin else { break }
             let itemIndex = laneNextIndex[lane]
             let item = laneItem(lane, at: itemIndex)
             laneNextIndex[lane] = itemIndex + 1
+            if idsOnScreen(outside: lane).contains(item.id) {
+                // A small pool may have nothing else: a gap, never a twin.
+                guard passedOver < Self.laneCount * 2 else { break }
+                passedOver += 1
+                continue
+            }
             let width = measuredBubbleWidth(for: item.text, in: bandWidth)
             laneBubbles[lane].append(
                 materializeBubble(item, atIndex: itemIndex, lane: lane, leftEdge: lastRight + Self.interItemGap, width: width)
             )
         }
 
-        // Backfill left (scrubbing backward rewinds into already-shown items).
+        // Backfill left (scrubbing backward rewinds into already-shown items),
+        // never below what entered the band. A reaction on screen in the
+        // other lane is passed over, the one before it taking its place.
         while let first = laneBubbles[lane].first {
             let firstLeft = first.view.layer.position.x - first.width / 2
             guard firstLeft - Self.interItemGap > -Self.scrubMargin else { break }
             // The tape's own previous entry: exactly what was shown (#2005).
-            let itemIndex = first.itemIndex - 1
-            let item = laneItem(lane, at: itemIndex)
+            var itemIndex = first.itemIndex - 1
+            guard itemIndex >= lanePastFloor[lane] else { break }
+            var item = laneItem(lane, at: itemIndex)
+            var passedOver = 0
+            while idsOnScreen(outside: lane).contains(item.id), passedOver < Self.laneCount * 2,
+                  itemIndex - 1 >= lanePastFloor[lane] {
+                passedOver += 1
+                itemIndex -= 1
+                item = laneItem(lane, at: itemIndex)
+            }
+            // A small pool may have nothing else: a gap, never a twin.
+            guard !idsOnScreen(outside: lane).contains(item.id) else { break }
             let width = measuredBubbleWidth(for: item.text, in: bandWidth)
             laneBubbles[lane].insert(
                 materializeBubble(item, atIndex: itemIndex, lane: lane, leftEdge: firstLeft - Self.interItemGap - width, width: width),
@@ -1085,6 +1134,7 @@ final class SnapCommentTickerView: UIView {
         let seed = CommentTickerBuilder.fnv1a(queue.map(\.id).joined(separator: "|")) &+ UInt64(tapeStarts)
         tape = ReactionTape(pool: queue, laneCount: Self.laneCount, seed: seed)
         laneNextIndex = Array(repeating: 0, count: Self.laneCount)
+        lanePastFloor = Array(repeating: 0, count: Self.laneCount)
         shownIDs = []
         askedMoreAtPoolSize = 0
         readsSinceAsk = 0
