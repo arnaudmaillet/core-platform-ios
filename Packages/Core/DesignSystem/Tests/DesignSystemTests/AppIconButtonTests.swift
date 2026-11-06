@@ -65,6 +65,20 @@ struct AppIconButtonTests {
         #expect(button.point(inside: CGPoint(x: region.minX + 1, y: region.minY + 1), with: nil))
     }
 
+    /// A symbol is replaced by UIKit's replace unless the button names a
+    /// quicker one; reduced motion has none.
+    @Test func theSymbolTransitionIsTheButtonsChoice() {
+        let button = glyph(.symbol("play.fill"))
+        #expect(button.configuration?.symbolContentTransition != nil, "UIKit's replace by default")
+        let quick = UISymbolContentTransition(.replace.offUp, options: .speed(2))
+        button.symbolTransition = quick
+        #expect(button.symbolTransition === quick)
+        #expect(button.configuration?.symbolContentTransition != nil)
+        button.reducesMotion = { true }
+        button.setContent(.symbol("pause.fill"), animated: false)
+        #expect(button.configuration?.symbolContentTransition == nil)
+    }
+
     /// Selected, the symbol takes its tint; the count keeps the ink, and a
     /// glyph grows no ground.
     @Test func selectedTintsTheSymbolNotTheCount() {

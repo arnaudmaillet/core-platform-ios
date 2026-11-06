@@ -262,7 +262,7 @@ public final class VoicePlayer {
     private func releaseFocus() {
         guard holdsFocus else { return }
         holdsFocus = false
-        try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        session.deactivate()
         notifications.post(name: VoiceAudioFocus.didRelease, object: self)
     }
 

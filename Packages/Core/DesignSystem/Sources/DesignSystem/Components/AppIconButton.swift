@@ -74,6 +74,16 @@ open class AppIconButton: AppControl {
     /// style's text-matched one — a card's actions stand level with its lone
     /// glyphs (`PostActionPillView.glyphPointSize`). Nil: the style's own.
     public var symbolPointSize: CGFloat? { didSet { refresh() } }
+    /// How a symbol swapped for another is replaced: UIKit's replace by
+    /// default; a toggle answering the tap at once takes a quicker one
+    /// (a voice message's play button, `.replace.offUp` at twice the speed).
+    public var symbolTransition = UISymbolContentTransition(.replace) { didSet { refresh() } }
+    /// A glyph's width follows its content, its neighbours with it, in a
+    /// spring. Off for a button its host sizes: there is nothing to follow,
+    /// and the replace's new symbol only showed once that spring had
+    /// settled, 0.45 s after the tap (filmed, the owner's device check,
+    /// 2026-11-06).
+    public var followsContentSize = true
 
     // MARK: - Init
 
@@ -187,7 +197,7 @@ open class AppIconButton: AppControl {
 
     /// The width follows the content, the neighbours with it.
     private func resize() {
-        guard case .glyph = style else { return }
+        guard case .glyph = style, followsContentSize else { return }
         invalidateIntrinsicContentSize()
         superview?.setNeedsLayout()
         let root = layoutRoot ?? self
@@ -343,7 +353,7 @@ open class AppIconButton: AppControl {
         config.image = UIImage.symbol(named: content.symbol)
         // A symbol swapped for another is replaced — the one symbol motion
         // UIKit does here.
-        config.symbolContentTransition = reducesMotion() ? nil : UISymbolContentTransition(.replace)
+        config.symbolContentTransition = reducesMotion() ? nil : symbolTransition
         if let text = content.text {
             config.attributedTitle = AttributedString(text, attributes: AttributeContainer([.font: font]))
         }
