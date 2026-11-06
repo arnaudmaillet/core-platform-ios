@@ -73,9 +73,9 @@ struct VoiceRecorderTests {
         #expect(!FileManager.default.fileExists(atPath: url.path))
     }
 
-    /// Ten seconds before 15 minutes the caller is told, once; at the limit
+    /// Ten seconds before the limit the caller is told, once; at the limit
     /// the take stops into a draft — never sent on its own.
-    @Test func theFifteenMinuteLimitWarnsThenFinishes() async throws {
+    @Test func theLimitWarnsThenFinishes() async throws {
         let (recorder, _) = recorder()
         var warnings = 0
         var autos: [VoiceRecorder.FinishOutcome] = []

@@ -104,7 +104,10 @@ public final class VoiceRecorder {
     ]
 
     public static let minimumDuration: TimeInterval = 1
-    public static let maximumDuration: TimeInterval = 15 * 60
+    /// Five minutes (the owner, 2026-11-06, after Instagram's DMs; it was
+    /// 15): the last `warningLead` seconds count down, and the take stops
+    /// into a finished draft at the limit.
+    public static let maximumDuration: TimeInterval = 5 * 60
     /// How long before the limit `onTimeRunningOut` is told.
     public static let warningLead: TimeInterval = 10
     /// The metering's rate: 20 Hz.
@@ -304,7 +307,7 @@ public final class VoiceRecorder {
         device = nil
         setLevel(0)
         keepAwake(false)
-        try? session.setActive(false, options: .notifyOthersOnDeactivation)
+        session.deactivate()
         notifications.post(name: VoiceAudioFocus.didRelease, object: self)
     }
 }

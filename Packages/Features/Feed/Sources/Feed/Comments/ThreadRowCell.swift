@@ -31,6 +31,7 @@ final class ThreadRowCell: UICollectionViewCell {
     let voiceView = ThreadVoiceView()
     private let liftPlate = UIView()
     private let quoteView = ThreadQuoteView(indented: false)
+    private let stack = UIStackView()
 
     private var selection: SelectableTextOverlay?
 
@@ -54,11 +55,14 @@ final class ThreadRowCell: UICollectionViewCell {
         // On the header line, right of the time (#753, the owner's call
         // 2026-10-09) — not a line of its own above the row.
         row.installHeaderAccessory(quoteView)
-        let stack = UIStackView(arrangedSubviews: [row, mediaView, voiceView])
+        for part in [row, mediaView, voiceView] as [UIView] { stack.addArrangedSubview(part) }
         stack.axis = .vertical
         stack.spacing = Spacing.xs
         stack.translatesAutoresizingMaskIntoConstraints = false
         liftPlate.addSubview(stack)
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (cell: ThreadRowCell, _: UITraitCollection) in
+            if cell.tucksVoice { cell.placeVoice() }
+        }
 
         // The plate hangs OUTSIDE the content view by the padding on every side
         // but the bottom, where it stops short of the inter-row breathing — so
@@ -187,6 +191,26 @@ final class ThreadRowCell: UICollectionViewCell {
     }
 
     // MARK: - Quote
+
+    /// A voice message stands right under the name line, beside the avatar,
+    /// where a body would be — not under the avatar (the owner's device
+    /// check, 2026-11-06: too far from the name).
+    var tucksVoice = false {
+        didSet {
+            guard tucksVoice != oldValue else { return }
+            placeVoice()
+        }
+    }
+
+    private func placeVoice() {
+        stack.setCustomSpacing(
+            tucksVoice
+                ? CommentRowView.nameLineHeight(for: traitCollection) + Spacing.xs
+                    - CommentRowView.avatarSize(for: traitCollection)
+                : UIStackView.spacingUseDefault,
+            after: row
+        )
+    }
 
     /// Shows (or, with nil, hides) the message this one answers.
     func setQuote(_ quote: (author: String, snippet: String)?) {

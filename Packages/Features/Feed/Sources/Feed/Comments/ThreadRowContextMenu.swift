@@ -98,6 +98,10 @@ extension ThreadRowContextMenu: UIContextMenuInteractionDelegate {
               let indexPath = collectionView.indexPathForItem(at: location),
               let cell = collectionView.cellForItem(at: indexPath) as? ThreadRowCell,
               cell.liftContains(collectionView.convert(location, to: cell)),
+              // A press on a voice message's play button, waveform or speed
+              // chip is theirs: the row neither lifts nor greys under it
+              // (the owner's device check, 2026-11-06).
+              !cell.voiceView.keepsPress(at: collectionView.convert(location, to: cell.voiceView)),
               let menu = menuProvider?(indexPath)
         else { return nil }
         liftedCell = cell

@@ -6,18 +6,21 @@ import UIKit
 /// (`ThreadMediaView`), indented to the text column:
 ///
 /// ```
-///  (▶︎)  ▂▅▇▅▃▂▅▇▆▃▂▁▃▅▇▅▃▂▁▂▃   0:12  •
+///   ▶︎   ▂▅▇▅▃▂▅▇▆▃▂▁▃▅▇▅▃▂▁▂▃   0:12  •
 ///  play   waveform (played | unplayed)  timer unplayed dot
 /// ```
 ///
 /// - **Its width says its length:** 140 pt at 1 s to 240 pt from 30 s.
 /// - **The waveform is the message's face:** 2 pt bars, the played ones in
 ///   the brand's raspberry, re-binned from the message's 100 levels.
-/// - **The speed chip takes the timer's place** while it plays or is paused
-///   mid-way (WhatsApp's): the row never grows.
+/// - **While it plays or is paused mid-way the speed chip stands over the
+///   waveform, centred,** coming in with a bounce (the owner's device check,
+///   2026-11-06); the timer counts the time played. The row never moves.
+/// - **Its drags are its own:** one that starts on the play button or the
+///   waveform goes before the list's scroll and the screen's swipes.
 /// - **It draws; the screen plays** (`VoicePlayer`, one for the app): every
 ///   tap is told through the callbacks.
-final class ThreadVoiceView: UIView {
+final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
     /// What the bubble shows, all of it — so a reused cell never keeps
     /// another message's progress.
     struct State: Equatable {
@@ -59,11 +62,19 @@ final class ThreadVoiceView: UIView {
 
     static let minWidth: CGFloat = 140
     static let maxWidth: CGFloat = 240
-    static let discSide: CGFloat = 36
+    /// The play button's square: the glyph alone, no glass bubble (the
+    /// owner's device check, 2026-11-06 — the glass press lagged behind the
+    /// tap).
+    static let buttonSide: CGFloat = 32
     static let barWidth: CGFloat = 2
     static let barGap: CGFloat = 2
     static let minBarHeight: CGFloat = 2
-    static let waveformHeight: CGFloat = 28
+    /// The bars' full height (the owner's device check, 2026-11-06: down
+    /// from 28).
+    static let waveformHeight: CGFloat = 20
+    /// How long a play waits on its audio before the loader replaces the
+    /// pause glyph: the glyph turns on the tap, the loader only when it lasts.
+    static let loaderDelay: TimeInterval = 0.4
 
     /// The bubble's width for a length: 140 pt at 1 s, 240 pt from 30 s,
     /// straight between — length reads at a glance.
@@ -112,31 +123,68 @@ final class ThreadVoiceView: UIView {
     // MARK: - Parts
 
     private let frameView = UIView()
-    private let playButton = UIButton(configuration: .glass())
-    private let glyph = UIImageView()
+    /// The app's glyph button: the symbol alone, the app's swell under the
+    /// finger, a 44 pt target.
+    private let playButton = AppIconButton(style: .glyph, content: .symbol("play.fill"), dims: false)
     private let loader = AppLoaderView(size: .medium)
+    /// The waveform and, under way, the speed chip over it: the two stacked
+    /// and centred in one box, as wide as the wider of them (the owner's
+    /// device check, 2026-11-06).
+    private let scrubber = UIView()
     let waveform = WaveformBars()
     private let timerLabel = UILabel()
-    private let speedChip = UIButton(configuration: .gray())
+    private let speedChip = SpeedChip(configuration: .gray())
     private let dot = UIView()
     private let failedLabel = UILabel()
     private var widthConstraint: NSLayoutConstraint?
     private(set) var state = State()
     private var shownGlyph = ""
     private var scrubSteps = -1
+    private var pendingLoader: DispatchWorkItem?
+    private let sideHold = UIPanGestureRecognizer()
+    /// Whether the message shows as under way; nil until first shown.
+    private var shownUnderway: Bool?
+    /// Whether the speed chip stands over the bars; nil until first shown.
+    private var chipShown: Bool?
+    /// A finger is scrubbing the bars.
+    private var isScrubbing = false
+    /// A glyph set without its transition.
+    private var glyphStill = false
 
     init() {
         super.init(frame: .zero)
         frameView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(frameView)
 
-        playButton.configuration?.cornerStyle = .capsule
+        // ⚠️ NO PRESSED DIMMING (`dims: false`; the owner's device check,
+        // 2026-11-06, filmed): the glyph greyed under the finger kept that
+        // grey through the Replace, half a second after the tap.
+        playButton.symbolPointSize = 20
+        // Off-up at twice the speed: the old glyph goes at once and the new
+        // one is up in a tenth of a second — the default down-up shrank the
+        // old one first, a third of a second behind the tap.
+        playButton.symbolTransition = UISymbolContentTransition(.replace.offUp, options: .speed(2))
+        // Sized here (`buttonSide`): no spring after a swap holding the new
+        // glyph back.
+        playButton.followsContentSize = false
+        playButton.reducesMotion = { [weak self] in MotionPreference.reducesMotion || self?.glyphStill == true }
         playButton.isAccessibilityElement = false
         playButton.addAction(UIAction { [weak self] _ in self?.onPlayTap?() }, for: .primaryActionTriggered)
-        glyph.tintColor = .label
-        glyph.contentMode = .center
-        glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
-        glyph.isUserInteractionEnabled = false
+        // A drag that starts on the button is the button's: neither the
+        // list's scroll nor the screen's swipes take it (the owner's device
+        // check, 2026-11-06). It leaves the button its touches, so a press
+        // that drifts is still a press.
+        let hold = UIPanGestureRecognizer()
+        hold.cancelsTouchesInView = false
+        hold.delegate = self
+        playButton.addGestureRecognizer(hold)
+        // ⚠️ AND A SIDEWAYS DRAG ANYWHERE ON THE BUBBLE IS THE BUBBLE'S (the
+        // owner's device check, 2026-11-06, filmed): one from the speed chip
+        // went to the screen's back swipe. The screen's pans wait for this
+        // one; the bubble's own run alongside it; a vertical drag scrolls.
+        sideHold.cancelsTouchesInView = false
+        sideHold.delegate = self
+        frameView.addGestureRecognizer(sideHold)
         loader.isHidden = true
 
         timerLabel.font = .scaledMonospacedDigitSystemFont(
@@ -147,10 +195,14 @@ final class ThreadVoiceView: UIView {
         timerLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         speedChip.configuration?.cornerStyle = .capsule
-        speedChip.configuration?.contentInsets = NSDirectionalEdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6)
+        // Opaque: it stands over the bars (the owner's device check,
+        // 2026-11-06).
+        speedChip.configuration?.baseBackgroundColor = .systemGray5
+        speedChip.configuration?.baseForegroundColor = .label
+        speedChip.configuration?.contentInsets = NSDirectionalEdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8)
         speedChip.configuration?.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var attributes = attributes
-            attributes.font = .scaledFont(forTextStyle: .caption1, weight: .semibold)
+            attributes.font = .scaledFont(forTextStyle: .caption2, weight: .semibold)
             return attributes
         }
         speedChip.isAccessibilityElement = false
@@ -174,21 +226,35 @@ final class ThreadVoiceView: UIView {
 
         waveform.onSeek = { [weak self] fraction, scrubbing in self?.seek(fraction, scrubbing: scrubbing) }
 
-        for part in [playButton, glyph, loader, waveform, timerLabel, speedChip, dot, failedLabel] as [UIView] {
+        for part in [playButton, loader, scrubber, waveform, timerLabel, speedChip, dot, failedLabel] as [UIView] {
             part.translatesAutoresizingMaskIntoConstraints = false
         }
         frameView.addSubview(playButton)
-        playButton.addSubview(glyph)
         playButton.addSubview(loader)
-        frameView.addSubview(waveform)
+        frameView.addSubview(scrubber)
+        // The chip over the bars: it takes the press first.
+        scrubber.addSubview(waveform)
+        scrubber.addSubview(speedChip)
         frameView.addSubview(timerLabel)
-        frameView.addSubview(speedChip)
         frameView.addSubview(dot)
         frameView.addSubview(failedLabel)
+        // The bubble's line: the button's height, or the timer's when larger
+        // text makes it taller — the same in every state, so playing never
+        // re-lays the list.
+        let line = UILayoutGuide()
+        frameView.addLayoutGuide(line)
 
+        // The length sets how many bars there are (`configure`); the bubble
+        // is then as wide as what it holds — no slack beside the bars.
         let width = frameView.widthAnchor.constraint(equalToConstant: Self.maxWidth)
-        width.priority = .required - 1
+        width.priority = .defaultLow
         widthConstraint = width
+        let boxHugsTheBars = scrubber.widthAnchor.constraint(equalTo: waveform.widthAnchor)
+        boxHugsTheBars.priority = .defaultHigh
+        waveform.setContentHuggingPriority(.required, for: .horizontal)
+        waveform.setContentCompressionResistancePriority(.defaultHigh + 1, for: .horizontal)
+        let hug = line.heightAnchor.constraint(equalToConstant: Self.buttonSide)
+        hug.priority = .defaultLow
         NSLayoutConstraint.activate([
             frameView.leadingAnchor.constraint(
                 equalTo: leadingAnchor, constant: CommentRowView.avatarSize + CommentRowView.avatarGap
@@ -198,33 +264,47 @@ final class ThreadVoiceView: UIView {
             frameView.bottomAnchor.constraint(equalTo: bottomAnchor),
             width,
 
+            line.topAnchor.constraint(equalTo: frameView.topAnchor),
+            line.leadingAnchor.constraint(equalTo: frameView.leadingAnchor),
+            line.trailingAnchor.constraint(equalTo: frameView.trailingAnchor),
+            line.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.buttonSide),
+            hug,
+
             playButton.leadingAnchor.constraint(equalTo: frameView.leadingAnchor),
-            playButton.topAnchor.constraint(equalTo: frameView.topAnchor),
-            playButton.widthAnchor.constraint(equalToConstant: Self.discSide),
-            playButton.heightAnchor.constraint(equalToConstant: Self.discSide),
-            glyph.centerXAnchor.constraint(equalTo: playButton.centerXAnchor),
-            glyph.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
+            playButton.centerYAnchor.constraint(equalTo: line.centerYAnchor),
+            playButton.widthAnchor.constraint(equalToConstant: Self.buttonSide),
+            playButton.heightAnchor.constraint(equalToConstant: Self.buttonSide),
             loader.centerXAnchor.constraint(equalTo: playButton.centerXAnchor),
             loader.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
 
-            waveform.leadingAnchor.constraint(equalTo: playButton.trailingAnchor, constant: Spacing.sm),
-            waveform.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
+            // The box is as wide as the wider of the bars and the chip —
+            // whatever its speed reads ("1×", "1.5×") — and the line's whole
+            // height (the chip's reach).
+            boxHugsTheBars,
+            scrubber.leadingAnchor.constraint(equalTo: playButton.trailingAnchor, constant: Spacing.sm),
+            scrubber.topAnchor.constraint(equalTo: line.topAnchor),
+            scrubber.bottomAnchor.constraint(equalTo: line.bottomAnchor),
+            scrubber.widthAnchor.constraint(greaterThanOrEqualTo: speedChip.widthAnchor),
+            waveform.centerXAnchor.constraint(equalTo: scrubber.centerXAnchor),
+            waveform.centerYAnchor.constraint(equalTo: scrubber.centerYAnchor),
+            waveform.widthAnchor.constraint(lessThanOrEqualTo: scrubber.widthAnchor),
             waveform.heightAnchor.constraint(equalToConstant: Self.waveformHeight),
+            speedChip.centerXAnchor.constraint(equalTo: scrubber.centerXAnchor),
+            speedChip.centerYAnchor.constraint(equalTo: scrubber.centerYAnchor),
 
-            timerLabel.leadingAnchor.constraint(equalTo: waveform.trailingAnchor, constant: Spacing.sm),
-            timerLabel.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
-            speedChip.leadingAnchor.constraint(equalTo: timerLabel.leadingAnchor),
-            speedChip.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
+            timerLabel.leadingAnchor.constraint(equalTo: scrubber.trailingAnchor, constant: Spacing.sm),
+            timerLabel.centerYAnchor.constraint(equalTo: line.centerYAnchor),
+            line.heightAnchor.constraint(greaterThanOrEqualTo: timerLabel.heightAnchor),
             dot.leadingAnchor.constraint(equalTo: timerLabel.trailingAnchor, constant: Spacing.xs),
-            dot.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
+            dot.centerYAnchor.constraint(equalTo: line.centerYAnchor),
             dot.widthAnchor.constraint(equalToConstant: 6),
             dot.heightAnchor.constraint(equalToConstant: 6),
             dot.trailingAnchor.constraint(equalTo: frameView.trailingAnchor),
 
             failedLabel.leadingAnchor.constraint(equalTo: frameView.leadingAnchor),
-            failedLabel.topAnchor.constraint(equalTo: playButton.bottomAnchor, constant: Spacing.xs),
+            failedLabel.topAnchor.constraint(equalTo: line.bottomAnchor, constant: Spacing.xs),
         ])
-        let bottom = playButton.bottomAnchor.constraint(equalTo: frameView.bottomAnchor)
+        let bottom = line.bottomAnchor.constraint(equalTo: frameView.bottomAnchor)
         bottom.priority = .defaultHigh
         bottom.isActive = true
         failedBottom = failedLabel.bottomAnchor.constraint(equalTo: frameView.bottomAnchor)
@@ -247,6 +327,9 @@ final class ThreadVoiceView: UIView {
     /// message). Nothing of a previous message survives.
     func configure(_ state: State?, senderName: String? = nil) {
         guard let state else {
+            setScrubbing(false, animated: false)
+            pendingLoader?.cancel()
+            pendingLoader = nil
             isHidden = true
             self.state = State()
             waveform.configure(levels: nil, barCount: 0, progress: 0)
@@ -256,11 +339,11 @@ final class ThreadVoiceView: UIView {
         self.senderName = senderName
         let width = Self.width(forDuration: state.duration)
         widthConstraint?.constant = width
-        let waveformWidth = width - Self.discSide - 2 * Spacing.sm - 34 - Spacing.xs - 6
+        let waveformWidth = width - Self.buttonSide - 2 * Spacing.sm - 34 - Spacing.xs - 6
         waveform.configure(
             levels: state.levels, barCount: Self.barCount(forWidth: waveformWidth), progress: state.progress
         )
-        apply(state)
+        apply(state, animated: false)
     }
 
     /// Updates what changes while it plays — progress, the glyph, the chip —
@@ -268,10 +351,10 @@ final class ThreadVoiceView: UIView {
     func update(_ state: State) {
         guard !isHidden else { return }
         waveform.setProgress(state.progress)
-        apply(state)
+        apply(state, animated: window != nil && !MotionPreference.reducesMotion)
     }
 
-    private func apply(_ state: State) {
+    private func apply(_ state: State, animated: Bool) {
         let previous = self.state
         self.state = state
         let sending = state.delivery == .sending
@@ -280,23 +363,33 @@ final class ThreadVoiceView: UIView {
         failedLabel.isHidden = !failedSend
         failedBottom?.isActive = failedSend
 
-        let loading = sending || state.playback == .loading
-        loader.isHidden = !loading
-        if loading { loader.startAnimating() } else { loader.stopAnimating() }
-        glyph.isHidden = loading
-        setGlyph(
-            state.playback == .failed ? "arrow.clockwise"
-                : { if case .playing = state.playback { "pause.fill" } else { "play.fill" } }()
-        )
+        // The glyph turns on the tap — a play waiting on its audio already
+        // shows pause — and the loader takes its place only when the wait
+        // lasts (the owner's device check, 2026-11-06: no delay).
+        if state.playback == .loading, !sending {
+            if loader.isHidden, pendingLoader == nil {
+                let work = DispatchWorkItem { [weak self] in
+                    self?.pendingLoader = nil
+                    self?.showLoader(true)
+                }
+                pendingLoader = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + Self.loaderDelay, execute: work)
+            }
+            setGlyph(glyphName)
+        } else {
+            pendingLoader?.cancel()
+            pendingLoader = nil
+            showLoader(sending)
+        }
         playButton.isEnabled = !sending && !failedSend
 
         timerLabel.text = state.isUnderway
             ? Self.clock(state.duration * state.progress)
             : Self.clock(state.duration)
-        // The chip in the timer's place while it plays or is paused mid-way.
-        speedChip.isHidden = !state.isUnderway
-        timerLabel.alpha = state.isUnderway ? 0 : 1
-        speedChip.configuration?.title = state.speedLabel
+        // Only on a change: written every frame of playback, it restyled the
+        // chip under a finger trying to press it.
+        if speedChip.configuration?.title != state.speedLabel { speedChip.configuration?.title = state.speedLabel }
+        setUnderway(state.isUnderway, animated: animated && previous.isUnderway != state.isUnderway)
 
         // The unplayed dot fades once playback starts.
         let showsDot = state.unplayed && !state.isUnderway && state.playback != .loading
@@ -315,22 +408,72 @@ final class ThreadVoiceView: UIView {
         updateAccessibility()
     }
 
+    /// What the glyph says the button does next.
+    private var glyphName: String {
+        if !loader.isHidden { return "" }
+        return switch state.playback {
+        case .failed: "arrow.clockwise"
+        case .playing, .loading: "pause.fill"
+        default: "play.fill"
+        }
+    }
+
+    private func showLoader(_ shown: Bool) {
+        loader.isHidden = !shown
+        if shown { loader.startAnimating() } else { loader.stopAnimating() }
+        setGlyph(glyphName)
+    }
+
+    /// The button's glyph — none while the loader stands in its place —
+    /// swapped by the symbol's own Replace.
     private func setGlyph(_ name: String) {
         guard name != shownGlyph else { return }
-        let animated = window != nil && !shownGlyph.isEmpty && !MotionPreference.reducesMotion
+        let animated = window != nil && !shownGlyph.isEmpty && !name.isEmpty && !MotionPreference.reducesMotion
         shownGlyph = name
-        glyph.image = UIImage(systemName: name)
-        guard animated else { return }
-        // The sound sheet's swap, not the system's replace: a bounce up from
-        // small as it fades in, drawn in the glass like any view.
-        glyph.alpha = 0
-        glyph.transform = CGAffineTransform(scaleX: 0.4, y: 0.4)
+        // Unanimated (a dequeued row), the glyph lands with no transition.
+        glyphStill = !animated
+        playButton.setContent(.symbol(name), animated: animated)
+        glyphStill = false
+    }
+
+    private func setUnderway(_ underway: Bool, animated: Bool) {
+        guard underway != shownUnderway else { return }
+        shownUnderway = underway
+        showChip(underway && !isScrubbing, animated: animated)
+    }
+
+    /// The speed chip comes in over the waveform's middle, springing up from
+    /// smaller as it fades in, and fades going. It stands there while the
+    /// message is under way and no finger scrubs the bars.
+    ///
+    /// ⚠️ NOTHING IS LAID OUT HERE. A spring around `layoutIfNeeded` held
+    /// the play button's new glyph back until it settled (filmed, 2026-11-06).
+    private func showChip(_ underway: Bool, animated: Bool) {
+        guard underway != chipShown else { return }
+        chipShown = underway
+        guard animated else {
+            speedChip.layer.removeAllAnimations()
+            speedChip.isHidden = !underway
+            speedChip.alpha = 1
+            speedChip.transform = .identity
+            return
+        }
+        if underway {
+            speedChip.isHidden = false
+            speedChip.alpha = 0
+            speedChip.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
+        }
         UIView.animate(
-            withDuration: 0.42, delay: 0, usingSpringWithDamping: 0.55, initialSpringVelocity: 0,
-            options: [.allowUserInteraction]
+            withDuration: 0.45, delay: 0, usingSpringWithDamping: underway ? 0.6 : 1, initialSpringVelocity: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction]
         ) {
-            self.glyph.alpha = 1
-            self.glyph.transform = .identity
+            self.speedChip.alpha = underway ? 1 : 0
+            self.speedChip.transform = underway ? .identity : CGAffineTransform(scaleX: 0.8, y: 0.8)
+        } completion: { _ in
+            guard self.chipShown == false else { return }
+            self.speedChip.isHidden = true
+            self.speedChip.alpha = 1
+            self.speedChip.transform = .identity
         }
     }
 
@@ -344,8 +487,34 @@ final class ThreadVoiceView: UIView {
 
     // MARK: - Scrubbing
 
+    /// A finger on the bars: the whole waveform grows a little,
+    /// and the chip steps aside; both come back when it lifts.
+    private func setScrubbing(_ scrubbing: Bool, animated: Bool) {
+        guard scrubbing != isScrubbing else { return }
+        isScrubbing = scrubbing
+        showChip(shownUnderway == true && !scrubbing, animated: animated)
+        waveform.setSwollen(scrubbing, animated: animated)
+        // The grown waveform pushes the timer and the dot aside by what it
+        // gains on its trailing side, in the same spring: never over them.
+        let gain = scrubbing ? (WaveformBars.swellScale - 1) / 2 * waveform.bounds.width : 0
+        let aside = CGAffineTransform(translationX: gain, y: 0)
+        guard animated else {
+            timerLabel.transform = aside
+            dot.transform = aside
+            return
+        }
+        UIView.animate(
+            springDuration: scrubbing ? WaveformBars.swellTravel : WaveformBars.settleDuration,
+            bounce: scrubbing ? 0.15 : 0, options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.timerLabel.transform = aside
+            self.dot.transform = aside
+        }
+    }
+
     private func seek(_ fraction: Double, scrubbing: Bool) {
         guard state.delivery == .sent else { return }
+        setScrubbing(scrubbing, animated: window != nil && !MotionPreference.reducesMotion)
         // A tick every 10 %, under the finger.
         let step = Int(fraction * 10)
         if scrubbing, step != scrubSteps {
@@ -357,6 +526,58 @@ final class ThreadVoiceView: UIView {
     }
 
     @objc private func retryTapped() { onRetry?() }
+
+    /// Whether a press at `point` (own coordinates) is the bubble's: on the
+    /// play button, the waveform or the speed chip — never the row's long
+    /// press.
+    func keepsPress(at point: CGPoint) -> Bool {
+        guard !isHidden, let hit = hitTest(point, with: nil) else { return false }
+        return sequence(first: hit, next: { $0.superview })
+            .prefix { $0 !== self }
+            .contains { $0 === playButton || $0 === waveform || $0 === speedChip }
+    }
+
+    /// The play button's hold: every other drag waits for it, so the
+    /// list's scroll and the screen's swipes never take a drag that starts
+    /// on the button.
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer
+    ) -> Bool {
+        WaveformBars.yields(other, to: self) || screenPops.contains { $0 === other }
+    }
+
+    /// The bubble's own gestures — the scrub, the button's hold — run
+    /// alongside its holds.
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool {
+        other.view?.isDescendant(of: self) == true
+    }
+
+    /// The side hold takes only a sideways drag. (Asked as its delegate:
+    /// it hangs on the bubble's frame, not on this view.)
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === sideHold else { return super.gestureRecognizerShouldBegin(gestureRecognizer) }
+        let velocity = sideHold.velocity(in: self)
+        return abs(velocity.x) > abs(velocity.y)
+    }
+
+    /// Whether a drag at `point` (own coordinates) starts on the bubble
+    /// itself — not on the row's room beside it.
+    func keepsDrag(at point: CGPoint) -> Bool {
+        !isHidden && frameView.frame.contains(point)
+    }
+
+    /// The navigation's back swipes — whatever class they are, not only
+    /// pans.
+    private var screenPops: [UIGestureRecognizer] {
+        var responder = next
+        while let current = responder, !(current is UIViewController) { responder = current.next }
+        guard let navigation = (responder as? UIViewController)?.navigationController else { return [] }
+        return [navigation.interactivePopGestureRecognizer, navigation.interactiveContentPopGestureRecognizer]
+            .compactMap { $0 }
+    }
 
     // MARK: - Accessibility
 
@@ -396,7 +617,36 @@ final class ThreadVoiceView: UIView {
     var debugChipTitle: String? { speedChip.configuration?.title }
     var debugShowsDot: Bool { !dot.isHidden }
     var debugShowsLoader: Bool { !loader.isHidden }
+    var debugChipFrame: CGRect { speedChip.convert(speedChip.bounds, to: self) }
+    var debugWaveformGrown: Bool { waveform.debugSwollen }
+    var debugTimerFrame: CGRect { timerLabel.convert(timerLabel.bounds, to: self) }
+    var debugChipFill: UIColor? { speedChip.configuration?.baseBackgroundColor }
+    var debugWaveformFrame: CGRect { waveform.convert(waveform.bounds, to: self) }
+    var debugScrubberFrame: CGRect { scrubber.convert(scrubber.bounds, to: self) }
+    func debugSetSpeedLabel(_ label: String) {
+        speedChip.configuration?.title = label
+        layoutIfNeeded()
+    }
+    /// What a press at `point` (own coordinates) lands on.
+    var debugSideHold: UIGestureRecognizer { sideHold }
+    func debugPressTarget(at point: CGPoint) -> String {
+        let hit = hitTest(point, with: nil)
+        if hit === speedChip || hit?.isDescendant(of: speedChip) == true { return "chip" }
+        if hit === waveform { return "waveform" }
+        return "other"
+    }
+    /// The play button's own drag, which every other pan waits on.
+    var debugPlayButtonHold: UIGestureRecognizer? {
+        playButton.gestureRecognizers?.first { $0 is UIPanGestureRecognizer && $0.delegate === self }
+    }
+    func debugLoaderWaitEnds() {
+        pendingLoader?.perform()
+    }
     var debugGlyph: String { shownGlyph }
+    var debugButtonImage: UIImage? { playButton.configuration?.image }
+    var debugButtonSize: CGSize { playButton.bounds.size }
+    /// The play button is the app's glyph button, not a system one.
+    var debugPlayButtonIsTheAppsGlyph: Bool { playButton.style == .glyph }
     var debugWidth: CGFloat { widthConstraint?.constant ?? 0 }
     func debugTapPlay() { onPlayTap?() }
     func debugTapSpeed() { onSpeedTap?() }
@@ -405,23 +655,32 @@ final class ThreadVoiceView: UIView {
 
 /// The voice message's waveform: 2 pt round-capped bars, the played ones in
 /// the brand's raspberry. A tap seeks; a horizontal drag scrubs (a vertical
-/// one is the list's, and a long press stays the row's menu).
+/// one is the list's; the row's long press does not start here). The played
+/// bars are the only mark of the finger: no playhead (the owner's device
+/// check, 2026-11-06).
+///
+/// Under a scrubbing finger the whole waveform grows a little, and settles
+/// when it lifts (the owner, same day).
 final class WaveformBars: UIView, UIGestureRecognizerDelegate {
     var onSeek: ((_ fraction: Double, _ scrubbing: Bool) -> Void)?
 
     private(set) var bars: [UInt8] = []
     private(set) var progress: Double = 0
     private var waiting = true
-    private let playhead = UIView()
     private var rise: CGFloat = 1
+
+    // MARK: The swell
+
+    /// How much the whole waveform grows under a scrubbing finger — width
+    /// and height — and how long it takes to grow and to settle.
+    static let swellScale: CGFloat = 1.1
+    static let swellTravel: CFTimeInterval = 0.45
+    static let settleDuration: CFTimeInterval = 0.35
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         isOpaque = false
         contentMode = .redraw
-        playhead.backgroundColor = Palette.tint
-        playhead.isHidden = true
-        addSubview(playhead)
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped(_:))))
         let pan = UIPanGestureRecognizer(target: self, action: #selector(panned(_:)))
         pan.delegate = self
@@ -437,7 +696,18 @@ final class WaveformBars: UIView, UIGestureRecognizerDelegate {
         bars = ThreadVoiceView.rebin(levels ?? [], to: barCount)
         self.progress = progress
         rise = 1
+        invalidateIntrinsicContentSize()
         setNeedsDisplay()
+    }
+
+    /// The bars' own width: the view is exactly as wide as what it draws,
+    /// so whatever is centred on it is centred on the bars.
+    var barsWidth: CGFloat {
+        bars.isEmpty ? 0 : CGFloat(bars.count) * (ThreadVoiceView.barWidth + ThreadVoiceView.barGap) - ThreadVoiceView.barGap
+    }
+
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: barsWidth, height: UIView.noIntrinsicMetric)
     }
 
     func setProgress(_ progress: Double) {
@@ -461,6 +731,13 @@ final class WaveformBars: UIView, UIGestureRecognizerDelegate {
         link.add(to: .main, forMode: .common)
     }
 
+    /// Drawn finer than the screen, so the bars stay sharp grown.
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        let screen = traitCollection.displayScale > 0 ? traitCollection.displayScale : 3
+        contentScaleFactor = screen * Self.swellScale
+    }
+
     override func draw(_ rect: CGRect) {
         guard !bars.isEmpty else { return }
         let step = ThreadVoiceView.barWidth + ThreadVoiceView.barGap
@@ -477,11 +754,28 @@ final class WaveformBars: UIView, UIGestureRecognizerDelegate {
         }
     }
 
+    // MARK: - The swell
+
+    /// The finger landed (true): the whole waveform grows. It lifted
+    /// (false): it settles back.
+    func setSwollen(_ swollen: Bool, animated: Bool) {
+        let size: CGAffineTransform = swollen ? CGAffineTransform(scaleX: Self.swellScale, y: Self.swellScale) : .identity
+        guard animated else {
+            transform = size
+            return
+        }
+        UIView.animate(
+            springDuration: swollen ? Self.swellTravel : Self.settleDuration, bounce: swollen ? 0.15 : 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.transform = size
+        }
+    }
+
     // MARK: - Seeking
 
     private func fraction(at point: CGPoint) -> Double {
-        let used = CGFloat(bars.count) * (ThreadVoiceView.barWidth + ThreadVoiceView.barGap)
-        return Double(min(1, max(0, point.x / max(1, min(used, bounds.width)))))
+        Double(min(1, max(0, point.x / max(1, min(barsWidth, bounds.width)))))
     }
 
     @objc private func tapped(_ tap: UITapGestureRecognizer) {
@@ -492,11 +786,8 @@ final class WaveformBars: UIView, UIGestureRecognizerDelegate {
         let fraction = fraction(at: pan.location(in: self))
         switch pan.state {
         case .began, .changed:
-            playhead.isHidden = false
-            playhead.frame = CGRect(x: CGFloat(fraction) * bounds.width - 1, y: 0, width: 2, height: bounds.height)
             onSeek?(fraction, true)
         default:
-            playhead.isHidden = true
             onSeek?(fraction, false)
         }
     }
@@ -508,6 +799,25 @@ final class WaveformBars: UIView, UIGestureRecognizerDelegate {
         return abs(velocity.x) > abs(velocity.y)
     }
 
+    /// A horizontal drag on the bars goes before the list's scroll and the
+    /// screen's swipes, which wait for it to fail.
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer
+    ) -> Bool {
+        // Not the bubble's own holds: waiting on the scrub, they failed when
+        // it began and let the screen's swipes through.
+        guard !(other.delegate is ThreadVoiceView) else { return false }
+        return Self.yields(other, to: self)
+    }
+
+    /// Whether `other` waits for a voice message's own drag: any pan that
+    /// is not the bubble's — the list's scroll, the content pop, the
+    /// screen's swipe stages.
+    static func yields(_ other: UIGestureRecognizer, to view: UIView) -> Bool {
+        guard other is UIPanGestureRecognizer, let owner = other.view else { return false }
+        return !owner.isDescendant(of: view)
+    }
+
     private final class RiseStep: NSObject {
         let action: (CADisplayLink) -> Void
         init(_ action: @escaping (CADisplayLink) -> Void) { self.action = action }
@@ -516,5 +826,18 @@ final class WaveformBars: UIView, UIGestureRecognizerDelegate {
 
     #if DEBUG
     var debugWaiting: Bool { waiting }
+    var debugSwollen: Bool { transform != .identity }
     #endif
+}
+
+/// The speed chip: its press reaches a little past its capsule, over the
+/// bars under it — the chip goes first (the owner's device check,
+/// 2026-11-06).
+final class SpeedChip: UIButton {
+    static let reach: CGFloat = 12
+
+    /// 12 pt each side, and the whole line's height (its box clips the rest).
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        bounds.insetBy(dx: -Self.reach, dy: -Self.reach * 2).contains(point)
+    }
 }

@@ -42,6 +42,12 @@ final class CommentRowView: UIView {
         return ceil(ceil(header.lineHeight) + Metrics.lineSpacing + body.lineHeight)
     }
 
+    /// The name line's height: what a row whose body is not text (a voice
+    /// message) keeps above it.
+    static func nameLineHeight(for traits: UITraitCollection?) -> CGFloat {
+        ceil(UIFont.appFont(forTextStyle: .footnote, compatibleWith: traits).lineHeight)
+    }
+
     /// The level-2 indentation: replies step in by one avatar column (avatar
     /// + its gap), the standard thread offset — a reply's avatar starts where
     /// its parent's text does.

@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import FeedInterface
 import Testing
 import UIKit
@@ -44,8 +45,8 @@ struct ThreadVoiceViewTests {
         return view
     }
 
-    /// At rest the duration and, unplayed, the dot; playing the chip takes
-    /// the timer's place and the dot goes; paused mid-way the elapsed time.
+    /// At rest the duration and, unplayed, the dot; playing the chip comes
+    /// over the waveform and the dot goes; paused mid-way the elapsed time.
     @Test func theTimerTheChipAndTheDotFollowThePlayback() {
         var state = ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 12, unplayed: true)
         let view = view(state)
@@ -72,10 +73,188 @@ struct ThreadVoiceViewTests {
 
         state.playback = .loading
         view.update(state)
-        #expect(view.debugShowsLoader)
+        #expect(view.debugGlyph == "pause.fill", "the glyph turns on the tap, not when the audio is ready")
+        #expect(!view.debugShowsLoader)
+        view.debugLoaderWaitEnds()
+        #expect(view.debugShowsLoader, "a wait that lasts shows the loader")
         state.playback = .failed
         view.update(state)
         #expect(view.debugGlyph == "arrow.clockwise")
+    }
+
+    /// The glyph alone — the app's glyph button, no glass bubble — on a
+    /// 32 pt square (the owner's device check,
+    /// 2026-11-06).
+    @Test func theGlyphStandsAloneWithNoBubble() {
+        let view = view(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 3))
+        view.layoutIfNeeded()
+        #expect(view.debugButtonImage != nil)
+        #expect(view.debugPlayButtonIsTheAppsGlyph)
+        #expect(view.debugButtonSize == CGSize(width: 32, height: 32))
+    }
+
+    /// A voice message owns horizontal drags: the conversation's leftward
+    /// swipe never starts on its waveform or its play button.
+    @Test func aVoiceMessageOwnsItsHorizontalDrags() {
+        let screen = UIView(frame: CGRect(x: 0, y: 0, width: 402, height: 400))
+        let voice = ThreadVoiceView()
+        voice.configure(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 3), senderName: nil)
+        voice.frame = CGRect(x: 0, y: 100, width: 402, height: 60)
+        screen.addSubview(voice)
+        screen.layoutIfNeeded()
+        let composer = UIView(frame: CGRect(x: 0, y: 340, width: 402, height: 60))
+        screen.addSubview(composer)
+        #expect(ConversationThreadViewController.ownsHorizontalDrag(at: CGPoint(x: 100, y: 116), in: screen, composer: composer))
+        #expect(!ConversationThreadViewController.ownsHorizontalDrag(at: CGPoint(x: 200, y: 20), in: screen, composer: composer))
+        #expect(!ConversationThreadViewController.ownsHorizontalDrag(at: CGPoint(x: 398, y: 120), in: screen, composer: composer),
+                "the row's room beside a short bubble is the screen's")
+    }
+
+    /// Playing, the chip stands over the waveform's middle and the row keeps
+    /// its height: playing never re-lays the list.
+    @Test func theChipStandsOverTheWaveformsMiddle() {
+        var state = ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 12)
+        let view = view(state)
+        let rest = view.systemLayoutSizeFitting(CGSize(width: 360, height: 0)).height
+        state.playback = .playing(progress: 0.5)
+        view.update(state)
+        view.layoutIfNeeded()
+        #expect(view.systemLayoutSizeFitting(CGSize(width: 360, height: 0)).height == rest)
+        #expect(rest == ThreadVoiceView.buttonSide)
+        var alpha: CGFloat = 0
+        view.debugChipFill?.resolvedColor(with: view.traitCollection).getWhite(nil, alpha: &alpha)
+        #expect(alpha == 1, "an opaque chip over the bars")
+        let chip = view.debugChipFrame, bars = view.debugWaveformFrame
+        #expect(abs(chip.midX - bars.midX) < 0.5 && abs(chip.midY - bars.midY) < 0.5, "\(chip) over \(bars)")
+    }
+
+    /// The waveform is as wide as its bars, and the chip and the bars are
+    /// centred on each other in their box whatever the speed reads; the
+    /// chip, wider or narrower, takes the press over the bars, a little past
+    /// its capsule.
+    @Test(arguments: ["1×", "1.5×", "2×"])
+    func theChipAndTheBarsShareTheirCentre(_ speed: String) {
+        var state = ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 12)
+        state.playback = .playing(progress: 0.3)
+        state.speedLabel = speed
+        let view = view(state)
+        view.debugSetSpeedLabel(speed)
+        let chip = view.debugChipFrame, bars = view.debugWaveformFrame, box = view.debugScrubberFrame
+        #expect(abs(bars.width - view.waveform.barsWidth) < 0.5, "the view is its bars")
+        #expect(abs(chip.midX - bars.midX) < 0.5 && abs(chip.midX - box.midX) < 0.5, "\(chip) \(bars) \(box)")
+        #expect(abs(chip.midY - bars.midY) < 0.5)
+        #expect(box.width >= chip.width && box.width >= bars.width)
+        #expect(view.debugPressTarget(at: CGPoint(x: chip.midX, y: chip.midY)) == "chip")
+        #expect(view.debugPressTarget(at: CGPoint(x: chip.maxX + SpeedChip.reach - 1, y: chip.midY)) == "chip")
+        #expect(view.debugPressTarget(at: CGPoint(x: bars.minX + 2, y: bars.midY)) == "waveform")
+    }
+
+    /// A finger scrubbing the bars grows them and sends the chip aside; both
+    /// come back when it lifts. A tap seeks without either.
+    @Test func scrubbingGrowsTheBarsAndSendsTheChipAside() {
+        var state = ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 12)
+        state.playback = .playing(progress: 0.3)
+        let view = view(state)
+        #expect(view.debugShowsChip && !view.debugWaveformGrown)
+        view.waveform.onSeek?(0.5, true)
+        #expect(!view.debugShowsChip, "the chip steps aside")
+        #expect(view.debugWaveformGrown)
+        #expect(view.debugWaveformFrame.maxX + 1 < view.debugTimerFrame.minX, "the grown bars never reach the timer")
+        // The screen re-tells the state while the finger moves: the chip
+        // stays aside.
+        state.playback = .playing(progress: 0.5)
+        view.update(state)
+        #expect(!view.debugShowsChip)
+        view.waveform.onSeek?(0.6, false)
+        #expect(view.debugShowsChip && !view.debugWaveformGrown)
+        view.waveform.onSeek?(0.2, false)
+        #expect(view.debugShowsChip && !view.debugWaveformGrown, "a tap seeks without either")
+    }
+
+    /// A sideways drag anywhere on the bubble is the bubble's: the screen's
+    /// pans wait for its hold, the bubble's own run alongside, a vertical
+    /// drag is not taken.
+    @Test func aSidewaysDragAnywhereOnTheBubbleIsItsOwn() throws {
+        let view = view(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 3))
+        let side = view.debugSideHold
+        #expect(side.view?.isDescendant(of: view) == true && side.view !== view, "on the bubble, not the whole row")
+        #expect(!side.cancelsTouchesInView)
+        let list = UIScrollView()
+        #expect(view.gestureRecognizer(side, shouldBeRequiredToFailBy: list.panGestureRecognizer))
+        let scrub = try #require(view.waveform.gestureRecognizers?.first { $0 is UIPanGestureRecognizer })
+        #expect(view.gestureRecognizer(side, shouldRecognizeSimultaneouslyWith: scrub))
+        #expect(!view.waveform.gestureRecognizer(scrub, shouldBeRequiredToFailBy: side), "a scrub never makes the hold fail")
+        #expect(!view.gestureRecognizer(side, shouldRecognizeSimultaneouslyWith: list.panGestureRecognizer))
+    }
+
+    /// A drag that starts on the play button is the button's: the list's
+    /// scroll and every other pan wait for it; the bubble's own do not.
+    @Test func thePlayButtonHoldsItsDrags() throws {
+        let view = view(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 3))
+        let hold = try #require(view.debugPlayButtonHold)
+        #expect(!hold.cancelsTouchesInView, "a press that drifts is still a press")
+        let list = UIScrollView()
+        #expect(view.gestureRecognizer(hold, shouldBeRequiredToFailBy: list.panGestureRecognizer))
+        let screen = UIView()
+        let swipe = UIPanGestureRecognizer()
+        screen.addGestureRecognizer(swipe)
+        #expect(view.gestureRecognizer(hold, shouldBeRequiredToFailBy: swipe))
+        #expect(!view.gestureRecognizer(hold, shouldBeRequiredToFailBy: UITapGestureRecognizer()))
+        let scrub = try #require(view.waveform.gestureRecognizers?.first { $0 is UIPanGestureRecognizer })
+        #expect(!view.gestureRecognizer(hold, shouldBeRequiredToFailBy: scrub))
+        #expect(view.waveform.gestureRecognizer(scrub, shouldBeRequiredToFailBy: list.panGestureRecognizer))
+    }
+
+    /// A press on the play button or the waveform is the bubble's, never
+    /// the row's long press; the timer's spot is still the row's.
+    @Test func itsControlsKeepThePressFromTheRow() {
+        let view = view(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 12))
+        let leading = CommentRowView.avatarSize + CommentRowView.avatarGap
+        let mid = ThreadVoiceView.buttonSide / 2
+        #expect(view.keepsPress(at: CGPoint(x: leading + mid, y: mid)), "the play button")
+        #expect(view.keepsPress(at: CGPoint(x: leading + ThreadVoiceView.buttonSide + Spacing.sm + 20, y: mid)), "the waveform")
+        #expect(!view.keepsPress(at: CGPoint(x: 2, y: mid)), "beside the bubble")
+        view.configure(nil)
+        #expect(!view.keepsPress(at: CGPoint(x: leading + mid, y: mid)), "a row with no voice")
+    }
+
+    /// The conversation's list gives its controls the touch at once, and a
+    /// scroll may still start on one — but not on a voice message.
+    @Test func theListAnswersAtOnceAndLeavesTheVoiceItsDrags() {
+        let list = ConversationCollectionView(frame: .zero, collectionViewLayout: UICollectionViewFlowLayout())
+        #expect(!list.delaysContentTouches)
+        #expect(list.touchesShouldCancel(in: UIButton()), "a scroll may start on any other control")
+        let voice = ThreadVoiceView()
+        let inside = UIButton()
+        voice.addSubview(inside)
+        #expect(!list.touchesShouldCancel(in: inside))
+        #expect(list.touchesShouldCancel(in: UIView()))
+    }
+
+    /// The bubble stands right under the name line, beside the avatar,
+    /// where a body would be.
+    @Test func theBubbleStandsUnderTheName() {
+        let cell = ThreadRowCell(frame: CGRect(x: 0, y: 0, width: 402, height: 200))
+        cell.row.configure(with: CommentDisplayModel(
+            id: "v", authorID: ProfileID("a"), authorName: "Ava", metaText: "2:43 PM", body: "", avatarURL: nil
+        ))
+        cell.voiceView.configure(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 3))
+        func laidOut() -> (row: CGRect, voice: CGRect) {
+            let height = cell.contentView.systemLayoutSizeFitting(
+                CGSize(width: 402, height: 0),
+                withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+            ).height
+            cell.frame = CGRect(x: 0, y: 0, width: 402, height: height)
+            cell.layoutIfNeeded()
+            return (cell.row.convert(cell.row.bounds, to: cell), cell.voiceView.convert(cell.voiceView.bounds, to: cell))
+        }
+        cell.tucksVoice = true
+        let tucked = laidOut()
+        let gap = tucked.voice.minY - tucked.row.minY - CommentRowView.nameLineHeight(for: cell.traitCollection)
+        #expect(abs(gap - Spacing.xs) < 0.5, "\(tucked)")
+        cell.tucksVoice = false
+        let under = laidOut()
+        #expect(under.voice.minY >= under.row.maxY, "\(under)")
     }
 
     /// A reused bubble keeps nothing of the message it showed.

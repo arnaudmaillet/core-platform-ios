@@ -3,8 +3,8 @@ import Foundation
 import Testing
 @testable import VoiceKit
 
-/// The waveform (#2101): 100 levels, 0–31, peaks clipped at 1.8 × the mean,
-/// from metering and from a file.
+/// The waveform (#2101): 100 levels, 0–31, each bin's peak in decibels
+/// against the take's loud parts (2026-11-06), from metering and from a file.
 struct VoiceWaveformTests {
     @Test func aHundredLevelsOfFiveBits() {
         let samples = (0..<1_000).map { Float(abs(sin(Double($0) / 30))) }
@@ -14,23 +14,37 @@ struct VoiceWaveformTests {
         #expect(levels.max() == 31, "the loudest bin does not reach 31")
     }
 
-    /// The loudest sample of each bin, not its mean.
-    @Test func eachLevelIsItsBinsPeak() {
-        var samples = [Float](repeating: 0.2, count: 200)
-        samples[1] = 0.3
+    /// Louder bins stand taller: three loudnesses, three heights in order.
+    @Test func louderStandsTaller() {
+        let samples = [Float](repeating: 0.05, count: 100) + [Float](repeating: 0.2, count: 100)
+            + [Float](repeating: 0.8, count: 100)
         let levels = VoiceWaveform.levels(from: samples)
-        #expect(levels[0] > levels[1], "a bin's peak was averaged away")
+        #expect(levels[10] < levels[50] && levels[50] < levels[90], "\(levels[10]), \(levels[50]), \(levels[90])")
     }
 
-    /// One cough does not flatten the rest: it is cut to 1.8 × the mean.
-    @Test func aPeakIsClippedAtNearlyTwiceTheMean() {
+    /// ⚠️ SPEECH IS NOT ALL AT THE TOP (the owner, 2026-11-06: "almost always
+    /// at the max"). Loud words, quieter syllables and pauses, as a voice
+    /// has them: several heights, and most bars under the top.
+    @Test func speechIsNotAllAtTheTop() {
+        var samples: [Float] = []
+        for word in 0..<20 {
+            samples += [Float](repeating: [0.6, 0.3, 0.15, 0.08][word % 4], count: 12)
+            samples += [Float](repeating: 0.001, count: 3)
+        }
+        let levels = VoiceWaveform.levels(from: samples)
+        let atTheTop = levels.filter { $0 >= 30 }.count
+        #expect(atTheTop < 40, "\(atTheTop) bars of 100 at the top")
+        #expect(Set(levels.filter { $0 > 0 }).count >= 4, "too few heights: \(Set(levels))")
+        #expect(levels.contains(0), "the pauses are not flat")
+    }
+
+    /// One cough does not flatten the rest: the words keep their height.
+    @Test func onePeakDoesNotFlattenTheRest() {
         var samples = [Float](repeating: 0.1, count: 100)
         samples[50] = 1
         let levels = VoiceWaveform.levels(from: samples)
         #expect(levels[50] == 31)
-        // Unclipped, the speech would be 0.1 / 1 of the cough: 3. Clipped at
-        // 1.8 × the mean (≈ 0.109 × 1.8), it is about half the height.
-        #expect(levels[0] >= 14, "the speech was flattened under one peak: \(levels[0])")
+        #expect(levels[0] == 31, "the speech was flattened under one peak: \(levels[0])")
     }
 
     @Test func silenceAndNothingAreFlat() {

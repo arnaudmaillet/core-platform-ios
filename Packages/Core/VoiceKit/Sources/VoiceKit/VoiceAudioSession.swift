@@ -12,9 +12,69 @@ public protocol VoiceAudioSessionControlling: AnyObject {
     func setActive(_ active: Bool, options: AVAudioSession.SetActiveOptions) throws
     /// Whether a microphone is there to record from.
     var isInputAvailable: Bool { get }
+    /// Takes the session — after any release already under way.
+    func activate() throws
+    /// Gives the session back, telling the others they may play again.
+    func deactivate()
 }
 
-extension AVAudioSession: VoiceAudioSessionControlling {}
+public extension VoiceAudioSessionControlling {
+    func activate() throws { try setActive(true, options: []) }
+    func deactivate() { try? setActive(false, options: .notifyOthersOnDeactivation) }
+}
+
+/// ⚠️ THE RELEASE NEVER HOLDS THE MAIN THREAD. On a device, deactivating with
+/// `.notifyOthersOnDeactivation` took 0.6 s, every time (0.7 ms on the
+/// simulator): a voice message's pause showed that long after the tap
+/// (measured, the owner's iPhone, 2026-11-06). It goes on `VoiceSessionLine`;
+/// an activation goes the same way, so it never lands before a release.
+extension AVAudioSession: VoiceAudioSessionControlling {
+    public func activate() throws {
+        try VoiceSessionLine.shared.claim {
+            try AVAudioSession.sharedInstance().setActive(true, options: [])
+        }
+    }
+
+    public func deactivate() {
+        VoiceSessionLine.shared.release {
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
+    }
+}
+
+/// The audio session's calls, one at a time, off the main thread for a
+/// release.
+///
+/// - **A release waits its turn** on a serial queue; the caller goes on.
+/// - **A claim cancels a release not begun** (a play right after a pause
+///   keeps the session it has), and **waits for one under way**: it never
+///   activates before a deactivation still in flight, which would leave the
+///   session off under a playing message.
+final class VoiceSessionLine: @unchecked Sendable {
+    static let shared = VoiceSessionLine()
+
+    private let queue = DispatchQueue(label: "VoiceKit.sessionLine", qos: .userInitiated)
+    private let lock = NSLock()
+    /// Every release and claim takes the next; a release runs only when it
+    /// is still the last.
+    private var ticket = 0
+
+    func release(_ work: @escaping @Sendable () -> Void) {
+        let mine = lock.withLock {
+            ticket += 1
+            return ticket
+        }
+        queue.async { [self] in
+            guard lock.withLock({ ticket == mine }) else { return }
+            work()
+        }
+    }
+
+    func claim<T>(_ work: () throws -> T) rethrows -> T {
+        lock.withLock { ticket += 1 }
+        return try queue.sync(execute: work)
+    }
+}
 
 /// The two roles the session takes for voice (#2101).
 public struct VoiceSessionRole: Equatable, Sendable {
@@ -36,7 +96,7 @@ public struct VoiceSessionRole: Equatable, Sendable {
     @MainActor
     func apply(to session: any VoiceAudioSessionControlling) throws {
         try session.setCategory(category, mode: mode, options: options)
-        try session.setActive(true, options: [])
+        try session.activate()
     }
 }
 

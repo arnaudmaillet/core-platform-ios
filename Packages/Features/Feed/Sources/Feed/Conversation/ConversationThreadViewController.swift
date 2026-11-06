@@ -52,7 +52,9 @@ final class ConversationThreadViewController: UIViewController {
     private let imagePipeline: ImagePipeline
 
     private let headerPolicy = HeaderPolicy()
-    private lazy var collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
+    private lazy var collectionView: UICollectionView = ConversationCollectionView(
+        frame: .zero, collectionViewLayout: makeLayout()
+    )
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private let contextMenu = ThreadRowContextMenu()
     /// The post's composer, so the post's geometry (`SnapActionColumn`): at
@@ -364,6 +366,15 @@ final class ConversationThreadViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // Back from a cancelled pop: the reader stays where they were while
+        // the footer finishes coming back (see `heldPlace`).
+        if let held = heldPlace {
+            // Held through the footer's own return, which outlasts the pop.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self, heldPlace == held else { return }
+                releaseHeldPlace()
+            }
+        }
         guard !hasAppeared else { return }
         hasAppeared = true
         // The rows that came on screen with it have sized themselves by now;
@@ -389,6 +400,34 @@ final class ConversationThreadViewController: UIViewController {
             voiceComposer?.leave()
         }
         guard mode == .full else { return }
+        // ⚠️ A POP THE FINGER DRIVES MAY BE CANCELLED: the footer goes and
+        // comes back, and a transcript at its tail must not move for it (see
+        // `heldPlace`). Held until the pop ends, or a while after a cancelled
+        // one has the screen back.
+        if let coordinator = transitionCoordinator, coordinator.isInteractive, hasRenderedContent,
+           bottomAnchorSlack < 0.5 {
+            // The clearance as it stands, kept with the safe area at its
+            // least (the home indicator's alone): the inset makes up for it.
+            let leastSafeArea = view.window?.safeAreaInsets.bottom ?? 0
+            heldPlace = HeldPlace(
+                offset: collectionView.contentOffset.y,
+                contentHeight: collectionView.contentSize.height,
+                inset: max(collectionView.contentInset.bottom, collectionView.adjustedContentInset.bottom - leastSafeArea)
+            )
+            holdPlace()
+            coordinator.animate(alongsideTransition: nil) { [weak self] context in
+                guard let self, let held = heldPlace else { return }
+                // Completed (a push to the profile stays under this screen):
+                // the inset goes back now, or the way back would carry the
+                // transcript by the difference. Cancelled: after the footer's
+                // return (`viewDidAppear`), and in any case soon.
+                if !context.isCancelled { return releaseHeldPlace() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                    guard let self, heldPlace == held else { return }
+                    releaseHeldPlace()
+                }
+            }
+        }
         // Taken away on the way out, or the inbox inherits an empty bar.
         navigationController?.setToolbarHidden(true, animated: animated)
     }
@@ -424,6 +463,9 @@ final class ConversationThreadViewController: UIViewController {
             self.syncDayItem()
             // After the clearance, in the same pass: see `pinToTail`.
             if self.owesTailPin { self.pinToTail() }
+            // Every pass while it is held: the footer's return moves the
+            // safe area through passing values, and the last pass is right.
+            if self.heldPlace != nil, self.hasRenderedContent { self.holdPlace() }
         }
         if transitionCoordinator != nil { UIView.performWithoutAnimation(layOut) } else { layOut() }
     }
@@ -1398,6 +1440,7 @@ final class ConversationThreadViewController: UIViewController {
             cell.playDelivered(revealing: Self.timeFormatter.string(from: message.sentAt))
         }
         configureVoice(cell.voiceView, for: message)
+        cell.tucksVoice = voice
         cell.mediaView.onTap = drawnMedia == nil ? nil : { [weak self, weak cell] in
             guard let self, let cell else { return }
             self.tapMedia(of: messageID, in: cell)
@@ -1626,6 +1669,31 @@ final class ConversationThreadViewController: UIViewController {
     /// Once the screen has come in: the tail is held for its arrival only —
     /// a message landing while the reader reads keeps its own animated scroll.
     private var hasAppeared = false
+    /// Where the reader stood — the offset and the content height then —
+    /// and a bottom inset deep enough for any footer, while a finger-driven
+    /// pop is under way and until a cancelled one has the screen back.
+    ///
+    /// ⚠️ THE END MUST NEVER COME ABOVE THE READER (the owner's device,
+    /// 2026-11-06, filmed and logged, long conversations only). A cancelled
+    /// pop sets the footer hidden for a moment before it comes back: the safe
+    /// area fell from 86 to 34, the end of a transcript resting at its tail
+    /// rose 52 pt above the offset, and UIKit clamped the offset at once
+    /// (326 → 274); putting it back ran inside the footer's return animation,
+    /// so the list visibly slid. Holding the inset as deep as the footer's
+    /// absence would need, from the start, keeps the end where it was: UIKit
+    /// never clamps, nothing moves.
+    ///
+    /// ⚠️ ONLY A TRANSCRIPT WITH NO SLACK (filmed the same day): a short one
+    /// wears its slack above, measured against the bottom inset — the deep
+    /// inset shrank it and the messages rose. It never reaches its end, and
+    /// is left alone.
+    private var heldPlace: HeldPlace?
+
+    private struct HeldPlace: Equatable {
+        var offset: CGFloat
+        var contentHeight: CGFloat
+        var inset: CGFloat
+    }
     private var contentSizeObservation: NSKeyValueObservation?
 
     private func observeContentSize() {
@@ -1648,6 +1716,35 @@ final class ConversationThreadViewController: UIViewController {
         let insets = collectionView.adjustedContentInset
         let visibleBottom = collectionView.contentOffset.y + collectionView.bounds.height - insets.bottom
         return visibleBottom >= collectionView.contentSize.height - 120
+    }
+
+    /// Keeps the deep inset and the reader where they stood (`heldPlace`),
+    /// moved only by what the content grew meanwhile.
+    private func holdPlace() {
+        guard let held = heldPlace else { return }
+        if abs(collectionView.contentInset.bottom - held.inset) > 0.25 {
+            collectionView.contentInset.bottom = held.inset
+            collectionView.verticalScrollIndicatorInsets.bottom = held.inset
+        }
+        let offset = held.offset + collectionView.contentSize.height - held.contentHeight
+        if abs(collectionView.contentOffset.y - offset) > 0.25 { collectionView.contentOffset.y = offset }
+    }
+
+    /// Ends the hold: the inset back to the composer's, the offset left
+    /// alone — the reader is where they were, and the end below them.
+    private func releaseHeldPlace() {
+        heldPlace = nil
+        guard let inset = restingBottomInset else { return }
+        collectionView.contentInset.bottom = inset
+        collectionView.verticalScrollIndicatorInsets.bottom = inset
+    }
+
+    /// The bottom inset the composer asks for: clear of it, a little air.
+    private var restingBottomInset: CGFloat? {
+        guard composeBar.bounds.height > 0 else { return nil }
+        // The bar's top at rest, the risen input row's while the keyboard
+        // holds it above the bar (the pin stays down there, under it).
+        return max(0, view.bounds.height - composeBar.occupiedMinY - view.safeAreaInsets.bottom) + Spacing.sm
     }
 
     private func scrollToBottom(animated: Bool) {
@@ -1794,11 +1891,10 @@ final class ConversationThreadViewController: UIViewController {
     /// adding the travel on top of an already-clamped value throws the list
     /// to the top of a short transcript.
     private func syncBottomClearance() {
-        guard composeBar.bounds.height > 0 else { return }
-        // The bar's top at rest, the risen input row's while the keyboard
-        // holds it above the bar (the pin stays down there, under it).
-        let composerTop = composeBar.occupiedMinY
-        let inset = max(0, view.bounds.height - composerTop - view.safeAreaInsets.bottom) + Spacing.sm
+        guard let inset = restingBottomInset else { return }
+        if heldPlace != nil, hasEstablishedClearance, hasRenderedContent {
+            return holdPlace()
+        }
         let delta = inset - collectionView.contentInset.bottom
         guard abs(delta) > 0.5 else { return }
         let offsetBefore = collectionView.contentOffset.y
@@ -2145,12 +2241,15 @@ extension ConversationThreadViewController: SwipeStageHosting {
     func swipePushDidEnd(committed: Bool) {}
 
     /// Whether the touch at `point` lands on something that keeps its own
-    /// horizontal drag: the composer, a text view (selection), or a scroll
-    /// view that scrolls sideways.
+    /// horizontal drag: the composer, a text view (selection), a scroll view
+    /// that scrolls sideways, or a voice message — its waveform scrubs and
+    /// its play button takes the tap, before the screen's swipe (the owner's
+    /// device check, 2026-11-06).
     static func ownsHorizontalDrag(at point: CGPoint, in view: UIView, composer: UIView) -> Bool {
         guard let hit = view.hitTest(point, with: nil) else { return false }
         for current in sequence(first: hit, next: { $0.superview }) {
             if current === composer || current is UITextView { return true }
+            if let voice = current as? ThreadVoiceView, voice.keepsDrag(at: current.convert(point, from: view)) { return true }
             if let scroll = current as? UIScrollView, scroll.contentSize.width > scroll.bounds.width + 1 { return true }
             if current === view { break }
         }
