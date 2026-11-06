@@ -13,8 +13,10 @@ public enum CareModePreference {
     /// Swappable for tests.
     nonisolated(unsafe) static var defaults: UserDefaults = .standard
 
-    /// The smallest text size Care Mode allows.
-    public static let minimumContentSize: UIContentSizeCategory = .extraLarge
+    /// The smallest text size Care Mode allows: Extra Large on Apple's
+    /// sizes, one step more on the app's own scale (#2149) so its text stays
+    /// about as large.
+    public static var minimumContentSize: UIContentSizeCategory { AppTypeScale.current.careModeMinimum }
 
     public static var isOn: Bool {
         get { defaults.bool(forKey: key) }
