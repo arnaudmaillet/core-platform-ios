@@ -231,7 +231,14 @@ struct SnapUnavailablePostTests {
         let panels = Panels(posts: Posts(gone: [PostID("a")]))
         let feed = makeFeed(["a", "b", "c", "d", "e"].map(media), panels: panels)
         try settle(feed, on: 0)
-        mountPanel(feed, for: PostID("a"), panels: panels)
+        // ⚠️ LEARNT AT ONCE, NOT THROUGH THE PANEL'S FETCH. The toast is for
+        // the page ON SHOW when the answer lands; waited for through the
+        // panel's revalidation, the answer landed whenever a starved runner
+        // let it, and once the page was no longer the active one it left
+        // without its toast (CI, #2157's run, toast 0 after 234 s). The
+        // panel → feed link is `aPageWhosePostTurnsUnavailable…`'s.
+        try #require(feed.activePostID == PostID("a"), "the premise: the page in front is a")
+        feed.markPostUnavailable(PostID("a"))
         let rest = ["b", "c", "d", "e"].map { PostID($0) }
         #expect(await eventually { feed.orderedIDs == rest }, "the page in front stayed")
         #expect(feed.debugUnavailableToastsShown == 1)
