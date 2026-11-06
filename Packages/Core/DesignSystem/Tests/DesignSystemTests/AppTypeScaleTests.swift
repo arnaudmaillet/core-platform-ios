@@ -24,9 +24,10 @@ struct AppTypeScaleTests {
         }
     }
 
-    /// Until the owner picks, Apple's sizes: nothing changes for anyone.
-    @Test func applesScaleIsTheDefaultAndDrawsPreferredFont() {
-        #expect(AppTypeScale.current == .apple)
+    /// B is the app's scale (the owner, 2026-11-06); Apple's, still a DEBUG
+    /// switch away, draws `preferredFont`'s sizes.
+    @Test func scaleBIsTheDefaultAndApplesDrawsPreferredFont() {
+        #expect(AppTypeScale.current == .moderate)
         for style in Self.styles {
             let font = UIFont.appFont(forTextStyle: style, scale: .apple, compatibleWith: Self.large)
             #expect(font.pointSize == UIFont.preferredFont(forTextStyle: style, compatibleWith: Self.large).pointSize)

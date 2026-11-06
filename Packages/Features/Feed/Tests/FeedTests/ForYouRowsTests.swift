@@ -223,7 +223,8 @@ struct ForYouRowsTests {
         let firstRecent = try #require(layout.layoutAttributesForItem(at: IndexPath(item: 0, section: 1)))
         let traits = collection.traitCollection
         let lineTop = header.frame.minY + SectionHeaderPillButton.inlineTitleTop(traits: traits)
-        let line = UIFont.preferredFont(forTextStyle: .title3, compatibleWith: traits).lineHeight
+        // The line the title draws: the app's scale (#2149), not Apple's.
+        let line = SectionTitleView.titleFont(.standard, traits: traits).lineHeight
         #expect(abs(lineTop - lastNew.frame.maxY - Spacing.section) <= 0.6,
                 "Recent's line is \(lineTop - lastNew.frame.maxY) under New's last card")
         #expect(abs(firstRecent.frame.minY - (lineTop + line) - Spacing.sectionTitle) <= 0.6,
@@ -326,7 +327,7 @@ struct ForYouRowsTests {
         let card = LeadRowMetrics.cardSize(forWidth: width).height
         let gap = LeadRowMetrics.rowGap
         #expect(gap == SectionTitleView.gapAbove())
-        let air = (bar - UIFont.systemFont(ofSize: 20, weight: .bold).lineHeight) / 2
+        let air = (bar - SectionTitleView.titleFont(.standard, traits: SectionTitleView.defaultTraits).lineHeight) / 2
         #expect(abs(gap + air - Spacing.section) <= 0.5)
         #expect(ForYouLeadFixture.height(forWidth: width, friends: 3, following: 3)
                 == bar + story + gap + bar + card + gap + bar + LeadRowMetrics.listGap)

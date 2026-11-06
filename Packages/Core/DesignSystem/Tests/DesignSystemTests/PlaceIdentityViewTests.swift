@@ -53,24 +53,25 @@ struct PlaceIdentityViewTests {
         #expect(identity.flagView.backgroundColor == .tertiarySystemFill)
     }
 
-    /// On two lines the block is the flag's height: the name level with the
-    /// disc's top, the counters with its foot, as on the profile.
+    /// On two lines the block is centred on the flag, a little inside it on
+    /// the app's scale B (#2149): measured 5 pt under the disc's top and over
+    /// its foot (it was level with both on Apple's sizes).
     @Test func aTwoLineTitleAndItsCountersSpanTheFlag() throws {
-        let identity = layOut(name: "Central African Republic", subtitle: "Africa")
+        let identity = layOut(name: "Central African Republic", subtitle: "Sub-Saharan Africa")
         #expect(!identity.titleLabel.subtitleFollowsName)
         let flag = frame(of: identity.flagView, in: identity)
         let title = frame(of: identity.titleLabel, in: identity)
         let likes = frame(of: try stat("Likes", in: identity), in: identity)
         #expect(abs((title.minY + likes.maxY) / 2 - flag.midY) < 0.5, "the block is not centred on the flag")
-        #expect(abs(title.minY - flag.minY) < 4, "the name is not level with the flag's top")
-        #expect(abs(likes.maxY - flag.maxY) < 4, "the counters are not level with the flag's foot")
+        #expect(abs(title.minY - flag.minY - 5) < 0.5, "the name is not 5 pt under the flag's top: \(title.minY - flag.minY)")
+        #expect(abs(flag.maxY - likes.maxY - 5) < 0.5, "the counters are not 5 pt over the flag's foot: \(flag.maxY - likes.maxY)")
     }
 
     /// A title on one line stands where the middle of a two-line one does,
     /// and its counters come up by half the line it does not take.
     @Test func aOneLineTitleKeepsItsMiddleAndRaisesTheCounters() throws {
         let oneLine = layOut()
-        let twoLines = layOut(name: "Central African Republic", subtitle: "Africa")
+        let twoLines = layOut(name: "Central African Republic", subtitle: "Sub-Saharan Africa")
         #expect(oneLine.titleLabel.subtitleFollowsName)
         let short = frame(of: oneLine.titleLabel, in: oneLine)
         let wrapped = frame(of: twoLines.titleLabel, in: twoLines)
@@ -91,8 +92,8 @@ struct PlaceIdentityViewTests {
     }
 
     @Test func aNameTooWideForItsSubtitlePutsItOnTheNextLine() {
-        let identity = layOut(name: "Central African Republic", subtitle: "Africa")
-        #expect(identity.titleLabel.attributedText?.string == "Central African Republic\nAfrica")
+        let identity = layOut(name: "Central African Republic", subtitle: "Sub-Saharan Africa")
+        #expect(identity.titleLabel.attributedText?.string == "Central African Republic\nSub-Saharan Africa")
     }
 
     @Test func noSubtitleIsTheNameAlone() {
@@ -112,7 +113,7 @@ struct PlaceIdentityViewTests {
         #expect(lines[0].hasPrefix("South Georgia") && lines[0].hasSuffix("…"), "\(lines[0])")
         #expect(lines[1] == "Seven seas (open ocean)")
         #expect(frame(of: label, in: identity).maxX <= Self.width + 0.5)
-        let wrapped = layOut(name: "Central African Republic", subtitle: "Africa")
+        let wrapped = layOut(name: "Central African Republic", subtitle: "Sub-Saharan Africa")
         #expect(identity.bounds.height == wrapped.bounds.height, "the long name took more than one line")
     }
 
@@ -177,7 +178,7 @@ struct PlaceIdentityViewTests {
     }
 
     @Test func aWideRankIsNeverTruncated() {
-        let identity = layOut(name: "Central African Republic", subtitle: "Africa", rank: "#126")
+        let identity = layOut(name: "Central African Republic", subtitle: "Sub-Saharan Africa", rank: "#126")
         let label = identity.rankBubble.label
         #expect(label.bounds.width >= label.intrinsicContentSize.width - 0.5, "the rank is truncated")
         #expect(frame(of: label, in: identity).maxX < frame(of: identity.titleLabel, in: identity).minX)

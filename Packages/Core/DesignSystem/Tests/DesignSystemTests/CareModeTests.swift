@@ -6,9 +6,11 @@ import UIKit
 @MainActor
 @Suite(.serialized)
 struct CareModeTests {
+    /// On the app's scale B (#2149) the floor is XXL: one step up on the app's own
+    /// sizes keeps Care Mode's text about as large as it was on Apple's.
     @Test func itRaisesTheTextSizeButNeverLowersIt() {
-        #expect(CareModePreference.contentSize(system: .medium, isOn: true) == .extraLarge)
-        #expect(CareModePreference.contentSize(system: .large, isOn: true) == .extraLarge)
+        #expect(CareModePreference.contentSize(system: .medium, isOn: true) == .extraExtraLarge)
+        #expect(CareModePreference.contentSize(system: .large, isOn: true) == .extraExtraLarge)
         // A larger iPhone setting wins, up to the app's XXXL ceiling.
         #expect(CareModePreference.contentSize(system: .extraExtraLarge, isOn: true) == .extraExtraLarge)
         #expect(CareModePreference.contentSize(system: .accessibilityLarge, isOn: true) == .extraExtraExtraLarge)
@@ -34,7 +36,7 @@ struct CareModeTests {
         CareModePreference.applyWeight(to: [window], isOn: true)
         TextSizeCeiling.apply(to: [window], system: .large, careMode: true, recordsCurrent: false)
         #expect(window.traitOverrides.contains(UITraitPreferredContentSizeCategory.self))
-        #expect(window.traitOverrides.preferredContentSizeCategory == .extraLarge)
+        #expect(window.traitOverrides.preferredContentSizeCategory == .extraExtraLarge)
         #expect(window.traitOverrides.legibilityWeight == .bold)
 
         CareModePreference.applyWeight(to: [window], isOn: false)

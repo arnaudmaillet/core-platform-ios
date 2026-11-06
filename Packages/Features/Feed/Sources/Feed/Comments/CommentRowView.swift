@@ -34,11 +34,11 @@ final class CommentRowView: UIView {
     /// The avatar's diameter: EXACTLY the name line, the gap under it and the
     /// body's first line, so the disc stands centred on the two lines it
     /// belongs to rather than hanging off the top of them. Derived from the
-    /// two fonts rather than fixed, so it follows Dynamic Type — at the default
-    /// size it is 39pt.
+    /// two fonts the row draws (`appFont`, the app's scale, #2149) rather than
+    /// fixed, so it follows Dynamic Type.
     static func avatarSize(for traits: UITraitCollection?) -> CGFloat {
-        let header = UIFont.preferredFont(forTextStyle: .footnote, compatibleWith: traits)
-        let body = UIFont.preferredFont(forTextStyle: .body, compatibleWith: traits)
+        let header = UIFont.appFont(forTextStyle: .footnote, compatibleWith: traits)
+        let body = UIFont.appFont(forTextStyle: .body, compatibleWith: traits)
         return ceil(ceil(header.lineHeight) + Metrics.lineSpacing + body.lineHeight)
     }
 

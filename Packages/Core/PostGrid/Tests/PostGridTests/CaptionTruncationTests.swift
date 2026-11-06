@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import MediaCore
 import Testing
 import UIKit
@@ -56,7 +57,7 @@ struct CaptionTruncationTests {
             if let label = view as? UILabel { found.append(label) }
             stack.append(contentsOf: view.subviews)
         }
-        return found.first { $0.font == .preferredFont(forTextStyle: .body) }
+        return found.first { $0.font == .appFont(forTextStyle: .body) }
     }
 
     private static func rendered(_ cell: UIView) throws -> String {
@@ -69,7 +70,7 @@ struct CaptionTruncationTests {
     private static func lines(_ text: String) -> [String] {
         let width = rowWidth - PostGridListRowCell.captionInset * 2
         let storage = NSTextStorage(
-            string: text, attributes: [.font: UIFont.preferredFont(forTextStyle: .body)]
+            string: text, attributes: [.font: UIFont.appFont(forTextStyle: .body)]
         )
         let manager = NSLayoutManager()
         let container = NSTextContainer(
@@ -132,7 +133,7 @@ struct CaptionTruncationTests {
     /// the veil hangs on.
     @Test func theCutLineSitsUnderTheLastLineTheCardShows() throws {
         let end = try #require(Self.sized(Self.long).revealCut)
-        let lineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
+        let lineHeight = UIFont.appFont(forTextStyle: .body).lineHeight
         let lines = (end - PostGridListRowCell.captionTopInset) / lineHeight
         #expect(abs(lines - CGFloat(PostGridListRowCell.captionLineLimit)) < 0.5)
     }
@@ -154,7 +155,7 @@ struct CaptionTruncationTests {
         // And it is BELOW the metric line, not above it: the page carries the
         // same one at the same offset, so veiling it would hide something the
         // card is showing.
-        let lineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
+        let lineHeight = UIFont.appFont(forTextStyle: .body).lineHeight
         #expect(cut > PostGridListRowCell.captionTopInset + lineHeight)
     }
 

@@ -5,10 +5,10 @@ import UIKit
 /// as a social app — and still scaled by Dynamic Type like the style, under
 /// the app's ceiling (`TextSizeCeiling`).
 ///
-/// ⚠️ TWO CANDIDATES BEHIND A SWITCH, FOR NOW. The owner compares them on a
-/// device (`-type-scale apple|a|b`, DEBUG) and picks one; until then the app
-/// draws Apple's sizes, as before. The pick becomes the only scale and the
-/// switch goes.
+/// ⚠️ B IS THE APP'S SCALE (the owner, 2026-11-06, after comparing the two
+/// on a device): every build draws it. A and Apple's stay one DEBUG switch
+/// away (`-type-scale a|apple`) while #2149 stays open, for another look;
+/// once it closes, B is the only scale and the switch goes.
 ///
 /// | Style | Apple | A: social | B: moderate |
 /// |---|---|---|---|
@@ -36,8 +36,8 @@ public enum AppTypeScale: String, Sendable, CaseIterable {
     /// The smallest size any style takes at the default text size.
     public static let floor: CGFloat = 11
 
-    /// The scale the app draws: Apple's, unless a DEBUG build was launched
-    /// with `-type-scale a` or `-type-scale b`.
+    /// The scale the app draws: B, unless a DEBUG build was launched with
+    /// `-type-scale a` or `-type-scale apple`.
     public static let current: AppTypeScale = {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
@@ -46,7 +46,7 @@ public enum AppTypeScale: String, Sendable, CaseIterable {
             return scale
         }
         #endif
-        return .apple
+        return .moderate
     }()
 
     /// `style`'s size at the default (Large) text size on this scale; nil on

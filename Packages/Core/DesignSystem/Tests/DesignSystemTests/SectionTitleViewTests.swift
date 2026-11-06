@@ -67,7 +67,7 @@ struct SectionTitleViewTests {
         #expect(colors.chevron == .secondaryLabel)
         #expect(colors.count == colors.chevron)
         let font = bar.debugTitleFont
-        #expect(font?.pointSize == UIFont.preferredFont(forTextStyle: .title3).pointSize)
+        #expect(font?.pointSize == UIFont.appFont(forTextStyle: .title3).pointSize)
         #expect(font?.fontDescriptor.symbolicTraits.contains(.traitBold) == true)
     }
 
