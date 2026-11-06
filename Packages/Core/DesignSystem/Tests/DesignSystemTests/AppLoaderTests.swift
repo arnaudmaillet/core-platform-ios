@@ -192,43 +192,70 @@ struct AppLoaderTests {
         #expect(view.debugAnimationCount == 1, "the dots do not pulse")
     }
 
-    /// The pills wear their tones; each lead its tone toward the page,
-    /// resolved per appearance.
-    @Test func theLeadsResolvePerAppearance() {
-        #expect(Palette.loaderTones.count == 3)
-        let light = Palette.loaderLeadTones[0].resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
-        let dark = Palette.loaderLeadTones[0].resolvedColor(with: UITraitCollection(userInterfaceStyle: .dark))
-        #expect(light != dark, "the lead does not follow the appearance")
+    /// The icon's gradient (#2147, the owner 2026-11-05): one layer across
+    /// the mark, the theme's colours at the icon's opacities, in the icon's
+    /// direction — the pills its mask, so the left one is raspberry, the
+    /// middle violet, the right mint.
+    @Test func thePillsMaskTheIconsGradient() {
         let (view, window) = loader()
         defer { window.isHidden = true }
-        view.overrideUserInterfaceStyle = .dark
-        view.layoutIfNeeded()
-        let expected = dark.cgColor.components ?? []
-        let drawn = view.debugTones.leads[0]?.components ?? []
-        #expect(expected.count == drawn.count && zip(expected, drawn).allSatisfy { abs($0 - $1) < 0.01 },
-                "the lead did not re-resolve for dark: \(drawn) vs \(expected)")
-        #expect(view.debugTones.pills[0] == Palette.loaderTones[0].cgColor)
+        let theme = BrandTheme.current
+        let gradient = view.debugPillGradient
+        #expect(view.debugPillsMaskTheGradient, "the pills do not mask the gradient")
+        let drawn = (gradient.colors as? [CGColor] ?? []).map(Self.rgba)
+        let expected = zip(theme.signatureGradient, theme.signatureOpacities).map { ($0, $1) }
+        #expect(drawn.count == expected.count)
+        for (stop, (colour, opacity)) in zip(drawn, expected) {
+            #expect(stop.hex == colour)
+            #expect(abs(stop.alpha - opacity) < 0.01, "real alpha, as the icon: \(stop.alpha) vs \(opacity)")
+        }
+        #expect(gradient.locations?.map(\.doubleValue) == theme.signatureLocations)
+        #expect(gradient.startPoint == CGPoint(x: 0, y: 0.2) && gradient.endPoint == CGPoint(x: 1, y: 1.03),
+                "not the icon's direction (circle.svg)")
+        #expect(gradient.frame.size == view.bounds.size, "the gradient does not span the mark")
     }
 
-    /// RASPBERRY TO VIOLET, ONE SOLID COLOUR PER PILL (#2083, the owner
-    /// 2026-11-03): the primary on the left, the violet on the right, the
-    /// colour halfway between them in the middle — no mint, no gradient.
-    @Test func thePillsRunFromTheRaspberryToTheViolet() {
+    /// The leads: the same gradient, masked by them, at their share.
+    @Test func theLeadsMaskTheSameGradientAtTheirShare() {
         let (view, window) = loader()
         defer { window.isHidden = true }
-        let light = UITraitCollection(userInterfaceStyle: .light)
-        func hex(_ color: CGColor?) -> UInt32 {
-            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-            UIColor(cgColor: color ?? UIColor.clear.cgColor).getRed(&r, green: &g, blue: &b, alpha: &a)
-            return UInt32((r * 255).rounded()) << 16 | UInt32((g * 255).rounded()) << 8 | UInt32((b * 255).rounded())
+        #expect(view.debugLeadsMaskTheGradient)
+        #expect(view.debugLeadGradient.opacity == Palette.loaderLeadOpacity)
+        #expect((view.debugLeadGradient.colors as? [CGColor])?.map(Self.rgba).map(\.hex)
+                == (view.debugPillGradient.colors as? [CGColor])?.map(Self.rgba).map(\.hex))
+    }
+
+    /// Increased Contrast: the stops opaque, the mint deepened past 3:1 on
+    /// the light page — the icon's own mint is 1.3:1 there.
+    @Test func increasedContrastMakesTheStopsOpaqueAndTheMintLegible() {
+        let (view, window) = loader()
+        defer { window.isHidden = true }
+        view.traitOverrides.accessibilityContrast = .high
+        view.layoutIfNeeded()
+        let stops = (view.debugPillGradient.colors as? [CGColor] ?? []).map(Self.rgba)
+        #expect(stops.map(\.hex) == BrandTheme.current.loaderContrastStops)
+        #expect(stops.allSatisfy { $0.alpha > 0.99 }, "not opaque")
+        let mint = stops.last?.hex ?? 0
+        #expect(Self.contrast(mint, 0xF2F2F7) >= 3, "the mint is \(Self.contrast(mint, 0xF2F2F7)):1 on the light page")
+    }
+
+    private static func rgba(_ color: CGColor) -> (hex: UInt32, alpha: Double) {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(cgColor: color).getRed(&r, green: &g, blue: &b, alpha: &a)
+        let hex = UInt32((r * 255).rounded()) << 16 | UInt32((g * 255).rounded()) << 8 | UInt32((b * 255).rounded())
+        return (hex, Double(a))
+    }
+
+    private static func contrast(_ a: UInt32, _ b: UInt32) -> Double {
+        func channel(_ value: UInt32) -> Double {
+            let c = Double(value) / 255
+            return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
         }
-        #expect(view.debugTones.pills.map(hex) == [0xEC1C75, 0xCF3DC7, 0x9B5CFF])
-        #expect(hex(view.debugTones.pills[0]) == hex(Palette.tint.resolvedColor(with: light).cgColor), "the left pill is not the primary")
-        // The middle is between its neighbours on every channel.
-        let channels = view.debugTones.pills.map { hex($0) }.map { [($0 >> 16) & 0xFF, ($0 >> 8) & 0xFF, $0 & 0xFF] }
-        for c in 0..<3 {
-            #expect((min(channels[0][c], channels[2][c])...max(channels[0][c], channels[2][c])).contains(channels[1][c]))
+        func luminance(_ hex: UInt32) -> Double {
+            0.2126 * channel((hex >> 16) & 0xFF) + 0.7152 * channel((hex >> 8) & 0xFF) + 0.0722 * channel(hex & 0xFF)
         }
+        let la = luminance(a), lb = luminance(b)
+        return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
     }
 
     // MARK: - Pull-to-refresh (#1329 slice 2)

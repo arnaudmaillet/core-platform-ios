@@ -92,6 +92,11 @@ struct BrandAssetsGuardTests {
     @Test func theIconWearsTheThemesGradient() throws {
         let svg = String(decoding: try Self.read("App/Resources/AppIcon.icon/Assets/circle.svg"), as: UTF8.self)
         #expect(Self.svgStops(svg) == Self.theme.iconStops.map(Self.hex))
+        // Their opacities too (#2147): the loader wears the signature at
+        // them, so the icon changing fails here until the theme follows.
+        let opacities = svg.components(separatedBy: "stop-opacity=\"").dropFirst()
+            .compactMap { Double($0.prefix { $0 != "\"" }) }
+        #expect(opacities == Self.theme.signatureOpacities)
         struct Icon: Decodable {
             struct Group: Decodable { let layers: [Layer] }
             struct Layer: Decodable {
