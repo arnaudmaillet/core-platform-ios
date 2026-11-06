@@ -63,16 +63,28 @@ final class SnapAuthorIdentityView: UIView {
     /// The widest the pill is drawn: the budget, under the pill's own cap.
     var widthCap: CGFloat { pill.widthCap }
 
-    /// Called when the identity is tapped, with the shown author.
+    /// Called when the identity is tapped, with the shown author: the card.
     var onAuthorTapped: ((ProfileID) -> Void)?
-    /// Called when the identity is held, with the shown author — the post
-    /// screen pushes the profile while a tap opens its card (#1669). Opt-in:
-    /// nil, the pill takes no long press (the thread, the composer).
+    /// Called when the identity is held, with the shown author: the profile,
+    /// pushed (#1669). A person beside content (#2145): every host gives one.
     var onAuthorLongPressed: ((ProfileID) -> Void)? {
-        didSet { longPress.isEnabled = onAuthorLongPressed != nil }
+        didSet {
+            opening.openProfile = onAuthorLongPressed == nil ? nil : { [weak self] in
+                guard let self, let authorID else { return }
+                onAuthorLongPressed?(authorID)
+            }
+        }
     }
-    /// The hold that pushes the profile; a recognised hold fails the tap.
-    private let longPress = UILongPressGestureRecognizer()
+    /// The tap and the hold on the pill: the shared contract (#2145).
+    private lazy var opening: PersonOpening = {
+        let opening = PersonOpening(on: self)
+        opening.hasPerson = { [weak self] in self?.authorID != nil }
+        opening.openCard = { [weak self] in
+            guard let self, let authorID else { return }
+            onAuthorTapped?(authorID)
+        }
+        return opening
+    }()
     /// Called when the "+" is tapped, with the shown author. Never for a
     /// state mark (`FollowBadge`): those take no tap of their own.
     var onFollowTapped: ((ProfileID) -> Void)?
@@ -126,37 +138,19 @@ final class SnapAuthorIdentityView: UIView {
             self.onFollowTapped?(id)
         }
         pill.pin(to: self)
-        // The tap is the HOST's, not the pill's: a swap fades the pill to
-        // nothing at its midpoint, and a faded view takes no touch.
-        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(authorTapped)))
-        longPress.minimumPressDuration = 0.4
-        longPress.addTarget(self, action: #selector(authorHeld(_:)))
-        longPress.isEnabled = false
-        addGestureRecognizer(longPress)
-    }
-
-    @objc private func authorTapped() {
-        guard let authorID else { return }
-        onAuthorTapped?(authorID)
-    }
-
-    @objc private func authorHeld(_ recognizer: UILongPressGestureRecognizer) {
-        guard recognizer.state == .began else { return }
-        authorLongPressed()
-    }
-
-    /// The hold's answer: `held`, then the callback with the shown author
-    /// (`PersonHold`).
-    private func authorLongPressed() {
-        guard let authorID, let onAuthorLongPressed else { return }
-        PersonHold.recognised { onAuthorLongPressed(authorID) }
+        // The tap and the hold are the HOST's, not the pill's: a swap fades
+        // the pill to nothing at its midpoint, and a faded view takes no
+        // touch. The shared contract owns both (#2145).
+        _ = opening
     }
 
     #if DEBUG
     /// Whether the pill takes a long press now. Tests.
-    var debugTakesLongPress: Bool { longPress.isEnabled }
+    var debugTakesLongPress: Bool { opening.debugTakesHold }
     /// A hold, as a finger's would land. Tests.
-    func debugLongPress() { authorLongPressed() }
+    func debugLongPress() { opening.debugHold() }
+    /// A tap, as a finger's would land. Tests.
+    func debugTap() { opening.debugTap() }
     #endif
 
     @available(*, unavailable)

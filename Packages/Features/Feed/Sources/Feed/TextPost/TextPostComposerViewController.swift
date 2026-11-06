@@ -537,11 +537,15 @@ final class TextPostComposerViewController: UIViewController {
         authorPill.setFollowBadge(.none)
         authorPill.setOverMedia(false)
         authorPill.setAuthor(model, pipeline: imagePipeline)
-        authorPill.onAuthorTapped = { [weak self] id in
+        // The viewer's own pill (#2145): the card resolves to the profile,
+        // so a tap and a hold both push it.
+        let openOwnProfile: (ProfileID) -> Void = { [weak self] id in
             self?.router?.route(to: .profile(
                 id, stub: ProfileIdentityStub(handle: author.handle, displayName: author.displayName)
             ))
         }
+        authorPill.onAuthorTapped = openOwnProfile
+        authorPill.onAuthorLongPressed = openOwnProfile
         var trailing = [BarItems.container(id: ItemID.authorPill, view: authorPill)]
         if let walletItem = makeWalletItem() {
             trailing += [.fixedSpace(Spacing.sm), walletItem]
