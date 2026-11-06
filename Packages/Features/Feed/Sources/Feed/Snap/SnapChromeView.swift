@@ -352,10 +352,11 @@ final class SnapChromeView: UIView {
     private func installAuthorRow() {
         authorRow.setOverMedia(true)
         authorRow.isHidden = true
-        authorRow.onTap = { [weak self] in self?.onAuthorTapped?() }
         authorRow.onFollowTapped = { [weak self] in self?.onAuthorFollowTapped?() }
-        let hold = UILongPressGestureRecognizer(target: self, action: #selector(authorRowHeld(_:)))
-        authorRow.addGestureRecognizer(hold)
+        // A person beside content (#2145): a tap opens the card, a hold the
+        // profile — the shared contract owns both.
+        authorRowOpening.openCard = { [weak self] in self?.onAuthorTapped?() }
+        authorRowOpening.openProfile = { [weak self] in self?.onAuthorLongPressed?() }
         authorRow.constrain(in: self) { parent in
             // The face on the caption's text axis.
             authorRow.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg - 2)
@@ -390,19 +391,14 @@ final class SnapChromeView: UIView {
     var debugCaptionLabel: UIView { captionLabel }
     var debugAuthorRow: UIView { authorRow }
     /// A hold on the author row, as a finger's would land.
-    func debugHoldAuthorRow() { authorRowLongPressed() }
+    func debugHoldAuthorRow() { authorRowOpening.debugHold() }
+    /// A tap on the author row. Tests.
+    func debugTapAuthorRow() { authorRowOpening.debugTap() }
     #endif
 
-    @objc private func authorRowHeld(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began else { return }
-        authorRowLongPressed()
-    }
+    /// The row's tap and hold (#2145).
+    private lazy var authorRowOpening = PersonOpening(on: authorRow)
 
-    /// The row's hold opens the profile, felt as the pill's is (`PersonHold`).
-    private func authorRowLongPressed() {
-        guard let onAuthorLongPressed else { return }
-        PersonHold.recognised { onAuthorLongPressed() }
-    }
 
     /// The stream stands on the author row while it shows, on the caption
     /// otherwise; the danmaku stands on the author row in the stream's place
