@@ -180,12 +180,26 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         }
         capTop = window.bounds.height - resting - bottomInset
         content.onDetachedEditingChanged = { [weak self] editing in self?.holdDetent(editing) }
-        // ⚠️ COLLAPSED, THE SHEET RIDES THE KEYS (the owner, 2026-11-04): its
-        // bar edits where it stands and UIKit raises the sheet, its rows and
-        // the media with it. Expanded, the rows stay and the keys come to a
-        // bar of their own over them.
+        // ⚠️ THE FIELD EXPANDS THE SHEET (#2153, the owner 2026-11-05). From
+        // collapsed, writing moved the sheet twice: up with the keys, then
+        // back down without them. Now a way into the field (a tap, Reply, a
+        // mention) expands it first, when it can, and the keys come to the
+        // detached bar over the rows: one movement, and the sheet stays
+        // expanded when they go (`holdDetent`). Asked here because this is
+        // read as the keys are about to come: expanded any later, the keys
+        // would go to the sheet's own bar and UIKit would raise it first.
+        // With nothing to expand to, the collapsed sheet still rides the keys
+        // (the owner, 2026-11-04).
         content.detachesKeyboard = { [weak self] in
-            self?.sheet.sheetPresentationController?.selectedDetentIdentifier == Self.expandedDetent
+            guard let self, let controller = sheet.sheetPresentationController else { return false }
+            let route = Self.fieldRoute(
+                selected: controller.selectedDetentIdentifier,
+                offersExpanded: controller.detents.contains { $0.identifier == Self.expandedDetent }
+            )
+            if route.expands {
+                controller.animateChanges { controller.selectedDetentIdentifier = Self.expandedDetent }
+            }
+            return route.detached
         }
         content.onDismissed = { [weak self] in self?.end() }
         content.onClose = { [weak self] in self?.close() }
@@ -998,6 +1012,17 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
             controller.detents = detents(expandable: isExpandable)
             controller.largestUndimmedDetentIdentifier = Self.expandedDetent
         }
+    }
+
+    /// What a way into the field does (#2153): from expanded, the keys go to
+    /// the detached bar; from collapsed with an expanded detent offered, the
+    /// sheet expands and they go there too; with none, the sheet's own bar
+    /// edits and the sheet rides the keys. Pure.
+    static func fieldRoute(
+        selected: UISheetPresentationController.Detent.Identifier?, offersExpanded: Bool
+    ) -> (detached: Bool, expands: Bool) {
+        if selected == expandedDetent { return (true, false) }
+        return offersExpanded ? (true, true) : (false, false)
     }
 
     /// The collapsed detent (`present`), kept to rebuild the list with.
