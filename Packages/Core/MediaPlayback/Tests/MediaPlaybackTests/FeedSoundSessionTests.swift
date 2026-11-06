@@ -171,4 +171,76 @@ struct FeedSoundSessionTests {
         controller.feedSound = FeedSoundSession(otherAudioPlaying: { false }, observe: { _ in nil }, tick: { _ in nil })
         #expect(AVAudioSession.sharedInstance().category == .ambient)
     }
+
+    // MARK: - Heard before any key (#483)
+
+    /// Counts announcements; posted synchronously on this thread.
+    private final class Counter: @unchecked Sendable {
+        private(set) var value = 0
+        func add() { value += 1 }
+    }
+
+    /// A ringing phone hears the `.ambient` feed before any volume key, so
+    /// Background Play and Picture in Picture may keep it: the ringer is read
+    /// for a screen that asks (`readsRinger`), at once and then each tick.
+    @Test func aRingingPhoneHearsTheFeedBeforeAnyKey() {
+        let probe = Probe()
+        let sound = session(probe)
+        let feed = NSObject()
+        sound.setWatching(true, by: feed, readsRinger: true)
+        #expect(probe.ringerChecks == 1, "read at once: the app may leave before the first tick")
+        #expect(sound.isCheckingRinger)
+        #expect(!sound.isTurnedOn)
+        #expect(sound.isHeard)
+    }
+
+    /// On silent, nothing is heard: `.playback` would make the feed heard for
+    /// the first time through the switch.
+    @Test func aSilentPhoneDoesNotHearTheFeed() {
+        let probe = Probe()
+        probe.silent = true
+        let sound = session(probe)
+        sound.setWatching(true, by: NSObject(), readsRinger: true)
+        #expect(!sound.isHeard)
+    }
+
+    /// The switch moving while the sound follows the device is announced, so
+    /// a readied floating window lets go.
+    @Test func theSwitchMovingIsAnnounced() {
+        let probe = Probe()
+        let sound = session(probe)
+        let feed = NSObject()
+        let announced = Counter()
+        let token = NotificationCenter.default.addObserver(
+            forName: FeedSoundSession.audibilityDidChange, object: sound, queue: nil
+        ) { _ in announced.add() }
+        defer { NotificationCenter.default.removeObserver(token) }
+        sound.setWatching(true, by: feed, readsRinger: true)
+        #expect(announced.value == 1 && sound.isHeard)
+        probe.silent = true
+        sound.checkRinger()
+        #expect(announced.value == 2 && !sound.isHeard)
+        sound.checkRinger()
+        #expect(announced.value == 2, "no change, no announcement")
+    }
+
+    /// Never over another app's audio: `.playback` would stop it.
+    @Test func anotherAppsAudioIsNeverInterrupted() {
+        let probe = Probe()
+        let sound = session(probe)
+        sound.setWatching(true, by: NSObject(), readsRinger: true)
+        probe.otherAudio = true
+        #expect(!sound.isHeard)
+    }
+
+    /// No screen asking (both settings off): the ringer is not read before a
+    /// key, as before #483.
+    @Test func theRingerIsReadOnlyForAScreenThatAsks() {
+        let probe = Probe()
+        let sound = session(probe)
+        sound.setWatching(true, by: NSObject())
+        #expect(probe.ringerChecks == 0)
+        #expect(!sound.isCheckingRinger)
+        #expect(!sound.isHeard)
+    }
 }

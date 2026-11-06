@@ -40,13 +40,15 @@ extension VideoPlaybackController {
         if let active = pictureInPicture, active.controller.isPictureInPictureActive {
             return active.surface === surface
         }
-        guard let surface, watchedPlayer(in: surface) != nil, let source = surface.pictureInPictureSource else {
+        guard let surface, let player = watchedPlayer(in: surface), let controller = surface.readiedPictureInPicture() else {
+            pictureInPicture?.disarm()
             pictureInPicture = nil
             settleAudioSession()
             return false
         }
-        if let current = pictureInPicture, current.surface === surface { return true }
-        let session = PictureInPictureSession(source: source, surface: surface, playback: self)
+        if let current = pictureInPicture, current.surface === surface, current.player === player { return true }
+        pictureInPicture?.disarm()
+        let session = PictureInPictureSession(controller: controller, surface: surface, player: player, playback: self)
         pictureInPicture = session
         PictureInPicturePlayback.shared.controller = self
         refreshPictureInPictureState()
@@ -67,6 +69,10 @@ extension VideoPlaybackController {
         guard let session = pictureInPicture, session.controller.isPictureInPictureActive else { return }
         session.controller.stopPictureInPicture()
     }
+
+    /// Whether the window that just closed handed the clip back to the app
+    /// (its "back to the app" button) rather than closing on its own.
+    public var pictureInPictureClosedIntoApp: Bool { pictureInPicture?.closedIntoApp ?? false }
 
     /// Called whenever the window opens or closes. `true` when it opened.
     public var onPictureInPictureChange: ((Bool) -> Void)? {
@@ -116,24 +122,68 @@ extension VideoPlaybackController {
     }
 }
 
-/// One readied window: the system's controller and the surface it lifts.
+extension VideoRenderView {
+    /// This surface's controller, made once (`pictureInPictureController`);
+    /// nil when its layer cannot float.
+    func readiedPictureInPicture() -> AVPictureInPictureController? {
+        if let controller = pictureInPictureController { return controller }
+        guard let source = pictureInPictureSource else { return nil }
+        let controller = AVPictureInPictureController(contentSource: source)
+        pictureInPictureController = controller
+        return controller
+    }
+}
+
+/// One readied window: the surface's controller, while it may start on its
+/// own, and the player it shows.
 @MainActor
 final class PictureInPictureSession: NSObject, AVPictureInPictureControllerDelegate {
     let controller: AVPictureInPictureController
     weak var surface: VideoRenderView?
+    weak var player: AVPlayer?
     private weak var playback: VideoPlaybackController?
+    /// ⚠️ THE WINDOW STARTS ONLY FOR A CLIP IT SEES PLAYING. Its "paused?" is
+    /// answered from a cache (`PictureInPicturePlayback`), filled when the
+    /// clip was readied — often before its player had started, so the cache
+    /// said "paused" for good and the system never opened the window (the
+    /// owner's device, 2026-11-06). The player's every start and stop is
+    /// passed on now.
+    private var statusObservation: NSKeyValueObservation?
 
-    init(source: AVPictureInPictureController.ContentSource, surface: VideoRenderView, playback: VideoPlaybackController) {
-        controller = AVPictureInPictureController(contentSource: source)
+    init(controller: AVPictureInPictureController, surface: VideoRenderView, player: AVPlayer, playback: VideoPlaybackController) {
+        self.controller = controller
         self.surface = surface
+        self.player = player
         self.playback = playback
         super.init()
         controller.delegate = self
         controller.canStartPictureInPictureAutomaticallyFromInline = true
+        statusObservation = player.observe(\.timeControlStatus) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                guard let self, let owner = self.playback, owner.pictureInPicture === self else { return }
+                owner.refreshPictureInPictureState()
+            }
+        }
     }
 
+    /// Another clip is readied, or none: this surface's controller stays
+    /// with it (`VideoRenderView.pictureInPictureController`), and no longer
+    /// starts on its own.
+    func disarm() {
+        statusObservation = nil
+        controller.canStartPictureInPictureAutomaticallyFromInline = false
+        if controller.delegate === self { controller.delegate = nil }
+    }
+
+    /// The window is closing back into the app (`restoreUserInterface…`):
+    /// the page it came from takes the clip over, playing, as it is.
+    private(set) var closedIntoApp = false
+
     nonisolated func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        Task { @MainActor [weak self] in self?.playback?.pictureInPictureDidChange(active: true) }
+        Task { @MainActor [weak self] in
+            self?.closedIntoApp = false
+            self?.playback?.pictureInPictureDidChange(active: true)
+        }
     }
 
     nonisolated func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
@@ -153,6 +203,7 @@ final class PictureInPictureSession: NSObject, AVPictureInPictureControllerDeleg
         _ pictureInPictureController: AVPictureInPictureController,
         restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void
     ) {
+        Task { @MainActor [weak self] in self?.closedIntoApp = true }
         completionHandler(true)
     }
 }

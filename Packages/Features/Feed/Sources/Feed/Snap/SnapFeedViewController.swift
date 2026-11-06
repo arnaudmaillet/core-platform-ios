@@ -2859,9 +2859,20 @@ final class SnapFeedViewController: UIViewController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.setForeground(true) }
         })
-        // The sound turned on, or off by the silent switch (#1931): Background
-        // Play and Picture in Picture follow it.
-        for name in [FeedSoundSession.didTurnOn, FeedSoundSession.didTurnOff] {
+        // ⚠️ THE FLOATING WINDOW IS CLOSED ONCE THE APP IS ACTIVE (#483). Asked
+        // as the app only enters the foreground (the app's icon tapped), the
+        // system kept the window up over the app, and the page showed its
+        // "playing in Picture in Picture" placeholder (the owner's device,
+        // 2026-11-06).
+        appObservers.add(center.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.videoPlayback?.stopPictureInPicture() }
+        })
+        // The sound turned on, or off by the silent switch (#1931), or the
+        // switch moved while it follows the device (#483): Background Play and
+        // Picture in Picture follow it.
+        for name in [FeedSoundSession.didTurnOn, FeedSoundSession.didTurnOff, FeedSoundSession.audibilityDidChange] {
             appObservers.add(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refreshAudibleSurface() }
             })
@@ -2922,6 +2933,12 @@ final class SnapFeedViewController: UIViewController {
     private func pictureInPictureEnded() {
         guard isAwaitingPictureInPicture else { return }
         isAwaitingPictureInPicture = false
+        // ⚠️ CLOSED INTO THE APP, NOT AWAY FROM IT. The window's "back to the
+        // app" closes it a moment before the app is in the foreground: read
+        // as "closed while away", the page paused, its picture went black and
+        // the clip came back from elsewhere (the owner's device, 2026-11-06).
+        // The page keeps playing; the foreground takes over.
+        if videoPlayback?.pictureInPictureClosedIntoApp == true { return }
         guard !isPlayingInBackground, UIApplication.shared.applicationState == .background else { return }
         isForeground = false
         refreshVisibility()
@@ -2933,10 +2950,10 @@ final class SnapFeedViewController: UIViewController {
         guard let videoPlayback, !isAwaitingPictureInPicture else { return }
         var surface: VideoRenderView?
         // A single clip floats, never a carousel's muted one (#1849); and only
-        // once the viewer turned the sound on (#1931, the owner 2026-10-30): a
-        // readied window makes the session `.playback`, which a phone on
-        // silent would hear before any volume key.
-        if MediaPlaybackPolicy.floatsInPictureInPicture, videoPlayback.feedSound.isTurnedOn,
+        // while the viewer hears the feed (#1931, #483): a readied window
+        // makes the session `.playback`, which a phone on silent would hear
+        // before any volume key. A ringing phone hears it already.
+        if MediaPlaybackPolicy.floatsInPictureInPicture, videoPlayback.feedSound.isHeard,
            isOnScreen, isForeground, let owner = playbackOwner,
            ownerModel.map(SnapSoundState.clipIsHeard(in:)) ?? true,
            let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
@@ -2964,11 +2981,12 @@ final class SnapFeedViewController: UIViewController {
 
     /// Background Play (#483): keeps the clip this screen is being heard
     /// through playing off screen — only when the viewer turned it on, the
-    /// sound is on (#1931: a phone on silent never hears it through the
-    /// background), and this screen (not one under it) owns the sound.
+    /// feed is heard (the sound turned on, or a ringing phone: #1931, a phone
+    /// on silent never hears it through the background), and this screen (not
+    /// one under it) owns the sound.
     private func continueInBackground() -> Bool {
         guard MediaPlaybackPolicy.playsInBackground, isOnScreen, !isAudioYielded,
-              let videoPlayback, videoPlayback.feedSound.isTurnedOn, let surface = ownAudibleSurface,
+              let videoPlayback, videoPlayback.feedSound.isHeard, let surface = ownAudibleSurface,
               surface === videoPlayback.currentAudibleSurface
         else { return false }
         let model = playbackOwner.flatMap { $0 < orderedIDs.count ? modelsByID[orderedIDs[$0]] : nil }
@@ -5266,7 +5284,8 @@ final class SnapFeedViewController: UIViewController {
         // (#1849, `refreshSong`).
         // A volume key turns the sound on while this screen owns it (#1931).
         videoPlayback.feedSound.setWatching(
-            isOnScreen && isForeground && !isAudioYielded && !LaunchTimeline.curtainIsUp, by: self
+            isOnScreen && isForeground && !isAudioYielded && !LaunchTimeline.curtainIsUp, by: self,
+            readsRinger: MediaPlaybackPolicy.playsInBackground || MediaPlaybackPolicy.floatsInPictureInPicture
         )
         if isOnScreen, isForeground, !isAudioYielded, !LaunchTimeline.curtainIsUp,
            let owner = playbackOwner, ownerModel.map(SnapSoundState.clipIsHeard(in:)) ?? true,
