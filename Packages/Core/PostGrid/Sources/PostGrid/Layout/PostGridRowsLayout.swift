@@ -20,12 +20,11 @@ public enum PostGridRowsLayout {
     public static let sideMargin: CGFloat = Spacing.lg
 
     /// `isTitled(section)` puts the group's title over it; `endsGroup(section)`
-    /// spends the section gap after it; `trailingSwipe(indexPath)` is the
-    /// row's swipe, nil for none.
+    /// spends the section gap after it. No swipe on a row (the owner,
+    /// 2026-11-07): its actions are in its long press's menu.
     public static func layout(
         isTitled: @escaping @MainActor (Int) -> Bool,
-        endsGroup: @escaping @MainActor (Int) -> Bool,
-        trailingSwipe: @escaping @MainActor (IndexPath) -> UISwipeActionsConfiguration?
+        endsGroup: @escaping @MainActor (Int) -> Bool
     ) -> UICollectionViewCompositionalLayout {
         UICollectionViewCompositionalLayout { index, environment in
             var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
@@ -33,9 +32,6 @@ public enum PostGridRowsLayout {
             configuration.backgroundColor = .clear
             configuration.headerMode = .none
             configuration.footerMode = .none
-            configuration.trailingSwipeActionsConfigurationProvider = { indexPath in
-                MainActor.assumeIsolated { trailingSwipe(indexPath) }
-            }
             let section = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
             section.interGroupSpacing = rowSpacing
             section.contentInsets = NSDirectionalEdgeInsets(

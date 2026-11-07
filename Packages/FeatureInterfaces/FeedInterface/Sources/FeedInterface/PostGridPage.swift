@@ -65,19 +65,16 @@ public struct PostGridPageSection: Equatable, Sendable {
     }
 }
 
-/// A row's trailing swipe on a Rows page — the list's own destructive swipe
-/// (History's "Remove from History", #2170). Its title also names the row's
-/// VoiceOver action, which stands in for the swipe.
-public struct PostGridRowSwipeAction {
+/// A Rows page's action on a row, offered to VoiceOver as the row's custom
+/// action — History's "Remove from History", which the long press's menu
+/// also leads with (#2170). No swipe: the owner kept it in the menu alone
+/// (2026-11-07).
+public struct PostGridRowAction {
     public let title: String
-    /// The glyph beside the title, an SF Symbol's name; nil for the title
-    /// alone.
-    public let symbolName: String?
     public let perform: @MainActor (GalleryPost) -> Void
 
-    public init(title: String, symbolName: String? = nil, perform: @escaping @MainActor (GalleryPost) -> Void) {
+    public init(title: String, perform: @escaping @MainActor (GalleryPost) -> Void) {
         self.title = title
-        self.symbolName = symbolName
         self.perform = perform
     }
 }
@@ -147,8 +144,8 @@ public protocol PostGridPage: UIView {
     /// opens the profile CARD (#2145); the hold is `onAuthorTapped`'s
     /// profile. Nil: the tap is `onAuthorTapped` too.
     var onAuthorCardTapped: ((GalleryPost) -> Void)? { get set }
-    /// A Rows page's trailing swipe on a row (#2170); nil for none.
-    var rowSwipeAction: PostGridRowSwipeAction? { get set }
+    /// A Rows page's row action for VoiceOver (#2170); nil for none.
+    var rowAccessibilityAction: PostGridRowAction? { get set }
     /// What a row's "..." offers — nothing hides the control.
     var postMenuActions: ((PostGridAuthorMenuContext) -> [PostCardMenuAction])? { get set }
     /// Pull-to-refresh, and a status's action.
@@ -229,7 +226,7 @@ public extension PostGridPage {
         set {}
     }
 
-    var rowSwipeAction: PostGridRowSwipeAction? {
+    var rowAccessibilityAction: PostGridRowAction? {
         get { nil }
         set {}
     }

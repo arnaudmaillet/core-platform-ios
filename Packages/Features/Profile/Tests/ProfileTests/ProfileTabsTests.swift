@@ -359,19 +359,33 @@ struct ProfileHistoryDaysTests {
         ]))
     }
 
-    /// History's page swipes a row out of the history; no other page swipes.
-    @Test func onlyHistorysRowsSwipe() throws {
+    /// History's page offers VoiceOver "Remove from History"; no other
+    /// page does. No row swipes (the owner, 2026-11-07).
+    @Test func onlyHistorysRowsOfferRemoval() throws {
         let pager = ProfileGalleryPagerView(
             tabs: [.format(.activity), .saved, .history], makePage: TestGridPages.pageMaker()
         )
         var removed: [PostID] = []
         pager.onRemoveFromHistory = { removed.append($0.id) }
         let history = try #require(pager.builtPage(for: .history))
-        let action = try #require(history.rowSwipeAction)
+        let action = try #require(history.rowAccessibilityAction)
         #expect(action.title == "Remove from History")
         action.perform(post("x"))
         #expect(removed == [PostID("x")])
-        #expect(pager.builtPage(for: .saved)?.rowSwipeAction == nil)
+        #expect(pager.builtPage(for: .saved)?.rowAccessibilityAction == nil)
+    }
+
+    /// A post opened from History holds the page; one opened elsewhere
+    /// does not.
+    @Test func openingFromHistoryHoldsIt() throws {
+        let pager = ProfileGalleryPagerView(
+            tabs: [.format(.activity), .history], makePage: TestGridPages.pageMaker()
+        )
+        var holds = 0
+        pager.onHistoryPostOpening = { holds += 1 }
+        try #require(pager.builtPage(for: .history)).onPostTapped?(post("a"), [], false)
+        try #require(pager.builtPage(for: .format(.activity))).onPostTapped?(post("b"), [], false)
+        #expect(holds == 1)
     }
 
     private actor NoProfiles: ProfileProviding {
@@ -436,5 +450,68 @@ struct ProfileHistoryDaysTests {
         } else {
             Issue.record("History lost its posts")
         }
+    }
+
+    /// History holds still while the viewer is on it (the owner,
+    /// 2026-11-07): views recorded meanwhile wait, a removal applies, and
+    /// leaving takes them all in.
+    @Test func historyHoldsStillUntilTheViewerLeavesIt() async throws {
+        let name = "history-hold-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let clock = Clock(Self.now.addingTimeInterval(-4 * 3_600))
+        let store = PostViewHistoryStore(
+            defaults: defaults, scope: StorageScope(owner: .member(account: "A", profile: "P")), now: { clock.date }
+        )
+        for id in ["a", "b", "c"] {
+            clock.date.addTimeInterval(600)
+            store.record(id)
+        }
+        let viewModel = ProfileViewModel(
+            repository: NoProfiles(), gallery: HistoryGallery(["a", "b", "c", "d"].map(post)), viewHistory: store
+        )
+        let now = Self.now
+        viewModel.now = { now }
+        var latest: ProfileViewModel.GallerySnapshot?
+        viewModel.onGalleryChange = { latest = $0 }
+        func shown() -> [String] {
+            if case .content(let posts) = latest?.history { posts.map(\.id.rawValue) } else { [] }
+        }
+        func settle(on expected: [String]) async throws {
+            for _ in 0..<200 where shown() != expected { try await Task.sleep(for: .milliseconds(10)) }
+            #expect(shown() == expected)
+        }
+        viewModel.loadHistory()
+        try await settle(on: ["c", "b", "a"])
+
+        // A post opened from History, then two more viewed in its feed.
+        viewModel.holdHistory()
+        clock.date = Self.now
+        store.record("a")
+        store.record("d")
+        viewModel.loadHistory()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(shown() == ["c", "b", "a"], "History moved while the viewer was on it")
+        #expect(viewModel.holdsHistory)
+
+        // A removal still applies.
+        viewModel.removeFromHistory(PostID("b"))
+        try await settle(on: ["c", "a"])
+
+        // Leaving takes in what was viewed.
+        viewModel.releaseHistory()
+        try await settle(on: ["d", "a", "c"])
+        #expect(!viewModel.holdsHistory)
+
+        // A pull on the profile does too, held or not.
+        viewModel.holdHistory()
+        clock.date.addTimeInterval(60)
+        store.record("c")
+        viewModel.loadHistory()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(shown() == ["d", "a", "c"])
+        viewModel.refreshHistory()
+        try await settle(on: ["c", "d", "a"])
+        #expect(!viewModel.holdsHistory)
     }
 }

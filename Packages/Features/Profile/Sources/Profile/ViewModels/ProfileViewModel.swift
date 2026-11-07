@@ -1767,8 +1767,9 @@ public final class ProfileViewModel {
     func loadHistory() {
         guard let viewHistory, let gallery else { return }
         // Undated views (recorded before the times were kept) last, under
-        // "Earlier".
-        let pile = viewHistory.views
+        // "Earlier". While History is held (`holdHistory`), the pile it
+        // showed, less what has left the store since.
+        let pile = Self.heldOrLive(held: heldHistory, live: viewHistory.views)
         let views = pile.filter { $0.viewedAt != nil } + pile.filter { $0.viewedAt == nil }
         let ids = views.map(\.postID)
         // The day is part of what is shown: "Today" is yesterday's by now.
@@ -1803,6 +1804,47 @@ public final class ProfileViewModel {
             }
             renderGallery()
         }
+    }
+
+    /// ⚠️ **HISTORY HOLDS STILL WHILE THE VIEWER IS ON IT** (the owner,
+    /// 2026-11-07). A post opened from History, and every post paged to
+    /// after it, is recorded at once (`PostViewHistoryStore`), but the page
+    /// keeps the posts it showed, in their order and with their times, until
+    /// the viewer leaves the History page or the profile (`releaseHistory`):
+    /// closing the post lands on the row it left, which has not moved to the
+    /// top. A removal (the menu, VoiceOver, Clear History) still applies.
+    private var heldHistory: [PostViewHistoryStore.View]?
+
+    /// Whether History is held now.
+    var holdsHistory: Bool { heldHistory != nil }
+
+    /// Holds History as it is shown — the viewer opened a post from it.
+    func holdHistory() {
+        guard heldHistory == nil, let viewHistory else { return }
+        heldHistory = shownHistory?.views ?? viewHistory.views
+    }
+
+    /// The viewer left the History page: it takes in every view since.
+    func releaseHistory() {
+        guard heldHistory != nil else { return }
+        heldHistory = nil
+        loadHistory()
+    }
+
+    /// A pull on the profile (the owner, 2026-11-07): History takes in
+    /// every view since, held or not.
+    func refreshHistory() {
+        heldHistory = nil
+        loadHistory()
+    }
+
+    /// The pile History shows: `live`, or `held` less what left `live`.
+    static func heldOrLive(
+        held: [PostViewHistoryStore.View]?, live: [PostViewHistoryStore.View]
+    ) -> [PostViewHistoryStore.View] {
+        guard let held else { return live }
+        let kept = Set(live.map(\.postID))
+        return held.filter { kept.contains($0.postID) }
     }
 
     /// Takes one post out of the history (its menu's "Remove from History").
