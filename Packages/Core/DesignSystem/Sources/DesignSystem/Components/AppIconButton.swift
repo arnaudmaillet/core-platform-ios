@@ -301,7 +301,7 @@ open class AppIconButton: AppControl {
             switch ground {
             case .prominent: return .quiet
             case .quiet: return .prominent
-            case .tinted, .material: return ground
+            case .tinted, .material, .monochrome: return ground
             }
         }
     }
@@ -325,6 +325,13 @@ open class AppIconButton: AppControl {
             config = .plain()
             config.baseForegroundColor = .label
             config.background.backgroundColor = .clear
+        case .monochrome?:
+            config = .filled()
+            // Black and white by appearance, never the semantic background:
+            // inside a sheet that resolves to its elevated grey, and the
+            // words vanished on the dark white (seen on the simulator).
+            config.baseBackgroundColor = AppControl.monochromeFill
+            config.baseForegroundColor = AppControl.monochromeInk
         case nil:
             config = .plain()
             config.baseForegroundColor = .label

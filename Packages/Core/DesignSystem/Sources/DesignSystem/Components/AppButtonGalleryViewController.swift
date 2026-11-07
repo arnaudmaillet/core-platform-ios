@@ -51,6 +51,7 @@ public final class AppButtonGalleryViewController: UIViewController {
         })
         buildMotion()
         buildAspects()
+        buildForm()
         buildStates()
     }
 
@@ -112,11 +113,47 @@ public final class AppButtonGalleryViewController: UIViewController {
         switch size {
         case .row: .title("Follow")
         case .header: AppButton.Content(title: "Message", symbol: "paperplane")
+        case .form: AppButton.Content(title: "Continue")
         }
     }
 
+    /// A stand-in logo in its own colours — a four-colour disc — for the
+    /// image icon (#2020): drawn as it is, never tinted, on every ground.
+    static let sampleLogo: UIImage = {
+        let side: CGFloat = 60
+        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in
+            let colours: [UIColor] = [.systemBlue, .systemGreen, .systemYellow, .systemRed]
+            let centre = CGPoint(x: side / 2, y: side / 2)
+            for (index, colour) in colours.enumerated() {
+                let start = CGFloat(index) * .pi / 2
+                let wedge = UIBezierPath()
+                wedge.move(to: centre)
+                wedge.addArc(withCenter: centre, radius: side / 2, startAngle: start, endAngle: start + .pi / 2, clockwise: true)
+                wedge.close()
+                colour.setFill()
+                wedge.fill()
+            }
+        }
+    }()
+
+    /// The form size, full width: a symbol and an image icon on each ground,
+    /// and a sign-in sheet's methods (#2020).
+    private func buildForm() {
+        header("Form")
+        let grounds: [AppButton.Ground] = [.prominent, .quiet, .tinted, .monochrome]
+        for ground in grounds {
+            column.addArrangedSubview(make(
+                .pill(ground), .form, AppButton.Content(title: "Continue with symbol", symbol: "envelope.fill"), shape: .card
+            ))
+            column.addArrangedSubview(make(
+                .pill(ground), .form, AppButton.Content(title: "Continue with image", icon: .image(Self.sampleLogo)), shape: .card
+            ))
+        }
+        row([make(.pill(.material), .form, AppButton.Content(title: "Over a photo", icon: .image(Self.sampleLogo)))], over: true)
+    }
+
     private func buildAspects() {
-        for size in AppButton.Size.allCases {
+        for size in AppButton.Size.allCases where size != .form {
             header("\(size)".capitalized)
             let sample = content(for: size)
             row([make(.pill(.prominent), size, sample), make(.pill(.quiet), size, sample), make(.pill(.tinted), size, sample)])

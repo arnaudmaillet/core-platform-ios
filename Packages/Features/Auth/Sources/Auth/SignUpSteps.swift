@@ -55,6 +55,10 @@ final class EmailEntryViewController: SignUpStepViewController {
 
     override var canContinue: Bool { address != nil }
 
+    #if DEBUG
+    var debugEmailField: UITextField { emailCell.textField }
+    #endif
+
     override func primaryTapped() {
         guard let address else { return }
         onContinue?(address)
