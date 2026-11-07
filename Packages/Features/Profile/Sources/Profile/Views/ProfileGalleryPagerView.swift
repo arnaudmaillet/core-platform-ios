@@ -38,6 +38,11 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
     var onRetry: (() -> Void)?
     /// A row's author was tapped, on whichever page is showing.
     var onAuthorTapped: ((GalleryPost) -> Void)?
+    /// A History row's author tapped: the profile card (#2145); the hold
+    /// is `onAuthorTapped`.
+    var onAuthorCardTapped: ((GalleryPost) -> Void)?
+    /// A History row swiped away (#2170): out of the history.
+    var onRemoveFromHistory: ((GalleryPost) -> Void)?
     /// What a row's "..." offers — see `PostGridPage.postMenuActions`.
     /// The tab is the page's: History adds its own row (#1344).
     var authorMenuActions: ((PostGridAuthorMenuContext, ProfileTab) -> [PostCardMenuAction])?
@@ -83,6 +88,14 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
         page.onViewAllTapped = { [weak self] in self?.onViewAllTapped?() }
         page.onRefresh = { [weak self] in self?.onRetry?() }
         page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
+        page.onAuthorCardTapped = { [weak self] post in self?.onAuthorCardTapped?(post) }
+        // History's rows swipe out of the history (#2170) — proposed, not
+        // asked for: the owner may decline it.
+        if tab == .history {
+            page.rowSwipeAction = PostGridRowSwipeAction(
+                title: "Remove from History", symbolName: "clock.badge.xmark"
+            ) { [weak self] post in self?.onRemoveFromHistory?(post) }
+        }
         page.postMenuActions = { [weak self] context in
             self?.authorMenuActions?(context, tab) ?? []
         }
@@ -97,9 +110,10 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
     /// The shape a tab's page takes.
     static func style(for tab: ProfileTab) -> PostGridPageStyle {
         switch tab {
-        // History lays out like For You (the owner, 2026-10-17): cards,
-        // mosaic chunks and tiles.
-        case .format(.activity), .reposts, .tagged, .history: .discover
+        // One post per row, by day (the owner, 2026-11-07, #2170) — it laid
+        // out like For You since 2026-10-17.
+        case .history: .rows
+        case .format(.activity), .reposts, .tagged: .discover
         case .format(.media): .grid
         case .format(.short), .saved, .reactions: .list
         }
@@ -147,6 +161,7 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
         page.show(Self.pageState(
             snapshot.state(for: tab), for: tab,
             groups: tab == .history ? snapshot.historyGroups : [],
+            viewedAt: tab == .history ? snapshot.historyViewedAt : [:],
             remembered: screen.flatMap { presence.count(screen: $0, section: section) }
         ))
     }
@@ -155,7 +170,8 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
     /// for an empty page, the lock for a private profile, the failure.
     ///
     /// `groups` title the posts in order (History's days, #1344) — dropped
-    /// unless they cover the posts exactly.
+    /// unless they cover the posts exactly. `viewedAt` dates them (#2170):
+    /// each group carries its own posts' dates.
     ///
     /// A private profile's page with posts (Tagged) is drawn like any other:
     /// no lock line above them (#1445). The lock is the state of a page with
@@ -166,7 +182,7 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
     /// empty page — nothing, then the answer fades in.
     static func pageState(
         _ state: ProfileViewModel.GalleryPageState, for tab: ProfileTab, groups: [HistoryGroup] = [],
-        remembered: Int? = nil
+        viewedAt: [PostID: Date] = [:], remembered: Int? = nil
     ) -> PostGridPageState {
         switch state {
         case .loading:
@@ -178,7 +194,11 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
             var start = 0
             return .sections(groups.map { group in
                 defer { start += group.count }
-                return PostGridPageSection(title: group.title, posts: Array(posts[start..<start + group.count]))
+                let members = Array(posts[start..<start + group.count])
+                let ids = Set(members.map(\.id))
+                return PostGridPageSection(
+                    title: group.title, posts: members, viewedAt: viewedAt.filter { ids.contains($0.key) }
+                )
             })
         case .empty(let message):
             let copy = tab.emptyState

@@ -1,3 +1,4 @@
+import DesignSystem
 import FeedInterface
 import MediaPlayback
 import PostGrid
@@ -61,6 +62,11 @@ extension ForYouGridPage {
             opensComments: opensComments,
             depthView: { [weak self] in self },
             textReveal: textReveal,
+            // A Rows row's square leaves and lands on its own outline — the
+            // rounded tile's corner, on its circular curve (#2170). Nil
+            // keeps the style's.
+            cornerRadius: rowSquareCornerRadius(for: id),
+            cornerCurve: rowSquareCornerRadius(for: id) == nil ? nil : AvatarShape.roundedTile.cornerCurve,
             // ⚠️ A CLOSE ONTO THE SAME POST CONTINUES ITS PLAYHEAD: the tile
             // takes the surface the card flew and the card waits for it to
             // draw — For You's own landing (`ForYouGridZoomSource`).
@@ -119,6 +125,10 @@ extension ForYouGridPage {
         let anchor = post.id
         if drawsAsTile(anchor) {
             return tileWindow(for: post, willStageDismissal: willStageDismissal, dismissalDidEnd: dismissalDidEnd)
+        }
+        // A Rows row's window is its square's (#2170).
+        if style == .rows {
+            return rowSquareWindow(for: post, willStageDismissal: willStageDismissal, dismissalDidEnd: dismissalDidEnd)
         }
         guard rowFrame(for: anchor, in: self) != nil else { return nil }
         return TextRevealOrigin(

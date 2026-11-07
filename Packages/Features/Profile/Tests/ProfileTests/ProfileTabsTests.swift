@@ -261,11 +261,15 @@ struct ProfileEmptyStateTests {
     }
 }
 
-/// History (#1344): laid out like For You, and the viewer's own profile only.
+/// History (#1344): one post per row (#2170), and the viewer's own profile
+/// only.
 @MainActor
 struct ProfileHistoryTabTests {
-    @Test func historyIsLaidOutLikeForYou() {
-        #expect(ProfileGalleryPagerView.style(for: .history) == .discover)
+    @Test func historyIsOnePostPerRow() {
+        #expect(ProfileGalleryPagerView.style(for: .history) == .rows)
+        // Saved and Liked keep theirs (#2170).
+        #expect(ProfileGalleryPagerView.style(for: .saved) == .list)
+        #expect(ProfileGalleryPagerView.style(for: .reactions) == .list)
         #expect(ProfileTab.history.title == "History")
         #expect(!ProfileTab.history.pages)
     }
@@ -342,5 +346,95 @@ struct ProfileHistoryDaysTests {
         #expect(ProfileGalleryPagerView.pageState(
             .content(posts), for: .history, groups: [HistoryGroup(title: "Today", count: 2)]
         ) == .content(posts))
+    }
+
+    /// Each group carries its own posts' view dates (#2170).
+    @Test func eachGroupCarriesItsPostsViewDates() {
+        let posts = ["a", "b", "c"].map(post)
+        let groups = [HistoryGroup(title: "Today", count: 2), HistoryGroup(title: "Yesterday", count: 1)]
+        let dates = [PostID("a"): Self.now, PostID("b"): daysAgo(0), PostID("c"): daysAgo(1)]
+        #expect(ProfileGalleryPagerView.pageState(.content(posts), for: .history, groups: groups, viewedAt: dates) == .sections([
+            PostGridPageSection(title: "Today", posts: Array(posts[0..<2]), viewedAt: [PostID("a"): Self.now, PostID("b"): daysAgo(0)]),
+            PostGridPageSection(title: "Yesterday", posts: [posts[2]], viewedAt: [PostID("c"): daysAgo(1)])
+        ]))
+    }
+
+    /// History's page swipes a row out of the history; no other page swipes.
+    @Test func onlyHistorysRowsSwipe() throws {
+        let pager = ProfileGalleryPagerView(
+            tabs: [.format(.activity), .saved, .history], makePage: TestGridPages.pageMaker()
+        )
+        var removed: [PostID] = []
+        pager.onRemoveFromHistory = { removed.append($0.id) }
+        let history = try #require(pager.builtPage(for: .history))
+        let action = try #require(history.rowSwipeAction)
+        #expect(action.title == "Remove from History")
+        action.perform(post("x"))
+        #expect(removed == [PostID("x")])
+        #expect(pager.builtPage(for: .saved)?.rowSwipeAction == nil)
+    }
+
+    private actor NoProfiles: ProfileProviding {
+        struct Unavailable: Error {}
+        func currentUserProfile() async throws -> UserProfile { throw Unavailable() }
+        func profile(id: ProfileID) async throws -> UserProfile { throw Unavailable() }
+        func relationship(for profileID: ProfileID) async throws -> ProfileRelationship { throw Unavailable() }
+        func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {}
+        func setBlocked(_ blocked: Bool, for profileID: ProfileID) async throws {}
+        func blockAccount(behind profileID: ProfileID) async throws -> [ProfileID] { [] }
+        func updateCurrentUserProfile(
+            displayName: String, bio: String, website: String, links: [ProfileLink]
+        ) async throws -> UserProfile { throw Unavailable() }
+        func changeHandle(_ newHandle: String) async throws -> UserProfile { throw Unavailable() }
+    }
+
+    private actor HistoryGallery: ProfileGalleryProviding {
+        let all: [GalleryPost]
+        init(_ all: [GalleryPost]) { self.all = all }
+        func authoredPosts(for profileID: ProfileID) async throws -> [GalleryPost] { [] }
+        func taggedPosts(for profileID: ProfileID, handle: String) async throws -> [GalleryPost] { [] }
+        func posts(ids: [String]) async throws -> [GalleryPost] { ids.compactMap { id in all.first { $0.id.rawValue == id } } }
+    }
+
+    private final class Clock: @unchecked Sendable {
+        var date: Date
+        init(_ date: Date) { self.date = date }
+    }
+
+    /// The view model hands each post's view date to the page, and a removal
+    /// leaves every other post its own (#2170).
+    @Test func viewDatesStayWithTheirPostsThroughARemoval() async throws {
+        let name = "history-rows-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let clock = Clock(Self.now)
+        let store = PostViewHistoryStore(
+            defaults: defaults, scope: StorageScope(owner: .member(account: "A", profile: "P")), now: { clock.date }
+        )
+        var stamps: [String: Date] = [:]
+        for (index, id) in ["a", "b", "c"].enumerated() {
+            clock.date = Self.now.addingTimeInterval(Double(index - 3) * 3_600)
+            stamps[id] = clock.date
+            store.record(id)
+        }
+        let viewModel = ProfileViewModel(
+            repository: NoProfiles(), gallery: HistoryGallery(["a", "b", "c"].map(post)), viewHistory: store
+        )
+        let now = Self.now
+        viewModel.now = { now }
+        var latest: ProfileViewModel.GallerySnapshot?
+        viewModel.onGalleryChange = { latest = $0 }
+        viewModel.loadHistory()
+        for _ in 0..<200 where latest?.historyViewedAt.count != 3 { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(latest?.historyViewedAt == [PostID("a"): stamps["a"]!, PostID("b"): stamps["b"]!, PostID("c"): stamps["c"]!])
+
+        viewModel.removeFromHistory(PostID("b"))
+        for _ in 0..<200 where latest?.historyViewedAt.count != 2 { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(latest?.historyViewedAt == [PostID("a"): stamps["a"]!, PostID("c"): stamps["c"]!])
+        if case .content(let posts) = latest?.history {
+            #expect(posts.map(\.id.rawValue) == ["c", "a"])
+        } else {
+            Issue.record("History lost its posts")
+        }
     }
 }

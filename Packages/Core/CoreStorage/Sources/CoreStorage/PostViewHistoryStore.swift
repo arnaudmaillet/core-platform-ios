@@ -60,7 +60,10 @@ public final class PostViewHistoryStore: @unchecked Sendable {
 
     /// Most recently viewed first.
     public var postIDs: [String] {
-        lock.withLock { defaults.array(forKey: key) as? [String] ?? [] }
+        #if DEBUG
+        applyDebugSeedIfReady()
+        #endif
+        return lock.withLock { defaults.array(forKey: key) as? [String] ?? [] }
     }
 
     /// One post of the pile and when it was last viewed — nil for a view
@@ -77,13 +80,44 @@ public final class PostViewHistoryStore: @unchecked Sendable {
 
     /// The pile with its times, most recently viewed first.
     public var views: [View] {
-        lock.withLock {
+        #if DEBUG
+        applyDebugSeedIfReady()
+        #endif
+        return lock.withLock {
             let times = defaults.dictionary(forKey: timesKey) as? [String: Double] ?? [:]
             return (defaults.array(forKey: key) as? [String] ?? []).map { id in
                 View(postID: id, viewedAt: times[id].map(Date.init(timeIntervalSince1970:)))
             }
         }
     }
+
+    #if DEBUG
+    /// A pile to write in place of the viewer's (newest first, each view's
+    /// age in seconds) — the app's `-mock-view-history` (#2170), set at
+    /// launch. Written the first time the pile is read under a PROFILE's
+    /// scope (the active profile is not known at launch), then forgotten.
+    public var debugPendingSeed: [(id: String, age: TimeInterval)]? {
+        get { lock.withLock { _debugPendingSeed } }
+        set { lock.withLock { _debugPendingSeed = newValue } }
+    }
+    private var _debugPendingSeed: [(id: String, age: TimeInterval)]?
+
+    private func applyDebugSeedIfReady() {
+        guard case .member(_, _?) = scope.owner else { return }
+        let stamp = now().timeIntervalSince1970
+        let handler: (() -> Void)? = lock.withLock {
+            guard let seed = _debugPendingSeed else { return nil }
+            _debugPendingSeed = nil
+            defaults.set(seed.map(\.id), forKey: key)
+            defaults.set(
+                Dictionary(seed.map { ($0.id, stamp - $0.age) }, uniquingKeysWith: { first, _ in first }),
+                forKey: timesKey
+            )
+            return _onChange
+        }
+        handler?()
+    }
+    #endif
 
     /// The viewer viewed `id`: it goes to the front, stamped now.
     public func record(_ id: String) {

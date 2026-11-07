@@ -1,0 +1,742 @@
+import CoreModels
+import DesignSystem
+import EmoteKit
+import MediaCore
+import UIKit
+
+/// ONE POST PER ROW (the owner, 2026-11-07, #2170) — the profile's History,
+/// as the owner drew it:
+///
+/// ```
+///   ┌────────┐  Title ·····························  2h
+///   │ square │
+///   │ media  │  (◯) Author ·······················  ♥ 1.2K
+///   └────────┘
+/// ```
+///
+/// - The square is the post's first page, centre-cropped, as tall as the two
+///   lines beside it plus their padding and never under `minimumSquareSide`
+///   — so it grows with the text size. A still, always: a row never plays
+///   (it is not a `GridPlaybackCell`, so autoplay never picks it). A text
+///   post draws its own text tile in miniature (`PostHistorySquareView`).
+/// - Line 1: the caption's first line, truncated at the end, then when the
+///   viewer VIEWED it — never truncated.
+/// - Line 2: the author (the app's avatar, no relation badge, and the name,
+///   truncated), then the likes as the cards show them — never truncated.
+/// - At a large text size the trailing values go UNDER the leading ones
+///   rather than crush the title to nothing (`wrapsTrailing`).
+///
+/// A list cell (`UICollectionViewListCell`) so the list's own trailing swipe
+/// works on it. The author is a person beside content (#2145): a tap is the
+/// profile card, a hold the profile (`PersonOpening`).
+public final class PostHistoryRowCell: UICollectionViewListCell {
+    public static let reuseID = "PostHistoryRowCell"
+
+    // MARK: - Metrics
+
+    /// The square is never smaller than this (#2170).
+    public static let minimumSquareSide: CGFloat = 56
+    /// Above and below the two lines, inside the square's height.
+    public static let verticalPadding: CGFloat = Spacing.xs
+    /// Between the two lines.
+    public static let lineGap: CGFloat = Spacing.xs
+    /// Between the square and the text (#2170).
+    public static let mediaTextGap: CGFloat = Spacing.md
+    /// Between a leading value and its trailing one on a line.
+    public static let trailingGap: CGFloat = Spacing.sm
+    /// The share of the text column the trailing values may take on a line
+    /// before they wrap under the leading ones.
+    public static let trailingShareLimit: CGFloat = 0.4
+
+    /// The title's face: `.body` semibold on the app's scale (#2149).
+    public static func titleFont(compatibleWith traits: UITraitCollection? = nil) -> UIFont {
+        .scaledSystemFont(
+            ofSize: UIFont.defaultPointSize(for: .body), weight: .semibold, relativeTo: .body,
+            compatibleWith: traits
+        )
+    }
+
+    /// The view time's, the author's and the likes' face: `.footnote`.
+    public static func detailFont(compatibleWith traits: UITraitCollection? = nil) -> UIFont {
+        .appFont(forTextStyle: .footnote, compatibleWith: traits)
+    }
+
+    /// The author's disc: the detail line's height, never under 16 pt.
+    public static func avatarDiameter(detailFont: UIFont) -> CGFloat {
+        max(16, detailFont.lineHeight.rounded(.up))
+    }
+
+    /// The square's side for these faces — the two lines (each trailing
+    /// value under its line when `wraps`), their gap and padding — never
+    /// under `minimumSquareSide`.
+    public static func squareSide(titleFont: UIFont, detailFont: UIFont, wraps: Bool) -> CGFloat {
+        let detailLine = detailFont.lineHeight.rounded(.up)
+        let first = titleFont.lineHeight.rounded(.up) + (wraps ? detailLine : 0)
+        let second = avatarDiameter(detailFont: detailFont) + (wraps ? detailLine : 0)
+        let side = verticalPadding * 2 + first + lineGap + second
+        return max(minimumSquareSide, side.rounded(.up))
+    }
+
+    /// Whether the trailing values go under the leading ones: when the wider
+    /// of them would take more than `trailingShareLimit` of the text column.
+    public static func wrapsTrailing(textWidth: CGFloat, trailingWidth: CGFloat) -> Bool {
+        guard textWidth > 0 else { return false }
+        return trailingWidth + trailingGap > textWidth * trailingShareLimit
+    }
+
+    /// A row's title: the caption's FIRST line, trimmed; empty for none.
+    public static func title(for post: GalleryPost) -> String {
+        let firstLine = post.caption.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        return firstLine.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// When the post was viewed, as the row writes it: the app's short
+    /// relative age ("2h", "3d", "1w").
+    public static func viewedText(_ viewedAt: Date?, now: Date) -> String? {
+        viewedAt.map { RelativeAgeFormatter.short(from: $0, to: now) }
+    }
+
+    // MARK: - Accessibility
+
+    /// VoiceOver's one element (#2170): "title, by author, viewed 2 hours
+    /// ago, 1,200 likes" — what is absent is left out.
+    public static func accessibilityLabel(for post: GalleryPost, viewedAt: Date?, now: Date) -> String {
+        var parts: [String] = []
+        let title = title(for: post)
+        parts.append(title.isEmpty ? kindName(post) : title)
+        if let author = post.authorName ?? post.authorHandle.map({ "@\($0)" }), !author.isEmpty {
+            parts.append("by \(author)")
+        }
+        if let viewedAt { parts.append("viewed \(spokenAge(of: viewedAt, now: now))") }
+        if let likes = post.reactionCount {
+            let number = NumberFormatter.localizedString(from: NSNumber(value: likes), number: .decimal)
+            parts.append(likes == 1 ? "\(number) like" : "\(number) likes")
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    /// What a post with no caption is called aloud.
+    static func kindName(_ post: GalleryPost) -> String {
+        if post.isCollection { return "Carousel" }
+        switch post.kind {
+        case .video: return "Video"
+        case .photo: return "Photo"
+        case .text: return "Text post"
+        }
+    }
+
+    /// The view time spelled out: "just now", "2 hours ago".
+    static func spokenAge(of date: Date, now: Date) -> String {
+        guard now.timeIntervalSince(date) >= 60 else { return "just now" }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter.localizedString(for: date, relativeTo: now)
+    }
+
+    /// The VoiceOver action that stands for the author's hold
+    /// (`PersonOpening`'s name).
+    public static let openProfileActionName = PersonOpening.openProfileActionName
+
+    // MARK: - Events
+
+    /// A tap on the author: the profile card (#2145).
+    public var onAuthorTapped: (() -> Void)? {
+        didSet { opening.openCard = onAuthorTapped }
+    }
+    /// A hold on the author: the profile, pushed (#2145). Also VoiceOver's
+    /// "Open profile".
+    public var onAuthorHeld: (() -> Void)? {
+        didSet {
+            opening.openProfile = onAuthorHeld
+            refreshAccessibilityActions()
+        }
+    }
+    /// The row's trailing swipe, named for VoiceOver: its title and what it
+    /// does — the page's, nil for none.
+    public var swipeAction: (title: String, perform: () -> Void)? {
+        didSet { refreshAccessibilityActions() }
+    }
+    /// The cover landed.
+    public var onCoverLoaded: (() -> Void)? {
+        get { square.onCoverLoaded }
+        set { square.onCoverLoaded = newValue }
+    }
+
+    // MARK: - Views
+
+    private let square = PostHistorySquareView()
+    private let titleLabel = EmoteLabel()
+    private let timeLabel = UILabel()
+    private let authorView = UIView()
+    private let avatar = AvatarView(diameter: 16, size: .avatar)
+    private let nameLabel = UILabel()
+    private let likes: PostMetricLabel
+    private let firstLine: UIStackView
+    private let secondLine: UIStackView
+    private lazy var opening = PersonOpening(on: authorView)
+
+    private var squareSide: NSLayoutConstraint?
+    private var titleHeight: NSLayoutConstraint?
+    private var avatarSide: NSLayoutConstraint?
+    private var post: GalleryPost?
+    private var viewedAt: Date?
+    /// The width the trailing values were last decided for.
+    private var wrapWidth: CGFloat = -1
+    /// Whether the trailing values sit under the leading ones now.
+    public private(set) var wrapsTrailingValues = false
+
+    override public init(frame: CGRect) {
+        likes = PostMetricLabel(
+            symbol: LikesSymbol.glyph, font: Self.detailFont(), color: .secondaryLabel
+        )
+        let spacer = UIView()
+        spacer.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+        spacer.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
+        firstLine = UIStackView()
+        secondLine = UIStackView()
+        super.init(frame: frame)
+        backgroundConfiguration = .clear()
+        // The row's own words: VoiceOver reads it as ONE element (#2170).
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+
+        square.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(square)
+
+        titleLabel.textColor = .label
+        titleLabel.numberOfLines = 1
+        titleLabel.lineBreakMode = .byTruncatingTail
+        // `@handle`s and `#tag`s as captions draw them (#524).
+        titleLabel.textEntityStyle = .link
+        titleLabel.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        timeLabel.textColor = .secondaryLabel
+        timeLabel.setContentHuggingPriority(.required, for: .horizontal)
+        timeLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        nameLabel.textColor = .label
+        nameLabel.lineBreakMode = .byTruncatingTail
+        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        likes.setContentHuggingPriority(.required, for: .horizontal)
+        likes.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        avatar.translatesAutoresizingMaskIntoConstraints = false
+        nameLabel.translatesAutoresizingMaskIntoConstraints = false
+        authorView.addSubview(avatar)
+        authorView.addSubview(nameLabel)
+        authorView.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        authorView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        for (line, views) in [(firstLine, [titleLabel, timeLabel]), (secondLine, [authorView, spacer, likes])] {
+            views.forEach(line.addArrangedSubview)
+            line.spacing = Self.trailingGap
+        }
+        let column = UIStackView(arrangedSubviews: [firstLine, secondLine])
+        column.axis = .vertical
+        column.alignment = .fill
+        column.spacing = Self.lineGap
+        column.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(column)
+
+        let side = square.heightAnchor.constraint(equalToConstant: Self.minimumSquareSide)
+        // ONE line, exactly: a caption with no words keeps it, and one whose
+        // emotes are drawn by the label's own text layout cannot make it
+        // taller than the line the square was measured for.
+        let titleHeight = titleLabel.heightAnchor.constraint(equalToConstant: 0)
+        let avatarSide = avatar.widthAnchor.constraint(equalToConstant: 16)
+        // The square IS the row's height; the self-sizing pass reads it.
+        let bottom = square.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+        bottom.priority = .required - 1
+        NSLayoutConstraint.activate([
+            square.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            square.topAnchor.constraint(equalTo: contentView.topAnchor),
+            bottom,
+            square.widthAnchor.constraint(equalTo: square.heightAnchor),
+            side,
+            column.leadingAnchor.constraint(equalTo: square.trailingAnchor, constant: Self.mediaTextGap),
+            column.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            column.centerYAnchor.constraint(equalTo: square.centerYAnchor),
+            column.topAnchor.constraint(greaterThanOrEqualTo: contentView.topAnchor),
+            titleHeight,
+            avatar.leadingAnchor.constraint(equalTo: authorView.leadingAnchor),
+            avatar.centerYAnchor.constraint(equalTo: authorView.centerYAnchor),
+            avatar.heightAnchor.constraint(equalTo: avatar.widthAnchor),
+            avatarSide,
+            authorView.heightAnchor.constraint(greaterThanOrEqualTo: avatar.heightAnchor),
+            nameLabel.leadingAnchor.constraint(equalTo: avatar.trailingAnchor, constant: 6),
+            nameLabel.trailingAnchor.constraint(equalTo: authorView.trailingAnchor),
+            nameLabel.centerYAnchor.constraint(equalTo: authorView.centerYAnchor),
+            nameLabel.topAnchor.constraint(greaterThanOrEqualTo: authorView.topAnchor),
+        ])
+        squareSide = side
+        self.titleHeight = titleHeight
+        self.avatarSide = avatarSide
+        applyFonts()
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (cell: PostHistoryRowCell, _) in
+            cell.applyFonts()
+        }
+        // The author's tap and hold, attached once.
+        _ = opening
+    }
+
+    @available(*, unavailable)
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    // MARK: - Configure
+
+    /// Dresses the row for `post`, viewed at `viewedAt` (nil: no time),
+    /// read against `now`.
+    public func configure(
+        with post: GalleryPost, viewedAt: Date?, now: Date = Date(), imagePipeline: ImagePipeline?
+    ) {
+        self.post = post
+        self.viewedAt = viewedAt
+        square.configure(with: post, imagePipeline: imagePipeline)
+        // A post with no caption keeps the line's height (`titleHeight`).
+        titleLabel.attributedText = nil
+        titleLabel.text = Self.title(for: post)
+        // ⚠️ AFTER the text: an emote caption is attributed text whose
+        // paragraph style resets the label's line break (to wrapping), and a
+        // recycled row then CLIPPED its next title mid-word instead of
+        // ending it on "…" — seen on the simulator.
+        titleLabel.lineBreakMode = .byTruncatingTail
+        let viewed = Self.viewedText(viewedAt, now: now)
+        timeLabel.text = viewed
+        timeLabel.isHidden = viewed == nil
+        let author = post.authorName ?? post.authorHandle.map { "@\($0)" }
+        nameLabel.text = author
+        avatar.setMonogram(MonogramAvatarView.monogram(name: post.authorName ?? "", handle: post.authorHandle ?? ""))
+        avatar.setPicture(post.authorAvatarURL, pipeline: imagePipeline)
+        authorView.isHidden = author == nil
+        // No person, no action (#2145): read as the gesture fires.
+        let hasAuthor = post.authorID != nil
+        opening.hasPerson = { hasAuthor }
+        likes.set(post.reactionCount)
+        accessibilityLabel = Self.accessibilityLabel(for: post, viewedAt: viewedAt, now: now)
+        wrapWidth = -1
+        setNeedsLayout()
+    }
+
+    /// New counters on the same post: the likes, and VoiceOver's words.
+    public func updateCounts(from post: GalleryPost) {
+        self.post = post
+        likes.set(post.reactionCount)
+        accessibilityLabel = Self.accessibilityLabel(for: post, viewedAt: viewedAt, now: Date())
+    }
+
+    private func applyFonts() {
+        let title = Self.titleFont(compatibleWith: traitCollection)
+        let detail = Self.detailFont(compatibleWith: traitCollection)
+        titleLabel.font = title
+        timeLabel.font = detail
+        nameLabel.font = detail
+        likes.setFont(detail)
+        titleHeight?.constant = title.lineHeight.rounded(.up)
+        let diameter = Self.avatarDiameter(detailFont: detail)
+        avatarSide?.constant = diameter
+        avatar.setDiameter(diameter)
+        wrapWidth = -1
+        applyWrap(Self.wrapsTrailing(textWidth: textWidth(forRowWidth: bounds.width), trailingWidth: trailingWidth()))
+        setNeedsLayout()
+    }
+
+    // MARK: - Wrapping at large sizes
+
+    private func textWidth(forRowWidth width: CGFloat) -> CGFloat {
+        let side = squareSide?.constant ?? Self.minimumSquareSide
+        return width - side - Self.mediaTextGap
+    }
+
+    private func trailingWidth() -> CGFloat {
+        max(
+            timeLabel.isHidden ? 0 : timeLabel.intrinsicContentSize.width,
+            likes.isHidden ? 0 : likes.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        )
+    }
+
+    /// Decides the lines' shape for a row `width` wide — once per width.
+    private func decideWrap(forWidth width: CGFloat) {
+        guard width > 0, abs(width - wrapWidth) > 0.5 else { return }
+        wrapWidth = width
+        applyWrap(Self.wrapsTrailing(textWidth: textWidth(forRowWidth: width), trailingWidth: trailingWidth()))
+    }
+
+    private func applyWrap(_ wraps: Bool) {
+        wrapsTrailingValues = wraps
+        for line in [firstLine, secondLine] {
+            line.axis = wraps ? .vertical : .horizontal
+            line.alignment = wraps ? .leading : .center
+            line.spacing = wraps ? 0 : Self.trailingGap
+        }
+        // Centred, not on the first baseline: an emote caption is drawn by
+        // the label's own text layout, whose baseline `UILabel` does not
+        // report — the time stood a line above it (seen on the simulator).
+        squareSide?.constant = Self.squareSide(
+            titleFont: titleLabel.font ?? Self.titleFont(), detailFont: timeLabel.font ?? Self.detailFont(), wraps: wraps
+        )
+    }
+
+    override public func systemLayoutSizeFitting(
+        _ targetSize: CGSize,
+        withHorizontalFittingPriority horizontalFittingPriority: UILayoutPriority,
+        verticalFittingPriority: UILayoutPriority
+    ) -> CGSize {
+        decideWrap(forWidth: targetSize.width)
+        return super.systemLayoutSizeFitting(
+            targetSize, withHorizontalFittingPriority: horizontalFittingPriority,
+            verticalFittingPriority: verticalFittingPriority
+        )
+    }
+
+    override public func layoutSubviews() {
+        let before = wrapsTrailingValues
+        decideWrap(forWidth: bounds.width)
+        super.layoutSubviews()
+        if before != wrapsTrailingValues { invalidateIntrinsicContentSize() }
+    }
+
+    // MARK: - Accessibility actions
+
+    private func refreshAccessibilityActions() {
+        var actions: [UIAccessibilityCustomAction] = []
+        if onAuthorHeld != nil {
+            actions.append(UIAccessibilityCustomAction(name: Self.openProfileActionName) { [weak self] _ in
+                guard let self, post?.authorID != nil, let onAuthorHeld else { return false }
+                onAuthorHeld()
+                return true
+            })
+        }
+        if let swipeAction {
+            actions.append(UIAccessibilityCustomAction(name: swipeAction.title) { _ in
+                swipeAction.perform()
+                return true
+            })
+        }
+        accessibilityCustomActions = actions.isEmpty ? nil : actions
+    }
+
+    // MARK: - The hero (the square opens and closes the post)
+
+    /// The square, in the cell's space — what the opening grows from and
+    /// the close returns to (#2170).
+    public var mediaHeroRect: CGRect {
+        layoutIfNeeded()
+        return contentView.convert(square.frame, to: self)
+    }
+
+    /// The square's view, for a lift.
+    public var squareView: UIView { square }
+
+    /// The author's disc and name — where the person's tap and hold are,
+    /// which the row's long press leaves alone.
+    public var authorHitView: UIView { authorView }
+
+    /// The picture the square shows now; nil for a text post's tile.
+    public var renderedCover: UIImage? { square.renderedCover }
+
+    /// The square's corner, for whatever can only wear one (a flight, a
+    /// window): the rounded tile's, at its side.
+    public var squareCornerRadius: CGFloat {
+        AvatarShape.roundedTile.cornerRadius(side: square.bounds.width)
+    }
+
+    /// Hides the square alone while its twin is in the air — the words stay.
+    public func setHeroConcealed(_ concealed: Bool) {
+        square.alpha = concealed ? 0 : 1
+    }
+
+    /// Whether the square is hidden for a flight or a window.
+    public var isHeroMediaConcealed: Bool { square.alpha == 0 }
+
+    override public func prepareForReuse() {
+        super.prepareForReuse()
+        // A recycled row comes back whole: a flight's hide was the last
+        // post's.
+        isHidden = false
+        alpha = 1
+        square.alpha = 1
+        square.reset()
+        avatar.reset()
+        onAuthorTapped = nil
+        onAuthorHeld = nil
+        swipeAction = nil
+        onCoverLoaded = nil
+        post = nil
+        viewedAt = nil
+    }
+
+    #if DEBUG
+    /// What the lines read, for tests.
+    public var debugTitle: String? { titleLabel.text }
+    public var debugViewedText: String? { timeLabel.isHidden ? nil : timeLabel.text }
+    public var debugAuthor: String? { nameLabel.text }
+    public var debugTitleLineBreakMode: NSLineBreakMode { titleLabel.lineBreakMode }
+    public var debugLikes: String? { likes.debugText }
+    /// The frames of the pieces, in the cell's space.
+    public var debugFrames: (square: CGRect, title: CGRect, time: CGRect, author: CGRect, likes: CGRect) {
+        layoutIfNeeded()
+        return (
+            mediaHeroRect, titleLabel.convert(titleLabel.bounds, to: self),
+            timeLabel.convert(timeLabel.bounds, to: self), nameLabel.convert(nameLabel.bounds, to: self),
+            likes.convert(likes.bounds, to: self)
+        )
+    }
+    /// Whether the title's text is wider than its label (it truncates).
+    public var debugTitleTruncates: Bool {
+        layoutIfNeeded()
+        return titleLabel.intrinsicContentSize.width > titleLabel.bounds.width + 0.5
+    }
+    /// The same for the time, the name and the likes.
+    public var debugTimeTruncates: Bool {
+        layoutIfNeeded()
+        return timeLabel.intrinsicContentSize.width > timeLabel.bounds.width + 0.5
+    }
+    public var debugLikesTruncates: Bool {
+        layoutIfNeeded()
+        return likes.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width > likes.bounds.width + 0.5
+    }
+    /// The square's marks: a clip's play, a carousel's stack.
+    public var debugMarks: (play: Bool, stack: Bool, textTile: Bool) { square.debugMarks }
+    /// A tap and a hold on the author, as a finger's would land.
+    public func debugTapAuthor() { opening.debugTap() }
+    public func debugHoldAuthor() { opening.debugHold() }
+    #endif
+}
+
+// MARK: - The square
+
+/// A row's square (#2170): the post's first page, centre-cropped, on the
+/// rounded tile's outline (`AvatarShape.roundedTile`, the app's small
+/// tiles) — a clip with a small play mark, a carousel with the stack mark —
+/// or, for a text post, its own text tile in miniature: the card's ground
+/// and its first words. Also what a window closing onto the row carries
+/// (`makeStandIn`), so the two ends are one picture.
+public final class PostHistorySquareView: UIView {
+    private let imageView = UIImageView()
+    private let textLabel = UILabel()
+    private let playMark = UIImageView()
+    private let stackMark = UIImageView()
+    private let outline = CAShapeLayer()
+    private let edge = CAShapeLayer()
+    private lazy var media: MediaSurface = {
+        let media = MediaSurface(cover: imageView, in: self, coverSize: .px256)
+        media.debugLabel = "history-row"
+        return media
+    }()
+
+    var onCoverLoaded: (() -> Void)? {
+        get { media.onCoverLoaded }
+        set { media.onCoverLoaded = newValue }
+    }
+
+    public init() {
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+        backgroundColor = Surface.mediaGround
+        layer.mask = outline
+        imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
+        imageView.pin(to: self)
+
+        textLabel.textColor = .label
+        textLabel.numberOfLines = 0
+        textLabel.lineBreakMode = .byTruncatingTail
+        textLabel.isHidden = true
+        addSubview(textLabel)
+
+        for (mark, symbol) in [(playMark, "play.fill"), (stackMark, "square.fill.on.square.fill")] {
+            mark.image = UIImage(systemName: symbol)
+            mark.tintColor = .white
+            mark.contentMode = .center
+            mark.isHidden = true
+            // Over a white picture, the shadow keeps the white mark readable
+            // without a plate — the tiles' counters' rule.
+            mark.layer.shadowColor = UIColor.black.cgColor
+            mark.layer.shadowOpacity = 0.5
+            mark.layer.shadowRadius = 2
+            mark.layer.shadowOffset = .zero
+            addSubview(mark)
+        }
+        // The card's dark-mode hairline, on the tile's own outline.
+        edge.fillColor = UIColor.clear.cgColor
+        layer.addSublayer(edge)
+        registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (view: PostHistorySquareView, _) in
+            view.resolveEdge()
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// A square for `post` as a cell draws it, its cover loaded through
+    /// `imagePipeline`.
+    func configure(with post: GalleryPost, imagePipeline: ImagePipeline?) {
+        dress(for: post)
+        guard post.kind != .text else {
+            media.reset()
+            return
+        }
+        let side = max(bounds.width, PostHistoryRowCell.minimumSquareSide)
+        let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 3
+        media.coverSize = PostGridTileCell.coverBucket(forDrawnSize: CGSize(width: side, height: side), scale: scale)
+        media.loadCover(post.thumbnailURL, pipeline: imagePipeline, item: post.id)
+    }
+
+    /// The window's twin of a row's square: `post` with `cover` (the
+    /// picture the row showed), `side` points square.
+    public static func makeStandIn(for post: GalleryPost, cover: UIImage?, side: CGFloat) -> PostHistorySquareView {
+        let view = PostHistorySquareView()
+        view.frame = CGRect(x: 0, y: 0, width: side, height: side)
+        view.dress(for: post)
+        // A window wears its own corner: the twin fills it edge to edge.
+        view.layer.mask = nil
+        view.edge.isHidden = true
+        if post.kind != .text {
+            view.imageView.image = cover
+            view.imageView.alpha = 1
+        }
+        view.layoutIfNeeded()
+        return view
+    }
+
+    private func dress(for post: GalleryPost) {
+        let isText = post.kind == .text
+        backgroundColor = PostGridTileCell.fillColor(for: post)
+        imageView.isHidden = isText
+        textLabel.isHidden = !isText
+        textLabel.text = isText ? post.caption.trimmingCharacters(in: .whitespacesAndNewlines) : nil
+        playMark.isHidden = isText || post.kind != .video
+        stackMark.isHidden = isText || !post.isCollection
+        edge.isHidden = !isText
+        setNeedsLayout()
+    }
+
+    func reset() {
+        media.reset()
+        imageView.image = nil
+        textLabel.text = nil
+    }
+
+    var renderedCover: UIImage? { imageView.isHidden ? nil : media.renderedCover ?? imageView.image }
+
+    override public func layoutSubviews() {
+        super.layoutSubviews()
+        let side = bounds.width
+        let path = AvatarShape.roundedTile.path(in: bounds)
+        outline.frame = bounds
+        outline.path = path.cgPath
+        edge.frame = bounds
+        edge.path = path.cgPath
+        resolveEdge()
+        // The words at a size the square can hold — its own first words, as
+        // a tile of its page would show them.
+        let inset = (side * 0.12).rounded()
+        textLabel.font = .systemFont(ofSize: max(7, (side * 0.15).rounded()), weight: .semibold)
+        textLabel.frame = bounds.insetBy(dx: inset, dy: inset)
+        let markSide = max(12, (side * 0.24).rounded())
+        let markConfiguration = UIImage.SymbolConfiguration(pointSize: markSide * 0.6, weight: .semibold)
+        playMark.preferredSymbolConfiguration = markConfiguration
+        stackMark.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: markSide * 0.5, weight: .semibold)
+        playMark.frame = CGRect(x: (side - markSide) / 2, y: (side - markSide) / 2, width: markSide, height: markSide)
+        let corner = (side * 0.1).rounded()
+        stackMark.frame = CGRect(x: side - markSide - corner / 2, y: corner / 2, width: markSide, height: markSide)
+    }
+
+    private func resolveEdge() {
+        edge.lineWidth = Surface.hairline(for: traitCollection) * 2
+        edge.strokeColor = Surface.cardEdge.resolvedColor(with: traitCollection).cgColor
+    }
+
+    #if DEBUG
+    var debugMarks: (play: Bool, stack: Bool, textTile: Bool) {
+        (!playMark.isHidden, !stackMark.isHidden, !textLabel.isHidden)
+    }
+    #endif
+}
+
+// MARK: - The skeleton
+
+/// A row's bones while History loads (#2170, sections by presence #1773):
+/// the square, two bars and the author's small circle — at the row's own
+/// height, so the rows land into the shape the bones drew.
+public final class PostHistoryRowSkeletonCell: UICollectionViewCell {
+    public static let reuseID = "PostHistoryRowSkeletonCell"
+
+    private let square = SkeletonBoneView(rounding: .fixed(0))
+    private let squareMask = CAShapeLayer()
+    private let titleBar = SkeletonBoneView()
+    private let avatarBone = SkeletonBoneView()
+    private let authorBar = SkeletonBoneView()
+    private var side: NSLayoutConstraint?
+    private var titleWidth: NSLayoutConstraint?
+
+    override public init(frame: CGRect) {
+        super.init(frame: frame)
+        isAccessibilityElement = false
+        square.layer.mask = squareMask
+        for bone in [square, titleBar, avatarBone, authorBar] {
+            bone.translatesAutoresizingMaskIntoConstraints = false
+            contentView.addSubview(bone)
+        }
+        let side = square.heightAnchor.constraint(equalToConstant: PostHistoryRowCell.minimumSquareSide)
+        let bottom = square.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+        bottom.priority = .required - 1
+        let text = square.trailingAnchor
+        let titleWidth = titleBar.widthAnchor.constraint(
+            equalTo: contentView.widthAnchor, multiplier: 0.55
+        )
+        NSLayoutConstraint.activate([
+            square.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            square.topAnchor.constraint(equalTo: contentView.topAnchor),
+            bottom,
+            square.widthAnchor.constraint(equalTo: square.heightAnchor),
+            side,
+            titleBar.leadingAnchor.constraint(equalTo: text, constant: PostHistoryRowCell.mediaTextGap),
+            titleBar.heightAnchor.constraint(equalToConstant: 12),
+            titleWidth,
+            titleBar.bottomAnchor.constraint(equalTo: square.centerYAnchor, constant: -PostHistoryRowCell.lineGap),
+            avatarBone.leadingAnchor.constraint(equalTo: titleBar.leadingAnchor),
+            avatarBone.topAnchor.constraint(equalTo: square.centerYAnchor, constant: PostHistoryRowCell.lineGap),
+            avatarBone.widthAnchor.constraint(equalToConstant: 16),
+            avatarBone.heightAnchor.constraint(equalToConstant: 16),
+            authorBar.leadingAnchor.constraint(equalTo: avatarBone.trailingAnchor, constant: 6),
+            authorBar.centerYAnchor.constraint(equalTo: avatarBone.centerYAnchor),
+            authorBar.heightAnchor.constraint(equalToConstant: 10),
+            authorBar.widthAnchor.constraint(equalTo: contentView.widthAnchor, multiplier: 0.3),
+        ])
+        self.side = side
+        self.titleWidth = titleWidth
+        applySide()
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (cell: PostHistoryRowSkeletonCell, _) in
+            cell.applySide()
+        }
+    }
+
+    @available(*, unavailable)
+    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// The bones vary their title's length row to row, so a column of them
+    /// reads as text rather than a pattern.
+    public func configure(variant: Int) {
+        guard let titleWidth else { return }
+        let multiplier: CGFloat = [0.55, 0.42, 0.5][abs(variant) % 3]
+        titleWidth.isActive = false
+        let next = titleBar.widthAnchor.constraint(equalTo: contentView.widthAnchor, multiplier: multiplier)
+        next.isActive = true
+        self.titleWidth = next
+    }
+
+    private func applySide() {
+        side?.constant = PostHistoryRowCell.squareSide(
+            titleFont: PostHistoryRowCell.titleFont(compatibleWith: traitCollection),
+            detailFont: PostHistoryRowCell.detailFont(compatibleWith: traitCollection), wraps: false
+        )
+    }
+
+    override public func layoutSubviews() {
+        super.layoutSubviews()
+        squareMask.frame = square.bounds
+        squareMask.path = AvatarShape.roundedTile.path(in: square.bounds).cgPath
+    }
+}
