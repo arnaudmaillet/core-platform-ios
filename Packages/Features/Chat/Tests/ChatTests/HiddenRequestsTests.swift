@@ -98,8 +98,8 @@ struct HiddenRequestsTests {
 
         #expect(requests.showsHiddenRequestsRow)
         #expect(rowIDs(requests.phase) == ["r1"])
-        // Its own request's 2 unread messages, none of the hidden one's 3.
-        #expect(requests.newCount == 2)
+        // Its own one new request (of 2 messages), none of the hidden ones.
+        #expect(requests.newCount == 1)
     }
 
     @Test func noHiddenRequestsMeansNoRow() async throws {

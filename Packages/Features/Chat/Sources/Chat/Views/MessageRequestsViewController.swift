@@ -58,12 +58,13 @@ final class MessageRequestsViewController: UIViewController {
     /// The sections as last rendered — what the headers count (#1210).
     private var renderedSections = InboxListSections()
 
-    /// Each visible section header's unread messages, from the rendered rows.
+    /// Each visible section header's new requests, from the rendered rows —
+    /// the badge's count (#2171).
     private func refreshHeaderCounts() {
         for index in 0..<tableView.numberOfSections {
             guard let section = dataSource.headedSection(at: index),
                   let header = tableView.headerView(forSection: index) as? InboxSectionHeaderView else { continue }
-            header.setCount(renderedSections.unreadMessages(in: section))
+            header.setCount(renderedSections.unreadRows(in: section))
         }
         // The bar names the stuck section with the same count.
         updatePinnedSection()
@@ -79,7 +80,7 @@ final class MessageRequestsViewController: UIViewController {
         let isShowing = !tableView.isHidden
         pinnedTracker.update(in: tableView) { index in
             guard isShowing, let section = dataSource.headedSection(at: index) else { return nil }
-            return InboxPinnedSection(section: section, count: renderedSections.unreadMessages(in: section))
+            return InboxPinnedSection(section: section, count: renderedSections.unreadRows(in: section))
         }
     }
 
@@ -449,7 +450,7 @@ extension MessageRequestsViewController: UITableViewDelegate {
         // The separation between sections is the footer's job — see
         // `heightForFooterInSection` — so the header has nothing to pad.
         header?.setTitle(section.title)
-        header?.setCount(renderedSections.unreadMessages(in: section))
+        header?.setCount(renderedSections.unreadRows(in: section))
         // The section's own first row, so tapping "Recent" puts Recent under
         // the header rather than wherever the list happened to be.
         header?.onTap = { [weak self] in
