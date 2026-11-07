@@ -82,6 +82,27 @@ final class MethodSelectionViewController: AuthStepTableViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// The sheet's ground: OPAQUE, the form's own grouped grey — no glass
+    /// and no blur through it (the owner, 2026-11-07).
+    ///
+    /// ⚠️ **RESOLVED OUTSIDE THE SHEET.** In a glass sheet at its fitted
+    /// height `systemGroupedBackground` resolves to the glass's own ground:
+    /// white in the light and clear in the dark, where the sheet went back
+    /// to blur (the owner's iPhone). Its elevated light and dark values
+    /// are taken here, with nothing of the sheet's context, at full alpha.
+    static let sheetBackground = UIColor { traits in
+        let plain = UITraitCollection { mutable in
+            mutable.userInterfaceStyle = traits.userInterfaceStyle == .dark ? .dark : .light
+            mutable.userInterfaceLevel = .elevated
+            mutable.accessibilityContrast = traits.accessibilityContrast
+        }
+        return UIColor.systemGroupedBackground.resolvedColor(with: plain).withAlphaComponent(1)
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        tableView.backgroundColor = Self.sheetBackground
+    }
 
     /// ⚠️ NO SCROLL WHILE THE LIST FITS (#1908, the owner 2026-10-30: the
     /// sheet scrolled though nothing was hidden). The table's content runs
@@ -125,32 +146,10 @@ final class MethodSelectionViewController: AuthStepTableViewController {
 
     private func cell(for method: SignInMethod) -> UITableViewCell {
         if let cell = cells[method] { return cell }
-        let cell = UITableViewCell()
-        cell.backgroundConfiguration = .clear()
-        cell.selectionStyle = .none
-        if let button = buttons[method] {
-            button.constrain(in: cell.contentView) { parent in
-                button.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-                button.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-                button.topAnchor.constraint(equalTo: parent.topAnchor)
-                button.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-            }
-        }
+        guard let button = buttons[method] else { return UITableViewCell() }
+        let cell = AuthButtonCell(hosting: button)
         cells[method] = cell
         return cell
-    }
-
-    /// ⚠️ THE ROW MUST NOT CLIP ITS BUTTON. An inset-grouped section rounds
-    /// its row (a one-row section, the capsule's radius on iOS 26), and the
-    /// button's card corner came out a capsule (seen on the simulator,
-    /// 2026-11-07, #2020): the button draws its own shape.
-    override func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-        guard case .method = sections[indexPath.section] else { return }
-        for view in [cell, cell.contentView] {
-            view.layer.cornerRadius = 0
-            view.layer.masksToBounds = false
-            view.layer.mask = nil
-        }
     }
 
     /// Puts `method`'s button in its held load, the others gated — or ends

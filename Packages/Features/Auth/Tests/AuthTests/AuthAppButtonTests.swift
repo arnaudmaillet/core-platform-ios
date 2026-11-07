@@ -28,6 +28,70 @@ struct AuthAppButtonTests {
         #expect(apple.content.symbol == "apple.logo")
     }
 
+    /// A row never clips its button — not when it appears, and not after the
+    /// table lays out again (the list's sheet coming back after a form's
+    /// closes), when the section rounds its rows once more (#2020, the
+    /// owner's iPhone): the card stays a card, and a swell is not cut off.
+    @Test func noRowClipsItsButtonEvenAfterARelayout() throws {
+        let list = MethodSelectionViewController(methods: Self.methods)
+        let rows = Self.buttonRows(of: list)
+        #expect(rows.count == Self.methods.count)
+        func check(_ moment: String) {
+            for cell in rows {
+                for view in [cell, cell.contentView] {
+                    #expect(!view.clipsToBounds && view.layer.cornerRadius == 0 && view.layer.mask == nil, "\(moment)")
+                }
+            }
+        }
+        check("on appearing")
+        // What the section does on a relayout: round and clip the row again
+        // — on iOS 26+ through `cornerConfiguration` and the clipping flag.
+        for cell in rows {
+            cell.layer.cornerRadius = 25
+            cell.cornerConfiguration = .corners(radius: .fixed(26))
+            cell.clipsToBounds = true
+            cell.layer.masksToBounds = true
+            #expect(!cell.clipsToBounds && !cell.layer.masksToBounds, "the row clips again")
+            cell.setNeedsLayout()
+            cell.layoutIfNeeded()
+        }
+        check("after a relayout")
+    }
+
+    /// The steps' buttons stand in the same rows.
+    @Test func theStepsButtonsStandInUnclippedRows() {
+        let phone = PhoneAuthViewController()
+        let step = SignUpStepViewController(emoji: "🔑", title: "T", subtitle: "S", buttonTitle: "Continue")
+        #expect(Self.buttonRows(of: phone).contains { phone.debugContinueButton.isDescendant(of: $0) })
+        #expect(Self.buttonRows(of: step).contains { step.primaryButton.isDescendant(of: $0) })
+    }
+
+    /// Every button row a screen's table vends.
+    private static func buttonRows(of screen: UITableViewController) -> [AuthButtonCell] {
+        screen.loadViewIfNeeded()
+        let table = screen.tableView!
+        return (0..<screen.numberOfSections(in: table)).flatMap { section in
+            (0..<screen.tableView(table, numberOfRowsInSection: section)).compactMap { row in
+                screen.tableView(table, cellForRowAt: IndexPath(row: row, section: section)) as? AuthButtonCell
+            }
+        }
+    }
+
+    /// The list's sheet is opaque: no glass, no blur through it.
+    @Test func theListsSheetIsOpaque() {
+        let list = MethodSelectionViewController(methods: Self.methods)
+        list.loadViewIfNeeded()
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let color = list.tableView.backgroundColor?.resolvedColor(with: UITraitCollection(userInterfaceStyle: style))
+            var white: CGFloat = 0
+            var alpha: CGFloat = 0
+            color?.getWhite(&white, alpha: &alpha)
+            #expect(alpha == 1, "\(style) is not opaque")
+            // The form's grey: light in the light, dark in the dark.
+            #expect(style == .dark ? white < 0.2 : white > 0.9, "\(style) at \(white)")
+        }
+    }
+
     /// The tap is the button's, and reports its method.
     @Test func aTapReportsTheMethod() throws {
         let list = MethodSelectionViewController(methods: Self.methods)

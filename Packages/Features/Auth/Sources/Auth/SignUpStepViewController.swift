@@ -33,18 +33,7 @@ class SignUpStepViewController: AuthStepTableViewController {
         return button
     }()
 
-    private lazy var buttonCell: UITableViewCell = {
-        let cell = UITableViewCell()
-        cell.backgroundConfiguration = .clear()
-        cell.selectionStyle = .none
-        primaryButton.constrain(in: cell.contentView) { parent in
-            primaryButton.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-            primaryButton.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-            primaryButton.topAnchor.constraint(equalTo: parent.topAnchor)
-            primaryButton.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-        }
-        return cell
-    }()
+    private lazy var buttonCell: UITableViewCell = AuthButtonCell(hosting: primaryButton)
 
     init(emoji: String, title: String, subtitle: String, buttonTitle: String) {
         self.emoji = emoji

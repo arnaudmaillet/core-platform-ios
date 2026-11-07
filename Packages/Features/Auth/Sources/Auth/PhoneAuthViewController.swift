@@ -49,16 +49,7 @@ final class PhoneAuthViewController: AuthStepTableViewController {
     }()
 
     private lazy var continueCell: UITableViewCell = {
-        let cell = UITableViewCell()
-        cell.backgroundConfiguration = .clear()
-        cell.selectionStyle = .none
-        continueButton.constrain(in: cell.contentView) { parent in
-            continueButton.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-            continueButton.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-            continueButton.topAnchor.constraint(equalTo: parent.topAnchor)
-            continueButton.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-        }
-        return cell
+        AuthButtonCell(hosting: continueButton)
     }()
 
     #if DEBUG
