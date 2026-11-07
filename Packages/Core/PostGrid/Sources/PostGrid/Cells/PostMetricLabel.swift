@@ -41,7 +41,7 @@ public final class PostMetricLabel: UIView {
     public init(
         symbol: String, font: UIFont, color: UIColor,
         iconColor: UIColor? = nil, shadowed: Bool = false,
-        glyphPointSize: CGFloat? = nil
+        glyphPointSize: CGFloat? = nil, glyphTrailing: Bool = false
     ) {
         icon = UIImageView(image: UIImage.symbol(named: symbol))
         super.init(frame: .zero)
@@ -83,7 +83,9 @@ public final class PostMetricLabel: UIView {
         label.setContentCompressionResistancePriority(.init(999), for: .horizontal)
         setContentCompressionResistancePriority(.init(999), for: .horizontal)
 
-        let row = UIStackView(arrangedSubviews: [icon, label])
+        // The glyph before the count, or after it (`glyphTrailing`: History's
+        // rows, "1.2K ♥", #2170).
+        let row = UIStackView(arrangedSubviews: glyphTrailing ? [label, icon] : [icon, label])
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = 4
@@ -132,6 +134,11 @@ public final class PostMetricLabel: UIView {
 
     #if DEBUG
     /// The number as drawn, nil when there is none.
+    /// Whether the glyph comes after the count ("1.2K ♥").
+    public var debugGlyphTrails: Bool {
+        (icon.superview as? UIStackView)?.arrangedSubviews.last === icon
+    }
+
     public var debugText: String? { label.isHidden ? nil : label.text }
     /// The glyph's symbol image, to tell one counter from another.
     public var debugSymbol: UIImage? { icon.image }

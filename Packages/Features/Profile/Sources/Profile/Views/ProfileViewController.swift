@@ -502,6 +502,12 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         galleryPager.onItemTapped = { [weak self] post, stream in
             self?.openGalleryPost(post, stream: stream, showingComments: false)
         }
+        // History holds still while its post is up (#2170, the owner).
+        galleryPager.onHistoryPostOpening = { [weak self] in
+            guard let self else { return }
+            viewModel.holdHistory()
+            isShowingHistoryPost = true
+        }
         // A card's comment chip: the same open, arriving with the thread up.
         galleryPager.onItemCommentsTapped = { [weak self] post, stream in
             self?.openGalleryPost(post, stream: stream, showingComments: true)
@@ -513,7 +519,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         galleryPager.onAuthorCardTapped = { [weak self] post in
             self?.viewModel.galleryAuthorCardTapped(post)
         }
-        // A History row's swipe (#2170): the menu's own row.
+        // A History row's VoiceOver action (#2170): the menu's own row.
         galleryPager.onRemoveFromHistory = { [weak self] post in
             self?.viewModel.removeFromHistory(post.id)
         }
@@ -703,10 +709,16 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         galleryPager.applyPendingReveal()
         // What the cards staked while the screen was up is final now.
         staking?.endSession()
+        // Gone for anything but History's own post — another tab, a screen
+        // pushed over it: the viewer left History (#2170).
+        if !isShowingHistoryPost { viewModel.releaseHistory() }
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // Back from History's post (not from a close abandoned half-way,
+        // which never appears): the next leave is a real one.
+        isShowingHistoryPost = false
         // A tab root always shows the bar (#769).
         ensureAppTabBarAsTabRoot()
         // The BACKSTOP, on UIKit's own animation like every other install
@@ -2295,7 +2307,14 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// re-opening the profile on a tab the next profile may not even have.
     private func adoptTab(_ tab: ProfileTab) {
         viewModel.setActiveTab(tab)
+        // Off the History page: it takes in what was viewed (#2170).
+        if tab != .history { viewModel.releaseHistory() }
     }
+
+    /// A post opened from History is covering the screen: the screen is
+    /// gone, but the viewer has not left History (#2170). Cleared once the
+    /// screen is back.
+    private var isShowingHistoryPost = false
 
     /// Selects a tab the way a selector tap does — the shared path behind the
     /// debug hook and the tests, so neither exercises a shortcut around the
@@ -2478,6 +2497,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// A pull released past its threshold, or a page asking.
     override func heroPageRefresh() {
         viewModel.refresh()
+        // History too, even held (#2170, the owner).
+        viewModel.refreshHistory()
     }
 
     /// A profile with no gallery (a page for no one) needs no air under it.

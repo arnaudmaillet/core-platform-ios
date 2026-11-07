@@ -41,8 +41,11 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
     /// A History row's author tapped: the profile card (#2145); the hold
     /// is `onAuthorTapped`.
     var onAuthorCardTapped: ((GalleryPost) -> Void)?
-    /// A History row swiped away (#2170): out of the history.
+    /// A History row taken out of the history by VoiceOver's action (#2170).
     var onRemoveFromHistory: ((GalleryPost) -> Void)?
+    /// A post is about to open from the History page (#2170): History holds
+    /// still until the viewer leaves it.
+    var onHistoryPostOpening: (() -> Void)?
     /// What a row's "..." offers — see `PostGridPage.postMenuActions`.
     /// The tab is the page's: History adds its own row (#1344).
     var authorMenuActions: ((PostGridAuthorMenuContext, ProfileTab) -> [PostCardMenuAction])?
@@ -71,6 +74,8 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
     override func didBuildPage(_ page: any PostGridPage, for tab: ProfileTab) {
         page.onPostTapped = { [weak self] post, stream, comments in
             guard let self else { return }
+            // Before the open: the viewer stays on History while the post is up.
+            if tab == .history { onHistoryPostOpening?() }
             if comments, let onItemCommentsTapped {
                 onItemCommentsTapped(post, stream)
             } else {
@@ -89,11 +94,11 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
         page.onRefresh = { [weak self] in self?.onRetry?() }
         page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
         page.onAuthorCardTapped = { [weak self] post in self?.onAuthorCardTapped?(post) }
-        // History's rows swipe out of the history (#2170) — proposed, not
-        // asked for: the owner may decline it.
+        // History's rows offer VoiceOver the menu's "Remove from History"
+        // (#2170). No swipe: the owner kept it in the menu (2026-11-07).
         if tab == .history {
-            page.rowSwipeAction = PostGridRowSwipeAction(
-                title: "Remove from History", symbolName: "clock.badge.xmark"
+            page.rowAccessibilityAction = PostGridRowAction(
+                title: "Remove from History"
             ) { [weak self] post in self?.onRemoveFromHistory?(post) }
         }
         page.postMenuActions = { [weak self] context in

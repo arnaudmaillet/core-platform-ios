@@ -151,9 +151,9 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
             refreshAccessibilityActions()
         }
     }
-    /// The row's trailing swipe, named for VoiceOver: its title and what it
-    /// does — the page's, nil for none.
-    public var swipeAction: (title: String, perform: () -> Void)? {
+    /// The row's action for VoiceOver — its menu's first row: its title and
+    /// what it does, the page's; nil for none.
+    public var rowAction: (title: String, perform: () -> Void)? {
         didSet { refreshAccessibilityActions() }
     }
     /// The cover landed.
@@ -186,8 +186,9 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     public private(set) var wrapsTrailingValues = false
 
     override public init(frame: CGRect) {
+        // The count, then the heart: "1.2K ♥" (the owner, 2026-11-07).
         likes = PostMetricLabel(
-            symbol: LikesSymbol.glyph, font: Self.detailFont(), color: .secondaryLabel
+            symbol: LikesSymbol.glyph, font: Self.detailFont(), color: .secondaryLabel, glyphTrailing: true
         )
         let spacer = UIView()
         spacer.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
@@ -407,9 +408,9 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
                 return true
             })
         }
-        if let swipeAction {
-            actions.append(UIAccessibilityCustomAction(name: swipeAction.title) { _ in
-                swipeAction.perform()
+        if let rowAction {
+            actions.append(UIAccessibilityCustomAction(name: rowAction.title) { _ in
+                rowAction.perform()
                 return true
             })
         }
@@ -460,7 +461,7 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
         avatar.reset()
         onAuthorTapped = nil
         onAuthorHeld = nil
-        swipeAction = nil
+        rowAction = nil
         onCoverLoaded = nil
         post = nil
         viewedAt = nil
@@ -498,6 +499,10 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     }
     /// The square's marks: a clip's play, a carousel's stack.
     public var debugMarks: (play: Bool, stack: Bool, textTile: Bool) { square.debugMarks }
+    /// The play mark's box side.
+    public var debugPlaySide: CGFloat { square.debugPlaySide }
+    /// Whether the heart comes after the like count.
+    public var debugLikesGlyphTrails: Bool { likes.debugGlyphTrails }
     /// A tap and a hold on the author, as a finger's would land.
     public func debugTapAuthor() { opening.debugTap() }
     public func debugHoldAuthor() { opening.debugHold() }
@@ -635,13 +640,20 @@ public final class PostHistorySquareView: UIView {
         textLabel.font = .systemFont(ofSize: max(7, (side * 0.15).rounded()), weight: .semibold)
         textLabel.frame = bounds.insetBy(dx: inset, dy: inset)
         let markSide = max(12, (side * 0.24).rounded())
-        let markConfiguration = UIImage.SymbolConfiguration(pointSize: markSide * 0.6, weight: .semibold)
-        playMark.preferredSymbolConfiguration = markConfiguration
+        // The play mark a little bigger than the corner's stack mark (the
+        // owner, 2026-11-07): it is the square's one sign of a clip.
+        let playSide = max(14, (side * Self.playShare).rounded())
+        playMark.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: playSide * 0.6, weight: .semibold)
         stackMark.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: markSide * 0.5, weight: .semibold)
-        playMark.frame = CGRect(x: (side - markSide) / 2, y: (side - markSide) / 2, width: markSide, height: markSide)
+        playMark.frame = CGRect(x: (side - playSide) / 2, y: (side - playSide) / 2, width: playSide, height: playSide)
         let corner = (side * 0.1).rounded()
         stackMark.frame = CGRect(x: side - markSide - corner / 2, y: corner / 2, width: markSide, height: markSide)
     }
+
+    /// The play mark's box, as a share of the square's side: 0.34 (it was
+    /// 0.24, the stack mark's; the owner asked twice for bigger,
+    /// 2026-11-07).
+    static let playShare: CGFloat = 0.34
 
     private func resolveEdge() {
         edge.lineWidth = Surface.hairline(for: traitCollection) * 2
@@ -649,6 +661,8 @@ public final class PostHistorySquareView: UIView {
     }
 
     #if DEBUG
+    var debugPlaySide: CGFloat { playMark.frame.width }
+
     var debugMarks: (play: Bool, stack: Bool, textTile: Bool) {
         (!playMark.isHidden, !stackMark.isHidden, !textLabel.isHidden)
     }

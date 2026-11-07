@@ -123,56 +123,120 @@ struct RowsPageTests {
     }
 
     /// A removal is expressed as one: the rows gone, and a group emptied
-    /// with them; anything that moves a post is not.
+    /// with them.
     @Test func removalsAreRowsAndEmptiedGroups() throws {
         let all = posts(5)
         let old = [PostGridPageSection(title: "Today", posts: Array(all[0..<3])), PostGridPageSection(title: "Yesterday", posts: Array(all[3..<5]))]
-        let oneRow = try #require(ForYouGridPage.removals(from: old, to: [
+        let oneRow = try #require(ForYouGridPage.rowUpdates(from: old, to: [
             PostGridPageSection(title: "Today", posts: [all[0], all[2]]), old[1]
         ]))
-        #expect(oneRow.items == [IndexPath(item: 1, section: 0)] && oneRow.sections.isEmpty)
-        let lastOfAGroup = try #require(ForYouGridPage.removals(from: old, to: [old[0]]))
-        #expect(lastOfAGroup.sections == IndexSet(integer: 1))
-        #expect(ForYouGridPage.removals(from: old, to: [
-            PostGridPageSection(title: "Today", posts: [all[1], all[0], all[2]]), old[1]
-        ]) == nil, "a reorder is not a removal")
-        #expect(ForYouGridPage.removals(from: old, to: [
-            PostGridPageSection(title: "Today", posts: Array(all[0..<4])), PostGridPageSection(title: "Yesterday", posts: [all[4]])
-        ]) == nil, "a post moving between groups is not a removal")
-        #expect(ForYouGridPage.removals(from: old, to: old) == nil, "nothing removed")
+        #expect(oneRow == .init(deletedItems: [IndexPath(item: 1, section: 0)], movedItems: [
+            .init(from: IndexPath(item: 2, section: 0), to: IndexPath(item: 1, section: 0))
+        ]))
+        let lastOfAGroup = try #require(ForYouGridPage.rowUpdates(from: old, to: [old[0]]))
+        #expect(lastOfAGroup == .init(deletedSections: IndexSet(integer: 1)))
+        #expect(ForYouGridPage.rowUpdates(from: old, to: old) == nil, "nothing changed")
     }
 
-    /// The trailing swipe is the host's, destructive, on the swiped row's
-    /// post; the long press keeps the host's menu.
-    @Test func theSwipeAndTheMenuAreTheHosts() throws {
+    /// A reorder MOVES its rows (the owner, 2026-11-07): within a group,
+    /// across groups, into a group that appears (a delete and an insert),
+    /// and a newly viewed post comes in.
+    @Test func aReorderMovesItsRows() throws {
+        let all = posts(6)
+        let old = [
+            PostGridPageSection(title: "Yesterday", posts: Array(all[0..<3])),
+            PostGridPageSection(title: "This Week", posts: Array(all[3..<5]))
+        ]
+        // Within a group: p2 to the top.
+        let within = try #require(ForYouGridPage.rowUpdates(from: old, to: [
+            PostGridPageSection(title: "Yesterday", posts: [all[2], all[0], all[1]]), old[1]
+        ]))
+        #expect(within.deletedItems.isEmpty && within.insertedItems.isEmpty)
+        #expect(within.movedItems.count == 3)
+        // Across groups: p3 from This Week up to Yesterday.
+        let across = try #require(ForYouGridPage.rowUpdates(from: old, to: [
+            PostGridPageSection(title: "Yesterday", posts: [all[3], all[0], all[1], all[2]]),
+            PostGridPageSection(title: "This Week", posts: [all[4]])
+        ]))
+        #expect(across.movedItems.contains(.init(from: IndexPath(item: 0, section: 1), to: IndexPath(item: 0, section: 0))))
+        #expect(across.deletedItems.isEmpty && across.insertedItems.isEmpty && across.insertedSections.isEmpty)
+        // Into Today, which appears, with p5 viewed for the first time.
+        let today = try #require(ForYouGridPage.rowUpdates(from: old, to: [
+            PostGridPageSection(title: "Today", posts: [all[5], all[1]]),
+            PostGridPageSection(title: "Yesterday", posts: [all[0], all[2]]), old[1]
+        ]))
+        #expect(today.insertedSections == IndexSet(integer: 0))
+        #expect(today.deletedItems == [IndexPath(item: 1, section: 0)], "p1 leaves Yesterday")
+        #expect(today.insertedItems.isEmpty, "p1 and p5 come in with Today")
+        #expect(today.movedItems == [.init(from: IndexPath(item: 2, section: 0), to: IndexPath(item: 1, section: 1))])
+    }
+
+    /// A row that changes groups at the same index path — the group
+    /// before it went — still moves.
+    @Test func aRowChangingGroupsAtTheSameNumbersMoves() throws {
+        let all = posts(3)
+        let old = [
+            PostGridPageSection(title: "X", posts: [all[0]]),
+            PostGridPageSection(title: "A", posts: [all[1]]),
+            PostGridPageSection(title: "B", posts: [all[2]])
+        ]
+        let updates = try #require(ForYouGridPage.rowUpdates(from: old, to: [
+            PostGridPageSection(title: "A", posts: [all[2]]),
+            PostGridPageSection(title: "B", posts: [all[1]])
+        ]))
+        #expect(updates.deletedSections == IndexSet(integer: 0))
+        #expect(updates.movedItems.contains(.init(from: IndexPath(item: 0, section: 1), to: IndexPath(item: 0, section: 1))))
+    }
+
+    /// Groups that swap places, or repeat, are not animated: a reload.
+    @Test func groupsOutOfOrderReload() {
+        let all = posts(2)
+        let old = [PostGridPageSection(title: "A", posts: [all[0]]), PostGridPageSection(title: "B", posts: [all[1]])]
+        #expect(ForYouGridPage.rowUpdates(from: old, to: [old[1], old[0]]) == nil)
+        #expect(ForYouGridPage.rowUpdates(from: old, to: [old[0], PostGridPageSection(title: "A", posts: [all[1]])]) == nil)
+    }
+
+    /// On a page in a window the reorder lands in the new order, every row
+    /// wearing its own post and date.
+    @Test func aReorderedPageShowsTheNewOrder() throws {
+        let all = posts(4)
+        let (page, grid) = page()
+        let dates = Dictionary(uniqueKeysWithValues: all.enumerated().map { ($1.id, Self.now.addingTimeInterval(Double(-($0 + 1)) * 3_600)) })
+        page.show(.sections([PostGridPageSection(title: "Today", posts: all, viewedAt: dates)]))
+        page.layoutIfNeeded()
+        var moved = dates
+        moved[all[3].id] = Self.now
+        page.show(.sections([PostGridPageSection(title: "Today", posts: [all[3], all[0], all[1], all[2]], viewedAt: moved)]))
+        page.layoutIfNeeded()
+        #expect(grid.posts.map(\.id.rawValue) == ["p3", "p0", "p1", "p2"])
+        #expect(try row(grid, "p3").debugViewedText == "now")
+        #expect(try row(grid, "p0").debugViewedText == "1h")
+    }
+
+    /// No row swipes (the owner, 2026-11-07); the long press keeps the
+    /// host's menu, and VoiceOver the host's row action.
+    @Test func theMenuIsTheHostsAndNoRowSwipes() throws {
         let all = posts(4)
         let (page, grid) = page()
         var removed: [PostID] = []
-        page.rowSwipeAction = PostGridRowSwipeAction(title: "Remove from History", symbolName: "clock.badge.xmark") {
+        page.rowAccessibilityAction = PostGridRowAction(title: "Remove from History") {
             removed.append($0.id)
         }
         page.postMenuActions = { context in [.removeFromHistory { removed.append(context.post.id) }] }
         page.show(.sections([PostGridPageSection(title: "Today", posts: all)]))
         page.layoutIfNeeded()
-        let configuration = try #require(grid.trailingSwipe(at: IndexPath(item: 2, section: 0)))
-        let action = try #require(configuration.actions.first)
-        #expect(action.style == .destructive && action.title == "Remove from History")
-        #expect(configuration.performsFirstActionWithFullSwipe)
-        action.handler(action, UIView()) { _ in }
-        #expect(removed == [PostID("p2")])
 
         let rows = grid.menuActions(for: all[1], authorID: ProfileID("a1"), anchor: UIView())
         let history = try #require(rows.compactMap { row -> (() -> Void)? in
             if case .removeFromHistory(let perform) = row { perform } else { nil }
         }.first)
         history()
-        #expect(removed == [PostID("p2"), PostID("p1")])
-        // The row names the swipe for VoiceOver.
+        #expect(removed == [PostID("p1")])
+        // VoiceOver's action is the host's.
         let cell = try row(grid, "p3")
-        #expect(cell.accessibilityCustomActions?.map(\.name).contains("Remove from History") == true)
-        // No host action, no swipe.
-        page.rowSwipeAction = nil
-        #expect(grid.trailingSwipe(at: IndexPath(item: 0, section: 0)) == nil)
+        let action = try #require(cell.accessibilityCustomActions?.first { $0.name == "Remove from History" })
+        _ = action.actionHandler?(action)
+        #expect(removed == [PostID("p1"), PostID("p3")])
     }
 
     /// The author beside content (#2145): a tap is the host's card, a hold

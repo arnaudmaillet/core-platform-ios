@@ -175,16 +175,33 @@ struct HistoryRowCellTests {
         #expect(cell.accessibilityLabel == label)
     }
 
-    /// Its custom actions: "Open profile" (the hold) and the row's swipe.
-    @Test func voiceOverActionsStandForTheHoldAndTheSwipe() throws {
+    /// Its custom actions: "Open profile" (the hold) and the row's action
+    /// (the menu's "Remove from History").
+    @Test func voiceOverActionsStandForTheHoldAndTheMenu() throws {
         let cell = laidOut(post(), viewedAt: nil)
         var events: [String] = []
         cell.onAuthorHeld = { events.append("profile") }
-        cell.swipeAction = ("Remove from History", { events.append("removed") })
+        cell.rowAction = ("Remove from History", { events.append("removed") })
         let actions = try #require(cell.accessibilityCustomActions)
         #expect(actions.map(\.name) == ["Open profile", "Remove from History"])
         for action in actions { _ = action.actionHandler?(action) }
         #expect(events == ["profile", "removed"])
+    }
+
+    /// The count, then the heart: "1.2K ♥" (the owner, 2026-11-07).
+    @Test func theHeartFollowsTheCount() {
+        let cell = laidOut(post(), viewedAt: Self.now)
+        #expect(cell.debugLikesGlyphTrails)
+    }
+
+    /// A clip's play mark, bigger than it was (the owner, 2026-11-07): 0.34
+    /// of the square, not 0.24.
+    @Test func thePlayMarkIsALittleBigger() {
+        let cell = laidOut(post(kind: .video), viewedAt: Self.now)
+        let side = cell.debugFrames.square.width
+        #expect(cell.debugMarks.play)
+        #expect(abs(cell.debugPlaySide - max(14, (side * 0.34).rounded())) < 0.5)
+        #expect(cell.debugPlaySide > (side * 0.24).rounded())
     }
 
     /// The bones are the row's height.

@@ -172,8 +172,8 @@ final class ForYouGridPage: UIView {
     /// A Rows page's author tapped: the profile card (#2145) — see
     /// `PostGridPage.onAuthorCardTapped`. Nil: `onAuthorTapped`.
     var onAuthorCardTapped: ((GalleryPost) -> Void)?
-    /// A Rows page's trailing swipe on a row (#2170).
-    var rowSwipeAction: PostGridRowSwipeAction?
+    /// A Rows page's row action, for VoiceOver (#2170).
+    var rowAccessibilityAction: PostGridRowAction?
     /// When the viewer viewed each post a Rows page holds — the groups'
     /// dates (`PostGridPageSection.viewedAt`), keyed by post so a date stays
     /// on its row (#2170).
@@ -1018,9 +1018,6 @@ final class ForYouGridPage: UIView {
                 },
                 endsGroup: { [headerHost] section in
                     headerHost.page?.endsGroup(inSection: section) ?? false
-                },
-                trailingSwipe: { [headerHost] indexPath in
-                    headerHost.page?.trailingSwipe(at: indexPath)
                 }
             )
         }
@@ -2353,23 +2350,6 @@ final class ForYouGridPage: UIView {
         )
     }
 
-    /// A row's trailing swipe — the host's (`rowSwipeAction`), destructive.
-    /// Asked by the layout, which is why it is not private.
-    func trailingSwipe(at indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        guard style == .rows, !showsSkeleton, let action = rowSwipeAction else { return nil }
-        let index = flatIndex(for: indexPath)
-        guard posts.indices.contains(index) else { return nil }
-        let post = posts[index]
-        let swipe = UIContextualAction(style: .destructive, title: action.title) { _, _, done in
-            action.perform(post)
-            done(true)
-        }
-        swipe.image = action.symbolName.flatMap { UIImage(systemName: $0) }
-        let configuration = UISwipeActionsConfiguration(actions: [swipe])
-        configuration.performsFirstActionWithFullSwipe = true
-        return configuration
-    }
-
     /// **THE TEXT REVEAL**. The whole card of a TEXT row, in
     /// `space` — the rect a clip-window reveal opens from and closes onto.
     ///
@@ -3476,39 +3456,84 @@ final class ForYouGridPage: UIView {
         reloadAll(dissolving: dissolving)
     }
 
-    /// Rows' groups changed by REMOVALS alone — a row taken out of the
-    /// history (#2170): every group left is an old group, in the old order,
-    /// holding its old posts in their old order less some. Its rows, and any
-    /// group emptied, leave with the list's own animation; nil for any other
-    /// change (a reload).
-    static func removals(
-        from old: [PostGridPageSection], to new: [PostGridPageSection]
-    ) -> (items: [IndexPath], sections: IndexSet)? {
+    /// What a Rows page's groups changed by, as the list's own updates —
+    /// so a reorder (History taking in what was viewed, #2170) MOVES its
+    /// rows rather than redrawing at once (the owner, 2026-11-07: "assez
+    /// brut"). Rows still in a group that stays move, wherever they go; new
+    /// ones come in, gone ones leave; a group appears or goes whole.
+    struct RowUpdates: Equatable {
+        struct Move: Equatable {
+            let from: IndexPath
+            let to: IndexPath
+        }
+        var deletedSections = IndexSet()
+        var insertedSections = IndexSet()
+        var deletedItems: [IndexPath] = []
+        var insertedItems: [IndexPath] = []
+        var movedItems: [Move] = []
+
+        var isEmpty: Bool {
+            deletedSections.isEmpty && insertedSections.isEmpty && deletedItems.isEmpty
+                && insertedItems.isEmpty && movedItems.isEmpty
+        }
+    }
+
+    /// The updates from `old` to `new`, keyed by group title and post; nil
+    /// when there are none, or none the list can animate — no groups on one
+    /// side, a repeated title or post, or groups that swapped places (day
+    /// groups never do: they are in the order of the days).
+    ///
+    /// ⚠️ A ROW LEAVING A GROUP THAT GOES, OR JOINING ONE THAT COMES, IS A
+    /// DELETE AND AN INSERT, never a move: the list refuses a move out of a
+    /// deleted section or into an inserted one.
+    static func rowUpdates(from old: [PostGridPageSection], to new: [PostGridPageSection]) -> RowUpdates? {
         guard !old.isEmpty, !new.isEmpty else { return nil }
-        var items: [IndexPath] = []
-        var sections = IndexSet()
-        var next = 0
-        var removedAny = false
-        for (section, group) in old.enumerated() {
-            guard next < new.count, new[next].title == group.title else {
-                sections.insert(section)
-                removedAny = true
+        let oldTitles = old.map(\.title)
+        let newTitles = new.map(\.title)
+        guard Set(oldTitles).count == oldTitles.count, Set(newTitles).count == newTitles.count else { return nil }
+        let common = Set(oldTitles).intersection(newTitles)
+        guard oldTitles.filter(common.contains) == newTitles.filter(common.contains) else { return nil }
+        func places(_ groups: [PostGridPageSection]) -> [PostID: IndexPath]? {
+            var places: [PostID: IndexPath] = [:]
+            for (section, group) in groups.enumerated() {
+                for (item, post) in group.posts.enumerated() {
+                    guard places.updateValue(IndexPath(item: item, section: section), forKey: post.id) == nil
+                    else { return nil }
+                }
+            }
+            return places
+        }
+        guard let before = places(old), let after = places(new) else { return nil }
+        var updates = RowUpdates()
+        for (index, title) in oldTitles.enumerated() where !common.contains(title) { updates.deletedSections.insert(index) }
+        for (index, title) in newTitles.enumerated() where !common.contains(title) { updates.insertedSections.insert(index) }
+        for (id, from) in before {
+            let leavesWithItsGroup = updates.deletedSections.contains(from.section)
+            guard let to = after[id] else {
+                if !leavesWithItsGroup { updates.deletedItems.append(from) }
                 continue
             }
-            let kept = new[next].posts.map(\.id)
-            let keptSet = Set(kept)
-            let remaining = group.posts.filter { keptSet.contains($0.id) }.map(\.id)
-            // Same posts left, same order — nothing moved in or between.
-            guard remaining == kept else { return nil }
-            for (item, post) in group.posts.enumerated() where !keptSet.contains(post.id) {
-                items.append(IndexPath(item: item, section: section))
-                removedAny = true
+            let joinsANewGroup = updates.insertedSections.contains(to.section)
+            if leavesWithItsGroup || joinsANewGroup {
+                if !leavesWithItsGroup { updates.deletedItems.append(from) }
+                if !joinsANewGroup { updates.insertedItems.append(to) }
+            } else if oldTitles[from.section] != newTitles[to.section] || from.item != to.item {
+                // By group and place, not by index path: a row can change
+                // groups at the same numbers when a group before it went.
+                updates.movedItems.append(RowUpdates.Move(from: from, to: to))
             }
-            next += 1
         }
-        guard next == new.count, removedAny else { return nil }
-        return (items, sections)
+        for (id, to) in after where before[id] == nil && !updates.insertedSections.contains(to.section) {
+            updates.insertedItems.append(to)
+        }
+        updates.deletedItems.sort()
+        updates.insertedItems.sort()
+        updates.movedItems.sort { $0.from < $1.from }
+        return updates.isEmpty ? nil : updates
     }
+
+    /// A Rows reorder's spring: long enough to follow a row up the list.
+    static let rowsReorderSpring: (duration: TimeInterval, damping: CGFloat) = (0.55, 0.86)
 
     /// Discover's titled groups (`.sections`): each group planned as a list
     /// of its own — its chunks numbered on from the group before, so the
@@ -3579,7 +3604,7 @@ final class ForYouGridPage: UIView {
         let wasGrouped = isGrouped && !showsSkeleton && groupTitles.count == segments.count
         let sameShape = wasGrouped && titles == groupTitles
             && MosaicChunkPlanner.change(from: segments, to: planned) == .identical
-        let removals = wasGrouped && window != nil ? Self.removals(from: before, to: shown) : nil
+        let updates = wasGrouped && window != nil ? Self.rowUpdates(from: before, to: shown) : nil
         let postsBefore = posts
         let dissolving = showsSkeleton && window != nil
         collectionView.layoutIfNeeded()
@@ -3604,17 +3629,38 @@ final class ForYouGridPage: UIView {
             if !visible.isEmpty { collectionView.reconfigureItems(at: visible) }
             return
         }
-        if let removals {
-            collectionView.performBatchUpdates {
-                adopt()
-                collectionView.deleteItems(at: removals.items.filter { !removals.sections.contains($0.section) })
-                collectionView.deleteSections(removals.sections)
-            } completion: { [weak self] _ in
-                // A group's trailing gap is asked of the group after it: the
-                // group now last loses it.
-                self?.collectionView.collectionViewLayout.invalidateLayout()
-                self?.updatePinnedSection()
-                self?.updateAutoplay()
+        if let updates {
+            let apply = { [self] in
+                collectionView.performBatchUpdates {
+                    adopt()
+                    collectionView.deleteSections(updates.deletedSections)
+                    collectionView.insertSections(updates.insertedSections)
+                    collectionView.deleteItems(at: updates.deletedItems)
+                    collectionView.insertItems(at: updates.insertedItems)
+                    for move in updates.movedItems {
+                        collectionView.moveItem(at: move.from, to: move.to)
+                    }
+                } completion: { [weak self] _ in
+                    guard let self else { return }
+                    // A group's trailing gap is asked of the group after
+                    // it: the group now last loses it.
+                    collectionView.collectionViewLayout.invalidateLayout()
+                    // A moved row still wears what it said where it was —
+                    // "2h" for a post viewed just now: its words, once landed.
+                    let visible = collectionView.indexPathsForVisibleItems
+                    if !showsSkeleton, !visible.isEmpty { collectionView.reconfigureItems(at: visible) }
+                    updatePinnedSection()
+                    updateAutoplay()
+                }
+            }
+            if UIAccessibility.isReduceMotionEnabled {
+                apply()
+            } else {
+                UIView.animate(
+                    withDuration: Self.rowsReorderSpring.duration, delay: 0,
+                    usingSpringWithDamping: Self.rowsReorderSpring.damping, initialSpringVelocity: 0,
+                    options: [.allowUserInteraction, .beginFromCurrentState], animations: apply
+                )
             }
             return
         }
@@ -3993,7 +4039,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     }
 
     /// A Rows row (#2170): the post, its view date, the author's tap and
-    /// hold (#2145), the swipe named for VoiceOver.
+    /// hold (#2145), the row's action for VoiceOver.
     private func rowCell(for post: GalleryPost, at indexPath: IndexPath, isFlying: Bool) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(
             withReuseIdentifier: PostHistoryRowCell.reuseID, for: indexPath
@@ -4008,8 +4054,8 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             }
             cell.onAuthorHeld = onAuthorTapped == nil ? nil : { [weak self] in self?.onAuthorTapped?(post) }
         }
-        if let action = rowSwipeAction {
-            cell.swipeAction = (action.title, { action.perform(post) })
+        if let action = rowAccessibilityAction {
+            cell.rowAction = (action.title, { action.perform(post) })
         }
         Self.applyHeroConcealment(isFlying, to: cell)
         return cell

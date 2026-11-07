@@ -302,8 +302,15 @@ struct SnapCommentTickerViewTests {
             let ticker = makeTicker(in: window)
             let first = try #require(grabbedAtStart(ticker))
             let x = first.layer.position.x
+            // ⚠️ WHAT STOOD AT THE GRAB, NOT THE FIRST BUBBLE ALONE: the lanes
+            // enter staggered, and on a starved runner (#2180's CI, 298 s) the
+            // next lane's entry fired before the grab — a second bubble at its
+            // entry edge that the scrub did not make.
+            let atGrab = Set(bubbleViews(ticker).map(ObjectIdentifier.init))
             ticker.applyScrubTranslation(20)
-            #expect(bubbleViews(ticker) == [first], "a backward scrub conjured \(texts(ticker))")
+            let conjured = bubbleViews(ticker).filter { !atGrab.contains(ObjectIdentifier($0)) }
+            #expect(conjured.isEmpty, "a backward scrub conjured \(texts(ticker))")
+            #expect(bubbleViews(ticker).contains(first))
             #expect(abs(first.layer.position.x - (x + 20)) < 0.5)
         }
     }
