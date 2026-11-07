@@ -1,12 +1,17 @@
 import DesignSystem
 import UIKit
 
-/// The field's place while a voice message is recorded (#2102):
+/// The field's place while a voice message is recorded (#2102). Locked
+/// and paused, the time leads on its chip and the waveform fills the rest
+/// of the field, and the bin stands in the avatar's place
+/// (`CommentsInputBar.showVoiceDelete`) — Telegram's (the owner,
+/// 2026-11-06; the chip left the bars' middle for the field's start on
+/// 11-07):
 ///
 /// ```
 /// recording   ● 0:07   ‹ Slide to cancel
-/// locked      (🗑)  ● 0:42  ▁▂▅▇▅▃▂▁▃▆▇   (❚❚)  (↑)
-/// paused      (🗑)  (▶︎)  ▂▅▇▅▃▂▅▇▆▃  0:42  (🎙)  (↑)
+/// locked      [● 0:42] ▁▂▅▇▅▃▂▁▃▆▇▅▃   (❚❚)  (↑)
+/// paused      [▶︎ 0:42] ▂▅▇▅▃▂▅▇▆▃▂▅   (🎙)  (↑)
 /// ```
 final class VoiceRecordingStrip: UIView {
     enum Mode: Equatable {
@@ -15,7 +20,6 @@ final class VoiceRecordingStrip: UIView {
         case paused(resumable: Bool, playing: Bool)
     }
 
-    var onDelete: (() -> Void)?
     var onPause: (() -> Void)?
     var onResume: (() -> Void)?
     var onPlay: (() -> Void)?
@@ -26,14 +30,23 @@ final class VoiceRecordingStrip: UIView {
     private let dot = UIView()
     private let timerLabel = UILabel()
     private let slideLabel = UILabel()
+    /// The waveform's box: it stretches between the chip and the buttons.
+    private let box = UIView()
     let waveform = WaveformBars()
-    private let deleteButton = VoiceRecordingStrip.button("trash", label: "Delete recording")
-    private let pauseButton = VoiceRecordingStrip.button("pause.fill", label: "Pause recording")
-    private let resumeButton = VoiceRecordingStrip.button("mic.fill", label: "Resume recording")
-    private let playButton = VoiceRecordingStrip.button("play.fill", label: "Play recording")
+    private let chip = UIButton(configuration: .gray())
+    /// ❚❚ while it records, 🎙 once paused: ONE button whose symbol is
+    /// replaced (the owner, 2026-11-07: an icon turning into another is
+    /// always the symbol's own Replace).
+    private let takeButton = VoiceRecordingStrip.button("pause.fill", label: "Pause recording")
     private let sendButton = VoiceRecordingStrip.button("arrow.up.circle.fill", label: "Send voice message")
     private let stack = UIStackView()
     private var liveLevels: [UInt8] = []
+    private var timeText = ""
+    private var stackTrailing: NSLayoutConstraint?
+    /// Holding, the mic disc stands over the field's end — its glow wider
+    /// still: the hint stops short of it (the owner, 2026-11-07: covered
+    /// before the finger had moved).
+    static let discClearance: CGFloat = 40
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -50,27 +63,71 @@ final class VoiceRecordingStrip: UIView {
         slideLabel.textColor = .secondaryLabel
         slideLabel.lineBreakMode = .byTruncatingTail
         sendButton.configuration?.baseForegroundColor = Palette.tint
-        waveform.heightAnchor.constraint(equalToConstant: 24).isActive = true
-        waveform.onSeek = { [weak self] fraction, _ in self?.onSeek?(fraction) }
 
-        deleteButton.addAction(UIAction { [weak self] _ in self?.onDelete?() }, for: .primaryActionTriggered)
-        pauseButton.addAction(UIAction { [weak self] _ in self?.onPause?() }, for: .primaryActionTriggered)
-        resumeButton.addAction(UIAction { [weak self] _ in self?.onResume?() }, for: .primaryActionTriggered)
-        playButton.addAction(UIAction { [weak self] _ in self?.onPlay?() }, for: .primaryActionTriggered)
+        // The chip: the time, leading the field, the bubble's speed chip's
+        // look.
+        chip.configuration?.cornerStyle = .capsule
+        chip.configuration?.baseBackgroundColor = .systemGray5
+        chip.configuration?.baseForegroundColor = .label
+        chip.configuration?.imagePadding = 4
+        chip.configuration?.contentInsets = NSDirectionalEdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 9)
+        chip.configuration?.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+        chip.configuration?.symbolContentTransition = UISymbolContentTransition(.replace)
+        chip.configuration?.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = .scaledMonospacedDigitSystemFont(
+                ofSize: UIFont.defaultPointSize(for: .footnote), weight: .semibold, relativeTo: .footnote
+            )
+            return attributes
+        }
+        chip.addAction(UIAction { [weak self] _ in
+            guard case .paused = self?.mode else { return }
+            self?.onPlay?()
+        }, for: .primaryActionTriggered)
+
+        waveform.onSeek = { [weak self] fraction, _ in self?.onSeek?(fraction) }
+        // The bars fill the field (the bubble's hug them): they, not the
+        // buttons, take the room — and give it up first. Their own width
+        // (`intrinsicContentSize`, as wide as their bars) once squeezed the
+        // pause under the send (the owner's video, 2026-11-07).
+        waveform.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+        waveform.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
+        waveform.translatesAutoresizingMaskIntoConstraints = false
+        box.addSubview(waveform)
+        NSLayoutConstraint.activate([
+            waveform.leadingAnchor.constraint(equalTo: box.leadingAnchor),
+            waveform.trailingAnchor.constraint(equalTo: box.trailingAnchor),
+            waveform.centerYAnchor.constraint(equalTo: box.centerYAnchor),
+            waveform.heightAnchor.constraint(equalToConstant: 24),
+            box.heightAnchor.constraint(greaterThanOrEqualToConstant: 24),
+        ])
+        chip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        // The one part that stretches, and the one that gives: the buttons
+        // keep their size.
+        box.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
+        box.setContentCompressionResistancePriority(UILayoutPriority(1), for: .horizontal)
+
+        takeButton.configuration?.symbolContentTransition = UISymbolContentTransition(.replace)
+        takeButton.addAction(UIAction { [weak self] _ in
+            guard let self else { return }
+            if mode == .locked { onPause?() } else { onResume?() }
+        }, for: .primaryActionTriggered)
         sendButton.addAction(UIAction { [weak self] _ in self?.onSend?() }, for: .primaryActionTriggered)
 
         stack.axis = .horizontal
         stack.alignment = .center
         stack.spacing = Spacing.sm
-        for part in [deleteButton, playButton, dot, timerLabel, slideLabel, waveform, pauseButton, resumeButton, sendButton] as [UIView] {
+        for part in [dot, timerLabel, slideLabel, chip, box, takeButton, sendButton] as [UIView] {
             stack.addArrangedSubview(part)
         }
         stack.setCustomSpacing(Spacing.xs, after: dot)
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
+        let trailing = stack.trailingAnchor.constraint(equalTo: trailingAnchor)
+        stackTrailing = trailing
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            trailing,
             stack.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
         apply(.recording)
@@ -100,29 +157,48 @@ final class VoiceRecordingStrip: UIView {
         } else {
             paused = false; resumable = false; playing = false
         }
+        // Holding: the dot, the time and the hint. Locked or paused: the
+        // bars with the time on their chip.
+        dot.isHidden = !recording
+        timerLabel.isHidden = !recording
         slideLabel.isHidden = !recording
-        dot.isHidden = paused
-        deleteButton.isHidden = recording
-        pauseButton.isHidden = !locked
-        resumeButton.isHidden = !(paused && resumable)
-        playButton.isHidden = !paused
-        playButton.configuration?.image = UIImage(systemName: playing ? "pause.fill" : "play.fill")
-        playButton.accessibilityLabel = playing ? "Pause playback" : "Play recording"
+        box.isHidden = recording
+        chip.isHidden = recording
+        stackTrailing?.constant = recording ? -Self.discClearance : 0
+        // Replaced only in sight: a button coming into view shows its symbol
+        // at once.
+        let wasShown = !takeButton.isHidden
+        takeButton.isHidden = !(locked || (paused && resumable))
+        let take = UIImage(systemName: locked ? "pause.fill" : "mic.fill")
+        if takeButton.configuration?.image != take {
+            takeButton.configuration?.symbolContentTransition = wasShown ? UISymbolContentTransition(.replace) : nil
+            takeButton.configuration?.image = take
+        }
+        takeButton.accessibilityLabel = locked ? "Pause recording" : "Resume recording"
         sendButton.isHidden = recording
-        waveform.isHidden = recording
-        if recording || locked { blink(true) } else { blink(false) }
+        // The chip leads with what it is: a red dot while it records, ▶︎ / ❚❚
+        // to listen back when it is paused.
+        let face = UIImage(systemName: paused ? (playing ? "pause.fill" : "play.fill") : "circle.fill")
+        if chip.configuration?.image != face { chip.configuration?.image = face }
+        chip.configuration?.imageColorTransformer = paused ? nil : UIConfigurationColorTransformer { _ in .systemRed }
+        chip.isUserInteractionEnabled = paused
+        chip.accessibilityLabel = paused ? (playing ? "Pause playback" : "Play recording") : nil
+        chip.isAccessibilityElement = paused
+        blink(recording || locked)
     }
 
     /// The take's time; red in its last ten seconds, counting down (#2102).
     func setTime(_ seconds: TimeInterval, remaining: TimeInterval?) {
-        if let remaining, remaining <= 10 {
-            timerLabel.text = "-" + ThreadVoiceView.clock(remaining.rounded(.up))
-            timerLabel.textColor = Palette.tint
-        } else {
-            timerLabel.text = ThreadVoiceView.clock(seconds)
-            timerLabel.textColor = .label
-        }
+        let running = remaining.map { $0 <= 10 } ?? false
+        let text = running ? "-" + ThreadVoiceView.clock((remaining ?? 0).rounded(.up)) : ThreadVoiceView.clock(seconds)
+        timerLabel.text = text
+        timerLabel.textColor = running ? Palette.tint : .label
         timerLabel.accessibilityLabel = "\(Int(seconds)) seconds"
+        if text != timeText {
+            timeText = text
+            chip.configuration?.title = text
+        }
+        chip.configuration?.baseForegroundColor = running ? Palette.tint : .label
     }
 
     /// How far toward cancel the finger is: the hint fades with it.
@@ -147,84 +223,38 @@ final class VoiceRecordingStrip: UIView {
         setTime(progress > 0 ? duration * progress : duration, remaining: nil)
     }
 
+    /// While it records: the holding row's dot, or the chip's.
     private func blink(_ on: Bool) {
-        dot.layer.removeAnimation(forKey: "blink")
-        guard on, !MotionPreference.reducesMotion else { return }
+        let target: CALayer? = mode == .recording ? dot.layer : chip.imageView?.layer
+        for layer in [dot.layer, chip.imageView?.layer].compactMap({ $0 }) { layer.removeAnimation(forKey: "blink") }
+        guard on, let target, !MotionPreference.reducesMotion else { return }
         let blink = CABasicAnimation(keyPath: "opacity")
         blink.fromValue = 1
         blink.toValue = 0.25
         blink.duration = 0.6
         blink.autoreverses = true
         blink.repeatCount = .infinity
-        dot.layer.add(blink, forKey: "blink")
+        target.add(blink, forKey: "blink")
     }
 
     #if DEBUG
-    var debugTimerText: String? { timerLabel.text }
+    var debugTimerText: String? { box.isHidden ? timerLabel.text : chip.configuration?.title }
     var debugVisibleControls: [String] {
-        [deleteButton, playButton, pauseButton, resumeButton, sendButton].filter { !$0.isHidden }.compactMap(\.accessibilityLabel)
+        var shown = [takeButton, sendButton].filter { !$0.isHidden }.compactMap(\.accessibilityLabel)
+        if !box.isHidden, chip.isAccessibilityElement, let label = chip.accessibilityLabel { shown.insert(label, at: 0) }
+        return shown
     }
+    var debugShowsWaveform: Bool { !box.isHidden }
+    var debugChipFrame: CGRect { chip.convert(chip.bounds, to: self) }
+    var debugWaveformFrame: CGRect { waveform.convert(waveform.bounds, to: self) }
+    var debugTakeFrame: CGRect { takeButton.convert(takeButton.bounds, to: self) }
+    var debugSendFrame: CGRect { sendButton.convert(sendButton.bounds, to: self) }
     func debugTap(_ label: String) {
-        [deleteButton, playButton, pauseButton, resumeButton, sendButton]
+        if chip.accessibilityLabel == label { return chip.sendActions(for: .primaryActionTriggered) }
+        [takeButton, sendButton]
             .first { $0.accessibilityLabel == label }?.sendActions(for: .primaryActionTriggered)
     }
     #endif
-}
-
-/// The mic under the finger while it holds (#2102): a raspberry disc that
-/// breathes with the voice — it is listening, without a meter.
-final class VoiceMicDisc: UIView {
-    static let side: CGFloat = 76
-    private let breath = UIView()
-    private let disc = UIView()
-    private let glyph = UIImageView(image: UIImage(systemName: "mic.fill"))
-
-    override init(frame: CGRect) {
-        super.init(frame: CGRect(x: 0, y: 0, width: Self.side, height: Self.side))
-        isUserInteractionEnabled = false
-        for view in [breath, disc] {
-            view.frame = bounds
-            view.layer.cornerRadius = Self.side / 2
-            view.backgroundColor = Palette.tint
-            addSubview(view)
-        }
-        breath.alpha = 0.25
-        glyph.tintColor = .white
-        glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 26, weight: .semibold)
-        glyph.sizeToFit()
-        glyph.center = CGPoint(x: bounds.midX, y: bounds.midY)
-        addSubview(glyph)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// The live level, 0…1: the soft ring swells with it.
-    func setLevel(_ level: Float) {
-        guard !MotionPreference.reducesMotion else { return }
-        let scale = 1 + CGFloat(min(1, level * 2)) * 0.5
-        UIView.animate(withDuration: 0.1, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
-            self.breath.transform = CGAffineTransform(scaleX: scale, y: scale)
-        }
-    }
-
-    /// The cancel's small scene: the mic gives way to a bin that drops away.
-    func throwAway(completion: @escaping () -> Void) {
-        guard window != nil, !MotionPreference.reducesMotion else {
-            completion()
-            return
-        }
-        glyph.image = UIImage(systemName: "trash.fill")
-        UIView.animate(withDuration: 0.18, animations: {
-            self.disc.backgroundColor = .systemRed
-            self.breath.alpha = 0
-        }) { _ in
-            UIView.animate(withDuration: 0.32, delay: 0.12, options: [.curveEaseIn]) {
-                self.transform = CGAffineTransform(translationX: 0, y: 60).scaledBy(x: 0.3, y: 0.3)
-                self.alpha = 0
-            } completion: { _ in completion() }
-        }
-    }
 }
 
 /// The lock above the mic while it holds (#2102): a glass capsule with a
@@ -243,10 +273,14 @@ final class VoiceLockCapsule: UIVisualEffectView {
         clipsToBounds = true
         fill.backgroundColor = Palette.tint.withAlphaComponent(0.25)
         contentView.addSubview(fill)
+        // ⚠️ A SQUARE THE SYMBOL CENTRES IN (the owner, 2026-11-07): sized
+        // to the open padlock, the closed one — narrower — was stretched
+        // into its frame and looked squashed.
         for (view, y) in [(padlock, 24.0), (chevron, 56.0)] as [(UIImageView, CGFloat)] {
             view.tintColor = .label
             view.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
-            view.sizeToFit()
+            view.contentMode = .center
+            view.frame = CGRect(x: 0, y: 0, width: 28, height: 28)
             view.center = CGPoint(x: Self.size.width / 2, y: y)
             contentView.addSubview(view)
         }
@@ -262,7 +296,8 @@ final class VoiceLockCapsule: UIVisualEffectView {
         chevron.alpha = 1 - progress
     }
 
+    /// Open to closed: the symbol's own Replace.
     func close() {
-        padlock.image = UIImage(systemName: "lock.fill")
+        padlock.setSymbolImage(UIImage(systemName: "lock.fill")!, contentTransition: .replace)
     }
 }

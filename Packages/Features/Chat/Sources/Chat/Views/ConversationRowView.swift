@@ -87,7 +87,12 @@ final class ConversationRowView: UIView {
         avatarView.setMark(model.peerID == nil ? .none : mark, animated: false)
         loadAvatar(for: model, imagePipeline: imagePipeline, avatars: avatars)
         titleLabel.text = model.title
-        previewLabel.text = model.preview.isEmpty ? "No messages yet" : model.preview
+        let preview = model.preview.isEmpty ? "No messages yet" : model.preview
+        if let voice = Self.voicePreview(preview) {
+            previewLabel.attributedText = voice
+        } else {
+            previewLabel.text = preview
+        }
         timeLabel.text = model.timeText
         mutedIcon.isHidden = !model.isMuted
         applyUnreadStyle(model.isUnread)
@@ -154,6 +159,22 @@ final class ConversationRowView: UIView {
     /// The pin glyph alone; the band belongs to the host that has a background.
     func setPinnedIconHidden(_ isHidden: Bool) {
         pinnedIcon.isHidden = isHidden
+    }
+
+    /// A voice message's preview — the server's "🎤 Voice message (0:12)" —
+    /// with the waveform symbol for the microphone (the owner, 2026-11-07).
+    /// A template image: it takes the line's colour and its unread weight
+    /// as the words do. Nil for any other preview.
+    static func voicePreview(_ preview: String) -> NSAttributedString? {
+        let microphone = "🎤 "
+        guard preview.hasPrefix(microphone),
+              let symbol = UIImage(
+                  systemName: "waveform",
+                  withConfiguration: UIImage.SymbolConfiguration(textStyle: .subheadline, scale: .small)
+              ) else { return nil }
+        let line = NSMutableAttributedString(attachment: NSTextAttachment(image: symbol))
+        line.append(NSAttributedString(string: " " + preview.dropFirst(microphone.count)))
+        return line
     }
 
     /// Unread rows carry weight and full-strength colour; read rows recede.

@@ -104,7 +104,300 @@ final class CommentsInputBar: UIView {
     private var voiceHoldStart: CGPoint = .zero
 
     /// The waveform's button, where the mic disc and the lock stand (#2102).
-    var voiceHoldAnchor: UIView { fieldActionButton }
+    var voiceHoldAnchor: UIView { actsFromOwnBubble ? rowActionButton : fieldActionButton }
+
+    /// A conversation's composer (#2102; the owner, 2026-11-07, Telegram's):
+    /// the field's action leaves the field for a glass bubble of its own at
+    /// the row's end — the waveform over an empty field (held, it records),
+    /// the send over a draft. The bubble belongs to the INPUT ROW: it rides
+    /// the keyboard with the avatar and the field, where the column's slot
+    /// stays down under the keyboard. The host shows no slot (`.noSlot`).
+    var actsFromOwnBubble = false {
+        didSet {
+            guard actsFromOwnBubble != oldValue else { return }
+            applyOwnBubble()
+        }
+    }
+    private let rowActionButton = UIButton(configuration: .glass())
+    private var fieldActionWidth: NSLayoutConstraint!
+    /// The own bubble steps aside while a locked or paused take covers the
+    /// field (it carries its own send): the field takes the row's width.
+    private var rowActionStepsAside = false
+
+    private func applyOwnBubble() {
+        fieldActionButton.isHidden = actsFromOwnBubble || (voiceOverlay != nil && voiceOverlayCoversButton)
+        fieldActionWidth.constant = actsFromOwnBubble ? 0 : Metrics.fieldActionSide
+        rowActionButton.isHidden = !actsFromOwnBubble || rowActionStepsAside
+        voiceHold.view?.removeGestureRecognizer(voiceHold)
+        (actsFromOwnBubble ? rowActionButton : fieldActionButton).addGestureRecognizer(voiceHold)
+        updateFieldAction()
+        setNeedsLayout()
+    }
+
+    /// The own bubble steps aside or comes back as glass does (the owner,
+    /// 2026-11-07): the field stretches over its place, or gives it back, in
+    /// one spring, while the bubble shrinks away or swells in.
+    private func setRowActionAside(_ aside: Bool) {
+        guard aside != rowActionStepsAside else { return }
+        rowActionStepsAside = aside
+        guard window != nil, !MotionPreference.reducesMotion else {
+            if !aside, !voiceHolding { wearRestingFace() }
+            rowActionButton.isHidden = aside
+            rowActionButton.alpha = 1
+            rowActionButton.transform = .identity
+            return setNeedsLayout()
+        }
+        let away = CGAffineTransform(scaleX: 0.5, y: 0.5)
+        if !aside {
+            if !voiceHolding { wearRestingFace() }
+            rowActionButton.isHidden = false
+            rowActionButton.alpha = 0
+            rowActionButton.transform = away
+        }
+        setNeedsLayout()
+        UIView.animate(
+            springDuration: 0.45, bounce: aside ? 0 : 0.2, options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.rowActionButton.alpha = aside ? 0 : 1
+            self.rowActionButton.transform = aside ? away : .identity
+            self.layoutIfNeeded()
+        } completion: { _ in
+            guard self.rowActionStepsAside else { return }
+            self.rowActionButton.isHidden = true
+            self.rowActionButton.alpha = 1
+            self.rowActionButton.transform = .identity
+        }
+    }
+
+    // MARK: The hold's bubble (#2102)
+
+    /// How big the action bubble grows under a held finger — the bubble
+    /// itself, not a disc laid over it (the owner, 2026-11-07).
+    static let voiceHoldSide: CGFloat = 76
+    private var voiceHolding = false
+    private var voiceHoldShift: CGFloat = 0
+    private var voiceHoldSwell: CGFloat = 1
+    private var voiceHoldTrash = false
+    private var rowActionWidth: NSLayoutConstraint!
+    private var rowActionHeight: NSLayoutConstraint!
+    private var rowActionTrailing: NSLayoutConstraint!
+    private var rowActionBottom: NSLayoutConstraint!
+    /// The held bubble's glyph — the mic, the bin — a view of the bar's own
+    /// centred on the bubble by constraints: solved in the same pass as the
+    /// bubble's size and place, it stays centred through every move. Drawn
+    /// by the button, it lagged its glass and drifted off centre (filmed,
+    /// 2026-11-07).
+    private let holdGlyph = UIImageView()
+    private static let holdGlyphConfiguration = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
+    /// The hold is over and the bubble shrinks home: the bar's glyph carries
+    /// the field action's symbol back, and the button takes it over once
+    /// the bubble has landed (`landVoiceHold`).
+    private var voiceHoldReturning = false
+    /// The held glyph fades away with a bubble stepping aside.
+    private var holdGlyphLeaving = false
+
+    /// The hold began: the bubble grows where it stands and wears the mic.
+    /// Its glass is sized by its constraints, never a transform: it redraws
+    /// at every size, as a system bubble swells.
+    func beginVoiceHold() {
+        guard actsFromOwnBubble, !voiceHolding else { return }
+        voiceHolding = true
+        voiceHoldReturning = false
+        if holdGlyphLeaving {
+            holdGlyphLeaving = false
+            holdGlyph.layer.removeAllAnimations()
+            holdGlyph.alpha = 1
+            holdGlyph.transform = .identity
+        }
+        voiceHoldShift = 0
+        voiceHoldSwell = 1
+        voiceHoldTrash = false
+        applyVoiceHoldFace()
+        layOutVoiceHold(spring: 0.42, bounce: 0.3)
+    }
+
+    /// The finger slides toward cancel: the bubble follows it, and wears
+    /// the bin a little of the way in — the mic again if the finger comes
+    /// back.
+    func moveVoiceHold(cancel: CGFloat, travel: CGFloat) {
+        guard voiceHolding else { return }
+        voiceHoldShift = cancel * travel
+        let trash = cancel > 0.15
+        if trash != voiceHoldTrash {
+            voiceHoldTrash = trash
+            applyVoiceHoldFace()
+        }
+        layOutVoiceHold(spring: nil)
+    }
+
+    /// The voice's level, 0…1: the held bubble breathes with it.
+    func setVoiceHoldLevel(_ level: Float) {
+        guard voiceHolding, !MotionPreference.reducesMotion else { return }
+        voiceHoldSwell = 1 + CGFloat(min(1, level * 2)) * 0.12
+        layOutVoiceHold(spring: 0.15, bounce: 0)
+    }
+
+    /// The hold is over — locked, sent, cancelled: the bubble springs back
+    /// to its place, its size and its face.
+    func endVoiceHold() {
+        guard voiceHolding else { return }
+        voiceHolding = false
+        voiceHoldShift = 0
+        voiceHoldSwell = 1
+        voiceHoldTrash = false
+        // A locked or paused take has already sent the bubble aside: its
+        // mic leaves with it — no waveform over the take's send (filmed,
+        // 2026-11-07). Otherwise the waveform rides home on the glyph.
+        voiceHoldReturning = !rowActionStepsAside
+        if rowActionStepsAside { carryHoldGlyphAway() }
+        applyVoiceHoldFace()
+        layOutVoiceHold(spring: 0.42, bounce: 0.15) { [weak self] in self?.landVoiceHold() }
+    }
+
+    /// The bubble steps aside under the held glyph: the glyph shrinks and
+    /// fades with it, wearing what it wore.
+    private func carryHoldGlyphAway() {
+        guard !holdGlyph.isHidden else { return }
+        holdGlyphLeaving = true
+        let finish = { [weak self] in
+            guard let self, self.holdGlyphLeaving else { return }
+            self.holdGlyphLeaving = false
+            self.holdGlyph.isHidden = true
+            self.holdGlyph.alpha = 1
+            self.holdGlyph.transform = .identity
+        }
+        guard window != nil, !MotionPreference.reducesMotion else { return finish() }
+        UIView.animate(springDuration: 0.45, bounce: 0, options: [.beginFromCurrentState]) {
+            self.holdGlyph.alpha = 0
+            self.holdGlyph.transform = CGAffineTransform(scaleX: 0.5, y: 0.5)
+        } completion: { _ in
+            finish()
+        }
+    }
+
+    /// The bubble is home: the button wears the field action's symbol
+    /// again, where the bar's glyph has just brought it.
+    private func landVoiceHold() {
+        guard voiceHoldReturning, !voiceHolding else { return }
+        voiceHoldReturning = false
+        // Taken over in place: no Replace replayed over the glyph's.
+        wearRestingFace()
+    }
+
+    /// The bubble's resting face put on in place, no Replace played; later
+    /// changes replace again.
+    private func wearRestingFace() {
+        applyVoiceHoldFace(replaces: false)
+        rowActionButton.configuration?.symbolContentTransition = UISymbolContentTransition(.replace.offUp, options: .speed(2))
+    }
+
+    var isVoiceHolding: Bool { voiceHolding }
+
+    /// The bubble's size and place for the hold as it stands, grown about
+    /// its own centre, slid toward cancel.
+    private func layOutVoiceHold(
+        spring duration: TimeInterval?, bounce: CGFloat = 0, landed: (() -> Void)? = nil
+    ) {
+        let side = voiceHolding ? Self.voiceHoldSide * voiceHoldSwell : Metrics.controlSize
+        let grow = (side - Metrics.controlSize) / 2
+        rowActionWidth.constant = side
+        rowActionHeight.constant = side
+        rowActionTrailing.constant = grow - voiceHoldShift
+        rowActionBottom.constant = grow
+        guard let duration, window != nil, !MotionPreference.reducesMotion else {
+            setNeedsLayout()
+            landed?()
+            return
+        }
+        UIView.animate(
+            springDuration: duration, bounce: bounce, options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.layoutIfNeeded()
+        } completion: { _ in
+            landed?()
+        }
+    }
+
+    /// The bubble's face: the mic on the brand's glass while held, the bin
+    /// on red past the cancel's start, the field action's otherwise — each
+    /// change the symbol's own Replace, quick enough to keep up with the
+    /// glass's colour.
+    ///
+    /// ⚠️ PROMINENT GLASS WHILE HELD: plain glass ignores a background
+    /// colour, and the white mic vanished on it (filmed, 2026-11-07). The
+    /// prominent glass wears the button's tint.
+    ///
+    /// ⚠️ THE WAY BACK IS THE BAR'S GLYPH TOO: handed back to the button
+    /// in the grown bubble, the symbol kept the frame it had before the
+    /// hold — the top-left corner of the big bubble — and slid to the
+    /// centre from there (filmed, 2026-11-07). A button lays its image out
+    /// only inside the shrink's animation, whatever is forced before it.
+    private func applyVoiceHoldFace(replaces: Bool = true) {
+        var face: UIButton.Configuration = voiceHolding ? .prominentGlass() : .glass()
+        face.cornerStyle = .capsule
+        let quick = UISymbolContentTransition(.replace.offUp, options: .speed(2))
+        if voiceHolding {
+            // The glyph is the bar's (`holdGlyph`): the button wears none.
+            face.image = nil
+            // Each symbol carries its own size, so a Replace never resizes
+            // the outgoing one first (a view-wide configuration would).
+            let glyph = UIImage(
+                systemName: voiceHoldTrash ? "trash.fill" : "mic.fill", withConfiguration: Self.holdGlyphConfiguration
+            )!
+            if holdGlyph.isHidden {
+                holdGlyph.image = glyph
+                holdGlyph.isHidden = false
+            } else if holdGlyph.image != glyph {
+                holdGlyph.setSymbolImage(glyph, contentTransition: .replace.offUp, options: .speed(2))
+            }
+            rowActionButton.tintColor = voiceHoldTrash ? .systemRed : Palette.tint
+        } else if voiceHoldReturning {
+            // The field action's symbol rides home on the bar's glyph,
+            // centred all the way, at the size the button draws it: the
+            // button scales its symbols up a text style's step, and the
+            // glyph's bare size jumped at the hand-over (filmed, 2026-11-07).
+            face.image = nil
+            if var home = Self.fieldActionImage(sends: hasDraft || isSending) {
+                if let drawn = rowActionButton.imageView?.preferredSymbolConfiguration {
+                    home = home.applyingSymbolConfiguration(drawn) ?? home
+                }
+                if holdGlyph.image != home {
+                    holdGlyph.setSymbolImage(home, contentTransition: .replace.offUp, options: .speed(2))
+                }
+            }
+            holdGlyph.isHidden = false
+            rowActionButton.tintColor = nil
+        } else if rowActionStepsAside {
+            // Aside, the bubble wears nothing: it shows again with its face
+            // (`setRowActionAside`).
+            face.image = nil
+            rowActionButton.tintColor = nil
+        } else {
+            if !holdGlyphLeaving { holdGlyph.isHidden = true }
+            if replaces { face.symbolContentTransition = quick }
+            face.image = Self.fieldActionImage(sends: hasDraft || isSending)
+            face.showsActivityIndicator = isSending
+            rowActionButton.tintColor = nil
+        }
+        rowActionButton.configuration = face
+    }
+
+    /// The own bubble's room at the row's end: its side and the gap before it.
+    private var ownBubbleInset: CGFloat {
+        actsFromOwnBubble && !rowActionStepsAside ? Metrics.controlSize + Spacing.sm : 0
+    }
+
+    #if DEBUG
+    var debugRowActionButton: UIButton { rowActionButton }
+    var debugHoldGlyph: UIImageView { holdGlyph }
+    var debugShowsRowAction: Bool { !rowActionButton.isHidden }
+    var debugFieldActionShows: Bool { !fieldActionButton.isHidden }
+    #endif
+
+    #if DEBUG
+    var debugShowsVoiceDelete: Bool { !voiceDeleteButton.isHidden }
+    func debugTapVoiceDelete() { voiceDeleteButton.sendActions(for: .primaryActionTriggered) }
+    #endif
 
     /// Shows a recording strip or bar in the field's place (#2102): the text,
     /// the emote button — and the field's own button when `coversButton`
@@ -116,7 +409,10 @@ final class CommentsInputBar: UIView {
         textView.isHidden = showing
         emotes.toggleButton.isHidden = showing
         placeholderLabel.isHidden = showing || hasDraft
-        fieldActionButton.isHidden = showing && coversButton
+        voiceOverlayCoversButton = coversButton
+        fieldActionButton.isHidden = actsFromOwnBubble || (showing && coversButton)
+        if actsFromOwnBubble { setRowActionAside(showing && coversButton) }
+        onVoiceOverlayChange?(showing)
         guard let overlay else { return }
         overlay.translatesAutoresizingMaskIntoConstraints = false
         field.contentView.addSubview(overlay)
@@ -131,6 +427,28 @@ final class CommentsInputBar: UIView {
         ])
     }
     private(set) var voiceOverlay: UIView?
+    private var voiceOverlayCoversButton = false
+    /// A take shows in the field's place, or the field is back: hosts clear
+    /// what floats over the composer's end (the lock rises there).
+    var onVoiceOverlayChange: ((Bool) -> Void)?
+
+    /// The bin in the avatar's place while a voice take can be thrown away
+    /// (#2102): `onDelete` nil gives the face back. The two cross-fade.
+    func showVoiceDelete(_ onDelete: (() -> Void)?) {
+        onVoiceDelete = onDelete
+        let showing = onDelete != nil
+        guard voiceDeleteButton.isHidden == showing else { return }
+        let swap = {
+            self.voiceDeleteButton.isHidden = !showing
+            self.avatarView.isHidden = showing
+            self.avatarButton.isHidden = showing
+        }
+        guard window != nil, !MotionPreference.reducesMotion else { return swap() }
+        UIView.transition(
+            with: avatarBubble.contentView, duration: 0.2,
+            options: [.transitionCrossDissolve, .allowUserInteraction], animations: swap
+        )
+    }
 
     @objc private func voiceHeld(_ hold: UILongPressGestureRecognizer) {
         let point = hold.location(in: self)
@@ -404,10 +722,10 @@ final class CommentsInputBar: UIView {
         /// and the rail slot are ONE row, the comment band's height, so the
         /// row reads as the media layout's sound bubble's line.
         @MainActor static var controlSize: CGFloat { SnapActionColumn.bubbleSize }
-        /// The emote toggle inside the field: 32pt wide on the 38pt line —
-        /// room for its widest face, the keyboard glyph (26pt), with a margin
-        /// either side.
-        static let emoteToggleWidth: CGFloat = 32
+        /// The emote toggle inside the field: 36pt wide on the 38pt line —
+        /// room for its widest face, the keyboard glyph (33pt at the large
+        /// scale, `emoteToggleConfiguration`), with a margin either side.
+        static let emoteToggleWidth: CGFloat = 36
         /// The field's trailing button is the field's trailing CAP: a 38pt
         /// square flush with the field's end, so its glyph is concentric
         /// with the capsule's round end. The send disc (29pt) used to stand
@@ -442,6 +760,19 @@ final class CommentsInputBar: UIView {
     /// stalls headless CI simulators.
     private let avatarBubble = UIVisualEffectView(effect: nil)
     private let avatarButton = UIButton(type: .system)
+    /// A voice take's delete, in the avatar's bubble while a take is locked
+    /// or paused (#2102; the owner, 2026-11-06, Telegram's bin on the left).
+    private let voiceDeleteButton: UIButton = {
+        var configuration = UIButton.Configuration.plain()
+        configuration.image = UIImage(systemName: "trash")
+        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+        configuration.baseForegroundColor = .label
+        let button = UIButton(configuration: configuration)
+        button.accessibilityLabel = "Delete recording"
+        button.isHidden = true
+        return button
+    }()
+    private var onVoiceDelete: (() -> Void)?
 
     // Effect set on window attach: materializing one in init contacts the
     // render server and stalls headless CI simulators (see ci memory).
@@ -530,7 +861,10 @@ final class CommentsInputBar: UIView {
     /// trailing buttons' constraints in `init`.
     static let waveformConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
     static let sendConfiguration = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
-    static let emoteToggleConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+    /// A step up, as the row's buttons draw theirs (a glass button scales
+    /// its symbols to the large scale): the face matched the waveform and
+    /// the send beside it no longer (the owner, 2026-11-07).
+    static let emoteToggleConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium, scale: .large)
     /// The send arrow's colour, on every host: the brand's tint (#1124),
     /// NAMED rather than inherited. It was `.tintColor`, which resolves
     /// against the button's ancestors — and came out grey in a conversation
@@ -593,6 +927,7 @@ final class CommentsInputBar: UIView {
         fieldActionButton.addGestureRecognizer(voiceHold)
         fieldActionButton.translatesAutoresizingMaskIntoConstraints = false
         field.contentView.addSubview(fieldActionButton)
+        fieldActionWidth = fieldActionButton.widthAnchor.constraint(equalToConstant: Metrics.fieldActionSide)
         NSLayoutConstraint.activate([
             textView.leadingAnchor.constraint(equalTo: field.contentView.leadingAnchor),
             textView.topAnchor.constraint(equalTo: field.contentView.topAnchor),
@@ -604,7 +939,7 @@ final class CommentsInputBar: UIView {
             emoteToggle.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
             fieldActionButton.trailingAnchor.constraint(equalTo: field.contentView.trailingAnchor),
             fieldActionButton.bottomAnchor.constraint(equalTo: field.contentView.bottomAnchor),
-            fieldActionButton.widthAnchor.constraint(equalToConstant: Metrics.fieldActionSide),
+            fieldActionWidth,
             fieldActionButton.heightAnchor.constraint(equalToConstant: Metrics.fieldActionSide),
         ])
         // The trailing glyphs hold one size at every text size, as a bar's
@@ -682,6 +1017,12 @@ final class CommentsInputBar: UIView {
 
         // ONE glyph, swapped in place: pin ↔ pinned is a symbol REPLACE on the
         // button's own image, so the bubble never blinks or moves.
+        // The conversation's own action bubble (`actsFromOwnBubble`).
+        rowActionButton.configuration?.cornerStyle = .capsule
+        rowActionButton.configuration?.symbolContentTransition = Self.fieldActionTransition
+        rowActionButton.isHidden = true
+        rowActionButton.addAction(UIAction { [weak self] _ in self?.fieldActionTapped() }, for: .primaryActionTriggered)
+
         railButton.configuration?.cornerStyle = .capsule
         railButton.configuration?.symbolContentTransition = UISymbolContentTransition(.replace)
         railButton.addAction(UIAction { [weak self] _ in self?.onRailAction?() }, for: .primaryActionTriggered)
@@ -748,10 +1089,31 @@ final class CommentsInputBar: UIView {
         // Nothing to open until a host wires a switcher; without this the
         // button would swallow taps.
         avatarButton.isEnabled = false
+        voiceDeleteButton.pin(to: avatarBubble.contentView)
+        // Under the face's button: the two never show together, and the face
+        // stays the bubble's top view.
+        avatarBubble.contentView.sendSubviewToBack(voiceDeleteButton)
+        voiceDeleteButton.addAction(UIAction { [weak self] _ in self?.onVoiceDelete?() }, for: .primaryActionTriggered)
 
         addSubview(avatarBubble)
         addSubview(field)
         addSubview(railButton)
+        addSubview(rowActionButton)
+        rowActionButton.translatesAutoresizingMaskIntoConstraints = false
+        rowActionTrailing = rowActionButton.trailingAnchor.constraint(equalTo: trailingAnchor)
+        rowActionBottom = rowActionButton.bottomAnchor.constraint(equalTo: field.bottomAnchor)
+        rowActionWidth = rowActionButton.widthAnchor.constraint(equalToConstant: Metrics.controlSize)
+        rowActionHeight = rowActionButton.heightAnchor.constraint(equalToConstant: Metrics.controlSize)
+        holdGlyph.translatesAutoresizingMaskIntoConstraints = false
+        holdGlyph.isUserInteractionEnabled = false
+        holdGlyph.contentMode = .center
+        holdGlyph.tintColor = .white
+        holdGlyph.isHidden = true
+        addSubview(holdGlyph)
+        NSLayoutConstraint.activate([
+            holdGlyph.centerXAnchor.constraint(equalTo: rowActionButton.centerXAnchor),
+            holdGlyph.centerYAnchor.constraint(equalTo: rowActionButton.centerYAnchor),
+        ])
         addSubview(boostButton)
         addSubview(visibilityButton)
         // The like face's count, under its heart in the stake pill (#669).
@@ -805,6 +1167,10 @@ final class CommentsInputBar: UIView {
             fieldAfterAvatar,
             fieldAtRest,
             fieldTrailing,
+            rowActionTrailing,
+            rowActionBottom,
+            rowActionWidth,
+            rowActionHeight,
             railButton.trailingAnchor.constraint(equalTo: trailingAnchor),
             railButton.bottomAnchor.constraint(equalTo: bottomAnchor),
             railButton.widthAnchor.constraint(equalToConstant: bubble),
@@ -1119,7 +1485,7 @@ final class CommentsInputBar: UIView {
         }
         #endif
         riseProgress = progress
-        let inset = Self.fieldTrailingInset(progress: progress, keepsSlot: keepsRailSlot)
+        let inset = Self.fieldTrailingInset(progress: progress, keepsSlot: keepsRailSlot) + ownBubbleInset
         guard abs(fieldTrailing.constant + inset) > 0.01 else { return false }
         fieldTrailing.constant = -inset
         return true
@@ -1971,6 +2337,17 @@ final class CommentsInputBar: UIView {
             ? sendAccessibilityLabel ?? "Send comment"
             : holdsToRecord ? "Record voice message" : "Record voice comment"
         fieldActionButton.isEnabled = !isSending
+        // The conversation's own bubble wears the same face — not while a
+        // finger holds it (`applyVoiceHoldFace`).
+        if actsFromOwnBubble {
+            if !voiceHolding, !voiceHoldReturning, !rowActionStepsAside, var bubble = rowActionButton.configuration {
+                bubble.image = Self.fieldActionImage(sends: sends)
+                bubble.showsActivityIndicator = isSending
+                if bubble != rowActionButton.configuration { rowActionButton.configuration = bubble }
+            }
+            rowActionButton.accessibilityLabel = fieldActionButton.accessibilityLabel
+            rowActionButton.isEnabled = !isSending
+        }
     }
 
     /// The symbol the field button wears, so an unchanged face is not

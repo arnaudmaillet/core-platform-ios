@@ -7,6 +7,11 @@ final class FakeSession: VoiceAudioSessionControlling {
     var roles: [VoiceSessionRole] = []
     var activations: [(Bool, AVAudioSession.SetActiveOptions)] = []
     var isInputAvailable = true
+    var allowsHapticsWhileRecording = false
+
+    func setAllowHapticsAndSystemSoundsDuringRecording(_ allow: Bool) throws {
+        allowsHapticsWhileRecording = allow
+    }
 
     func setCategory(
         _ category: AVAudioSession.Category, mode: AVAudioSession.Mode, options: AVAudioSession.CategoryOptions
