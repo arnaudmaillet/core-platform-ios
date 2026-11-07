@@ -6,7 +6,7 @@ import Foundation
 ///
 /// Apple and Google only (guest mode, decision 2): Sign in with Apple is the
 /// equivalent login guideline 4.8 requires next to Google.
-enum IdentityProvider: CaseIterable, Sendable {
+enum IdentityProvider: CaseIterable, Hashable, Sendable {
     case apple
     case google
 
@@ -20,7 +20,7 @@ enum IdentityProvider: CaseIterable, Sendable {
 
 /// The explicit sign-in methods listed on the first screen, in display
 /// order: federated providers first, then the credential flows.
-enum SignInMethod: Equatable, Sendable {
+enum SignInMethod: Hashable, Sendable {
     case provider(IdentityProvider)
     case email
     case phone

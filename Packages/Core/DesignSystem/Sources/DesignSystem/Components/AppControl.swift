@@ -54,7 +54,16 @@ open class AppControl: UIButton {
         case tinted
         /// A blur material, for a button over a photograph. Never glass.
         case material
+        /// Black in the light, white in the dark, the ink the other way
+        /// round: Sign in with Apple's own grounds, as its guidelines ask of
+        /// a custom button (#2020).
+        case monochrome
     }
+
+    /// The monochrome ground's fill and ink: black and white, swapped in
+    /// the dark (#2020).
+    static let monochromeFill = UIColor { $0.userInterfaceStyle == .dark ? .white : .black }
+    static let monochromeInk = UIColor { $0.userInterfaceStyle == .dark ? .black : .white }
 
     public enum Metrics {
         /// The smallest region a finger can hit, whatever is drawn (HIG).

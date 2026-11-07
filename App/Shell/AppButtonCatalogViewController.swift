@@ -66,6 +66,7 @@ final class AppButtonCatalogViewController: UIViewController {
         buildMessageRequest()
         buildPostCard()
         buildShop()
+        buildSignIn()
         buildGalleryLink()
     }
 
@@ -592,6 +593,25 @@ final class AppButtonCatalogViewController: UIViewController {
         name.text = "Japan"
         name.font = UIFont.scaledFont(forTextStyle: .body, weight: .semibold)
         row([name, UIView(), price, disabled], fills: true, on: Surface.card)
+    }
+
+    // MARK: - Sign-in sheet
+
+    /// The sign-in sheet's methods and a form step's Continue (#2020): the
+    /// form size, full width — Apple's on its monochrome ground.
+    private func buildSignIn() {
+        section("Sign-in sheet", source: "MethodSelectionViewController · SignUpStepViewController — form size, full width")
+        let methods: [(String, String, AppButton.Ground)] = [
+            ("Continue with Apple", "apple.logo", .monochrome),
+            ("Continue with Google", "g.circle", .quiet),
+            ("Continue with email", "envelope", .quiet),
+        ]
+        for (title, symbol, ground) in methods {
+            column.addArrangedSubview(track(AppButton(
+                aspect: .pill(ground), size: .form, shape: .card, content: AppButton.Content(title: title, symbol: symbol)
+            )))
+        }
+        column.addArrangedSubview(track(AppButton(aspect: .pill(.prominent), size: .form, content: .title("Continue"))))
     }
 
     // MARK: - The component's matrix
