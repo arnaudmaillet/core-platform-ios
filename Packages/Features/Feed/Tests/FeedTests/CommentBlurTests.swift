@@ -8,10 +8,8 @@ import UIKit
 @MainActor
 @Suite(.serialized)
 struct CommentBlurTests {
-    private let bandWidth: CGFloat = 390
-
     private func hosting(_ body: (UIWindow) async throws -> Void) async rethrows {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: bandWidth, height: 100))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 100))
         window.isHidden = false
         defer {
             window.subviews.forEach { $0.removeFromSuperview() }
@@ -21,92 +19,18 @@ struct CommentBlurTests {
         try await body(window)
     }
 
-    private func makeTicker(blur: Bool, in window: UIWindow) -> SnapCommentTickerView {
-        let ticker = SnapCommentTickerView(frame: CGRect(x: 0, y: 0, width: bandWidth, height: 69))
-        ticker.usesBlur = blur
-        ticker.setComments((0..<12).map { TickerCommentModel(id: "r\($0)", text: "GG 🔥 \($0)") })
-        window.addSubview(ticker)
-        return ticker
-    }
-
     @Test func theFlagIsReadFromTheLaunchArguments() {
         #expect(CommentBlur.isEnabled(arguments: ["app", "-comment-blur"]))
         #expect(!CommentBlur.isEnabled(arguments: ["app"]))
         #expect(!CommentBlur.isEnabled(arguments: ["app", "-comment-blurry"]))
     }
 
-    /// The band's strength is the wash's opacity over its ceiling: the larger
-    /// of the interaction and the resting level, clamped to 0…1.
-    @Test func theWashsOpacityMapsOntoTheBlursStrength() {
-        let ceiling = SnapCommentTickerView.maxBackdropOpacity
-        #expect(CommentBlur.bandStrength(fraction: 0, resting: 0, ceiling: ceiling) == 0)
-        #expect(CommentBlur.bandStrength(fraction: ceiling, resting: 0, ceiling: ceiling) == 1)
-        #expect(abs(CommentBlur.bandStrength(fraction: 0.2, resting: 0.39, ceiling: ceiling) - 0.6) < 0.001,
-                "the resting level wins when it is higher")
-        #expect(CommentBlur.bandStrength(fraction: 2, resting: 0, ceiling: ceiling) == 1)
+    /// The pill's strength is the viewer's fill over its ceiling. (The band
+    /// no longer uses the blur flag: its capsules carry their own, #2172.)
+    @Test func thePillsFillMapsOntoTheBlursStrength() {
         #expect(CommentBlur.pillStrength(fill: 0) == 0)
         #expect(abs(CommentBlur.pillStrength(fill: 0.45) - 0.5) < 0.001)
         #expect(CommentBlur.pillStrength(fill: 0.9) == 1)
-    }
-
-    /// Off: the black wash, exactly as before, and no blur view at all.
-    @Test func withTheFlagOffTheWashIsUnchanged() async throws {
-        await hosting { window in
-            let ticker = makeTicker(blur: false, in: window)
-            ticker.setActive(true)
-            ticker.beginScrub()
-            ticker.applyScrubTranslation(-400)
-            ticker.endScrub(releaseVelocity: 1200)
-            ticker.coastStep(now: ticker.coastStartTime + 0.001)
-            #expect(abs(ticker.currentBackdropOpacity - ticker.currentKineticFraction) < 0.001)
-            #expect(ticker.currentBlurStrength == 0)
-            #expect(!ticker.subviews.contains { $0.accessibilityIdentifier == "ticker-kinetic-blur" })
-        }
-    }
-
-    /// On: the blur grows with the scrub's curve, the wash stays hidden, and
-    /// after the coast hands over the dismissal relaxes it to rest.
-    @Test func withTheFlagOnTheBlurFollowsTheWashsCurve() async throws {
-        try await hosting { window in
-            let ticker = makeTicker(blur: true, in: window)
-            ticker.setActive(true)
-            ticker.beginScrub()
-            ticker.applyScrubTranslation(-400)
-            ticker.endScrub(releaseVelocity: 1200)
-            ticker.coastStep(now: ticker.coastStartTime + 0.001)
-            let expected = CommentBlur.bandStrength(
-                fraction: ticker.currentKineticFraction, resting: 0, ceiling: SnapCommentTickerView.maxBackdropOpacity
-            )
-            #expect(abs(ticker.currentBlurStrength - expected) < 0.001)
-            #expect(ticker.currentBlurStrength > 0.9)
-            #expect(ticker.currentBackdropOpacity == 0, "the black wash stays out")
-
-            ticker.coastStep(now: ticker.coastStartTime + 30) // handover → dismissal
-            #expect(ticker.currentKineticFraction == 0)
-            for _ in 0..<40 where ticker.currentBlurStrength > 0 {
-                try await Task.sleep(for: .milliseconds(25))
-            }
-            #expect(ticker.currentBlurStrength == 0, "relaxed back to rest (none by default)")
-        }
-    }
-
-    /// The `KineticAnimatorBag` trap: a band released mid-drag, with its
-    /// paused animator engaged, must not throw on deallocation.
-    @Test func aBandReleasedMidDragDoesNotThrow() async throws {
-        try await hosting { window in
-            do {
-                let ticker = makeTicker(blur: true, in: window)
-                ticker.setActive(true)
-                ticker.beginScrub()
-                ticker.applyScrubTranslation(-200)
-                ticker.endScrub(releaseVelocity: 1200)
-                ticker.coastStep(now: ticker.coastStartTime + 0.001) // mid-coast
-                #expect(ticker.currentBlurStrength > 0, "the animator is engaged")
-                ticker.removeFromSuperview()
-            }
-            // The bag finishes orphaned animators on the next main turn.
-            try await Task.sleep(for: .milliseconds(100))
-        }
     }
 
     /// The pill reads on a blur at the viewer's fill strength, its own black

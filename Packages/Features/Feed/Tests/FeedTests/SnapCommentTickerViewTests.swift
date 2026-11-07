@@ -543,103 +543,119 @@ struct SnapCommentTickerViewTests {
         #expect(SnapCommentTickerView.entryDeferral(lastRightEdge: 100, bandWidth: 400, speed: 22) == 0)
     }
 
-    /// Bug 3: the kinetic backdrop must engage during manual control — a
-    /// visible wash while the coast is fast, disengaged at handover, where
-    /// the dismissal fade owns the return to the resting level.
-    @Test func kineticBackdropEngagesDuringCoastAndDisengagesAtHandover() throws {
-        try hosting { window in
-            let ticker = makeTicker(in: window)
-            ticker.setActive(true)
-            ticker.debugFillBand()
-            ticker.beginScrub()
-            ticker.applyScrubTranslation(-40)
-            ticker.endScrub(releaseVelocity: 1200)
+    // MARK: - The capsules (#2172)
 
-            let blur = try #require(
-                ticker.subviews.first { $0.accessibilityIdentifier == "ticker-kinetic-backdrop" }
-            )
-            // The ticker's own release stamp, not a fresh reading — see
-            // `accumulatorSumsAbsoluteDeltasNotNetTranslation` for what a second
-            // clock read costs on a loaded runner.
-            let start = ticker.coastStartTime
-            ticker.coastStep(now: start + 0.016) // one fast frame into the decay
-            #expect(!blur.isHidden)
-            #expect(ticker.currentKineticFraction > 0)
-            #expect(abs(ticker.currentBackdropOpacity - ticker.currentKineticFraction) < 0.001)
-
-            ticker.coastStep(now: start + 30) // decay long settled → handover
-            #expect(ticker.currentKineticFraction == 0) // disengaged; reversal fades out
-            let labels = bubbleViews(ticker)
-            #expect(!labels.isEmpty)
-            #expect(labels.allSatisfy { $0.layer.animation(forKey: "flight") != nil })
+    /// Each bubble and its capsule share a frame, flight for flight.
+    private func expectCapsulesMatch(_ ticker: SnapCommentTickerView, _ moment: String,
+                                     sourceLocation: SourceLocation = #_sourceLocation) {
+        let pairs = ticker.debugBubbleCapsuleFrames
+        #expect(!pairs.isEmpty, "no bubble \(moment)", sourceLocation: sourceLocation)
+        for pair in pairs {
+            #expect(abs(pair.bubble.midX - pair.capsule.midX) < 0.5 && pair.bubble.size == pair.capsule.size
+                    && abs(pair.bubble.midY - pair.capsule.midY) < 0.5,
+                    "a capsule left its bubble \(moment): \(pair.capsule) vs \(pair.bubble)", sourceLocation: sourceLocation)
         }
     }
 
-    /// At rest the wash sits at the viewer's Background setting — none by
-    /// default — and a scrub raises it from there, never below it.
-    @Test func theBackdropRestsAtTheViewersSettingAndScrubsRaiseIt() {
+    /// The capsules follow their bubbles through a spawn, a scrub, a coast
+    /// and the hand-back — and no wash rises on the drag.
+    @Test func theCapsulesNeverLeaveTheirBubbles() {
         hosting { window in
-            let store = MediaCommentPreferencesStore(defaults: UserDefaults(suiteName: "ticker-rest-\(UUID().uuidString)")!)
+            let ticker = makeTicker(in: window)
+            ticker.setActive(true)
+            ticker.debugFillBand()
+            expectCapsulesMatch(ticker, "after a spawn")
+            for view in bubbleViews(ticker) {
+                #expect(view.layer.animation(forKey: "flight") != nil)
+            }
+
+            ticker.beginScrub()
+            ticker.applyScrubTranslation(-60)
+            ticker.applyScrubTranslation(25)
+            expectCapsulesMatch(ticker, "during a scrub")
+            #expect(!ticker.subviews.contains { $0.accessibilityIdentifier == "ticker-kinetic-backdrop" },
+                    "a wash behind the band")
+
+            ticker.endScrub(releaseVelocity: 900)
+            ticker.coastStep(now: ticker.coastStartTime + 0.016)
+            expectCapsulesMatch(ticker, "in the coast")
+
+            ticker.coastStep(now: ticker.coastStartTime + 30) // handover
+            #expect(ticker.debugIsConveying)
+            expectCapsulesMatch(ticker, "after the hand-back")
+        }
+    }
+
+    /// One blur for the whole band, masked by one capsule per bubble.
+    @Test func oneBlurForTheWholeBand() throws {
+        try hosting { window in
+            let ticker = makeTicker(in: window)
+            ticker.reducesTransparency = { false }
+            ticker.setActive(true)
+            ticker.debugFillBand()
+            let surface = try #require(ticker.debugCapsuleSurface as? UIVisualEffectView)
+            #expect(!surface.isHidden)
+            let blurs = ticker.subviews.filter { $0 is UIVisualEffectView }
+            #expect(blurs.count == 1, "\(blurs.count) blurs")
+            #expect(bubbleViews(ticker).allSatisfy { !$0.subviews.contains { $0 is UIVisualEffectView } },
+                    "a bubble carries its own blur")
+            let mask = try #require(surface.mask)
+            #expect(mask.layer.sublayers?.count == bubbleViews(ticker).count, "one capsule per bubble")
+
+            // Parked, the band draws no blur (#580).
+            ticker.setActive(false)
+            #expect(surface.isHidden)
+            #expect(mask.layer.sublayers?.isEmpty ?? true, "a capsule outlived its bubble")
+        }
+    }
+
+    /// The band's height, the corner's authority, does not move by a point.
+    @Test func theBandHeightIsUnchanged() {
+        let lane = max(20, ceil(UIFont.appFont(forTextStyle: .caption1).lineHeight) + 6)
+        #expect(SnapCommentTickerView.bandHeight == 2 * lane + 3)
+        let ticker = SnapCommentTickerView(frame: .zero)
+        #expect(ticker.intrinsicContentSize.height == SnapCommentTickerView.bandHeight)
+    }
+
+    /// Reduce Transparency: an opaque dark capsule, no blur.
+    @Test func reduceTransparencyDrawsOpaqueCapsules() throws {
+        try hosting { window in
+            let ticker = makeTicker(in: window)
+            ticker.reducesTransparency = { true }
+            ticker.setActive(true)
+            ticker.debugFillBand()
+            let surface = try #require(ticker.debugCapsuleSurface)
+            #expect(!(surface is UIVisualEffectView), "a blur under Reduce Transparency")
+            #expect(surface.backgroundColor == SnapCommentTickerView.opaqueCapsuleColor)
+            #expect(!ticker.subviews.contains { $0 is UIVisualEffectView })
+        }
+    }
+
+    /// The Background setting is the capsules' dark tint over their blur,
+    /// darker with Increased Contrast.
+    @Test func theBackgroundSettingTintsTheCapsules() {
+        hosting { window in
+            let store = MediaCommentPreferencesStore(defaults: UserDefaults(suiteName: "ticker-tint-\(UUID().uuidString)")!)
             defer { SnapCommentTickerView.refreshAppearance(from: MediaCommentPreferencesStore(defaults: UserDefaults(suiteName: "reset-\(UUID().uuidString)")!)) }
 
             let bare = makeTicker(in: window)
             bare.appearanceStore = store
+            bare.increasesContrast = { false }
             bare.setActive(true)
-            bare.debugFillBand()
-            #expect(bare.currentBackdropOpacity == 0)
+            #expect(bare.debugCapsuleTint == 0, "the default is the blur alone")
 
-            store.update { $0.bandBackgroundOpacity = 0.3 }
-            let ticker = makeTicker(in: window)
-            ticker.appearanceStore = store
-            ticker.setActive(true)
-            ticker.debugFillBand()
-            #expect(abs(ticker.currentBackdropOpacity - 0.3) < 0.001)
+            store.update { $0.bandBackgroundOpacity = 0.4 }
+            let tinted = makeTicker(in: window)
+            tinted.appearanceStore = store
+            tinted.increasesContrast = { false }
+            tinted.setActive(true)
+            #expect(abs(tinted.debugCapsuleTint - 0.4) < 0.001)
 
-            ticker.beginScrub()
-            ticker.applyScrubTranslation(-400)
-            ticker.endScrub(releaseVelocity: 1200)
-            ticker.coastStep(now: ticker.coastStartTime + 0.001)
-            #expect(ticker.currentBackdropOpacity > 0.6)
-            ticker.coastStep(now: ticker.coastStartTime + 30) // handover
-            #expect(ticker.currentKineticFraction == 0)
-        }
-    }
-
-    /// The backdrop is a true accumulator during a touch: monotone
-    /// non-decreasing in accumulated absolute travel — floor at touch-down,
-    /// cap at full travel, and NO velocity term anywhere in the mapping.
-    @Test func scrubFractionIsAMonotoneNonDecayingAccumulator() {
-        #expect(SnapCommentTickerView.scrubFraction(forAccumulatedDistance: 0) == SnapCommentTickerView.scrubEngagementFloor)
-        #expect(SnapCommentTickerView.scrubFraction(forAccumulatedDistance: 10_000) == SnapCommentTickerView.maxBackdropOpacity)
-
-        var previous: CGFloat = -1
-        for distance in stride(from: CGFloat(0), through: 600, by: 20) {
-            let fraction = SnapCommentTickerView.scrubFraction(forAccumulatedDistance: distance)
-            #expect(fraction >= previous) // can build or hold, never drop
-            previous = fraction
-        }
-    }
-
-    /// The accumulator sums |Δx|, not net translation: scrubbing forward
-    /// then all the way back builds intensity instead of cancelling out.
-    @Test func accumulatorSumsAbsoluteDeltasNotNetTranslation() {
-        hosting { window in
-            let ticker = makeTicker(in: window)
-            ticker.setActive(true)
-            ticker.debugFillBand()
-            ticker.beginScrub()
-            ticker.applyScrubTranslation(-200)
-            ticker.applyScrubTranslation(200) // net translation: zero
-            ticker.endScrub(releaseVelocity: 1200)
-
-            // Anchored to the release the ticker recorded, NOT to a fresh clock
-            // reading: the gap between `endScrub` and this line is real elapsed
-            // time, and on a loaded runner it is long enough for the fraction to
-            // decay out of the assertion. This test is about the accumulator
-            // summing |Δx|, not about how fast the machine got here.
-            ticker.coastStep(now: ticker.coastStartTime + 0.001)
-            // 400pt of absolute travel ≥ backdropDistanceScale → released at the cap.
-            #expect(ticker.currentKineticFraction > SnapCommentTickerView.maxBackdropOpacity - 0.05)
+            let contrast = makeTicker(in: window)
+            contrast.appearanceStore = store
+            contrast.increasesContrast = { true }
+            contrast.setActive(true)
+            #expect(abs(contrast.debugCapsuleTint - (0.4 + SnapCommentTickerView.increasedContrastTint)) < 0.001)
         }
     }
 

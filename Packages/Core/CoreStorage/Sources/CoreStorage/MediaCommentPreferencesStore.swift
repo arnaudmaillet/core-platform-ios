@@ -29,7 +29,8 @@ public struct MediaCommentPreferences: Codable, Equatable, Sendable {
         didSet { bandOpacity = Self.clamp(bandOpacity, to: Self.opacityRange) }
     }
     public var bandSpeed: BandSpeed
-    /// Fill behind each band bubble, clamped to `bandBackgroundRange`.
+    /// The dark tint over each band bubble's blurred capsule (0 = the blur
+    /// alone, #2172), clamped to `bandBackgroundRange`.
     public var bandBackgroundOpacity: Double {
         didSet { bandBackgroundOpacity = Self.clamp(bandBackgroundOpacity, to: Self.bandBackgroundRange) }
     }
