@@ -1003,10 +1003,10 @@ struct InboxSurfaceViewModelTests {
         #expect(rows.map(\.isUnread) == [false, true])
     }
 
-    /// The Requests badge counts UNREAD MESSAGES (#1210, the owner
-    /// 2026-10-15), and falls by a request's own as it is read; a reload
-    /// leaves it be.
-    @Test func theRequestsBadgeCountsUnreadMessagesAndFallsAsTheyAreRead() async {
+    /// The Requests badge counts NEW REQUESTS (#2171, the owner 2026-11-07;
+    /// it counted their messages, #1210): two requests of 3 and 2 messages
+    /// are 2, falling by one as a request is opened; a reload leaves it be.
+    @Test func theRequestsBadgeCountsRequestsAndFallsAsTheyAreRead() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [], requests: [
                 conversation("r1", peer: "a", isUnread: true, unreadCount: 3),
@@ -1020,15 +1020,15 @@ struct InboxSurfaceViewModelTests {
         requests.onNewCountChange = { counts.append($0) }
         requests.refresh()
         await settle()
-        #expect(counts == [5])
-        #expect(requests.newCount == 5)
+        #expect(counts == [2], "the badge counted messages, not requests")
+        #expect(requests.newCount == 2)
 
         catalog.markRead(ConversationID("r1"))
-        #expect(requests.newCount == 2, "reading r1 left its 3 messages on the badge")
+        #expect(requests.newCount == 1, "opening r1 left it on the badge")
 
         requests.refresh()
         await settle()
-        #expect(requests.newCount == 2)
+        #expect(requests.newCount == 1)
     }
 
     /// The Chats badge is the same count: unread messages, falling as a
@@ -1423,8 +1423,8 @@ struct InboxListSectionTests {
         }
     }
 
-    /// The sections' header counts — their unread messages (#1210) — add up
-    /// to the badge: one count, read off the same rows.
+    /// The Requests sections' header counts — their new requests (#2171) —
+    /// add up to the badge: one count, read off the same rows.
     @Test func theSectionCountsAddUpToTheBadge() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [], requests: [
@@ -1444,8 +1444,8 @@ struct InboxListSectionTests {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
-        #expect(sections.unreadMessages(in: .new) + sections.unreadMessages(in: .earlier) == requests.newCount)
-        #expect(sections.unreadMessages(in: .new) == 5)
+        #expect(sections.unreadRows(in: .new) + sections.unreadRows(in: .earlier) == requests.newCount)
+        #expect(sections.unreadRows(in: .new) == 2)
         #expect(sections.earlier.isEmpty)
     }
 

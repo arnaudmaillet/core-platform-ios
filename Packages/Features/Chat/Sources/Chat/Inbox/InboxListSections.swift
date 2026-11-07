@@ -6,8 +6,9 @@ import UIKit
 /// screen, and everything that was already there.
 ///
 /// The split is `InboxTabWatermark`'s. The tab's badge and each section's
-/// header count UNREAD MESSAGES (#1210, the owner 2026-10-15) — read off the
-/// same rows (`unreadMessages(in:)`), so the headers add up to the badge.
+/// header read the same rows, so the headers add up to the badge: UNREAD
+/// MESSAGES on Chats (#1210, the owner 2026-10-15, `unreadMessages(in:)`),
+/// NEW REQUESTS on Requests (#2171, the owner 2026-11-07, `unreadRows(in:)`).
 ///
 /// ⚠️ For the All list, "new" is NOT the same as "unread". Unread is server
 /// truth — a read cursor — and a conversation can sit unread for a week without
@@ -44,6 +45,12 @@ public struct InboxListSections: Equatable, Sendable {
     /// it reads as read (`ConversationDisplayModel.unreadCount`).
     static func unreadMessages(in rows: [ConversationDisplayModel]) -> Int {
         rows.reduce(0) { $0 + ($1.isUnread ? $1.unreadCount : 0) }
+    }
+
+    /// The rows of `section` still unread, each one 1 — the Requests
+    /// headers' count, as its badge's (#2171).
+    func unreadRows(in section: InboxListSection) -> Int {
+        (section == .new ? new : earlier).count(where: \.isUnread)
     }
 }
 

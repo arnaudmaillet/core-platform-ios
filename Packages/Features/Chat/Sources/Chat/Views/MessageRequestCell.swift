@@ -7,16 +7,16 @@ import UIKit
 /// A pending message request, laid out as a standard two-line messaging row
 /// with its decision attached (#2088):
 ///
-///     [face+mark] [name · time ·············] ⟷ [Accept] ✕
-///                 [message preview ·········]          (3)
+///     [face+mark] [name · time ·············]
+///                 [message preview ·········] ⟷ [Accept] ✕
 ///
 /// The face wears the relation mark, as an All row's does (#2049): the "+"
 /// follows — it never accepts — and the rest of the row behaves as before.
-/// The trailing column is two lines, aligned to the trailing edge: Accept
-/// and a bare ✕ on the name's line, the unread count under them on the
-/// preview's, as the time and the count sit in an All row. The face and the
-/// column are centred across the row; the text column takes whatever width
-/// is left, which is what makes the gap before the buttons elastic. The timestamp sits directly beside the
+/// Accept and a bare ✕ are one line on the row's midline, the face's (the
+/// owner, 2026-11-07, #2171): no count — a new request reads as new by its
+/// bold preview, and the tab's badge counts requests, not their messages.
+/// The text column takes whatever width is left, which is what makes the
+/// gap before the buttons elastic. The timestamp sits directly beside the
 /// name as part of the same phrase rather than anchored to the far edge —
 /// with a short name, a lone right-aligned time reads as unrelated to it.
 /// Name and preview truncate; the timestamp and the buttons never shrink, so
@@ -53,9 +53,6 @@ final class MessageRequestCell: UITableViewCell {
         button.inkColor = .tertiaryLabel
         return button
     }()
-    /// The unread count, under Accept and the ✕ at the trailing edge
-    /// (#2088): the All row's pill.
-    private let unreadPill = UnreadCountPill()
 
     /// The peer the row shows, for the relations' updates.
     private(set) var peerID: ProfileID?
@@ -64,8 +61,8 @@ final class MessageRequestCell: UITableViewCell {
     var debugAcceptButton: AppButton { acceptButton }
     /// Decline. Internal for tests.
     var debugDismissButton: AppIconButton { dismissButton }
-    /// The count's pill. Internal for tests.
-    var debugUnreadPill: UnreadCountPill { unreadPill }
+    /// The face. Internal for tests.
+    var debugFace: UIView { avatarView }
     /// The face's badge. Internal for tests.
     var debugBadge: RelationBadgeView { avatarView.badge }
     /// The mark on show. Internal for tests.
@@ -112,14 +109,6 @@ final class MessageRequestCell: UITableViewCell {
         avatarView.setMark(model.peerID == nil ? .none : mark, animated: false)
         avatarView.onFollowTapped = onFollow
         loadAvatar(for: model, imagePipeline: imagePipeline, avatars: avatars)
-        // The same count as an All row, under the actions as it sits under
-        // the time there — and it clears the same way, when the viewer opens
-        // the thread and the read cursor moves. Never at zero.
-        if model.isUnread, model.unreadCount > 0 {
-            unreadPill.show(count: model.unreadCount)
-        } else {
-            unreadPill.hide()
-        }
         applyUnreadStyle(model.isUnread)
         nameLabel.text = model.title
         previewLabel.text = Self.previewText(for: model)
@@ -133,8 +122,9 @@ final class MessageRequestCell: UITableViewCell {
         // elements so VoiceOver can reach each decision.
         accessibilityElements = [contentView, acceptButton, dismissButton]
         contentView.isAccessibilityElement = true
+        // "New request", never a message count: the row shows none (#2171).
         contentView.accessibilityLabel = [
-            model.title, ConversationRowView.unreadWords(model), model.timeText, Self.previewText(for: model)
+            model.title, model.isUnread ? Self.newWords : nil, model.timeText, Self.previewText(for: model)
         ].compactMap(\.self).filter { !$0.isEmpty }.joined(separator: ", ")
         updateFollowAccessibility()
     }
@@ -168,6 +158,9 @@ final class MessageRequestCell: UITableViewCell {
         }
         return super.hitTest(point, with: event)
     }
+
+    /// What VoiceOver says of a request the viewer has not opened yet.
+    static let newWords = "New request"
 
     /// A request usually *is* its first message, so the preview carries the
     /// decision. When there is nothing to show, say what the row is rather
@@ -294,38 +287,15 @@ final class MessageRequestCell: UITableViewCell {
         actions.setContentHuggingPriority(.required, for: .horizontal)
         actions.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        // ⚠️ THE SECOND LINE KEEPS ITS HEIGHT, count or not (#2088, as an
-        // All row's, #2049): an unread request and a read one put Accept at
-        // the same height, and a count arriving moves nothing.
-        let secondLine = UIView()
-        secondLine.addSubview(unreadPill)
-        unreadPill.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            secondLine.heightAnchor.constraint(equalToConstant: UnreadCountPill.Metrics.height),
-            unreadPill.centerYAnchor.constraint(equalTo: secondLine.centerYAnchor),
-            unreadPill.leadingAnchor.constraint(greaterThanOrEqualTo: secondLine.leadingAnchor),
-            unreadPill.trailingAnchor.constraint(equalTo: secondLine.trailingAnchor)
-        ])
-
-        // Accept and the ✕ over the count, aligned to the trailing edge, the
-        // text column's own 2 pt apart: at `Spacing.xs` the column was a
-        // point over the shared pitch.
-        let actionColumn = UIStackView(arrangedSubviews: [actions, secondLine])
-        actionColumn.axis = .vertical
-        actionColumn.alignment = .trailing
-        actionColumn.spacing = Self.actionLineGap
-        actionColumn.setContentHuggingPriority(.required, for: .horizontal)
-        actionColumn.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        let row = UIStackView(arrangedSubviews: [avatarView, textColumn, actionColumn])
+        let row = UIStackView(arrangedSubviews: [avatarView, textColumn, actions])
         row.axis = .horizontal
-        // Centred: the face and the action column sit on the row's midline.
+        // Centred: the face, Accept and the ✕ sit on the row's midline.
         row.alignment = .center
         row.spacing = Spacing.md
         // Tallest of the three things in the row: the disc, the two lines of
-        // type, and the action column (Accept, the gap, the count's line). At
-        // the default text size the column (56 pt) fits the shared pitch
-        // (65 pt); at larger sizes the row grows by what it lacks.
+        // type, and Accept. At the default text size the two lines decide the
+        // shared pitch, as on every person row; at larger sizes the row grows
+        // with the text.
         let inset = PersonRowMetrics.verticalInset(forContentHeight: max(
             MonogramAvatarView.rowDiameter,
             PersonRowMetrics.textHeight([.headline, .subheadline]),
@@ -354,13 +324,8 @@ final class MessageRequestCell: UITableViewCell {
         dismissButton.setContentCompressionResistancePriority(.required, for: .horizontal)
     }
 
-    /// The gap between Accept's line and the count's.
-    static let actionLineGap: CGFloat = 2
-
-    /// The action column's height: Accept (the taller of the pair), the gap,
-    /// and the count's line.
+    /// The actions' height: Accept's, the taller of the pair.
     static func actionColumnHeight(accept: UIView) -> CGFloat {
         accept.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height
-            + actionLineGap + UnreadCountPill.Metrics.height
     }
 }

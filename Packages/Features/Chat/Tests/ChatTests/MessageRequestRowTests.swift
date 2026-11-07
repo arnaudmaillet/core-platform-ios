@@ -8,8 +8,8 @@ import UIKit
 @testable import Chat
 
 /// The request row, reworked (#2088, the owner 2026-11-03): the face wears
-/// the relation mark as an All row's does, the ✕ is a bare glyph, and the
-/// unread count sits under Accept and the ✕ at the trailing edge.
+/// the relation mark as an All row's does, the ✕ is a bare glyph; Accept and
+/// the ✕ sit on the row's midline, with no count (#2171).
 @MainActor
 @Suite(.serialized)
 struct MessageRequestRowTests {
@@ -136,34 +136,45 @@ struct MessageRequestRowTests {
         #expect(decline.accessibilityLabel == "Decline request from Ava Moreau")
     }
 
-    // MARK: - The count
+    // MARK: - No count, the actions on the midline (#2171)
 
-    /// Under Accept and the ✕, aligned to the trailing edge; "99+" past 99.
-    @Test(arguments: [3, 12, 120])
-    func theCountSitsUnderTheActions(_ count: Int) {
-        let cell = laidOut(model(unread: count))
-        let pill = cell.debugUnreadPill
-        #expect(pill.shownText == UnreadCountPill.text(for: count))
-        let pillFrame = frame(of: pill, in: cell)
-        let accept = frame(of: cell.debugAcceptButton, in: cell)
-        let decline = frame(of: cell.debugDismissButton, in: cell)
-        #expect(pillFrame.minY >= accept.maxY, "the count is not under Accept")
-        #expect(abs(pillFrame.maxX - decline.maxX) < 0.5, "the count is not on the trailing edge")
-        #expect(contentLabel(cell).contains("\(count) unread"))
+    /// No count view on a new request with several messages: the bold
+    /// preview says it is new, VoiceOver says "New request".
+    @Test func aNewRequestShowsNoCountAndSaysNewRequest() {
+        let cell = laidOut(model(unread: 5))
+        #expect(!Self.subviews(of: cell.contentView).contains { $0 is UnreadCountPill }, "a count view on the row")
+        #expect(contentLabel(cell).contains(MessageRequestCell.newWords))
+        #expect(!contentLabel(cell).contains("unread"), "VoiceOver still reads a message count")
     }
 
-    /// Hidden at zero and on a read request — and the actions don't move.
-    @Test func noCountWhenReadAndNothingMoves() {
-        let read = laidOut(model())
-        let unread = laidOut(model(unread: 4))
-        #expect(read.debugUnreadPill.shownText == nil)
-        #expect(read.bounds.height == unread.bounds.height, "a count changed the row's height")
-        #expect(frame(of: read.debugAcceptButton, in: read) == frame(of: unread.debugAcceptButton, in: unread))
-        #expect(!contentLabel(read).contains("unread"))
+    /// A seen request says nothing of the kind.
+    @Test func aSeenRequestIsNotNew() {
+        let cell = laidOut(model())
+        #expect(!contentLabel(cell).contains(MessageRequestCell.newWords))
+    }
+
+    /// Accept and the ✕ on the face's midline, new or seen, and the
+    /// actions don't move between the two.
+    @Test(arguments: [0, 5])
+    func theActionsSitOnTheFacesMidline(_ unread: Int) {
+        let cell = laidOut(model(unread: unread))
+        let face = frame(of: cell.debugFace, in: cell)
+        let accept = frame(of: cell.debugAcceptButton, in: cell)
+        let decline = frame(of: cell.debugDismissButton, in: cell)
+        #expect(abs(accept.midY - face.midY) <= 0.5, "Accept off the face's midline: \(accept.midY) vs \(face.midY)")
+        #expect(abs(decline.midY - face.midY) <= 0.5, "the ✕ off the face's midline: \(decline.midY) vs \(face.midY)")
+        #expect(abs(cell.bounds.height / 2 - face.midY) <= 0.5, "the face off the row's midline")
+    }
+
+    /// The trailing edge is unchanged: the ✕ ends at the row's margin.
+    @Test func theTrailingEdgeIsUnchanged() {
+        let cell = laidOut(model(unread: 2))
+        let decline = frame(of: cell.debugDismissButton, in: cell)
+        #expect(abs(decline.maxX - (cell.bounds.width - Spacing.lg)) < 0.5, "\(decline.maxX) in \(cell.bounds.width)")
     }
 
     /// At the default text size the row keeps the shared pitch: the same
-    /// height as an All row, measured the same way.
+    /// height as an All row, measured the same way — the two lines decide it.
     @Test func theRowKeepsTheSharedPitch() {
         let request = laidOut(model(unread: 2))
         let conversation = ConversationCell(style: .default, reuseIdentifier: nil)
@@ -173,7 +184,11 @@ struct MessageRequestRowTests {
             withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
         ).height
         #expect(request.bounds.height == allRow, "the row grew: \(request.bounds.height) against an All row's \(allRow)")
-        #expect(MessageRequestCell.actionColumnHeight(accept: request.debugAcceptButton) <= PersonRowMetrics.rowHeight - 2 * Spacing.xs)
+        #expect(MessageRequestCell.actionColumnHeight(accept: request.debugAcceptButton) <= PersonRowMetrics.textHeight([.headline, .subheadline]))
+    }
+
+    private static func subviews(of view: UIView) -> [UIView] {
+        view.subviews + view.subviews.flatMap { subviews(of: $0) }
     }
 
     private func contentLabel(_ cell: MessageRequestCell) -> String { cell.contentView.accessibilityLabel ?? "" }

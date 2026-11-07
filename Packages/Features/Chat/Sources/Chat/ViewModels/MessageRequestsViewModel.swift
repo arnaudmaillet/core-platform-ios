@@ -24,13 +24,15 @@ public final class MessageRequestsViewModel {
     }
 
     public var onPhaseChange: ((Phase) -> Void)?
-    /// How many request messages wait unread, for its badge. Emitted on every
+    /// How many requests are new, for its badge. Emitted on every
     /// projection — including while the surface is off screen, which is when
     /// a badge matters most.
     public var onNewCountChange: ((Int) -> Void)?
 
-    /// THE UNREAD MESSAGES of the requests (#1210, the owner 2026-10-15),
-    /// falling as one is opened — as the Chats tab's. The watermark still
+    /// THE NEW REQUESTS, each one 1 whatever its messages (the owner,
+    /// 2026-11-07, #2171; it counted their unread messages, #1210): the
+    /// requests the row marks new with its bold preview, falling as one is
+    /// opened. The Chats tab keeps counting messages. The watermark still
     /// splits the list into New and Recent.
     private(set) public var newCount = 0
 
@@ -157,9 +159,7 @@ public final class MessageRequestsViewModel {
         hasMore = snapshot.hasMore.contains(folder)
         // A hidden request announces nothing: the server sends no push for it,
         // and the badge would point at a list it isn't on.
-        publishNewCount(isHiddenFolder ? 0 : requests.reduce(0) { total, row in
-            total + (snapshot.unreadIDs.contains(row.id) ? row.unreadCount : 0)
-        })
+        publishNewCount(isHiddenFolder ? 0 : requests.count { snapshot.unreadIDs.contains($0.id) })
         showsHiddenRequestsRow = !isHiddenFolder
             && (!snapshot.hiddenRequests.isEmpty || snapshot.hasMore.contains(.hiddenRequests))
         switch snapshot.phase {
@@ -181,12 +181,12 @@ public final class MessageRequestsViewModel {
             // treatment (bold preview, a dot on the avatar) is the treatment an
             // unread conversation gets. One flag, so both cells stay honest
             // about meaning the same thing: new to you.
-            // Identical to the All list's projection, and deliberately so: a
-            // request wears the same bold preview and the same numeric badge on
-            // the same corner of the same avatar, and it stops wearing them for
-            // the same reason — the viewer opened it, which moved the read
-            // cursor. `isUnread` used to be the watermark here, which meant a
-            // request stayed marked after being read.
+            // The All list's projection, and deliberately so: a request wears
+            // the same bold preview, and it stops wearing it for the same
+            // reason — the viewer opened it, which moved the read cursor. Its
+            // row shows no count (#2171): the tab counts requests. `isUnread`
+            // used to be the watermark here, which meant a request stayed
+            // marked after being read.
             let isNew = Dictionary(
                 uniqueKeysWithValues: requests.map { ($0.id, !isHiddenFolder && watermark.isNewOnRow($0)) }
             )
