@@ -1,8 +1,9 @@
 import DesignSystem
 import UIKit
 
-/// A screen that started a call and shows it is out: a spinner on the
-/// control that started it, the inputs locked, until the call ends (#827).
+/// A screen that started a call and shows it is out: the control that
+/// started it in its held load (#2020; a spinner, #827), the inputs locked,
+/// until the call ends.
 @MainActor
 protocol WorkingIndicating: AnyObject {
     func setWorking(_ working: Bool)
@@ -23,33 +24,23 @@ class SignUpStepViewController: AuthStepTableViewController {
     var trailingRows: [UITableViewCell] = []
     var onTrailingRowSelected: ((Int) -> Void)?
 
-    lazy var primaryButton: UIButton = {
-        var configuration = UIButton.Configuration.prominentGlass()
-        configuration.buttonSize = .large
-        let button = UIButton(configuration: configuration)
+    /// The app's button at its form size (#2020): its press, its haptic,
+    /// its gating while the input is incomplete, its held load while a call
+    /// runs.
+    lazy var primaryButton: AppButton = {
+        let button = AppButton(aspect: .pill(.prominent), size: .form, content: .title(""))
         button.addAction(UIAction { [weak self] _ in self?.primaryTapped() }, for: .primaryActionTriggered)
         return button
     }()
 
-    private lazy var buttonCell: UITableViewCell = {
-        let cell = UITableViewCell()
-        cell.backgroundConfiguration = .clear()
-        cell.selectionStyle = .none
-        primaryButton.constrain(in: cell.contentView) { parent in
-            primaryButton.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
-            primaryButton.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-            primaryButton.topAnchor.constraint(equalTo: parent.topAnchor)
-            primaryButton.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
-        }
-        return cell
-    }()
+    private lazy var buttonCell: UITableViewCell = AuthButtonCell(hosting: primaryButton)
 
     init(emoji: String, title: String, subtitle: String, buttonTitle: String) {
         self.emoji = emoji
         self.heading = title
         self.subtitle = subtitle
         super.init(style: .insetGrouped)
-        primaryButton.configuration?.title = buttonTitle
+        primaryButton.setContent(.title(buttonTitle), animated: false)
     }
 
     @available(*, unavailable)
@@ -58,12 +49,14 @@ class SignUpStepViewController: AuthStepTableViewController {
     /// The step's action. Subclasses override.
     func primaryTapped() {}
 
-    /// Spinner on the button, back disabled, inputs locked — while a call runs.
+    /// The button's held load (#2020), back disabled, inputs locked — while a
+    /// call runs: sending a code, verifying it, creating the account. The
+    /// load ignores re-taps and keeps its ground (not greyed as disabled).
     /// The form's × and back are DISABLED, not hidden (#2022): the bar keeps
     /// its shape (`ContentFittingNavigationController.setFormWorking`).
     func setWorking(_ working: Bool) {
-        primaryButton.configuration?.showsActivityIndicator = working
-        primaryButton.isEnabled = !working && canContinue
+        primaryButton.setPhase(working ? .loading : .content, animated: true)
+        primaryButton.isEnabled = working || canContinue
         (navigationController as? ContentFittingNavigationController)?.setFormWorking(working)
         view.isUserInteractionEnabled = !working
         if working {

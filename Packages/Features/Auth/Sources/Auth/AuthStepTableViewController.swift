@@ -20,6 +20,16 @@ class AuthStepTableViewController: UITableViewController {
     /// gap must be exact.
     static let collapsedFooterHeight: CGFloat = 1
 
+    /// A row hosting a button is unclipped again after every layout of the
+    /// table — see `AuthButtonCell`: the section rounds its rows from the
+    /// table's layout, without always laying the row out again.
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        for case let cell as AuthButtonCell in tableView.visibleCells {
+            cell.unclip()
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         // A form that fits shouldn't bounce.
