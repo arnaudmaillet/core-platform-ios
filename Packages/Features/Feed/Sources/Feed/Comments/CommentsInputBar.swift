@@ -90,6 +90,7 @@ final class CommentsInputBar: UIView {
         didSet {
             voiceHold.isEnabled = holdsToRecord
             updateFieldAction()
+            applyPlaceholder()
         }
     }
     var onVoiceHold: ((VoiceHoldEvent) -> Void)?
@@ -102,6 +103,18 @@ final class CommentsInputBar: UIView {
         return hold
     }()
     private var voiceHoldStart: CGPoint = .zero
+
+    /// "Hold for voice, tap to type" (the owner, 2026-11-07): in a
+    /// conversation (`speaksFromField`) a long press on the empty field
+    /// records — the bubble grows into the mic as its own hold did — and a
+    /// tap writes. Later than a tap (0.3 s); a draft keeps the field's
+    /// native long press (the loupe, the selection).
+    private lazy var fieldVoiceHold: UILongPressGestureRecognizer = {
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(voiceHeld(_:)))
+        hold.minimumPressDuration = 0.3
+        hold.delegate = self
+        return hold
+    }()
 
     /// The waveform's button, where the mic disc and the lock stand (#2102).
     var voiceHoldAnchor: UIView { actsFromOwnBubble ? rowActionButton : fieldActionButton }
@@ -119,7 +132,17 @@ final class CommentsInputBar: UIView {
         }
     }
     private let rowActionButton = UIButton(configuration: .glass())
+
+    /// A conversation with voice messages (#2102; the owner, 2026-11-07):
+    /// the voice is the FIELD's long press, so the own bubble at rest is the
+    /// emote button (the field's own emote button goes until there is a
+    /// draft), and the send over a draft — where the emote button comes
+    /// back into the field.
+    var speaksFromField: Bool { actsFromOwnBubble && holdsToRecord }
     private var fieldActionWidth: NSLayoutConstraint!
+    /// The field's emote button's width: 0 while it is gone
+    /// (`updateEmoteToggle`), so the text and the placeholder run on.
+    private var emoteToggleWidth: NSLayoutConstraint!
     /// The own bubble steps aside while a locked or paused take covers the
     /// field (it carries its own send): the field takes the row's width.
     private var rowActionStepsAside = false
@@ -130,7 +153,9 @@ final class CommentsInputBar: UIView {
         rowActionButton.isHidden = !actsFromOwnBubble || rowActionStepsAside
         voiceHold.view?.removeGestureRecognizer(voiceHold)
         (actsFromOwnBubble ? rowActionButton : fieldActionButton).addGestureRecognizer(voiceHold)
+        if actsFromOwnBubble { field.addGestureRecognizer(fieldVoiceHold) } else { field.removeGestureRecognizer(fieldVoiceHold) }
         updateFieldAction()
+        applyPlaceholder()
         setNeedsLayout()
     }
 
@@ -357,7 +382,7 @@ final class CommentsInputBar: UIView {
             // button scales its symbols up a text style's step, and the
             // glyph's bare size jumped at the hand-over (filmed, 2026-11-07).
             face.image = nil
-            if var home = Self.fieldActionImage(sends: hasDraft || isSending) {
+            if var home = bubbleImage(sends: hasDraft || isSending) {
                 if let drawn = rowActionButton.imageView?.preferredSymbolConfiguration {
                     home = home.applyingSymbolConfiguration(drawn) ?? home
                 }
@@ -375,7 +400,7 @@ final class CommentsInputBar: UIView {
         } else {
             if !holdGlyphLeaving { holdGlyph.isHidden = true }
             if replaces { face.symbolContentTransition = quick }
-            face.image = Self.fieldActionImage(sends: hasDraft || isSending)
+            face.image = bubbleImage(sends: hasDraft || isSending)
             face.showsActivityIndicator = isSending
             rowActionButton.tintColor = nil
         }
@@ -391,6 +416,21 @@ final class CommentsInputBar: UIView {
     var debugRowActionButton: UIButton { rowActionButton }
     var debugHoldGlyph: UIImageView { holdGlyph }
     var debugShowsRowAction: Bool { !rowActionButton.isHidden }
+    /// The field's emote button shows, with room.
+    var debugShowsFieldEmoteToggle: Bool { !emotes.toggleButton.isHidden && emoteToggleWidth.constant > 0 }
+    /// The emote panel stands in for the keyboard.
+    var debugShowsEmotePanel: Bool { emotes.isShowingPanel }
+    /// The placeholder's words.
+    var debugPlaceholder: String? { placeholderLabel.text }
+    /// The placeholder's frame and the field's, in the field's space.
+    var debugPlaceholderFrame: CGRect { placeholderLabel.frame }
+    var debugFieldBounds: CGRect { field.contentView.bounds }
+    /// Whether the bubble's own hold would begin now.
+    var debugBubbleHoldBegins: Bool { gestureRecognizerShouldBegin(voiceHold) }
+    /// Whether the field's long press would begin now.
+    var debugFieldHoldBegins: Bool { gestureRecognizerShouldBegin(fieldVoiceHold) }
+    /// The field's text view, for its VoiceOver actions.
+    var debugTextView: UITextView { textView }
     var debugFieldActionShows: Bool { !fieldActionButton.isHidden }
     #endif
 
@@ -403,28 +443,128 @@ final class CommentsInputBar: UIView {
     /// the emote button — and the field's own button when `coversButton`
     /// (the locked and paused bars carry their own). Nil gives the field back.
     func showVoiceOverlay(_ overlay: UIView?, coversButton: Bool = false) {
-        voiceOverlay?.removeFromSuperview()
+        let previous = voiceOverlay
+        let animated = window != nil && !MotionPreference.reducesMotion
         voiceOverlay = overlay
         let showing = overlay != nil
-        textView.isHidden = showing
-        emotes.toggleButton.isHidden = showing
-        placeholderLabel.isHidden = showing || hasDraft
         voiceOverlayCoversButton = coversButton
+        updateEmoteToggle()
         fieldActionButton.isHidden = actsFromOwnBubble || (showing && coversButton)
         if actsFromOwnBubble { setRowActionAside(showing && coversButton) }
         onVoiceOverlayChange?(showing)
+        setFieldWordsShown(!showing, animated: animated)
+        if let previous, previous !== overlay { retireVoiceOverlay(previous, animated: animated) }
         guard let overlay else { return }
+        if previous === overlay {
+            // The same strip, another bar (locked, paused): only its end
+            // moves, as the bubble steps aside.
+            voiceOverlayTrailing?.isActive = false
+            voiceOverlayTrailing = voiceOverlayTrailingConstraint(for: overlay, coversButton: coversButton)
+            voiceOverlayTrailing?.isActive = true
+            if animated {
+                UIView.animate(springDuration: 0.45, bounce: 0, options: [.allowUserInteraction, .beginFromCurrentState]) {
+                    self.field.contentView.layoutIfNeeded()
+                }
+            }
+            return
+        }
+        // A strip still leaving (cancelled, then held again) starts over.
+        overlay.layer.removeAllAnimations()
+        overlay.removeFromSuperview()
         overlay.translatesAutoresizingMaskIntoConstraints = false
         field.contentView.addSubview(overlay)
+        let trailing = voiceOverlayTrailingConstraint(for: overlay, coversButton: coversButton)
+        voiceOverlayTrailing = trailing
         NSLayoutConstraint.activate([
             overlay.leadingAnchor.constraint(equalTo: field.contentView.leadingAnchor, constant: Spacing.md),
-            overlay.trailingAnchor.constraint(
-                equalTo: coversButton ? field.contentView.trailingAnchor : fieldActionButton.leadingAnchor,
-                constant: coversButton ? -Spacing.xs : 0
-            ),
+            trailing,
             overlay.topAnchor.constraint(equalTo: field.contentView.topAnchor),
             overlay.bottomAnchor.constraint(equalTo: field.contentView.bottomAnchor),
         ])
+        // ⚠️ LAID OUT AT ONCE, OUTSIDE ANY ANIMATION (the owner, 2026-11-07):
+        // left to the next pass, the strip was laid out inside the bubble's
+        // grow spring, and its parts flew in from the field's top-left
+        // corner the first time it showed.
+        UIView.performWithoutAnimation {
+            field.contentView.layoutIfNeeded()
+            overlay.layoutIfNeeded()
+        }
+        overlay.alpha = 1
+        overlay.transform = .identity
+        guard animated else { return }
+        // In: it fades in sliding a little from the end it comes from.
+        overlay.alpha = 0
+        overlay.transform = CGAffineTransform(translationX: Self.voiceOverlaySlide * layoutDirectionSign, y: 0)
+        UIView.animate(springDuration: 0.4, bounce: 0.1, options: [.allowUserInteraction, .beginFromCurrentState]) {
+            overlay.alpha = 1
+            overlay.transform = .identity
+        }
+    }
+
+    /// How far a take's strip slides as it comes in or leaves.
+    static let voiceOverlaySlide: CGFloat = 16
+
+    private var layoutDirectionSign: CGFloat { effectiveUserInterfaceLayoutDirection == .rightToLeft ? -1 : 1 }
+
+    private var voiceOverlayTrailing: NSLayoutConstraint?
+
+    private func voiceOverlayTrailingConstraint(for overlay: UIView, coversButton: Bool) -> NSLayoutConstraint {
+        overlay.trailingAnchor.constraint(
+            equalTo: coversButton ? field.contentView.trailingAnchor : fieldActionButton.leadingAnchor,
+            constant: coversButton ? -Spacing.xs : 0
+        )
+    }
+
+    /// The strip leaves — sent, cancelled: it fades out sliding toward the
+    /// cancel's side, unless it is shown again meanwhile.
+    private func retireVoiceOverlay(_ overlay: UIView, animated: Bool) {
+        guard animated else {
+            overlay.removeFromSuperview()
+            return
+        }
+        UIView.animate(withDuration: 0.22, delay: 0, options: [.beginFromCurrentState]) {
+            overlay.alpha = 0
+            overlay.transform = CGAffineTransform(translationX: -Self.voiceOverlaySlide * self.layoutDirectionSign, y: 0)
+        } completion: { _ in
+            guard self.voiceOverlay !== overlay else { return }
+            overlay.removeFromSuperview()
+            overlay.alpha = 1
+            overlay.transform = .identity
+        }
+    }
+
+    /// The field's own words — the text, or the placeholder — give way to a
+    /// take's strip and come back after it, fading.
+    private func setFieldWordsShown(_ shown: Bool, animated: Bool) {
+        let placeholderHidden = !shown || hasDraft
+        guard animated, textView.isHidden == shown else {
+            textView.isHidden = !shown
+            placeholderLabel.isHidden = placeholderHidden
+            textView.alpha = 1
+            placeholderLabel.alpha = 1
+            return
+        }
+        if shown {
+            textView.isHidden = false
+            placeholderLabel.isHidden = placeholderHidden
+            textView.alpha = 0
+            placeholderLabel.alpha = 0
+            UIView.animate(withDuration: 0.25, delay: 0.08, options: [.beginFromCurrentState, .allowUserInteraction]) {
+                self.textView.alpha = 1
+                self.placeholderLabel.alpha = 1
+            }
+        } else {
+            UIView.animate(withDuration: 0.15, delay: 0, options: [.beginFromCurrentState]) {
+                self.textView.alpha = 0
+                self.placeholderLabel.alpha = 0
+            } completion: { _ in
+                guard self.voiceOverlay != nil else { return }
+                self.textView.isHidden = true
+                self.placeholderLabel.isHidden = true
+                self.textView.alpha = 1
+                self.placeholderLabel.alpha = 1
+            }
+        }
     }
     private(set) var voiceOverlay: UIView?
     private var voiceOverlayCoversButton = false
@@ -781,6 +921,11 @@ final class CommentsInputBar: UIView {
     /// through `plainText`, the emoji and `:code:`s that are sent.
     private let textView = EmoteTextView()
     private let placeholderLabel = UILabel()
+    /// The placeholder at the text's start, or centred in the field — the
+    /// field's own instructions, "Hold for voice, tap to type" (the owner,
+    /// 2026-11-07).
+    private var placeholderLeading: NSLayoutConstraint?
+    private var placeholderCentre: NSLayoutConstraint?
     /// The emote panel and the inline `:query` strip for this field; its
     /// smiley sits at the field's trailing end, where iMessage keeps its own.
     private lazy var emotes = EmoteKeyboard(textView: textView)
@@ -928,6 +1073,7 @@ final class CommentsInputBar: UIView {
         fieldActionButton.translatesAutoresizingMaskIntoConstraints = false
         field.contentView.addSubview(fieldActionButton)
         fieldActionWidth = fieldActionButton.widthAnchor.constraint(equalToConstant: Metrics.fieldActionSide)
+        emoteToggleWidth = emoteToggle.widthAnchor.constraint(equalToConstant: Metrics.emoteToggleWidth)
         NSLayoutConstraint.activate([
             textView.leadingAnchor.constraint(equalTo: field.contentView.leadingAnchor),
             textView.topAnchor.constraint(equalTo: field.contentView.topAnchor),
@@ -935,7 +1081,7 @@ final class CommentsInputBar: UIView {
             textView.trailingAnchor.constraint(equalTo: emoteToggle.leadingAnchor),
             emoteToggle.trailingAnchor.constraint(equalTo: fieldActionButton.leadingAnchor),
             emoteToggle.bottomAnchor.constraint(equalTo: field.contentView.bottomAnchor),
-            emoteToggle.widthAnchor.constraint(equalToConstant: Metrics.emoteToggleWidth),
+            emoteToggleWidth,
             emoteToggle.heightAnchor.constraint(equalToConstant: Metrics.controlSize),
             fieldActionButton.trailingAnchor.constraint(equalTo: field.contentView.trailingAnchor),
             fieldActionButton.bottomAnchor.constraint(equalTo: field.contentView.bottomAnchor),
@@ -966,15 +1112,18 @@ final class CommentsInputBar: UIView {
         placeholderLabel.font = textView.font
         placeholderLabel.adjustsFontForContentSizeCategory = true
         placeholderLabel.textColor = .placeholderText
+        let placeholderInset = Spacing.sm + textView.textContainer.lineFragmentPadding
         placeholderLabel.constrain(in: field.contentView) { parent in
-            placeholderLabel.leadingAnchor.constraint(
-                equalTo: parent.leadingAnchor,
-                constant: Spacing.sm + textView.textContainer.lineFragmentPadding
-            )
+            placeholderLabel.leadingAnchor.constraint(greaterThanOrEqualTo: parent.leadingAnchor, constant: placeholderInset)
             placeholderLabel.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
             // Short of the emote toggle: "Comment as …" runs under it otherwise.
             placeholderLabel.trailingAnchor.constraint(lessThanOrEqualTo: emotes.toggleButton.leadingAnchor)
         }
+        placeholderLeading = placeholderLabel.leadingAnchor.constraint(
+            equalTo: field.contentView.leadingAnchor, constant: placeholderInset
+        )
+        placeholderCentre = placeholderLabel.centerXAnchor.constraint(equalTo: field.contentView.centerXAnchor)
+        placeholderLeading?.isActive = true
 
         // The native bubble-glass token (the chat bar's exact contract):
         // the corner configuration drives the glass shape itself, so the
@@ -1244,7 +1393,10 @@ final class CommentsInputBar: UIView {
     /// recognizer keeps UIKit's default answer.
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         // The waveform's hold (#2102): over an empty field, nothing on its way.
-        if gestureRecognizer === voiceHold { return holdsToRecord && !hasDraft && !isSending }
+        if gestureRecognizer === voiceHold { return holdsToRecord && !speaksFromField && !hasDraft && !isSending }
+        if gestureRecognizer === fieldVoiceHold {
+            return actsFromOwnBubble && holdsToRecord && !hasDraft && !isSending && voiceOverlay == nil
+        }
         guard gestureRecognizer === swipeRecognizer,
               let pan = gestureRecognizer as? UIPanGestureRecognizer else {
             return super.gestureRecognizerShouldBegin(gestureRecognizer)
@@ -1672,6 +1824,11 @@ final class CommentsInputBar: UIView {
     private func fieldActionTapped() {
         if hasDraft {
             sendTapped()
+        } else if speaksFromField, !isSending {
+            // The bubble at rest is the emote button: the panel or the
+            // keyboard, as the field's own button does.
+            emotes.toggle()
+            updateFieldAction()
         } else if !isSending {
             if holdsToRecord, UIAccessibility.isVoiceOverRunning {
                 onVoiceHold?(.accessibilityStart)
@@ -1749,6 +1906,10 @@ final class CommentsInputBar: UIView {
     private var viewerIdentity: ViewerIdentity?
     private var viewerImagePipeline: ImagePipeline?
 
+    /// The field's own instructions where its long press records (the
+    /// owner, 2026-11-07: "maintenir pour vocal, taper pour écrire").
+    static let speakOrWritePlaceholder = "Hold for voice, tap to type"
+
     /// The placeholder, resolved from BOTH axes in one place.
     ///
     ///   replying          → "Reply to Kenji…"
@@ -1768,12 +1929,23 @@ final class CommentsInputBar: UIView {
             placeholderLabel.text = "Sign up to comment"
         } else if let replyName {
             placeholderLabel.text = "Reply to \(replyName)…"
+        } else if speaksFromField {
+            placeholderLabel.text = Self.speakOrWritePlaceholder
         } else if let defaultPlaceholder {
             placeholderLabel.text = defaultPlaceholder
         } else if let viewerName, !viewerName.isEmpty {
             placeholderLabel.text = "Comment as \(viewerName)"
         } else {
             placeholderLabel.text = "Add a comment…"
+        }
+        let centred = placeholderLabel.text == Self.speakOrWritePlaceholder
+        placeholderLabel.textAlignment = centred ? .center : .natural
+        if centred {
+            placeholderLeading?.isActive = false
+            placeholderCentre?.isActive = true
+        } else {
+            placeholderCentre?.isActive = false
+            placeholderLeading?.isActive = true
         }
     }
 
@@ -2341,13 +2513,47 @@ final class CommentsInputBar: UIView {
         // finger holds it (`applyVoiceHoldFace`).
         if actsFromOwnBubble {
             if !voiceHolding, !voiceHoldReturning, !rowActionStepsAside, var bubble = rowActionButton.configuration {
-                bubble.image = Self.fieldActionImage(sends: sends)
+                bubble.image = bubbleImage(sends: sends)
                 bubble.showsActivityIndicator = isSending
                 if bubble != rowActionButton.configuration { rowActionButton.configuration = bubble }
             }
-            rowActionButton.accessibilityLabel = fieldActionButton.accessibilityLabel
+            rowActionButton.accessibilityLabel = speaksFromField && !sends
+                ? (emotes.isShowingPanel ? "Keyboard" : "Emotes")
+                : fieldActionButton.accessibilityLabel
             rowActionButton.isEnabled = !isSending
         }
+        updateEmoteToggle()
+    }
+
+    /// The field's emote button: gone while a take covers the field, and —
+    /// in a conversation that speaks from the field — until there is a
+    /// draft: the bubble is the emote button then.
+    private func updateEmoteToggle() {
+        guard emoteToggleWidth != nil else { return }
+        let hidden = voiceOverlay != nil || (speaksFromField && !hasDraft)
+        emotes.toggleButton.isHidden = hidden
+        let width = hidden && voiceOverlay == nil ? 0 : Metrics.emoteToggleWidth
+        if emoteToggleWidth.constant != width {
+            emoteToggleWidth.constant = width
+            setNeedsLayout()
+        }
+        textView.accessibilityCustomActions = speaksFromField && !hasDraft
+            ? [UIAccessibilityCustomAction(name: "Record voice message") { [weak self] _ in
+                self?.onVoiceHold?(.accessibilityStart)
+                return true
+            }]
+            : nil
+    }
+
+    /// The own bubble's glyph: the send over a draft; at rest the emote
+    /// button's — its smile, or the keyboard while the panel is up — where
+    /// the voice is the field's (`speaksFromField`), the waveform otherwise.
+    private func bubbleImage(sends: Bool) -> UIImage? {
+        guard !sends, speaksFromField else { return Self.fieldActionImage(sends: sends) }
+        return UIImage(
+            systemName: emotes.isShowingPanel ? "keyboard" : "face.smiling",
+            withConfiguration: Self.emoteToggleConfiguration
+        )?.withTintColor(Self.waveformTint, renderingMode: .alwaysOriginal)
     }
 
     /// The symbol the field button wears, so an unchanged face is not
@@ -2581,6 +2787,12 @@ extension CommentsInputBar: UITextViewDelegate {
             self?.textView.becomeFirstResponder()
         }
         return false
+    }
+
+    /// The emote panel goes with the keyboard: the bubble's glyph follows,
+    /// once the panel has left (after this turn).
+    func textViewDidEndEditing(_ textView: UITextView) {
+        DispatchQueue.main.async { [weak self] in self?.updateFieldAction() }
     }
 
     func textViewDidChange(_ textView: UITextView) {

@@ -81,7 +81,14 @@ final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
 
     /// The bubble's width for a length: 140 pt at 1 s, 240 pt from 30 s,
     /// straight between — length reads at a glance.
+    ///
+    /// ⚠️ AT THE TENTH OF A SECOND (the owner, 2026-11-07): the server keeps
+    /// a voice message's length to a tenth (`ChatMedia`'s `d`), the take's
+    /// own is exact — at full precision the sent copy came out a point
+    /// narrower or wider, with a bar more or less, and its waveform jumped
+    /// as it replaced the pending one.
     static func width(forDuration duration: TimeInterval) -> CGFloat {
+        let duration = (duration * 10).rounded() / 10
         let progress = min(1, max(0, (duration - 1) / 29))
         return (minWidth + (maxWidth - minWidth) * progress).rounded()
     }
@@ -372,7 +379,11 @@ final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
         } else {
             pendingLoader?.cancel()
             pendingLoader = nil
-            showLoader(sending)
+            // ⚠️ NO LOADER OVER THE PLAY BUTTON WHILE SENDING (the owner,
+            // 2026-11-07): a message's one loader is its delivery's, beside
+            // "You" (`ThreadRowCell.setDelivery`); the bubble stays faded
+            // with its play button disabled.
+            showLoader(false)
         }
         playButton.isEnabled = !sending && !failedSend
 
@@ -399,7 +410,10 @@ final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
                 }
             }
         }
-        if previous.levels == nil, state.levels != nil, window != nil { waveform.riseIn() }
+        // The waveform rises in when it ARRIVES for the message shown — not
+        // when a row is filled afresh (a reused cell, the sent copy taking
+        // the pending one's place: it is already there).
+        if previous.levels == nil, previous.duration > 0, state.levels != nil, window != nil { waveform.riseIn() }
         updateAccessibility()
     }
 
@@ -608,6 +622,8 @@ final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
     var debugShowsChip: Bool { !speedChip.isHidden }
     var debugChipTitle: String? { speedChip.content.title }
     var debugShowsDot: Bool { !dot.isHidden }
+    var debugWaveformRising: Bool { waveform.debugRising }
+    var debugPlayEnabled: Bool { playButton.isEnabled }
     var debugShowsLoader: Bool { !loader.isHidden }
     var debugChipFrame: CGRect { speedChip.convert(speedChip.bounds, to: self) }
     var debugWaveformGrown: Bool { waveform.debugSwollen }
@@ -744,6 +760,9 @@ final class WaveformBars: UIView, UIGestureRecognizerDelegate {
         }
         setNeedsDisplay()
     }
+
+    /// Whether it is rising in now.
+    var debugRising: Bool { rise < 1 }
 
     /// The waveform arriving rises into place, once.
     func riseIn() {

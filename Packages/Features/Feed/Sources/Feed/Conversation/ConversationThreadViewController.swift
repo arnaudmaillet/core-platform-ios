@@ -1416,7 +1416,37 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     private func isAwaitingDelivery(_ message: ConversationThreadMessage) -> Bool {
-        message.isMine && message.media == nil && message.delivery != .sent
+        Self.showsDeliveryBesideName(message) && message.delivery != .sent
+    }
+
+    /// Whether the viewer's message shows its delivery beside "You": a text,
+    /// and a voice message — its bubble keeps its play button, no loader
+    /// over it (the owner, 2026-11-07). A photo or a clip shows it on its
+    /// picture (`ThreadMediaView`).
+    static func showsDeliveryBesideName(_ message: ConversationThreadMessage) -> Bool {
+        message.isMine && (message.media == nil || message.media?.kind == .voice)
+    }
+
+    /// What delivery a row shows beside "You": a text's, sending or failed;
+    /// a voice message's while sending only — its bubble says "Not sent.
+    /// Tap to retry" itself.
+    static func deliveryBesideName(of message: ConversationThreadMessage) -> ConversationThreadDelivery? {
+        guard showsDeliveryBesideName(message) else { return nil }
+        if message.media?.kind == .voice, message.delivery == .failed { return nil }
+        return message.delivery
+    }
+
+    /// Whether `sent` is the delivered copy of the pending `pending`: the
+    /// same words, and no media or the same voice take.
+    static func isSameSend(_ pending: ConversationThreadMessage, _ sent: ConversationThreadMessage) -> Bool {
+        guard pending.body == sent.body else { return false }
+        switch (pending.media, sent.media) {
+        case (nil, nil): return true
+        case let (mine?, theirs?):
+            return mine.kind == .voice && theirs.kind == .voice
+                && abs((mine.duration ?? 0) - (theirs.duration ?? 0)) < 0.5
+        default: return false
+        }
     }
 
     /// What a message's row was last configured with, so a render can tell
@@ -1498,7 +1528,7 @@ final class ConversationThreadViewController: UIViewController {
         // (#719); a failed one is sent again by a tap.
         cell.loaderDelay = sendingLoaderDelay
         cell.setDelivery(
-            message.isMine && message.media == nil ? message.delivery : nil,
+            Self.deliveryBesideName(of: message),
             time: Self.timeFormatter.string(from: message.sentAt)
         )
         if message.isMine, message.media == nil, message.delivery == .failed {
@@ -1529,7 +1559,7 @@ final class ConversationThreadViewController: UIViewController {
             if message.delivery == .sending {
                 arrivingIDs.insert(message.id)
             } else if message.delivery == .sent,
-                      let index = goneSending.firstIndex(where: { $0.body == message.body && $0.media == nil }) {
+                      let index = goneSending.firstIndex(where: { Self.isSameSend($0, message) }) {
                 goneSending.remove(at: index)
                 if deliveredEarly.remove(message.id) == nil { deliveredIDs.insert(message.id) }
                 swappedIDs.insert(message.id)
@@ -1545,10 +1575,10 @@ final class ConversationThreadViewController: UIViewController {
     private func playEarlyDeliveries(in phase: ConversationThreadPhase) -> Bool {
         guard case .content(let messages) = phase else { return false }
         var played = false
-        var pending = messagesByID.values.filter { $0.isMine && $0.delivery == .sending && $0.media == nil }
+        var pending = messagesByID.values.filter { Self.showsDeliveryBesideName($0) && $0.delivery == .sending }
         for message in messages where message.isMine && message.delivery == .sent && messagesByID[message.id] == nil
             && !deliveredEarly.contains(message.id) {
-            guard let index = pending.firstIndex(where: { $0.body == message.body && !messages.map(\.id).contains($0.id) })
+            guard let index = pending.firstIndex(where: { Self.isSameSend($0, message) && !messages.map(\.id).contains($0.id) })
             else { continue }
             let row = pending.remove(at: index)
             guard let path = dataSource.indexPath(for: .message(row.id)),
