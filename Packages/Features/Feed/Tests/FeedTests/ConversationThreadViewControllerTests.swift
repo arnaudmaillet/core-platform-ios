@@ -827,26 +827,6 @@ struct ConversationThreadViewControllerTests {
         try #require(bottom > 1500, "the premise: a transcript several screens long")
         #expect(!screen.debugShowsReturnButton)
 
-        // A voice take in the field's place: the lock rises over the held
-        // bubble, where the way back floats — it gives the column up, and
-        // takes it back once the take is gone.
-        screen.debugComposeBar.showVoiceOverlay(VoiceRecordingStrip())
-        window.layoutIfNeeded()
-        screen.debugScroll(to: bottom - 1200, userScroll: true)
-        #expect(screen.debugShowsReturn)
-        #expect(!screen.debugShowsReturnButton, "the way back stood over the lock's column")
-        screen.debugComposeBar.showVoiceOverlay(nil)
-        #expect(screen.debugShowsReturnButton, "the way back did not come back after the take")
-        window.layoutIfNeeded()
-        // Back at the newest message, and away again mid-fade: it shows.
-        screen.debugScroll(to: bottom, userScroll: false)
-        #expect(!screen.debugShowsReturn)
-        screen.debugScroll(to: bottom - 1200, userScroll: true)
-        // The model value: where the fade now heads.
-        #expect(screen.debugShowsReturnButton && screen.debugReturnButtonAlpha > 0.99,
-                "shown again mid-fade, the way back stayed invisible")
-        screen.debugScroll(to: bottom, userScroll: false)
-
         // A programmatic move (a quote jump) never shows it.
         screen.debugScroll(to: bottom - 1200, userScroll: false)
         #expect(!screen.debugShowsReturn)
@@ -864,10 +844,45 @@ struct ConversationThreadViewControllerTests {
         while screen.debugStreamOffset <= away, ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
-        #expect(screen.debugStreamOffset > away, "the tap did not head for the newest message")
+        #expect(
+            screen.debugStreamOffset > away,
+            """
+            the tap did not head for the newest message: offset \(screen.debugStreamOffset), away \(away), \
+            bottom then \(bottom), now \(screen.debugBottomOffset), way back shown \(screen.debugShowsReturnButton), \
+            window key \(window.isKeyWindow)
+            """
+        )
         // Arriving there — as the animation's scroll callbacks report it.
         screen.debugScroll(to: bottom, userScroll: false)
         #expect(!screen.debugShowsReturn, "back at the newest message, the way back stayed")
+    }
+
+    /// A voice take in the field's place: the lock rises over the held
+    /// bubble, where the way back floats — it gives the column up, and takes
+    /// it back once the take is gone. Apart from the tap's test: the take's
+    /// strip re-lays the composer, and the tap after it never scrolled on
+    /// CI's iOS 26 (#2173).
+    @Test func theWayBackGivesTheLockItsColumn() throws {
+        let (screen, _, _, window) = makeScreen(phase: .content(Self.longTranscript))
+        defer { window.isHidden = true }
+        window.layoutIfNeeded()
+        let bottom = screen.debugBottomOffset
+        try #require(bottom > 1500, "the premise: a transcript several screens long")
+        screen.debugComposeBar.showVoiceOverlay(VoiceRecordingStrip())
+        window.layoutIfNeeded()
+        screen.debugScroll(to: bottom - 1200, userScroll: true)
+        try #require(screen.debugShowsReturn, "the premise: scrolled away")
+        #expect(!screen.debugShowsReturnButton, "the way back stood over the lock's column")
+        screen.debugComposeBar.showVoiceOverlay(nil)
+        #expect(screen.debugShowsReturnButton, "the way back did not come back after the take")
+        window.layoutIfNeeded()
+        // Back at the newest message, and away again mid-fade: it shows.
+        screen.debugScroll(to: bottom, userScroll: false)
+        #expect(!screen.debugShowsReturn)
+        screen.debugScroll(to: bottom - 1200, userScroll: true)
+        // The model value: where the fade now heads.
+        #expect(screen.debugShowsReturnButton && screen.debugReturnButtonAlpha > 0.99,
+                "shown again mid-fade, the way back stayed invisible")
     }
 
     /// The composer has no column slot: its own bubble is the voice note and
