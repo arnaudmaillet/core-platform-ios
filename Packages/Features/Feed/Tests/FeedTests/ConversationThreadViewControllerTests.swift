@@ -857,7 +857,13 @@ struct ConversationThreadViewControllerTests {
 
         let away = screen.debugStreamOffset
         screen.debugTapReturn()
-        for _ in 0..<100 where screen.debugStreamOffset <= away { try await Task.sleep(for: .milliseconds(10)) }
+        // On the outcome, not a fixed second: the animated scroll moves on
+        // display ticks, which a starved CI host hands out late (#2173's
+        // run: still at `away` after the second, the test 389 s long).
+        let deadline = ContinuousClock.now + .seconds(20)
+        while screen.debugStreamOffset <= away, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
         #expect(screen.debugStreamOffset > away, "the tap did not head for the newest message")
         // Arriving there — as the animation's scroll callbacks report it.
         screen.debugScroll(to: bottom, userScroll: false)
