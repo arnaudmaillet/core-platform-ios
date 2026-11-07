@@ -22,14 +22,6 @@ enum CommentBlur {
     /// across parallel suites).
     static let isEnabled = isEnabled(arguments: ProcessInfo.processInfo.arguments)
 
-    /// The band's blur strength (0…1) for the wash's opacity: the larger of
-    /// the interaction's fraction and the resting level, over the wash's
-    /// ceiling — so the blur grows, holds and relaxes on the wash's own curve.
-    static func bandStrength(fraction: CGFloat, resting: CGFloat, ceiling: CGFloat) -> CGFloat {
-        guard ceiling > 0 else { return 0 }
-        return min(1, max(0, max(fraction, resting)) / ceiling)
-    }
-
     /// The fill setting's top (Settings: 0…0.9).
     static let pillFillCeiling: CGFloat = 0.9
 

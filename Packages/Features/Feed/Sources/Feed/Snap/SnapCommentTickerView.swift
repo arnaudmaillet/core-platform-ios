@@ -4,10 +4,21 @@ import EmoteKit
 import MediaCore
 import UIKit
 
-/// The danmaku band: `laneCount` lanes of naked micro-reaction text conveying
-/// right-to-left over the page's media, directly above the caption. Text
-/// carries no capsule, by the owner's decision (#1991); since #1983 the
-/// page's scrim stops at the caption and no longer reaches the band.
+/// The danmaku band: `laneCount` lanes of micro-reactions conveying
+/// right-to-left over the page's media, directly above the caption, each on
+/// its own blurred capsule (the owner, 2026-11-07, #2172; the text was naked
+/// from #1991, after #1988's capsule): since #1983 the page's scrim stops at
+/// the caption, and naked white text read poorly over a white picture.
+///
+/// # The capsules
+/// ONE blur for the whole band (`capsuleSurface`), masked by one capsule
+/// layer per bubble (`TickerBubbleView.capsule`) — one backdrop pass whatever
+/// the number of bubbles, where a blur per bubble was one per bubble per
+/// frame over the video. Each capsule is moved exactly as its bubble is: the
+/// same flight added in the same transaction, the same freeze on a grab, the
+/// same displacement during a drag and a coast (`moveBubble`, `animateToExit`).
+/// The capsule is the lane's height, so the band, its lanes and the corner
+/// sized from it do not move by a point (#1990 was declined for growing it).
 ///
 /// # The conveyor
 /// Steady state is pure Core Animation. Each bubble's flight is one linear
@@ -32,16 +43,8 @@ import UIKit
 /// drift (`v(t) = -vₖ + (V₀+vₖ)·e^(-t/τ)`), integrated by a `CADisplayLink`
 /// that lives only for the interaction transient; when the residual is
 /// imperceptible the bubbles are handed back to CA at exactly matched
-/// velocity. A kinetic backdrop — a black wash behind the band — tracks the
-/// touch's ACCUMULATED absolute travel in its opacity: monotone
-/// non-decreasing while the finger is down, so a hold freezes at its peak;
-/// release relaxes it on the coast's exponential clock back to the resting
-/// level. At rest the wash sits at the viewer's Background setting (Settings
-/// → App and Device → Comments on Media), 0 by default — and at 0 the
-/// surface is hidden (zero cost). It was a `systemThickMaterial` blur until
-/// 2026-10-04; a wash keeps the media's detail around the band instead of
-/// fogging it, costs nothing per frame, and lets the viewer set a resting
-/// level, which a blur's fraction can't express.
+/// velocity. No wash rises behind the band any more (#2172): the capsules
+/// carry the readability, at rest and under the finger alike.
 ///
 /// # Lifecycle
 /// Hard stop/start, not a freeze: deactivation retires everything in flight,
@@ -61,9 +64,9 @@ final class SnapCommentTickerView: UIView {
     private(set) static var speedScale: CGFloat = 1
     /// The viewer's bubble opacity, read with the speed.
     private(set) static var bubbleOpacity: CGFloat = 1
-    /// The backdrop's resting opacity (0 = none, the default), read with the
-    /// speed. A scrub raises the wash from here and the release returns it.
-    private(set) static var restingBackdropOpacity: CGFloat = 0
+    /// The viewer's Background setting (0 = the blur alone, the default),
+    /// read with the speed: the capsules' dark tint over their blur (#2172).
+    private(set) static var capsuleTint: CGFloat = 0
     /// "Don't Cover People" (#484), read with the speed.
     private(set) static var avoidsPeople = false
     static var laneSpeeds: [CGFloat] { baseLaneSpeeds.map { $0 * speedScale } }
@@ -73,7 +76,7 @@ final class SnapCommentTickerView: UIView {
         let preferences = store.preferences
         speedScale = CGFloat(preferences.bandSpeed.scale)
         bubbleOpacity = CGFloat(preferences.bandOpacity)
-        restingBackdropOpacity = CGFloat(preferences.bandBackgroundOpacity)
+        capsuleTint = CGFloat(preferences.bandBackgroundOpacity)
         avoidsPeople = preferences.avoidsPeople
     }
     /// When each lane's first bubble enters, from the start (#2000): lane 0
@@ -93,24 +96,27 @@ final class SnapCommentTickerView: UIView {
     /// Residual manual velocity (pt/s) under which the conveyor resumes CA —
     /// below perception, so the handover cannot be seen.
     static let restVelocityTolerance: CGFloat = 2
-    /// The backdrop's opacity ceiling during a scrub: dark enough to read as
-    /// kinetic, light enough to keep the media visible around the band.
-    static let maxBackdropOpacity: CGFloat = 0.65
-    /// The backdrop never disappears under a live touch: engagement starts
-    /// here at touch-down, and the accumulator can only raise it.
-    static let scrubEngagementFloor: CGFloat = 0.25
-    /// Accumulated absolute travel (pt) at which the backdrop reaches its
-    /// cap.
-    static let backdropDistanceScale: CGFloat = 260
 
-    /// Accumulated |Δx| → backdrop fraction while the finger is down. A true
-    /// accumulator: monotone non-decreasing over the touch lifecycle — it
-    /// starts at the engagement floor, builds with absolute travel, and
-    /// FREEZES at its peak when the thumb slows or stops. Instantaneous
-    /// velocity plays no part until the gesture ends.
-    static func scrubFraction(forAccumulatedDistance distance: CGFloat) -> CGFloat {
-        scrubEngagementFloor
-            + (maxBackdropOpacity - scrubEngagementFloor) * min(1, distance / backdropDistanceScale)
+    // MARK: Capsule tuning (#2172)
+
+    /// The capsules' material: a dark blur, always — the band is always over
+    /// the media. Ultra-thin keeps the picture's colour through the capsule;
+    /// `-ticker-thin-material` shows the thin one (DEBUG, for the PR).
+    static var capsuleMaterial: UIBlurEffect.Style {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-ticker-thin-material") { return .systemThinMaterialDark }
+        #endif
+        return .systemUltraThinMaterialDark
+    }
+    /// Increased Contrast adds this much dark tint to the capsules.
+    static let increasedContrastTint: CGFloat = 0.25
+    /// Reduce Transparency's capsule: opaque, dark, no blur.
+    static let opaqueCapsuleColor = UIColor(white: 0.12, alpha: 1)
+
+    /// The tint the capsules wear over their blur: the setting's, darker
+    /// with Increased Contrast, capped short of black.
+    static func tint(setting: CGFloat, increasedContrast: Bool) -> CGFloat {
+        min(0.9, max(0, setting) + (increasedContrast ? increasedContrastTint : 0))
     }
     /// How far past either edge a scrubbed bubble may sit before retiring.
     private static let scrubMargin: CGFloat = 48
@@ -223,24 +229,24 @@ final class SnapCommentTickerView: UIView {
     private let panRecognizer = UIPanGestureRecognizer()
     private var coastLink: CADisplayLink?
     private var coastReleaseVelocity: CGFloat = 0
-    /// The backdrop value held at release — the coast's fade envelope starts
-    /// here, so lifting the finger never discontinues the feedback.
-    private var coastReleaseFraction: CGFloat = 0
     private var coastStart: CFTimeInterval = 0
     private var coastLastTimestamp: CFTimeInterval = 0
     private var lastPanTranslation: CGFloat = 0
-    /// The accumulator: total absolute travel of the current touch. Only
-    /// ever grows while scrubbing; reset by the next `beginScrub`.
-    private var scrubAccumulatedDistance: CGFloat = 0
-    /// The kinetic wash behind the band: a black view whose alpha is the
-    /// intensity. Hidden (zero render cost) whenever its alpha is 0.
-    private let backdropView = UIView()
-    /// #560 (`CommentBlur`): the same backdrop on a blur material. Set before
-    /// the band joins a window; tests set it per view.
-    var usesBlur = CommentBlur.isEnabled
-    /// The blur backdrop, made on first use (never at init: a blur effect
-    /// built eagerly stalls headless CI).
-    private var blurBackdrop: CommentBlurView?
+    /// The capsules' one surface, behind every bubble: a blur (or, with
+    /// Reduce Transparency, an opaque dark fill) under the setting's tint,
+    /// masked by `capsuleMask` (#2172). Made on the first start in a window
+    /// (never at init: a blur built eagerly stalls headless CI), hidden while
+    /// the band is parked (#580: no blur drawn for a parked band).
+    private var capsuleSurface: UIView?
+    /// The tint over the surface's blur.
+    private let capsuleTintView = UIView()
+    /// The mask holding one capsule layer per bubble, in the band's space.
+    private let capsuleMask = UIView()
+    /// What the surface was made for: a blur or Reduce Transparency's fill.
+    private var surfaceIsOpaque = false
+    /// Accessibility, read when a stream starts. Tests set them.
+    var reducesTransparency: () -> Bool = { UIAccessibility.isReduceTransparencyEnabled }
+    var increasesContrast: () -> Bool = { UIAccessibility.isDarkerSystemColorsEnabled }
     /// Where the band reads its appearance when a stream starts — the app's
     /// store; a test hands its own.
     var appearanceStore: MediaCommentPreferencesStore = .standard
@@ -265,9 +271,6 @@ final class SnapCommentTickerView: UIView {
         fade.colors = [UIColor.black.cgColor, UIColor.black.cgColor, UIColor.clear.cgColor]
         return fade
     }()
-    /// The interaction's own intensity (0 when no scrub or coast is running);
-    /// the wash shows the larger of this and the resting level.
-    private var kineticFraction: CGFloat = 0
 
     override init(frame: CGRect) {
         bubbleHeight = Self.laneBubbleHeight
@@ -290,12 +293,9 @@ final class SnapCommentTickerView: UIView {
         // capsule end nests inside its curvature, so no clipped bubble
         // sliver can peek out of the square zone's corner gaps.
 
-        backdropView.backgroundColor = .black
-        backdropView.alpha = 0
-        backdropView.isHidden = true
-        backdropView.isUserInteractionEnabled = false
-        backdropView.accessibilityIdentifier = "ticker-kinetic-backdrop"
-        insertSubview(backdropView, at: 0)
+        capsuleMask.isUserInteractionEnabled = false
+        capsuleTintView.backgroundColor = .black
+        capsuleTintView.isUserInteractionEnabled = false
 
         // Horizontal-only pan for the scrub. The delegate declares the
         // band's priority over other pans (the timeline slide-to-pop, the
@@ -384,6 +384,18 @@ final class SnapCommentTickerView: UIView {
 
     func setComments(_ comments: [TickerCommentModel]) {
         #if DEBUG
+        // `-ticker-demo`: a band with nothing to play plays samples — the
+        // mock corpus rarely has enough reaction-shaped comments to fill one,
+        // and the capsules (#2172) have to be looked at over real pictures.
+        if comments.isEmpty, ProcessInfo.processInfo.arguments.contains("-ticker-demo") {
+            let samples = ["GG 🔥", "lol", "so good 😍", "W", "🔥🔥🔥", "no way 😂", "clean", "first!", "big mood", "😭😭",
+                           "this light ✨", "again!!"]
+            let demo = samples.enumerated().map { TickerCommentModel(id: "demo-\($0.offset)", text: $0.element) }
+            if demo != queue { setComments(demo) }
+            return
+        }
+        #endif
+        #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
             print(String(format: "[ticker] %.3f setComments n=%d same=%@ active=%@ width=%.0f mode=%@ reserves=%@", CACurrentMediaTime(), comments.count, comments == queue ? "Y" : "N", isActive ? "Y" : "N", bounds.width, "\(mode)", reservesBand ? "Y" : "N"))
         }
@@ -464,8 +476,9 @@ final class SnapCommentTickerView: UIView {
             trailingFade.locations = [0, NSNumber(value: Double(start)), 1]
             CATransaction.commit()
         }
-        backdropView.frame = bounds
-        blurBackdrop?.frame = bounds
+        capsuleSurface?.frame = bounds
+        capsuleTintView.frame = bounds
+        capsuleMask.frame = bounds
         // Activation can precede first layout (configure → willBecomeActive
         // before the cell is sized); spawning needs a real width. A width
         // that changes mid-stream needs nothing: every spawn reads the band's
@@ -506,7 +519,6 @@ final class SnapCommentTickerView: UIView {
 
     private func startIfNeeded() {
         Self.refreshAppearance(from: appearanceStore)
-        showBackdrop(kineticFraction)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-ticker-trace") {
             print(String(format: "[ticker] %.3f startIfNeeded active=%@ mode=%@ queue=%d width=%.0f held=%@ window=%@ alpha=%.2f hidden=%@", CACurrentMediaTime(), isActive ? "Y" : "N", "\(mode)", queue.count, bounds.width, isHeldForFlight ? "Y" : "N", window != nil ? "Y" : "N", alpha, isHidden ? "Y" : "N"))
@@ -522,6 +534,7 @@ final class SnapCommentTickerView: UIView {
         #if DEBUG
         debugTrainsLaid += 1
         #endif
+        prepareCapsuleSurface()
         startTape()
         // ⚠️ NO PRE-FILL (#2000, the owner): every lane's first bubble enters
         // at the edge, lane 0 at once and the others staggered, and the steady
@@ -537,17 +550,59 @@ final class SnapCommentTickerView: UIView {
         for timer in spawnTimers { timer?.invalidate() }
         spawnTimers = Array(repeating: nil, count: SnapCommentTickerView.laneCount)
         stopCoast()
-        setKineticIntensity(0)
+        capsuleSurface?.isHidden = true
         // Cancel any in-progress grab (a page can deactivate mid-touch).
         panRecognizer.isEnabled = false
         panRecognizer.isEnabled = true
         for lane in 0..<Self.laneCount {
             for bubble in laneBubbles[lane] {
                 bubble.view.layer.removeAllAnimations()
+                bubble.view.capsule.removeAllAnimations()
                 recycle(bubble.view)
             }
             laneBubbles[lane].removeAll()
         }
+    }
+
+    // MARK: - The capsules' surface (#2172)
+
+    /// Makes the surface on the first start (or remakes it when Reduce
+    /// Transparency changed), and shows it with the current tint.
+    private func prepareCapsuleSurface() {
+        let opaque = reducesTransparency()
+        if capsuleSurface == nil || opaque != surfaceIsOpaque {
+            capsuleSurface?.removeFromSuperview()
+            surfaceIsOpaque = opaque
+            let surface: UIView
+            if opaque {
+                surface = UIView()
+                surface.backgroundColor = Self.opaqueCapsuleColor
+                surface.addSubview(capsuleTintView)
+            } else {
+                let blur = UIVisualEffectView(effect: UIBlurEffect(style: Self.capsuleMaterial))
+                blur.contentView.addSubview(capsuleTintView)
+                surface = blur
+            }
+            surface.isUserInteractionEnabled = false
+            surface.accessibilityIdentifier = "ticker-capsule-surface"
+            // The mask on the surface itself — the way an effect view takes
+            // one — never on an ancestor.
+            surface.mask = capsuleMask
+            surface.frame = bounds
+            capsuleMask.frame = bounds
+            capsuleTintView.frame = bounds
+            insertSubview(surface, at: 0)
+            capsuleSurface = surface
+        }
+        capsuleTintView.alpha = Self.tint(setting: Self.capsuleTint, increasedContrast: increasesContrast())
+        capsuleSurface?.isHidden = false
+    }
+
+    /// Puts `bubble` at center-x `x` — its view and its capsule together,
+    /// with no implicit animation: the one write of a bubble's place.
+    private func moveBubble(_ bubble: Bubble, toX x: CGFloat) {
+        bubble.view.layer.position.x = x
+        bubble.view.capsule.position.x = x
     }
 
     private func armSpawn(lane: Int, after delay: TimeInterval) {
@@ -663,6 +718,14 @@ final class SnapCommentTickerView: UIView {
         )
         view.layoutIfNeeded()
         addSubview(view)
+        // Its capsule in the mask, on the same frame, at the same opacity.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        view.capsule.frame = view.frame
+        view.capsule.cornerRadius = view.frame.height / 2
+        view.capsule.opacity = Float(Self.bubbleOpacity)
+        capsuleMask.layer.addSublayer(view.capsule)
+        CATransaction.commit()
         return Bubble(view: view, width: width, itemIndex: itemIndex, itemID: item.id)
     }
 
@@ -693,9 +756,12 @@ final class SnapCommentTickerView: UIView {
         }
         // Model value rests at the exit before the animation is added, so if
         // the system strips animations the bubble sits off screen left rather
-        // than snapping back to the entry edge.
-        layer.position.x = exitX
+        // than snapping back to the entry edge. Its capsule takes the same
+        // flight in the same transaction: the same begin time, so the two
+        // never drift apart.
+        moveBubble(bubble, toX: exitX)
         layer.add(flight, forKey: "flight")
+        bubble.view.capsule.add(flight, forKey: "flight")
         CATransaction.commit()
     }
 
@@ -710,15 +776,10 @@ final class SnapCommentTickerView: UIView {
         case .began:
             lastPanTranslation = 0
             beginScrub()
-            // Feedback engages with the grab itself, before any movement.
-            setKineticIntensity(Self.scrubFraction(forAccumulatedDistance: 0))
         case .changed:
             let translation = pan.translation(in: self).x
             applyScrubTranslation(translation - lastPanTranslation)
             lastPanTranslation = translation
-            // Accumulator only: no velocity term while the finger is down,
-            // so the intensity can rise or hold but never drop mid-touch.
-            setKineticIntensity(Self.scrubFraction(forAccumulatedDistance: scrubAccumulatedDistance))
         case .ended, .cancelled, .failed:
             endScrub(releaseVelocity: pan.velocity(in: self).x)
         default:
@@ -745,25 +806,21 @@ final class SnapCommentTickerView: UIView {
             CATransaction.setDisableActions(true)
             for lane in 0..<Self.laneCount {
                 for bubble in laneBubbles[lane] {
-                    let layer = bubble.view.layer
                     let frozenX = currentVisualCenterX(of: bubble, lane: lane)
-                    layer.removeAnimation(forKey: "flight")
-                    layer.position.x = frozenX
+                    bubble.view.layer.removeAnimation(forKey: "flight")
+                    bubble.view.capsule.removeAnimation(forKey: "flight")
+                    moveBubble(bubble, toX: frozenX)
                 }
             }
             CATransaction.commit()
         }
         mode = .scrubbing
-        scrubAccumulatedDistance = 0 // each touch is its own accumulation lifecycle
     }
 
     /// Direct manipulation: the whole band tracks the finger by `dx`, then
-    /// both edges are re-normalized from the wrap-around queue. Every delta
-    /// feeds the accumulator by its absolute value — back-and-forth travel
-    /// builds intensity; nothing subtracts.
+    /// both edges are re-normalized from the wrap-around queue.
     func applyScrubTranslation(_ dx: CGFloat) {
         guard mode == .scrubbing else { return }
-        scrubAccumulatedDistance += abs(dx)
         displaceLanes(by: Array(repeating: dx, count: Self.laneCount))
     }
 
@@ -773,7 +830,6 @@ final class SnapCommentTickerView: UIView {
     /// display link that lives only for this transient.
     func endScrub(releaseVelocity: CGFloat) {
         guard mode == .scrubbing else { return }
-        coastReleaseFraction = Self.scrubFraction(forAccumulatedDistance: scrubAccumulatedDistance)
         let maxResidual = Self.laneSpeeds
             .map { abs(releaseVelocity - (-$0)) }
             .max() ?? 0
@@ -823,10 +879,6 @@ final class SnapCommentTickerView: UIView {
             laneDx.append(velocity * dt)
         }
         displaceLanes(by: laneDx)
-        // The fade envelope starts at the value held at release (the
-        // accumulator's peak) and relaxes on the same exponential clock as
-        // the velocities — continuous at lift-off, zero at handover.
-        setKineticIntensity(coastReleaseFraction * CGFloat(exp(-elapsed / Self.decayTimeConstant)))
 
         if maxResidual < Self.restVelocityTolerance {
             stopCoast()
@@ -846,7 +898,6 @@ final class SnapCommentTickerView: UIView {
     /// the right edge.
     private func resumeConveying() {
         mode = .conveying
-        dismissKineticBackdrop()
         let bandWidth = bounds.width
         for lane in 0..<Self.laneCount {
             // A scrub can strand a bubble past the exit (model position ≤
@@ -886,7 +937,7 @@ final class SnapCommentTickerView: UIView {
         CATransaction.setDisableActions(true)
         for lane in 0..<Self.laneCount where !queue.isEmpty {
             for bubble in laneBubbles[lane] {
-                bubble.view.layer.position.x += laneDx[lane]
+                moveBubble(bubble, toX: bubble.view.layer.position.x + laneDx[lane])
             }
             normalizeLaneEdges(lane, bandWidth: bandWidth, forward: laneDx[lane] < 0)
         }
@@ -925,8 +976,23 @@ final class SnapCommentTickerView: UIView {
         if laneBubbles[lane].isEmpty {
             let hasPast = laneNextIndex[lane] - 1 >= lanePastFloor[lane]
             guard forward || hasPast else { return }
-            let itemIndex = laneNextIndex[lane]
-            let item = laneItem(lane, at: itemIndex)
+            var itemIndex = laneNextIndex[lane]
+            var item = laneItem(lane, at: itemIndex)
+            // Never a twin of the other lane, as the backfills below (#2154):
+            // wider capsules (#2172) empty a lane mid-drag more often, and the
+            // re-anchor laid the other lane's reaction again. Forward, the
+            // future has no fixed order: the next ones are tried; backward,
+            // the one carried out is the past, so a twin leaves a gap.
+            var passedOver = 0
+            while forward, idsOnScreen(outside: lane).contains(item.id), passedOver < Self.laneCount * 2 {
+                passedOver += 1
+                itemIndex += 1
+                item = laneItem(lane, at: itemIndex)
+            }
+            guard !idsOnScreen(outside: lane).contains(item.id) else {
+                if forward { laneNextIndex[lane] = itemIndex }
+                return
+            }
             laneNextIndex[lane] = itemIndex + 1
             let width = measuredBubbleWidth(for: item.text, in: bandWidth)
             let leftEdge = forward ? bandWidth : bandWidth - width
@@ -982,17 +1048,23 @@ final class SnapCommentTickerView: UIView {
         }
     }
 
-    // MARK: - Kinetic backdrop
+    // MARK: - Tests
 
-    /// The interaction's current intensity (0 when disengaged) — the
-    /// deterministic observable for tests.
-    var currentKineticFraction: CGFloat { kineticFraction }
-
-    /// The wash's opacity on screen: the interaction's, or the resting level
-    /// when that is higher.
-    var currentBackdropOpacity: CGFloat { backdropView.isHidden ? 0 : backdropView.alpha }
-    /// The blur's strength (0…1) when `usesBlur` — 0 otherwise.
-    var currentBlurStrength: CGFloat { blurBackdrop?.strength ?? 0 }
+    #if DEBUG
+    /// The capsules' surface, nil before the first start.
+    var debugCapsuleSurface: UIView? { capsuleSurface }
+    /// The capsule tint's alpha.
+    var debugCapsuleTint: CGFloat { capsuleTintView.alpha }
+    /// Every bubble on screen with its capsule, as (bubble frame, capsule
+    /// frame) — the model values, or the presentation's in flight.
+    var debugBubbleCapsuleFrames: [(bubble: CGRect, capsule: CGRect)] {
+        laneBubbles.joined().map { bubble in
+            let view = bubble.view.layer.presentation() ?? bubble.view.layer
+            let capsule = bubble.view.capsule.presentation() ?? bubble.view.capsule
+            return (view.frame, capsule.frame)
+        }
+    }
+    #endif
 
     /// The clock flights and coasts are stamped and frozen with:
     /// `CACurrentMediaTime()`, Core Animation's own. A test pins it (#993):
@@ -1012,65 +1084,6 @@ final class SnapCommentTickerView: UIView {
     /// lines, which is ~0 on a developer's Mac and hundreds of milliseconds on
     /// a loaded CI runner. That is a decayed fraction, and it failed the build.
     var coastStartTime: CFTimeInterval { coastStart }
-
-    /// Sets the interaction's intensity. Zero is the hard teardown (page
-    /// deactivation): straight back to the resting level. The graceful end of
-    /// an interaction is `dismissKineticBackdrop`.
-    private func setKineticIntensity(_ fraction: CGFloat) {
-        kineticFraction = max(0, fraction)
-        backdropView.layer.removeAllAnimations()
-        showBackdrop(kineticFraction)
-    }
-
-    private func showBackdrop(_ fraction: CGFloat) {
-        if usesBlur {
-            blur().setStrength(CommentBlur.bandStrength(
-                fraction: fraction, resting: Self.restingBackdropOpacity, ceiling: Self.maxBackdropOpacity
-            ))
-            return
-        }
-        let opacity = max(fraction, Self.restingBackdropOpacity)
-        backdropView.alpha = opacity
-        backdropView.isHidden = opacity <= 0
-    }
-
-    private func blur() -> CommentBlurView {
-        if let blurBackdrop { return blurBackdrop }
-        let view = CommentBlurView(style: .systemThickMaterialDark)
-        view.accessibilityIdentifier = "ticker-kinetic-blur"
-        view.frame = bounds
-        insertSubview(view, at: 0)
-        blurBackdrop = view
-        return view
-    }
-
-    /// Ends the interaction's feedback with a short fade back to the resting
-    /// level. Releasing from a stationary hold sits at the accumulator's
-    /// peak, and popping that off reads as a glitch; a dismissal from a fast
-    /// coast is equally fine, the intensity has already decayed to almost
-    /// nothing.
-    private func dismissKineticBackdrop() {
-        guard kineticFraction > 0 else { return }
-        kineticFraction = 0
-        let resting = Self.restingBackdropOpacity
-        if usesBlur {
-            // The same 0.25 s ease-out back to the resting level, on the
-            // material instead of an alpha (an effect view's alpha must
-            // never be faded).
-            let target = CommentBlur.bandStrength(fraction: 0, resting: resting, ceiling: Self.maxBackdropOpacity)
-            blur().tween(to: target, duration: 0.25) { [weak self] in
-                guard let self, self.kineticFraction == 0 else { return }
-                self.showBackdrop(0)
-            }
-            return
-        }
-        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) { [backdropView] in
-            backdropView.alpha = resting
-        } completion: { [weak self] finished in
-            guard finished, let self, self.kineticFraction == 0 else { return }
-            self.showBackdrop(0)
-        }
-    }
 
     /// The bubble's on-screen center-x: the render server's truth when
     /// available (authoritative even while an interactive transition freezes
@@ -1164,9 +1177,11 @@ final class SnapCommentTickerView: UIView {
         let textWidth = measuringLabel.sizeThatFits(
             CGSize(width: .greatestFiniteMagnitude, height: bubbleHeight)
         ).width
-        // The avatar column (circle + gap) is a fixed leading addend; the
-        // text takes whatever remains up to the band cap.
-        let full = TickerBubbleView.avatarDiameter + TickerBubbleView.avatarGap + ceil(textWidth)
+        // The capsule's leading inset, the avatar column (circle + gap) and
+        // its trailing room are fixed addends; the text takes whatever
+        // remains up to the band cap.
+        let full = TickerBubbleView.avatarInset + TickerBubbleView.avatarDiameter + TickerBubbleView.avatarGap
+            + ceil(textWidth) + TickerBubbleView.trailingPadding
         return min(full, bandWidth * 0.9)
     }
 
@@ -1175,6 +1190,8 @@ final class SnapCommentTickerView: UIView {
     }
 
     private func recycle(_ bubble: TickerBubbleView) {
+        bubble.capsule.removeAllAnimations()
+        bubble.capsule.removeFromSuperlayer()
         bubble.removeFromSuperview()
         bubble.prepareForReuse()
         // Steady state needs a handful per lane; a wide scrub can hold a few
@@ -1218,24 +1235,29 @@ private final class DisplayLinkProxy: NSObject {
     }
 }
 
-/// A pooled danmaku bubble: a compact author avatar leading naked semibold
-/// caption text — a `[avatar] [text]` row. The whole bubble is ONE view
-/// whose layer the conveyor animates on `position.x`; the avatar and text
-/// ride it as a unit.
+/// A pooled danmaku bubble: a compact author avatar leading semibold caption
+/// text — a `[avatar] [text]` row on a blurred capsule (#2172). The whole
+/// bubble is ONE view whose layer the conveyor animates on `position.x`; the
+/// avatar and text ride it as a unit.
 ///
-/// ⚠️ NO CAPSULE, BY THE OWNER'S DECISION (2026-11-01). Since #1983 the
-/// page's scrim stops at the caption block and no longer reaches the band,
-/// so over a white picture the text reads poorly — accepted. A capsule was
-/// tried (#1988) and taken out: making it roomier grew the band, and with
-/// it the whole corner sized from the band (#1990, declined). And
-/// deliberately NOT `layer.shadow*` either: a shadow on a moving layer
-/// forces an offscreen render pass per frame per bubble over the video.
+/// ⚠️ THE CAPSULE IS NOT THE BUBBLE'S OWN BLUR. It is `capsule`, a plain
+/// layer in the band's mask, flown with the bubble: the band draws ONE blur
+/// through every capsule (`SnapCommentTickerView.capsuleSurface`). A blur —
+/// like a `layer.shadow*` — on each moving bubble forces an offscreen render
+/// pass per frame per bubble over the video. The capsule is the lane's
+/// height: a roomier one grows the band and the whole corner sized from it
+/// (#1990, declined), a separate decision.
 final class TickerBubbleView: UIView {
     /// Sized to fit within the lane (the band height is derived from the
     /// caption line + text insets, so a compact circle sits centered without
     /// growing the band).
     static let avatarDiameter: CGFloat = 20
+    /// The avatar's inset from the capsule's leading end — concentric with
+    /// the capsule's round end in a lane a point or two taller than it.
+    static let avatarInset: CGFloat = 1
     static let avatarGap: CGFloat = 6
+    /// The capsule's room after the text.
+    static let trailingPadding: CGFloat = Spacing.sm
     static let textInsets = UIEdgeInsets(top: 3, left: 0, bottom: 3, right: 0)
     static let font = UIFont.scaledFont(forTextStyle: .caption1, weight: .semibold)
 
@@ -1247,6 +1269,14 @@ final class TickerBubbleView: UIView {
     /// Emotes ride the band: the players are subviews of the label, so they
     /// travel with the bubble's own flight and cost nothing per frame.
     private let label = EmoteLabel()
+    /// The bubble's capsule in the band's mask (see the type's note), sized
+    /// and flown by the band with the bubble.
+    let capsule: CALayer = {
+        let layer = CALayer()
+        layer.backgroundColor = UIColor.black.cgColor
+        layer.cornerCurve = .continuous
+        return layer
+    }()
 
     init() {
         super.init(frame: .zero)
@@ -1267,9 +1297,11 @@ final class TickerBubbleView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         let diameter = Self.avatarDiameter
-        avatarView.frame = CGRect(x: 0, y: (bounds.height - diameter) / 2, width: diameter, height: diameter)
-        let textX = diameter + Self.avatarGap
-        label.frame = CGRect(x: textX, y: 0, width: max(0, bounds.width - textX), height: bounds.height)
+        avatarView.frame = CGRect(x: Self.avatarInset, y: (bounds.height - diameter) / 2, width: diameter, height: diameter)
+        let textX = Self.avatarInset + diameter + Self.avatarGap
+        label.frame = CGRect(
+            x: textX, y: 0, width: max(0, bounds.width - textX - Self.trailingPadding), height: bounds.height
+        )
     }
 
     /// Sets the text, the author's initials, and their picture over them —
