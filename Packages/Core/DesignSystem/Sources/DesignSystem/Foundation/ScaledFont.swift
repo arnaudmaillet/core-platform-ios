@@ -74,7 +74,7 @@ extension UIFont {
     /// On the app's own type scale (`AppTypeScale`, #2149), the style's
     /// designed size, scaled like the style.
     public static func appFont(forTextStyle style: TextStyle) -> UIFont {
-        appFont(forTextStyle: style, scale: AppTypeScale.current, compatibleWith: TextSizeCeiling.currentTraits)
+        appFont(forTextStyle: style, compatibleWith: TextSizeCeiling.currentTraits, boldText: AppTypeScale.boldText)
     }
 
     /// `appFont` at `traits`' text size — for a measure made for a trait
@@ -82,15 +82,15 @@ extension UIFont {
     /// that resolves its own. ⚠️ Not `preferredFont(forTextStyle:
     /// compatibleWith:)`: that is Apple's size, not the app's (#2149).
     public static func appFont(forTextStyle style: TextStyle, compatibleWith traits: UITraitCollection?) -> UIFont {
-        appFont(forTextStyle: style, scale: AppTypeScale.current, compatibleWith: traits ?? TextSizeCeiling.currentTraits)
+        appFont(forTextStyle: style, compatibleWith: traits ?? TextSizeCeiling.currentTraits, boldText: AppTypeScale.boldText)
     }
 
-    /// `appFont` on a given scale, at given traits (nil: the system's). Tests.
+    /// `appFont` at given traits (nil: the system's) with Bold Text given.
+    /// Tests.
     static func appFont(
-        forTextStyle style: TextStyle, scale: AppTypeScale, compatibleWith traits: UITraitCollection?,
-        boldText: Bool = AppTypeScale.boldText
+        forTextStyle style: TextStyle, compatibleWith traits: UITraitCollection?, boldText: Bool
     ) -> UIFont {
-        guard let size = scale.size(for: style) else {
+        guard let size = AppTypeScale.size(for: style) else {
             return preferredFont(forTextStyle: style, compatibleWith: traits)
         }
         let font = UIFont.systemFont(ofSize: size, weight: AppTypeScale.weight(for: style, boldText: boldText))
@@ -115,12 +115,7 @@ extension UIFont {
     /// size to hand `scaledSystemFont` when matching a style with a different
     /// weight.
     public static func defaultPointSize(for style: TextStyle) -> CGFloat {
-        defaultPointSize(for: style, scale: AppTypeScale.current)
-    }
-
-    /// On a given scale (`AppTypeScale`, #2149).
-    static func defaultPointSize(for style: TextStyle, scale: AppTypeScale) -> CGFloat {
-        scale.size(for: style) ?? UIFont.preferredFont(
+        AppTypeScale.size(for: style) ?? UIFont.preferredFont(
             forTextStyle: style, compatibleWith: UITraitCollection(preferredContentSizeCategory: .large)
         ).pointSize
     }

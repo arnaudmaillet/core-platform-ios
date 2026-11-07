@@ -32,13 +32,11 @@ struct ScaledFontTests {
 
     /// The baseline for a style is its DEFAULT size on the app's scale (B,
     /// #2149), whatever the current setting — the size the metrics expect,
-    /// so nothing is scaled twice. Apple's scale keeps Apple's.
+    /// so nothing is scaled twice.
     @Test func defaultPointSizesAreTheLargeCategorysSizes() {
         #expect(UIFont.defaultPointSize(for: .body) == 16)
         #expect(UIFont.defaultPointSize(for: .footnote) == 13)
         #expect(UIFont.defaultPointSize(for: .caption2) == 11)
-        #expect(UIFont.defaultPointSize(for: .body, scale: .apple) == 17)
-        #expect(UIFont.defaultPointSize(for: .footnote, scale: .apple) == 13)
     }
 
     /// Scaling the default baseline once lands on the system's own size for
@@ -48,7 +46,7 @@ struct ScaledFontTests {
         let ax = traits(.accessibilityExtraExtraExtraLarge)
         let system = UIFont.preferredFont(forTextStyle: .body, compatibleWith: ax).pointSize
         let ours = UIFont.scaledSystemFont(
-            ofSize: UIFont.defaultPointSize(for: .body, scale: .apple), relativeTo: .body, compatibleWith: ax
+            ofSize: 17, relativeTo: .body, compatibleWith: ax // Apple's body at Large
         )
         // UIFontMetrics' curve for a custom font tracks the system's own sizes
         // closely but not to the point; the overshoot below is the bug.
