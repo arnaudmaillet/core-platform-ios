@@ -103,6 +103,16 @@ final class CommentsInputBar: UIView {
     }()
     private var voiceHoldStart: CGPoint = .zero
 
+    /// SPIKE (the owner, 2026-11-07): "hold to speak, tap to write" — a long
+    /// press on the empty field records as the bubble's hold does. Later
+    /// than the bubble's (0 s) so a tap still writes.
+    private lazy var fieldVoiceHold: UILongPressGestureRecognizer = {
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(voiceHeld(_:)))
+        hold.minimumPressDuration = 0.3
+        hold.delegate = self
+        return hold
+    }()
+
     /// The waveform's button, where the mic disc and the lock stand (#2102).
     var voiceHoldAnchor: UIView { actsFromOwnBubble ? rowActionButton : fieldActionButton }
 
@@ -130,6 +140,7 @@ final class CommentsInputBar: UIView {
         rowActionButton.isHidden = !actsFromOwnBubble || rowActionStepsAside
         voiceHold.view?.removeGestureRecognizer(voiceHold)
         (actsFromOwnBubble ? rowActionButton : fieldActionButton).addGestureRecognizer(voiceHold)
+        if actsFromOwnBubble { field.addGestureRecognizer(fieldVoiceHold) } else { field.removeGestureRecognizer(fieldVoiceHold) }
         updateFieldAction()
         setNeedsLayout()
     }
@@ -1245,6 +1256,9 @@ final class CommentsInputBar: UIView {
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         // The waveform's hold (#2102): over an empty field, nothing on its way.
         if gestureRecognizer === voiceHold { return holdsToRecord && !hasDraft && !isSending }
+        if gestureRecognizer === fieldVoiceHold {
+            return actsFromOwnBubble && holdsToRecord && !hasDraft && !isSending && voiceOverlay == nil
+        }
         guard gestureRecognizer === swipeRecognizer,
               let pan = gestureRecognizer as? UIPanGestureRecognizer else {
             return super.gestureRecognizerShouldBegin(gestureRecognizer)
