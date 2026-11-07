@@ -33,39 +33,86 @@ final class SnapChromeView: UIView {
     /// The comment surfaces above the caption no longer get it, by the
     /// owner's decision.
     ///
-    /// ONE progressive ramp, from clear at its top to `scrimEdgeAlpha` at the
-    /// screen's bottom edge, darker all the way down (the owner, 2026-10-31,
-    /// on the device: no fade that stops on a plateau). Its top IS the
-    /// caption block's top (`scrimLead`, 0) and is pinned there, so it rides
-    /// the block's animated frame with no jump; its stops are fractions of
-    /// its height, so they stretch with it. The flight's replica builds the
-    /// same constraints, so it lands pixel-identical.
+    /// ONE progressive ramp, darker all the way down (the owner, 2026-10-31,
+    /// on the device: no fade that stops on a plateau), calibrated on
+    /// TikTok's and Instagram's, measured over a white video (#2175, the
+    /// owner 2026-11-07: a little darker, the gradient itself imperceptible):
+    /// - it starts `scrimLead` (48 pt) above the caption block, with a zero
+    ///   slope — no line marks its top — and its first 20 pt stay under 3 %,
+    ///   which the eye reads as nothing (behind the danmaku's lower lane), as
+    ///   the reference's do;
+    /// - it is never steeper than `scrimSlopeCap` (0.4 % per point, the
+    ///   reference's), and its slope never kinks;
+    /// - it reaches `scrimTopAlpha` (0.12) at the block's top, about 0.26 at
+    ///   a two-line caption's last line, and about 0.60 at the screen's edge
+    ///   under the toolbar (it was 0.75), easing toward `scrimCeiling` below.
+    ///
+    /// ⚠️ IN POINTS, NOT FRACTIONS OF ITS HEIGHT. The darkness is set at
+    /// points of the caption block, the same on every post whatever the
+    /// caption's length; its stops were fractions of a scrim whose height was
+    /// the block's, so the darkness under the caption changed with it. The
+    /// view is a FIXED height (`scrimHeight`, deeper than any screen) pinned
+    /// by its top to the block's: it rides the block's animated frame with
+    /// nothing recomputed, so nothing jumps, and the flight's replica builds
+    /// the same constraints, so it lands pixel-identical. What runs past the
+    /// screen's bottom is never seen.
     private let scrimView = GradientView(colors: SnapChromeView.scrimColors,
                                          locations: SnapChromeView.scrimLocations)
+    /// Clips the scrim at the page's edges: deeper than the page, it would
+    /// otherwise darken the next page in the pager (cells don't clip).
+    private let scrimClip = UIView()
 
-    /// How far above the caption block the ramp begins: the seam between the
-    /// block and the comment stream above it (`Spacing.md`, the stream's own
-    /// gap), so the ramp starts on the caption — the author row on Shots —
-    /// and never reaches the stream (the owner, 2026-11-01). It began 120 pt
-    /// up, which reached the top of the stream.
-    static let scrimLead: CGFloat = Spacing.md
-    /// The darkness at the bottom edge, under the caption and the toolbar —
-    /// what it was before #1983.
-    static let scrimEdgeAlpha: CGFloat = 0.75
+    /// How far above the caption block the ramp begins (#2175, the owner's
+    /// option A, 2026-11-07; it was 12 pt, from 2026-11-01): the reference's
+    /// darkness at the block's top cannot be reached gently from closer.
+    static let scrimLead: CGFloat = 48
+    /// The darkness at the caption block's top — its first line: the dark
+    /// side of the reference's 0.10–0.12 (the owner: a little darker), which
+    /// the app's smaller type (#2149) needs to reach about 0.26 by a two-line
+    /// caption's last line at the capped slope.
+    static let scrimTopAlpha: CGFloat = 0.12
+    /// The steepest the ramp gets, in alpha per point: the reference's.
+    static let scrimSlopeCap: CGFloat = 0.004
+    /// How far below the block's top the ramp stays at its cap before it
+    /// eases toward `scrimCeiling` — past a typical caption and the toolbar.
+    static let scrimLinearDepth: CGFloat = 140
+    /// What the ramp eases toward far below the block, never reaching it.
+    static let scrimCeiling: CGFloat = 0.8
+    /// The view's fixed height: the lead and more than any screen below it.
+    static let scrimHeight: CGFloat = scrimLead + 1_200
 
-    /// The ramp's stops, from clear to `scrimEdgeAlpha`, NEARLY LINEAR (the
-    /// owner, 2026-11-01: the darkening should be barely perceptible, top to
-    /// bottom): seven tenths a straight line, three tenths a smoothstep, so
-    /// it starts with a gentle slope (no edge where it begins) and is never
-    /// steeper than a straight line by more than a fifth. The ease-out
-    /// curves tried before darkened visibly fast at the top.
-    static let scrimLocations: [NSNumber] = (0...8).map { NSNumber(value: Double($0) / 8) }
+    /// The ramp's darkness `x` points below where it starts (the block's top
+    /// is at `scrimLead`). Three pieces, the slope continuous at each joint:
+    /// a parabola from a zero slope up to the cap, the cap, then an
+    /// exponential ease whose first slope is the cap.
+    static func scrimAlpha(at x: CGFloat) -> CGFloat {
+        let cap = scrimSlopeCap
+        // Where the parabola meets the cap, so the block's top lands on
+        // `scrimTopAlpha`: a·x₁² + cap·(lead − x₁) with a = cap / 2x₁.
+        let joint = 2 * (cap * scrimLead - scrimTopAlpha) / cap
+        guard x > 0 else { return 0 }
+        if x <= joint { return cap / (2 * joint) * x * x }
+        let easeStart = scrimLead + scrimLinearDepth
+        let atJoint = cap * joint / 2
+        if x <= easeStart { return atJoint + cap * (x - joint) }
+        let atEase = atJoint + cap * (easeStart - joint)
+        let room = scrimCeiling - atEase
+        return scrimCeiling - room * CGFloat(exp(Double(-(x - easeStart) * cap / room)))
+    }
+
+    /// The stops, in points: every 6 pt through the curved start and the
+    /// cap — so linear interpolation between stops never shows — then every
+    /// 30 pt through the slow ease.
+    static let scrimStopPoints: [CGFloat] = {
+        let dense = scrimLead + scrimLinearDepth + 24
+        var points = Array(stride(from: CGFloat(0), through: dense, by: 6))
+        points += Array(stride(from: (points.last ?? 0) + 30, to: scrimHeight, by: 30))
+        points.append(scrimHeight)
+        return points
+    }()
+    static let scrimLocations: [NSNumber] = scrimStopPoints.map { NSNumber(value: Double($0 / scrimHeight)) }
     static var scrimColors: [UIColor] {
-        scrimLocations.map { location in
-            let t = CGFloat(truncating: location)
-            let smoothstep = t * t * (3 - 2 * t)
-            return UIColor.black.withAlphaComponent(scrimEdgeAlpha * (0.7 * t + 0.3 * smoothstep))
-        }
+        scrimStopPoints.map { UIColor.black.withAlphaComponent(scrimAlpha(at: $0)) }
     }
 
     /// The scrim's top on the caption, and on the author row while it shows.
@@ -388,6 +435,7 @@ final class SnapChromeView: UIView {
     var debugAuthorLane: UIView { authorLane }
     /// The scrim, the caption and the author row, for the scrim's suite.
     var debugScrimView: UIView { scrimView }
+    var debugScrimClip: UIView { scrimClip }
     var debugCaptionLabel: UIView { captionLabel }
     var debugAuthorRow: UIView { authorRow }
     /// A hold on the author row, as a finger's would land.
@@ -572,10 +620,36 @@ final class SnapChromeView: UIView {
 
     private func buildLayout() {
         scrimView.isUserInteractionEnabled = false
-        scrimView.constrain(in: self) { parent in
+        scrimClip.isUserInteractionEnabled = false
+        scrimClip.clipsToBounds = true
+        scrimClip.constrain(in: self) { parent in
+            scrimClip.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            scrimClip.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+            scrimClip.topAnchor.constraint(equalTo: parent.topAnchor)
+            scrimClip.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
+        }
+        #if DEBUG
+        // `-scrim-white-page`: a flat white page under the scrim, to measure
+        // it as the reference was measured (#2175).
+        if ProcessInfo.processInfo.arguments.contains("-scrim-white-page") {
+            let white = UIView()
+            white.backgroundColor = .white
+            white.isUserInteractionEnabled = false
+            white.translatesAutoresizingMaskIntoConstraints = false
+            insertSubview(white, at: 0)
+            NSLayoutConstraint.activate([
+                white.leadingAnchor.constraint(equalTo: leadingAnchor),
+                white.trailingAnchor.constraint(equalTo: trailingAnchor),
+                white.topAnchor.constraint(equalTo: topAnchor),
+                white.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+        }
+        #endif
+        scrimView.constrain(in: scrimClip) { parent in
             scrimView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             scrimView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
-            scrimView.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
+            // Fixed: its stops are points (see `scrimView`).
+            scrimView.heightAnchor.constraint(equalToConstant: Self.scrimHeight)
         }
         // Its top: the caption block's, less the lead (`applyAuthorRowLayout`
         // picks the author row's while it shows).
