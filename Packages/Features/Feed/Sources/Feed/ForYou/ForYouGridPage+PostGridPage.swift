@@ -27,7 +27,11 @@ extension ForYouGridPage: PostGridPage {
         // longer" replace it at 10 s.
         case .sections(let groups):
             let kept = groups
-                .map { PostGridPageSection(title: $0.title, posts: $0.posts.filter { !withheld.contains($0.id) }) }
+                .map {
+                    PostGridPageSection(
+                        title: $0.title, posts: $0.posts.filter { !withheld.contains($0.id) }, viewedAt: $0.viewedAt
+                    )
+                }
                 .filter { !$0.posts.isEmpty }
             settle { [weak self] in self?.applyGroups(kept) }
         case .status(let status):
@@ -96,6 +100,7 @@ extension ForYouGridPage.Style {
         case .grid: self = .grid
         case .list: self = .list
         case .discover: self = .discover
+        case .rows: self = .rows
         }
     }
 }

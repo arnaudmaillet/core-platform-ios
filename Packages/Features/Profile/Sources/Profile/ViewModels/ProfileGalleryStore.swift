@@ -67,6 +67,8 @@ final class ProfileGalleryStore {
     var history: PageState = .empty(message: "")
     /// Its groups by day, over its posts in order.
     var historyGroups: [HistoryGroup] = []
+    /// When each of its posts was viewed (#2170).
+    var historyViewedAt: [PostID: Date] = [:]
 
     private struct TileKey: Hashable {
         let format: GalleryFilter.Format
@@ -355,6 +357,7 @@ final class ProfileGalleryStore {
             // The viewer's own viewing history (#1344): nowhere else.
             history: isOwnProfile ? history : .empty(message: ""),
             historyGroups: isOwnProfile ? historyGroups : [],
+            historyViewedAt: isOwnProfile ? historyViewedAt : [:],
             repostsComplete: isComplete(.reposts),
             taggedComplete: isComplete(.tagged)
         )

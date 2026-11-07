@@ -68,7 +68,17 @@ final class ForYouGridPage: UIView {
         /// land here", "what does a landing conceal") is answered here per
         /// POST, by whether it sits in a chunk — see `drawsAsTile`.
         case discover
+        /// One post per row (`PostHistoryRowCell`), each titled group one
+        /// section of rows (`PostGridRowsLayout`) — the profile's History
+        /// (the owner, 2026-11-07, #2170). Its groups are Discover's: the
+        /// same titles, pin line and bar name; a row is never a tile, never
+        /// plays, and opens and closes through its square.
+        case rows
     }
+
+    /// Whether the posts are laid out as `segments` (one collection-view
+    /// section each): Discover's stretches, and Rows' groups.
+    var drawsSegments: Bool { style == .discover || style == .rows }
 
     /// Discover's "View all" under a chunk was pressed: show the whole mosaic.
     var onViewAllTapped: (() -> Void)?
@@ -159,6 +169,15 @@ final class ForYouGridPage: UIView {
     private var nextPageAskedAtLength: CGFloat?
     /// A row's author was tapped — its disc, its name or its handle.
     var onAuthorTapped: ((GalleryPost) -> Void)?
+    /// A Rows page's author tapped: the profile card (#2145) — see
+    /// `PostGridPage.onAuthorCardTapped`. Nil: `onAuthorTapped`.
+    var onAuthorCardTapped: ((GalleryPost) -> Void)?
+    /// A Rows page's trailing swipe on a row (#2170).
+    var rowSwipeAction: PostGridRowSwipeAction?
+    /// When the viewer viewed each post a Rows page holds — the groups'
+    /// dates (`PostGridPageSection.viewedAt`), keyed by post so a date stays
+    /// on its row (#2170).
+    private(set) var viewedAt: [PostID: Date] = [:]
     /// A text post's top comments as already in hand (the post screen's
     /// first page, prefetched): what its long press's preview shows under
     /// the caption (#1498). Nil, or nothing cached: the caption alone.
@@ -519,6 +538,8 @@ final class ForYouGridPage: UIView {
         case .grid: true
         case .list: false
         case .discover: tilePostIDs.contains(postID) || pairedPostIDs.contains(postID)
+        // A row is a row: its square is one part of it, as a card's media.
+        case .rows: false
         }
     }
 
@@ -552,14 +573,14 @@ final class ForYouGridPage: UIView {
     /// Whether `section` opens a titled group, and wears its title. Asked by
     /// the layout, like `chunk(inSection:)`.
     func isTitled(inSection section: Int) -> Bool {
-        guard style == .discover, !showsSkeleton else { return false }
+        guard drawsSegments, !showsSkeleton else { return false }
         return groupIndex(openedBy: section) != nil
     }
 
     /// Whether `section` is the last stretch of a group with another after
     /// it — the section gap before the next title.
     func endsGroup(inSection section: Int) -> Bool {
-        guard style == .discover, !showsSkeleton else { return false }
+        guard drawsSegments, !showsSkeleton else { return false }
         return groupIndex(openedBy: section + 1) != nil
     }
 
@@ -660,7 +681,7 @@ final class ForYouGridPage: UIView {
     ///
     /// Internal (not private) only for the +QA hooks.
     func indexPath(for index: Int) -> IndexPath {
-        if style == .discover, !segmentStarts.isEmpty {
+        if drawsSegments, !segmentStarts.isEmpty {
             // The last stretch starting at or before `index`.
             var low = 0
             var high = segmentStarts.count - 1
@@ -681,7 +702,7 @@ final class ForYouGridPage: UIView {
     ///
     /// Internal (not private) only for the +QA hooks.
     func flatIndex(for indexPath: IndexPath) -> Int {
-        if style == .discover, segmentStarts.indices.contains(indexPath.section) {
+        if drawsSegments, segmentStarts.indices.contains(indexPath.section) {
             return segmentStarts[indexPath.section] + indexPath.item
         }
         return indexPath.section == 0 ? indexPath.item : split + indexPath.item
@@ -807,7 +828,7 @@ final class ForYouGridPage: UIView {
     static func concurrentPlayers(for style: Style) -> Int {
         ForYouGridAutoplayDriver.concurrentPlayers(for: style)
     }
-    private let style: Style
+    let style: Style
 
     /// Internal (not private) only for the +QA hooks.
     let collectionView: UICollectionView
@@ -835,7 +856,11 @@ final class ForYouGridPage: UIView {
         let post = posts[index]
         // A tile decodes its cover at its drawn size (#1505): asked for at
         // that bucket, or the prefetch is a 1200 px decode the tile never
-        // reads. A card keeps the full picture.
+        // reads. A card keeps the full picture. A row's square is a small
+        // tile's cover (#2170).
+        if style == .rows {
+            return post.thumbnailURL.map { [PostGridTileCell.coverRequest($0, at: indexPath, in: collectionView)] } ?? []
+        }
         guard drawsAsTile(post.id), !drawsAsPairedCard(post.id), let url = post.thumbnailURL
         else { return post.lookaheadImages }
         return [PostGridTileCell.coverRequest(url, at: indexPath, in: collectionView)]
@@ -929,7 +954,12 @@ final class ForYouGridPage: UIView {
     /// slices — a scrolling page has a whole viewport to fill, and a slice is
     /// only a little over one screenful.
     private var skeletonCount: Int {
-        style == .grid ? (sliceLayout?.cellsPerSlice ?? ChaoticSliceEngine.defaultCellsPerSlice) * 2 : 6
+        switch style {
+        case .grid: (sliceLayout?.cellsPerSlice ?? ChaoticSliceEngine.defaultCellsPerSlice) * 2
+        // Rows are short: a screenful is about ten.
+        case .rows: 10
+        case .list, .discover: 6
+        }
     }
 
     init(
@@ -981,6 +1011,18 @@ final class ForYouGridPage: UIView {
                     headerHost.page?.offersViewAll ?? false
                 }
             )
+        case .rows:
+            PostGridRowsLayout.layout(
+                isTitled: { [headerHost] section in
+                    headerHost.page?.isTitled(inSection: section) ?? false
+                },
+                endsGroup: { [headerHost] section in
+                    headerHost.page?.endsGroup(inSection: section) ?? false
+                },
+                trailingSwipe: { [headerHost] indexPath in
+                    headerHost.page?.trailingSwipe(at: indexPath)
+                }
+            )
         }
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         super.init(frame: .zero)
@@ -1009,6 +1051,10 @@ final class ForYouGridPage: UIView {
         )
         collectionView.register(
             PostGridSkeletonListCell.self, forCellWithReuseIdentifier: PostGridSkeletonListCell.reuseID
+        )
+        collectionView.register(PostHistoryRowCell.self, forCellWithReuseIdentifier: PostHistoryRowCell.reuseID)
+        collectionView.register(
+            PostHistoryRowSkeletonCell.self, forCellWithReuseIdentifier: PostHistoryRowSkeletonCell.reuseID
         )
         collectionView.register(
             SectionHeaderCapsuleView.self,
@@ -2201,6 +2247,8 @@ final class ForYouGridPage: UIView {
         // A paired (Following) card is its picture, edge to edge, too.
         case let card as PostShelfMediaCardCell: card.bounds
         case let row as PostGridListRowCell: row.mediaHeroRect ?? .zero
+        // A Rows row flies its square (#2170).
+        case let row as PostHistoryRowCell: row.mediaHeroRect
         default: .zero
         }
         guard rect != .zero else { return nil }
@@ -2234,9 +2282,92 @@ final class ForYouGridPage: UIView {
             row.mediaHeroRect == nil
                 ? nil
                 : (cover: row.renderedCover, style: .listMedia)
+        // A Rows row's square flies as a row's media does — no counters
+        // over it, which the row writes beside it — on the square's own
+        // corner (`heroOrigin`). A text post's square is its words: no
+        // flight, it opens through the square's window (`rowSquareWindow`).
+        case let row as PostHistoryRowCell:
+            post(for: postID)?.kind == .text ? nil : (cover: row.renderedCover, style: .listMedia)
         default:
             nil
         }
+    }
+
+    // MARK: - A Rows row's square (#2170)
+
+    /// The corner a row's square wears in anything that can only take a
+    /// corner — a flight, a window: the rounded tile's, at the square's side
+    /// (`AvatarShape.roundedTile`), on a circular curve.
+    func rowSquareCornerRadius(for postID: PostID) -> CGFloat? {
+        guard style == .rows else { return nil }
+        if let row = cell(for: postID) as? PostHistoryRowCell { return row.squareCornerRadius }
+        return slotSize(of: postID).map { AvatarShape.roundedTile.cornerRadius(side: $0.height) }
+    }
+
+    /// A row's square, in `space`: what a window opens from and closes onto.
+    func rowSquareFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
+        guard let row = cell(for: postID) as? PostHistoryRowCell else { return nil }
+        return row.convert(row.mediaHeroRect, to: space)
+    }
+
+    /// The square's twin, for a window: the picture the row shows (or the
+    /// pipeline's), or a text post's tile.
+    func makeRowSquareStandIn(for post: GalleryPost) -> UIView? {
+        let row = cell(for: post.id) as? PostHistoryRowCell
+        let side = row?.mediaHeroRect.height ?? slotSize(of: post.id)?.height ?? PostHistoryRowCell.minimumSquareSide
+        let cover = row?.renderedCover ?? post.thumbnailURL.flatMap { imagePipeline.cachedImage(for: $0) }
+        return PostHistorySquareView.makeStandIn(for: post, cover: cover, side: side)
+    }
+
+    /// ⚠️ THE CLOSE FOLLOWS THE OPENING, AND BOTH ARE THE SQUARE (#2170): a
+    /// text post opens through a window grown from the row's square, and any
+    /// post closes onto it once the feed has paged onto words — never the
+    /// list card's window (`closeWindow`'s default), whose stand-in is a
+    /// whole card squeezed into the row.
+    func rowSquareWindow(
+        for post: GalleryPost,
+        willStageDismissal: @escaping () -> Void,
+        dismissalDidEnd: @escaping (Bool) -> Void
+    ) -> TextRevealOrigin? {
+        let anchor = post.id
+        guard rowSquareFrame(for: anchor, in: self) != nil else { return nil }
+        return TextRevealOrigin(
+            rowFrame: { [weak self] space in self?.rowSquareFrame(for: anchor, in: space) },
+            captionEnd: nil,
+            depthView: { [weak self] in self },
+            makeDismissStandIn: { [weak self] _ in
+                guard let self, let current = self.post(for: anchor) else { return nil }
+                return makeRowSquareStandIn(for: current)
+            },
+            makePresentStandIn: { [weak self] in self?.makeRowSquareStandIn(for: post) },
+            alignsPageToSource: false,
+            pageFit: .covering,
+            cornerRadius: rowSquareCornerRadius(for: anchor),
+            cornerCurve: AvatarShape.roundedTile.cornerCurve,
+            fill: PostGridTileCell.fillColor(for: post),
+            setConcealed: { [weak self] concealed in
+                self?.setRevealConcealed(concealed, for: anchor)
+            },
+            willStageDismissal: { _ in willStageDismissal() },
+            dismissalDidEnd: dismissalDidEnd
+        )
+    }
+
+    /// A row's trailing swipe — the host's (`rowSwipeAction`), destructive.
+    /// Asked by the layout, which is why it is not private.
+    func trailingSwipe(at indexPath: IndexPath) -> UISwipeActionsConfiguration? {
+        guard style == .rows, !showsSkeleton, let action = rowSwipeAction else { return nil }
+        let index = flatIndex(for: indexPath)
+        guard posts.indices.contains(index) else { return nil }
+        let post = posts[index]
+        let swipe = UIContextualAction(style: .destructive, title: action.title) { _, _, done in
+            action.perform(post)
+            done(true)
+        }
+        swipe.image = action.symbolName.flatMap { UIImage(systemName: $0) }
+        let configuration = UISwipeActionsConfiguration(actions: [swipe])
+        configuration.performsFirstActionWithFullSwipe = true
+        return configuration
     }
 
     /// **THE TEXT REVEAL**. The whole card of a TEXT row, in
@@ -2303,6 +2434,7 @@ final class ForYouGridPage: UIView {
         // it hands over to draws, a like made in the feed it opened included.
         guard let post = post(for: postID) else { return nil }
         if drawsAsTile(postID) { return makeTileStandIn(for: post) }
+        if style == .rows { return makeRowSquareStandIn(for: post) }
         // The realized row's width when there is one, the list's own otherwise:
         // a row scrolled out still has to produce a card, and the width is a
         // property of the LIST rather than of any particular cell.
@@ -2510,7 +2642,8 @@ final class ForYouGridPage: UIView {
             guard posts.indices.contains(index) else { continue }
             let card = cell.contentView.subviews.first
             if cell.isHidden || cell.alpha == 0 || card?.alpha == 0
-                || (cell as? PostGridListRowCell)?.isHeroMediaConcealed == true {
+                || (cell as? PostGridListRowCell)?.isHeroMediaConcealed == true
+                || (cell as? PostHistoryRowCell)?.isHeroMediaConcealed == true {
                 hidden.insert(posts[index].id)
             }
         }
@@ -2809,6 +2942,11 @@ final class ForYouGridPage: UIView {
         case let row as PostGridListRowCell:
             row.isHidden = false
             row.setHeroConcealed(concealed, carrying: carry)
+        // A Rows row: its square, whichever channel — a flight and a window
+        // both carry the square alone (#2170).
+        case let row as PostHistoryRowCell:
+            row.isHidden = false
+            row.setHeroConcealed(concealed)
         case let other?:
             other.isHidden = concealed
         case nil:
@@ -2957,6 +3095,10 @@ final class ForYouGridPage: UIView {
                    revealConcealedPostID == nil || cell(for: revealConcealedPostID!) !== row {
                     row.setHeroConcealed(false)
                 }
+                if let row = visible as? PostHistoryRowCell,
+                   revealConcealedPostID == nil || cell(for: revealConcealedPostID!) !== row {
+                    row.setHeroConcealed(false)
+                }
             }
         }
         // Unhiding is the end of a flight. The tile is excluded from
@@ -3088,6 +3230,8 @@ final class ForYouGridPage: UIView {
         case .content(let posts):
             emptyState.isHidden = true
             leaveGroups()
+            // An untitled delivery carries no view dates (#2170).
+            viewedAt = [:]
             apply(posts, skeleton: false)
         case .empty(let empty):
             showStatus(
@@ -3156,6 +3300,10 @@ final class ForYouGridPage: UIView {
             applyDiscover(incoming, skeleton: skeleton, dissolving: dissolving, mustReload: mustReload)
             return
         }
+        if style == .rows {
+            applyRows(incoming, skeleton: skeleton, dissolving: dissolving, mustReload: mustReload)
+            return
+        }
         let added = Self.addedPosts(from: rawPosts, to: incoming)
         rawPosts = incoming
         showsSkeleton = skeleton
@@ -3215,7 +3363,7 @@ final class ForYouGridPage: UIView {
         let fresh = Dictionary(incoming.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let before = posts
         rawPosts = incoming
-        if style == .discover {
+        if drawsSegments {
             adoptSegments(segments.map { $0.mappingPosts { fresh[$0.id] ?? $0 } })
         } else {
             posts = posts.map { fresh[$0.id] ?? $0 }
@@ -3228,6 +3376,7 @@ final class ForYouGridPage: UIView {
             switch visible.contains(path) ? collectionView.cellForItem(at: path) : nil {
             case let row as PostGridListRowCell: row.updateCounts(from: posts[index])
             case let tile as PostGridTileCell: tile.updateCounts(from: posts[index])
+            case let row as PostHistoryRowCell: row.updateCounts(from: posts[index])
             default: reconfigured.append(path)
             }
         }
@@ -3314,6 +3463,53 @@ final class ForYouGridPage: UIView {
         reloadAll(dissolving: dissolving)
     }
 
+    /// Rows' untitled delivery (`.content`): the posts as ONE section of
+    /// rows. A count change is written onto the rows (`applyCountsOnly`,
+    /// before this); anything else redraws.
+    private func applyRows(_ incoming: [GalleryPost], skeleton: Bool, dissolving: Bool, mustReload: Bool) {
+        let postsBefore = posts
+        let wasSkeleton = showsSkeleton
+        rawPosts = incoming
+        showsSkeleton = skeleton
+        adoptSegments(skeleton || incoming.isEmpty ? [] : [.rows(incoming)])
+        if wasSkeleton == skeleton, !mustReload, postsBefore == posts { return }
+        reloadAll(dissolving: dissolving)
+    }
+
+    /// Rows' groups changed by REMOVALS alone — a row taken out of the
+    /// history (#2170): every group left is an old group, in the old order,
+    /// holding its old posts in their old order less some. Its rows, and any
+    /// group emptied, leave with the list's own animation; nil for any other
+    /// change (a reload).
+    static func removals(
+        from old: [PostGridPageSection], to new: [PostGridPageSection]
+    ) -> (items: [IndexPath], sections: IndexSet)? {
+        guard !old.isEmpty, !new.isEmpty else { return nil }
+        var items: [IndexPath] = []
+        var sections = IndexSet()
+        var next = 0
+        var removedAny = false
+        for (section, group) in old.enumerated() {
+            guard next < new.count, new[next].title == group.title else {
+                sections.insert(section)
+                removedAny = true
+                continue
+            }
+            let kept = new[next].posts.map(\.id)
+            let keptSet = Set(kept)
+            let remaining = group.posts.filter { keptSet.contains($0.id) }.map(\.id)
+            // Same posts left, same order — nothing moved in or between.
+            guard remaining == kept else { return nil }
+            for (item, post) in group.posts.enumerated() where !keptSet.contains(post.id) {
+                items.append(IndexPath(item: item, section: section))
+                removedAny = true
+            }
+            next += 1
+        }
+        guard next == new.count, removedAny else { return nil }
+        return (items, sections)
+    }
+
     /// Discover's titled groups (`.sections`): each group planned as a list
     /// of its own — its chunks numbered on from the group before, so the
     /// shapes vary down the page — and the lists drawn one after another,
@@ -3324,13 +3520,16 @@ final class ForYouGridPage: UIView {
     /// except new counters on the same posts, written onto the cells.
     func applyGroups(_ groups: [PostGridPageSection]) {
         defer { lookahead.setNeedsPlan() }
-        guard style == .discover else { return apply(groups.flatMap(\.posts), skeleton: false) }
+        guard drawsSegments else { return apply(groups.flatMap(\.posts), skeleton: false) }
         emptyState.isHidden = true
         let shown = groups.filter { !$0.posts.isEmpty }
+        // The dates go with their posts, whatever the change (#2170).
+        viewedAt = shown.reduce(into: [:]) { dates, group in dates.merge(group.viewedAt) { _, new in new } }
         guard !shown.isEmpty else {
             leaveGroups()
             return apply([], skeleton: false)
         }
+        if style == .rows { return applyRowGroups(shown) }
         var ordinal = 0
         var planned: [DiscoverSegment] = []
         var firsts: [Int] = []
@@ -3362,6 +3561,64 @@ final class ForYouGridPage: UIView {
             if !visible.isEmpty { collectionView.reconfigureItems(at: visible) }
             return
         }
+        collectionView.collectionViewLayout.invalidateLayout()
+        reloadAll(dissolving: dissolving)
+        DispatchQueue.main.async { [weak self] in self?.updatePinnedSection() }
+    }
+
+    /// Rows' groups: one section of rows each. Counters only: written onto
+    /// the rows. Removals only: the rows (and any group emptied) leave with
+    /// the list's animation (#2170). Anything else redraws.
+    private func applyRowGroups(_ shown: [PostGridPageSection]) {
+        let titles = shown.map(\.title)
+        let planned = shown.map { DiscoverSegment.rows($0.posts) }
+        let firsts = Array(planned.indices)
+        let before = segments.enumerated().map { index, segment in
+            PostGridPageSection(title: groupTitles.indices.contains(index) ? groupTitles[index] : "", posts: segment.posts)
+        }
+        let wasGrouped = isGrouped && !showsSkeleton && groupTitles.count == segments.count
+        let sameShape = wasGrouped && titles == groupTitles
+            && MosaicChunkPlanner.change(from: segments, to: planned) == .identical
+        let removals = wasGrouped && window != nil ? Self.removals(from: before, to: shown) : nil
+        let postsBefore = posts
+        let dissolving = showsSkeleton && window != nil
+        collectionView.layoutIfNeeded()
+        let adopt = { [self] in
+            rawPosts = shown.flatMap(\.posts)
+            showsSkeleton = false
+            plannedCorpusComplete = true
+            leftGroups = false
+            mustReload = false
+            groupTitles = titles
+            groupFirstSections = firsts
+            adoptSegments(planned)
+            if !posts.contains(where: { $0.id == heroHiddenPostID }) { heroHiddenPostID = nil }
+        }
+        if sameShape {
+            adopt()
+            let visible = collectionView.indexPathsForVisibleItems.filter {
+                let index = flatIndex(for: $0)
+                return posts.indices.contains(index) && postsBefore.indices.contains(index)
+                    && posts[index] != postsBefore[index]
+            }
+            if !visible.isEmpty { collectionView.reconfigureItems(at: visible) }
+            return
+        }
+        if let removals {
+            collectionView.performBatchUpdates {
+                adopt()
+                collectionView.deleteItems(at: removals.items.filter { !removals.sections.contains($0.section) })
+                collectionView.deleteSections(removals.sections)
+            } completion: { [weak self] _ in
+                // A group's trailing gap is asked of the group after it: the
+                // group now last loses it.
+                self?.collectionView.collectionViewLayout.invalidateLayout()
+                self?.updatePinnedSection()
+                self?.updateAutoplay()
+            }
+            return
+        }
+        adopt()
         collectionView.collectionViewLayout.invalidateLayout()
         reloadAll(dissolving: dissolving)
         DispatchQueue.main.async { [weak self] in self?.updatePinnedSection() }
@@ -3439,7 +3696,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         guard !showsSkeleton else { return style == .discover ? discoverSkeletonPlan.count : 1 }
         // One section per stretch — and one empty one for an empty list, the
         // shape the other styles have when there is nothing to show.
-        if style == .discover { return max(1, segments.count) }
+        if drawsSegments { return max(1, segments.count) }
         return sections.count
     }
 
@@ -3448,7 +3705,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             guard style == .discover else { return skeletonCount }
             return discoverSkeletonPlan.indices.contains(section) ? discoverSkeletonPlan[section].count : 0
         }
-        if style == .discover {
+        if drawsSegments {
             return segments.indices.contains(section) ? segments[section].posts.count : 0
         }
         let split = split
@@ -3489,7 +3746,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // A titled group's header: the title in the flow, which leaves as it
         // reaches the bar — the host names the group there (#1344, the
         // inbox's #1301).
-        if style == .discover, let group = groupIndex(openedBy: indexPath.section) {
+        if drawsSegments, let group = groupIndex(openedBy: indexPath.section) {
             header.hidesWhenPinned = true
             header.setTitle(groupTitles[group])
             header.onTap = { [weak self] in self?.scrollToSection(group) }
@@ -3551,6 +3808,13 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
                 ) as! PostGridSkeletonListCell
                 cell.configure(variant: indexPath.item)
                 return cell
+            // A row's bones: the square, two bars, the author's circle (#2170).
+            case .rows:
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: PostHistoryRowSkeletonCell.reuseID, for: indexPath
+                ) as! PostHistoryRowSkeletonCell
+                cell.configure(variant: indexPath.item)
+                return cell
             case .grid:
                 let cell = collectionView.dequeueReusableCell(
                     withReuseIdentifier: PostGridSkeletonTileCell.reuseID, for: indexPath
@@ -3567,6 +3831,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // another tile.
         // Either flight hides it, and neither knows about the other.
         let isFlying = post.id == heroHiddenPostID || post.id == revealConcealedPostID
+        if style == .rows { return rowCell(for: post, at: indexPath, isFlying: isFlying) }
         // Asked per post, because Discover draws both — see `drawsAsTile`.
         let shape: CellShape = drawsAsPairedCard(post.id)
             ? .pairedCard
@@ -3725,6 +3990,29 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             cell.isHidden = isFlying
             return cell
         }
+    }
+
+    /// A Rows row (#2170): the post, its view date, the author's tap and
+    /// hold (#2145), the swipe named for VoiceOver.
+    private func rowCell(for post: GalleryPost, at indexPath: IndexPath, isFlying: Bool) -> UICollectionViewCell {
+        let cell = collectionView.dequeueReusableCell(
+            withReuseIdentifier: PostHistoryRowCell.reuseID, for: indexPath
+        ) as! PostHistoryRowCell
+        cell.configure(with: post, viewedAt: viewedAt[post.id], imagePipeline: imagePipeline)
+        if post.authorID != nil {
+            // A person beside content (#2145): a tap is the card, a hold
+            // the profile — the host's routes, never this page's.
+            cell.onAuthorTapped = { [weak self] in
+                guard let self else { return }
+                (onAuthorCardTapped ?? onAuthorTapped)?(post)
+            }
+            cell.onAuthorHeld = onAuthorTapped == nil ? nil : { [weak self] in self?.onAuthorTapped?(post) }
+        }
+        if let action = rowSwipeAction {
+            cell.swipeAction = (action.title, { action.perform(post) })
+        }
+        Self.applyHeroConcealment(isFlying, to: cell)
+        return cell
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -3937,6 +4225,12 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             guard let media = row.mediaHeroRect,
                   media.contains(collectionView.convert(point, to: row)) else { return nil }
         }
+        // A Rows row lifts from anywhere but its author, whose hold is the
+        // profile's (#2145, #2170).
+        if let row = collectionView.cellForItem(at: indexPath) as? PostHistoryRowCell {
+            let author = row.authorHitView
+            guard author.isHidden || !author.bounds.contains(collectionView.convert(point, to: author)) else { return nil }
+        }
         let width = max(0, bounds.width - LeadRowMetrics.sideMargin * 2)
         let pipeline = imagePipeline
         let pool = videoPool
@@ -4099,6 +4393,12 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         let parameters = UIPreviewParameters()
         parameters.backgroundColor = .clear
         let card = cell.contentView
+        // A Rows row lifts its square, on the square's own outline (#2170).
+        if let row = cell as? PostHistoryRowCell {
+            let square = row.squareView
+            parameters.visiblePath = AvatarShape.roundedTile.path(in: square.bounds)
+            return UITargetedPreview(view: square, parameters: parameters)
+        }
         // The media's OWN view, not the card clipped to it: UIKit hides the
         // targeted view while the lift is up, and the card's header, text
         // and actions must stay where they are.

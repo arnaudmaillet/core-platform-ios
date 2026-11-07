@@ -42,6 +42,18 @@ public final class SectionHeaderCapsuleView: UICollectionReusableView {
     public override func prepareForReuse() {
         super.prepareForReuse()
         onTap = nil
+        // ⚠️ A RECYCLED HEADER STARTS AS A TITLE. Its shape is re-read only
+        // when the list's offset moves, so a header that had pinned — and,
+        // named in the bar, faded out (`hidesWhenPinned`) — came back as the
+        // next group's title still at alpha 0 once the list stood still: a
+        // blank where "This Week" belonged (History's rows, #2170). The next
+        // scroll tick pins it again if it is at the line.
+        setPresentationInline()
+    }
+
+    private func setPresentationInline() {
+        guard pill.presentation != .inline else { return }
+        pill.setPresentation(.inline, animated: false)
     }
 
     public override func layoutSubviews() {

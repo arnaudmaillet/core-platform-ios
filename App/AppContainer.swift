@@ -82,8 +82,53 @@ final class AppContainer {
             }
         )
         backend.bff.faults = mockNetworkFaults
+        #if DEBUG
+        Self.seedViewHistoryIfAsked(from: backend.dataset)
+        #endif
         return backend
     }()
+
+    #if DEBUG
+    /// `-mock-view-history`: the profile's History (#2170) filled with a
+    /// varied pile of the mock's posts — clips, photos, carousels, text
+    /// posts, one without a caption, the longest caption and author name —
+    /// viewed from minutes to months ago, so its rows and day groups can be
+    /// looked at without viewing each post first. Replaces the pile on every
+    /// launch that asks.
+    private static func seedViewHistoryIfAsked(from dataset: MockSocialDataset) {
+        guard ProcessInfo.processInfo.arguments.contains("-mock-view-history") else { return }
+        let posts = dataset.posts.filter { $0.parentID.isEmpty }
+        let isVideo: (MockSocialDataset.PostRecord) -> Bool = {
+            $0.media.map { MockMediaFixtures.isVideoURL($0.url) } ?? false
+        }
+        let nameLength: (MockSocialDataset.PostRecord) -> Int = {
+            dataset.author(for: $0.authorProfileID)?.displayName.count ?? 0
+        }
+        var picked: [String] = []
+        func take(_ candidates: [MockSocialDataset.PostRecord], _ count: Int) {
+            var added = 0
+            for post in candidates where added < count && !picked.contains(post.postID) {
+                picked.append(post.postID)
+                added += 1
+            }
+        }
+        take(posts.filter { $0.media != nil && $0.caption.count > 70 }.sorted { $0.caption.count > $1.caption.count }, 1)
+        take(posts.filter(isVideo), 3)
+        take(posts.filter { !$0.extraMedia.isEmpty }, 2)
+        take(posts.filter { $0.media == nil }, 3)
+        take(posts.filter { $0.media != nil && !isVideo($0) && $0.extraMedia.isEmpty }, 4)
+        take(posts.filter { $0.media != nil && $0.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }, 1)
+        take(posts.sorted { nameLength($0) > nameLength($1) }, 1)
+        take(posts.filter { ($0.seededLikes ?? 0) > 1_000 }, 1)
+        take(posts, 22 - picked.count)
+        // Minutes to months: Today, Yesterday, this week and the last,
+        // this month and the last, then months by name.
+        let hours: [Double] = [0.1, 0.5, 2, 5, 9, 26, 30, 50, 75, 100]
+        let days: [Double] = [8, 9, 12, 20, 26, 40, 45, 70, 75, 100, 130, 160]
+        let ages: [TimeInterval] = hours.map { $0 * 3600 } + days.map { $0 * 86_400 }
+        PostViewHistoryStore.shared.debugPendingSeed = zip(picked, ages).map { (id: $0, age: $1) }
+    }
+    #endif
 
     /// Offline, timed outages, lost acks and upload faults for the WHOLE mock
     /// network — BFF, upload transport and realtime together (#790):

@@ -10,6 +10,11 @@ public enum PostGridPageStyle: Sendable {
     case list
     /// For You's mixed list: cards, paired cards and mosaic chunks.
     case discover
+    /// One post per row, full width: a square crop of its media beside two
+    /// lines — the title and when the viewer viewed it, the author and the
+    /// likes (the profile's History, the owner 2026-11-07, #2170). Titled
+    /// groups work as on Discover: one collection-view section per group.
+    case rows
 }
 
 /// What a page shows in place of its posts: a host's own words (a private
@@ -34,8 +39,9 @@ public enum PostGridPageState: Equatable, Sendable {
     /// Skeletons on a page with nothing yet; the posts it has otherwise.
     case loading
     case content([GalleryPost])
-    /// The posts in titled groups, in order — Discover only (the profile's
-    /// History by day, #1344). Each group's title stands over its first
+    /// The posts in titled groups, in order — Discover and Rows (the
+    /// profile's History by day, #1344, #2170); any other style draws them
+    /// as one untitled list. Each group's title stands over its first
     /// stretch; once it has scrolled under the bar, the page names it
     /// (`onPinnedSectionChanged`) for the host to show in its own bar.
     case sections([PostGridPageSection])
@@ -46,10 +52,33 @@ public enum PostGridPageState: Equatable, Sendable {
 public struct PostGridPageSection: Equatable, Sendable {
     public let title: String
     public let posts: [GalleryPost]
+    /// When the viewer viewed each of `posts` — what a Rows page writes at
+    /// the end of a row's first line (History, #2170). Carried with the
+    /// posts, keyed by post, so a date stays on its row whatever is removed
+    /// or reordered around it. Empty: no dates.
+    public let viewedAt: [PostID: Date]
 
-    public init(title: String, posts: [GalleryPost]) {
+    public init(title: String, posts: [GalleryPost], viewedAt: [PostID: Date] = [:]) {
         self.title = title
         self.posts = posts
+        self.viewedAt = viewedAt
+    }
+}
+
+/// A row's trailing swipe on a Rows page — the list's own destructive swipe
+/// (History's "Remove from History", #2170). Its title also names the row's
+/// VoiceOver action, which stands in for the swipe.
+public struct PostGridRowSwipeAction {
+    public let title: String
+    /// The glyph beside the title, an SF Symbol's name; nil for the title
+    /// alone.
+    public let symbolName: String?
+    public let perform: @MainActor (GalleryPost) -> Void
+
+    public init(title: String, symbolName: String? = nil, perform: @escaping @MainActor (GalleryPost) -> Void) {
+        self.title = title
+        self.symbolName = symbolName
+        self.perform = perform
     }
 }
 
@@ -114,6 +143,12 @@ public protocol PostGridPage: UIView {
     var onNearEnd: (() -> Void)? { get set }
     var onViewAllTapped: (() -> Void)? { get set }
     var onAuthorTapped: ((GalleryPost) -> Void)? { get set }
+    /// A tap on a Rows page's author — a person beside content, whose tap
+    /// opens the profile CARD (#2145); the hold is `onAuthorTapped`'s
+    /// profile. Nil: the tap is `onAuthorTapped` too.
+    var onAuthorCardTapped: ((GalleryPost) -> Void)? { get set }
+    /// A Rows page's trailing swipe on a row (#2170); nil for none.
+    var rowSwipeAction: PostGridRowSwipeAction? { get set }
     /// What a row's "..." offers — nothing hides the control.
     var postMenuActions: ((PostGridAuthorMenuContext) -> [PostCardMenuAction])? { get set }
     /// Pull-to-refresh, and a status's action.
@@ -185,6 +220,19 @@ public protocol PostGridPage: UIView {
     func openHoldingStill(from host: UIViewController, _ open: () -> Void)
     /// The open was refused: the playback handoff `heroOrigin` began ends.
     func endPlaybackHandoff()
+}
+
+/// The Rows hooks are new (#2170): a page that draws no rows takes neither.
+public extension PostGridPage {
+    var onAuthorCardTapped: ((GalleryPost) -> Void)? {
+        get { nil }
+        set {}
+    }
+
+    var rowSwipeAction: PostGridRowSwipeAction? {
+        get { nil }
+        set {}
+    }
 }
 
 #if DEBUG

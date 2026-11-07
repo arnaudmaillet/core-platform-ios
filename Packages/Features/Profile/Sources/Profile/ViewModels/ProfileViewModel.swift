@@ -135,6 +135,10 @@ public final class ProfileViewModel {
         /// History's groups by day, over its posts in order — what the page
         /// titles (#1344). Empty: one untitled list.
         public var historyGroups: [HistoryGroup] = []
+        /// When the viewer viewed each History post — written at the end of
+        /// its row's first line (#2170). Keyed by post, so a date stays on
+        /// its row through a removal or a refresh.
+        public var historyViewedAt: [PostID: Date] = [:]
         /// Whether no further page is coming for Reposts and for Tagged: each
         /// follows its own corpus, apart from `isComplete`.
         public var repostsComplete = true
@@ -1274,6 +1278,14 @@ public final class ProfileViewModel {
         router?.route(to: .profile(authorID, stub: post.authorIdentityStub))
     }
 
+    /// A History row's author TAPPED: the profile card — a person beside
+    /// content (#2145, `PersonOpening.openCard`; the hold is
+    /// `galleryAuthorTapped`'s profile). Nothing for the profile itself.
+    public func galleryAuthorCardTapped(_ post: GalleryPost) {
+        guard let authorID = post.authorID, authorID != profile?.id else { return }
+        router?.route(to: .profileCard(authorID, stub: post.authorIdentityStub))
+    }
+
     /// Whether a gallery row may offer Report.
     ///
     /// No seam, no row — a screen that cannot file withholds the action rather
@@ -1769,6 +1781,7 @@ public final class ProfileViewModel {
             hasShownHistory = true
             galleryStore.history = .empty(message: "")
             galleryStore.historyGroups = []
+            galleryStore.historyViewedAt = [:]
             renderGallery()
             return
         }
@@ -1785,6 +1798,9 @@ public final class ProfileViewModel {
             galleryStore.historyGroups = HistoryDayGroups.groups(
                 for: tiles.map { viewedAt[$0.id.rawValue] ?? nil }, now: now()
             )
+            galleryStore.historyViewedAt = tiles.reduce(into: [:]) { dates, tile in
+                if let date = viewedAt[tile.id.rawValue] ?? nil { dates[tile.id] = date }
+            }
             renderGallery()
         }
     }

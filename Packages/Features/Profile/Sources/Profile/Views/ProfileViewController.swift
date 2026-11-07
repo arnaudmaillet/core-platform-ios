@@ -509,6 +509,14 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         galleryPager.onAuthorTapped = { [weak self] post in
             self?.viewModel.galleryAuthorTapped(post)
         }
+        // A History row's author: tap → the card, hold → the profile (#2145).
+        galleryPager.onAuthorCardTapped = { [weak self] post in
+            self?.viewModel.galleryAuthorCardTapped(post)
+        }
+        // A History row's swipe (#2170): the menu's own row.
+        galleryPager.onRemoveFromHistory = { [weak self] post in
+            self?.viewModel.removeFromHistory(post.id)
+        }
         galleryPager.onViewAllTapped = { [weak self] in self?.pushMediaGallery() }
         galleryPager.authorMenuActions = { [weak self] context, tab in
             guard let self else { return [] }
