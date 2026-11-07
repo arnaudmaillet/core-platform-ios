@@ -139,15 +139,154 @@ struct VoiceComposerTests {
         #expect(composer.phase == .locked)
         composer.handle(.ended(leading: 0))
         #expect(composer.phase == .locked, "lifting the finger after the lock ended the take")
-        #expect(composer.debugStrip.debugVisibleControls == ["Delete recording", "Pause recording", "Send voice message"])
+        #expect(composer.debugStrip.debugVisibleControls == ["Pause recording", "Send voice message"])
+        #expect(composer.debugStrip.debugShowsWaveform, "locked, the bars fill the field")
+        #expect(bar.debugShowsVoiceDelete, "the bin stands in the avatar's place")
         composer.debugStrip.debugTap("Pause recording")
         #expect(composer.phase == .paused(resumable: true))
         #expect(device.pauses == 1)
-        #expect(composer.debugStrip.debugVisibleControls.contains("Resume recording"))
+        #expect(composer.debugStrip.debugVisibleControls == ["Play recording", "Resume recording", "Send voice message"],
+                "paused, the chip plays the take back")
+        #expect(bar.debugShowsVoiceDelete)
         device.currentTime = 7
         composer.debugStrip.debugTap("Send voice message")
         #expect(sent.takes.count == 1)
         #expect(bar.voiceOverlay == nil)
+        #expect(!bar.debugShowsVoiceDelete, "the face is back")
+    }
+
+    /// Held, the action bubble itself grows into the mic, wears the bin
+    /// once the finger slides toward cancel, and — cancelled — goes back to
+    /// its place, size and waveform (the owner, 2026-11-07).
+    @Test func theBubbleGrowsIntoTheMicAndComesBack() async {
+        let (composer, bar, _) = composer()
+        // In a window: the bubble animates its way back, as on screen.
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.addSubview(bar)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        bar.actsFromOwnBubble = true
+        bar.layoutIfNeeded()
+        let bubble = bar.debugRowActionButton
+        let rest = bubble.frame
+        bubble.layoutIfNeeded()
+        let restSymbol = bubble.imageView?.frame.size ?? .zero
+        composer.handle(.began)
+        #expect(await settle { composer.phase == .holding(revealed: true) })
+        bar.layoutIfNeeded()
+        #expect(bar.isVoiceHolding)
+        #expect(abs(bubble.frame.width - CommentsInputBar.voiceHoldSide) < 0.5, "\(bubble.frame)")
+        #expect(abs(bubble.frame.midX - rest.midX) < 0.5 && abs(bubble.frame.midY - rest.midY) < 0.5,
+                "it grew about its own centre")
+        let glyph = bar.debugHoldGlyph
+        #expect(!glyph.isHidden && glyph.image != nil, "no mic on the held bubble")
+        // Within a point: the symbol's own frame rounds to the pixel.
+        #expect(abs(glyph.frame.midX - bubble.frame.midX) < 1 && abs(glyph.frame.midY - bubble.frame.midY) < 1,
+                "the mic is off the bubble's centre: \(glyph.frame) \(bubble.frame)")
+        device.currentTime = 4
+        composer.handle(.moved(leading: 40, up: 0))
+        bar.layoutIfNeeded()
+        #expect(bubble.frame.midX < rest.midX, "the bubble did not follow the finger")
+        #expect(abs(glyph.frame.midX - bubble.frame.midX) < 1, "the glyph drifted off centre as the bubble moved")
+        #expect(bubble.tintColor == .systemRed, "no bin on the way to cancel")
+        composer.handle(.moved(leading: 100, up: 0))
+        #expect(composer.phase == .idle)
+        bar.layoutIfNeeded()
+        #expect(!bar.isVoiceHolding)
+        #expect(bubble.frame == rest, "the bubble did not come back: \(bubble.frame) vs \(rest)")
+        #expect(bubble.tintColor != .systemRed, "the bubble kept the bin's red")
+        // The waveform rides home on the bar's glyph, centred all the way —
+        // handed to the button in the big bubble, it came back from the
+        // corner (filmed, 2026-11-07) — and the button takes it once landed.
+        #expect(!glyph.isHidden, "the waveform did not ride home on the glyph")
+        if !glyph.isHidden {
+            #expect(bubble.configuration?.image == nil, "two waveforms on the way back")
+            // The button's own size, or the waveform jumps at the hand-over
+            // (the width: the button's image box is a text line tall).
+            let size = glyph.intrinsicContentSize
+            #expect(abs(size.width - restSymbol.width) < 1,
+                    "the waveform comes back at \(size), the button draws it at \(restSymbol)")
+            #expect(abs(glyph.frame.midX - bubble.frame.midX) < 1 && abs(glyph.frame.midY - bubble.frame.midY) < 1,
+                    "the waveform left the bubble's centre on the way back")
+        }
+        #expect(await settle { glyph.isHidden }, "the held glyph stayed")
+        #expect(bubble.configuration?.image?.isSymbolImage == true, "the button never took the waveform back")
+    }
+
+    /// Locked, the bubble steps aside wearing the mic: no waveform shows
+    /// over the take's send on its way out (filmed, 2026-11-07), and it
+    /// comes back with its waveform once the take is gone.
+    @Test func theLockedBubbleLeavesWearingTheMic() async {
+        let (composer, bar, _) = composer()
+        // In a window: the bubble animates its way back, as on screen.
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.addSubview(bar)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        bar.actsFromOwnBubble = true
+        bar.layoutIfNeeded()
+        let bubble = bar.debugRowActionButton
+        let glyph = bar.debugHoldGlyph
+        composer.handle(.began)
+        #expect(await settle { composer.phase == .holding(revealed: true) })
+        let mic = glyph.image
+        composer.handle(.moved(leading: 0, up: 101))
+        #expect(composer.phase == .locked)
+        #expect(bubble.configuration?.image == nil, "the leaving bubble wears the waveform")
+        #expect(!glyph.isHidden && glyph.image == mic, "the leaving glyph turned to the waveform")
+        #expect(await settle { glyph.isHidden }, "the held glyph stayed")
+        bar.debugTapVoiceDelete()
+        #expect(await settle { composer.phase == .idle })
+        #expect(await settle { bar.debugShowsRowAction }, "the bubble never came back")
+        #expect(bubble.configuration?.image?.isSymbolImage == true, "the bubble came back bare")
+    }
+
+    /// The bin in the avatar's place throws the locked take away.
+    @Test func theBinInTheAvatarsPlaceThrowsTheTakeAway() async {
+        let (composer, bar, sent) = composer()
+        composer.handle(.began)
+        #expect(await settle { composer.phase == .holding(revealed: true) })
+        #expect(!bar.debugShowsVoiceDelete, "held, the slide cancels: no bin yet")
+        composer.handle(.moved(leading: 0, up: 101))
+        composer.handle(.ended(leading: 0))
+        #expect(bar.debugShowsVoiceDelete)
+        bar.debugTapVoiceDelete()
+        #expect(composer.phase == .idle)
+        #expect(sent.takes.isEmpty)
+        #expect(!bar.debugShowsVoiceDelete)
+    }
+
+    /// A take that fills the bars never squeezes the buttons: the pause
+    /// keeps its size beside the send (the owner's video, 2026-11-07).
+    @Test func fullBarsNeverSqueezeTheButtons() {
+        let strip = VoiceRecordingStrip(frame: CGRect(x: 0, y: 0, width: 280, height: 44))
+        strip.apply(.locked)
+        strip.layoutIfNeeded()
+        for _ in 0..<120 {
+            strip.appendLevel(0.4)
+            strip.layoutIfNeeded()
+        }
+        let take = strip.debugTakeFrame, send = strip.debugSendFrame
+        #expect(!take.intersects(send), "\(take) under \(send)")
+        #expect(take.width >= 26, "the pause was squeezed: \(take)")
+        #expect(strip.debugWaveformFrame.maxX <= take.minX, "the bars run under the pause")
+    }
+
+    /// Locked or paused, the time leads the field on its chip and the bars
+    /// fill the rest (the owner, 2026-11-07).
+    @Test func theTimeLeadsTheFieldOnItsChip() {
+        let strip = VoiceRecordingStrip(frame: CGRect(x: 0, y: 0, width: 260, height: 44))
+        strip.apply(.paused(resumable: true, playing: false))
+        strip.setTime(42, remaining: nil)
+        strip.layoutIfNeeded()
+        let chip = strip.debugChipFrame, bars = strip.debugWaveformFrame
+        #expect(strip.debugTimerText == "0:42")
+        #expect(chip.minX < 1, "the chip leads the field: \(chip)")
+        #expect(bars.minX >= chip.maxX, "\(bars) after \(chip)")
+        #expect(bars.width > 90, "the bars fill the rest: \(bars)")
+        #expect(abs(chip.midY - bars.midY) < 0.5)
+        strip.apply(.recording)
+        #expect(!strip.debugShowsWaveform, "held: the dot, the time and the hint")
     }
 
     /// Refused before: a hold offers Settings, and records nothing.

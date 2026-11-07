@@ -10,8 +10,9 @@ import VoiceKit
 /// The bar reports the finger (`CommentsInputBar.VoiceHoldEvent`), the
 /// thresholds are `VoiceHoldGesture`'s, the take is #2101's `VoiceRecorder`,
 /// and the sends are the thread's (`onSend`, #2103). This draws in the
-/// field's place (`VoiceRecordingStrip`) and over the content (the mic disc
-/// and the lock).
+/// field's place (`VoiceRecordingStrip`), on the action bubble the finger
+/// holds (it grows into the mic, `CommentsInputBar.beginVoiceHold`) and over
+/// the content (the lock).
 @MainActor
 final class VoiceComposer {
     enum Phase: Equatable {
@@ -47,7 +48,6 @@ final class VoiceComposer {
     private weak var bar: CommentsInputBar?
     private weak var host: UIView?
     private let strip = VoiceRecordingStrip()
-    private let disc = VoiceMicDisc()
     private let lock = VoiceLockCapsule()
     private var holdStarted: Date?
     private var fingerDown = false
@@ -61,7 +61,6 @@ final class VoiceComposer {
         recorder.onLevel = { [weak self] level in self?.levelChanged(level) }
         recorder.onAutoFinish = { [weak self] outcome in self?.autoFinished(outcome) }
         recorder.onTimeRunningOut = { [weak self] in self?.tickClock() }
-        strip.onDelete = { [weak self] in self?.cancel() }
         strip.onPause = { [weak self] in self?.pause() }
         strip.onResume = { [weak self] in self?.resume() }
         strip.onPlay = { [weak self] in self?.listenBack() }
@@ -102,7 +101,7 @@ final class VoiceComposer {
             case .holding(let cancel, let lockProgress):
                 strip.setCancelProgress(cancel)
                 lock.setProgress(lockProgress)
-                disc.transform = CGAffineTransform(translationX: -cancel * VoiceHoldGesture.cancelTravel, y: 0)
+                bar?.moveVoiceHold(cancel: cancel, travel: VoiceHoldGesture.cancelTravel)
             }
         case .ended(let leading):
             fingerDown = false
@@ -164,23 +163,21 @@ final class VoiceComposer {
         strip.apply(.recording)
         strip.setCancelProgress(0)
         bar?.showVoiceOverlay(strip)
+        // The bubble itself grows into the mic (the owner, 2026-11-07).
+        bar?.beginVoiceHold()
         startClock()
         guard let bar, let host else { return }
         let anchor = bar.voiceHoldAnchor.convert(
             CGPoint(x: bar.voiceHoldAnchor.bounds.midX, y: bar.voiceHoldAnchor.bounds.midY), to: host
         )
-        disc.transform = .identity
-        disc.alpha = 1
-        disc.center = anchor
-        host.addSubview(disc)
         lock.setProgress(0)
-        lock.center = CGPoint(x: anchor.x, y: anchor.y - VoiceMicDisc.side / 2 - VoiceLockCapsule.size.height / 2 - 16)
+        lock.center = CGPoint(
+            x: anchor.x, y: anchor.y - CommentsInputBar.voiceHoldSide / 2 - VoiceLockCapsule.size.height / 2 - 16
+        )
         host.addSubview(lock)
         if window(host) && !MotionPreference.reducesMotion {
-            disc.transform = CGAffineTransform(scaleX: 0.4, y: 0.4)
             lock.alpha = 0
             UIView.animate(withDuration: 0.42, delay: 0, usingSpringWithDamping: 0.6, initialSpringVelocity: 0) {
-                self.disc.transform = .identity
                 self.lock.alpha = 1
             }
         }
@@ -189,13 +186,17 @@ final class VoiceComposer {
     private func window(_ view: UIView) -> Bool { view.window != nil }
 
     private func lockTake() {
-        Haptics.play(.boundary)
+        // A commit, felt: the take is the finger's no longer (the owner,
+        // 2026-11-07 — the boundary's light tap went unfelt).
+        Haptics.play(.commit)
         lock.close()
         phase = .locked
-        disc.removeFromSuperview()
         lock.removeFromSuperview()
         strip.apply(.locked)
+        // The bubble steps aside first, so it leaves wearing the mic.
         bar?.showVoiceOverlay(strip, coversButton: true)
+        bar?.endVoiceHold()
+        showBin()
         startClock()
     }
 
@@ -219,6 +220,7 @@ final class VoiceComposer {
         stopClock()
         strip.apply(.paused(resumable: resumable, playing: false))
         bar?.showVoiceOverlay(strip, coversButton: true)
+        showBin()
         strip.layoutIfNeeded()
         if let draft {
             strip.showTake(levels: draft.waveform, duration: draft.duration, progress: 0)
@@ -282,14 +284,7 @@ final class VoiceComposer {
         recorder.reset()
         if let draft { try? FileManager.default.removeItem(at: draft.fileURL) }
         Haptics.play(.warning)
-        if disc.superview != nil {
-            lock.removeFromSuperview()
-            disc.throwAway { [weak self] in self?.disc.removeFromSuperview() }
-            draft = nil
-            phase = .idle
-            bar?.showVoiceOverlay(nil)
-            return
-        }
+        // Slid away: the bubble goes straight back to its place and face.
         reset()
     }
 
@@ -299,9 +294,9 @@ final class VoiceComposer {
         switch outcome {
         case .draft(let finished):
             draft = finished
-            disc.removeFromSuperview()
             lock.removeFromSuperview()
             showPaused(resumable: false)
+            bar?.endVoiceHold()
         case .tooShort:
             reset()
         }
@@ -310,10 +305,16 @@ final class VoiceComposer {
     private func reset() {
         stopClock()
         draft = nil
-        disc.removeFromSuperview()
+        bar?.endVoiceHold()
         lock.removeFromSuperview()
         bar?.showVoiceOverlay(nil)
+        bar?.showVoiceDelete(nil)
         phase = .idle
+    }
+
+    /// The bin in the avatar's place: the locked and paused bars' delete.
+    private func showBin() {
+        bar?.showVoiceDelete { [weak self] in self?.cancel() }
     }
 
     /// Leaving the conversation: a locked or paused take is kept as its
@@ -325,7 +326,7 @@ final class VoiceComposer {
             if let key = draftKey, let draft { Self.drafts[key] = draft }
             VoicePlayer.shared.stop()
             stopClock()
-            disc.removeFromSuperview()
+            bar?.endVoiceHold()
             lock.removeFromSuperview()
             phase = .idle
             draft = nil
@@ -359,13 +360,13 @@ final class VoiceComposer {
     }
 
     private func levelChanged(_ level: Float) {
-        disc.setLevel(level)
+        if case .holding = phase { bar?.setVoiceHoldLevel(level) }
         if phase == .locked { strip.appendLevel(level) }
     }
 
     #if DEBUG
     var debugStrip: VoiceRecordingStrip { strip }
-    var debugShowsDisc: Bool { disc.superview != nil }
+    var debugShowsDisc: Bool { bar?.isVoiceHolding == true }
     static func debugDraft(for key: String) -> VoiceDraft? { drafts[key] }
     static func debugClearDrafts() { drafts = [:] }
     #endif

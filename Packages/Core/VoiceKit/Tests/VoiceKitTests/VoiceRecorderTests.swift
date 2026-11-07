@@ -146,6 +146,7 @@ struct VoiceRecorderTests {
         defer { observers.forEach(center.removeObserver) }
         #expect(await recorder.start() == .started)
         #expect(session.roles == [.recording])
+        #expect(session.allowsHapticsWhileRecording, "the lock's haptic would be muted while it records")
         #expect(VoiceSessionRole.recording.category == .playAndRecord)
         #expect(VoiceSessionRole.recording.mode == .default)
         #expect(VoiceSessionRole.recording.options == [.defaultToSpeaker, .allowBluetoothHFP])

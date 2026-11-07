@@ -110,9 +110,9 @@ struct ThreadVoiceViewTests {
                 "the row's room beside a short bubble is the screen's")
     }
 
-    /// Playing, the chip stands over the waveform's middle and the row keeps
-    /// its height: playing never re-lays the list.
-    @Test func theChipStandsOverTheWaveformsMiddle() {
+    /// Playing, the chip stands right of the timer, level with it, and the
+    /// row keeps its height: playing never re-lays the list.
+    @Test func theChipStandsRightOfTheTimer() {
         var state = ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 12)
         let view = view(state)
         let rest = view.systemLayoutSizeFitting(CGSize(width: 360, height: 0)).height
@@ -121,54 +121,64 @@ struct ThreadVoiceViewTests {
         view.layoutIfNeeded()
         #expect(view.systemLayoutSizeFitting(CGSize(width: 360, height: 0)).height == rest)
         #expect(rest == ThreadVoiceView.buttonSide)
-        var alpha: CGFloat = 0
-        view.debugChipFill?.resolvedColor(with: view.traitCollection).getWhite(nil, alpha: &alpha)
-        #expect(alpha == 1, "an opaque chip over the bars")
-        let chip = view.debugChipFrame, bars = view.debugWaveformFrame
-        #expect(abs(chip.midX - bars.midX) < 0.5 && abs(chip.midY - bars.midY) < 0.5, "\(chip) over \(bars)")
+        #expect(view.debugChipIsTheAppsPill, "the app's pill, not a system button")
+        let chip = view.debugChipFrame, timer = view.debugTimerFrame, bars = view.debugWaveformFrame
+        #expect(chip.minX >= timer.maxX, "\(chip) right of \(timer)")
+        #expect(abs(chip.midY - timer.midY) < 0.5, "\(chip) vs \(timer)")
+        #expect(!chip.intersects(bars), "off the bars")
     }
 
-    /// The waveform is as wide as its bars, and the chip and the bars are
-    /// centred on each other in their box whatever the speed reads; the
-    /// chip, wider or narrower, takes the press over the bars, a little past
-    /// its capsule.
+    /// Whatever the speed reads, the chip follows the timer and takes the
+    /// press a little past its capsule; the bars keep theirs.
     @Test(arguments: ["1×", "1.5×", "2×"])
-    func theChipAndTheBarsShareTheirCentre(_ speed: String) {
+    func theChipFollowsTheTimerAtEverySpeed(_ speed: String) {
         var state = ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 12)
         state.playback = .playing(progress: 0.3)
         state.speedLabel = speed
         let view = view(state)
         view.debugSetSpeedLabel(speed)
-        let chip = view.debugChipFrame, bars = view.debugWaveformFrame, box = view.debugScrubberFrame
+        let chip = view.debugChipFrame, bars = view.debugWaveformFrame, timer = view.debugTimerFrame
         #expect(abs(bars.width - view.waveform.barsWidth) < 0.5, "the view is its bars")
-        #expect(abs(chip.midX - bars.midX) < 0.5 && abs(chip.midX - box.midX) < 0.5, "\(chip) \(bars) \(box)")
-        #expect(abs(chip.midY - bars.midY) < 0.5)
-        #expect(box.width >= chip.width && box.width >= bars.width)
+        #expect(chip.minX >= timer.maxX)
         #expect(view.debugPressTarget(at: CGPoint(x: chip.midX, y: chip.midY)) == "chip")
-        #expect(view.debugPressTarget(at: CGPoint(x: chip.maxX + SpeedChip.reach - 1, y: chip.midY)) == "chip")
         #expect(view.debugPressTarget(at: CGPoint(x: bars.minX + 2, y: bars.midY)) == "waveform")
     }
 
-    /// A finger scrubbing the bars grows them and sends the chip aside; both
-    /// come back when it lifts. A tap seeks without either.
-    @Test func scrubbingGrowsTheBarsAndSendsTheChipAside() {
+    /// A finger scrubbing the bars grows them and pushes the timer and the
+    /// chip clear; all of it settles when it lifts. A tap seeks without it.
+    @Test func scrubbingGrowsTheBars() {
         var state = ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 12)
         state.playback = .playing(progress: 0.3)
         let view = view(state)
         #expect(view.debugShowsChip && !view.debugWaveformGrown)
         view.waveform.onSeek?(0.5, true)
-        #expect(!view.debugShowsChip, "the chip steps aside")
+        #expect(view.debugShowsChip, "the chip stays, off the bars")
         #expect(view.debugWaveformGrown)
         #expect(view.debugWaveformFrame.maxX + 1 < view.debugTimerFrame.minX, "the grown bars never reach the timer")
-        // The screen re-tells the state while the finger moves: the chip
-        // stays aside.
-        state.playback = .playing(progress: 0.5)
-        view.update(state)
-        #expect(!view.debugShowsChip)
         view.waveform.onSeek?(0.6, false)
-        #expect(view.debugShowsChip && !view.debugWaveformGrown)
+        #expect(!view.debugWaveformGrown)
         view.waveform.onSeek?(0.2, false)
-        #expect(view.debugShowsChip && !view.debugWaveformGrown, "a tap seeks without either")
+        #expect(!view.debugWaveformGrown, "a tap seeks without it")
+    }
+
+    /// The bar the progress is in fills by its share, and the drawn progress
+    /// eases to a new one: no bar flips colour at once.
+    @Test func theFillIsProgressive() {
+        let half = WaveformBars.blend(.black, .white, 0.5)
+        var white: CGFloat = 0
+        half.getWhite(&white, alpha: nil)
+        #expect(abs(white - 0.5) < 0.01, "half-way blended")
+        #expect(WaveformBars.blend(.black, .white, 0) == .black && WaveformBars.blend(.black, .white, 1) == .white)
+
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 40))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let bars = WaveformBars(frame: CGRect(x: 0, y: 0, width: 198, height: 20))
+        window.addSubview(bars)
+        bars.configure(levels: Array(repeating: 20, count: 100), barCount: 50, progress: 0)
+        bars.setProgress(0.5)
+        #expect(bars.progress == 0.5)
+        #expect(bars.drawnProgress < 0.5, "a jump eases in, it does not land at once")
     }
 
     /// A sideways drag anywhere on the bubble is the bubble's: the screen's

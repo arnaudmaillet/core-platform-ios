@@ -12,10 +12,10 @@ import UIKit
 ///
 /// - **Its width says its length:** 140 pt at 1 s to 240 pt from 30 s.
 /// - **The waveform is the message's face:** 2 pt bars, the played ones in
-///   the brand's raspberry, re-binned from the message's 100 levels.
-/// - **While it plays or is paused mid-way the speed chip stands over the
-///   waveform, centred,** coming in with a bounce (the owner's device check,
-///   2026-11-06); the timer counts the time played. The row never moves.
+///   a dark grey (`ink`), re-binned from the message's 100 levels.
+/// - **While it plays or is paused mid-way the speed chip stands right of
+///   the timer,** coming in with a bounce (the owner's device checks,
+///   2026-11-06 and 11-07); the timer counts the time played.
 /// - **Its drags are its own:** one that starts on the play button or the
 ///   waveform goes before the list's scroll and the screen's swipes.
 /// - **It draws; the screen plays** (`VoicePlayer`, one for the app): every
@@ -66,6 +66,9 @@ final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
     /// owner's device check, 2026-11-06 — the glass press lagged behind the
     /// tap).
     static let buttonSide: CGFloat = 32
+    /// The bubble's ink — the played bars and the play glyph: a dark grey,
+    /// not the brand's colour nor black (the owner, 2026-11-07).
+    static let ink = UIColor.label.withAlphaComponent(0.7)
     static let barWidth: CGFloat = 2
     static let barGap: CGFloat = 2
     static let minBarHeight: CGFloat = 2
@@ -127,13 +130,18 @@ final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
     /// finger, a 44 pt target.
     private let playButton = AppIconButton(style: .glyph, content: .symbol("play.fill"), dims: false)
     private let loader = AppLoaderView(size: .medium)
-    /// The waveform and, under way, the speed chip over it: the two stacked
-    /// and centred in one box, as wide as the wider of them (the owner's
-    /// device check, 2026-11-06).
+    /// The waveform's box: the line's whole height, the bars centred in it.
     private let scrubber = UIView()
+    /// The bubble ends at the unplayed dot at rest, at the speed chip under
+    /// way — both right after the timer.
+    private var endsAtDot: NSLayoutConstraint?
+    private var endsAtChip: NSLayoutConstraint?
     let waveform = WaveformBars()
     private let timerLabel = UILabel()
-    private let speedChip = SpeedChip(configuration: .gray())
+    /// The app's pill (the owner's device check, 2026-11-07): its ground,
+    /// its swell under the finger, its morph when the speed changes, a 44 pt
+    /// target.
+    private let speedChip = AppButton(aspect: .pill(.quiet), size: .row, content: .title("1×"))
     private let dot = UIView()
     private let failedLabel = UILabel()
     private var widthConstraint: NSLayoutConstraint?
@@ -160,6 +168,7 @@ final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
         // 2026-11-06, filmed): the glyph greyed under the finger kept that
         // grey through the Replace, half a second after the tap.
         playButton.symbolPointSize = 20
+        playButton.inkColor = Self.ink
         // Off-up at twice the speed: the old glyph goes at once and the new
         // one is up in a tenth of a second — the default down-up shrank the
         // old one first, a third of a second behind the tap.
@@ -194,23 +203,9 @@ final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
         timerLabel.textColor = .secondaryLabel
         timerLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        speedChip.configuration?.cornerStyle = .capsule
-        // Opaque: it stands over the bars (the owner's device check,
-        // 2026-11-06).
-        speedChip.configuration?.baseBackgroundColor = .systemGray5
-        speedChip.configuration?.baseForegroundColor = .label
-        speedChip.configuration?.contentInsets = NSDirectionalEdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8)
-        speedChip.configuration?.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var attributes = attributes
-            attributes.font = .scaledFont(forTextStyle: .caption2, weight: .semibold)
-            return attributes
-        }
         speedChip.isAccessibilityElement = false
         speedChip.isHidden = true
-        speedChip.addAction(UIAction { [weak self] _ in
-            self?.popChip()
-            self?.onSpeedTap?()
-        }, for: .primaryActionTriggered)
+        speedChip.addAction(UIAction { [weak self] _ in self?.onSpeedTap?() }, for: .primaryActionTriggered)
 
         dot.backgroundColor = Palette.tint
         dot.layer.cornerRadius = 3
@@ -232,11 +227,10 @@ final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
         frameView.addSubview(playButton)
         playButton.addSubview(loader)
         frameView.addSubview(scrubber)
-        // The chip over the bars: it takes the press first.
         scrubber.addSubview(waveform)
-        scrubber.addSubview(speedChip)
         frameView.addSubview(timerLabel)
         frameView.addSubview(dot)
+        frameView.addSubview(speedChip)
         frameView.addSubview(failedLabel)
         // The bubble's line: the button's height, or the timer's when larger
         // text makes it taller — the same in every state, so playing never
@@ -277,33 +271,32 @@ final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
             loader.centerXAnchor.constraint(equalTo: playButton.centerXAnchor),
             loader.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
 
-            // The box is as wide as the wider of the bars and the chip —
-            // whatever its speed reads ("1×", "1.5×") — and the line's whole
-            // height (the chip's reach).
             boxHugsTheBars,
             scrubber.leadingAnchor.constraint(equalTo: playButton.trailingAnchor, constant: Spacing.sm),
             scrubber.topAnchor.constraint(equalTo: line.topAnchor),
             scrubber.bottomAnchor.constraint(equalTo: line.bottomAnchor),
-            scrubber.widthAnchor.constraint(greaterThanOrEqualTo: speedChip.widthAnchor),
             waveform.centerXAnchor.constraint(equalTo: scrubber.centerXAnchor),
             waveform.centerYAnchor.constraint(equalTo: scrubber.centerYAnchor),
             waveform.widthAnchor.constraint(lessThanOrEqualTo: scrubber.widthAnchor),
             waveform.heightAnchor.constraint(equalToConstant: Self.waveformHeight),
-            speedChip.centerXAnchor.constraint(equalTo: scrubber.centerXAnchor),
-            speedChip.centerYAnchor.constraint(equalTo: scrubber.centerYAnchor),
 
             timerLabel.leadingAnchor.constraint(equalTo: scrubber.trailingAnchor, constant: Spacing.sm),
             timerLabel.centerYAnchor.constraint(equalTo: line.centerYAnchor),
             line.heightAnchor.constraint(greaterThanOrEqualTo: timerLabel.heightAnchor),
+            // The dot or the chip, right of the timer.
             dot.leadingAnchor.constraint(equalTo: timerLabel.trailingAnchor, constant: Spacing.xs),
             dot.centerYAnchor.constraint(equalTo: line.centerYAnchor),
             dot.widthAnchor.constraint(equalToConstant: 6),
             dot.heightAnchor.constraint(equalToConstant: 6),
-            dot.trailingAnchor.constraint(equalTo: frameView.trailingAnchor),
+            speedChip.leadingAnchor.constraint(equalTo: timerLabel.trailingAnchor, constant: Spacing.xs),
+            speedChip.centerYAnchor.constraint(equalTo: line.centerYAnchor),
 
             failedLabel.leadingAnchor.constraint(equalTo: frameView.leadingAnchor),
             failedLabel.topAnchor.constraint(equalTo: line.bottomAnchor, constant: Spacing.xs),
         ])
+        endsAtDot = dot.trailingAnchor.constraint(equalTo: frameView.trailingAnchor)
+        endsAtChip = speedChip.trailingAnchor.constraint(equalTo: frameView.trailingAnchor)
+        endsAtDot?.isActive = true
         let bottom = line.bottomAnchor.constraint(equalTo: frameView.bottomAnchor)
         bottom.priority = .defaultHigh
         bottom.isActive = true
@@ -388,7 +381,9 @@ final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
             : Self.clock(state.duration)
         // Only on a change: written every frame of playback, it restyled the
         // chip under a finger trying to press it.
-        if speedChip.configuration?.title != state.speedLabel { speedChip.configuration?.title = state.speedLabel }
+        if speedChip.content.title != state.speedLabel {
+            speedChip.setContent(.title(state.speedLabel), animated: animated && previous.speedLabel != state.speedLabel)
+        }
         setUnderway(state.isUnderway, animated: animated && previous.isUnderway != state.isUnderway)
 
         // The unplayed dot fades once playback starts.
@@ -439,18 +434,21 @@ final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
     private func setUnderway(_ underway: Bool, animated: Bool) {
         guard underway != shownUnderway else { return }
         shownUnderway = underway
-        showChip(underway && !isScrubbing, animated: animated)
+        showChip(underway, animated: animated)
     }
 
-    /// The speed chip comes in over the waveform's middle, springing up from
-    /// smaller as it fades in, and fades going. It stands there while the
-    /// message is under way and no finger scrubs the bars.
+    /// The speed chip comes in right of the timer, springing up from smaller
+    /// as it fades in, and fades going: it stands there while the message is
+    /// under way.
     ///
     /// ⚠️ NOTHING IS LAID OUT HERE. A spring around `layoutIfNeeded` held
     /// the play button's new glyph back until it settled (filmed, 2026-11-06).
     private func showChip(_ underway: Bool, animated: Bool) {
         guard underway != chipShown else { return }
         chipShown = underway
+        // The bubble ends at what stands after the timer.
+        endsAtDot?.isActive = !underway
+        endsAtChip?.isActive = underway
         guard animated else {
             speedChip.layer.removeAllAnimations()
             speedChip.isHidden = !underway
@@ -477,30 +475,23 @@ final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
         }
     }
 
-    private func popChip() {
-        guard window != nil, !MotionPreference.reducesMotion else { return }
-        speedChip.transform = CGAffineTransform(scaleX: 1.18, y: 1.18)
-        UIView.animate(withDuration: 0.35, delay: 0, usingSpringWithDamping: 0.5, initialSpringVelocity: 0) {
-            self.speedChip.transform = .identity
-        }
-    }
-
     // MARK: - Scrubbing
 
-    /// A finger on the bars: the whole waveform grows a little,
-    /// and the chip steps aside; both come back when it lifts.
+    /// A finger on the bars: the whole waveform grows a little, and settles
+    /// back when it lifts.
     private func setScrubbing(_ scrubbing: Bool, animated: Bool) {
         guard scrubbing != isScrubbing else { return }
         isScrubbing = scrubbing
-        showChip(shownUnderway == true && !scrubbing, animated: animated)
         waveform.setSwollen(scrubbing, animated: animated)
-        // The grown waveform pushes the timer and the dot aside by what it
-        // gains on its trailing side, in the same spring: never over them.
+        // The grown waveform pushes the timer and what follows it aside by
+        // what it gains on its trailing side, in the same spring: never over
+        // them.
         let gain = scrubbing ? (WaveformBars.swellScale - 1) / 2 * waveform.bounds.width : 0
         let aside = CGAffineTransform(translationX: gain, y: 0)
         guard animated else {
             timerLabel.transform = aside
             dot.transform = aside
+            speedChip.transform = aside
             return
         }
         UIView.animate(
@@ -509,6 +500,7 @@ final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
         ) {
             self.timerLabel.transform = aside
             self.dot.transform = aside
+            self.speedChip.transform = aside
         }
     }
 
@@ -614,17 +606,18 @@ final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
     #if DEBUG
     var debugTimerText: String? { timerLabel.text }
     var debugShowsChip: Bool { !speedChip.isHidden }
-    var debugChipTitle: String? { speedChip.configuration?.title }
+    var debugChipTitle: String? { speedChip.content.title }
     var debugShowsDot: Bool { !dot.isHidden }
     var debugShowsLoader: Bool { !loader.isHidden }
     var debugChipFrame: CGRect { speedChip.convert(speedChip.bounds, to: self) }
     var debugWaveformGrown: Bool { waveform.debugSwollen }
     var debugTimerFrame: CGRect { timerLabel.convert(timerLabel.bounds, to: self) }
-    var debugChipFill: UIColor? { speedChip.configuration?.baseBackgroundColor }
+    /// The speed chip is the app's pill.
+    var debugChipIsTheAppsPill: Bool { speedChip.aspect == .pill(.quiet) }
     var debugWaveformFrame: CGRect { waveform.convert(waveform.bounds, to: self) }
     var debugScrubberFrame: CGRect { scrubber.convert(scrubber.bounds, to: self) }
     func debugSetSpeedLabel(_ label: String) {
-        speedChip.configuration?.title = label
+        speedChip.setContent(.title(label), animated: false)
         layoutIfNeeded()
     }
     /// What a press at `point` (own coordinates) lands on.
@@ -654,7 +647,7 @@ final class ThreadVoiceView: UIView, UIGestureRecognizerDelegate {
 }
 
 /// The voice message's waveform: 2 pt round-capped bars, the played ones in
-/// the brand's raspberry. A tap seeks; a horizontal drag scrubs (a vertical
+/// a dark grey (`ink`). A tap seeks; a horizontal drag scrubs (a vertical
 /// one is the list's; the row's long press does not start here). The played
 /// bars are the only mark of the finger: no playhead (the owner's device
 /// check, 2026-11-06).
@@ -666,6 +659,14 @@ final class WaveformBars: UIView, UIGestureRecognizerDelegate {
 
     private(set) var bars: [UInt8] = []
     private(set) var progress: Double = 0
+    /// The progress drawn: it follows `progress` in a tenth of a second, so
+    /// a seek or a finger never flips a bar's colour at once (the owner's
+    /// device check, 2026-11-07).
+    private(set) var drawnProgress: Double = 0
+    private var progressLink: CADisplayLink?
+    private var progressStepAt: CFTimeInterval = 0
+    /// How long the drawn progress takes to close most of a gap.
+    static let progressEase: CFTimeInterval = 0.08
     private var waiting = true
     private var rise: CGFloat = 1
 
@@ -695,6 +696,7 @@ final class WaveformBars: UIView, UIGestureRecognizerDelegate {
         // Waiting for a waveform: a flat row of minimum bars.
         bars = ThreadVoiceView.rebin(levels ?? [], to: barCount)
         self.progress = progress
+        drawnProgress = progress
         rise = 1
         invalidateIntrinsicContentSize()
         setNeedsDisplay()
@@ -713,6 +715,33 @@ final class WaveformBars: UIView, UIGestureRecognizerDelegate {
     func setProgress(_ progress: Double) {
         guard abs(progress - self.progress) > 0.0005 else { return }
         self.progress = progress
+        guard window != nil, !MotionPreference.reducesMotion else {
+            drawnProgress = progress
+            return setNeedsDisplay()
+        }
+        guard progressLink == nil else { return }
+        progressStepAt = CACurrentMediaTime()
+        let link = CADisplayLink(target: RiseStep { [weak self] link in
+            guard let self else { return link.invalidate() }
+            stepProgress()
+        }, selector: #selector(RiseStep.fire(_:)))
+        link.add(to: .main, forMode: .common)
+        progressLink = link
+    }
+
+    /// Eases the drawn progress toward the real one, frame by frame.
+    private func stepProgress() {
+        let now = CACurrentMediaTime()
+        let dt = now - progressStepAt
+        progressStepAt = now
+        let gap = progress - drawnProgress
+        if abs(gap) < 0.0005 {
+            drawnProgress = progress
+            progressLink?.invalidate()
+            progressLink = nil
+        } else {
+            drawnProgress += gap * (1 - exp(-dt / Self.progressEase))
+        }
         setNeedsDisplay()
     }
 
@@ -741,7 +770,11 @@ final class WaveformBars: UIView, UIGestureRecognizerDelegate {
     override func draw(_ rect: CGRect) {
         guard !bars.isEmpty else { return }
         let step = ThreadVoiceView.barWidth + ThreadVoiceView.barGap
-        let played = Int((progress * Double(bars.count)).rounded(.down))
+        // A bar fills by the share of it the progress has covered: the one
+        // under the finger blends, none flips.
+        let reached = drawnProgress * Double(bars.count)
+        let played = ThreadVoiceView.ink.resolvedColor(with: traitCollection)
+        let unplayed = UIColor.tertiaryLabel.resolvedColor(with: traitCollection)
         for (index, level) in bars.enumerated() {
             let full = waiting ? 0 : CGFloat(level) / 31 * bounds.height * rise
             let height = max(ThreadVoiceView.minBarHeight, full)
@@ -749,9 +782,24 @@ final class WaveformBars: UIView, UIGestureRecognizerDelegate {
                 x: CGFloat(index) * step, y: (bounds.height - height) / 2,
                 width: ThreadVoiceView.barWidth, height: height
             )
-            (index < played ? Palette.tint : UIColor.tertiaryLabel).setFill()
+            let share = CGFloat(min(1, max(0, reached - Double(index))))
+            Self.blend(unplayed, played, share).setFill()
             UIBezierPath(roundedRect: bar, cornerRadius: ThreadVoiceView.barWidth / 2).fill()
         }
+    }
+
+    /// `from` to `to`, `share` of the way, channel by channel.
+    static func blend(_ from: UIColor, _ to: UIColor, _ share: CGFloat) -> UIColor {
+        guard share > 0 else { return from }
+        guard share < 1 else { return to }
+        var a = (r: CGFloat(0), g: CGFloat(0), b: CGFloat(0), a: CGFloat(0))
+        var b = a
+        from.getRed(&a.r, green: &a.g, blue: &a.b, alpha: &a.a)
+        to.getRed(&b.r, green: &b.g, blue: &b.b, alpha: &b.a)
+        return UIColor(
+            red: a.r + (b.r - a.r) * share, green: a.g + (b.g - a.g) * share,
+            blue: a.b + (b.b - a.b) * share, alpha: a.a + (b.a - a.a) * share
+        )
     }
 
     // MARK: - The swell
@@ -828,16 +876,4 @@ final class WaveformBars: UIView, UIGestureRecognizerDelegate {
     var debugWaiting: Bool { waiting }
     var debugSwollen: Bool { transform != .identity }
     #endif
-}
-
-/// The speed chip: its press reaches a little past its capsule, over the
-/// bars under it — the chip goes first (the owner's device check,
-/// 2026-11-06).
-final class SpeedChip: UIButton {
-    static let reach: CGFloat = 12
-
-    /// 12 pt each side, and the whole line's height (its box clips the rest).
-    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        bounds.insetBy(dx: -Self.reach, dy: -Self.reach * 2).contains(point)
-    }
 }

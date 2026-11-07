@@ -310,8 +310,10 @@ struct ConversationThreadViewControllerTests {
         // ⚠️ In the bar a turn later (#756): placed from inside a diffable
         // apply, it lost UIKit's appearance transition and morph.
         #expect(await Self.settleDay(screen, inBar: true), "the day never reached the bar: \(Self.dayDiagnostic(screen))")
-        #expect(screen.navigationItem.rightBarButtonItems?.last === middle.item, "the day is not left of the bell")
-        #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains { $0 === tail.item }, "both days in the bar")
+        // Right of the back button (the owner, 2026-11-07).
+        #expect(screen.navigationItem.leftBarButtonItems?.first === middle.item, "the day is not right of the back button")
+        #expect(screen.navigationItem.leftItemsSupplementBackButton, "the day took the back button's place")
+        #expect(!(screen.navigationItem.leftBarButtonItems ?? []).contains { $0 === tail.item }, "both days in the bar")
 
         // At the start of the conversation no chip has gone under: no item.
         stream.setContentOffset(CGPoint(x: 0, y: -stream.adjustedContentInset.top), animated: false)
@@ -370,7 +372,7 @@ struct ConversationThreadViewControllerTests {
         #expect(await Self.settleDay(screen, inBar: true), "the day never reached the bar: \(Self.dayDiagnostic(screen))")
 
         #expect(screen.debugAnimatedBarPlacements - before == 1, "the appearance was placed again and cut short")
-        let days = screen.navigationItem.rightBarButtonItems?.filter { $0.identifier?.hasPrefix("conversation.day.") == true }
+        let days = screen.navigationItem.leftBarButtonItems?.filter { $0.identifier?.hasPrefix("conversation.day.") == true }
         #expect(days?.count == 1)
     }
 
@@ -615,7 +617,8 @@ struct ConversationThreadViewControllerTests {
         ).y
         #expect(abs(composer.field.maxY - (footerLine + SnapActionColumn.toolbarGlassDrop - SnapActionColumn.glassGap - SnapActionColumn.bottomBreath)) < 0.5,
                 "the field ends at \(composer.field.maxY), not glassGap above the toolbar's glass")
-        #expect(!composer.bar.debugRailButton.isHidden, "the slot is the pin")
+        #expect(composer.bar.debugRailButton.isHidden, "no column slot: the row's own bubble acts")
+        #expect(composer.bar.debugShowsRowAction)
     }
 
     /// ⚠️ THE GAP ON SCREEN, against the real toolbar this screen shows: the
@@ -642,39 +645,31 @@ struct ConversationThreadViewControllerTests {
                 "iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion): the field stands \(gap)pt above the toolbar's glass (field \(composer.field.maxY), glass \(glass))")
     }
 
-    /// The thread shares the post's composer, so it shares the post's action
-    /// column — at rest the rail slot stands exactly where
-    /// the snap feed's repost bubble stands under the same footer
-    /// (`SnapActionColumnLayoutTests` holds the post to it), wearing a PIN.
-    /// Nothing stands at the like bubble's place.
-    @Test func thePinStandsWhereTheFeedsRepostBubbleStands() throws {
+    /// The composer's own bubble ends the input row, the field's height,
+    /// right of the field — the voice note over an empty field, the send
+    /// over a draft — and no button is left in the field.
+    @Test func theOwnBubbleEndsTheInputRow() throws {
         let (screen, _, _, window) = makeScreen()
         screen.view.layoutIfNeeded()
-        let media = SnapActionColumnLayoutTests.mediaColumn(insets: UIEdgeInsets(
-            top: screen.view.safeAreaInsets.top, left: 0,
-            bottom: screen.view.safeAreaInsets.bottom, right: 0
-        ))
         let composer = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
-
+        let bubble = composer.bar.debugRowActionButton.convert(composer.bar.debugRowActionButton.bounds, to: window)
         #expect(composer.stake == nil)
-        #expect(SnapActionColumnLayoutTests.same(composer.rail, media.sound), "pin \(composer.rail) vs sound \(media.sound)")
-        #expect(composer.bar.debugRailSymbol == "pin")
-        #expect(!composer.bar.debugFieldActionButton.isHidden, "the waveform is in the field")
+        #expect(abs(bubble.maxY - composer.field.maxY) < 0.5, "\(bubble) vs field \(composer.field)")
+        #expect(bubble.minX >= composer.field.maxX, "the bubble overlaps the field")
+        #expect(composer.bar.debugRowActionButton.accessibilityLabel != nil)
+        #expect(composer.bar.debugRowActionButton.accessibilityLabel == composer.bar.debugFieldActionButton.accessibilityLabel,
+                "the bubble wears the field action's face")
+        #expect(!composer.bar.debugFieldActionShows, "a button is still in the field")
     }
 
-    /// ⚠️ KEYBOARD UP, THE PIN STAYS (asked 2026-10-02). Only the input row
-    /// rides the keyboard — `sm` over it, widened into the pin's width — and
-    /// the pin keeps the feed's repost coordinates, under the keyboard. The
-    /// stream clears the risen row, not the resting bar.
-    @Test func theKeyboardLiftsTheInputRowAndLeavesThePin() throws {
+    /// Keyboard up, the input row rides it — the field and its own bubble,
+    /// `sm` over it — and the stream clears the risen row, not the resting
+    /// bar.
+    @Test func theKeyboardLiftsTheInputRowAndItsBubble() throws {
         let (screen, _, _, window) = makeScreen()
         let rest = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
         let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
         let restInset = stream.contentInset.bottom
-        // No keyboard: the guide's top well below the bar. (Not the window's
-        // bottom: the package test host shows no toolbar, so its footer line
-        // is the window's edge and the resting row stands only 2pt above it —
-        // closer than the ceiling's `sm`.)
         let keyboard = SnapActionColumnLayoutTests.fakeKeyboard(
             in: screen.view, for: rest.bar, top: screen.view.bounds.height + 100
         )
@@ -687,11 +682,11 @@ struct ConversationThreadViewControllerTests {
         screen.view.setNeedsLayout()
         screen.view.layoutIfNeeded()
         let up = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
-        #expect(up.rail == rest.rail, "the pin moved: \(up.rail) vs \(rest.rail)")
-        #expect(up.bar.debugRailSymbol == "pin")
         let keyboardTopInWindow = screen.view.convert(CGPoint(x: 0, y: keyboardTop), to: window).y
         #expect(abs(up.field.maxY - (keyboardTopInWindow - Spacing.sm)) < 0.5)
-        #expect(abs(up.field.maxX - up.rail.maxX) < 0.5, "the risen field does not take the pin's width")
+        let bubble = up.bar.debugRowActionButton.convert(up.bar.debugRowActionButton.bounds, to: window)
+        #expect(abs(bubble.maxY - up.field.maxY) < 0.5, "the bubble stayed under the keyboard: \(bubble)")
+        #expect(bubble.minX >= up.field.maxX)
         #expect(stream.contentInset.bottom > restInset + 200,
                 "the stream clears the resting bar (\(stream.contentInset.bottom)), not the risen row")
     }
@@ -706,43 +701,38 @@ struct ConversationThreadViewControllerTests {
         #expect(Self.firstView(UIRefreshControl.self, in: preview.view) == nil)
     }
 
-    /// The pin is the inbox's: a tap goes to the driver, and what the driver
-    /// reports — from here or from the inbox — is the glyph, filled when
-    /// pinned. Typing never turns it into send: the send is in the field.
-    @Test func thePinPinsThroughTheDriverAndNeverTurnsIntoSend() throws {
+    /// The pin is the inbox's, in the bar: a tap goes to the driver, and
+    /// what the driver reports — from here or from the inbox — is the
+    /// glyph, filled when pinned. The bubble's send is never a pin.
+    @Test func thePinPinsThroughTheDriverFromTheBar() throws {
         let (screen, driver, _, _) = makeScreen()
         let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
-        let rail = bar.debugRailButton
-        #expect(rail.accessibilityLabel == "Pin conversation")
+        let pin = screen.debugPinItem
+        #expect(pin.accessibilityLabel == "Pin conversation")
 
-        rail.sendActions(for: .primaryActionTriggered)
+        screen.debugTapPin()
         #expect(driver.pinned == true)
-        #expect(bar.debugRailSymbol == "pin.fill")
-        #expect(rail.accessibilityLabel == "Unpin conversation")
+        #expect(pin.accessibilityLabel == "Unpin conversation")
 
         bar.draftText = "On my way"
-        #expect(bar.debugRailSymbol == "pin.fill", "the pin turned into \(bar.debugRailSymbol ?? "-")")
-        bar.debugFieldActionButton.sendActions(for: .primaryActionTriggered)
+        bar.debugRowActionButton.sendActions(for: .primaryActionTriggered)
         #expect(driver.sent == ["On my way"])
         #expect(driver.pinned == true, "a send is not a pin")
-        #expect(bar.debugRailSymbol == "pin.fill")
 
         // Unpinned from elsewhere (the inbox's menu): the glyph follows.
         driver.onPinnedChange?(false)
-        #expect(bar.debugRailSymbol == "pin")
+        #expect(pin.accessibilityLabel == "Pin conversation")
     }
 
-    /// A draft conversation has nothing to pin yet: the pin is drawn, quiet —
-    /// and stays so over a draft, whose send is the field's.
+    /// A draft conversation has nothing to pin yet: the pin is drawn, quiet;
+    /// the send never waits on it.
     @Test func aDraftConversationsPinWaitsForTheConversation() throws {
         let (screen, driver, _, _) = makeScreen()
         driver.onPinnedChange?(nil)
         let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
-        #expect(bar.debugRailSymbol == "pin")
-        #expect(bar.debugRailButton.isEnabled == false)
+        #expect(screen.debugPinItem.isEnabled == false)
         bar.draftText = "Hi"
-        #expect(bar.debugRailButton.isEnabled == false)
-        #expect(bar.debugFieldActionButton.isEnabled, "send is never held back by the pin")
+        #expect(bar.debugRowActionButton.isEnabled, "send is never held back by the pin")
     }
 
     /// A draft is sendable with the keyboard down (a shared link or an emote
@@ -800,7 +790,7 @@ struct ConversationThreadViewControllerTests {
 
     /// The footer: [peer pill] … [⋯] (#671, the layout since #680) — no
     /// emote strip (the composer's emote button is the way to emotes), and no
-    /// peer pill left in the nav bar. The composer's pin is unchanged.
+    /// peer pill left in the nav bar. The pin is the bar's, beside the bell.
     @Test func thePeerPillLeadsTheFooter() throws {
         let (screen, _, _, _) = makeScreen()
         let items = try #require(screen.toolbarItems)
@@ -809,8 +799,7 @@ struct ConversationThreadViewControllerTests {
         #expect(items.last?.customView == nil, "⋯ is not a stock bar item")
         let nav = screen.navigationItem.rightBarButtonItems ?? []
         #expect(!nav.contains { $0.customView is SnapAuthorIdentityView }, "the peer pill is still in the nav bar")
-        let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
-        #expect(bar.debugRailSymbol == "pin" || bar.debugRailSymbol == "pin.fill")
+        #expect(nav.contains { $0 === screen.debugPinItem })
     }
 
     @Test func aPeekHasNoComposerNoFooterAndNoMenu() throws {
@@ -821,21 +810,42 @@ struct ConversationThreadViewControllerTests {
         #expect(!stream.interactions.contains { $0 is UIContextMenuInteraction })
     }
 
-    // MARK: - #1929: scrolled away, the pin becomes the way back
+    // MARK: - #1929: scrolled away, the way back floats over the composer
 
     private static let longTranscript = (0..<80).map { index in
         message("long\(index)", daysBack: 0, minutes: Double(index), mine: index.isMultiple(of: 2))
     }
 
-    /// The reader scrolls more than a screen up: the pin becomes a chevron in
-    /// place; a tap goes back to the newest message, and the pin is back.
-    @Test func scrolledAwayThePinBecomesTheWayBack() async throws {
+    /// The reader scrolls more than a screen up: the way back floats over the
+    /// composer (the owner, 2026-11-07, Telegram's); a tap goes back to the
+    /// newest message, and it goes.
+    @Test func scrolledAwayTheWayBackFloatsOverTheComposer() async throws {
         let (screen, _, _, window) = makeScreen(phase: .content(Self.longTranscript))
         defer { window.isHidden = true }
         window.layoutIfNeeded()
         let bottom = screen.debugBottomOffset
         try #require(bottom > 1500, "the premise: a transcript several screens long")
-        #expect(screen.debugRailFace == .pin(isPinned: false))
+        #expect(!screen.debugShowsReturnButton)
+
+        // A voice take in the field's place: the lock rises over the held
+        // bubble, where the way back floats — it gives the column up, and
+        // takes it back once the take is gone.
+        screen.debugComposeBar.showVoiceOverlay(VoiceRecordingStrip())
+        window.layoutIfNeeded()
+        screen.debugScroll(to: bottom - 1200, userScroll: true)
+        #expect(screen.debugShowsReturn)
+        #expect(!screen.debugShowsReturnButton, "the way back stood over the lock's column")
+        screen.debugComposeBar.showVoiceOverlay(nil)
+        #expect(screen.debugShowsReturnButton, "the way back did not come back after the take")
+        window.layoutIfNeeded()
+        // Back at the newest message, and away again mid-fade: it shows.
+        screen.debugScroll(to: bottom, userScroll: false)
+        #expect(!screen.debugShowsReturn)
+        screen.debugScroll(to: bottom - 1200, userScroll: true)
+        // The model value: where the fade now heads.
+        #expect(screen.debugShowsReturnButton && screen.debugReturnButtonAlpha > 0.99,
+                "shown again mid-fade, the way back stayed invisible")
+        screen.debugScroll(to: bottom, userScroll: false)
 
         // A programmatic move (a quote jump) never shows it.
         screen.debugScroll(to: bottom - 1200, userScroll: false)
@@ -843,38 +853,31 @@ struct ConversationThreadViewControllerTests {
         // The reader's own scroll does.
         screen.debugScroll(to: bottom - 1200, userScroll: true)
         #expect(screen.debugShowsReturn)
-        #expect(screen.debugRailFace == .returnTo(down: true))
+        #expect(screen.debugShowsReturnButton)
 
         let away = screen.debugStreamOffset
-        screen.debugTapRail()
+        screen.debugTapReturn()
         for _ in 0..<100 where screen.debugStreamOffset <= away { try await Task.sleep(for: .milliseconds(10)) }
         #expect(screen.debugStreamOffset > away, "the tap did not head for the newest message")
         // Arriving there — as the animation's scroll callbacks report it.
         screen.debugScroll(to: bottom, userScroll: false)
-        #expect(!screen.debugShowsReturn, "back at the newest message, the chevron stayed")
-        #expect(screen.debugRailFace == .pin(isPinned: false))
+        #expect(!screen.debugShowsReturn, "back at the newest message, the way back stayed")
     }
 
-    /// The chevron's hold arms the pin through the driver; a draft's hold
-    /// arms nothing.
-    @Test func theChevronsHoldArmsThePinAndADraftsNothing() throws {
+    /// The composer has no column slot: its own bubble is the voice note and
+    /// the send, and the pin is the bar's, beside the bell.
+    @Test func theComposersOwnBubbleAndThePinInTheBar() throws {
         let (screen, driver, _, window) = makeScreen(phase: .content(Self.longTranscript))
         defer { window.isHidden = true }
         window.layoutIfNeeded()
-        screen.debugScroll(to: screen.debugBottomOffset - 1200, userScroll: true)
-        let hold = try #require(screen.debugPinHold)
-        #expect(hold.isEnabled, "the chevron's hold is off")
-        hold.onFire?()
-        #expect(driver.pinned == true, "the hold did not pin the conversation")
-
-        let (draft, draftDriver, _, draftWindow) = makeScreen(phase: .content(Self.longTranscript))
-        defer { draftWindow.isHidden = true }
-        draftDriver.pinned = nil
-        draftDriver.onPinnedChange?(nil)
-        draftWindow.layoutIfNeeded()
-        draft.debugScroll(to: draft.debugBottomOffset - 1200, userScroll: true)
-        #expect(draft.debugShowsReturn, "a draft's chevron is missing")
-        #expect(draft.debugPinHold?.isEnabled == false, "a draft's hold arms something")
+        #expect(screen.debugRailFace == .noSlot)
+        #expect(screen.debugComposeBar.actsFromOwnBubble)
+        #expect(screen.debugComposeBar.debugShowsRowAction)
+        #expect(!screen.debugComposeBar.debugFieldActionShows, "no button left in the field")
+        #expect(screen.navigationItem.rightBarButtonItems?.contains { $0 === screen.debugPinItem } == true)
+        #expect(screen.debugPinItem.isEnabled)
+        screen.debugTapPin()
+        #expect(driver.pinned == true, "the bar's pin did not pin the conversation")
     }
 
 }

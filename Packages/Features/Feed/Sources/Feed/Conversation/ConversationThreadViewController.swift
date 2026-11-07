@@ -57,13 +57,11 @@ final class ConversationThreadViewController: UIViewController {
     )
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private let contextMenu = ThreadRowContextMenu()
-    /// The post's composer, so the post's geometry (`SnapActionColumn`): at
-    /// rest the rail slot stands where the snap feed's repost bubble stands
-    /// (the column's lift above the footer, its inset from the trailing edge)
-    /// and wears a PIN for this conversation, whatever the field holds; the
-    /// voice note and the send arrow are in the field. Keyboard up, only the
-    /// input row rides the keyboard, widening into the pin's width — the pin
-    /// stays where it was.
+    /// The post's composer, in its conversation's shape (the owner,
+    /// 2026-11-07, Telegram's): no column slot — the voice note and the send
+    /// are the input row's own bubble at its end (`actsFromOwnBubble`), which
+    /// rides the keyboard with the field. The pin went to the bar, the way
+    /// back to the newest message floats over the composer (`returnButton`).
     private let composeBar = CommentsInputBar()
     /// The leftward swipe's push of the peer's profile (#1525).
     private(set) var swipeArbiter: SwipeStageArbiter?
@@ -74,40 +72,93 @@ final class ConversationThreadViewController: UIViewController {
 
     private func renderPinned(_ pinned: Bool?) {
         isPinned = pinned
-        composeBar.isRailFaceEnabled = pinned != nil
-        renderRailFace()
+        applyPinLook()
     }
 
-    /// Scrolled away from the newest message, the pin becomes the way back
-    /// (#1929): a tap scrolls to the bottom, a hold arms the pin.
+    /// The conversation's pin: a bar item of its own, left of the bell and
+    /// apart from it (the owner, 2026-11-07). Disabled until the driver
+    /// reports one: a draft has nothing to pin. The action carries no image
+    /// (`BarItems.icon`'s note: an action's image is re-applied to its item
+    /// when it fires).
+    private lazy var pinItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            title: nil, image: UIImage(systemName: "pin"),
+            primaryAction: UIAction { [weak self] _ in self?.togglePin() }
+        )
+        item.identifier = "conversation.pin"
+        item.tintColor = .label
+        return item
+    }()
+    private let pinSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
+
+    private func togglePin() {
+        guard isPinned != nil else { return }
+        driver.togglePinned()
+    }
+
+    private func applyPinLook() {
+        pinItem.image = UIImage(systemName: isPinned == true ? "pin.fill" : "pin")
+        pinItem.isEnabled = isPinned != nil
+        pinItem.accessibilityLabel = isPinned == true ? "Unpin conversation" : "Pin conversation"
+    }
+
+    /// Scrolled away from the newest message, the way back shows (#1929).
     private var scrollAway = ScrollAwayPolicy()
 
-    /// The slot as it stands: the way back while scrolled away, the pin
-    /// otherwise — a symbol replace on the slot's own glyph, never a blink.
-    private func renderRailFace() {
-        composeBar.railFace = scrollAway.showsReturn ? .returnTo(down: true) : .pin(isPinned: isPinned == true)
-        pinHold?.isEnabled = scrollAway.showsReturn && isPinned != nil
-        // The pin stays reachable with the chevron up: VoiceOver's road.
-        composeBar.railHoldTarget.accessibilityCustomActions = scrollAway.showsReturn && isPinned != nil ? [
-            UIAccessibilityCustomAction(name: isPinned == true ? "Unpin conversation" : "Pin conversation") { [weak self] _ in
-                self?.driver.togglePinned()
-                return true
-            },
-        ] : nil
-    }
+    /// The way back to the newest message: a glass bubble floating over the
+    /// composer's trailing end (the owner, 2026-11-07, Telegram's) — the
+    /// composer's end is its voice and send now.
+    private let returnButton: UIButton = {
+        var configuration = UIButton.Configuration.glass()
+        configuration.image = UIImage(
+            systemName: "chevron.down", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        )
+        configuration.baseForegroundColor = .label
+        configuration.cornerStyle = .capsule
+        let button = UIButton(configuration: configuration)
+        button.accessibilityLabel = "Scroll to latest message"
+        button.isHidden = true
+        return button
+    }()
 
-    /// The chevron's hold: the disc rises with the pin, and once full the
-    /// pin toggles — the disc says the new state before it retreats.
-    private var pinHold: HoldToArmPresenter?
+    /// A voice take shows in the field's place: the way back gives the
+    /// column to the lock rising over the held bubble.
+    private var composerRecords = false
 
-    private func installPinHold() {
-        let hold = HoldToArmPresenter(view: composeBar.railHoldTarget) { [weak self] in
-            .symbol(self?.isPinned == true ? "pin.fill" : "pin")
+    private var returnShows: Bool { scrollAway.showsReturn && !composerRecords }
+    /// What the way back was last told — not `isHidden`, which stays false
+    /// through a fade out: shown again mid-fade, it stayed at alpha 0.
+    private var returnShown = false
+
+    /// The way back comes in springing up from smaller as it fades in, and
+    /// fades going.
+    private func renderReturn() {
+        let shows = returnShows
+        guard shows != returnShown else { return }
+        returnShown = shows
+        let size: CGAffineTransform = shows ? .identity : CGAffineTransform(scaleX: 0.6, y: 0.6)
+        guard view.window != nil, !MotionPreference.reducesMotion else {
+            returnButton.isHidden = !shows
+            returnButton.alpha = 1
+            returnButton.transform = .identity
+            return
         }
-        hold.firedFace = { [weak self] in .symbol(self?.isPinned == true ? "pin.fill" : "pin") }
-        hold.onFire = { [weak self] in self?.driver.togglePinned() }
-        hold.isEnabled = false
-        pinHold = hold
+        if shows, returnButton.isHidden {
+            returnButton.isHidden = false
+            returnButton.alpha = 0
+            returnButton.transform = CGAffineTransform(scaleX: 0.6, y: 0.6)
+        }
+        UIView.animate(
+            springDuration: 0.35, bounce: shows ? 0.25 : 0, options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.returnButton.alpha = shows ? 1 : 0
+            self.returnButton.transform = size
+        } completion: { _ in
+            guard !self.returnShows else { return }
+            self.returnButton.isHidden = true
+            self.returnButton.alpha = 1
+            self.returnButton.transform = .identity
+        }
     }
 
     /// Feeds the way-back policy: the distance from the newest message.
@@ -118,15 +169,20 @@ final class ConversationThreadViewController: UIViewController {
         let viewport = collectionView.bounds.height - insets.top - insets.bottom
         let before = scrollAway.showsReturn
         scrollAway.update(distance: distance, viewport: viewport, isUserScroll: userScroll)
-        if scrollAway.showsReturn != before { renderRailFace() }
+        if scrollAway.showsReturn != before { renderReturn() }
     }
 
     /// The way back's state, for tests.
     var debugShowsReturn: Bool { scrollAway.showsReturn }
-    var debugPinHold: HoldToArmPresenter? { pinHold }
     var debugRailFace: CommentsInputBar.RailFace { composeBar.railFace }
-    /// A tap on the slot, through its own action.
-    func debugTapRail() { composeBar.onRailAction?() }
+    var debugComposeBar: CommentsInputBar { composeBar }
+    var debugPinItem: UIBarButtonItem { pinItem }
+    var debugShowsReturnButton: Bool { !returnButton.isHidden }
+    var debugReturnButtonAlpha: CGFloat { returnButton.alpha }
+    /// A tap on the way back.
+    func debugTapReturn() { returnButton.sendActions(for: .primaryActionTriggered) }
+    /// A tap on the bar's pin, through its own action.
+    func debugTapPin() { togglePin() }
     /// The stream moved to `offset` — by the reader, or not — as a scroll
     /// callback reports it.
     func debugScroll(to offset: CGFloat, userScroll: Bool) {
@@ -483,7 +539,6 @@ final class ConversationThreadViewController: UIViewController {
     /// (#729): a title edited in place swaps in a frame; a new item under a
     /// new identifier gets the native Liquid Glass morph.
     private var dayItem = UIBarButtonItem()
-    private let daySpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     private var dayItemShown = false
     private var dayShown: Date?
 
@@ -509,7 +564,7 @@ final class ConversationThreadViewController: UIViewController {
     ///   the same turn, and a second `setRightBarButtonItems` cut the first
     ///   one's appearance short — the item popped in on the device.
     private func scheduleDayPlacement() {
-        guard view.window != nil else { return placeMuteItem() }
+        guard view.window != nil else { return placeDayItem(animated: false) }
         guard !dayPlacementScheduled else { return }
         dayPlacementScheduled = true
         DispatchQueue.main.async { [weak self] in
@@ -534,7 +589,7 @@ final class ConversationThreadViewController: UIViewController {
             return
         }
         dayPlacementScheduled = false
-        placeMuteItem(animated: true)
+        placeDayItem(animated: true)
     }
 
     private var dayPlacementScheduled = false
@@ -621,7 +676,7 @@ final class ConversationThreadViewController: UIViewController {
     /// Whether the bar's day shows, and what it says. Tests.
     /// `inBar`: whether the bar holds it yet — a turn after `shown`.
     var debugDayItem: (shown: Bool, title: String?, item: UIBarButtonItem, inBar: Bool) {
-        let inBar = navigationItem.rightBarButtonItems?.contains { $0 === dayItem } ?? false
+        let inBar = navigationItem.leftBarButtonItems?.contains { $0 === dayItem } ?? false
         return (dayItemShown, dayItem.title, dayItem, inBar)
     }
 
@@ -782,18 +837,17 @@ final class ConversationThreadViewController: UIViewController {
             self?.presentNotice("Voice Messages", "Voice messages aren't available yet.")
         }
         installVoiceComposer()
-        // No stake: a conversation has nothing to like. The column keeps its
-        // slot where it was: the pin.
+        // No stake: a conversation has nothing to like, and no column slot:
+        // the row's own bubble is the voice and the send.
         composeBar.showsStake = false
-        // The slot's pin, the inbox's own (the driver's). Disabled until the
-        // driver reports one (`renderPinned`): a draft has nothing to pin.
-        installPinHold()
+        composeBar.railFace = .noSlot
+        composeBar.actsFromOwnBubble = true
         renderPinned(isPinned)
-        composeBar.onRailAction = { [weak self] in
-            guard let self else { return }
-            // Scrolled away: the way back to the newest message (#1929).
-            if scrollAway.showsReturn { return scrollToBottom(animated: true) }
-            driver.togglePinned()
+        returnButton.addAction(UIAction { [weak self] _ in self?.scrollToBottom(animated: true) }, for: .primaryActionTriggered)
+        composeBar.onVoiceOverlayChange = { [weak self] records in
+            guard let self, records != composerRecords else { return }
+            composerRecords = records
+            renderReturn()
         }
 
         composerBackdrop.setVeilOpacity(SnapCommentsLayout.frostVeilOpacity(hasMedia: false))
@@ -801,12 +855,14 @@ final class ConversationThreadViewController: UIViewController {
         composeBar.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(composerBackdrop)
         view.addSubview(composeBar)
+        returnButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(returnButton)
         // The BAR rests on the safe area, which the footer toolbar inflates,
         // and never moves: at rest the input row sits `glassGap` above the
         // toolbar's glass and the bar lifts its own column
         // (`SnapActionColumn`). The keyboard guide, measured from the screen's
         // edge, lifts the input row alone the moment the keyboard rises past
-        // it (`riseWithKeyboard`) — the pin stays on its station.
+        // it (`riseWithKeyboard`), its own action bubble with it.
         view.keyboardLayoutGuide.usesBottomSafeArea = false
         NSLayoutConstraint.activate([
             composeBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Spacing.lg),
@@ -827,6 +883,12 @@ final class ConversationThreadViewController: UIViewController {
             composerBackdrop.topAnchor.constraint(
                 equalTo: composeBar.inputRowTopAnchor, constant: -SnapCommentsLayout.footerFrostLead
             ),
+            // Over the row's own bubble, a breath above the row: it rides the
+            // keyboard with it.
+            returnButton.trailingAnchor.constraint(equalTo: composeBar.trailingAnchor),
+            returnButton.bottomAnchor.constraint(equalTo: composeBar.inputRowTopAnchor, constant: -Spacing.md),
+            returnButton.widthAnchor.constraint(equalToConstant: SnapActionColumn.bubbleSize),
+            returnButton.heightAnchor.constraint(equalToConstant: SnapActionColumn.bubbleSize),
         ])
         composeBar.riseWithKeyboard(of: view.keyboardLayoutGuide)
     }
@@ -909,8 +971,11 @@ final class ConversationThreadViewController: UIViewController {
         // The pill is the toolbar's (#671); a preview (no toolbar) keeps it
         // in the bar.
         var items = pillRidesToolbar ? [] : [BarItems.container(id: "conversation.peer-pill", view: peerPill)]
-        // No points badge on a conversation (#738): the bell alone trails.
+        // No points badge on a conversation (#738): the bell trails, the pin
+        // beside it.
         navigationItem.rightBarButtonItems = items
+        // The day stands right of the back button (the owner, 2026-11-07).
+        navigationItem.leftItemsSupplementBackButton = true
         placeMuteItem()
     }
 
@@ -919,19 +984,15 @@ final class ConversationThreadViewController: UIViewController {
     private func placeMuteItem(replacing old: UIBarButtonItem? = nil, animated: Bool = false) {
         let current = ownTrailingBarItems
         var items = current.filter {
-            $0 !== muteItem && $0 !== muteSpacer && $0 !== old && $0 !== daySpacer && !Self.isDayItem($0)
+            $0 !== muteItem && $0 !== muteSpacer && $0 !== old && $0 !== pinItem && $0 !== pinSpacer
         }
-        // `[0]` is the trailing edge: the bell takes the corner, the day
-        // stands left of it (#750).
+        // `[0]` is the trailing edge: the bell takes the corner, the pin
+        // stands left of it, a bubble of its own (the owner, 2026-11-07).
         var trailing: [UIBarButtonItem] = []
         if mode == .full, muted != nil { trailing.append(muteItem) }
-        // A day placement on its way, animated: an unanimated placement (the
-        // bell's first) leaves the day as it stands rather than popping it in.
-        let day = dayPlacementScheduled && !animated ? current.first(where: Self.isDayItem)
-            : (dayItemShown ? dayItem : nil)
-        if mode == .full, let day {
-            if !trailing.isEmpty { trailing.append(daySpacer) }
-            trailing.append(day)
+        if mode == .full {
+            if !trailing.isEmpty { trailing.append(pinSpacer) }
+            trailing.append(pinItem)
         }
         items = trailing + (items.isEmpty || trailing.isEmpty ? [] : [muteSpacer]) + items
         // The same items again would restart — and cut short — a transition
@@ -944,9 +1005,19 @@ final class ConversationThreadViewController: UIViewController {
     /// How many animated placements the bar took. Tests.
     private(set) var debugAnimatedBarPlacements = 0
 
-    /// Any day item — the one on show, or one a change of day replaced.
-    private static func isDayItem(_ item: UIBarButtonItem) -> Bool {
-        item.identifier?.hasPrefix("conversation.day.") == true
+    /// The day, right of the back button (the owner, 2026-11-07; it stood
+    /// left of the bell). A placement on its way, unanimated (`scheduled`),
+    /// leaves the day as it stands rather than popping it in.
+    private func placeDayItem(animated: Bool) {
+        guard mode == .full else { return }
+        let current = navigationItem.leftBarButtonItems ?? []
+        if dayPlacementScheduled, !animated { return }
+        let items = dayItemShown ? [dayItem] : []
+        // The same items again would restart — and cut short — a transition
+        // already running (#756).
+        guard items.count != current.count || zip(items, current).contains(where: { $0 !== $1 }) else { return }
+        if animated { debugAnimatedBarPlacements += 1 }
+        navigationItem.setLeftBarButtonItems(items, animated: animated)
     }
 
     /// The bell: a tap toggles the mute it shows when tapped, a long press

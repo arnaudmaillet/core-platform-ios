@@ -16,11 +16,15 @@ public protocol VoiceAudioSessionControlling: AnyObject {
     func activate() throws
     /// Gives the session back, telling the others they may play again.
     func deactivate()
+    /// Whether haptics still play while it records — iOS mutes them by
+    /// default, and the lock's tap went unfelt (the owner, 2026-11-07).
+    func setAllowHapticsAndSystemSoundsDuringRecording(_ allow: Bool) throws
 }
 
 public extension VoiceAudioSessionControlling {
     func activate() throws { try setActive(true, options: []) }
     func deactivate() { try? setActive(false, options: .notifyOthersOnDeactivation) }
+    func setAllowHapticsAndSystemSoundsDuringRecording(_ allow: Bool) throws {}
 }
 
 /// ⚠️ THE RELEASE NEVER HOLDS THE MAIN THREAD. On a device, deactivating with
@@ -102,6 +106,9 @@ public struct VoiceSessionRole: Equatable, Sendable {
     @MainActor
     func apply(to session: any VoiceAudioSessionControlling) throws {
         try session.setCategory(category, mode: mode, options: options)
+        // A take answers the finger with haptics — the start, the lock —
+        // which iOS mutes while it records unless asked.
+        if self == .recording { try? session.setAllowHapticsAndSystemSoundsDuringRecording(true) }
         try session.activate()
     }
 }
