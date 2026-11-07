@@ -35,26 +35,50 @@ open class AppButton: AppControl {
         case row
         /// The profile header's capsules.
         case header
+        /// A form's action at the width its host gives — a sheet's
+        /// "Continue", a sign-in method (#2020): the height of the system's
+        /// large button, growing with the text size up to the app's ceiling.
+        case form
     }
 
-    /// What the button says: a title, a symbol, a count, or a mix.
+    /// What stands beside the words: a symbol, tinted with the button's ink,
+    /// or an image drawn in its own colours, never tinted — a provider's
+    /// logo (#2020; the owner, 2026-11-01: our buttons carry any icon). Both
+    /// take the symbol's size, placement, morph and load.
+    public enum Icon: Equatable, Sendable {
+        /// An SF Symbol or one of the app's own (`AppSymbol`).
+        case symbol(String)
+        case image(UIImage)
+    }
+
+    /// What the button says: a title, an icon, a count, or a mix.
     public struct Content: Equatable, Sendable {
         public var title: String?
-        public var symbol: String?
+        public var icon: Icon?
         /// Drawn compact (1.2K) in monospaced digits; it is also the
         /// accessibility value.
         public var count: Int?
-        /// Where the symbol stands against the words.
+        /// Where the icon stands against the words.
         public var imagePlacement: NSDirectionalRectEdge
 
+        /// `icon` wins over `symbol`, which is `.symbol(symbol)`.
         public init(
-            title: String? = nil, symbol: String? = nil, count: Int? = nil,
+            title: String? = nil, symbol: String? = nil, icon: Icon? = nil, count: Int? = nil,
             imagePlacement: NSDirectionalRectEdge = .leading
         ) {
             self.title = title
-            self.symbol = symbol
+            self.icon = icon ?? symbol.map(Icon.symbol)
             self.count = count
             self.imagePlacement = imagePlacement
+        }
+
+        /// The icon's symbol name, when it is a symbol.
+        public var symbol: String? {
+            get {
+                guard case .symbol(let name) = icon else { return nil }
+                return name
+            }
+            set { icon = newValue.map(Icon.symbol) }
         }
 
         public static func title(_ title: String) -> Content { Content(title: title) }
@@ -990,7 +1014,7 @@ open class AppButton: AppControl {
         case .placeholder: accessibilityValue = nil
         }
         largeContentTitle = content.text ?? accessibilityLabel
-        largeContentImage = content.symbol.flatMap { UIImage.symbol(named: $0) }
+        largeContentImage = Self.iconImage(content.icon, font: Self.font(for: size))
     }
 
     // MARK: - Configuration
@@ -1020,7 +1044,7 @@ open class AppButton: AppControl {
         switch ground {
         case .prominent: return .quiet
         case .quiet: return .prominent
-        case .tinted, .material: return ground
+        case .tinted, .material, .monochrome: return ground
         }
     }
 
@@ -1044,6 +1068,13 @@ open class AppButton: AppControl {
             config = .plain()
             config.baseForegroundColor = .label
             config.background.backgroundColor = .clear
+        case .monochrome?:
+            config = .filled()
+            // Black and white by appearance, never the semantic background:
+            // inside a sheet that resolves to its elevated grey, and the
+            // words vanished on the dark white (seen on the simulator).
+            config.baseBackgroundColor = AppControl.monochromeFill
+            config.baseForegroundColor = AppControl.monochromeInk
         case nil:
             config = .plain()
             config.baseForegroundColor = .label
@@ -1062,8 +1093,8 @@ open class AppButton: AppControl {
         config.contentInsets = Self.insets(for: size)
         config.imagePadding = 6
         config.imagePlacement = content.imagePlacement
-        config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(font: font, scale: .small)
-        config.image = content.symbol.flatMap { UIImage.symbol(named: $0) }
+        config.preferredSymbolConfigurationForImage = Self.symbolConfiguration(for: font)
+        config.image = Self.iconImage(content.icon, font: font)
         config.titleLineBreakMode = .byTruncatingTail
         if let text = content.text {
             config.attributedTitle = AttributedString(text, attributes: AttributeContainer([.font: font]))
@@ -1098,13 +1129,17 @@ open class AppButton: AppControl {
         return config
     }
 
-    static func font(for size: Size) -> UIFont {
+    /// `traits`: a text size to measure at (tests); nil is the app's.
+    static func font(for size: Size, compatibleWith traits: UITraitCollection? = nil) -> UIFont {
         switch size {
         case .row:
             UIFont.appFont(forTextStyle: .subheadline)
         case .header:
             // Capped (#482), as the tray's capsule.
             UIFont.scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 19)
+        case .form:
+            // The system large button's words: the body's size, semibold.
+            UIFont.appFont(forTextStyle: .headline, compatibleWith: traits)
         }
     }
 
@@ -1112,7 +1147,57 @@ open class AppButton: AppControl {
         switch size {
         case .row: NSDirectionalEdgeInsets(top: 6, leading: Spacing.md, bottom: 6, trailing: Spacing.md)
         case .header: NSDirectionalEdgeInsets(top: Spacing.sm, leading: Spacing.md, bottom: Spacing.sm, trailing: Spacing.md)
+        case .form:
+            NSDirectionalEdgeInsets(
+                top: formVerticalInset, leading: Spacing.lg, bottom: formVerticalInset, trailing: Spacing.lg
+            )
         }
+    }
+
+    /// The system large button's height, a `.form` button's at the default
+    /// text size: the app's own type scale (#2149) sets its words a little
+    /// smaller than Apple's, so the inset makes up the difference.
+    static let formHeight: CGFloat = 50
+    /// A `.form` button's inset above and below its words: what reaches
+    /// `formHeight` at the default size, never under 14 pt — so it grows
+    /// with the text from there.
+    static var formVerticalInset: CGFloat {
+        let base = UIFont.appFont(
+            forTextStyle: .headline, compatibleWith: UITraitCollection(preferredContentSizeCategory: .large)
+        )
+        return max(14, ((formHeight - base.lineHeight) / 2).rounded(.up))
+    }
+
+    /// The symbol's configuration at `font` — what sizes an image icon too.
+    static func symbolConfiguration(for font: UIFont) -> UIImage.SymbolConfiguration {
+        UIImage.SymbolConfiguration(font: font, scale: .small)
+    }
+
+    /// The icon drawn: a symbol as the configuration sizes it, tinted; an
+    /// image at a symbol's height at `font`, in its own colours.
+    static func iconImage(_ icon: Icon?, font: UIFont) -> UIImage? {
+        switch icon {
+        case .symbol(let name)?:
+            return UIImage.symbol(named: name)
+        case .image(let image)?:
+            let side = imageIconSide(for: font)
+            guard image.size.height > 0 else { return nil }
+            let size = CGSize(width: (image.size.width * side / image.size.height).rounded(), height: side)
+            let format = UIGraphicsImageRendererFormat.preferred()
+            return UIGraphicsImageRenderer(size: size, format: format).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: size))
+            }.withRenderingMode(.alwaysOriginal)
+        case nil:
+            return nil
+        }
+    }
+
+    /// The height an image icon takes at `font`: the reference symbol's —
+    /// a circle, the rounded glyph a logo usually is — at the same
+    /// configuration, so an image and a symbol stand the same size.
+    static func imageIconSide(for font: UIFont) -> CGFloat {
+        let reference = UIImage(systemName: "circle", withConfiguration: symbolConfiguration(for: font))
+        return (reference?.size.height ?? font.lineHeight).rounded()
     }
 
     // MARK: - Cell accessory

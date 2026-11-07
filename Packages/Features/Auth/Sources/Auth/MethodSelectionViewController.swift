@@ -37,7 +37,6 @@ final class MethodSelectionViewController: AuthStepTableViewController {
         self?.onClose?()
     }
 
-    private static let methodCornerRadius: CGFloat = 12
 
     /// Each method gets its own standalone section (one row each); the legal
     /// line closes the list, as a header with no rows.
@@ -49,14 +48,30 @@ final class MethodSelectionViewController: AuthStepTableViewController {
     private let methods: [SignInMethod]
     private let sections: [Section]
 
-    /// The method whose sign-in is running (Sign in with Apple): its row
-    /// carries a spinner until the call ends (#827).
+    /// The method whose sign-in is running (Sign in with Apple): its button
+    /// holds its load until the call ends (#2020; a spinner, #827).
     private(set) var workingMethod: SignInMethod?
+
+    /// Each method's button, made once (#2020): the app's own, at its form
+    /// size, a card on the quiet ground — Apple's on its monochrome one.
+    private var buttons: [SignInMethod: AppButton] = [:]
+    /// Each method's row, made once, hosting its button on a clear ground.
+    private var cells: [SignInMethod: UITableViewCell] = [:]
 
     init(methods: [SignInMethod] = SignInMethod.all) {
         self.methods = methods
         sections = methods.map(Section.method) + [.legal]
         super.init(style: .insetGrouped)
+        for method in methods {
+            let button = AppButton(
+                aspect: .pill(method.ground), size: .form, shape: .card,
+                content: AppButton.Content(title: method.displayName, symbol: method.symbolName)
+            )
+            // The tap is the button's, not the row's selection: no grey row
+            // highlight, the button's swell instead.
+            button.addAction(UIAction { [weak self] _ in self?.onMethodSelected?(method) }, for: .primaryActionTriggered)
+            buttons[method] = button
+        }
         // An inline title in the bar's own appearance, as on the form's steps.
         title = Self.sheetTitle
         navigationItem.largeTitleDisplayMode = .never
@@ -104,64 +119,61 @@ final class MethodSelectionViewController: AuthStepTableViewController {
         case .legal:
             return UITableViewCell()
         case .method(let method):
-            let cell = UITableViewCell()
-            // Sharper corners than input capsules so methods read as
-            // distinct buttons; the update handler keeps the native
-            // pressed-state tint.
-            cell.configurationUpdateHandler = { cell, state in
-                var background = UIBackgroundConfiguration.listGroupedCell().updated(for: state)
-                background.cornerRadius = Self.methodCornerRadius
-                cell.backgroundConfiguration = background
-            }
-            var content = UIListContentConfiguration.cell()
-            content.text = method.displayName
-            content.image = method.icon
-            content.imageProperties.tintColor = .label
-            content.imageProperties.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .body)
-            cell.contentConfiguration = content
-            cell.accessibilityTraits = .button
-            showWorking(on: cell, for: method)
-            return cell
+            return cell(for: method)
         }
     }
 
-    /// Puts the spinner on `method`'s row, or takes it off every row with nil.
-    /// The coordinator locks the screen itself; this is only what it shows.
+    private func cell(for method: SignInMethod) -> UITableViewCell {
+        if let cell = cells[method] { return cell }
+        let cell = UITableViewCell()
+        cell.backgroundConfiguration = .clear()
+        cell.selectionStyle = .none
+        if let button = buttons[method] {
+            button.constrain(in: cell.contentView) { parent in
+                button.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+                button.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
+                button.topAnchor.constraint(equalTo: parent.topAnchor)
+                button.bottomAnchor.constraint(equalTo: parent.bottomAnchor)
+            }
+        }
+        cells[method] = cell
+        return cell
+    }
+
+    /// ⚠️ THE ROW MUST NOT CLIP ITS BUTTON. An inset-grouped section rounds
+    /// its row (a one-row section, the capsule's radius on iOS 26), and the
+    /// button's card corner came out a capsule (seen on the simulator,
+    /// 2026-11-07, #2020): the button draws its own shape.
+    override func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        guard case .method = sections[indexPath.section] else { return }
+        for view in [cell, cell.contentView] {
+            view.layer.cornerRadius = 0
+            view.layer.masksToBounds = false
+            view.layer.mask = nil
+        }
+    }
+
+    /// Puts `method`'s button in its held load, the others gated — or ends
+    /// it everywhere with nil. The coordinator locks the screen itself; this
+    /// is only what it shows.
     func setWorking(_ method: SignInMethod?) {
         workingMethod = method
         // ⚠️ × WAITS FOR THE CALL (#1969). Sign in with Apple or a passkey
         // goes on in the system's sheet and on the server; closing under it
         // would leave its answer — a birthday step, a second step, an error
-        // — nowhere to land. The row's spinner says why.
+        // — nowhere to land. The button's load says why.
         closeItem.isEnabled = method == nil
-        guard isViewLoaded else { return }
-        for (index, section) in sections.enumerated() {
-            guard case .method(let candidate) = section,
-                  let cell = tableView.cellForRow(at: IndexPath(row: 0, section: index))
-            else { continue }
-            showWorking(on: cell, for: candidate)
+        for (candidate, button) in buttons {
+            button.setPhase(candidate == method ? .loading : .content, animated: isViewLoaded)
+            button.isEnabled = method == nil || candidate == method
         }
     }
 
-    private func showWorking(on cell: UITableViewCell, for method: SignInMethod) {
-        guard method == workingMethod else {
-            cell.accessoryView = nil
-            return
-        }
-        let spinner = AppLoaderView(size: .medium)
-        spinner.startAnimating()
-        cell.accessoryView = spinner
-    }
-
-    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        tableView.deselectRow(at: indexPath, animated: true)
-        switch sections[indexPath.section] {
-        case .method(let method):
-            onMethodSelected?(method)
-        case .legal:
-            break
-        }
-    }
+    #if DEBUG
+    /// A method's button. Tests.
+    func debugButton(for method: SignInMethod) -> AppButton? { buttons[method] }
+    var debugCloseItem: UIBarButtonItem { closeItem }
+    #endif
 
     /// The legal line under the last method; nothing over the first.
     override func tableView(_ tableView: UITableView, viewForHeaderInSection section: Int) -> UIView? {
@@ -259,16 +271,26 @@ private extension MethodSelectionViewController {
     }
 }
 
-private extension SignInMethod {
-    /// Row artwork. Apple has a native SF Symbol; the other providers are
-    /// monogram placeholders until licensed brand assets are bundled.
-    var icon: UIImage? {
+extension SignInMethod {
+    /// The button's symbol. Apple has a native SF Symbol; Google keeps a
+    /// placeholder until licensed brand assets are bundled — then an
+    /// `.image` icon in its own colours (`AppButton.Icon`, #2020).
+    var symbolName: String {
         switch self {
-        case .provider(.apple): UIImage(systemName: "apple.logo")
-        case .provider(.google): UIImage(systemName: "g.circle")
-        case .email: UIImage(systemName: "envelope")
-        case .phone: UIImage(systemName: "phone")
-        case .passkey: UIImage(systemName: "person.badge.key")
+        case .provider(.apple): "apple.logo"
+        case .provider(.google): "g.circle"
+        case .email: "envelope"
+        case .phone: "phone"
+        case .passkey: "person.badge.key"
         }
+    }
+
+    /// The button's ground. ⚠️ SIGN IN WITH APPLE'S GUIDELINES: a custom
+    /// button keeps the Apple logo and "Continue with Apple" on a black, a
+    /// white or a white-outlined ground — black in the light, white in the
+    /// dark here (`.monochrome`); a grey one does not qualify. The others
+    /// are quiet.
+    var ground: AppButton.Ground {
+        self == .provider(.apple) ? .monochrome : .quiet
     }
 }

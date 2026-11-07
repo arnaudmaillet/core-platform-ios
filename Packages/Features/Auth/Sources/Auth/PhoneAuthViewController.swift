@@ -41,11 +41,9 @@ final class PhoneAuthViewController: AuthStepTableViewController {
         return cell
     }()
 
-    private lazy var continueButton: UIButton = {
-        var configuration = UIButton.Configuration.prominentGlass()
-        configuration.title = "Continue"
-        configuration.buttonSize = .large
-        let button = UIButton(configuration: configuration)
+    /// The app's button at its form size (#2020), as the sign-up steps'.
+    private lazy var continueButton: AppButton = {
+        let button = AppButton(aspect: .pill(.prominent), size: .form, content: .title("Continue"))
         button.addAction(UIAction { [weak self] _ in self?.continueTapped() }, for: .primaryActionTriggered)
         return button
     }()
@@ -180,21 +178,25 @@ final class PhoneAuthViewController: AuthStepTableViewController {
     /// Whether the code is being sent (#827).
     private(set) var isWorking = false
 
-    /// Spinner on Continue, × and back disabled, inputs locked — while the
-    /// code is sent. The sign-up steps' `setWorking`, on this screen's own
-    /// button.
+    /// Continue's held load (#2020), × and back disabled, inputs locked —
+    /// while the code is sent. The sign-up steps' `setWorking`, on this
+    /// screen's own button.
     func setWorking(_ working: Bool) {
         isWorking = working
-        continueButton.configuration?.showsActivityIndicator = working
+        continueButton.setPhase(working ? .loading : .content, animated: true)
         (navigationController as? ContentFittingNavigationController)?.setFormWorking(working)
         view.isUserInteractionEnabled = !working
         if working {
-            continueButton.isEnabled = false
+            continueButton.isEnabled = true
             view.endEditing(true)
         } else {
             continueButton.isEnabled = country.isValidNationalNumber(nationalDigits)
         }
     }
+
+    #if DEBUG
+    var debugContinueButton: AppButton { continueButton }
+    #endif
 
     // MARK: - Table
 
