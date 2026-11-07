@@ -314,6 +314,131 @@ struct VoiceComposerTests {
         #expect(VoiceComposer.debugDraft(for: key) == nil, "the draft was shown and kept")
     }
 
+    /// "Hold for voice, tap to type" (the owner, 2026-11-07): in a
+    /// conversation the field says so, its long press records, and the
+    /// bubble at rest is the emote button — the field's own goes until
+    /// there is a draft, and comes back beside the send.
+    @Test func theFieldSpeaksAndTheBubbleIsTheEmoteButton() async {
+        let (composer, bar, _) = composer()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.addSubview(bar)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        bar.actsFromOwnBubble = true
+        bar.layoutIfNeeded()
+        let bubble = bar.debugRowActionButton
+        #expect(bar.speaksFromField)
+        #expect(bar.debugPlaceholder == CommentsInputBar.speakOrWritePlaceholder)
+        #expect(bubble.accessibilityLabel == "Emotes")
+        #expect(!bar.debugShowsFieldEmoteToggle, "two emote buttons at rest")
+        #expect(bar.debugFieldHoldBegins, "the field's hold does not record")
+        #expect(!bar.debugBubbleHoldBegins, "the emote bubble still records on a hold")
+
+        // A tap on the bubble: the panel, and the bubble offers the keyboard back.
+        bubble.sendActions(for: .primaryActionTriggered)
+        #expect(bar.debugShowsEmotePanel)
+        #expect(bubble.accessibilityLabel == "Keyboard")
+        bubble.sendActions(for: .primaryActionTriggered)
+        #expect(!bar.debugShowsEmotePanel)
+        #expect(composer.phase == .idle, "the bubble's tap recorded")
+
+        // A draft: the send in the bubble, the emote button back in the field.
+        bar.draftText = "hi"
+        bar.layoutIfNeeded()
+        #expect(bubble.accessibilityLabel != "Emotes" && bubble.accessibilityLabel != "Keyboard")
+        #expect(bar.debugShowsFieldEmoteToggle, "no emote button beside the send")
+        #expect(!bar.debugFieldHoldBegins, "a draft's long press recorded")
+        bar.draftText = ""
+        #expect(!bar.debugShowsFieldEmoteToggle)
+    }
+
+    /// The field's instructions stand centred in it (the owner, 2026-11-07);
+    /// a reply's wording goes back to the text's start.
+    @Test func theInstructionsAreCentred() {
+        let (_, bar, _) = composer()
+        bar.frame = CGRect(x: 0, y: 0, width: 390, height: 120)
+        bar.actsFromOwnBubble = true
+        bar.layoutIfNeeded()
+        let field = bar.debugFieldBounds
+        let words = bar.debugPlaceholderFrame
+        #expect(abs(words.midX - field.midX) < 1, "\(words) in \(field)")
+    }
+
+    /// The strip is laid out the moment it shows, before the bubble's grow
+    /// spring: its parts no longer fly in from the field's top-left corner
+    /// (the owner, 2026-11-07).
+    @Test func theStripIsLaidOutTheMomentItShows() {
+        let bar = CommentsInputBar()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        bar.frame = CGRect(x: 0, y: 700, width: 390, height: 120)
+        window.addSubview(bar)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        bar.actsFromOwnBubble = true
+        bar.layoutIfNeeded()
+        let strip = VoiceRecordingStrip()
+        strip.setTime(0, remaining: nil) // as the composer does, before it shows
+        bar.showVoiceOverlay(strip)
+        #expect(strip.bounds.width > 0 && strip.bounds.height > 0, "the strip waits for a later pass: \(strip.frame)")
+        #expect(strip.debugTimerFrame.width > 0, "the time waits for a later pass")
+    }
+
+    /// Locked in sight, the strip springs from the hint to the bars and its
+    /// buttons, and ends on the locked bar's parts.
+    @Test func aLockInSightEndsOnTheLockedBar() async {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 100))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let strip = VoiceRecordingStrip(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
+        window.addSubview(strip)
+        strip.layoutIfNeeded()
+        strip.apply(.locked, animated: true)
+        #expect(strip.debugShowsWaveform)
+        #expect(strip.debugVisibleControls == ["Pause recording", "Send voice message"])
+        #expect(await settle { strip.debugTimerFrame.width == 0 || strip.debugHidesTimer }, "the hint's time stayed")
+    }
+
+    /// The lock leaves once the take is locked — after its way out, not at
+    /// once — and the next hold's lock is not taken away by it.
+    @Test func theLockLeavesAndANewHoldKeepsItsOwn() async {
+        let (composer, bar, _) = composer()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        bar.frame = CGRect(x: 0, y: 700, width: 390, height: 120)
+        window.addSubview(bar)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        // The window is the host the lock rises in (the helper's own is gone).
+        composer.attach(to: bar, host: window)
+        bar.actsFromOwnBubble = true
+        bar.layoutIfNeeded()
+        composer.handle(.began)
+        #expect(await settle { composer.phase == .holding(revealed: true) })
+        #expect(composer.debugLock.superview != nil)
+        composer.handle(.moved(leading: 0, up: 101))
+        #expect(composer.phase == .locked)
+        #expect(await settle { composer.debugLock.superview == nil }, "the lock stayed")
+    }
+
+    /// VoiceOver records from the field's own action — holding is
+    /// impractical, and the bubble is the emote button.
+    @Test func voiceOverRecordsFromTheField() async {
+        let (composer, bar, _) = composer()
+        bar.actsFromOwnBubble = true
+        let action = bar.debugTextView.accessibilityCustomActions?.first { $0.name == "Record voice message" }
+        #expect(action != nil)
+        if let action { _ = action.actionHandler?(action) }
+        #expect(await settle { composer.phase != .idle }, "VoiceOver's action recorded nothing")
+    }
+
+    /// A post's comments keep their emote button and their wording.
+    @Test func aPostsFieldKeepsItsEmoteButton() {
+        let bar = CommentsInputBar()
+        bar.layoutIfNeeded()
+        #expect(!bar.speaksFromField)
+        #expect(bar.debugShowsFieldEmoteToggle)
+        #expect(bar.debugPlaceholder != CommentsInputBar.speakOrWritePlaceholder)
+    }
+
     /// A post's comments keep today's tap: no hold.
     @Test func aPostsComposerKeepsTheTap() {
         let bar = CommentsInputBar()

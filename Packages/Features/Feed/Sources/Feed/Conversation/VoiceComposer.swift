@@ -162,6 +162,10 @@ final class VoiceComposer {
         phase = .holding(revealed: true)
         strip.apply(.recording)
         strip.setCancelProgress(0)
+        // The time is there before the strip shows, so it is laid out with
+        // it — set by the clock's first tick, it came in from nothing
+        // inside the bubble's spring.
+        strip.setTime(recorder.elapsed, remaining: nil)
         bar?.showVoiceOverlay(strip)
         // The bubble itself grows into the mic (the owner, 2026-11-07).
         bar?.beginVoiceHold()
@@ -170,16 +174,52 @@ final class VoiceComposer {
         let anchor = bar.voiceHoldAnchor.convert(
             CGPoint(x: bar.voiceHoldAnchor.bounds.midX, y: bar.voiceHoldAnchor.bounds.midY), to: host
         )
+        // A lock still leaving (the last take's) comes back from where it is.
+        lockGeneration += 1
+        lock.layer.removeAllAnimations()
+        lock.transform = .identity
         lock.setProgress(0)
         lock.center = CGPoint(
             x: anchor.x, y: anchor.y - CommentsInputBar.voiceHoldSide / 2 - VoiceLockCapsule.size.height / 2 - 16
         )
         host.addSubview(lock)
+        lock.alpha = 1
         if window(host) && !MotionPreference.reducesMotion {
+            // It rises out of the bubble, small, and settles in its place.
             lock.alpha = 0
-            UIView.animate(withDuration: 0.42, delay: 0, usingSpringWithDamping: 0.6, initialSpringVelocity: 0) {
+            lock.transform = CGAffineTransform(translationX: 0, y: 24).scaledBy(x: 0.6, y: 0.6)
+            UIView.animate(springDuration: 0.45, bounce: 0.3, options: [.allowUserInteraction, .beginFromCurrentState]) {
                 self.lock.alpha = 1
+                self.lock.transform = .identity
             }
+        }
+    }
+
+    /// Counts the lock's comings and goings, so a removal left over from a
+    /// take never takes away the next one's lock.
+    private var lockGeneration = 0
+
+    /// The lock goes — locked (it rises, closed), sent, cancelled — fading,
+    /// unless `animated` is false (leaving the conversation).
+    private func dismissLock(animated: Bool = true) {
+        lockGeneration += 1
+        guard lock.superview != nil else { return }
+        let generation = lockGeneration
+        let finish = { [weak self] in
+            guard let self, generation == lockGeneration else { return }
+            lock.removeFromSuperview()
+            lock.alpha = 1
+            lock.transform = .identity
+        }
+        guard animated, lock.window != nil, !MotionPreference.reducesMotion else {
+            lock.layer.removeAllAnimations()
+            return finish()
+        }
+        UIView.animate(withDuration: 0.28, delay: 0, options: [.beginFromCurrentState]) {
+            self.lock.alpha = 0
+            self.lock.transform = CGAffineTransform(translationX: 0, y: -18).scaledBy(x: 0.85, y: 0.85)
+        } completion: { _ in
+            finish()
         }
     }
 
@@ -191,8 +231,8 @@ final class VoiceComposer {
         Haptics.play(.commit)
         lock.close()
         phase = .locked
-        lock.removeFromSuperview()
-        strip.apply(.locked)
+        dismissLock()
+        strip.apply(.locked, animated: true)
         // The bubble steps aside first, so it leaves wearing the mic.
         bar?.showVoiceOverlay(strip, coversButton: true)
         bar?.endVoiceHold()
@@ -211,14 +251,14 @@ final class VoiceComposer {
         VoicePlayer.shared.stop()
         recorder.resume()
         phase = .locked
-        strip.apply(.locked)
+        strip.apply(.locked, animated: true)
         startClock()
     }
 
     private func showPaused(resumable: Bool) {
         phase = .paused(resumable: resumable)
         stopClock()
-        strip.apply(.paused(resumable: resumable, playing: false))
+        strip.apply(.paused(resumable: resumable, playing: false), animated: true)
         bar?.showVoiceOverlay(strip, coversButton: true)
         showBin()
         strip.layoutIfNeeded()
@@ -294,7 +334,7 @@ final class VoiceComposer {
         switch outcome {
         case .draft(let finished):
             draft = finished
-            lock.removeFromSuperview()
+            dismissLock()
             showPaused(resumable: false)
             bar?.endVoiceHold()
         case .tooShort:
@@ -306,7 +346,7 @@ final class VoiceComposer {
         stopClock()
         draft = nil
         bar?.endVoiceHold()
-        lock.removeFromSuperview()
+        dismissLock()
         bar?.showVoiceOverlay(nil)
         bar?.showVoiceDelete(nil)
         phase = .idle
@@ -327,7 +367,7 @@ final class VoiceComposer {
             VoicePlayer.shared.stop()
             stopClock()
             bar?.endVoiceHold()
-            lock.removeFromSuperview()
+            dismissLock(animated: false)
             phase = .idle
             draft = nil
         case .holding:
@@ -371,3 +411,10 @@ final class VoiceComposer {
     static func debugClearDrafts() { drafts = [:] }
     #endif
 }
+
+#if DEBUG
+extension VoiceComposer {
+    /// The lock over the mic, for the specs that watch it come and go.
+    var debugLock: UIView { lock }
+}
+#endif

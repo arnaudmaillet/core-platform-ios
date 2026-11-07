@@ -82,6 +82,44 @@ struct ThreadVoiceViewTests {
         #expect(view.debugGlyph == "arrow.clockwise")
     }
 
+    /// The sent copy keeps the pending one's width (the owner, 2026-11-07):
+    /// its length comes back to a tenth of a second, and at full precision
+    /// the bubble changed by a point and its bars by one.
+    @Test func theWidthReadsTheLengthToATenth() {
+        #expect(ThreadVoiceView.width(forDuration: 4.37) == ThreadVoiceView.width(forDuration: 4.4))
+        #expect(ThreadVoiceView.width(forDuration: 12.04) == ThreadVoiceView.width(forDuration: 12.0))
+    }
+
+    /// A row filled afresh — the sent copy in the pending one's place —
+    /// draws its waveform at once; it rises only when it arrives for the
+    /// message already shown.
+    @Test func aFreshRowDoesNotRiseItsWaveform() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 200))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let view = ThreadVoiceView()
+        view.frame = CGRect(x: 0, y: 0, width: 360, height: 40)
+        window.addSubview(view)
+        view.configure(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 4), senderName: nil)
+        #expect(!view.debugWaveformRising, "a fresh row's waveform rose")
+        var waiting = ThreadVoiceView.State(levels: nil, duration: 4)
+        view.configure(waiting, senderName: "Ava")
+        waiting.levels = Array(repeating: 9, count: 100)
+        view.configure(waiting, senderName: "Ava")
+        #expect(view.debugWaveformRising, "an arriving waveform did not rise")
+    }
+
+    /// Sending, the bubble keeps its play glyph — no loader over it (the
+    /// owner, 2026-11-07): the message's one loader is beside "You".
+    @Test func sendingShowsNoLoaderOverThePlayButton() {
+        var state = ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 3)
+        state.delivery = .sending
+        let view = view(state)
+        #expect(!view.debugShowsLoader)
+        #expect(view.debugGlyph == "play.fill")
+        #expect(!view.debugPlayEnabled)
+    }
+
     /// The glyph alone — the app's glyph button, no glass bubble — on a
     /// 32 pt square (the owner's device check,
     /// 2026-11-06).

@@ -69,6 +69,33 @@ struct ConversationThreadViewControllerTests {
         )
     }
 
+    /// A voice message of the viewer's shows its send beside "You", as a
+    /// text does — its bubble keeps its play button (the owner,
+    /// 2026-11-07); its failure is its bubble's own. A photo shows it on its
+    /// picture.
+    @Test func aVoiceMessageSendsBesideTheName() {
+        func message(_ media: ConversationThreadMedia?, _ delivery: ConversationThreadDelivery, mine: Bool = true)
+            -> ConversationThreadMessage {
+            ConversationThreadMessage(
+                id: "v", senderID: ProfileID("me"), body: "", sentAt: Date(), isMine: mine, quote: nil,
+                media: media, delivery: delivery
+            )
+        }
+        let voice = ConversationThreadMedia(kind: .voice, url: nil, duration: 4)
+        let photo = ConversationThreadMedia(kind: .image, url: nil)
+        typealias Screen = ConversationThreadViewController
+        #expect(Screen.deliveryBesideName(of: message(voice, .sending)) == .sending)
+        #expect(Screen.deliveryBesideName(of: message(voice, .failed)) == nil)
+        #expect(Screen.deliveryBesideName(of: message(nil, .failed)) == .failed)
+        #expect(Screen.deliveryBesideName(of: message(photo, .sending)) == nil)
+        #expect(Screen.deliveryBesideName(of: message(voice, .sending, mine: false)) == nil)
+        // The delivered copy of a voice take is the same send: its spinner
+        // hands over to the time.
+        #expect(Screen.isSameSend(message(voice, .sending), message(ConversationThreadMedia(kind: .voice, url: nil, duration: 4.2), .sent)))
+        #expect(!Screen.isSameSend(message(voice, .sending), message(nil, .sent)))
+        #expect(!Screen.isSameSend(message(voice, .sending), message(ConversationThreadMedia(kind: .voice, url: nil, duration: 9), .sent)))
+    }
+
     /// Oldest first: two in the evening two days ago, two early today.
     private static let transcript = [
         message("m1", daysBack: 2, minutes: 20 * 60, mine: false),

@@ -147,7 +147,13 @@ final class VoiceRecordingStrip: UIView {
         return button
     }
 
-    func apply(_ mode: Mode) {
+    /// - Parameter animated: a change in sight springs — the parts that come
+    ///   fade in as the row opens for them, the parts that go fade out as it
+    ///   closes (the owner, 2026-11-07: the hint, the time, the buttons).
+    func apply(_ mode: Mode, animated: Bool = false) {
+        let springs = animated && window != nil && !MotionPreference.reducesMotion && mode != self.mode
+        let shownBefore = Dictionary(uniqueKeysWithValues: animatedParts.map { (ObjectIdentifier($0), !$0.isHidden) })
+        let trailingBefore = stackTrailing?.constant ?? 0
         self.mode = mode
         let recording = mode == .recording
         let locked = mode == .locked
@@ -185,7 +191,32 @@ final class VoiceRecordingStrip: UIView {
         chip.accessibilityLabel = paused ? (playing ? "Pause playback" : "Play recording") : nil
         chip.isAccessibilityElement = paused
         blink(recording || locked)
+        guard springs else { return }
+        // Undone, then sprung into: the parts as they were, the change in
+        // one spring.
+        let target = animatedParts.map { ($0, !$0.isHidden) }
+        let targetTrailing = stackTrailing?.constant
+        for (part, shown) in target {
+            let was = shownBefore[ObjectIdentifier(part)] ?? shown
+            part.isHidden = !was
+            if !was, shown { part.alpha = 0 }
+        }
+        stackTrailing?.constant = trailingBefore
+        layoutIfNeeded()
+        stackTrailing?.constant = targetTrailing ?? 0
+        UIView.animate(springDuration: 0.4, bounce: 0.1, options: [.allowUserInteraction, .beginFromCurrentState]) {
+            for (part, shown) in target {
+                part.isHidden = !shown
+                part.alpha = shown ? 1 : 0
+            }
+            self.layoutIfNeeded()
+        } completion: { _ in
+            for (part, _) in target where part.isHidden { part.alpha = 1 }
+        }
     }
+
+    /// The parts a mode shows or hides.
+    private var animatedParts: [UIView] { [dot, timerLabel, slideLabel, chip, box, takeButton, sendButton] }
 
     /// The take's time; red in its last ten seconds, counting down (#2102).
     func setTime(_ seconds: TimeInterval, remaining: TimeInterval?) {
@@ -245,6 +276,8 @@ final class VoiceRecordingStrip: UIView {
         return shown
     }
     var debugShowsWaveform: Bool { !box.isHidden }
+    var debugTimerFrame: CGRect { timerLabel.isHidden ? .zero : timerLabel.convert(timerLabel.bounds, to: self) }
+    var debugHidesTimer: Bool { timerLabel.isHidden }
     var debugChipFrame: CGRect { chip.convert(chip.bounds, to: self) }
     var debugWaveformFrame: CGRect { waveform.convert(waveform.bounds, to: self) }
     var debugTakeFrame: CGRect { takeButton.convert(takeButton.bounds, to: self) }
