@@ -318,9 +318,12 @@ public final class VideoPlaybackController {
         self.capacity = capacity
         self.byteCache = byteCache
         try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .moviePlayback)
-        // A volume key turned the feed's sound on (#1931): heard through the
-        // silent switch — until the phone is put on silent again.
-        feedSoundObservers = [FeedSoundSession.didTurnOn, FeedSoundSession.didTurnOff].map { name in
+        // A volume key turned the feed's sound on (#1931) — heard through the
+        // silent switch once the key's ringer read says silent (#2185) — until
+        // the phone is put on silent again.
+        feedSoundObservers = [
+            FeedSoundSession.didTurnOn, FeedSoundSession.didNeedPlayThrough, FeedSoundSession.didTurnOff,
+        ].map { name in
             NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
                 // The sender's identity, read here: a `Notification` cannot
                 // cross into the main actor's isolation.
