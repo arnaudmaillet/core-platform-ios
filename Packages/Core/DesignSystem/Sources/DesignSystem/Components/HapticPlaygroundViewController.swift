@@ -66,6 +66,10 @@ public final class HapticPlaygroundViewController: UIViewController, UIScrollVie
     private static let pullThreshold: CGFloat = 120
 
     private var roleDetails: [Haptic: UIButton] = [:]
+    /// The "Try in the app" button beside each role.
+    static let menuWidth: CGFloat = 52
+    /// Each role's "Try in the app" button, for the tests.
+    private(set) var roleMenus: [Haptic: UIButton] = [:]
     private var observer: NSObjectProtocol?
 
     public init(overrides: HapticOverrides = .shared) {
@@ -145,10 +149,16 @@ public final class HapticPlaygroundViewController: UIViewController, UIScrollVie
             menu.configuration?.image = UIImage(systemName: "wand.and.stars")
             menu.accessibilityLabel = "Try in the app"
             menu.showsMenuAsPrimaryAction = true
+            roleMenus[role] = menu
             menu.menu = UIMenu(children: [UIDeferredMenuElement.uncached { [weak self] completion in
                 completion(self?.roleMenu(role) ?? [])
             }])
+            // One width on every row: the row's two-line button gave way to it
+            // unevenly, and crushed it to nothing on some rows.
             menu.setContentHuggingPriority(.required, for: .horizontal)
+            menu.setContentCompressionResistancePriority(.required, for: .horizontal)
+            menu.widthAnchor.constraint(equalToConstant: Self.menuWidth).isActive = true
+            play.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             let line = UIStackView(arrangedSubviews: [play, menu])
             line.spacing = Spacing.sm
             line.alignment = .fill
@@ -245,7 +255,7 @@ public final class HapticPlaygroundViewController: UIViewController, UIScrollVie
     private func buildPatterns() {
         add(.patterns, header: "Core Haptics, patterns", footer: coreHapticsFooter,
             rows: HapticPattern.presets.map { pattern in
-                button(title: pattern.name, detail: "\(pattern.events.count) events") { [weak self] in
+                button(title: pattern.name, detail: pattern.events.count == 1 ? "1 event" : "\(pattern.events.count) events") { [weak self] in
                     self?.select(.pattern(pattern), from: .patterns)
                 }
             }, coreHaptics: true)

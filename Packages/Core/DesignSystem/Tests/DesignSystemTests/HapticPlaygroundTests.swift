@@ -44,6 +44,25 @@ struct HapticPlaygroundTests {
         #expect(rows[.context]?.count == 6)
     }
 
+    /// Every role's "Try in the app" button keeps one width beside a title
+    /// on one line or two: on the simulator it shrank unevenly, and to
+    /// nothing beside `armed` and `boundary`.
+    @Test(arguments: [CGFloat(375), 402, 440])
+    func everyRolesMenuKeepsItsWidth(width: CGFloat) {
+        let playground = HapticPlaygroundViewController(overrides: HapticOverrides(defaults: freshDefaults()))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: width, height: 900))
+        defer { window.isHidden = true }
+        window.addSubview(playground.view)
+        playground.view.frame = window.bounds
+        playground.view.layoutIfNeeded()
+        #expect(playground.roleMenus.count == Haptic.allCases.count)
+        for role in Haptic.allCases {
+            let menu = playground.roleMenus[role]
+            #expect(abs((menu?.bounds.width ?? 0) - HapticPlaygroundViewController.menuWidth) < 0.5,
+                    "\(role)'s menu is \(menu?.bounds.width ?? 0) pt wide at \(width)")
+        }
+    }
+
     /// Without a Taptic Engine (the simulator), Core Haptics' rows are there
     /// but greyed out; with one, they play.
     @Test func coreHapticsIsGreyedOutWithoutATapticEngine() {
