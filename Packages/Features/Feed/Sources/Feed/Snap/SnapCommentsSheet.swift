@@ -20,22 +20,28 @@ import UIKit
 /// sheet through its entrance, a drag down and its exit — never a second
 /// animation trying to keep pace with UIKit's.
 ///
-/// Two heights (the owner, 2026-11-03): collapsed, the content's own, at most
-/// what the media leaves it (`restingHeight`) — a short thread takes a short
-/// sheet, with no room above its first row — and, for comments that outgrow
-/// it, expanded to the top of the screen, the media shrinking on in the room
-/// left (a floating preview takes it from there, #2087's next steps). The
+/// Two heights for a portrait media (the owner, 2026-11-03): collapsed, the
+/// content's own, at most what the media leaves it (`restingHeight`) — a
+/// short thread takes a short sheet, with no room above its first row — and,
+/// for comments that outgrow it, expanded to the top of the screen, the media
+/// shrinking on in the room left (a floating preview takes it from there,
+/// #2087's next steps). A square or landscape media gets ONE height (#2184):
+/// it keeps the screen's width and never shrinks; the comments scroll inside
+/// the sheet. The
 /// sheet is undimmed, so the media above it stays lit; a tap there closes
 /// it, as a swipe down does.
 @MainActor
 final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationControllerDelegate {
-    /// The sheet's tallest resting height, as shares of the screen: never
-    /// under the floor, which keeps the rows readable — lower for a square
-    /// to landscape media, whose whole width comes first — never over the
-    /// ceiling (`restingHeight`).
+    /// A portrait media's sheet, as shares of the screen: never under the
+    /// floor, which keeps the rows readable, never over the ceiling
+    /// (`restingHeight`). The ceiling also bounds a square or landscape one.
     static let floorShare: CGFloat = 0.6
-    static let wideFloorShare: CGFloat = 0.5
     static let ceilingShare: CGFloat = 0.75
+    /// The shortest a square or landscape media's sheet gets (#2184): its bar
+    /// (~56 pt), three comment rows (~60 pt each) and its composer (~64 pt),
+    /// measured on the simulator. Under it, the media shrinks to fit — a
+    /// square on an iPhone SE.
+    static let minimumSheetHeight: CGFloat = 300
     static let detent = UISheetPresentationController.Detent.Identifier("feed.comments.v2")
     /// The sheet up to the top of the screen — offered only while the
     /// comments outgrow `detent` (the owner, 2026-11-03), the media shrinking
@@ -47,15 +53,17 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// them (the owner, 2026-11-03).
     static let mediaSideMargin: CGFloat = Spacing.sm
 
-    /// The sheet's tallest resting height, the media's to decide (the owner,
-    /// 2026-11-03): the media keeps the screen's whole width, less its side
-    /// margins, in the room above, and the sheet takes what is left, between
-    /// a floor and `ceilingShare` of the screen. A square to landscape media
-    /// comes first, down to `wideFloorShare` (the owner, 2026-11-03): a 4:3
-    /// one keeps its whole width over a ~55 % sheet, a square one shrinks a
-    /// little over a 50 % one. A portrait one, which the width would leave
-    /// the sheet no room, gets `floorShare`. Read once, at the opening: a
-    /// carousel paged under the sheet does not move it.
+    /// The sheet's tallest resting height: one per shape on a screen
+    /// (#2184, `SnapFeedCell.CommentsSheetShape`), read once, at the opening
+    /// — a carousel paged under the sheet does not move it.
+    ///
+    /// - **Portrait:** the media shrinks into the room above a sheet between
+    ///   `floorShare` and `ceilingShare` of the screen — the width would
+    ///   leave the sheet no room.
+    /// - **Square and landscape:** the media keeps the screen's whole width,
+    ///   less `mediaSideMargin` on each side (it never touches them, the
+    ///   owner 2026-11-03), and the sheet takes exactly what is left — never
+    ///   under `minimumSheetHeight`, where the media shrinks to fit instead.
     ///
     /// The height of a custom detent, so it leaves out the bottom safe area
     /// the sheet stands on.
@@ -64,11 +72,20 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     ///   (`SnapFeedCell.commentsSheetPictureSize`).
     static func restingHeight(screen: CGSize, safeArea: UIEdgeInsets, picture: CGSize) -> CGFloat {
         let ceiling = screen.height * ceilingShare
-        guard picture.width > 0, picture.height > 0 else { return screen.height * floorShare }
-        let floor = screen.height * (picture.width >= picture.height ? wideFloorShare : floorShare)
+        guard let shape = SnapFeedCell.CommentsSheetShape.of(picture) else { return screen.height * floorShare }
         let mediaHeight = (screen.width - 2 * mediaSideMargin) * picture.height / picture.width
         let left = screen.height - safeArea.top - mediaHeight - mediaGap - safeArea.bottom
-        return min(max(left, floor), ceiling)
+        guard shape != .portrait else { return min(max(left, screen.height * floorShare), ceiling) }
+        return min(max(left, minimumSheetHeight), ceiling)
+    }
+
+    /// Whether a sheet over a picture of `picture`'s shape offers its
+    /// expanded detent at all (#2184): only a portrait one; a square or
+    /// landscape media keeps its one height and never shrinks — the comments
+    /// scroll inside the sheet. A picture not known yet reads as portrait,
+    /// today's sheet.
+    static func offersExpandedDetent(picture: CGSize) -> Bool {
+        (SnapFeedCell.CommentsSheetShape.of(picture) ?? .portrait) == .portrait
     }
 
     let postID: PostID
@@ -107,6 +124,9 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     /// (`isExpandable`).
     private var restingHeight: CGFloat = 0
     private var bottomInset: CGFloat = 0
+    /// Whether the media's shape lets the sheet expand at all (#2184):
+    /// portrait only (`offersExpandedDetent`).
+    private var shapeOffersExpanded = true
     /// What a floating sheet's detent needs on top of `restingHeight` to rest
     /// where it says, measured on the first sheet and kept (`correctCap`).
     private static var capCorrection: CGFloat = 0
@@ -160,6 +180,7 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
         sheet.traitOverrides.userInterfaceLevel = .base
         restingHeight = resting
         self.bottomInset = bottomInset
+        shapeOffersExpanded = Self.offersExpandedDetent(picture: cell.commentsSheetPictureSize)
         if let controller = sheet.sheetPresentationController {
             collapsedDetent = .custom(identifier: Self.detent) { [weak self, weak content] context in
                 MainActor.assumeIsolated {
@@ -1029,9 +1050,10 @@ final class SnapCommentsSheetSession: NSObject, UIAdaptivePresentationController
     private var collapsedDetent: UISheetPresentationController.Detent?
 
     /// Whether the comments stand taller than the collapsed detent: the
-    /// expanded one has something to show.
+    /// expanded one has something to show — over a portrait media only
+    /// (#2184), however many comments a square or landscape one has.
     private var isExpandable: Bool {
-        guard let fitted = content.fittedHeight else { return false }
+        guard shapeOffersExpanded, let fitted = content.fittedHeight else { return false }
         return fitted - bottomInset > restingHeight + Self.capCorrection + 1
     }
 

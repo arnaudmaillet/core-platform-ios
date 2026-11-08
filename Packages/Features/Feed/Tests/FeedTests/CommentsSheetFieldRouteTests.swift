@@ -29,6 +29,17 @@ struct CommentsSheetFieldRouteTests {
         #expect(!route.detached)
     }
 
+    /// A square or landscape media offers no expanded detent (#2184): the
+    /// field never expands its sheet; it rides the keys and drops back.
+    @Test func aSquareOrLandscapeSheetTakesTheRide() {
+        for picture in [CGSize(width: 1000, height: 1000), CGSize(width: 960, height: 720)] {
+            let route = Session.fieldRoute(
+                selected: Session.detent, offersExpanded: Session.offersExpandedDetent(picture: picture)
+            )
+            #expect(!route.expands && !route.detached, "\(picture)")
+        }
+    }
+
     /// Expanded already: the keys go to the detached bar and nothing moves.
     @Test func fromExpandedNothingMoves() {
         let route = Session.fieldRoute(selected: Session.expandedDetent, offersExpanded: true)
