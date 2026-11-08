@@ -7,6 +7,7 @@ import MapKit
 import MapsInterface
 import MediaCore
 import MediaPlayback
+import PostGrid
 import UIKit
 
 /// The Explore tab's surface: a full-bleed `MKMapView` that re-queries
@@ -292,6 +293,33 @@ final class MapsViewController: UIViewController {
     /// The row above the filter bars: the locate button, or the "See posts
     /// around you" card while nothing is open (guest mode §3.1).
     private let locationControls = MapLocationControlsView()
+
+    // MARK: The text-post card (`-map-text-card`, the owner 2026-11-08)
+
+    /// Whether the map wears the text-post card in the filter bars' place.
+    let usesTextCard = DebugFlags.isOn("-map-text-card")
+    /// The card, and the slot it stands in above the tab bar.
+    private(set) lazy var textCard = MapTextPostCardView(imagePipeline: imagePipeline)
+    let textCardSlot = UIView()
+    /// The text marker the card speaks for.
+    var textCardFeatured: (any MKAnnotation)?
+    /// The next nearest, on the card behind.
+    var textCardBehind: (any MKAnnotation)?
+    /// The carousel's loop — the open part's text posts, nearest first —
+    /// and where the front card stands in it.
+    var textCardDeck: [any MKAnnotation] = []
+    var textCardIndex = 0
+    /// The viewer moved the map since the deck was built.
+    var textCardDeckStale = true
+    /// The text posts' words, as they came.
+    var textCardPosts: [PostID: GalleryPost] = [:]
+    var textCardLoad: Task<Void, Never>?
+    /// A swipe is carrying the map to its post: the centre is not asked
+    /// until it has landed.
+    var textCardFollowsSwipe = false
+    /// The posts' words, asked for together; and one already in hand.
+    let loadTextPosts: ([PostID]) async -> [PostID: GalleryPost]
+    let heldTextPost: (PostID) -> GalleryPost?
     /// A tap asked where the device is: fly to its country once it is known.
     private var fliesToCurrentCountry = false
 
@@ -429,8 +457,12 @@ final class MapsViewController: UIViewController {
         stakePacks: (any StakePackSelling)? = nil,
         profileItems: (any ProfileItemSelling)? = nil,
         isMember: @escaping @MainActor () -> Bool = { true },
-        locator: (any CurrentCountryLocating)? = nil
+        locator: (any CurrentCountryLocating)? = nil,
+        loadTextPosts: @escaping ([PostID]) async -> [PostID: GalleryPost] = { _ in [:] },
+        heldTextPost: @escaping (PostID) -> GalleryPost? = { _ in nil }
     ) {
+        self.loadTextPosts = loadTextPosts
+        self.heldTextPost = heldTextPost
         self.isMember = isMember
         self.locator = locator
         self.countryAccess = countryAccess
@@ -1191,7 +1223,8 @@ final class MapsViewController: UIViewController {
         // The guest moves the map now (#1907): the compass follows it.
         mapView.showsCompass = true
         // They filter posts the guest cannot see; the card is what matters.
-        filterBar.isHidden = locked
+        filterBar.isHidden = locked || usesTextCard
+        if usesTextCard { updateTextCard(animated: view.window != nil) }
         if locked {
             subFilterBar.isHidden = true
             pendingQuery?.cancel()
@@ -1362,6 +1395,8 @@ final class MapsViewController: UIViewController {
         barsStack.addArrangedSubview(locationControls)
         barsStack.addArrangedSubview(subFilterBar)
         barsStack.addArrangedSubview(filterBar)
+        // `-map-text-card`: the card stands in the bars' place, which rest.
+        if usesTextCard { installTextCard() }
         locationControls.onTap = { [weak self] permission in self?.locationControlTapped(permission) }
         // Resting state: no refinement row until a primary that has one.
         subFilterBar.isHidden = true
@@ -1467,6 +1502,8 @@ final class MapsViewController: UIViewController {
     /// background refresh re-renders only if the list actually changed and
     /// the selection hasn't moved on.
     private func updateSubFilterBar(for filter: MapFilter?) {
+        // The text card's map rests its filters (`-map-text-card`).
+        guard !usesTextCard else { return }
         subFilterLoadTask?.cancel()
         switch filter {
         case .friends, .following:
@@ -2623,6 +2660,7 @@ extension MapsViewController: MKMapViewDelegate {
         // A zoom/pan started: hold annotation mutations until it settles.
         isRegionTransitioning = true
         idlePrerollWork?.cancel()
+        textCardRegionWillChange()
         #if DEBUG
         OfferLog.note("region will change")
         #endif
@@ -2644,6 +2682,12 @@ extension MapsViewController: MKMapViewDelegate {
         idlePrerollRested = false
         idlePrerollRetries = 0
         scheduleIdlePreroll()
+        textCardRegionSettled()
+    }
+
+    func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {
+        // The card follows the centre as the map moves, not only once it rests.
+        if usesTextCard, !textCardFollowsSwipe { updateTextCard(animated: true) }
     }
 
     func mapView(_ mapView: MKMapView, didAdd views: [MKAnnotationView]) {
@@ -2677,6 +2721,7 @@ extension MapsViewController: MKMapViewDelegate {
         // warm the visible posts so a tap opens instantly.
         refreshVideoPlayback()
         prewarmVisiblePosts()
+        if usesTextCard { textCardViewsAdded(views) }
         #if DEBUG
         debugOpenFirstPinIfRequested(among: views)
         debugOpenFirstClusterIfRequested(among: views)
@@ -2966,7 +3011,7 @@ extension MapsViewController: MKMapViewDelegate {
         pins.min { center.distance(to: $0.point) < center.distance(to: $1.point) }?.id
     }
 
-    private func openAnnotation(_ annotation: any MKAnnotation, thumbnail: UIImage?) {
+    func openAnnotation(_ annotation: any MKAnnotation, thumbnail: UIImage?) {
         // ⚠️ AN OPEN OFFER SWALLOWS THE TAP (#686), as a tap on the map does:
         // tapping away is "no thanks". Here, ahead of everything, so the
         // instant tap, MapKit's `didSelect`, VoiceOver and the DEBUG hooks all

@@ -27,6 +27,8 @@ public enum DebugFlags {
     public static let all: [Flag] = [
         Flag(argument: "-voice-messages", title: "Voice messages composer",
              detail: "The hold-to-record composer in threads (#2105)", appliesAtLaunch: false),
+        Flag(argument: "-map-text-card", title: "Map text-post card",
+             detail: "A card for the text post nearest the map's centre; the filter bars rest", appliesAtLaunch: true),
         Flag(argument: "-viewport-share", title: "Viewport share trace",
              detail: "Logs the half-the-display playback measure (#1914)", appliesAtLaunch: false),
         Flag(argument: "-still-video-backdrop", title: "Still video backdrops",

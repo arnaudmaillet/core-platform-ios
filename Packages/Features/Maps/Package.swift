@@ -17,6 +17,7 @@ let package = Package(
         .package(path: "../../Core/CoreStorage"),
         .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Core/MediaCore"),
+        .package(path: "../../Core/PostGrid"),
         .package(path: "../../Core/MediaPlayback"),
         .package(path: "../../Core/CacheKit"),
         .package(path: "../../Core/LocalStore"),
@@ -38,6 +39,8 @@ let package = Package(
                 "DesignSystem",
                 "MediaCore",
                 "MediaPlayback",
+                // `GalleryPost`: the text-post card's words (`-map-text-card`).
+                "PostGrid",
                 // The flag palette lives in the device cache's UI assets class
                 // (#971).
                 "CacheKit",
@@ -68,6 +71,7 @@ let package = Package(
                 "CoreNetworking",
                 "CacheKit",
                 "LocalStore",
+                "PostGrid",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
         )

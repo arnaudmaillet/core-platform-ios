@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import MapKit
 import MediaCore
 import MediaPlayback
@@ -313,8 +314,22 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
     /// bound player to the pool before it is reused for another group.
     var onReuse: (() -> Void)?
 
+    // MARK: - Featured by the text-post card (`-map-text-card`)
+
+    /// A group whose face is a text post, featured as a single marker is.
+    let featuredHalo = MapFeaturedHalo()
+    var isFeatured: Bool { featuredHalo.isFeatured }
+
+    func setFeatured(_ featured: Bool, animated: Bool) {
+        guard featured != isFeatured else { return }
+        zPriority = featured ? .max : .defaultUnselected
+        featuredHalo.set(featured, card: card, in: self, animated: animated)
+    }
+
     override func prepareForReuse() {
         super.prepareForReuse()
+        featuredHalo.reset(card: card)
+        zPriority = .defaultUnselected
         // ⚠️ BEFORE the rest: the coordinator has to hand its player back while
         // this view still owns the surface. Clearing state first would leave a
         // player bound to a view that is about to draw a different group.

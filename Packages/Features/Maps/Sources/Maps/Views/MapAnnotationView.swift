@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import MapKit
 import MediaCore
 import MediaPlayback
@@ -387,6 +388,18 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         card.reinstallPreviewPlayback()
     }
 
+    // MARK: - Featured by the text-post card (`-map-text-card`)
+
+    /// The marker whose words the map's card shows (`MapFeaturedHalo`).
+    let featuredHalo = MapFeaturedHalo()
+    var isFeatured: Bool { featuredHalo.isFeatured }
+
+    func setFeatured(_ featured: Bool, animated: Bool) {
+        guard featured != isFeatured else { return }
+        zPriority = featured ? .max : .defaultUnselected
+        featuredHalo.set(featured, card: card, in: self, animated: animated)
+    }
+
     override func prepareForReuse() {
         super.prepareForReuse()
         // ⚠️ A CONCEALED MARKER CAN BE RETIRED WHILE CONCEALED. A flight hides
@@ -402,6 +415,8 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         // in, but a view can also be dequeued for a pin that never pops.
         alpha = 1
         transform = .identity
+        featuredHalo.reset(card: card)
+        zPriority = .defaultUnselected
         onSelect = nil
         onReuse?()
         onReuse = nil
