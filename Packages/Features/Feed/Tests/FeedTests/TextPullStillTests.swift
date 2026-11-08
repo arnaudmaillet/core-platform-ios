@@ -45,12 +45,12 @@ struct TextPullStillTests {
         return feed
     }
 
-    private func pager(of feed: SnapFeedViewController) throws -> UICollectionView {
+    private func pagerView(of feed: SnapFeedViewController) throws -> UICollectionView {
         try #require(feed.view.subviews.compactMap { $0 as? UICollectionView }.first)
     }
 
     private func settle(_ feed: SnapFeedViewController, on index: Int) throws {
-        let pager = try pager(of: feed)
+        let pager = try pagerView(of: feed)
         pager.setContentOffset(CGPoint(x: 0, y: CGFloat(index) * pager.bounds.height), animated: false)
         pager.layoutIfNeeded()
         feed.scrollViewDidEndDecelerating(pager)
@@ -61,7 +61,7 @@ struct TextPullStillTests {
     func aTextPagePulledStaysStillAndOnlyTheIndicatorAnswers(_ axis: ZoomDismissAxisCase) throws {
         let feed = makeFeed([model("t", media: false), model("m", media: true)])
         try settle(feed, on: 0)
-        let pager = try pager(of: feed)
+        let pager = try pagerView(of: feed)
         let rest = pager.contentOffset.y
 
         let lift = feed.pullToClose(travel: 200, along: axis.axis)
@@ -101,7 +101,7 @@ struct TextPullStillTests {
     @Test func aMediaPagePulledStillLifts() throws {
         let feed = makeFeed([model("m", media: true), model("t", media: false)])
         try settle(feed, on: 0)
-        let pager = try pager(of: feed)
+        let pager = try pagerView(of: feed)
         let rest = pager.contentOffset.y
         let lift = feed.pullToClose(travel: 200, along: .upward)
         #expect(abs(pager.contentOffset.y - (rest + lift)) < 0.5, "the media page did not lift")
@@ -114,7 +114,7 @@ struct TextPullStillTests {
     @Test func theKindIsReadFromThePageOnShow() throws {
         let feed = makeFeed([model("m", media: true), model("t", media: false)])
         try settle(feed, on: 1)
-        let pager = try pager(of: feed)
+        let pager = try pagerView(of: feed)
         let rest = pager.contentOffset.y
         feed.pullToClose(travel: 200, along: .upward)
         #expect(pager.contentOffset.y == rest, "the text page on show moved")
