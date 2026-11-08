@@ -11,14 +11,14 @@ struct DebugFlagsTests {
 
     @Test func theLaunchArgumentWinsAndTheSwitchStandsIn() {
         let store = defaults()
-        #expect(!DebugFlags.isOn("-voice-messages", arguments: [], defaults: store))
-        #expect(DebugFlags.isOn("-voice-messages", arguments: ["app", "-voice-messages"], defaults: store))
-        DebugFlags.set("-voice-messages", on: true, defaults: store)
-        #expect(DebugFlags.isOn("-voice-messages", arguments: [], defaults: store))
-        DebugFlags.set("-voice-messages", on: false, defaults: store)
-        #expect(!DebugFlags.isOn("-voice-messages", arguments: [], defaults: store))
+        #expect(!DebugFlags.isOn("-viewport-share", arguments: [], defaults: store))
+        #expect(DebugFlags.isOn("-viewport-share", arguments: ["app", "-viewport-share"], defaults: store))
+        DebugFlags.set("-viewport-share", on: true, defaults: store)
+        #expect(DebugFlags.isOn("-viewport-share", arguments: [], defaults: store))
+        DebugFlags.set("-viewport-share", on: false, defaults: store)
+        #expect(!DebugFlags.isOn("-viewport-share", arguments: [], defaults: store))
         // Off in the store, on from the argument: on.
-        #expect(DebugFlags.isOn("-voice-messages", arguments: ["-voice-messages"], defaults: store))
+        #expect(DebugFlags.isOn("-viewport-share", arguments: ["-viewport-share"], defaults: store))
     }
 
     @Test func resetTurnsEverySwitchOff() {

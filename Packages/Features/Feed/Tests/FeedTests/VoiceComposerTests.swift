@@ -332,7 +332,8 @@ struct VoiceComposerTests {
         #expect(bubble.accessibilityLabel == "Emotes")
         #expect(!bar.debugShowsFieldEmoteToggle, "two emote buttons at rest")
         #expect(bar.debugFieldHoldBegins, "the field's hold does not record")
-        #expect(!bar.debugBubbleHoldBegins, "the emote bubble still records on a hold")
+        #expect(bubble.gestureRecognizers?.contains { $0 is UILongPressGestureRecognizer } != true,
+                "the emote bubble still carries a voice hold")
 
         // A tap on the bubble: the panel, and the bubble offers the keyboard back.
         bubble.sendActions(for: .primaryActionTriggered)

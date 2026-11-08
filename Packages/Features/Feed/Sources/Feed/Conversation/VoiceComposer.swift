@@ -4,15 +4,15 @@ import UIKit
 import VoiceKit
 
 /// Recording a voice message from a conversation's composer (#2102): hold
-/// the waveform to talk, slide to cancel, slide up to lock, then pause,
-/// listen back, resume, delete or send.
+/// the empty field to talk (#2183), slide to cancel, slide up to lock, then
+/// pause, listen back, resume, delete or send.
 ///
 /// The bar reports the finger (`CommentsInputBar.VoiceHoldEvent`), the
 /// thresholds are `VoiceHoldGesture`'s, the take is #2101's `VoiceRecorder`,
 /// and the sends are the thread's (`onSend`, #2103). This draws in the
-/// field's place (`VoiceRecordingStrip`), on the action bubble the finger
-/// holds (it grows into the mic, `CommentsInputBar.beginVoiceHold`) and over
-/// the content (the lock).
+/// field's place (`VoiceRecordingStrip`), on the row's own action bubble
+/// (it grows into the mic while the field is held,
+/// `CommentsInputBar.beginVoiceHold`) and over the content (the lock).
 @MainActor
 final class VoiceComposer {
     enum Phase: Equatable {

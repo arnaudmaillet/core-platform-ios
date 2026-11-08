@@ -1,7 +1,7 @@
 import Foundation
 
 /// The app's DEBUG feature switches (#2132): what used to be a launch
-/// argument alone — `-voice-messages`, `-viewport-share`, … — read in one
+/// argument alone — `-viewport-share`, `-idle-calm-off`, … — read in one
 /// place, so the debug dashboard can turn each on for good.
 ///
 /// - **The launch argument wins** when it is passed: a QA run, a script and
@@ -10,7 +10,7 @@ import Foundation
 /// - **Release:** the argument alone, as before — nothing persisted is read.
 public enum DebugFlags {
     public struct Flag: Sendable, Identifiable, Equatable {
-        /// The launch argument, `-voice-messages`.
+        /// The launch argument, `-viewport-share`.
         public let argument: String
         public let title: String
         /// What turning it on does, in a line.
@@ -25,8 +25,6 @@ public enum DebugFlags {
     /// `isOn(_:)` cannot be switched, so a new one is added here and read
     /// through it.
     public static let all: [Flag] = [
-        Flag(argument: "-voice-messages", title: "Voice messages composer",
-             detail: "The hold-to-record composer in threads (#2105)", appliesAtLaunch: false),
         Flag(argument: "-viewport-share", title: "Viewport share trace",
              detail: "Logs the half-the-display playback measure (#1914)", appliesAtLaunch: false),
         Flag(argument: "-still-video-backdrop", title: "Still video backdrops",
