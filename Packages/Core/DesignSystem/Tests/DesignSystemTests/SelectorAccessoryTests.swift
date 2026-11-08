@@ -364,3 +364,28 @@ struct SelectorAccessoryTests {
         #expect(controller.tabBarMinimizeBehavior == .onScrollDown)
     }
 }
+
+
+/// A stand-in in the strip's place (the profile's History, 2026-11-08): the
+/// same accessory, its content replaced, and the strip back after.
+@MainActor
+struct SelectorAccessoryStandInTests {
+    @Test func aStandInTakesTheStripsPlaceAndGivesItBack() {
+        let strip = PagedTabBar(titles: ["Posts", "History"], style: .navigationTitle)
+        let host = SelectorAccessoryHost(strip: strip)
+        host.frame = CGRect(x: 0, y: 0, width: 360, height: 48)
+        host.layoutIfNeeded()
+        let standIn = UIButton(configuration: .plain())
+        host.showStandIn(standIn, animated: true)
+        #expect(standIn.superview === host)
+        #expect(host.standIn === standIn)
+        #expect(strip.alpha == 0 && !strip.isUserInteractionEnabled, "the strip still shows under the stand-in")
+        #expect(standIn.frame == host.bounds, "the stand-in does not fill the capsule: \(standIn.frame)")
+        #expect(strip.superview === host, "the strip left its accessory")
+
+        host.showStandIn(nil, animated: true)
+        #expect(standIn.superview == nil)
+        #expect(host.standIn == nil)
+        #expect(strip.alpha == 1 && strip.isUserInteractionEnabled)
+    }
+}

@@ -142,6 +142,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// adjacent bar items into one platter (the feed's note on
     /// `setEngagedChrome`). Kept for the same by-reference reason.
     private let muteBellSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
+    /// Keeps History's Select / Done its own bubble, apart from the gear.
+    private let historySelectSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     /// An item the SHELL owns at the head of the leading group — the
     /// notifications bell, on the tab root only (a pushed profile leads with
     /// its back button). Kept as state for the same reason as the trailing
@@ -487,6 +489,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         }
         viewModel.onGalleryChange = { [weak self] snapshot in
             self?.lastGallerySnapshot = snapshot
+            self?.historyChanged()
             self?.showTabs(for: snapshot)
             HeroScreenCost.measure("landing.gallery") { self?.galleryPager.render(snapshot) }
             // The media gallery "View all" pushed, if it is up, grows with
@@ -661,6 +664,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // Leaving the profile ends History's select mode.
+        setSelectingHistory(false, restoresFoot: false)
         // The band comes down; the toolbar is the stack's, put away unless the
         // screen taking over brings items of its own (the relations screen,
         // the feed).
@@ -2100,7 +2105,12 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // [search]). On a pushed profile, which has neither the gear nor the
         // switcher, the balance is the corner. Fixed spaces keep each its own
         // bubble — adjacent items share one glass capsule.
-        if let trailingAccessoryItem, !namesNoOne {
+        // History's Select (Done while selecting) takes the balance's place
+        // on the own profile's History page (the owner, 2026-11-08).
+        if let historyItem = historySelectBarItem {
+            items.append(historySelectSpacer)
+            items.append(historyItem)
+        } else if let trailingAccessoryItem, !namesNoOne {
             if showsMuteBell { items.append(muteBellSpacer) }
             items.append(trailingAccessoryItem)
         }
@@ -2295,10 +2305,124 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// corpora, not formats, and writing one into the stored filter would mean
     /// re-opening the profile on a tab the next profile may not even have.
     private func adoptTab(_ tab: ProfileTab) {
+        let changed = shownTab != tab
+        shownTab = tab
         viewModel.setActiveTab(tab)
-        // Off the History page: it takes in what was viewed (#2170).
-        if tab != .history { viewModel.releaseHistory() }
+        // Off the History page: it takes in what was viewed (#2170), and its
+        // select mode ends.
+        if tab != .history {
+            viewModel.releaseHistory()
+            setSelectingHistory(false)
+        }
+        // History's Select stands in the balance's place, and only there.
+        if changed { applyNavigationState(animated: view.window != nil) }
     }
+
+    /// The page on screen, as last adopted.
+    private var shownTab: ProfileTab?
+
+    // MARK: - History's select mode (the owner, 2026-11-08)
+
+    /// History's rows wear their selection circles; the bar says Done and the
+    /// foot of the screen "Remove from History (n)" in the tabs' place.
+    private(set) var isSelectingHistory = false
+    private var historySelection: [PostID] = []
+
+    /// The own profile, on its History page: Select (Done while selecting)
+    /// stands where the balance does.
+    private var historySelectBarItem: UIBarButtonItem? {
+        guard dayLeads, !viewModel.namesNoOne, shownTab == .history else { return nil }
+        if isSelectingHistory { return historyDoneItem }
+        historySelectItem.isEnabled = viewModel.hasHistory
+        return historySelectItem
+    }
+
+    private lazy var historySelectItem = BarItems.title(id: "profile.history.select", title: "Select") { [weak self] in
+        self?.setSelectingHistory(true)
+    }
+
+    private lazy var historyDoneItem = BarItems.title(id: "profile.history.done", title: "Done", prominent: true) {
+        [weak self] in self?.setSelectingHistory(false)
+    }
+
+    /// The select mode's one action, in the selector's place: "Remove from
+    /// History (n)", in red, the accessory's own capsule around it.
+    private lazy var historyRemoveButton: UIButton = {
+        var configuration = UIButton.Configuration.plain()
+        configuration.baseForegroundColor = .systemRed
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.scaledFont(forTextStyle: .headline, weight: .semibold)
+            return attributes
+        }
+        let button = UIButton(configuration: configuration)
+        button.addAction(UIAction { [weak self] _ in self?.removeSelectedHistory() }, for: .primaryActionTriggered)
+        return button
+    }()
+
+    /// Into, or out of, History's select mode. `restoresFoot` false: the
+    /// screen is leaving, and its own disappearance takes the band down.
+    func setSelectingHistory(_ selecting: Bool, restoresFoot: Bool = true) {
+        guard selecting != isSelectingHistory else { return }
+        guard !selecting || (shownTab == .history && viewModel.hasHistory) else { return }
+        isSelectingHistory = selecting
+        // Selecting holds the viewer on History: no paging to the other tabs.
+        galleryPager.allowsPaging = !selecting
+        let page = galleryPager.builtPage(for: .history)
+        page?.onRowSelectionChanged = { [weak self] ids in self?.historySelectionChanged(ids) }
+        page?.setSelectingRows(selecting)
+        historySelection = page?.selectedRowPostIDs ?? []
+        applyHistoryRemoveTitle()
+        swapFootForHistoryRemove(selecting, restoresFoot: restoresFoot)
+        applyNavigationState(animated: view.window != nil)
+    }
+
+    /// History changed: Select is offered while there is something to
+    /// select, and the select mode ends with the last row.
+    private func historyChanged() {
+        historySelectItem.isEnabled = viewModel.hasHistory
+        if isSelectingHistory, !viewModel.hasHistory { setSelectingHistory(false) }
+    }
+
+    private func historySelectionChanged(_ ids: [PostID]) {
+        historySelection = ids
+        applyHistoryRemoveTitle()
+    }
+
+    private func applyHistoryRemoveTitle() {
+        let count = historySelection.count
+        historyRemoveButton.configuration?.title = count == 0 ? "Remove from History" : "Remove from History (\(count))"
+        historyRemoveButton.isEnabled = count > 0
+        historyRemoveButton.accessibilityLabel = count == 0
+            ? "Remove from History" : "Remove \(count) from History"
+    }
+
+    /// The selected rows leave the history, with the list's own animation;
+    /// the select mode ends there, as Photos' does after a delete.
+    private func removeSelectedHistory() {
+        let ids = historySelection
+        guard !ids.isEmpty else { return }
+        viewModel.removeFromHistory(ids)
+        setSelectingHistory(false)
+    }
+
+    /// The foot of the screen: the selector's own accessory wears "Remove
+    /// from History (n)" in the strip's place while selecting — the same
+    /// capsule, its content replaced (the owner, 2026-11-08) — and the strip
+    /// again after. `restoresFoot` is kept for a screen leaving, whose band
+    /// its own disappearance takes down with the stand-in in it.
+    private func swapFootForHistoryRemove(_ selecting: Bool, restoresFoot: Bool) {
+        let animated = view.window != nil && restoresFoot
+        selectorAccessory?.showStandIn(selecting ? historyRemoveButton : nil, animated: animated)
+    }
+
+    #if DEBUG
+    var debugHistoryPage: (any PostGridPage)? { galleryPager.builtPage(for: .history) }
+    var debugAllowsPaging: Bool { galleryPager.allowsPaging }
+    var debugHistoryRemoveTitle: String? { historyRemoveButton.configuration?.title }
+    var debugHistoryRemoveEnabled: Bool { historyRemoveButton.isEnabled }
+    func debugTapHistoryRemove() { removeSelectedHistory() }
+    #endif
 
     /// A post opened from History is covering the screen: the screen is
     /// gone, but the viewer has not left History (#2170). Cleared once the

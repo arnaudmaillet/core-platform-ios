@@ -1849,7 +1849,14 @@ public final class ProfileViewModel {
 
     /// Takes one post out of the history (its menu's "Remove from History").
     func removeFromHistory(_ id: PostID) {
-        viewHistory?.remove(id.rawValue)
+        removeFromHistory([id])
+    }
+
+    /// Takes several posts out of the history at once — the History page's
+    /// select mode (the owner, 2026-11-08): one reload, one animation.
+    func removeFromHistory(_ ids: [PostID]) {
+        guard !ids.isEmpty else { return }
+        for id in ids { viewHistory?.remove(id.rawValue) }
         loadHistory()
     }
 

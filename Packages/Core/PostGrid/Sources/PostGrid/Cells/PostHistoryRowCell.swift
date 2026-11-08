@@ -151,6 +151,141 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
             refreshAccessibilityActions()
         }
     }
+    // MARK: - The select mode (the profile's History, 2026-11-08)
+
+    /// The selection circle's side, and the room either side of it — from
+    /// the row's leading edge, and to the square (the owner: the circle
+    /// centred in its gap, not against the picture).
+    public static let selectionMarkSide: CGFloat = 24
+    public static let selectionMarkGap: CGFloat = 16
+    /// How far the square, the title and the author slide to make room.
+    public static var selectionShift: CGFloat { selectionMarkSide + selectionMarkGap }
+    /// The fade the title and the name melt into, just before the time and
+    /// the likes, which stay where they are.
+    static let selectionFade: CGFloat = 28
+
+    private let selectionMark = UIImageView()
+    public private(set) var isSelecting = false
+    private var isSelectedRow = false
+
+    /// The select mode (the list editing): the square, the title and the
+    /// author slide right for the circle while the time and the likes stay;
+    /// the title is not cut a second time — it fades into them. The author
+    /// rests, so a tap on it selects the row as anywhere else does.
+    override public func updateConfiguration(using state: UICellConfigurationState) {
+        super.updateConfiguration(using: state)
+        authorView.isUserInteractionEnabled = !state.isEditing
+        let selected = state.isEditing && state.isSelected
+        if selected != isSelectedRow {
+            isSelectedRow = selected
+            applySelectionMark(animated: window != nil && state.isEditing)
+        }
+        accessibilityTraits = selected ? [.button, .selected] : .button
+        guard state.isEditing != isSelecting else { return }
+        isSelecting = state.isEditing
+        let animated = window != nil && !MotionPreference.reducesMotion
+        // Laid out first, outside any animation: the circle is where it
+        // belongs before it fades and grows in.
+        UIView.performWithoutAnimation { contentView.layoutIfNeeded() }
+        placeSelectionMark()
+        applySelectionFades()
+        let place = { self.applySelectionPlacement() }
+        guard animated else { return place() }
+        UIView.animate(springDuration: 0.4, bounce: 0.1, options: [.allowUserInteraction, .beginFromCurrentState], animations: place)
+    }
+
+    /// The circle — empty, or the brand's check — swapped by the symbol's
+    /// own Replace.
+    private func applySelectionMark(animated: Bool) {
+        let image = UIImage(systemName: isSelectedRow ? "checkmark.circle.fill" : "circle")
+        selectionMark.tintColor = isSelectedRow ? Palette.tint : .tertiaryLabel
+        if animated, !MotionPreference.reducesMotion, let image {
+            selectionMark.setSymbolImage(image, contentTransition: .replace)
+        } else {
+            selectionMark.image = image
+        }
+    }
+
+    /// Where the slid parts and the circle stand for the mode.
+    private func applySelectionPlacement() {
+        let shift = isSelecting ? CGAffineTransform(translationX: Self.selectionShift * layoutSign, y: 0) : .identity
+        for view in [square as UIView, titleLabel, authorView] { view.transform = shift }
+        selectionMark.alpha = isSelecting ? 1 : 0
+        selectionMark.transform = isSelecting ? .identity : CGAffineTransform(scaleX: 0.5, y: 0.5)
+    }
+
+    private var layoutSign: CGFloat { effectiveUserInterfaceLayoutDirection == .rightToLeft ? -1 : 1 }
+
+    /// The circle at the row's leading edge — the list's margin before it,
+    /// the same gap after it to the slid square — centred on the square.
+    ///
+    /// ⚠️ NEVER INSIDE AN ANIMATION (the owner, 2026-11-08): the list lays
+    /// its rows out inside its editing transition, and the circle's first
+    /// frame then grew from the row's top-left corner. It is placed at once;
+    /// only its alpha and scale spring.
+    private func placeSelectionMark() {
+        let side = Self.selectionMarkSide
+        let x = layoutSign > 0 ? 0 : contentView.bounds.width - side
+        UIView.performWithoutAnimation {
+            selectionMark.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+            selectionMark.center = CGPoint(x: x + side / 2, y: square.center.y)
+        }
+    }
+
+    /// The title and the name melt into the time and the likes while they
+    /// are slid (a mask on each, in its own space); nothing at rest.
+    private func applySelectionFades() {
+        guard isSelecting else {
+            titleLabel.layer.mask = nil
+            authorView.layer.mask = nil
+            return
+        }
+        fade(titleLabel, before: timeLabel.isHidden || wrapsTrailingValues ? nil : timeLabel)
+        fade(authorView, before: likes.isHidden || wrapsTrailingValues ? nil : likes)
+    }
+
+    /// Masks `view` to melt away just before `neighbour` (the row's end
+    /// without one), as it stands once slid.
+    private func fade(_ view: UIView, before neighbour: UIView?) {
+        guard let container = view.superview, view.bounds.width > 0 else { return }
+        let width = view.bounds.width
+        // Its laid-out place, whatever transform it wears.
+        let origin = view.center.x - width / 2
+        let end: CGFloat
+        if let neighbour, neighbour.superview === container {
+            end = neighbour.center.x - neighbour.bounds.width / 2 - Spacing.xs
+        } else {
+            end = contentView.convert(CGPoint(x: contentView.bounds.maxX, y: 0), to: container).x
+        }
+        let localEnd = (end - origin - Self.selectionShift) / width
+        let localStart = localEnd - Self.selectionFade / width
+        guard localEnd < 1 else { view.layer.mask = nil; return }
+        let mask = (view.layer.mask as? CAGradientLayer) ?? CAGradientLayer()
+        mask.startPoint = CGPoint(x: 0, y: 0.5)
+        mask.endPoint = CGPoint(x: 1, y: 0.5)
+        mask.colors = [UIColor.black.cgColor, UIColor.black.cgColor, UIColor.clear.cgColor, UIColor.clear.cgColor]
+        let start = max(0, min(1, localStart)), finish = max(0, min(1, localEnd))
+        let flipped = layoutSign < 0
+        mask.locations = (flipped
+            ? [0, 1 - finish, 1 - start, 1].map { NSNumber(value: Double($0)) }
+            : [0, start, finish, 1].map { NSNumber(value: Double($0)) })
+        if flipped { mask.colors = mask.colors?.reversed() }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        mask.frame = view.bounds
+        CATransaction.commit()
+        view.layer.mask = mask
+    }
+
+    /// Whether the circle shows, and checked.
+    public var debugSelectionMark: (shown: Bool, checked: Bool) { (isSelecting && selectionMark.alpha > 0, isSelectedRow) }
+    /// The circle's frame and the square's, in the row's space, as drawn.
+    public var debugSelectionFrames: (mark: CGRect, square: CGRect) {
+        (selectionMark.frame, square.frame)
+    }
+    /// Whether the title melts away (a mask) now.
+    public var debugTitleFades: Bool { titleLabel.layer.mask != nil }
+
     /// The row's action for VoiceOver — its menu's first row: its title and
     /// what it does, the page's; nil for none.
     public var rowAction: (title: String, perform: () -> Void)? {
@@ -203,6 +338,12 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
 
         square.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(square)
+        selectionMark.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 22, weight: .regular)
+        selectionMark.contentMode = .center
+        selectionMark.alpha = 0
+        selectionMark.isAccessibilityElement = false
+        contentView.addSubview(selectionMark)
+        applySelectionMark(animated: false)
 
         titleLabel.textColor = .label
         titleLabel.numberOfLines = 1
@@ -395,6 +536,8 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
         decideWrap(forWidth: bounds.width)
         super.layoutSubviews()
         if before != wrapsTrailingValues { invalidateIntrinsicContentSize() }
+        placeSelectionMark()
+        if isSelecting { applySelectionFades() }
     }
 
     // MARK: - Accessibility actions

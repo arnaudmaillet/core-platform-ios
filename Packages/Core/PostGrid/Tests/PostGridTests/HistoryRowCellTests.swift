@@ -204,6 +204,41 @@ struct HistoryRowCellTests {
         #expect(cell.debugPlaySide > (side * 0.24).rounded())
     }
 
+    /// The select mode (the owner, 2026-11-08): the circle stands at the
+    /// row's edge with the same gap after it to the slid square; the time
+    /// stays where it was, and the title melts into it rather than being
+    /// cut a second time.
+    @Test func theSelectModeCentresItsCircleAndMeltsTheTitle() {
+        let cell = laidOut(post(caption: String(repeating: "A long caption that runs on ", count: 4)), viewedAt: Self.now)
+        let timeBefore = cell.debugFrames.time
+        var state = UICellConfigurationState(traitCollection: cell.traitCollection)
+        state.isEditing = true
+        state.isSelected = true
+        cell.updateConfiguration(using: state)
+        // Placed at once — not left to a pass inside the list's animation,
+        // where it grew from the row's corner (the owner, 2026-11-08).
+        #expect(cell.debugSelectionFrames.mark.width == PostHistoryRowCell.selectionMarkSide * 0.5
+                || cell.debugSelectionFrames.mark.width == PostHistoryRowCell.selectionMarkSide,
+                "the circle waits for a later pass: \(cell.debugSelectionFrames.mark)")
+        cell.layoutIfNeeded()
+        let frames = cell.debugSelectionFrames
+        #expect(cell.debugSelectionMark == (shown: true, checked: true))
+        #expect(abs(frames.mark.minX) < 0.5, "the circle is off the row's edge: \(frames.mark)")
+        #expect(abs(frames.square.minX - frames.mark.maxX - PostHistoryRowCell.selectionMarkGap) < 0.5,
+                "the circle is not centred in its gap: \(frames)")
+        #expect(abs(frames.mark.midY - frames.square.midY) < 0.5)
+        #expect(cell.debugFrames.time == timeBefore, "the time moved")
+        #expect(cell.debugTitleFades, "the title is cut instead of melting")
+
+        state.isEditing = false
+        state.isSelected = false
+        cell.updateConfiguration(using: state)
+        cell.layoutIfNeeded()
+        #expect(!cell.debugSelectionMark.shown)
+        #expect(!cell.debugTitleFades)
+        #expect(abs(cell.debugSelectionFrames.square.minX) < 0.5, "the square did not come back")
+    }
+
     /// The bones are the row's height.
     @Test func theSkeletonIsTheRowsHeight() {
         let bones = PostHistoryRowSkeletonCell(frame: CGRect(x: 0, y: 0, width: 370, height: 10))

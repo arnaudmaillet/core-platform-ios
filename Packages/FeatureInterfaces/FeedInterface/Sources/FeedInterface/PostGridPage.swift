@@ -146,6 +146,15 @@ public protocol PostGridPage: UIView {
     var onAuthorCardTapped: ((GalleryPost) -> Void)? { get set }
     /// A Rows page's row action for VoiceOver (#2170); nil for none.
     var rowAccessibilityAction: PostGridRowAction? { get set }
+    /// A Rows page in its select mode (the profile's History, the owner
+    /// 2026-11-08): each row wears a selection circle and a tap selects it
+    /// instead of opening the post; the author and the menu rest.
+    var isSelectingRows: Bool { get }
+    func setSelectingRows(_ selecting: Bool)
+    /// The rows selected now, in the page's order.
+    var selectedRowPostIDs: [PostID] { get }
+    /// The selection changed — a tap, or rows that left.
+    var onRowSelectionChanged: (([PostID]) -> Void)? { get set }
     /// What a row's "..." offers — nothing hides the control.
     var postMenuActions: ((PostGridAuthorMenuContext) -> [PostCardMenuAction])? { get set }
     /// Pull-to-refresh, and a status's action.
@@ -227,6 +236,14 @@ public extension PostGridPage {
     }
 
     var rowAccessibilityAction: PostGridRowAction? {
+        get { nil }
+        set {}
+    }
+
+    var isSelectingRows: Bool { false }
+    func setSelectingRows(_ selecting: Bool) {}
+    var selectedRowPostIDs: [PostID] { [] }
+    var onRowSelectionChanged: (([PostID]) -> Void)? {
         get { nil }
         set {}
     }

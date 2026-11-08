@@ -213,6 +213,40 @@ struct RowsPageTests {
         #expect(try row(grid, "p0").debugViewedText == "1h")
     }
 
+    /// The select mode (the owner, 2026-11-08): a tap selects a row instead
+    /// of opening it, nothing lifts, and leaving drops the selection.
+    @Test func theSelectModeSelectsInsteadOfOpening() throws {
+        let all = posts(4)
+        let (page, grid) = page()
+        var opened = 0
+        page.onPostTapped = { _, _, _ in opened += 1 }
+        var reported: [[PostID]] = []
+        page.onRowSelectionChanged = { reported.append($0) }
+        page.show(.sections([PostGridPageSection(title: "Today", posts: all)]))
+        page.layoutIfNeeded()
+        #expect(!page.isSelectingRows)
+        page.setSelectingRows(true)
+        #expect(page.isSelectingRows)
+        for item in [2, 0] {
+            let path = IndexPath(item: item, section: 0)
+            grid.collectionView.selectItem(at: path, animated: false, scrollPosition: [])
+            grid.collectionView(grid.collectionView, didSelectItemAt: path)
+        }
+        #expect(opened == 0, "a tap opened the post in the select mode")
+        #expect(page.selectedRowPostIDs == [PostID("p0"), PostID("p2")], "in the page's order")
+        #expect(reported.last == [PostID("p0"), PostID("p2")])
+        #expect(grid.collectionView(grid.collectionView, contextMenuConfigurationForItemsAt: [IndexPath(item: 1, section: 0)], point: .zero) == nil,
+                "a row lifted its menu in the select mode")
+        let cell = try row(grid, "p1")
+        #expect(cell.debugSelectionMark.shown, "no selection circle on the row")
+        #expect(try row(grid, "p0").debugSelectionMark.checked, "a selected row wears no check")
+        #expect(!cell.debugSelectionMark.checked)
+        page.setSelectingRows(false)
+        #expect(!page.isSelectingRows)
+        #expect(page.selectedRowPostIDs.isEmpty)
+        #expect(reported.last == [])
+    }
+
     /// No row swipes (the owner, 2026-11-07); the long press keeps the
     /// host's menu, and VoiceOver the host's row action.
     @Test func theMenuIsTheHostsAndNoRowSwipes() throws {

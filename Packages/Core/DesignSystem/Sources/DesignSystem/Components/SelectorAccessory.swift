@@ -220,6 +220,60 @@ public final class SelectorAccessoryHost: UIView {
     /// trade is worse where it bites hardest: equal slots price every segment
     /// at the WIDEST title, so on the inbox "All" wears "Suggestions"' box —
     /// 41pt of word in a 98pt slot — and the strip scrolls to show three.
+    // MARK: - A stand-in (the profile's History, 2026-11-08)
+
+    /// What stands in the strip's place now, if anything.
+    public private(set) var standIn: UIView?
+
+    /// Puts `view` in the strip's place, in the SAME accessory — the capsule
+    /// the viewer sees does not change, its content does (the owner: "not a
+    /// button added: the bottom accessory's content replaced"). The strip
+    /// and `view` cross-fade; nil gives the strip back.
+    public func showStandIn(_ view: UIView?, animated: Bool) {
+        let leaving = standIn
+        guard view !== leaving else { return }
+        standIn = view
+        let parts = [strip, trailing].compactMap { $0 }
+        if let view {
+            view.layer.removeAllAnimations()
+            view.removeFromSuperview()
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+            NSLayoutConstraint.activate([
+                view.leadingAnchor.constraint(equalTo: leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: trailingAnchor),
+                view.topAnchor.constraint(equalTo: topAnchor),
+                view.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+            UIView.performWithoutAnimation { layoutIfNeeded() }
+        }
+        for part in parts { part.isUserInteractionEnabled = view == nil }
+        let swap = {
+            for part in parts { part.alpha = view == nil ? 1 : 0 }
+            leaving?.alpha = 0
+            leaving?.transform = CGAffineTransform(scaleX: 0.92, y: 0.92)
+            view?.alpha = 1
+            view?.transform = .identity
+        }
+        let done = { [weak self, weak leaving] in
+            guard let self, let leaving, leaving !== standIn else { return }
+            leaving.removeFromSuperview()
+            leaving.alpha = 1
+            leaving.transform = .identity
+        }
+        guard animated, window != nil, !MotionPreference.reducesMotion else {
+            swap()
+            return done()
+        }
+        view?.alpha = 0
+        view?.transform = CGAffineTransform(scaleX: 0.92, y: 0.92)
+        UIView.animate(springDuration: 0.35, bounce: 0.1, options: [.allowUserInteraction, .beginFromCurrentState]) {
+            swap()
+        } completion: { _ in
+            done()
+        }
+    }
+
     private func applyEnvironment() {
         strip?.segmentSizing =
             traitCollection.tabAccessoryEnvironment == .inline ? .naturalWhenCrowded : .equalSlots
@@ -604,6 +658,12 @@ public final class SelectorAccessory {
     public typealias Options = SelectorAccessoryOptions
 
     public let hostView: SelectorAccessoryHost
+
+    /// Puts `view` in the strip's place in this same accessory — see
+    /// `SelectorAccessoryHost.showStandIn`.
+    public func showStandIn(_ view: UIView?, animated: Bool) {
+        hostView.showStandIn(view, animated: animated)
+    }
     /// Whether THIS accessory is one of the store's owners, so a double
     /// install or a double remove cannot move the count twice.
     private var holdsMinimize = false

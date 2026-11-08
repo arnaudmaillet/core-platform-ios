@@ -410,6 +410,10 @@ struct ProfileHistoryDaysTests {
         func posts(ids: [String]) async throws -> [GalleryPost] { ids.compactMap { id in all.first { $0.id.rawValue == id } } }
     }
 
+    private struct NoImages: ImageFetching {
+        func fetchImageData(for url: URL) async throws -> Data { Data() }
+    }
+
     private final class Clock: @unchecked Sendable {
         var date: Date
         init(_ date: Date) { self.date = date }
@@ -450,6 +454,72 @@ struct ProfileHistoryDaysTests {
         } else {
             Issue.record("History lost its posts")
         }
+    }
+
+    /// History's select mode (the owner, 2026-11-08): on the own profile's
+    /// History page, Select stands where the balance does; selecting, Done,
+    /// and the foot's "Remove from History (n)" takes the selected rows out
+    /// and ends the mode. Off History, the balance is back.
+    @Test func historysSelectModeTakesTheBalancesPlace() async throws {
+        let name = "history-select-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let clock = Clock(Self.now.addingTimeInterval(-3 * 3_600))
+        let store = PostViewHistoryStore(
+            defaults: defaults, scope: StorageScope(owner: .member(account: "A", profile: "P")), now: { clock.date }
+        )
+        for id in ["a", "b", "c"] {
+            clock.date.addTimeInterval(600)
+            store.record(id)
+        }
+        let viewModel = ProfileViewModel(
+            repository: NoProfiles(), gallery: HistoryGallery(["a", "b", "c"].map(post)), viewHistory: store
+        )
+        let now = Self.now
+        viewModel.now = { now }
+        let screen = ProfileViewController(
+            viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: NoImages()),
+            makeGridPage: TestGridPages.factory(), onLogout: {}, trayPlacement: .aboveBottomSafeArea
+        )
+        screen.loadViewIfNeeded()
+        let balance = UIBarButtonItem(title: "250")
+        balance.accessibilityLabel = "Balance"
+        screen.setTrailingAccessoryItem(balance)
+        func bar() -> [String] {
+            let items: [UIBarButtonItem] = screen.navigationItem.rightBarButtonItems ?? []
+            return items.compactMap { item -> String? in item.accessibilityLabel ?? item.title }
+        }
+        viewModel.loadHistory()
+        for _ in 0..<300 where !screen.debugTabTitles.contains("History") { try await Task.sleep(for: .milliseconds(10)) }
+        let history = try #require(screen.debugTabTitles.firstIndex(of: "History"))
+        #expect(bar().contains("Balance"), "the balance left the Posts page")
+        screen.selectTab(at: history)
+        #expect(bar().contains("Select") && !bar().contains("Balance"), "\(bar())")
+
+        screen.setSelectingHistory(true)
+        #expect(screen.isSelectingHistory)
+        #expect(bar().contains("Done") && !bar().contains("Select"), "\(bar())")
+        #expect(!screen.debugAllowsPaging, "selecting still pages to the other tabs")
+        #expect(screen.debugHistoryPage?.isSelectingRows == true)
+        #expect(screen.debugHistoryRemoveTitle == "Remove from History")
+        #expect(!screen.debugHistoryRemoveEnabled)
+
+        // Two rows selected: the count, then out they go and the mode ends.
+        screen.debugHistoryPage?.onRowSelectionChanged?([PostID("a"), PostID("c")])
+        #expect(screen.debugHistoryRemoveTitle == "Remove from History (2)")
+        #expect(screen.debugHistoryRemoveEnabled)
+        screen.debugTapHistoryRemove()
+        #expect(store.postIDs == ["b"])
+        #expect(!screen.isSelectingHistory)
+        #expect(screen.debugHistoryPage?.isSelectingRows == false)
+        #expect(bar().contains("Select"))
+        #expect(screen.debugAllowsPaging)
+
+        // Off History: the balance, and no select mode.
+        screen.setSelectingHistory(true)
+        screen.selectTab(at: 0)
+        #expect(!screen.isSelectingHistory)
+        #expect(bar().contains("Balance") && !bar().contains("Select") && !bar().contains("Done"), "\(bar())")
     }
 
     /// History holds still while the viewer is on it (the owner,
