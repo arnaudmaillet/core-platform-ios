@@ -562,6 +562,17 @@ struct SnapCommentTickerViewTests {
                     && abs(pair.bubble.midY - pair.capsule.midY) < 0.5,
                     "a capsule left its bubble \(moment): \(pair.capsule) vs \(pair.bubble)", sourceLocation: sourceLocation)
         }
+        // Flight for flight: the same move, begun at the same time.
+        for flight in ticker.debugBubbleCapsuleFlights {
+            #expect((flight.bubble == nil) == (flight.capsule == nil), "one flies without the other \(moment)",
+                    sourceLocation: sourceLocation)
+            guard let bubble = flight.bubble, let capsule = flight.capsule else { continue }
+            #expect(bubble.beginTime == capsule.beginTime
+                    && (bubble.fromValue as? CGFloat) == (capsule.fromValue as? CGFloat)
+                    && (bubble.toValue as? CGFloat) == (capsule.toValue as? CGFloat)
+                    && bubble.duration == capsule.duration,
+                    "a capsule flies another flight \(moment)", sourceLocation: sourceLocation)
+        }
     }
 
     /// The capsules follow their bubbles through a spawn, a scrub, a coast

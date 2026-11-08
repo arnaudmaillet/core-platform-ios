@@ -102,6 +102,14 @@ open class HeroPagePager<Tab: Equatable>: UIView {
     /// The pan that pages; exposed so the owner can subordinate it to the
     /// navigation stack's edge-swipe pop.
     public var horizontalPan: UIPanGestureRecognizer { scrollView.panGestureRecognizer }
+
+    /// Whether a drag pages to the other tabs — and pulls past the first.
+    /// Off while a page holds the viewer in a mode of its own (the
+    /// profile's History selecting, the owner 2026-11-08).
+    public var allowsPaging: Bool {
+        get { scrollView.isScrollEnabled }
+        set { scrollView.isScrollEnabled = newValue }
+    }
     /// Which page is live — read by the dismissal gate, which may only claim
     /// the whole surface when there is no page to the left.
     public var activePageIndex: Int { activeIndex }

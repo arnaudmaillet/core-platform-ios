@@ -174,6 +174,8 @@ final class ForYouGridPage: UIView {
     var onAuthorCardTapped: ((GalleryPost) -> Void)?
     /// A Rows page's row action, for VoiceOver (#2170).
     var rowAccessibilityAction: PostGridRowAction?
+    /// The selection changed in the select mode (`setSelectingRows`).
+    var onRowSelectionChanged: (([PostID]) -> Void)?
     /// When the viewer viewed each post a Rows page holds — the groups'
     /// dates (`PostGridPageSection.viewedAt`), keyed by post so a date stays
     /// on its row (#2170).
@@ -2350,6 +2352,41 @@ final class ForYouGridPage: UIView {
         )
     }
 
+    // MARK: - The select mode (the profile's History, 2026-11-08)
+
+    /// Whether the rows wear their selection circles now.
+    var isSelectingRows: Bool { style == .rows && collectionView.isEditing }
+
+    /// The rows' select mode: the list's own editing — each row draws its
+    /// circle and slides for it (`PostHistoryRowCell`); a tap selects, the
+    /// author and the menu rest. Leaving it drops the selection.
+    func setSelectingRows(_ selecting: Bool) {
+        guard style == .rows, selecting != collectionView.isEditing else { return }
+        collectionView.allowsMultipleSelectionDuringEditing = true
+        if !selecting {
+            for path in collectionView.indexPathsForSelectedItems ?? [] {
+                collectionView.deselectItem(at: path, animated: false)
+            }
+        }
+        collectionView.isEditing = selecting
+        onRowSelectionChanged?(selectedRowPostIDs)
+    }
+
+    /// The rows selected now, in the page's order.
+    var selectedRowPostIDs: [PostID] {
+        guard isSelectingRows else { return [] }
+        return (collectionView.indexPathsForSelectedItems ?? [])
+            .map { flatIndex(for: $0) }
+            .filter { posts.indices.contains($0) }
+            .sorted()
+            .map { posts[$0].id }
+    }
+
+    func collectionView(_ collectionView: UICollectionView, didDeselectItemAt indexPath: IndexPath) {
+        guard isSelectingRows else { return }
+        onRowSelectionChanged?(selectedRowPostIDs)
+    }
+
     /// **THE TEXT REVEAL**. The whole card of a TEXT row, in
     /// `space` — the rect a clip-window reveal opens from and closes onto.
     ///
@@ -3651,6 +3688,8 @@ final class ForYouGridPage: UIView {
                     if !showsSkeleton, !visible.isEmpty { collectionView.reconfigureItems(at: visible) }
                     updatePinnedSection()
                     updateAutoplay()
+                    // Selected rows that left leave the selection.
+                    if isSelectingRows { onRowSelectionChanged?(selectedRowPostIDs) }
                 }
             }
             if UIAccessibility.isReduceMotionEnabled {
@@ -3668,6 +3707,8 @@ final class ForYouGridPage: UIView {
         collectionView.collectionViewLayout.invalidateLayout()
         reloadAll(dissolving: dissolving)
         DispatchQueue.main.async { [weak self] in self?.updatePinnedSection() }
+        // A reload drops the selection.
+        if isSelectingRows { onRowSelectionChanged?(selectedRowPostIDs) }
     }
 
     /// Back to one untitled list: the next delivery is planned whole.
@@ -4062,6 +4103,8 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        // The select mode: a tap selects the row, nothing opens.
+        if isSelectingRows { return onRowSelectionChanged?(selectedRowPostIDs) ?? () }
         guard !showsSkeleton, posts.indices.contains(flatIndex(for: indexPath)) else { return }
         collectionView.deselectItem(at: indexPath, animated: false)
         // The flight leaves from where the cell IS. Nothing moves first:
@@ -4255,7 +4298,8 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
         point: CGPoint
     ) -> UIContextMenuConfiguration? {
-        guard !showsSkeleton, let indexPath = indexPaths.first else { return nil }
+        // The select mode's rows lift nothing: a press selects.
+        guard !showsSkeleton, !isSelectingRows, let indexPath = indexPaths.first else { return nil }
         let index = flatIndex(for: indexPath)
         guard posts.indices.contains(index) else { return nil }
         // ⚠️ A LIST CARD'S PREVIEW BELONGS TO ITS MEDIA (#1377, the owner
