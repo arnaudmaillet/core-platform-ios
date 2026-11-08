@@ -45,15 +45,22 @@ struct VoiceComposerTests {
     let device = Device()
     let clock = Clock()
 
-    func composer(_ permission: VoicePermissionState = .granted, key: String = "conv-\(UUID().uuidString)")
-        -> (VoiceComposer, CommentsInputBar, Sent) {
+    func composer(
+        _ permission: VoicePermissionState = .granted, key: String = "conv-\(UUID().uuidString)",
+        join: ((VoiceDraft, VoiceDraft) async throws -> VoiceDraft)? = nil
+    ) -> (VoiceComposer, CommentsInputBar, Sent) {
         let fake = device
         let recorder = VoiceRecorder(
             session: Session(), permission: Permission(permission), makeDevice: { fake }, ticker: Ticker(),
             notifications: NotificationCenter(), keepAwake: { _ in }
         )
         let time = clock
-        let composer = VoiceComposer(recorder: recorder, draftKey: key, now: { time.now })
+        let composer = VoiceComposer(
+            recorder: recorder, draftKey: key, now: { time.now },
+            join: join ?? { first, second in
+                VoiceDraft(fileURL: first.fileURL, duration: first.duration + second.duration, waveform: first.waveform)
+            }
+        )
         let bar = CommentsInputBar()
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         host.addSubview(bar)
@@ -438,6 +445,133 @@ struct VoiceComposerTests {
         #expect(!bar.speaksFromField)
         #expect(bar.debugShowsFieldEmoteToggle)
         #expect(bar.debugPlaceholder != CommentsInputBar.speakOrWritePlaceholder)
+    }
+
+    final class Joins {
+        var pairs: [[TimeInterval]] = []
+    }
+
+    /// Listened back, the take is closed — and the 🎙 stays: it records on
+    /// from the take's end, and the two parts go as one (the owner,
+    /// 2026-11-08).
+    @Test func afterAListenBackTheMicRecordsOnAndBothPartsGoAsOne() async {
+        let joins = Joins()
+        let (composer, _, sent) = composer(join: { first, second in
+            joins.pairs.append([first.duration, second.duration])
+            return VoiceDraft(fileURL: first.fileURL, duration: first.duration + second.duration, waveform: first.waveform)
+        })
+        composer.handle(.began)
+        #expect(await settle { composer.phase == .holding(revealed: true) })
+        composer.handle(.moved(leading: 0, up: 101))
+        composer.handle(.ended(leading: 0))
+        device.currentTime = 3
+        composer.debugStrip.debugTap("Pause recording")
+        composer.debugStrip.debugTap("Play recording")
+        #expect(composer.phase == .paused(resumable: false), "the listen back did not close the take")
+        #expect(composer.debugStrip.debugVisibleControls.contains("Record more"), "the mic left after the listen back")
+        composer.debugStrip.debugTap("Record more")
+        #expect(await settle { composer.phase == .locked }, "the mic did not record on")
+        device.currentTime = 2
+        composer.debugStrip.debugTap("Send voice message")
+        #expect(await settle { sent.takes.count == 1 }, "nothing was sent")
+        #expect(joins.pairs == [[3, 2]], "the two parts were not joined, first then second")
+        #expect(sent.takes.first?.duration == 5)
+    }
+
+    /// A second part under a second is dropped: the part before is sent.
+    @Test func aRecordOnUnderASecondSendsThePartBefore() async {
+        let joins = Joins()
+        let (composer, _, sent) = composer(join: { first, second in
+            joins.pairs.append([first.duration, second.duration])
+            return first
+        })
+        composer.handle(.began)
+        #expect(await settle { composer.phase == .holding(revealed: true) })
+        composer.handle(.moved(leading: 0, up: 101))
+        device.currentTime = 4
+        composer.debugStrip.debugTap("Pause recording")
+        composer.debugStrip.debugTap("Play recording")
+        composer.debugStrip.debugTap("Record more")
+        #expect(await settle { composer.phase == .locked })
+        device.currentTime = 0.4
+        composer.debugStrip.debugTap("Send voice message")
+        #expect(await settle { sent.takes.count == 1 })
+        #expect(joins.pairs.isEmpty)
+        #expect(sent.takes.first?.duration == 4)
+    }
+
+    /// The lock sinks back into the bubble it rose from (the owner,
+    /// 2026-11-08: it rose on its way out).
+    @Test func theLockSinksBackIntoTheBubble() async {
+        let (composer, bar, _) = composer()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        bar.frame = CGRect(x: 0, y: 700, width: 390, height: 120)
+        window.addSubview(bar)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        composer.attach(to: bar, host: window)
+        bar.actsFromOwnBubble = true
+        bar.layoutIfNeeded()
+        composer.handle(.began)
+        #expect(await settle { composer.phase == .holding(revealed: true) })
+        let resting = composer.debugLock.center.y
+        composer.handle(.moved(leading: 0, up: 101))
+        #expect(composer.debugLock.superview != nil, "the lock left at once")
+        #expect(composer.debugLock.transform.ty > 0, "the lock rose on its way out")
+        #expect(composer.debugLock.center.y == resting)
+    }
+
+    /// Focused, the field writes: the host's placeholder at the text's start,
+    /// and no voice hold or VoiceOver recording (the owner, 2026-11-08).
+    @Test func aFocusedFieldWritesAndRecordsNothing() async throws {
+        let (composer, bar, _) = composer()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        bar.frame = CGRect(x: 0, y: 700, width: 390, height: 120)
+        window.addSubview(bar)
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        bar.defaultPlaceholder = "Message…"
+        bar.actsFromOwnBubble = true
+        bar.layoutIfNeeded()
+        #expect(bar.debugPlaceholder == CommentsInputBar.speakOrWritePlaceholder)
+        #expect(bar.debugFieldHoldBegins)
+        bar.debugTextView.becomeFirstResponder()
+        try #require(bar.debugTextView.isFirstResponder, "the field took no focus")
+        #expect(bar.debugPlaceholder == "Message…")
+        #expect(bar.debugPlaceholderAlignment == .natural)
+        #expect(!bar.debugFieldHoldBegins, "the focused field's long press records")
+        #expect(bar.debugTextView.accessibilityCustomActions?.isEmpty ?? true, "VoiceOver still records from the focused field")
+        bar.debugTextView.resignFirstResponder()
+        #expect(bar.debugPlaceholder == CommentsInputBar.speakOrWritePlaceholder)
+        #expect(bar.debugFieldHoldBegins)
+        #expect(composer.phase == .idle)
+    }
+
+    /// ▶︎ to ❚❚, and ❚❚ to 🎙: only the faces change. The row does not spring
+    /// (laid out in a spring, the chip's time flew in from its corner and
+    /// the symbol's Replace stuttered under a moving frame: the owner's
+    /// video, 2026-11-08), and the chip keeps its place and width though ▶︎,
+    /// ❚❚ and ● are not the same width. A change that opens or closes the
+    /// row still springs.
+    @Test func aFaceChangeNeitherSpringsNorMovesTheChip() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 100))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let strip = VoiceRecordingStrip(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
+        window.addSubview(strip)
+        strip.apply(.locked)
+        strip.setTime(6, remaining: nil)
+        strip.layoutIfNeeded()
+        strip.apply(.paused(resumable: true, playing: false), animated: true)
+        #expect(strip.debugSpringCount == 0, "pausing sprang the row")
+        let chip = strip.debugChipFrame
+        strip.apply(.paused(resumable: false, playing: true), animated: true)
+        strip.setTime(0, remaining: nil)
+        strip.layoutIfNeeded()
+        #expect(strip.debugSpringCount == 0, "playing back sprang the row")
+        #expect(strip.debugChipFrame == chip, "the chip moved: \(strip.debugChipFrame) vs \(chip)")
+        strip.apply(.recording, animated: true)
+        #expect(strip.debugSpringCount == 1, "a change of parts no longer springs")
     }
 
     /// A post's comments keep today's tap: no hold.

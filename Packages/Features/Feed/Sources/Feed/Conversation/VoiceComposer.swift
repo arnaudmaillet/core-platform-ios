@@ -21,7 +21,8 @@ final class VoiceComposer {
         case holding(revealed: Bool)
         case locked
         /// Paused: `resumable` while the take is still open — after a listen
-        /// back or an interruption it is a finished draft.
+        /// back or an interruption it is a finished draft, and the 🎙 records
+        /// on from its end as a second take, joined to it (`earlier`).
         case paused(resumable: Bool)
     }
 
@@ -52,12 +53,29 @@ final class VoiceComposer {
     private var holdStarted: Date?
     private var fingerDown = false
     private var draft: VoiceDraft?
+    /// Recording on after a listen back (the owner, 2026-11-08): the take
+    /// before, closed, joined to the one recording now once it closes in
+    /// turn (`closeTake`).
+    private var earlier: VoiceDraft?
+    /// Two closed takes as one: `VoiceTakeJoin` in the app, a fake in tests.
+    private let join: (VoiceDraft, VoiceDraft) async throws -> VoiceDraft
+    /// A join on its way: listening and sending wait for it.
+    private(set) var isJoining = false
     private var clock: Timer?
 
-    init(recorder: VoiceRecorder = VoiceRecorder(), draftKey: String?, now: @escaping () -> Date = Date.init) {
+    init(
+        recorder: VoiceRecorder = VoiceRecorder(), draftKey: String?, now: @escaping () -> Date = Date.init,
+        join: @escaping (VoiceDraft, VoiceDraft) async throws -> VoiceDraft = { first, second in
+            try await VoiceTakeJoin.join(
+                first, second,
+                in: FileManager.default.temporaryDirectory.appending(path: "voice-takes", directoryHint: .isDirectory)
+            )
+        }
+    ) {
         self.recorder = recorder
         self.draftKey = draftKey
         self.now = now
+        self.join = join
         recorder.onLevel = { [weak self] level in self?.levelChanged(level) }
         recorder.onAutoFinish = { [weak self] outcome in self?.autoFinished(outcome) }
         recorder.onTimeRunningOut = { [weak self] in self?.tickClock() }
@@ -199,8 +217,10 @@ final class VoiceComposer {
     /// take never takes away the next one's lock.
     private var lockGeneration = 0
 
-    /// The lock goes — locked (it rises, closed), sent, cancelled — fading,
-    /// unless `animated` is false (leaving the conversation).
+    /// The lock goes — locked (closed), sent, cancelled — sinking back into
+    /// the bubble it rose from, fading, unless `animated` is false (leaving
+    /// the conversation). The owner, 2026-11-08: it rose on its way out
+    /// before, the opposite of how it came.
     private func dismissLock(animated: Bool = true) {
         lockGeneration += 1
         guard lock.superview != nil else { return }
@@ -217,7 +237,7 @@ final class VoiceComposer {
         }
         UIView.animate(withDuration: 0.28, delay: 0, options: [.beginFromCurrentState]) {
             self.lock.alpha = 0
-            self.lock.transform = CGAffineTransform(translationX: 0, y: -18).scaledBy(x: 0.85, y: 0.85)
+            self.lock.transform = CGAffineTransform(translationX: 0, y: 24).scaledBy(x: 0.6, y: 0.6)
         } completion: { _ in
             finish()
         }
@@ -246,13 +266,59 @@ final class VoiceComposer {
         showPaused(resumable: true)
     }
 
+    /// The 🎙 on the paused bar: the open take resumes, a closed one records
+    /// on (`recordOn`).
     private func resume() {
+        if phase == .paused(resumable: false) { return recordOn() }
         guard phase == .paused(resumable: true) else { return }
         VoicePlayer.shared.stop()
         recorder.resume()
         phase = .locked
         strip.apply(.locked, animated: true)
         startClock()
+    }
+
+    /// Records on from a closed take's end: a second take, joined to it when
+    /// it closes in turn — listened back, sent, or left.
+    private func recordOn() {
+        guard let taken = draft, !isJoining else { return }
+        VoicePlayer.shared.stop()
+        Task {
+            if case .finished = recorder.state { recorder.reset() }
+            if recorder.state == .cancelled { recorder.reset() }
+            guard case .started = await recorder.start(), phase == .paused(resumable: false), draft == taken else {
+                return
+            }
+            earlier = taken
+            draft = nil
+            Haptics.play(.commit)
+            phase = .locked
+            strip.apply(.locked, animated: true)
+            startClock()
+        }
+    }
+
+    /// The take as one closed draft: the one kept, or the recorder's own —
+    /// joined to the part before a record-on. A join that fails, or a second
+    /// part under a second, leaves the part before.
+    private func closeTake(_ done: @escaping (VoiceRecorder.FinishOutcome?) -> Void) {
+        if let draft { return done(.draft(draft)) }
+        let outcome = recorder.finish()
+        guard let before = earlier else { return done(outcome) }
+        earlier = nil
+        guard case .draft(let after) = outcome else { return done(.draft(before)) }
+        isJoining = true
+        Task {
+            let joined: VoiceDraft
+            do {
+                joined = try await join(before, after)
+            } catch {
+                try? FileManager.default.removeItem(at: after.fileURL)
+                joined = before
+            }
+            isJoining = false
+            done(.draft(joined))
+        }
     }
 
     private func showPaused(resumable: Bool) {
@@ -265,23 +331,24 @@ final class VoiceComposer {
         if let draft {
             strip.showTake(levels: draft.waveform, duration: draft.duration, progress: 0)
         } else {
-            strip.setTime(recorder.elapsed, remaining: nil)
+            strip.setTime(elapsed, remaining: nil)
         }
     }
 
     /// ▶︎ on the paused bar. A take still open is finished first — an `.m4a`
     /// plays only once closed — so it can no longer be resumed.
     private func listenBack() {
-        if draft == nil {
-            guard case .draft(let finished) = recorder.finish() else { return reset() }
+        guard !isJoining else { return }
+        closeTake { [weak self] outcome in
+            guard let self else { return }
+            guard case .draft(let finished) = outcome else { return reset() }
             draft = finished
+            let player = VoicePlayer.shared
+            let id = "voice-draft-\(finished.fileURL.lastPathComponent)"
+            player.onChange = { [weak self] in self?.listenBackChanged(id: id) }
+            player.toggle(id, url: finished.fileURL)
+            listenBackChanged(id: id)
         }
-        guard let draft else { return }
-        let player = VoicePlayer.shared
-        let id = "voice-draft-\(draft.fileURL.lastPathComponent)"
-        player.onChange = { [weak self] in self?.listenBackChanged(id: id) }
-        player.toggle(id, url: draft.fileURL)
-        listenBackChanged(id: id)
     }
 
     private func listenBackChanged(id: String) {
@@ -300,20 +367,23 @@ final class VoiceComposer {
 
     /// Release, or ↑: the take as it is.
     private func send() {
+        guard !isJoining else { return }
         stopClock()
         VoicePlayer.shared.stop()
-        let outcome: VoiceRecorder.FinishOutcome? = if let draft { .draft(draft) } else { recorder.finish() }
-        switch outcome {
-        case .draft(let take):
-            onSend?(ConversationThreadVoiceTake(fileURL: take.fileURL, duration: take.duration, waveform: take.waveform))
-        case .tooShort:
-            Haptics.play(.warning)
-            onHint?(Self.hint)
-        case nil:
-            break
+        closeTake { [weak self] outcome in
+            guard let self else { return }
+            switch outcome {
+            case .draft(let take):
+                onSend?(ConversationThreadVoiceTake(fileURL: take.fileURL, duration: take.duration, waveform: take.waveform))
+            case .tooShort:
+                Haptics.play(.warning)
+                onHint?(Self.hint)
+            case nil:
+                break
+            }
+            recorder.reset()
+            reset()
         }
-        recorder.reset()
-        reset()
     }
 
     /// Slid away, released past 55 %, or 🗑: the take goes, with the bin.
@@ -322,7 +392,7 @@ final class VoiceComposer {
         VoicePlayer.shared.stop()
         recorder.cancel()
         recorder.reset()
-        if let draft { try? FileManager.default.removeItem(at: draft.fileURL) }
+        for part in [draft, earlier].compactMap({ $0 }) { try? FileManager.default.removeItem(at: part.fileURL) }
         Haptics.play(.warning)
         // Slid away: the bubble goes straight back to its place and face.
         reset()
@@ -332,19 +402,41 @@ final class VoiceComposer {
     /// nothing lost, nothing sent.
     private func autoFinished(_ outcome: VoiceRecorder.FinishOutcome) {
         switch outcome {
-        case .draft(let finished):
-            draft = finished
+        case .draft:
             dismissLock()
-            showPaused(resumable: false)
             bar?.endVoiceHold()
+            // Recording on: the part before and this one, as one.
+            stopClock()
+            closeTakeAfterAutoFinish(outcome)
         case .tooShort:
-            reset()
+            if earlier != nil { closeTakeAfterAutoFinish(outcome) } else { reset() }
+        }
+    }
+
+    /// The recorder already closed its take: joined to the part before, if
+    /// any, into the paused bar.
+    private func closeTakeAfterAutoFinish(_ outcome: VoiceRecorder.FinishOutcome) {
+        let finish: (VoiceRecorder.FinishOutcome?) -> Void = { [weak self] closed in
+            guard let self else { return }
+            guard case .draft(let take) = closed else { return reset() }
+            draft = take
+            showPaused(resumable: false)
+        }
+        guard let before = earlier else { return finish(outcome) }
+        earlier = nil
+        guard case .draft(let after) = outcome else { return finish(.draft(before)) }
+        isJoining = true
+        Task {
+            let joined = (try? await join(before, after)) ?? before
+            isJoining = false
+            finish(.draft(joined))
         }
     }
 
     private func reset() {
         stopClock()
         draft = nil
+        earlier = nil
         bar?.endVoiceHold()
         dismissLock()
         bar?.showVoiceOverlay(nil)
@@ -362,13 +454,15 @@ final class VoiceComposer {
     func leave() {
         switch phase {
         case .locked, .paused:
-            if draft == nil, case .draft(let finished) = recorder.finish() { draft = finished }
-            if let key = draftKey, let draft { Self.drafts[key] = draft }
+            let key = draftKey
             VoicePlayer.shared.stop()
             stopClock()
             bar?.endVoiceHold()
             dismissLock(animated: false)
             phase = .idle
+            closeTake { outcome in
+                if let key, case .draft(let kept) = outcome { Self.drafts[key] = kept }
+            }
             draft = nil
         case .holding:
             cancel()
@@ -394,9 +488,31 @@ final class VoiceComposer {
         clock = nil
     }
 
+    /// The take's length: the part before a record-on, and this one.
+    private var elapsed: TimeInterval { (earlier?.duration ?? 0) + recorder.elapsed }
+
     private func tickClock() {
-        let elapsed = recorder.elapsed
-        strip.setTime(elapsed, remaining: VoiceRecorder.maximumDuration - elapsed)
+        let total = elapsed
+        let remaining = VoiceRecorder.maximumDuration - total
+        strip.setTime(total, remaining: remaining)
+        // Recording on counts from the whole take: the limit is the take's,
+        // where the recorder only knows its own part.
+        if earlier != nil, remaining <= 0, phase == .locked {
+            stopClock()
+            recorder.pause()
+            showPaused(resumable: true)
+            listenBackOrClose()
+        }
+    }
+
+    /// At the limit while recording on: the take closes into the paused bar.
+    private func listenBackOrClose() {
+        closeTake { [weak self] outcome in
+            guard let self else { return }
+            guard case .draft(let take) = outcome else { return reset() }
+            draft = take
+            showPaused(resumable: false)
+        }
     }
 
     private func levelChanged(_ level: Float) {

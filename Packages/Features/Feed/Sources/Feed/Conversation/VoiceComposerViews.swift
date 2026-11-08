@@ -13,6 +13,9 @@ import UIKit
 /// locked      [● 0:42] ▁▂▅▇▅▃▂▁▃▆▇▅▃   (❚❚)  (↑)
 /// paused      [▶︎ 0:42] ▂▅▇▅▃▂▅▇▆▃▂▅   (🎙)  (↑)
 /// ```
+///
+/// The 🎙 stays on the paused bar even after a listen back: it records on
+/// from where the take ended (the owner, 2026-11-08).
 final class VoiceRecordingStrip: UIView {
     enum Mode: Equatable {
         case recording
@@ -43,6 +46,13 @@ final class VoiceRecordingStrip: UIView {
     private var liveLevels: [UInt8] = []
     private var timeText = ""
     private var stackTrailing: NSLayoutConstraint?
+    /// The chip as wide as its widest face for its time: ▶︎, ❚❚ and ● are not
+    /// the same width, and the chip jumped by a fraction of a point at each
+    /// play and pause (2026-11-08).
+    private var chipWidth: NSLayoutConstraint?
+    private var chipWidthTitle = ""
+    /// The chip's three faces.
+    private static let chipFaces = ["circle.fill", "play.fill", "pause.fill"]
     /// Holding, the mic disc stands over the field's end — its glow wider
     /// still: the hint stops short of it (the owner, 2026-11-07: covered
     /// before the finger had moved).
@@ -102,6 +112,9 @@ final class VoiceRecordingStrip: UIView {
             box.heightAnchor.constraint(greaterThanOrEqualToConstant: 24),
         ])
         chip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let width = chip.widthAnchor.constraint(greaterThanOrEqualToConstant: 0)
+        width.isActive = true
+        chipWidth = width
         // The one part that stretches, and the one that gives: the buttons
         // keep their size.
         box.setContentHuggingPriority(UILayoutPriority(1), for: .horizontal)
@@ -150,6 +163,13 @@ final class VoiceRecordingStrip: UIView {
     /// - Parameter animated: a change in sight springs — the parts that come
     ///   fade in as the row opens for them, the parts that go fade out as it
     ///   closes (the owner, 2026-11-07: the hint, the time, the buttons).
+    ///
+    /// ⚠️ ONLY THE ROW SPRINGS (the owner's video, 2026-11-08). The buttons'
+    /// faces (the chip's ▶︎ / ❚❚ and its time, the take's ❚❚ / 🎙) change and
+    /// lay out with no animation, so the symbol's own Replace runs alone:
+    /// laid out inside the spring, the chip's time flew in from its bottom
+    /// right and the symbol stuttered under a moving frame. And a change
+    /// that shows or hides nothing (▶︎ to ❚❚) does not spring at all.
     func apply(_ mode: Mode, animated: Bool = false) {
         let springs = animated && window != nil && !MotionPreference.reducesMotion && mode != self.mode
         let shownBefore = Dictionary(uniqueKeysWithValues: animatedParts.map { (ObjectIdentifier($0), !$0.isHidden) })
@@ -172,26 +192,36 @@ final class VoiceRecordingStrip: UIView {
         chip.isHidden = recording
         stackTrailing?.constant = recording ? -Self.discClearance : 0
         // Replaced only in sight: a button coming into view shows its symbol
-        // at once.
+        // at once. Paused, the 🎙 records on — resumed, or after a listen
+        // back from the take's end (`resumable` false).
         let wasShown = !takeButton.isHidden
-        takeButton.isHidden = !(locked || (paused && resumable))
-        let take = UIImage(systemName: locked ? "pause.fill" : "mic.fill")
-        if takeButton.configuration?.image != take {
-            takeButton.configuration?.symbolContentTransition = wasShown ? UISymbolContentTransition(.replace) : nil
-            takeButton.configuration?.image = take
-        }
-        takeButton.accessibilityLabel = locked ? "Pause recording" : "Resume recording"
+        takeButton.isHidden = !(locked || paused)
         sendButton.isHidden = recording
-        // The chip leads with what it is: a red dot while it records, ▶︎ / ❚❚
-        // to listen back when it is paused.
+        let take = UIImage(systemName: locked ? "pause.fill" : "mic.fill")
         let face = UIImage(systemName: paused ? (playing ? "pause.fill" : "play.fill") : "circle.fill")
-        if chip.configuration?.image != face { chip.configuration?.image = face }
-        chip.configuration?.imageColorTransformer = paused ? nil : UIConfigurationColorTransformer { _ in .systemRed }
+        UIView.performWithoutAnimation {
+            if takeButton.configuration?.image != take {
+                takeButton.configuration?.symbolContentTransition = wasShown ? UISymbolContentTransition(.replace) : nil
+                takeButton.configuration?.image = take
+            }
+            // The chip leads with what it is: a red dot while it records,
+            // ▶︎ / ❚❚ to listen back when it is paused.
+            if chip.configuration?.image != face { chip.configuration?.image = face }
+            chip.configuration?.imageColorTransformer = paused ? nil : UIConfigurationColorTransformer { _ in .systemRed }
+            takeButton.layoutIfNeeded()
+            chip.layoutIfNeeded()
+        }
+        takeButton.accessibilityLabel = locked ? "Pause recording" : (resumable ? "Resume recording" : "Record more")
         chip.isUserInteractionEnabled = paused
         chip.accessibilityLabel = paused ? (playing ? "Pause playback" : "Play recording") : nil
         chip.isAccessibilityElement = paused
         blink(recording || locked)
-        guard springs else { return }
+        let rowChanges = animatedParts.contains { (shownBefore[ObjectIdentifier($0)] ?? !$0.isHidden) == $0.isHidden }
+            || trailingBefore != (stackTrailing?.constant ?? 0)
+        guard springs, rowChanges else { return }
+        #if DEBUG
+        debugSpringCount += 1
+        #endif
         // Undone, then sprung into: the parts as they were, the change in
         // one spring.
         let target = animatedParts.map { ($0, !$0.isHidden) }
@@ -225,11 +255,33 @@ final class VoiceRecordingStrip: UIView {
         timerLabel.text = text
         timerLabel.textColor = running ? Palette.tint : .label
         timerLabel.accessibilityLabel = "\(Int(seconds)) seconds"
-        if text != timeText {
-            timeText = text
-            chip.configuration?.title = text
+        // The chip's time and ink change with no animation, laid out at once:
+        // set inside a spring, the title flew in from the chip's corner.
+        UIView.performWithoutAnimation {
+            if text != timeText {
+                timeText = text
+                chip.configuration?.title = text
+                holdChipWidth(for: text)
+            }
+            chip.configuration?.baseForegroundColor = running ? Palette.tint : .label
+            chip.layoutIfNeeded()
         }
-        chip.configuration?.baseForegroundColor = running ? Palette.tint : .label
+    }
+
+    /// The chip's least width: its widest face with this time, read once per
+    /// time's shape (its digits as zeros), so it never moves on a face change.
+    private func holdChipWidth(for text: String) {
+        let shape = String(text.map { $0.isNumber ? "0" : $0 })
+        guard shape != chipWidthTitle, let configuration = chip.configuration else { return }
+        chipWidthTitle = shape
+        let sizing = UIButton(configuration: configuration)
+        var widest: CGFloat = 0
+        for face in Self.chipFaces {
+            sizing.configuration?.title = shape
+            sizing.configuration?.image = UIImage(systemName: face)
+            widest = max(widest, sizing.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width)
+        }
+        chipWidth?.constant = ceil(widest)
     }
 
     /// How far toward cancel the finger is: the hint fades with it.
@@ -281,6 +333,8 @@ final class VoiceRecordingStrip: UIView {
     var debugChipFrame: CGRect { chip.convert(chip.bounds, to: self) }
     var debugWaveformFrame: CGRect { waveform.convert(waveform.bounds, to: self) }
     var debugTakeFrame: CGRect { takeButton.convert(takeButton.bounds, to: self) }
+    /// How many times the row sprang: a change of faces alone never does.
+    private(set) var debugSpringCount = 0
     var debugSendFrame: CGRect { sendButton.convert(sendButton.bounds, to: self) }
     func debugTap(_ label: String) {
         if chip.accessibilityLabel == label { return chip.sendActions(for: .primaryActionTriggered) }
