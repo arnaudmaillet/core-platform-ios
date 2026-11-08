@@ -255,7 +255,7 @@ public final class DebugListViewController: UITableViewController {
             content.text = title
             content.secondaryText = detail
             content.textProperties.color = tableView.tintColor
-            cell.accessoryView = UIImageView(image: UIImage(systemName: "rectangle.portrait.on.rectangle.portrait"))
+            cell.accessoryView = UIImageView(image: UIImage(systemName: "rectangle.portrait.bottomhalf.inset.filled"))
         case .link(let title, let symbol, _):
             content.text = title
             content.image = symbol.flatMap { UIImage(systemName: $0) }
