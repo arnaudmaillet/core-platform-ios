@@ -400,13 +400,15 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
                 shell.present(catalog, animated: false)
             }
         }
-        // `-haptic-catalog`: every haptic role, to feel and tune on a device
-        // (#1882) — see `HapticCatalogViewController`.
-        if ProcessInfo.processInfo.arguments.contains("-haptic-catalog") {
+        // `-haptic-playground` (`-haptic-catalog`, its old name, still works):
+        // every haptic, to feel and choose on a device (#1882, #2193) — see
+        // `HapticPlaygroundViewController`. Also in the debug dashboard's Labs.
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-haptic-playground") || arguments.contains("-haptic-catalog") {
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .seconds(1))
                 guard let shell = self?.mainTabCoordinator?.rootViewController else { return }
-                let catalog = UINavigationController(rootViewController: HapticCatalogViewController())
+                let catalog = UINavigationController(rootViewController: HapticPlaygroundViewController())
                 catalog.modalPresentationStyle = .fullScreen
                 shell.present(catalog, animated: false)
             }

@@ -272,7 +272,9 @@ enum DebugDashboardTools {
     // MARK: - Labs
 
     /// The labs, benches and audits are launch-time screens and traces: each
-    /// row copies its simulator command.
+    /// row copies its simulator command. The haptics playground opens here
+    /// instead (#2193): it is felt on a device, where a launch argument is
+    /// awkward.
     private static func labSections() -> [DebugSection] {
         let groups: [(String, [(String, String)])] = [
             ("Labs", [
@@ -292,7 +294,14 @@ enum DebugDashboardTools {
                 ("Status bar blur", "-status-bar-blur-audit"),
             ]),
         ]
-        return groups.map { title, rows in
+        let playground = DebugSection(
+            title: "Screens",
+            footer: "Opens over the dashboard. Also -haptic-playground at launch.",
+            rows: [.sheet("Haptics playground", detail: "Every haptic, in context and on the app's roles (#2193)", make: {
+                HapticPlaygroundViewController()
+            })]
+        )
+        return [playground] + groups.map { title, rows in
             DebugSection(
                 title: title,
                 footer: title == "Audits" ? "Each copies `xcrun simctl launch booted …`; the results print to the console." : nil,

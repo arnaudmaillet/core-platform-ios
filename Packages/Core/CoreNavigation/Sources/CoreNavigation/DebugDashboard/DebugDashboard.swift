@@ -78,6 +78,20 @@ public enum DebugDashboard {
                 }
             ))
         }
+        // A role playing a candidate is not the real catalog (#2193 § 4).
+        let candidates = HapticOverrides.shared.roles
+        if !candidates.isEmpty {
+            sections.append(DebugSection(
+                title: "Haptic candidates on",
+                footer: "These roles play the playground's candidate everywhere, until reset.",
+                rows: [
+                    .info("\(candidates.count) of \(Haptic.allCases.count) roles", candidates.map { "\($0)" }.joined(separator: ", ")),
+                    .action("Reset all", detail: "Every role back to today's recipe", run: {
+                        HapticOverrides.shared.resetAll()
+                    }),
+                ]
+            ))
+        }
         sections.append(DebugSection(title: nil, footer: nil, rows: entries.map { entry in
             .link(entry.title, symbol: entry.symbol, make: entry.make)
         }))
@@ -153,6 +167,9 @@ public enum DebugRow {
     case toggle(DebugToggle)
     case action(String, detail: String?, run: @MainActor () -> Void)
     case link(String, symbol: String?, make: @MainActor () -> UIViewController)
+    /// Opens a screen as a sheet in the dashboard's window (a lab that is a
+    /// screen, not a launch argument: the haptics playground, #2193).
+    case sheet(String, detail: String?, make: @MainActor () -> UIViewController)
 }
 
 @MainActor
@@ -234,6 +251,11 @@ public final class DebugListViewController: UITableViewController {
             content.text = title
             content.secondaryText = detail
             content.textProperties.color = tableView.tintColor
+        case .sheet(let title, let detail, _):
+            content.text = title
+            content.secondaryText = detail
+            content.textProperties.color = tableView.tintColor
+            cell.accessoryView = UIImageView(image: UIImage(systemName: "rectangle.portrait.on.rectangle.portrait"))
         case .link(let title, let symbol, _):
             content.text = title
             content.image = symbol.flatMap { UIImage(systemName: $0) }
@@ -255,6 +277,10 @@ public final class DebugListViewController: UITableViewController {
             reload()
         case .link(_, _, let make):
             navigationController?.pushViewController(make(), animated: true)
+        case .sheet(_, _, let make):
+            let screen = make()
+            present(screen is UINavigationController ? screen : UINavigationController(rootViewController: screen),
+                    animated: true)
         }
     }
 
