@@ -213,6 +213,11 @@ open class HeroHeaderView: UIView {
     private let avatarCutout = FaceCutout()
     private let nameLabel = UILabel()
     private let verifiedBadge = UIImageView(image: UIImage(systemName: "checkmark.seal.fill"))
+    /// The chevron after the name, shown while `onTitleTapped` is set: the
+    /// name opens something of its own — the own profile's switcher (the
+    /// owner, 2026-11-08).
+    private let titleChevron = UIImageView(image: UIImage(systemName: "chevron.down"))
+    private var titleTap: UITapGestureRecognizer?
     private let handleLabel = UILabel()
     /// A bio's emotes animate (`EmoteLabel` marks plain `text`).
     private let bioLabel = EmoteLabel()
@@ -545,6 +550,15 @@ open class HeroHeaderView: UIView {
         return cell
     }
 
+    /// The chevron wears the name's ink and shadow, wherever it is read.
+    private func matchChevronToName() {
+        titleChevron.tintColor = nameLabel.textColor
+        titleChevron.layer.shadowColor = nameLabel.layer.shadowColor
+        titleChevron.layer.shadowOpacity = nameLabel.layer.shadowOpacity
+        titleChevron.layer.shadowRadius = nameLabel.layer.shadowRadius
+        titleChevron.layer.shadowOffset = nameLabel.layer.shadowOffset
+    }
+
     private func applyIdentityInk(force: Bool = false) {
         // No picture yet (a flat grey slot, no ramp): the page's ink.
         let onPicture = bannerFormat == .none || !bannerView.hasPicture ? 0 : bannerView.visibility
@@ -560,6 +574,7 @@ open class HeroHeaderView: UIView {
             for label in [nameLabel, handleLabel] {
                 HeroInk.applyShadow(to: label, tone: tone, onPicture: onPicture)
             }
+            matchChevronToName()
         }
         let bodyOnPicture: CGFloat = 0
         guard force || bodyOnPicture != bodyInkOnPicture else { return }
@@ -1049,7 +1064,7 @@ open class HeroHeaderView: UIView {
         appliedContent = nil
         // Identity first: the banner's colour field and the avatar carry most of
         // the "this is someone else now" signal, and the name says it outright.
-        dissolve([bannerView, avatarView, nameLabel, handleLabel, verifiedBadge], after: 0, generation: generation) {
+        dissolve([bannerView, avatarView, nameLabel, handleLabel, verifiedBadge, titleChevron], after: 0, generation: generation) {
             self.avatar?.setMonogram(content.avatarMonogram)
             self.avatar?.frameID = content.avatarFrameID
             self.nameLabel.text = content.title
@@ -1190,7 +1205,7 @@ open class HeroHeaderView: UIView {
             // Everything data-driven drops to alpha 0 in place — the badge
             // included, so a verified profile fades it in with the name
             // instead of popping it beside the finished text.
-            for view in [nameLabel, handleLabel, bioLabel, websiteButton, verifiedBadge] {
+            for view in [nameLabel, handleLabel, bioLabel, websiteButton, verifiedBadge, titleChevron] {
                 view.alpha = 0
             }
             for bone in redactionBones { bone.isHidden = false; bone.alpha = 1 }
@@ -1215,7 +1230,7 @@ open class HeroHeaderView: UIView {
         let reveal = {
             for view in [
                 self.nameLabel, self.handleLabel, self.bioLabel,
-                self.websiteButton, self.verifiedBadge
+                self.websiteButton, self.verifiedBadge, self.titleChevron
             ] {
                 view.alpha = 1
             }
@@ -1350,6 +1365,50 @@ open class HeroHeaderView: UIView {
     /// to the disc. The badge sits over the disc, so where their touch
     /// areas overlap (its 8 pt outset) the "+" wins.
     public var onRelationBadgeTapped: (() -> Void)?
+
+    /// A tap on the name — or the chevron it then wears. Nil: the name is
+    /// text alone and wears no chevron.
+    public var onTitleTapped: (() -> Void)? {
+        didSet { applyTitleAction() }
+    }
+
+    /// What a menu opened from the name points at.
+    public var titleAnchor: UIView { nameLabel }
+
+    private func applyTitleAction() {
+        let tappable = onTitleTapped != nil
+        titleChevron.isHidden = !tappable
+        if tappable, titleTap == nil {
+            let tap = UITapGestureRecognizer(target: self, action: #selector(titleTapped))
+            titleChevron.superview?.addGestureRecognizer(tap)
+            titleTap = tap
+        }
+        titleTap?.isEnabled = tappable
+        nameLabel.accessibilityTraits = tappable ? [.header, .button] : .header
+        nameLabel.accessibilityHint = tappable ? "Switches profile" : nil
+    }
+
+    /// The name's row is tapped: on the name or its chevron, not the air
+    /// after them.
+    @objc private func titleTapped(_ tap: UITapGestureRecognizer) {
+        guard let row = tap.view else { return }
+        let end = row.convert(titleChevron.bounds, from: titleChevron).maxX
+        guard tap.location(in: row).x <= end + Spacing.sm else { return }
+        onTitleTapped?()
+    }
+
+    /// Whether the name wears its chevron now.
+    public var debugShowsTitleChevron: Bool { !titleChevron.isHidden }
+    /// The chevron's frame, in the header's space.
+    public var debugTitleChevronFrame: CGRect { titleChevron.convert(titleChevron.bounds, to: self) }
+    /// Whether the name is cut short now.
+    public var debugNameIsTruncated: Bool {
+        let fits = nameLabel.textRect(forBounds: CGRect(x: 0, y: 0, width: nameLabel.bounds.width, height: .greatestFiniteMagnitude),
+                                      limitedToNumberOfLines: 0)
+        return fits.height > nameLabel.bounds.height + 0.5
+    }
+    /// The name's tap, as a finger would.
+    public func debugTapTitle() { onTitleTapped?() }
 
     /// The badge's offsets from the disc's trailing and bottom edges.
     private var relationBadgeOffsets: [NSLayoutConstraint] = []
@@ -1495,6 +1554,10 @@ open class HeroHeaderView: UIView {
         // Two lines, not one (#482): at accessibility sizes a one-line name
         // was cut to its first few letters.
         nameLabel.numberOfLines = 2
+        // ⚠️ A LONG NAME IS CUT, NEVER ITS CHEVRON (the owner, 2026-11-08):
+        // the chevron and the badge resist being squeezed, the name gives
+        // way and ends in "…" on its second line.
+        nameLabel.lineBreakMode = .byTruncatingTail
 
         handleLabel.font = .appFont(forTextStyle: .subheadline)
         handleLabel.adjustsFontForContentSizeCategory = true
@@ -1511,6 +1574,17 @@ open class HeroHeaderView: UIView {
         verifiedBadge.contentMode = .scaleAspectFit
         verifiedBadge.setContentHuggingPriority(.required, for: .horizontal)
 
+        // The name's own ink and weight, a step smaller.
+        titleChevron.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
+            font: UIFont.scaledFont(forTextStyle: .title3, weight: .semibold), scale: .small
+        )
+        titleChevron.contentMode = .center
+        titleChevron.setContentHuggingPriority(.required, for: .horizontal)
+        titleChevron.setContentCompressionResistancePriority(.required, for: .horizontal)
+        titleChevron.isHidden = true
+        titleChevron.isAccessibilityElement = false
+        matchChevronToName()
+
         bioLabel.font = .appFont(forTextStyle: .subheadline)
         bioLabel.adjustsFontForContentSizeCategory = true
         bioLabel.textColor = .label
@@ -1522,7 +1596,7 @@ open class HeroHeaderView: UIView {
 
         // Name + verified badge sit on one line; a spacer keeps them leading
         // while the row itself stretches with the fill-aligned column.
-        let nameRow = UIStackView(arrangedSubviews: [nameLabel, verifiedBadge, UIView()])
+        let nameRow = UIStackView(arrangedSubviews: [nameLabel, verifiedBadge, titleChevron, UIView()])
         nameRow.axis = .horizontal
         nameRow.alignment = .center
         nameRow.spacing = Spacing.xs

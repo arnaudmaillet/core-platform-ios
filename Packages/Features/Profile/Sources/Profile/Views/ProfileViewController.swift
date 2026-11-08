@@ -129,8 +129,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
     /// The own-profile settings gear; pushes `AccountSettingsViewController`.
     private var settingsItem: UIBarButtonItem?
-    /// The own-profile switcher; taps present the profile-switcher menu.
-    private var switcherItem: UIBarButtonItem?
     /// The mute bell, on someone else's profile (#689): the scoped Mute menu
     /// that used to sit in the see-more menu. `bell`, or `bell.slash` once
     /// anything is muted. Kept: the trailing run is compared by reference
@@ -1663,31 +1661,25 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         settings.tintColor = .label
         settingsItem = settings
 
-        // Profile switcher — the leading item, opposite the gear (see
-        // `applyNavigationState` for why the leading slot is free here).
-        // Tapping presents the shared switcher menu; the switch itself is
-        // picked up through `.activeProfileDidChange`, so this screen refreshes
-        // whichever switcher was used.
+        // ⚠️ THE SWITCHER IS THE NAME'S, NOT THE BAR'S (the owner,
+        // 2026-11-08): the own profile's name wears a chevron, and a tap on
+        // it opens the app's one switcher (#2034), anchored to the name. The
+        // switch itself is picked up through `.activeProfileDidChange`, so
+        // this screen refreshes whichever switcher was used.
         if switcherFactory != nil {
-            // A native item (the bar contract, #1679) that opens the app's
-            // one switcher, anchored to itself (#2034).
-            var item: UIBarButtonItem?
-            let switcher = BarItems.icon(
-                id: "profile.switcher", image: UIImage(systemName: "person.2"), label: "Switch Profile"
-            ) { [weak self] in
-                guard let self, let item else { return }
-                self.switcherFactory?.present(
-                    from: .barItem(item), over: self, includesAddProfile: true,
-                    onSwitch: {}, onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
-                )
-            }
-            item = switcher
-            switcher.tintColor = .label
-            switcherItem = switcher
+            headerView.onTitleTapped = { [weak self] in self?.presentSwitcherFromName() }
             // Pre-load profiles, avatars and counts, so the switcher opens
             // complete on its first frame.
             reloadSwitcherMenu()
         }
+    }
+
+    /// The own profile's name was tapped: the switcher, from the name.
+    private func presentSwitcherFromName() {
+        switcherFactory?.present(
+            from: .view(headerView.titleAnchor), over: self, includesAddProfile: true,
+            onSwitch: {}, onAddProfile: { [weak self] in self?.presentAddProfilePlaceholder() }
+        )
     }
 
     /// Installs (or clears) the shell's trailing accessory. Safe before the
@@ -2084,9 +2076,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // way to settings and to another profile.
         let namesNoOne = viewModel.namesNoOne
         if let settingsItem { items.append(settingsItem) }
-        // The switcher, on the own profile only — see the note above for why it
-        // is not in the leading group.
-        if let switcherItem { items.append(switcherItem) }
         // The mute bell (#689), someone else's followed profile only: `[0]`
         // is the corner, as the gear is on your own. On screen, someone
         // else's profile reads `[pill][coins][bell]` once followed and

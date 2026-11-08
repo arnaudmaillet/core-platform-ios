@@ -57,6 +57,39 @@ struct HeroHeaderViewTests {
     /// ⚠️ ONE BONE ON THE DISC (#1771): a redacted header holds the avatar's
     /// place with `AvatarView`'s own skeleton, never a redaction bone stacked
     /// over it — two skeletons on one disc.
+    /// The name wears a chevron only while it opens something, and a tap
+    /// on it says so (the owner, 2026-11-08: the own profile's switcher).
+    @Test func theNameWearsAChevronWhileItOpensSomething() {
+        let header = makeHeader()
+        #expect(!header.debugShowsTitleChevron)
+        var taps = 0
+        header.onTitleTapped = { taps += 1 }
+        #expect(header.debugShowsTitleChevron)
+        header.debugTapTitle()
+        #expect(taps == 1)
+        header.onTitleTapped = nil
+        #expect(!header.debugShowsTitleChevron)
+    }
+
+    /// ⚠️ A very long name is cut, never its chevron: it ends in "…" and the
+    /// chevron stays whole, inside the header (the owner, 2026-11-08).
+    @Test(arguments: textSizes)
+    func aVeryLongNameIsCutAndKeepsItsChevron(_ textSize: UIContentSizeCategory) {
+        let header = makeHeader(width: 375, textSize: textSize)
+        header.onTitleTapped = {}
+        header.configure(with: HeroHeaderContent(
+            title: "Maximilian Alexander Christopher Montgomery-Wellington the Third of Westminster",
+            subtitle: "@maximilian", counterValues: ["1", "2"]
+        ))
+        header.setNeedsLayout()
+        header.layoutIfNeeded()
+        let chevron = header.debugTitleChevronFrame
+        #expect(chevron.width > 4, "the chevron was squeezed away: \(chevron)")
+        #expect(chevron.maxX <= header.bounds.width, "the chevron runs off the header: \(chevron)")
+        #expect(header.debugNameIsTruncated, "the long name was not cut")
+        #expect(chevron.minX >= header.debugNameFrame.maxX - 0.5, "the chevron sits on the name")
+    }
+
     @Test func aRedactedAvatarWearsOnlyItsOwnBone() async throws {
         let header = makeHeader(avatar: .person)
         header.setRedacted(true)
