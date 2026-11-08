@@ -106,12 +106,10 @@ struct ProfileHeaderAccessoryTests {
 
     // MARK: - The own profile's pair
 
-    /// ⚠️ THE TAB ROOT READS `[coins][switcher settings]`: the gear at the
-    /// corner, the switcher inboard of it, the balance inboard of both — and
-    /// the switcher and the gear SHARE one capsule (neither opts out of the
-    /// bar's shared background), while the balance, which does opt out, stands
-    /// alone.
-    @Test func theOwnProfileCarriesSettingsThenTheSwitcherThenTheBalance() throws {
+    /// ⚠️ THE OWN PROFILE'S BAR: the gear in the corner, the balance inboard
+    /// of it — no switcher any more (the owner, 2026-11-08): its name wears
+    /// a chevron that opens the switcher.
+    @Test func theOwnProfileCarriesSettingsThenTheBalance() throws {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: StubAccessoryProfiles()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
@@ -129,12 +127,24 @@ struct ProfileHeaderAccessoryTests {
         screen.setTrailingAccessoryItem(badge)
 
         let items = try #require(screen.navigationItem.rightBarButtonItems)
-        #expect(items.map(\.accessibilityLabel) == ["Settings", "Switch Profile", "Balance"])
+        #expect(items.map(\.accessibilityLabel) == ["Settings", "Balance"])
         // The bar contract (#1679, R2): the viewer's own items by function.
         #expect(items[0].identifier == "profile.settings")
-        #expect(items[1].identifier == "profile.switcher")
-        #expect(items[0].sharesBackground && items[1].sharesBackground,
-                "the switcher and settings no longer read as one capsule")
+        #expect(!items.contains { $0.identifier == "profile.switcher" })
+        // The switcher is the name's.
+        #expect(screen.headerView.debugShowsTitleChevron)
+    }
+
+    /// Someone else's profile, or a pushed one: the name is text alone.
+    @Test func aPushedProfilesNameWearsNoChevron() {
+        let screen = ProfileViewController(
+            viewModel: ProfileViewModel(repository: StubAccessoryProfiles()),
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            makeGridPage: TestGridPages.factory(),
+            onLogout: nil
+        )
+        screen.loadViewIfNeeded()
+        #expect(!screen.headerView.debugShowsTitleChevron)
     }
 
     /// A pushed profile — built without `onLogout` — has neither: its trailing
