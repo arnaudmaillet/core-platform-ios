@@ -88,7 +88,10 @@ struct ConversationCellLayoutTests {
         let centres = glyphs(in: cell).map { $0.frame.midY }
 
         #expect(centres.count == 2)
-        #expect(abs((centres.first ?? 0) - (centres.last ?? 0)) < 0.5)
+        // Within a point: two symbols of fractional heights, each centred and
+        // snapped to a 2× screen's half point (the iPhone SE), land 0.75 pt
+        // apart; on 3× they agree within a third (#2182).
+        #expect(abs((centres.first ?? 0) - (centres.last ?? 0)) < 1)
     }
 
     @Test("An unmuted, unpinned row shows neither")

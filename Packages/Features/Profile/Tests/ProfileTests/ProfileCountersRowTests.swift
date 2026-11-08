@@ -45,7 +45,9 @@ struct ProfileCountersRowTests {
         #expect(cells.count == 3)
         let row = header.debugStatsFrame
         let widths = cells.map(\.width)
-        #expect((widths.max() ?? 0) - (widths.min() ?? 0) < 0.5, "unequal cells: \(widths)")
+        // Within half a point, inclusive: a 2× screen (the iPhone SE) rounds
+        // a third of the column to the half point (#2182).
+        #expect((widths.max() ?? 0) - (widths.min() ?? 0) <= 0.5, "unequal cells: \(widths)")
         #expect(abs((cells.first?.minX ?? 0) - row.minX) < 0.5 && abs((cells.last?.maxX ?? 0) - row.maxX) < 0.5)
         // The row spans the column beside the avatar, from the name's edge.
         #expect(abs(row.minX - header.debugNameHalfFrame.minX) < 0.5)

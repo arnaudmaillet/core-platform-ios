@@ -57,6 +57,45 @@ struct HeroHeaderViewTests {
     /// ⚠️ ONE BONE ON THE DISC (#1771): a redacted header holds the avatar's
     /// place with `AvatarView`'s own skeleton, never a redaction bone stacked
     /// over it — two skeletons on one disc.
+    /// ⚠️ AIR BETWEEN THE COUNTERS (#2182): at the app's ceiling on an
+    /// iPhone SE's width, "Followers" filled its cell and ran into
+    /// "Following". Each word keeps `statCellInset` (4 pt) from its cell's
+    /// edges, so two neighbours stand at least 8 pt apart, at every text size.
+    ///
+    /// ⚠️ IN A WINDOW carrying the text size: off one, the test host ignores
+    /// the override and the captions stay at the default size, where they
+    /// never fill their cells (the test passed with no inset at all).
+    @Test(arguments: textSizes, [false, true])
+    func theCountersWordsNeverTouch(textSize: UIContentSizeCategory, bold: Bool) {
+        let width: CGFloat = 375
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: width, height: 900))
+        window.traitOverrides.preferredContentSizeCategory = textSize
+        // Bold Text, and Care Mode's heavier type: the wider words that ran
+        // into each other on the SE.
+        if bold { window.traitOverrides.legibilityWeight = .bold }
+        defer { window.isHidden = true }
+        let header = makeHeader(captions: ["Followers", "Following", "Likes"], width: width)
+        window.addSubview(header)
+        header.frame.size.height = header.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+        ).height
+        header.setNeedsLayout()
+        header.layoutIfNeeded()
+        let captions = header.counters.map { $0.debugLabels[1] }
+        if textSize == .extraExtraExtraLarge {
+            // The guard against measuring the default size again.
+            #expect((captions.first?.font.pointSize ?? 0) > 14, "the window's text size did not reach the captions")
+        }
+        let words = captions.map { $0.convert($0.bounds, to: header) }
+        for (left, right) in zip(words, words.dropFirst()) {
+            // 8 pt, written out: a bound read from `statCellInset` itself
+            // would pass with no inset at all.
+            #expect(right.minX - left.maxX >= 8 - 0.5,
+                    "\(textSize.rawValue)\(bold ? ", bold" : ""): \(right.minX - left.maxX) pt between two counters' words")
+        }
+    }
+
     /// The name wears a chevron only while it opens something, and a tap
     /// on it says so (the owner, 2026-11-08: the own profile's switcher).
     @Test func theNameWearsAChevronWhileItOpensSomething() {
@@ -121,7 +160,9 @@ struct HeroHeaderViewTests {
         let cells = header.debugStatCellFrames
         #expect(cells.count == captions.count)
         let widths = cells.map(\.width)
-        #expect((widths.max() ?? 0) - (widths.min() ?? 0) < 0.5, "unequal cells: \(widths)")
+        // Within half a point, inclusive: a 2× screen (the iPhone SE) rounds
+        // a third of the column to the half point — 81.5, 82, 81.5 (#2182).
+        #expect((widths.max() ?? 0) - (widths.min() ?? 0) <= 0.5, "unequal cells: \(widths)")
         let row = header.debugStatsFrame
         #expect(abs((cells.first?.minX ?? 0) - row.minX) < 0.5 && abs((cells.last?.maxX ?? 0) - row.maxX) < 0.5)
         #expect(abs(row.minX - header.debugNameHalfFrame.minX) < 0.5)
@@ -173,7 +214,11 @@ struct HeroHeaderViewTests {
         #expect(collapsed.bannerFormat == .band)
         let avatarTop = collapsed.debugAvatarFrame.minY
         #expect(abs(avatarTop - (103 + HeroBannerMetrics.bandAvatarDetentGap)) < 1, "avatar at \(avatarTop)")
-        #expect(collapsed.debugBannerFrame.maxY < standard.debugBannerFrame.maxY - 50,
+        // Clearly shorter, on every screen: the standard card's foot stands at
+        // 30 % of the screen's height (`bandScreenFraction`), so on an iPhone
+        // SE (667 pt) it is 36 pt under the collapsed one, on a Pro over 50
+        // (#2182).
+        #expect(collapsed.debugBannerFrame.maxY < standard.debugBannerFrame.maxY - 20,
                 "the card is not shorter: \(collapsed.debugBannerFrame) vs \(standard.debugBannerFrame)")
         #expect((collapsed.bandAvatarDetent ?? 99) < 1, "a collapsed band has no notch left to rest on")
     }

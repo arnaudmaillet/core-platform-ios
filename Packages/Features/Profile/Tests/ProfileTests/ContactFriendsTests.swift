@@ -417,6 +417,10 @@ struct ContactFriendsTests {
         let navigation = UINavigationController(rootViewController: settings)
         navigation.view.frame = CGRect(x: 0, y: 0, width: 402, height: 2_000)
         settings.loadViewIfNeeded()
+        // The screen too, not only its navigation: loaded off a window it
+        // took the device's height, and on an iPhone SE (667 pt) the row sat
+        // under the fold, never visible (#2182).
+        settings.view.frame = navigation.view.bounds
         let list = try #require(settings.view.subviews.compactMap { $0 as? UICollectionView }.first)
         func contactsRow() -> IndexPath? {
             list.layoutIfNeeded()

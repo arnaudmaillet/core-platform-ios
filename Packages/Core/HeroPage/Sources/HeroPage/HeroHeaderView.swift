@@ -536,14 +536,20 @@ open class HeroHeaderView: UIView {
     /// One of the counter row's four equal cells (#687): `stat` centred in
     /// it, never wider than it. A hidden stat leaves the cell — and so its
     /// neighbours' places — as they were.
+    /// The least air between two counters' words, half on each side of a
+    /// cell: at XXXL and in Care Mode on an iPhone SE, "Followers" filled its
+    /// cell and ran into "Following" with no gap (#2182). The caption shrinks
+    /// to fit inside it instead.
+    static let statCellInset = Spacing.xs
+
     private static func statCell(holding stat: HeroStatView) -> UIView {
         let cell = UIView()
         stat.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(stat)
         NSLayoutConstraint.activate([
             stat.centerXAnchor.constraint(equalTo: cell.centerXAnchor),
-            stat.leadingAnchor.constraint(greaterThanOrEqualTo: cell.leadingAnchor),
-            stat.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor),
+            stat.leadingAnchor.constraint(greaterThanOrEqualTo: cell.leadingAnchor, constant: statCellInset),
+            stat.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor, constant: -statCellInset),
             stat.topAnchor.constraint(equalTo: cell.topAnchor),
             stat.bottomAnchor.constraint(equalTo: cell.bottomAnchor),
         ])
