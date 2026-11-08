@@ -154,10 +154,11 @@ public final class InteractiveSlideDismissal: NSObject {
 
     /// ⚠️ THE SCREEN CAME IN WITH THE NATIVE PUSH (#2045, #2046): a vertical
     /// close is a PULL, not a scrubbed pop. No pop starts at the drag's begin;
-    /// the screen lifts its own page (`VerticalPullClosing`) under a fixed bar,
-    /// and a release past `HeroPullToRefreshView.threshold` of visible lift
-    /// pops through the chevron's path — the page leaves to the right as it
-    /// came in. A window or a flight keeps its grab: set by whoever pushes,
+    /// the screen lifts its own page (`VerticalPullClosing`) under a fixed bar
+    /// — or, on a text page, lifts nothing and shows only its indicator
+    /// (#2187) — and a release past `HeroPullToRefreshView.threshold` of
+    /// lift pops through the chevron's path — the page leaves to the right as
+    /// it came in. A window or a flight keeps its grab: set by whoever pushes,
     /// on every opening (`resetForNewPresentation` clears it).
     public var closesByPull = false
 
@@ -1174,11 +1175,15 @@ final class SlideDismissalPan: UIPanGestureRecognizer, CustomBackPopper {}
 
 /// A screen that lifts its own page for a pull-to-close (#2045, #2046): only
 /// its content moves, under a navigation bar that stays, over its own ground.
+/// A screen may also lift nothing and let its indicator alone answer (the
+/// feed's text pages, #2187): the returned lift is then the progress the
+/// page WOULD have, so a pull costs the same distance either way.
 @MainActor
 public protocol VerticalPullClosing: AnyObject {
     /// The finger has travelled `travel` points along `axis` (`.upward` or
     /// `.vertical`, downward), from 0 at the drag's begin. Returns the page's
-    /// visible lift, after the screen's resistance.
+    /// lift after the screen's resistance — visible, or, on a page that stays
+    /// still, the progress it stands for.
     @discardableResult
     func pullToClose(travel: CGFloat, along axis: ZoomDismissAxis) -> CGFloat
     /// Released: `commit` — the page stays as it is and the pop follows —
