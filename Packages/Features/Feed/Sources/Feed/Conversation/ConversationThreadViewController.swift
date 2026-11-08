@@ -237,8 +237,8 @@ final class ConversationThreadViewController: UIViewController {
     /// on screen (#2104): coming back to one mid-way shows — and plays from —
     /// where it was.
     private var voicePositions: [String: Double] = [:]
-    /// Hold the waveform to record (#2102) — behind `-voice-messages` until
-    /// the owner approves the flow on a device.
+    /// Hold the empty field to record (#2102, #2183): every full
+    /// conversation whose driver sends voice.
     private(set) var voiceComposer: VoiceComposer?
     /// The voice message the one player last spoke for: its position is kept
     /// when another starts.
@@ -833,9 +833,6 @@ final class ConversationThreadViewController: UIViewController {
         // The reply state's natural exit, as on the post: the keyboard retired
         // over an empty field.
         composeBar.onIdleDismiss = { [weak self] in self?.driver.cancelReply() }
-        composeBar.onVoiceNote = { [weak self] in
-            self?.presentNotice("Voice Messages", "Voice messages aren't available yet.")
-        }
         installVoiceComposer()
         // No stake: a conversation has nothing to like, and no column slot:
         // the row's own bubble is the voice and the send.
@@ -2516,19 +2513,10 @@ extension ConversationThreadViewController {
 // MARK: - Recording (#2102)
 
 extension ConversationThreadViewController {
-    /// Whether the composer records: the driver sends voice, the screen is
-    /// the full conversation, and — until the owner approves the flow on a
-    /// device — DEBUG's `-voice-messages` asks for it.
-    static var recordsVoice: Bool {
-        #if DEBUG
-        DebugFlags.isOn("-voice-messages")
-        #else
-        false
-        #endif
-    }
-
-    func installVoiceComposer(forced: Bool = false) {
-        guard mode == .full, driver.sendsVoice, forced || Self.recordsVoice, voiceComposer == nil else { return }
+    /// The composer records when the screen is the full conversation and
+    /// its driver sends voice: the empty field's long press (#2183).
+    func installVoiceComposer() {
+        guard mode == .full, driver.sendsVoice, voiceComposer == nil else { return }
         let composer = VoiceComposer(draftKey: driver.presenceKey ?? peer.id?.rawValue)
         composer.onSend = { [weak self] take in self?.driver.send(voice: take) }
         composer.onHint = { [weak self] hint in

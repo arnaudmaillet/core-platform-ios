@@ -206,7 +206,7 @@ Reach with `-select-tab 2` or `-open-messages [all\|requests\|suggestions]`.
 - thread | ConversationThreadViewController | mute bell / menu | tap | **bell is held in its old look until the server confirms, then toast** (non-optimistic) | `:913-947`, `setMuted` `:972` → `driver.setMuted` `ConversationThreadDriver.swift:133` | same
 - thread | ConversationThreadViewController | rail pin / hold | tap / hold | toggle pin (optimistic) | `:746-750`, `:106` | same
 - thread | ConversationThreadViewController | day header / quote / retry | tap | scroll / scroll / retry | `:507`, `:1385`, `:1398` | same
-- thread | voice | hold record / play / seek / speed | hold / tap | recording UI / playback | `:2186-2192`, `:2319-2324`; `VoiceHoldGesture.swift` | `-voice-messages`
+- thread | voice | hold record / play / seek / speed | hold / tap | recording UI / playback | `:2186-2192`, `:2319-2324`; `VoiceHoldGesture.swift` | default (the empty field's long press)
 - thread | sticker strip / emote panel | composer emote button | tap | emote keyboard | `CommentsInputBar` / `EmoteKit` `EmotePickerView` | `-emote-keyboard-qa`, `-composer-keyboard-qa`
 
 ### Map / Explore (`F/Maps/Sources/Maps/MapsViewController.swift`)

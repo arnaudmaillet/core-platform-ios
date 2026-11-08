@@ -68,10 +68,11 @@ final class CommentsInputBar: UIView {
     /// flow does not exist yet.
     var onVoiceNote: (() -> Void)?
 
-    /// The hold on the waveform (#2102), conversations only: a post's
-    /// comments leave it off and keep `onVoiceNote`'s tap.
+    /// The voice hold (#2102, #2183), conversations only: the empty field's
+    /// long press (`speaksFromField`). A post's comments have none and keep
+    /// `onVoiceNote`'s tap on the waveform.
     enum VoiceHoldEvent: Equatable {
-        /// Touch-down on the waveform over an empty field.
+        /// The empty field's long press began.
         case began
         /// The finger's travel from touch-down: `leading` toward the leading
         /// edge (mirrored right-to-left), `up` upward.
@@ -84,24 +85,17 @@ final class CommentsInputBar: UIView {
         case accessibilityStart
     }
 
-    /// Whether the waveform records on a hold (#2102). Off: its tap is
-    /// `onVoiceNote`, as before.
+    /// Whether this composer records (#2102): with `actsFromOwnBubble`, the
+    /// empty field's long press does (`speaksFromField`). Off: the
+    /// waveform's tap is `onVoiceNote`.
     var holdsToRecord = false {
         didSet {
-            voiceHold.isEnabled = holdsToRecord
             updateFieldAction()
             applyPlaceholder()
         }
     }
     var onVoiceHold: ((VoiceHoldEvent) -> Void)?
 
-    private lazy var voiceHold: UILongPressGestureRecognizer = {
-        let hold = UILongPressGestureRecognizer(target: self, action: #selector(voiceHeld(_:)))
-        hold.minimumPressDuration = 0
-        hold.delegate = self
-        hold.isEnabled = false
-        return hold
-    }()
     private var voiceHoldStart: CGPoint = .zero
 
     /// "Hold for voice, tap to type" (the owner, 2026-11-07): in a
@@ -116,13 +110,15 @@ final class CommentsInputBar: UIView {
         return hold
     }()
 
-    /// The waveform's button, where the mic disc and the lock stand (#2102).
+    /// Where the mic and the lock stand while the field's hold records: the
+    /// conversation's own bubble, which grows into the mic (#2102).
     var voiceHoldAnchor: UIView { actsFromOwnBubble ? rowActionButton : fieldActionButton }
 
     /// A conversation's composer (#2102; the owner, 2026-11-07, Telegram's):
     /// the field's action leaves the field for a glass bubble of its own at
-    /// the row's end — the waveform over an empty field (held, it records),
-    /// the send over a draft. The bubble belongs to the INPUT ROW: it rides
+    /// the row's end — the emote button over an empty field while the field
+    /// itself records on a long press (`speaksFromField`), the send over a
+    /// draft. The bubble belongs to the INPUT ROW: it rides
     /// the keyboard with the avatar and the field, where the column's slot
     /// stays down under the keyboard. The host shows no slot (`.noSlot`).
     var actsFromOwnBubble = false {
@@ -151,8 +147,6 @@ final class CommentsInputBar: UIView {
         fieldActionButton.isHidden = actsFromOwnBubble || (voiceOverlay != nil && voiceOverlayCoversButton)
         fieldActionWidth.constant = actsFromOwnBubble ? 0 : Metrics.fieldActionSide
         rowActionButton.isHidden = !actsFromOwnBubble || rowActionStepsAside
-        voiceHold.view?.removeGestureRecognizer(voiceHold)
-        (actsFromOwnBubble ? rowActionButton : fieldActionButton).addGestureRecognizer(voiceHold)
         if actsFromOwnBubble { field.addGestureRecognizer(fieldVoiceHold) } else { field.removeGestureRecognizer(fieldVoiceHold) }
         updateFieldAction()
         applyPlaceholder()
@@ -425,8 +419,6 @@ final class CommentsInputBar: UIView {
     /// The placeholder's frame and the field's, in the field's space.
     var debugPlaceholderFrame: CGRect { placeholderLabel.frame }
     var debugFieldBounds: CGRect { field.contentView.bounds }
-    /// Whether the bubble's own hold would begin now.
-    var debugBubbleHoldBegins: Bool { gestureRecognizerShouldBegin(voiceHold) }
     /// Whether the field's long press would begin now.
     var debugFieldHoldBegins: Bool { gestureRecognizerShouldBegin(fieldVoiceHold) }
     /// The field's text view, for its VoiceOver actions.
@@ -1069,7 +1061,6 @@ final class CommentsInputBar: UIView {
         action.symbolContentTransition = Self.fieldActionTransition
         fieldActionButton.configuration = action
         fieldActionButton.addAction(UIAction { [weak self] _ in self?.fieldActionTapped() }, for: .primaryActionTriggered)
-        fieldActionButton.addGestureRecognizer(voiceHold)
         fieldActionButton.translatesAutoresizingMaskIntoConstraints = false
         field.contentView.addSubview(fieldActionButton)
         fieldActionWidth = fieldActionButton.widthAnchor.constraint(equalToConstant: Metrics.fieldActionSide)
@@ -1392,8 +1383,7 @@ final class CommentsInputBar: UIView {
     /// Vertical-intent gate for the swipe-exit pan only; every other
     /// recognizer keeps UIKit's default answer.
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        // The waveform's hold (#2102): over an empty field, nothing on its way.
-        if gestureRecognizer === voiceHold { return holdsToRecord && !speaksFromField && !hasDraft && !isSending }
+        // The field's voice hold (#2183): over an empty field, nothing on its way.
         if gestureRecognizer === fieldVoiceHold {
             return actsFromOwnBubble && holdsToRecord && !hasDraft && !isSending && voiceOverlay == nil
         }
@@ -1830,11 +1820,7 @@ final class CommentsInputBar: UIView {
             emotes.toggle()
             updateFieldAction()
         } else if !isSending {
-            if holdsToRecord, UIAccessibility.isVoiceOverRunning {
-                onVoiceHold?(.accessibilityStart)
-            } else {
-                onVoiceNote?()
-            }
+            onVoiceNote?()
         }
     }
 
@@ -2507,7 +2493,7 @@ final class CommentsInputBar: UIView {
         }
         fieldActionButton.accessibilityLabel = sends
             ? sendAccessibilityLabel ?? "Send comment"
-            : holdsToRecord ? "Record voice message" : "Record voice comment"
+            : "Record voice comment"
         fieldActionButton.isEnabled = !isSending
         // The conversation's own bubble wears the same face — not while a
         // finger holds it (`applyVoiceHoldFace`).
