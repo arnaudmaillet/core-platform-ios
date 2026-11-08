@@ -167,6 +167,9 @@ final class SnapFeedViewController: UIViewController {
     /// page rested, and the indicator in the gap it opens.
     private var pullBaseOffset: CGFloat?
     private var pullIndicator: PullToGoBackIndicator?
+    /// Whether the pull under way lifts the page: a media page's does; a text
+    /// page's lifts nothing (#2187), read once at the pull's first step.
+    private var pullLiftsPage = true
     /// The arrival screen's own LOADING state, drawn while the corpus is in
     /// flight — a SUBVIEW, never a ground.
     ///
@@ -8484,12 +8487,19 @@ extension SnapFeedViewController: StackScreen {
 // MARK: - The pull to go back (#2045, #2046)
 
 /// On a feed that came in with the native push, a vertical close is a pull:
-/// only the page's content moves — with the end of the list's own rubber
-/// band — under a navigation bar that stays, over the feed's own ground. No
-/// map, no dim, no parallax. The indicator rides in the gap: at the bottom
-/// for a page pulled up, under the bar for one pulled down. (In the back
-/// chevron instead was tried on the owner's device, 2026-11-05, and set
+/// on a MEDIA page only the page's content moves — with the end of the list's
+/// own rubber band — under a navigation bar that stays, over the feed's own
+/// ground. No map, no dim, no parallax. The indicator rides in the gap: at the
+/// bottom for a page pulled up, under the bar for one pulled down. (In the
+/// back chevron instead was tried on the owner's device, 2026-11-05, and set
 /// aside: the native item stays.)
+///
+/// ⚠️ A TEXT page lifts NOTHING (#2187, the owner): its text and comments
+/// are a reading surface, and a lift past the end read as a scroll gone too
+/// far. The page, its comments and its composer stay still; the indicator
+/// alone answers the finger, pinned where it sits at zero lift (over the
+/// composer, under the bar). The effort is the same: the progress is still
+/// the rubber-banded travel, it just drives no offset.
 extension SnapFeedViewController: VerticalPullClosing {
     @discardableResult
     func pullToClose(travel: CGFloat, along axis: ZoomDismissAxis) -> CGFloat {
@@ -8501,14 +8511,21 @@ extension SnapFeedViewController: VerticalPullClosing {
             // has already moved it a little.
             base = pageDriveStartOffset ?? collectionView.contentOffset.y
             pullBaseOffset = base
+            pullLiftsPage = !isTextPage(activePostID)
             let indicator = PullToGoBackIndicator(direction: axis == .upward ? .up : .down)
             indicator.prepare()
             view.addSubview(indicator)
             pullIndicator = indicator
         }
         let lift = Self.rubberBand(travel, dimension: max(1, view.bounds.height))
-        collectionView.contentOffset.y = axis == .upward ? base + lift : base - lift
-        placePullIndicator(lift: lift, axis: axis)
+        if pullLiftsPage {
+            collectionView.contentOffset.y = axis == .upward ? base + lift : base - lift
+        } else if collectionView.contentOffset.y != base {
+            // A page drive that began on the same drag may have nudged it:
+            // a text page rests exactly where it was.
+            collectionView.contentOffset.y = base
+        }
+        placePullIndicator(lift: pullLiftsPage ? lift : 0, axis: axis)
         pullIndicator?.setPull(lift)
         return lift
     }
@@ -8536,6 +8553,10 @@ extension SnapFeedViewController: VerticalPullClosing {
     /// Pinned to the chrome, in the gap: over the toolbar for a page lifted
     /// from the bottom, under the bar for a page pulled down — it never rides
     /// the lift behind either (the owner's recording, 2026-11-05).
+    ///
+    /// A still text page (#2187) opens no gap: pulled up, the indicator floats
+    /// over the comments just above the page's own composer — over the toolbar
+    /// it sat ON the field, its label cut, on the simulator.
     private func placePullIndicator(lift: CGFloat, axis: ZoomDismissAxis) {
         guard let indicator = pullIndicator else { return }
         let width = view.bounds.width - 2 * Spacing.lg
@@ -8543,7 +8564,10 @@ extension SnapFeedViewController: VerticalPullClosing {
         let centreY: CGFloat
         if axis == .upward {
             let pageBottom = view.bounds.maxY - lift
-            let toolbarTop = pullChromeEdge(bottom: true) ?? view.bounds.maxY - view.safeAreaInsets.bottom
+            var toolbarTop = pullChromeEdge(bottom: true) ?? view.bounds.maxY - view.safeAreaInsets.bottom
+            if !pullLiftsPage, let composerTop = pullComposerTop() {
+                toolbarTop = min(toolbarTop, composerTop)
+            }
             centreY = min(toolbarTop - size.height / 2 - Spacing.sm, (pageBottom + toolbarTop) / 2)
         } else {
             let barBottom = pullChromeEdge(bottom: false) ?? view.safeAreaInsets.top
@@ -8551,6 +8575,13 @@ extension SnapFeedViewController: VerticalPullClosing {
         }
         indicator.bounds = CGRect(origin: .zero, size: CGSize(width: width, height: size.height))
         indicator.center = CGPoint(x: view.bounds.midX, y: centreY)
+    }
+
+    /// The top of the shown page's comment composer, in the page's space.
+    private func pullComposerTop() -> CGFloat? {
+        guard let bar = (commentsContentVC as? PostDetailViewController)?.composeBar,
+              bar.window != nil, !bar.isHidden, bar.alpha > 0.01, bar.bounds.height > 0 else { return nil }
+        return bar.convert(bar.bounds, to: view).minY
     }
 
     /// The navigation bar's bottom, or the shown toolbar's top, in the
