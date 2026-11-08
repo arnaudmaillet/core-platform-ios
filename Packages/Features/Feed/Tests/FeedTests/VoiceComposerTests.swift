@@ -574,6 +574,47 @@ struct VoiceComposerTests {
         #expect(strip.debugSpringCount == 1, "a change of parts no longer springs")
     }
 
+    /// The bars cross-dissolve when they change source — the take listened
+    /// back, then the take recording on — and redraw at once otherwise
+    /// (the owner, 2026-11-08).
+    @Test func theBarsCrossDissolveToAnotherSourceOnly() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 100))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let strip = VoiceRecordingStrip(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
+        window.addSubview(strip)
+        strip.apply(.locked)
+        strip.layoutIfNeeded()
+        strip.appendLevel(0.5)
+        strip.appendLevel(0.6)
+        #expect(strip.debugWaveformTransitions == 0, "the first bars or the same source dissolved")
+        strip.apply(.paused(resumable: false, playing: false))
+        strip.showTake(levels: Array(repeating: 12, count: 100), duration: 4, progress: 0)
+        strip.showTake(levels: Array(repeating: 12, count: 100), duration: 4, progress: 0.5)
+        #expect(strip.debugWaveformTransitions == 1, "live to the take did not dissolve once")
+        strip.apply(.locked)
+        strip.appendLevel(0.4)
+        strip.appendLevel(0.3)
+        #expect(strip.debugWaveformTransitions == 2, "the take to live did not dissolve once")
+        // A new take starts from nothing: no dissolve into its first bars.
+        strip.apply(.recording)
+        strip.apply(.locked)
+        strip.appendLevel(0.4)
+        #expect(strip.debugWaveformTransitions == 2)
+    }
+
+    /// The emote button is a step larger, in the field and in the bubble
+    /// (the owner, 2026-11-08), and its widest face fits the field's slot.
+    @Test func theEmoteButtonIsLargerAndFitsItsSlot() throws {
+        let small = try #require(UIImage(systemName: "face.smiling",
+                                         withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium, scale: .large)))
+        let keyboard = try #require(UIImage(systemName: "keyboard", withConfiguration: CommentsInputBar.emoteToggleConfiguration))
+        let smile = try #require(UIImage(systemName: "face.smiling", withConfiguration: CommentsInputBar.emoteToggleConfiguration))
+        #expect(smile.size.width > small.size.width, "the face is no larger than at 17 pt")
+        #expect(max(keyboard.size.width, smile.size.width) <= CommentsInputBar.Metrics.emoteToggleWidth,
+                "the widest face is \(max(keyboard.size.width, smile.size.width)) pt in a \(CommentsInputBar.Metrics.emoteToggleWidth) pt slot")
+    }
+
     /// A post's comments keep today's tap: no hold.
     @Test func aPostsComposerKeepsTheTap() {
         let bar = CommentsInputBar()

@@ -376,8 +376,12 @@ final class CommentsInputBar: UIView {
             // button scales its symbols up a text style's step, and the
             // glyph's bare size jumped at the hand-over (filmed, 2026-11-07).
             face.image = nil
-            if var home = bubbleImage(sends: hasDraft || isSending) {
-                if let drawn = rowActionButton.imageView?.preferredSymbolConfiguration {
+            let sends = hasDraft || isSending
+            if var home = bubbleImage(sends: sends) {
+                // The emote face carries its own size (`emoteToggleConfiguration`),
+                // which the button draws as is: the button's would shrink it.
+                let carriesItsSize = speaksFromField && !sends
+                if !carriesItsSize, let drawn = rowActionButton.imageView?.preferredSymbolConfiguration {
                     home = home.applyingSymbolConfiguration(drawn) ?? home
                 }
                 if holdGlyph.image != home {
@@ -855,10 +859,10 @@ final class CommentsInputBar: UIView {
         /// and the rail slot are ONE row, the comment band's height, so the
         /// row reads as the media layout's sound bubble's line.
         @MainActor static var controlSize: CGFloat { SnapActionColumn.bubbleSize }
-        /// The emote toggle inside the field: 36pt wide on the 38pt line —
-        /// room for its widest face, the keyboard glyph (33pt at the large
-        /// scale, `emoteToggleConfiguration`), with a margin either side.
-        static let emoteToggleWidth: CGFloat = 36
+        /// The emote toggle inside the field: 40pt wide on the 38pt line —
+        /// room for its widest face, the keyboard glyph (about 39pt at 20pt
+        /// and the large scale, `emoteToggleConfiguration`).
+        static let emoteToggleWidth: CGFloat = 40
         /// The field's trailing button is the field's trailing CAP: a 38pt
         /// square flush with the field's end, so its glyph is concentric
         /// with the capsule's round end. The send disc (29pt) used to stand
@@ -1001,8 +1005,9 @@ final class CommentsInputBar: UIView {
     static let sendConfiguration = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
     /// A step up, as the row's buttons draw theirs (a glass button scales
     /// its symbols to the large scale): the face matched the waveform and
-    /// the send beside it no longer (the owner, 2026-11-07).
-    static let emoteToggleConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium, scale: .large)
+    /// the send beside it no longer (the owner, 2026-11-07). 20pt since
+    /// 2026-11-08 (the owner: larger, in the field and in the bubble).
+    static let emoteToggleConfiguration = UIImage.SymbolConfiguration(pointSize: 20, weight: .medium, scale: .large)
     /// The send arrow's colour, on every host: the brand's tint (#1124),
     /// NAMED rather than inherited. It was `.tintColor`, which resolves
     /// against the button's ancestors — and came out grey in a conversation

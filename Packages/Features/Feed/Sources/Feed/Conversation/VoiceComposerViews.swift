@@ -44,6 +44,9 @@ final class VoiceRecordingStrip: UIView {
     private let sendButton = VoiceRecordingStrip.button("arrow.up.circle.fill", label: "Send voice message")
     private let stack = UIStackView()
     private var liveLevels: [UInt8] = []
+    /// What the bars draw: the take recording now, or the one listened back.
+    private enum WaveformSource { case live, take }
+    private var waveformSource: WaveformSource?
     private var timeText = ""
     private var stackTrailing: NSLayoutConstraint?
     /// The chip as wide as its widest face for its time: ▶︎, ❚❚ and ● are not
@@ -176,6 +179,12 @@ final class VoiceRecordingStrip: UIView {
         let trailingBefore = stackTrailing?.constant ?? 0
         self.mode = mode
         let recording = mode == .recording
+        // A new take starts from empty bars (recording on from a closed take
+        // goes straight to locked, and keeps them).
+        if recording {
+            liveLevels = []
+            waveformSource = nil
+        }
         let locked = mode == .locked
         let paused: Bool, resumable: Bool, playing: Bool
         if case .paused(let canResume, let isPlaying) = mode {
@@ -296,14 +305,29 @@ final class VoiceRecordingStrip: UIView {
         let width = max(1, waveform.bounds.width)
         let count = ThreadVoiceView.barCount(forWidth: width)
         let shown = Array(liveLevels.suffix(count))
-        waveform.configure(levels: Array(repeating: 0, count: max(0, count - shown.count)) + shown, barCount: count, progress: 0)
+        drawWaveform(.live) {
+            self.waveform.configure(levels: Array(repeating: 0, count: max(0, count - shown.count)) + shown, barCount: count, progress: 0)
+        }
     }
 
     /// The paused bar's whole take, `progress` of it played back.
     func showTake(levels: [UInt8], duration: TimeInterval, progress: Double) {
         let count = ThreadVoiceView.barCount(forWidth: max(1, waveform.bounds.width))
-        waveform.configure(levels: levels, barCount: count, progress: progress)
+        drawWaveform(.take) { self.waveform.configure(levels: levels, barCount: count, progress: progress) }
         setTime(progress > 0 ? duration * progress : duration, remaining: nil)
+    }
+
+    /// The bars change source — the take listened back, the take recording
+    /// on — cross-dissolving (the owner, 2026-11-08); the same source redraws
+    /// at once, as it scrolls or plays.
+    private func drawWaveform(_ source: WaveformSource, _ draw: @escaping () -> Void) {
+        let changes = waveformSource != nil && waveformSource != source
+        waveformSource = source
+        guard changes, window != nil, !MotionPreference.reducesMotion else { return draw() }
+        #if DEBUG
+        debugWaveformTransitions += 1
+        #endif
+        UIView.transition(with: waveform, duration: 0.25, options: [.transitionCrossDissolve, .allowUserInteraction], animations: draw)
     }
 
     /// While it records: the holding row's dot, or the chip's.
@@ -335,6 +359,8 @@ final class VoiceRecordingStrip: UIView {
     var debugTakeFrame: CGRect { takeButton.convert(takeButton.bounds, to: self) }
     /// How many times the row sprang: a change of faces alone never does.
     private(set) var debugSpringCount = 0
+    /// How many times the bars cross-dissolved to another source.
+    private(set) var debugWaveformTransitions = 0
     var debugSendFrame: CGRect { sendButton.convert(sendButton.bounds, to: self) }
     func debugTap(_ label: String) {
         if chip.accessibilityLabel == label { return chip.sendActions(for: .primaryActionTriggered) }
