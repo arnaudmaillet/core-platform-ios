@@ -11,8 +11,11 @@ import QuartzCore
 ///
 /// - At launch the session is `.ambient` (`VideoPlaybackController`): the
 ///   Ring/Silent switch silences it, and it mixes with other apps' audio.
-/// - A volume key pressed while a feed plays turns the sound ON: the pool's
-///   session becomes `.playback`, heard through the silent switch
+/// - A volume key pressed while a feed plays turns the sound ON. The ringer
+///   is read at the key (#2185): on a silent phone the pool's session becomes
+///   `.playback`, heard through the switch; on a ringing one the `.ambient`
+///   session is already heard and stays — a category change under a playing
+///   clip cuts its sound and hitches its picture
 ///   (`VideoPlaybackController.settleAudioSession`).
 /// - Putting the phone on silent again turns it OFF (the owner, 2026-10-30,
 ///   as Instagram does): back to `.ambient`, which the switch silences, and
@@ -38,6 +41,21 @@ public final class FeedSoundSession {
 
     /// Posted on the main queue when the sound is turned on.
     public static let didTurnOn = Notification.Name("FeedSoundSession.didTurnOn")
+    /// Posted on the main queue when `playsThroughSilentSwitch` became true:
+    /// the key's ringer read said silent.
+    public static let didNeedPlayThrough = Notification.Name("FeedSoundSession.didNeedPlayThrough")
+
+    /// Whether the sound turned on must play through the silent switch
+    /// (#2185): the ringer read at the key said SILENT, where nothing was
+    /// heard before — so the session's switch to `.playback` cuts nothing.
+    /// False on a ringing phone, whose `.ambient` session is already heard:
+    /// the key turns the sound on in the state only, and putting the phone on
+    /// silent later turns it off anyway (#1931's rule), as `.ambient` does on
+    /// its own. A check that fails reads "ringing": towards silence.
+    public private(set) var playsThroughSilentSwitch = false
+    /// Which turn-on the ringer read at the key answers for: a read landing
+    /// after the sound went off, or on again, is dropped.
+    private var keyReadGeneration = 0
     /// Posted on the main queue when the phone was put on silent again.
     public static let didTurnOff = Notification.Name("FeedSoundSession.didTurnOff")
     /// Posted on the main queue when `isHeard` changed without a volume key:
@@ -199,6 +217,8 @@ public final class FeedSoundSession {
     /// next volume key turns it back on.
     private func ringerWentSilent() {
         isTurnedOn = false
+        playsThroughSilentSwitch = false
+        keyReadGeneration += 1
         lastReadSilent = nil
         ringsWhileFollowing = false
         settleWatch()
@@ -207,12 +227,36 @@ public final class FeedSoundSession {
 
     /// The system volume moved: a volume key. Turns the sound on for the
     /// session, unless another app's audio is what the key was about.
+    ///
+    /// ⚠️ THE CATEGORY CHANGES ONLY WHERE NOTHING IS HEARD (#2185). The key
+    /// used to switch the session to `.playback` at once, under the playing
+    /// clip: iOS reconfigured the output, the sound cut out and the picture,
+    /// synced to its audio clock, jumped — once per launch, at the first key.
+    /// Now the ringer is read at the key (`RingerProbe`: a silent phone
+    /// answers in under 0.1 s, a ringing one in 0.4 s, and nothing has to
+    /// change meanwhile), and only a silent answer asks for `.playback`.
     public func volumeDidChange() {
         guard !isTurnedOn, !readsOtherAudio() else { return }
         isTurnedOn = true
+        playsThroughSilentSwitch = false
         lastReadSilent = nil
+        keyReadGeneration += 1
         settleWatch()
         NotificationCenter.default.post(name: Self.didTurnOn, object: self)
+        readRingerAtKey(generation: keyReadGeneration)
+    }
+
+    /// The ringer at the key: a silent phone needs the sound played through
+    /// the switch; a ringing one, nothing. Also the first read of the ringer's
+    /// checks, so ring → silent from here on turns the sound off.
+    private func readRingerAtKey(generation: Int) {
+        probesSilent { [weak self] silent in
+            guard let self, isTurnedOn, generation == keyReadGeneration else { return }
+            if lastReadSilent == nil { lastReadSilent = silent }
+            guard silent, !playsThroughSilentSwitch else { return }
+            playsThroughSilentSwitch = true
+            NotificationCenter.default.post(name: Self.didNeedPlayThrough, object: self)
+        }
     }
 
     /// Whether the ringer is being checked now. Tests.
@@ -222,6 +266,8 @@ public final class FeedSoundSession {
     /// Tests start from a fresh launch.
     public func debugReset() {
         isTurnedOn = false
+        playsThroughSilentSwitch = false
+        keyReadGeneration += 1
         ringsWhileFollowing = nil
         ringerReaders = []
         observation = nil

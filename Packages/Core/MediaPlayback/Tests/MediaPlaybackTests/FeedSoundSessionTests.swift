@@ -101,7 +101,8 @@ struct FeedSoundSessionTests {
 
         sound.checkRinger()
         #expect(sound.isTurnedOn, "a ringing phone turned the sound off")
-        #expect(probe.ringerChecks == 1)
+        // The key's own read (#2185), then the tick's.
+        #expect(probe.ringerChecks == 2)
         nonisolated(unsafe) var told = false
         let token = NotificationCenter.default.addObserver(
             forName: FeedSoundSession.didTurnOff, object: sound, queue: nil
@@ -150,23 +151,90 @@ struct FeedSoundSessionTests {
         #expect(probe.ticking == 2)
     }
 
-    /// The pool's session: `.ambient` at launch, `.playback` once the sound
-    /// is on — heard through the silent switch — and `.ambient` again once
-    /// the phone is put on silent.
-    @Test func theSessionPlaysThroughTheSwitchOnceTheSoundIsOn() {
+    /// ⚠️ ON A RINGING PHONE THE KEY CHANGES NO CATEGORY (#2185): the
+    /// `.ambient` session is already heard, and switching it under the
+    /// playing clip cut its sound and hitched its picture. The sound is on in
+    /// the state only; ring → silent still turns it off.
+    @Test func onARingingPhoneTheKeyKeepsTheAmbientSession() {
         let probe = Probe()
         let sound = session(probe)
         let controller = VideoPlaybackController(source: Passthrough(), poolSize: 1, capacity: 1)
         controller.feedSound = sound
+        defer { resetToLaunch(sound, controller) }
         #expect(AVAudioSession.sharedInstance().category == .ambient)
         sound.setWatching(true, by: controller)
         sound.volumeDidChange()
+        #expect(sound.isTurnedOn && sound.isHeard)
+        #expect(probe.ringerChecks == 1, "the ringer was not read at the key")
+        #expect(!sound.playsThroughSilentSwitch)
+        #expect(AVAudioSession.sharedInstance().category == .ambient, "the category changed under the clip")
+        probe.silent = true
+        sound.checkRinger()
+        #expect(!sound.isTurnedOn, "ring → silent kept the sound on")
+        #expect(AVAudioSession.sharedInstance().category == .ambient)
+    }
+
+    /// On a silent phone nothing was heard before the key: the session
+    /// switches to `.playback` there, heard through the switch, and goes back
+    /// to `.ambient` once the sound is off.
+    @Test func onASilentPhoneTheKeyPlaysThroughTheSwitch() {
+        let probe = Probe()
+        probe.silent = true
+        let sound = session(probe)
+        let controller = VideoPlaybackController(source: Passthrough(), poolSize: 1, capacity: 1)
+        controller.feedSound = sound
+        defer { resetToLaunch(sound, controller) }
+        let announced = Counter()
+        let token = NotificationCenter.default.addObserver(
+            forName: FeedSoundSession.didNeedPlayThrough, object: sound, queue: nil
+        ) { _ in announced.add() }
+        defer { NotificationCenter.default.removeObserver(token) }
+        sound.setWatching(true, by: controller)
+        sound.volumeDidChange()
+        #expect(sound.playsThroughSilentSwitch)
+        #expect(announced.value == 1)
         #expect(AVAudioSession.sharedInstance().category == .playback)
+        // Already silent: the checks reading silent keep it on.
+        sound.checkRinger()
+        #expect(sound.isTurnedOn)
+        probe.silent = false
         sound.checkRinger()
         probe.silent = true
         sound.checkRinger()
+        #expect(!sound.isTurnedOn && !sound.playsThroughSilentSwitch)
         #expect(AVAudioSession.sharedInstance().category == .ambient, "on silent again, still heard through it")
-        // Back to a fresh launch for the next suite.
+    }
+
+    /// A check that never answers leaves the session `.ambient` — towards
+    /// silence — and a late answer for a sound already off is dropped.
+    @Test func aKeyReadThatNeverAnswersKeepsAmbient() {
+        let probe = Probe()
+        nonisolated(unsafe) var pending: [(Bool) -> Void] = []
+        let sound = FeedSoundSession(
+            otherAudioPlaying: { false },
+            observe: { _ in NSObject() },
+            probeSilent: { done in
+                probe.ringerChecks += 1
+                pending.append { done($0) }
+            },
+            tick: { _ in NSObject() }
+        )
+        let controller = VideoPlaybackController(source: Passthrough(), poolSize: 1, capacity: 1)
+        controller.feedSound = sound
+        defer { resetToLaunch(sound, controller) }
+        sound.setWatching(true, by: controller)
+        sound.volumeDidChange()
+        #expect(sound.isTurnedOn && !sound.playsThroughSilentSwitch)
+        #expect(AVAudioSession.sharedInstance().category == .ambient)
+        // The sound goes off before the key's read lands: it is dropped.
+        sound.debugReset()
+        pending.first?(true)
+        #expect(!sound.playsThroughSilentSwitch)
+        #expect(AVAudioSession.sharedInstance().category == .ambient)
+    }
+
+    /// Back to a fresh launch for the next suite.
+    private func resetToLaunch(_ sound: FeedSoundSession, _ controller: VideoPlaybackController) {
         sound.debugReset()
         controller.feedSound = FeedSoundSession(otherAudioPlaying: { false }, observe: { _ in nil }, tick: { _ in nil })
         #expect(AVAudioSession.sharedInstance().category == .ambient)

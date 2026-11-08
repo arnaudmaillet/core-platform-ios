@@ -167,12 +167,19 @@ extension VideoPlaybackController {
 
     /// `.playback` while a player is heard by name (`setMuted`), kept playing
     /// in the background, readied for Picture in Picture (#483), or once the
-    /// viewer turned the feed's sound on with a volume key (#1931,
-    /// `FeedSoundSession`); `.ambient` otherwise — the feed follows the device.
+    /// viewer turned the feed's sound on with a volume key ON A SILENT PHONE
+    /// (#1931, #2185, `FeedSoundSession.playsThroughSilentSwitch`); `.ambient`
+    /// otherwise — the feed follows the device, and a ringing phone already
+    /// hears it.
+    ///
+    /// ⚠️ A CATEGORY CHANGE UNDER A PLAYING CLIP IS HEARD (#2185): iOS
+    /// reconfigures the output, the sound cuts and the picture hitches. So the
+    /// key on a ringing phone changes nothing here; Background Play and Picture
+    /// in Picture still switch at their own moment.
     func settleAudioSession() {
         let session = AVAudioSession.sharedInstance()
         let quiet = audiblePlayers.isEmpty && backgroundPlayer == nil && pictureInPicture == nil
-            && !feedSound.isTurnedOn
+            && !feedSound.playsThroughSilentSwitch
         let wanted: AVAudioSession.Category = quiet ? .ambient : .playback
         guard session.category != wanted else { return }
         try? session.setCategory(wanted, mode: .moviePlayback)
