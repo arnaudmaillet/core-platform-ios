@@ -19,7 +19,7 @@ struct CardContractGuardTests {
     /// File name → why its rounded fill is not a card.
     static let allowed: [String: String] = [
         "LensLab.swift": "the DEBUG lens bench's sample shapes",
-        "HapticCatalogViewController.swift": "the DEBUG haptic catalog's strips",
+        "HapticPlaygroundViewController.swift": "the DEBUG haptics playground's strips and pads",
         "WalletHowItWorksViewController.swift": "a step's number badge, a disc",
         "WalletSheetViews.swift": "the streak's progress track and fill, 4 pt high",
         "TextCompletionStrip.swift": "the emote suggestions' chips: a control, not a card",

@@ -61,7 +61,7 @@ struct StackScreenGuardTests {
         "LaunchViewController": "the window's launch root",
         "SignInSheetContainer": "a sheet",
         "CaptureViewController": "the camera's root",
-        "HapticCatalogViewController": "a DEBUG sheet",
+        "HapticPlaygroundViewController": "a DEBUG sheet",
         "AppButtonCatalogViewController": "a DEBUG sheet",
         "SnapCommentsSheetViewController": "a sheet",
         "ToastOverlayRootController": "the toast window's root",

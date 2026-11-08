@@ -208,7 +208,7 @@ public enum Haptics {
         if let recorder {
             if let last = recorder.lastPlayed[role], now - last < spacing(of: role) { return }
             recorder.lastPlayed[role] = now
-            recorder.record(role)
+            recorder.record(role, sound: recorder.overrides?[role] ?? .recipe(role.recipe))
             return
         }
         #endif
@@ -216,6 +216,12 @@ public enum Haptics {
         lastPlayed[role] = now
         #if DEBUG
         if logs { print("haptic \(role)") }
+        // A candidate the playground gave this role (#2193 § 4), after the
+        // switch and the pacing, as the role itself would.
+        if let candidate = HapticOverrides.shared[role] {
+            audition(candidate)
+            return
+        }
         #endif
         let recipe = role.recipe
         switch recipe {
@@ -240,6 +246,10 @@ public enum Haptics {
         #if DEBUG
         if let recorder {
             recorder.recordPrepare(role)
+            return
+        }
+        if let candidate = HapticOverrides.shared[role] {
+            prepareAudition(candidate)
             return
         }
         #endif
@@ -281,6 +291,44 @@ public enum Haptics {
     /// role fired).
     static let logs = ProcessInfo.processInfo.arguments.contains("-haptics-log")
 
+    /// The playground's player (#2193): plays `sound` now, behind the switch
+    /// but with no pacing — the playground's bursts set their own spacing.
+    public static func audition(_ sound: HapticSound) {
+        guard HapticPreference.isOn else { return }
+        if let recorder {
+            recorder.recordAudition(sound)
+            return
+        }
+        switch sound {
+        case .recipe(.selection):
+            selection.selectionChanged()
+            selection.prepare()
+        case .recipe(.impact(let style, let intensity)):
+            let generator = impact(style)
+            generator.impactOccurred(intensity: intensity)
+            generator.prepare()
+        case .recipe(.notification(let type)):
+            notification.notificationOccurred(type)
+            notification.prepare()
+        case .pattern(let pattern):
+            HapticPatternPlayer.shared.play(pattern)
+        case .systemVibration:
+            HapticSystemVibration.play()
+        }
+    }
+
+    /// Warms what `audition(sound)` will play.
+    public static func prepareAudition(_ sound: HapticSound) {
+        guard HapticPreference.isOn, recorder == nil else { return }
+        switch sound {
+        case .recipe(.selection): selection.prepare()
+        case .recipe(.impact(let style, _)): impact(style).prepare()
+        case .recipe(.notification): notification.prepare()
+        case .pattern: HapticPatternPlayer.shared.prepare()
+        case .systemVibration: break
+        }
+    }
+
     #endif
 }
 
@@ -291,6 +339,14 @@ public enum Haptics {
 public final class HapticRecorder {
     public private(set) var played: [Haptic] = []
     public private(set) var prepared: [Haptic] = []
+    /// What each play in `played` sounded like: the role's recipe, or the
+    /// candidate `overrides` gives it.
+    public private(set) var sounds: [HapticSound] = []
+    /// What `Haptics.audition` played.
+    public private(set) var auditioned: [HapticSound] = []
+    /// The candidates this recorder's plays read, instead of the app's
+    /// (`HapticOverrides.shared`): a test's own, beside other suites.
+    public var overrides: HapticOverrides?
     /// The pacing, this recorder's own.
     var lastPlayed: [Haptic: TimeInterval] = [:]
     /// The clock its pacing reads, when a test drives time.
@@ -298,7 +354,11 @@ public final class HapticRecorder {
 
     public init() {}
 
-    func record(_ role: Haptic) { played.append(role) }
+    func record(_ role: Haptic, sound: HapticSound) {
+        played.append(role)
+        sounds.append(sound)
+    }
+    func recordAudition(_ sound: HapticSound) { auditioned.append(sound) }
     func recordPrepare(_ role: Haptic) { prepared.append(role) }
 
     /// Runs `body` with a fresh recorder (and its own pacing) for this
