@@ -56,6 +56,10 @@ struct PlaceIdentityViewTests {
     /// On two lines the block is centred on the flag, a little inside it on
     /// the app's scale B (#2149): measured 5 pt under the disc's top and over
     /// its foot (it was level with both on Apple's sizes).
+    ///
+    /// Within half a point, INCLUSIVE: a 2× screen (the iPhone SE) rounds
+    /// layout to the half point, and lands the counters 4.5 pt over the foot
+    /// (#2182); a 3× screen measures 5.
     @Test func aTwoLineTitleAndItsCountersSpanTheFlag() throws {
         let identity = layOut(name: "Central African Republic", subtitle: "Sub-Saharan Africa")
         #expect(!identity.titleLabel.subtitleFollowsName)
@@ -63,8 +67,8 @@ struct PlaceIdentityViewTests {
         let title = frame(of: identity.titleLabel, in: identity)
         let likes = frame(of: try stat("Likes", in: identity), in: identity)
         #expect(abs((title.minY + likes.maxY) / 2 - flag.midY) < 0.5, "the block is not centred on the flag")
-        #expect(abs(title.minY - flag.minY - 5) < 0.5, "the name is not 5 pt under the flag's top: \(title.minY - flag.minY)")
-        #expect(abs(flag.maxY - likes.maxY - 5) < 0.5, "the counters are not 5 pt over the flag's foot: \(flag.maxY - likes.maxY)")
+        #expect(abs(title.minY - flag.minY - 5) <= 0.5, "the name is not 5 pt under the flag's top: \(title.minY - flag.minY)")
+        #expect(abs(flag.maxY - likes.maxY - 5) <= 0.5, "the counters are not 5 pt over the flag's foot: \(flag.maxY - likes.maxY)")
     }
 
     /// A title on one line stands where the middle of a two-line one does,

@@ -128,8 +128,11 @@ struct CoverLoadCancellationTests {
         await landings.next { await fetcher.release(secondURL) }
 
         #expect(landings.count == 1)
-        // At the tile's drawn bucket (#1505): a 120 pt tile is a 512 px decode.
-        #expect(cell.renderedCover === pipeline.cachedImage(for: secondURL, size: .px512))
+        // At the tile's drawn bucket (#1505): a 120 pt tile is a 512 px decode
+        // at 3×, a 256 px one at 2× (the iPhone SE, #2182).
+        let scale = cell.traitCollection.displayScale > 0 ? cell.traitCollection.displayScale : 3
+        let bucket = PostGridTileCell.coverBucket(forDrawnSize: cell.bounds.size, scale: scale)
+        #expect(cell.renderedCover === pipeline.cachedImage(for: secondURL, size: bucket))
     }
 
     /// The list row's single-media cover follows the same rule.

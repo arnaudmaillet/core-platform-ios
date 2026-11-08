@@ -338,7 +338,9 @@ struct EmoteSkeletonTests {
         #expect(!holdsABone(tile))
     }
 
-    /// The same on a label, at the seed's bucket.
+    /// The same on a label, at a bucket the seeds cover: 64 px on a 3× screen,
+    /// 48 px on a 2× one (the iPhone SE, #2182), which the 64 px sheet covers
+    /// drawn smaller (`EmoteSeeds.covers`, #1504).
     @Test func aSeededLabelNeverShowsASkeleton() async throws {
         let engine = EmoteEngine(diskCache: nil, seeds: .bundled, animationProvider: { _ in nil })
         engine.localArtGrace = 600
@@ -346,8 +348,8 @@ struct EmoteSkeletonTests {
         defer { window.isHidden = true }
         let square = try #require(label.emoteFrames.first)
         try #require(
-            EmoteEngine.pixelSide(forPoints: square.width, scale: window.screen.scale) == EmoteSeeds.side,
-            "the host's scale does not draw 17 pt at the seed's bucket"
+            EmoteEngine.pixelSide(forPoints: square.width, scale: window.screen.scale) <= EmoteSeeds.side,
+            "the host's scale draws 17 pt past the seeds' bucket"
         )
         var skeletonSeen = label.skeletonCount > 0
         let landed = await settle {
