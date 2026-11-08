@@ -1057,11 +1057,24 @@ final class SnapCommentTickerView: UIView {
     var debugCapsuleTint: CGFloat { capsuleTintView.alpha }
     /// Every bubble on screen with its capsule, as (bubble frame, capsule
     /// frame) — the model values, or the presentation's in flight.
+    ///
+    /// ⚠️ THE MODEL, NOT THE PRESENTATION: a presentation is the last frame
+    /// the render server drew, and it is not refreshed within the turn that
+    /// moves a layer. With the tests' frozen clock and a starved runner, a
+    /// bubble's flight had finished on screen (its presentation at the exit)
+    /// while the scrub had just put both back where the frozen clock says —
+    /// a capsule "off its bubble" that never was (#2186's follow-up CI).
+    /// The flights themselves are compared in `debugBubbleCapsuleFlights`.
     var debugBubbleCapsuleFrames: [(bubble: CGRect, capsule: CGRect)] {
+        laneBubbles.joined().map { bubble in (bubble.view.layer.frame, bubble.view.capsule.frame) }
+    }
+
+    /// Each bubble's flight and its capsule's: the same move, begun at the
+    /// same time — nil for a bubble at rest.
+    var debugBubbleCapsuleFlights: [(bubble: CABasicAnimation?, capsule: CABasicAnimation?)] {
         laneBubbles.joined().map { bubble in
-            let view = bubble.view.layer.presentation() ?? bubble.view.layer
-            let capsule = bubble.view.capsule.presentation() ?? bubble.view.capsule
-            return (view.frame, capsule.frame)
+            (bubble.view.layer.animation(forKey: "flight") as? CABasicAnimation,
+             bubble.view.capsule.animation(forKey: "flight") as? CABasicAnimation)
         }
     }
     #endif
