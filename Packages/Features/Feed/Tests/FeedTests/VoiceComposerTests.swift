@@ -615,6 +615,39 @@ struct VoiceComposerTests {
                 "the widest face is \(max(keyboard.size.width, smile.size.width)) pt in a \(CommentsInputBar.Metrics.emoteToggleWidth) pt slot")
     }
 
+    /// The field's emote button comes and goes in sight (the owner,
+    /// 2026-11-08): a draft brings it in from half its size, fading in, as
+    /// the field opens its slot; emptied, it leaves the same way and hides
+    /// once out. A repeat of the same state does not animate again.
+    @Test func theFieldsEmoteButtonComesAndGoesInMotion() async {
+        let (_, bar, _) = composer()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        bar.frame = CGRect(x: 0, y: 700, width: 390, height: 120)
+        window.addSubview(bar)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        bar.actsFromOwnBubble = true
+        bar.layoutIfNeeded()
+        let toggle = bar.debugEmoteToggle
+        #expect(toggle.isHidden, "an emote button in the empty field")
+        let before = bar.debugEmoteToggleMotions
+        bar.draftText = "hi"
+        #expect(!toggle.isHidden, "the draft's emote button is not on its way in")
+        // The slot is open before the scale starts: nothing swings from the edge.
+        #expect(bar.debugEmoteSlotWidth == CommentsInputBar.Metrics.emoteToggleWidth, "the slot widens under the scale")
+        #expect(toggle.bounds.width == CommentsInputBar.Metrics.emoteToggleWidth, "the button grows from the field's edge")
+        #expect(bar.debugEmoteToggleMotions == before + 1, "the emote button came in with no motion")
+        #expect(!(toggle.layer.animationKeys() ?? []).isEmpty, "nothing animates the emote button in")
+        bar.draftText = "hi there"
+        #expect(bar.debugEmoteToggleMotions == before + 1, "a longer draft animated it again")
+        bar.draftText = ""
+        #expect(bar.debugEmoteToggleMotions == before + 2, "the emote button left with no motion")
+        #expect(!bar.debugShowsFieldEmoteToggle, "the emote button is not on its way out")
+        #expect(await settle { toggle.isHidden }, "the emote button never hid once out")
+        #expect(toggle.alpha == 1 && toggle.transform == .identity, "the emote button kept its way-out look")
+        #expect(await settle { bar.debugEmoteSlotWidth == 0 }, "the slot never closed for the text")
+    }
+
     /// A post's comments keep today's tap: no hold.
     @Test func aPostsComposerKeepsTheTap() {
         let bar = CommentsInputBar()

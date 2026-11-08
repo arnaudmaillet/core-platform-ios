@@ -139,6 +139,12 @@ final class CommentsInputBar: UIView {
     /// The field's emote button's width: 0 while it is gone
     /// (`updateEmoteToggle`), so the text and the placeholder run on.
     private var emoteToggleWidth: NSLayoutConstraint!
+    /// Whether the field's emote button was last asked to show: a change
+    /// animates (`animateEmoteToggle`), a repeat does nothing.
+    private var emoteToggleShown = true
+    /// `speaksFromField` as of the last update: a change of mode is not a
+    /// draft's, and does not animate.
+    private var emoteToggleSpeaks = false
     /// The own bubble steps aside while a locked or paused take covers the
     /// field (it carries its own send): the field takes the row's width.
     private var rowActionStepsAside = false
@@ -415,7 +421,9 @@ final class CommentsInputBar: UIView {
     var debugHoldGlyph: UIImageView { holdGlyph }
     var debugShowsRowAction: Bool { !rowActionButton.isHidden }
     /// The field's emote button shows, with room.
-    var debugShowsFieldEmoteToggle: Bool { !emotes.toggleButton.isHidden && emoteToggleWidth.constant > 0 }
+    /// Whether the field's emote button is shown, or on its way in — not
+    /// once it is leaving.
+    var debugShowsFieldEmoteToggle: Bool { emoteToggleShown && !emotes.toggleButton.isHidden && emoteToggleWidth.constant > 0 }
     /// The emote panel stands in for the keyboard.
     var debugShowsEmotePanel: Bool { emotes.isShowingPanel }
     /// The placeholder's words.
@@ -423,6 +431,10 @@ final class CommentsInputBar: UIView {
     /// The placeholder's frame and the field's, in the field's space.
     var debugPlaceholderFrame: CGRect { placeholderLabel.frame }
     var debugPlaceholderAlignment: NSTextAlignment { placeholderLabel.textAlignment }
+    /// How many times the field's emote button came or went in sight.
+    private(set) var debugEmoteToggleMotions = 0
+    var debugEmoteToggle: UIButton { emotes.toggleButton }
+    var debugEmoteSlotWidth: CGFloat { emoteToggleWidth.constant }
     var debugFieldBounds: CGRect { field.contentView.bounds }
     /// Whether the field's long press would begin now.
     var debugFieldHoldBegins: Bool { gestureRecognizerShouldBegin(fieldVoiceHold) }
@@ -2524,14 +2536,32 @@ final class CommentsInputBar: UIView {
     /// The field's emote button: gone while a take covers the field, and —
     /// in a conversation that speaks from the field — until there is a
     /// draft: the bubble is the emote button then.
+    ///
+    /// It comes and goes in sight (the owner, 2026-11-08): a scale with a
+    /// bounce and a fade, about its own centre. At once under a take or with
+    /// Reduce Motion.
     private func updateEmoteToggle() {
         guard emoteToggleWidth != nil else { return }
         let hidden = voiceOverlay != nil || (speaksFromField && !hasDraft)
-        emotes.toggleButton.isHidden = hidden
         let width = hidden && voiceOverlay == nil ? 0 : Metrics.emoteToggleWidth
-        if emoteToggleWidth.constant != width {
-            emoteToggleWidth.constant = width
-            setNeedsLayout()
+        let button = emotes.toggleButton
+        // Only a draft coming or going moves it: the bar setting up its mode
+        // (a conversation's field that speaks) puts it in place at once.
+        let animates = emoteToggleShown != !hidden && emoteToggleSpeaks == speaksFromField
+            && voiceOverlay == nil && window != nil && !MotionPreference.reducesMotion
+        emoteToggleShown = !hidden
+        emoteToggleSpeaks = speaksFromField
+        if animates {
+            animateEmoteToggle(shown: !hidden, width: width)
+        } else {
+            button.layer.removeAllAnimations()
+            button.isHidden = hidden
+            button.alpha = 1
+            button.transform = .identity
+            if emoteToggleWidth.constant != width {
+                emoteToggleWidth.constant = width
+                setNeedsLayout()
+            }
         }
         textView.accessibilityCustomActions = speaksFromField && !hasDraft && !textView.isFirstResponder
             ? [UIAccessibilityCustomAction(name: "Record voice message") { [weak self] _ in
@@ -2539,6 +2569,48 @@ final class CommentsInputBar: UIView {
                 return true
             }]
             : nil
+    }
+
+    /// The field's emote button in or out (the owner, 2026-11-08: a scale or
+    /// a bounce, and a fade — nothing that swings). Its slot never moves
+    /// under it: in, the slot opens at once and the button bounces up from a
+    /// fifth of its size where it stands; out, it shrinks and fades where it
+    /// stands, and only then does the slot close for the text. A slot that
+    /// widened with it swung the glyph from the field's edge.
+    private func animateEmoteToggle(shown: Bool, width: CGFloat) {
+        let button = emotes.toggleButton
+        let small = CGAffineTransform(scaleX: 0.2, y: 0.2)
+        let options: UIView.AnimationOptions = [.beginFromCurrentState, .allowUserInteraction]
+        #if DEBUG
+        debugEmoteToggleMotions += 1
+        #endif
+        if shown {
+            UIView.performWithoutAnimation {
+                emoteToggleWidth.constant = width
+                field.contentView.layoutIfNeeded()
+            }
+            if button.isHidden || button.alpha == 0 {
+                button.isHidden = false
+                button.alpha = 0
+                button.transform = small
+            }
+            UIView.animate(withDuration: 0.15, delay: 0, options: options) { button.alpha = 1 }
+            UIView.animate(springDuration: 0.45, bounce: 0.5, options: options) { button.transform = .identity }
+            return
+        }
+        UIView.animate(withDuration: 0.18, delay: 0, options: options) {
+            button.alpha = 0
+            button.transform = small
+        } completion: { [weak self] _ in
+            guard let self, !self.emoteToggleShown else { return }
+            button.isHidden = true
+            button.alpha = 1
+            button.transform = .identity
+            emoteToggleWidth.constant = width
+            UIView.animate(springDuration: 0.25, bounce: 0, options: options) {
+                self.field.contentView.layoutIfNeeded()
+            }
+        }
     }
 
     /// The own bubble's glyph: the send over a draft; at rest the emote
