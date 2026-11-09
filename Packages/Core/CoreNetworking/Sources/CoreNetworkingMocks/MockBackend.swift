@@ -46,7 +46,9 @@ public struct MockBackend: Sendable {
         seedsMapHierarchy: Bool = false,
         enforcesEdgePolicy: Bool = false,
         countryOf: (@Sendable (Double, Double) -> String?)? = nil,
-        persistence: UserDefaults = .standard
+        persistence: UserDefaults = .standard,
+        seedsGroups: Bool = false,
+        seedsChannels: Bool = false
     ) {
         // The world beyond France (`MockWorldSeed`) rides the same decision
         // as the European seed: it is what the map's places are for.
@@ -227,9 +229,10 @@ public struct MockBackend: Sendable {
             default: .open
             }
         },
-        // Groups and channels (#2213), seeded behind their flags.
-        seedsGroups: ProcessInfo.processInfo.arguments.contains("-group-chats"),
-        seedsChannels: ProcessInfo.processInfo.arguments.contains("-channels")
+        // Groups and channels (#2213), seeded behind their flags — read by
+        // the app (`DebugFlags`) and handed in.
+        seedsGroups: seedsGroups,
+        seedsChannels: seedsChannels
         ).register(on: bff)
         socialGraph.register(on: bff)
         // Contacts find a profile only through a channel its owner left on,
