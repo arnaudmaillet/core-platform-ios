@@ -5850,7 +5850,9 @@ final class SnapFeedViewController: UIViewController {
             displayName: model.authorName,
             handle: SnapAuthorIdentityView.pillMetaLine(fromMeta: model.metaText),
             avatarURL: model.avatarURL,
-            url: link
+            url: link,
+            // A voice post says its voice where no player is drawn (#2208).
+            detail: VoicePosts.shareText(caption: model.caption, voice: model.voice)
         )
         let sheet = ShareSheetViewController(
             card: card,

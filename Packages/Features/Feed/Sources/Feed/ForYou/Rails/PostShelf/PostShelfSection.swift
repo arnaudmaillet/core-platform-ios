@@ -1358,6 +1358,8 @@ extension PostShelfSection: UICollectionViewDelegate {
         didEndDisplaying cell: UICollectionViewCell,
         forItemAt indexPath: IndexPath
     ) {
+        // A text card scrolled off: a voice it plays stops where it is (#2208).
+        (cell as? PostGridListRowCell)?.voiceDidEndDisplaying()
         // A card that left gives its player back now — the pool is shared.
         guard collectionView === mediaView, let card = cell as? PostShelfMediaCardCell else { return }
         playback?.stop(cell: card)
