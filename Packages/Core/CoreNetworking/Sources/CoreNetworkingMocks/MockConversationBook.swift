@@ -1,3 +1,4 @@
+import CoreModels
 import CoreNetworking
 import Foundation
 
@@ -72,6 +73,17 @@ final class MockConversationBook: @unchecked Sendable {
                 requests: [author(13), author(14), author(15)].enumerated().map {
                     .init(profileID: $0.element, requestedAtMs: now - Int64($0.offset + 1) * 3_600_000)
                 })
+            // For the showcases (#2216): one on request the viewer has no
+            // standing in (Request to join), and one turned private (its
+            // showcase reads "This channel is private"). A showcase whose
+            // channel is in no record reads as deleted.
+            add(.init(conversationID: "ch-printroom", kind: .channel, name: "Print room", photoURL: photo("printroom"),
+                      description: "Proofs, plates and the press, from the studio floor.", visibility: .listedOnRequest,
+                      subscriberCount: 340),
+                members: [author(16): .owner, author(17): .admin], since: now - 60 * day)
+            add(.init(conversationID: "ch-backroom", kind: .channel, name: "Backroom sessions", photoURL: photo("backroom"),
+                      description: "Live sets, invite only.", visibility: .private, subscriberCount: 95),
+                members: [author(18): .owner], since: now - 15 * day)
         }
     }
 
@@ -112,6 +124,59 @@ final class MockConversationBook: @unchecked Sendable {
         lock.withLock {
             guard let role = records[id]?.members[profile] else { return false }
             return role == .owner || role == .admin
+        }
+    }
+
+    // MARK: - Showcases (#2216)
+
+    /// Channel `id` as a showcase's card shows it to `viewer`, read now — as
+    /// the backend hydrates an embed in the feed, map and search responses
+    /// (#995), so a join or a request made through the chat mock shows on
+    /// the next read of the post. Nil for a conversation that is not a
+    /// channel.
+    ///
+    /// - In no record: deleted.
+    /// - Private and the viewer not in: private — the card can't show it.
+    /// - `blocksOwner`: a block either way with its owner hides it.
+    /// - An owner and an admin are members to the card (Open).
+    func channelEmbed(
+        _ id: String, for viewer: String, lastMessage: String?, blocksOwner: (String) -> Bool
+    ) -> ChannelEmbed? {
+        lock.withLock {
+            guard let record = records[id] else {
+                return ChannelEmbed(conversationID: ConversationID(id), availability: .deleted)
+            }
+            guard record.details.kind == .channel, let details = details(id, for: viewer) else { return nil }
+            let state: ChannelEmbed.ViewerState = switch details.viewerState {
+            case .owner, .admin, .member: .member
+            case .subscriber: .subscriber
+            case .requested: .requested
+            case .banned: .banned
+            case .invited, .none: .none
+            }
+            let isIn = state == .member || state == .subscriber
+            // A private channel tells an outsider nothing — not even its
+            // name (#995: it can't be probed).
+            if details.visibility == .private, !isIn {
+                return ChannelEmbed(conversationID: ConversationID(id), availability: .private)
+            }
+            let owner = record.members.first { $0.value == .owner }?.key
+            let blocked = owner.map { $0 != viewer && blocksOwner($0) } ?? false
+            let availability: ChannelEmbed.Availability = blocked ? .blocked : .available
+            // Only a reader sees what was said: a public channel's, or one
+            // the viewer is in.
+            let readable = isIn || details.visibility == .public
+            return ChannelEmbed(
+                conversationID: ConversationID(id),
+                name: details.name,
+                photoURL: details.photoURL.isEmpty ? nil : URL(string: details.photoURL),
+                description: details.description,
+                subscriberCount: details.subscriberCount,
+                visibility: details.visibility == .public ? .public : .onRequest,
+                viewerState: state,
+                availability: availability,
+                lastMessagePreview: readable ? lastMessage : nil
+            )
         }
     }
 

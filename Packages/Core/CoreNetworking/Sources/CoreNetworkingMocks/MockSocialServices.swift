@@ -23,6 +23,7 @@ public final class MockSocialServices: @unchecked Sendable {
     /// author none of them follows when `privacy` applies). Set by the
     /// composition, which owns the graph; nil lets everyone through.
     /// Guarded by `lock`.
+    private var showcase: (@Sendable (_ postID: String) -> (embed: PostEmbed, text: String)?)?
     private var audienceGate: (@Sendable (_ readers: [String], _ author: String, _ privacy: Bool) -> Bool)?
 
     /// The viewer's editable profile, mutated by the `UpdateProfile` /
@@ -781,6 +782,13 @@ public final class MockSocialServices: @unchecked Sendable {
     }
 
     /// Sets who may see whose content (`audienceGate`).
+    /// The showcase a seeded post is (#2216): its channel's card, hydrated
+    /// at the read, and the author's words above it. Set only when channels
+    /// are seeded (`MockBackend`, under `-channels`).
+    public func setShowcases(_ showcase: @escaping @Sendable (_ postID: String) -> (embed: PostEmbed, text: String)?) {
+        lock.withLock { self.showcase = showcase }
+    }
+
     public func setAudienceGate(_ gate: @escaping @Sendable (_ readers: [String], _ author: String, _ privacy: Bool) -> Bool) {
         lock.withLock { audienceGate = gate }
     }
@@ -922,6 +930,12 @@ public final class MockSocialServices: @unchecked Sendable {
         if let seeded = dataset.seededVoice(forPostID: record.postID) {
             PostVoiceWire.write(seeded.voice, to: &view)
             if !seeded.keepsText, drawsVoicePosts { view.caption = "" }
+        }
+        // A seeded showcase (#2216): a text post whose card shows a channel,
+        // read for the viewer now — never an attachment.
+        if let showcase = lock.withLock({ self.showcase }), let shown = showcase(record.postID) {
+            PostEmbedWire.write(shown.embed, to: &view)
+            view.caption = shown.text
         }
         return .success(view)
     }
