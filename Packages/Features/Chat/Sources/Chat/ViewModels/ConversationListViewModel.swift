@@ -176,6 +176,20 @@ public final class ConversationListViewModel {
     }
     public func delete(_ ids: Set<ConversationID>) { catalog.delete(ids) }
 
+    // MARK: - Group invitations (#2214)
+
+    /// Accepts or declines a group's invitation from its row. The row changes
+    /// at once; a refusal puts it back and is said (`onInvitationRefused`).
+    public func answerInvitation(_ id: ConversationID, accept: Bool) {
+        catalog.answerInvitation(id, accept: accept) { [weak self] written in
+            guard !written else { return }
+            self?.onInvitationRefused?(accept ? "Couldn't join the group" : "Couldn't decline the invitation")
+        }
+    }
+
+    /// An invitation's answer the server refused: the words to show.
+    public var onInvitationRefused: ((String) -> Void)?
+
     // MARK: - Projection
 
     private func publishNewCount(_ count: Int) {
@@ -216,7 +230,8 @@ public final class ConversationListViewModel {
                     // Suppressed with the flag: the catalog's read bridge can
                     // clear a row ahead of the server, and a count left behind
                     // would be a number beside a row that reads as read.
-                    unreadCount: snapshot.unreadIDs.contains($0.id) ? $0.unreadCount : 0
+                    unreadCount: snapshot.unreadIDs.contains($0.id) ? $0.unreadCount : 0,
+                    joinedInvitation: snapshot.joinedInvitations.contains($0.id)
                 )
             }
             phase = .content(InboxListSections(rows: models) { isNew[$0.id] ?? false })

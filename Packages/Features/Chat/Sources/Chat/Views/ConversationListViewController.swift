@@ -173,6 +173,11 @@ final class ConversationListViewController: UIViewController {
                 Feedback.failure(message, from: self)
             }
         }
+        // A group invitation's answer the server refused (#2214).
+        viewModel.onInvitationRefused = { [weak self] message in
+            guard let self else { return }
+            Feedback.failure(message, from: self)
+        }
         viewModel.onMuteUndoable = { [weak self] message, undo in
             guard let self else { return }
             Feedback.undoable(message, symbol: "bell.slash.fill", from: self, commit: {}, undo: undo)
@@ -318,6 +323,8 @@ final class ConversationListViewController: UIViewController {
 
     private func configureTableView() {
         tableView.register(ConversationCell.self, forCellReuseIdentifier: ConversationCell.reuseIdentifier)
+        // A group invitation (#2214) is a request's row: the same Accept and ✕.
+        tableView.register(MessageRequestCell.self, forCellReuseIdentifier: MessageRequestCell.reuseIdentifier)
         // No indicators on the inbox's pages either — the tabs sit above them
         // and each page keeps its own position, so a bar that flashes on every
         // switch reads as motion nobody asked for.
@@ -347,6 +354,13 @@ final class ConversationListViewController: UIViewController {
 
         adapter = ConversationListTableAdapter(tableView: tableView) {
             [weak self] tableView, indexPath, id in
+            if let self, let model = self.modelsByID[id], model.invitation != nil {
+                let cell = tableView.dequeueReusableCell(
+                    withIdentifier: MessageRequestCell.reuseIdentifier, for: indexPath
+                ) as! MessageRequestCell
+                self.configureInvitation(cell, with: model)
+                return cell
+            }
             let cell = tableView.dequeueReusableCell(
                 withIdentifier: ConversationCell.reuseIdentifier, for: indexPath
             ) as! ConversationCell
@@ -357,16 +371,46 @@ final class ConversationListViewController: UIViewController {
         }
     }
 
+    /// A group's invitation (#2214): its Accept and ✕ answer it.
+    private func configureInvitation(_ cell: MessageRequestCell, with model: ConversationDisplayModel) {
+        cell.configure(with: model, imagePipeline: imagePipeline, avatars: avatars)
+        let id = model.id
+        cell.onAccept = { [weak self] in self?.viewModel.answerInvitation(id, accept: true) }
+        cell.onDismiss = { [weak self] in self?.viewModel.answerInvitation(id, accept: false) }
+    }
+
     /// Re-renders rows whose content changed but whose position did not,
     /// straight onto the live cells.
+    ///
+    /// A row that changed KIND — an invitation accepted (#2214) — is skipped:
+    /// its cell is of the other type, and it is reloaded once the
+    /// arrangement is applied (`reloadRowsOfChangedKind`).
     private func reconfigureVisible(_ ids: [ConversationID]) {
         for id in ids {
-            guard let indexPath = adapter.indexPath(for: id),
-                  let cell = tableView.cellForRow(at: indexPath) as? ConversationCell,
-                  let model = modelsByID[id]
-            else { continue }
-            configure(cell, with: model)
+            guard let indexPath = adapter.indexPath(for: id), let model = modelsByID[id] else { continue }
+            switch tableView.cellForRow(at: indexPath) {
+            case let cell as ConversationCell where model.invitation == nil:
+                configure(cell, with: model)
+            case let cell as MessageRequestCell where model.invitation != nil:
+                configureInvitation(cell, with: model)
+            default:
+                continue
+            }
         }
+    }
+
+    /// The rows on screen whose cell is of the wrong kind for their model —
+    /// an invitation accepted becomes a group's row (#2214) — reloaded in
+    /// their new places.
+    private func reloadRowsOfChangedKind(_ ids: [ConversationID]) {
+        let paths = ids.compactMap { id -> IndexPath? in
+            guard let indexPath = adapter.indexPath(for: id), let model = modelsByID[id],
+                  let cell = tableView.cellForRow(at: indexPath) else { return nil }
+            let isInvitationCell = cell is MessageRequestCell
+            return isInvitationCell == (model.invitation != nil) ? nil : indexPath
+        }
+        guard !paths.isEmpty else { return }
+        tableView.reloadRows(at: paths, with: .fade)
     }
 
     private func configureStatusViews() {
@@ -418,6 +462,7 @@ final class ConversationListViewController: UIViewController {
             // up and the band travels with it.
             reconfigureVisible(changed)
             adapter.apply(sections, animated: hasRenderedContent && view.window != nil)
+            reloadRowsOfChangedKind(changed)
             hasRenderedContent = true
             // The list moved under the spinner: it waits for the end to
             // come back in reach before it turns again.

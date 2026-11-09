@@ -2,6 +2,7 @@ import ChatInterface
 import CoreModels
 import CoreStorage
 import CoreNavigation
+import DesignSystem
 import FeedInterface
 import LocalStore
 import MediaCore
@@ -41,6 +42,12 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// The peers' relations, for the rows' mark and its "+" (#2049): the
     /// inbox's and its search's, over the app's `EntityStore`.
     private let relations: InboxRelations?
+    /// Groups (#2214, `-group-chats`): creating one, its thread's senders,
+    /// its info screen. Nil — the flag off, or a repository with no groups —
+    /// and Messages is DMs only, as it was.
+    private let groups: (any GroupChatServicing)?
+    /// What this session did to groups that the server doesn't say yet.
+    private let groupNotes = GroupSessionNotes()
 
     /// `localStore`: the inbox opens on its last rows and a conversation on
     /// its last 200 messages, offline and at a cold start (#897). Nil keeps
@@ -55,8 +62,10 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         mediaPicker: ChatMediaPickerFactory? = nil,
         localStore: LocalStore? = nil,
         relations: InboxRelations? = nil,
+        showsGroups: Bool = DebugFlags.isOn("-group-chats"),
         threadScreens: @escaping () -> any ConversationThreadScreenBuilding
     ) {
+        groups = showsGroups ? repository as? any GroupChatServicing : nil
         self.threadScreens = threadScreens
         self.relations = relations
         self.mediaPicker = mediaPicker
@@ -183,7 +192,109 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             initialCategory: initialCategory
         )
         inbox.onTotalNewCountChange = onUnreadCountChange
+        // "New group" in the empty search (#2214): the member picker, over
+        // the inbox.
+        if groups != nil {
+            searchViewModel.onNewGroup = { [weak inbox, self] in
+                guard let inbox else { return }
+                presentGroupCreation(from: inbox)
+            }
+        }
         return inbox
+    }
+
+    // MARK: - Groups (#2214)
+
+    /// The new group's sheet: pick the people, then name it, then Create —
+    /// which lands in its thread, opened by "You created the group".
+    private func presentGroupCreation(from presenter: UIViewController) {
+        guard let groups else { return }
+        let picker = makeMemberPicker(purpose: .create, excluded: [], title: "New Group", nextTitle: "Next")
+        let sheet = UINavigationController(rootViewController: picker)
+        picker.onCancel = { [weak sheet] in sheet?.dismiss(animated: true) }
+        picker.onNext = { [weak sheet, catalog, groupNotes, router] people in
+            let creation = GroupCreationViewModel(members: people, service: groups)
+            creation.onCreated = { [weak sheet] id in
+                groupNotes.created[id] = Date()
+                // The inbox behind the thread lists it.
+                catalog.refresh()
+                if let sheet {
+                    sheet.dismiss(animated: true) { router?.route(to: .conversation(id)) }
+                } else {
+                    router?.route(to: .conversation(id))
+                }
+            }
+            sheet?.pushViewController(GroupNameViewController(viewModel: creation), animated: true)
+        }
+        presenter.present(sheet, animated: true)
+    }
+
+    /// The member picker (#2214): the viewer's recent correspondents, the
+    /// directory once typed into — never the viewer, nor `excluded`.
+    private func makeMemberPicker(
+        purpose: GroupMemberPickerViewModel.Purpose, excluded: Set<ProfileID>, title: String, nextTitle: String
+    ) -> GroupMemberPickerViewController {
+        let recents = catalog.directConversations().compactMap(PersonDisplayModel.init(recent:))
+        let model = GroupMemberPickerViewModel(purpose: purpose, recents: recents, directory: people, excluded: excluded)
+        if let groups {
+            Task { @MainActor [weak model] in
+                guard let viewer = try? await groups.viewerProfileID() else { return }
+                model?.exclude([viewer])
+            }
+        }
+        return GroupMemberPickerViewController(
+            viewModel: model, title: title, nextTitle: nextTitle, imagePipeline: imagePipeline,
+            avatars: connections as? any PeerAvatarProviding
+        )
+    }
+
+    /// A group's info screen (#2214); `onChange` tells the thread behind it
+    /// that the group changed.
+    private func makeGroupInfo(_ id: ConversationID, onChange: @escaping @MainActor () -> Void) -> UIViewController {
+        guard let groups else { return UIViewController() }
+        let model = GroupInfoViewModel(
+            conversationID: id, service: groups,
+            isMuted: { [catalog] in catalog.isMuted(id) },
+            setMuted: { [catalog] muted, done in catalog.setMute(id, muted: muted, until: nil, completion: done) }
+        )
+        model.onChange = onChange
+        let screen = GroupInfoViewController(viewModel: model, imagePipeline: imagePipeline)
+        screen.onOpenProfile = { [router] profileID, name in
+            router?.route(to: .profile(profileID, stub: ProfileIdentityStub(handle: nil, displayName: name)))
+        }
+        screen.onAddMembers = { [self] presenter, excluded, memberCount, completion in
+            let picker = makeMemberPicker(
+                purpose: .add(memberCount: memberCount), excluded: excluded, title: "Add Members", nextTitle: "Add"
+            )
+            let sheet = UINavigationController(rootViewController: picker)
+            picker.onCancel = { [weak sheet] in sheet?.dismiss(animated: true) }
+            picker.onNext = { [weak sheet] people in
+                sheet?.dismiss(animated: true)
+                completion(people.map(\.id))
+            }
+            presenter.present(sheet, animated: true)
+        }
+        // Left: the row goes, and the viewer is back in the inbox.
+        screen.onLeft = { [weak screen, catalog] in
+            catalog.delete([id])
+            catalog.refresh()
+            screen?.navigationController?.popToRootViewController(animated: true)
+        }
+        return screen
+    }
+
+    /// What a group's thread needs (#2214); nil without groups.
+    private func groupThreadContext() -> GroupThreadContext? {
+        guard let groups else { return nil }
+        return GroupThreadContext(
+            service: groups,
+            makeInfo: { [self] id, onChange in makeGroupInfo(id, onChange: onChange) },
+            openProfile: { [router] id, name in
+                router?.route(to: .profile(id, stub: name.isEmpty ? nil : ProfileIdentityStub(handle: nil, displayName: name)))
+            },
+            createdAt: { [groupNotes] id in groupNotes.created[id] },
+            knownKind: { [directory] id in directory.summary(for: id)?.kind }
+        )
     }
 
     public func makeConversationViewController(for conversationID: ConversationID) -> UIViewController {
@@ -233,7 +344,8 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             avatars: connections as? any PeerAvatarProviding,
             // The thread's pin is the inbox's: a peek offers no pinning.
             pins: mode == .full ? catalog : nil,
-            mediaPicker: mode == .full ? mediaPicker : nil
+            mediaPicker: mode == .full ? mediaPicker : nil,
+            groupContext: groupThreadContext()
         )
         return threadScreens().makeConversationThreadViewController(
             driver: driver,
@@ -270,6 +382,14 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         return 20
     }
 
+}
+
+/// What this session did to groups that chat.v1 doesn't carry yet (#2214):
+/// the groups the viewer created, and when — their thread opens with "You
+/// created the group". In memory, for the builder's (the app's) life.
+@MainActor
+final class GroupSessionNotes {
+    var created: [ConversationID: Date] = [:]
 }
 
 /// Stands in when the app is composed without a social-graph client: the

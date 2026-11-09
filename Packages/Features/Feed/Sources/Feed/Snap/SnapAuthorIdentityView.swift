@@ -75,13 +75,22 @@ final class SnapAuthorIdentityView: UIView {
             }
         }
     }
+    /// Called when a pill standing for no person — a group (#2214) — is
+    /// tapped: its info screen. Set, it makes the pill take its tap.
+    var onGroupTapped: (() -> Void)? {
+        didSet { _ = opening }
+    }
     /// The tap and the hold on the pill: the shared contract (#2145).
     private lazy var opening: PersonOpening = {
         let opening = PersonOpening(on: self)
-        opening.hasPerson = { [weak self] in self?.authorID != nil }
+        opening.hasPerson = { [weak self] in self?.authorID != nil || self?.onGroupTapped != nil }
         opening.openCard = { [weak self] in
-            guard let self, let authorID else { return }
-            onAuthorTapped?(authorID)
+            guard let self else { return }
+            if let authorID {
+                onAuthorTapped?(authorID)
+            } else {
+                onGroupTapped?()
+            }
         }
         return opening
     }()
@@ -316,6 +325,8 @@ final class SnapAuthorIdentityView: UIView {
     #if DEBUG
     /// The pill's content frames, for tests.
     var debugContentFrame: CGRect { pill.frame }
+    /// The name drawn, for tests.
+    var debugName: String { pill.name ?? "" }
     #endif
 
     /// What the pill's second line says for a post's meta ("@handle · 3m"):

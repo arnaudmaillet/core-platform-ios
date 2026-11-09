@@ -84,6 +84,15 @@ public struct Conversation: Equatable, Sendable, Identifiable {
     /// The faces a nameless, photoless group stacks: up to three members'
     /// avatars (#2213).
     public let memberAvatarURLs: [URL]
+    /// Who wrote a GROUP's last message, when it is someone else (#2214):
+    /// the inbox row prefixes the preview with their first name ("Alice: see
+    /// you there"). Nil for a DM — whose sender is obvious — and for the
+    /// viewer's own message, which the row signs "You" from
+    /// `lastMessageIsMine`.
+    public let lastMessageSenderName: String?
+    /// Who invited the viewer, by name, while `identity` says invited
+    /// (#2214): the invitation row's "Bob invited you to …".
+    public let invitedByName: String?
     public let title: String
     public let lastMessage: String
     public let lastActivityAt: Date?
@@ -145,13 +154,17 @@ public struct Conversation: Equatable, Sendable, Identifiable {
         kind: ConversationKind = .direct,
         isOutgoingRequest: Bool = false,
         identity: ConversationIdentity? = nil,
-        memberAvatarURLs: [URL] = []
+        memberAvatarURLs: [URL] = [],
+        lastMessageSenderName: String? = nil,
+        invitedByName: String? = nil
     ) {
         self.id = id
         self.kind = kind
         self.isOutgoingRequest = isOutgoingRequest
         self.identity = identity
         self.memberAvatarURLs = memberAvatarURLs
+        self.lastMessageSenderName = lastMessageSenderName
+        self.invitedByName = invitedByName
         self.title = title
         self.lastMessage = lastMessage
         self.lastActivityAt = lastActivityAt
@@ -400,9 +413,9 @@ public actor ChatRepository: ChatProviding {
     /// Who is signed in, and as which profile — shared with every other
     /// repository (`ViewerSession`), so a switch or a sign-out reaches all of them.
     private let viewer: any ViewerProviding
-    private var nameCache: [ProfileID: String] = [:]
-    private var handleCache: [ProfileID: String] = [:]
-    private var avatarCache: [ProfileID: URL] = [:]
+    var nameCache: [ProfileID: String] = [:]
+    var handleCache: [ProfileID: String] = [:]
+    var avatarCache: [ProfileID: URL] = [:]
     /// Groups' and channels' own calls (#2213), on the shape backend #995
     /// describes; nil: none (DMs only).
     let proposals: ProposedChatClient?
@@ -512,7 +525,10 @@ public actor ChatRepository: ChatProviding {
                 ? (details[entry.conversationID]?.members ?? []).map { ProfileID($0.profileID) }
                 : [ProfileID(entry.peerID)]
         }
-        await hydrateNames(for: peers.filter { $0 != viewer })
+        // The inviter of a group the viewer is invited to names its row
+        // (#2214) — a member, usually listed already; asked here in case not.
+        let inviters = identities.values.compactMap(\.invitedBy)
+        await hydrateNames(for: (peers + inviters).filter { $0 != viewer })
         try Task.checkCancellation()
         let conversations = entries.map {
             conversation(
@@ -608,7 +624,11 @@ public actor ChatRepository: ChatProviding {
             identity: identity,
             memberAvatarURLs: kind == .group && identity?.photoURL == nil
                 ? Array(otherIDs.compactMap { avatarCache[$0] }.prefix(ConversationIdentity.stackedFaces))
-                : []
+                : [],
+            lastMessageSenderName: kind == .group
+                ? last.map { ProfileID($0.senderID) }.flatMap { $0 == viewer ? nil : nameCache[$0] }
+                : nil,
+            invitedByName: identity?.invitedBy.flatMap { nameCache[$0] }
         )
     }
 
@@ -897,7 +917,7 @@ public actor ChatRepository: ChatProviding {
 
     // MARK: - Hydration
 
-    private func hydrateNames(for ids: [ProfileID]) async {
+    func hydrateNames(for ids: [ProfileID]) async {
         let missing = Set(ids).filter { nameCache[$0] == nil && !$0.rawValue.isEmpty }
         guard !missing.isEmpty else { return }
         let client = profileClient

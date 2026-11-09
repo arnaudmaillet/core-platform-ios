@@ -8,15 +8,25 @@ extension Conversation {
     /// preview, new activity time, and necessarily read (you cannot have
     /// unread mail from yourself).
     func sending(_ message: ChatMessage) -> Conversation {
+        // ⚠️ EVERYTHING THE ROW IS, KEPT (#2214): only what the message
+        // changes is new. Rebuilt from the four fields it used to carry, a
+        // group came back from its thread a DM — no kind, no identity, no
+        // faces — and the row lost its photo and its name's members.
         Conversation(
             id: id,
             title: title,
             lastMessage: message.summary,
             lastActivityAt: message.createdAt,
             otherMemberIDs: otherMemberIDs,
+            directPeerHandle: directPeerHandle,
             lastMessageIsMine: true,
             lastMessageID: message.id,
-            isUnread: false
+            isUnread: false,
+            isMuted: isMuted,
+            kind: kind,
+            isOutgoingRequest: isOutgoingRequest,
+            identity: identity,
+            memberAvatarURLs: memberAvatarURLs
         )
     }
 }
@@ -80,6 +90,10 @@ final class InboxCatalog {
         var muted: Set<ConversationID> = []
         /// The folders with another page to load (#593).
         var hasMore: Set<InboxFolder> = []
+        /// Groups whose invitation the viewer accepted this session, ahead of
+        /// the next load saying they are a member (#2214): their rows read
+        /// as the group's, no longer as an invitation.
+        var joinedInvitations: Set<ConversationID> = []
     }
 
     /// Cancels the registration when it is released — surfaces hold one for
@@ -151,6 +165,10 @@ final class InboxCatalog {
     private var deleted: Set<ConversationID> = []
     private var accepted: Set<ConversationID> = []
     private var declined: Set<ConversationID> = []
+    /// See `Snapshot.joinedInvitations`.
+    private var joinedInvitations: Set<ConversationID> = []
+    /// Invitations answered and not yet written, so a second tap does nothing.
+    private var invitationsInFlight: Set<ConversationID> = []
 
     init(repository: any ChatProviding, directory: ConversationDirectory? = nil, deviceCache: ChatLocalCache? = nil) {
         self.repository = repository
@@ -326,6 +344,8 @@ final class InboxCatalog {
         deleted = []
         accepted = []
         declined = []
+        joinedInvitations = []
+        invitationsInFlight = []
         snapshot = Snapshot()
         emit()
     }
@@ -567,6 +587,36 @@ final class InboxCatalog {
         answer(id, accept: false)
     }
 
+    /// Answers a group's invitation (#2214, `answerInvitation`): shown at
+    /// once — accepted, the row becomes the group's; declined, it leaves the
+    /// inbox — and put back if the server refuses. `completion` says whether
+    /// it was written. A repository with no groups writes nothing.
+    func answerInvitation(
+        _ id: ConversationID, accept: Bool, completion: (@MainActor (_ written: Bool) -> Void)? = nil
+    ) {
+        guard let groups = repository as? any ConversationManaging, !invitationsInFlight.contains(id) else {
+            completion?(false)
+            return
+        }
+        invitationsInFlight.insert(id)
+        if accept { joinedInvitations.insert(id) } else { declined.insert(id) }
+        emit()
+        Task { [weak self] in
+            var written = true
+            do { try await groups.answerInvitation(to: id, accept: accept) } catch { written = false }
+            guard let self else { return }
+            self.invitationsInFlight.remove(id)
+            if !written {
+                if accept { self.joinedInvitations.remove(id) } else { self.declined.remove(id) }
+                self.emit()
+            } else if accept {
+                // The group's history and identity as a member now.
+                self.refresh()
+            }
+            completion?(written)
+        }
+    }
+
     /// The answer, written (#2212). Shown at once; the next load agrees.
     private func answer(_ id: ConversationID, accept: Bool) {
         let repository = repository
@@ -657,6 +707,7 @@ final class InboxCatalog {
         snapshot.pinned = pinned
         snapshot.muted = muted
         snapshot.hasMore = Set(nextTokens.keys)
+        snapshot.joinedInvitations = joinedInvitations
         for observer in observers.values { observer(snapshot) }
     }
 }
