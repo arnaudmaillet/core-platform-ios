@@ -1,3 +1,4 @@
+import CoreModels
 import DesignSystem
 import Foundation
 
@@ -29,11 +30,14 @@ public struct NotificationDisplayModel: Equatable, Sendable, Identifiable {
     public let faces: [Face]
     /// The subject post's still, drawn at the trailing edge.
     public let thumbnailURL: URL?
-    /// A text post's opening, drawn under the sentence.
+    /// A text post's opening, drawn under the sentence — for a voice post
+    /// (#2208), "🎙 Voice post · 0:32" or its words marked.
     public let excerpt: String?
     public let isRead: Bool
 
-    public init(item: NotificationItem, now: Date = Date()) {
+    /// - Parameter showsVoice: `-voice-posts` (#2208): off, a voice post's
+    ///   row reads as the text post it is.
+    public init(item: NotificationItem, now: Date = Date(), showsVoice: Bool = DebugFlags.isOn("-voice-posts")) {
         id = item.id
         action = item.action
         actorsText = Self.actors(for: item)
@@ -47,7 +51,7 @@ public struct NotificationDisplayModel: Equatable, Sendable, Identifiable {
         }
         self.faces = faces
         thumbnailURL = item.subjectPreview?.thumbnailURL
-        excerpt = item.subjectPreview?.thumbnailURL == nil ? item.subjectPreview?.excerpt : nil
+        excerpt = Self.excerpt(of: item.subjectPreview, showsVoice: showsVoice)
         isRead = item.isRead
     }
 
@@ -56,6 +60,14 @@ public struct NotificationDisplayModel: Equatable, Sendable, Identifiable {
     public var accessibilityText: String {
         let when = timeText == "now" ? "just now" : "\(timeText) ago"
         return [text, excerpt, when].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    /// The line under the sentence: a text post's opening, or a voice post's
+    /// text (#2208) — none under a picture. Pure.
+    static func excerpt(of preview: NotificationSubjectPreview?, showsVoice: Bool) -> String? {
+        guard let preview, preview.thumbnailURL == nil else { return nil }
+        guard showsVoice, let voice = preview.voice else { return preview.excerpt }
+        return voice.previewText(caption: preview.excerpt)
     }
 
     private static func actors(for item: NotificationItem) -> String {

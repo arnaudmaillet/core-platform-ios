@@ -17,13 +17,28 @@ public struct ShareCard: Equatable, @unchecked Sendable {
     /// Wins over `avatarURL`.
     public let avatarImage: UIImage?
     public let url: URL
+    /// What the shared thing says, when it is a post that has no picture to
+    /// say it (#2208): a voice post's "🎙 Voice post · 0:32", or its words
+    /// marked. The system sheet's title and Mail's subject carry it.
+    public let detail: String?
 
-    public init(displayName: String, handle: String, avatarURL: URL?, avatarImage: UIImage? = nil, url: URL) {
+    public init(
+        displayName: String, handle: String, avatarURL: URL?, avatarImage: UIImage? = nil, url: URL,
+        detail: String? = nil
+    ) {
         self.displayName = displayName
         self.handle = handle
         self.avatarURL = avatarURL
         self.avatarImage = avatarImage
         self.url = url
+        self.detail = detail
+    }
+
+    /// The line the system sheet's header and Mail's subject read: the
+    /// name and the line under it — or, for a post that says something
+    /// (`detail`), the name and that.
+    public var shareTitle: String {
+        "\(displayName) · \(detail ?? handle)"
     }
 }
 
