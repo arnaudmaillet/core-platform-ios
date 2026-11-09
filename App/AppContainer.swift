@@ -79,7 +79,11 @@ final class AppContainer {
             // A place page asked by country code (#643): the map's borders.
             countryOf: { latitude, longitude in
                 CountryAtlas.shared.country(owning: CLLocationCoordinate2D(latitude: latitude, longitude: longitude))?.code
-            }
+            },
+            // Groups and channels (#2213): the mock seeds them only under
+            // their flags.
+            seedsGroups: DebugFlags.isOn("-group-chats"),
+            seedsChannels: DebugFlags.isOn("-channels")
         )
         backend.bff.faults = mockNetworkFaults
         #if DEBUG
