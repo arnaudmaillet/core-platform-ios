@@ -13,6 +13,26 @@ public typealias ChatMediaPickerFactory = @MainActor (
     _ completion: @escaping @MainActor ([ChatMediaUpload]) -> Void
 ) -> UIViewController
 
+/// What a GROUP's thread needs beyond a DM's (#2214), from the feature
+/// builder; nil with `-group-chats` off, and every thread is drawn as it was.
+@MainActor
+struct GroupThreadContext {
+    /// The group's identity, members and their profiles.
+    let service: any GroupChatServicing
+    /// The info screen for a group; the callback runs when it changed the
+    /// group (renamed, a member removed), so the thread reads it again.
+    let makeInfo: @MainActor (_ id: ConversationID, _ onChange: @escaping @MainActor () -> Void) -> UIViewController
+    /// A member's profile, pushed: their id and the name the row showed.
+    let openProfile: @MainActor (_ id: ProfileID, _ name: String) -> Void
+    /// When the viewer created this group in this session: the thread opens
+    /// with "You created the group" (client-side until chat.v1 carries
+    /// system events).
+    let createdAt: @MainActor (_ id: ConversationID) -> Date?
+    /// What the inbox already knows the conversation is; nil when it doesn't
+    /// (a cold entry). A known DM never asks for a group's details.
+    let knownKind: @MainActor (_ id: ConversationID) -> ConversationKind?
+}
+
 /// Drives Feed's conversation screen from the thread's view model.
 ///
 /// A pass-through, deliberately: `ConversationViewModel` keeps every rule it
@@ -29,6 +49,7 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     var onPinnedChange: ((Bool?) -> Void)?
     var onMutedChange: ((Bool?) -> Void)?
     var onLoadingOlderChange: ((Bool) -> Void)?
+    var onGroupChange: ((ConversationThreadGroup?) -> Void)?
 
     /// What the viewer's own rows are signed with.
     ///
@@ -64,13 +85,21 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     /// The last transcript, kept so a late peer name re-signs the quotes.
     private var lastMessages: [MessageDisplayModel]?
 
+    /// A group's needs (#2214); nil: every conversation is drawn as a DM.
+    private let groupContext: GroupThreadContext?
+    /// The group on show, once its details answered (#2214).
+    private(set) var group: ConversationThreadGroup?
+    private var groupLoad: Task<Void, Never>?
+
     init(
         viewModel: ConversationViewModel,
         viewer: any ViewerIdentityProviding,
         avatars: (any PeerAvatarProviding)?,
         pins: InboxCatalog? = nil,
-        mediaPicker: ChatMediaPickerFactory? = nil
+        mediaPicker: ChatMediaPickerFactory? = nil,
+        groupContext: GroupThreadContext? = nil
     ) {
+        self.groupContext = groupContext
         self.viewModel = viewModel
         self.mediaPicker = mediaPicker
         self.viewer = viewer
@@ -83,8 +112,9 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         viewModel.onTitleChange = { [weak self] name in self?.adoptPeer(name: name) }
         viewModel.onPeerChange = { [weak self] id in self?.adoptPeer(id: id) }
         viewModel.onReplyStateChange = { [weak self] draft in
-            self?.onReplyStateChange?(draft.map {
-                ConversationThreadReplyDraft(messageID: $0.messageID, author: $0.author, snippet: $0.snippet)
+            guard let self else { return }
+            self.onReplyStateChange?(draft.map {
+                ConversationThreadReplyDraft(messageID: $0.messageID, author: self.replyAuthor($0), snippet: $0.snippet)
             })
         }
         viewModel.onActionNotice = { [weak self] title, message in self?.onActionNotice?(title, message) }
@@ -109,6 +139,108 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         forwardMuted()
         resolveViewer()
         viewModel.viewDidLoad()
+        loadGroup()
+    }
+
+    // MARK: - Groups (#2214)
+
+    /// Reads the group — identity, members, their profiles — and tells the
+    /// screen: its header becomes the group's, and each row is signed by its
+    /// sender. A conversation the inbox knows as a DM asks nothing; one it
+    /// doesn't know is asked, and a DM answers with no details.
+    func loadGroup() {
+        guard let context = groupContext, let id = viewModel.currentConversationID else { return }
+        let known = context.knownKind(id)
+        guard known == nil || known == .group else { return }
+        groupLoad?.cancel()
+        let service = context.service
+        groupLoad = Task { [weak self] in
+            guard let identity = try? await service.details(of: id) else { return }
+            let members = (try? await service.members(of: id)) ?? []
+            let viewerID = try? await service.viewerProfileID()
+            let profiles = await service.profiles(members.map(\.profileID))
+            guard !Task.isCancelled, let self else { return }
+            self.adoptGroup(Self.group(identity: identity, members: members, profiles: profiles, viewer: viewerID))
+        }
+    }
+
+    /// The group as the screen draws it (#2214): its name — or its other
+    /// members', for a nameless one — its photo, "N members", and every
+    /// member the profiles named.
+    static func group(
+        identity: ConversationIdentity, members: [ConversationMember], profiles: [ProfileID: ChatProfile], viewer: ProfileID?
+    ) -> ConversationThreadGroup {
+        var people: [ProfileID: ConversationThreadPerson] = [:]
+        for member in members {
+            let profile = profiles[member.profileID]
+            people[member.profileID] = ConversationThreadPerson(
+                id: member.profileID, name: profile?.name ?? "", avatarURL: profile?.avatarURL, handle: profile?.handle
+            )
+        }
+        let count = max(identity.memberCount, members.count)
+        let others = members.filter { $0.profileID != viewer }.compactMap { profiles[$0.profileID]?.name }
+        let name = identity.name.isEmpty
+            ? ConversationIdentity.memberName(others, total: max(0, count - 1))
+            : identity.name
+        return ConversationThreadGroup(
+            name: name, photoURL: identity.photoURL, subtitle: memberCountText(count), members: people
+        )
+    }
+
+    /// Who a reply answers: in a group, the member who wrote the message
+    /// (#2214) — the view model knows only the group's name.
+    private func replyAuthor(_ draft: ConversationViewModel.ReplyDraft) -> String {
+        guard let group, let sender = lastMessages?.first(where: { $0.id == draft.messageID }),
+              !sender.isMine, let name = group.members[sender.senderID]?.name, !name.isEmpty else { return draft.author }
+        return name
+    }
+
+    /// "1 member", "12 members" — the header's subtitle (#2214).
+    static func memberCountText(_ count: Int) -> String {
+        count == 1 ? "1 member" : "\(count) members"
+    }
+
+    private func adoptGroup(_ group: ConversationThreadGroup) {
+        self.group = group
+        onGroupChange?(group)
+        // Quotes of members' messages were signed with the group's name.
+        if let lastMessages { forward(.content(lastMessages)) }
+    }
+
+    func didTapGroupInfo(from presenter: UIViewController) {
+        guard let context = groupContext, group != nil, let id = viewModel.currentConversationID else { return }
+        let info = context.makeInfo(id) { [weak self] in self?.loadGroup() }
+        presenter.navigationController?.pushViewController(info, animated: true)
+    }
+
+    func didTapMember(_ profileID: ProfileID) {
+        guard let context = groupContext, let member = group?.members[profileID] else { return didTapIdentity() }
+        context.openProfile(profileID, member.name)
+    }
+
+    /// The system lines a group's thread opens with (#2214): "You created
+    /// the group" for one the viewer created this session.
+    private func systemLines() -> [ConversationThreadMessage] {
+        guard let context = groupContext, let id = viewModel.currentConversationID,
+              let created = context.createdAt(id) else { return [] }
+        return [ConversationThreadMessage(
+            id: Self.createdLineID, senderID: ProfileID(""), body: "You created the group", sentAt: created,
+            isMine: false, quote: nil, isSystem: true
+        )]
+    }
+
+    /// The id of the "You created the group" line.
+    static let createdLineID = "system.created"
+
+    /// `messages` with `lines` in place by time, oldest first — a line at
+    /// the same time as a message goes before it.
+    static func inserting(_ lines: [ConversationThreadMessage], into messages: [ConversationThreadMessage]) -> [ConversationThreadMessage] {
+        var merged = messages
+        for line in lines {
+            let index = merged.firstIndex { $0.sentAt >= line.sentAt } ?? merged.endIndex
+            merged.insert(line, at: index)
+        }
+        return merged
     }
 
     func togglePinned() {
@@ -197,19 +329,28 @@ final class ConversationThreadDriver: ConversationThreadDriving {
             onPhaseChange?(.failed(message))
         case .content(let models):
             lastMessages = models
-            onPhaseChange?(.content(Self.messages(from: models, peerName: peer.name)))
+            let names = group?.members.compactMapValues { $0.name.isEmpty ? nil : $0.name } ?? [:]
+            let messages = Self.messages(from: models, peerName: peer.name, names: names)
+            onPhaseChange?(.content(Self.inserting(systemLines(), into: messages)))
         }
     }
 
     /// Oldest first, with each reply's quote resolved against the whole set —
     /// a reply can answer a message from any earlier day.
-    static func messages(from models: [MessageDisplayModel], peerName: String) -> [ConversationThreadMessage] {
+    ///
+    /// `names`: a group's members (#2214) — a quote of one of theirs is
+    /// signed with their name, not the group's.
+    static func messages(
+        from models: [MessageDisplayModel], peerName: String, names: [ProfileID: String] = [:]
+    ) -> [ConversationThreadMessage] {
         let byID = Dictionary(models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return models.map { model in
             let quote = model.replyToID.flatMap { byID[$0] }.map { original in
                 ConversationThreadMessage.Quote(
                     messageID: original.id,
-                    author: ChatTranscript.quoteAuthor(isMine: original.isMine, peerName: peerName),
+                    author: ChatTranscript.quoteAuthor(
+                        isMine: original.isMine, peerName: names[original.senderID] ?? peerName
+                    ),
                     snippet: ChatTranscript.snippet(original.summary)
                 )
             }
@@ -249,9 +390,7 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         peer = ConversationThreadPerson(id: peer.id, name: name, avatarURL: peer.avatarURL, handle: peer.handle)
         onPeerChange?(peer)
         // Quotes of the peer's messages were signed with a placeholder until now.
-        if let lastMessages {
-            onPhaseChange?(.content(Self.messages(from: lastMessages, peerName: name)))
-        }
+        if let lastMessages { forward(.content(lastMessages)) }
     }
 
     private func adoptPeer(id: ProfileID?) {

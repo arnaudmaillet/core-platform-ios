@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNetworking
 import CoreStorage
+import DesignSystem
 import Foundation
 
 /// The inbox's global search: one query answered across every category at once,
@@ -34,6 +35,9 @@ final class InboxSearchViewModel {
         case people
         /// The device-local search history — queries, not threads.
         case recents
+        /// "New group" (#2214, `-group-chats`): starting a conversation with
+        /// several people, from the screen that starts one with someone.
+        case create
     }
 
     /// A result row, as the diffable data source's identifier. The two cases
@@ -46,6 +50,8 @@ final class InboxSearchViewModel {
         /// A query the viewer has run before, from the device-local history the
         /// global search screen writes to.
         case recentQuery(String)
+        /// "New group" (#2214).
+        case newGroup
     }
 
     nonisolated struct Section: Equatable, Sendable, Identifiable {
@@ -75,6 +81,10 @@ final class InboxSearchViewModel {
     /// seam the compose picker uses, so no result opens slower than another and
     /// this view model never navigates.
     var onOpenConversation: ((ConversationTarget) -> Void)?
+    /// "New group" was picked (#2214): the group's member picker.
+    var onNewGroup: (() -> Void)?
+    /// Whether the empty field offers "New group" (#2214, `-group-chats`).
+    let showsNewGroup: Bool
 
     private enum SearchState: Equatable {
         case idle
@@ -140,8 +150,10 @@ final class InboxSearchViewModel {
         recents: RecentSearchStore? = nil,
         debounce: Duration = .milliseconds(300),
         pageSize: Int32 = 25,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        showsNewGroup: Bool = DebugFlags.isOn("-group-chats")
     ) {
+        self.showsNewGroup = showsNewGroup
         self.catalog = catalog
         self.viewer = viewer
         self.people = people
@@ -320,6 +332,8 @@ final class InboxSearchViewModel {
         case .recentQuery(let text):
             // A history row is not a destination — it is the query again.
             replayRecentQuery(text)
+        case .newGroup:
+            onNewGroup?()
         }
     }
 
@@ -422,7 +436,8 @@ final class InboxSearchViewModel {
                     now: stamp,
                     isPinned: snapshot.pinned.contains(conversation.id),
                     isMuted: snapshot.muted.contains(conversation.id),
-                    isUnread: snapshot.unreadIDs.contains(conversation.id)
+                    isUnread: snapshot.unreadIDs.contains(conversation.id),
+                    joinedInvitation: snapshot.joinedInvitations.contains(conversation.id)
                 )
                 if let peer = conversation.directPeerID { matchedPeerIDs.insert(peer) }
             }
@@ -455,6 +470,11 @@ final class InboxSearchViewModel {
         matchedPeerIDs = []
         let stamp = now()
         var sections: [Section] = []
+        // "New group" leads the empty field (#2214): the field is where a
+        // conversation is started, with one person or several.
+        if showsNewGroup {
+            sections.append(Section(kind: .create, title: "Groups", rows: [.newGroup]))
+        }
         // ⚠️ Recent QUERIES first, from the shared device-local store. These are
         // things the viewer typed, which is what "recent searches" means
         // everywhere else in the app; the threads below are a suggestion, not a
@@ -486,7 +506,8 @@ final class InboxSearchViewModel {
                     now: stamp,
                     isPinned: snapshot.pinned.contains(conversation.id),
                     isMuted: snapshot.muted.contains(conversation.id),
-                    isUnread: snapshot.unreadIDs.contains(conversation.id)
+                    isUnread: snapshot.unreadIDs.contains(conversation.id),
+                    joinedInvitation: snapshot.joinedInvitations.contains(conversation.id)
                 )
                 if let peer = conversation.directPeerID { matchedPeerIDs.insert(peer) }
             }

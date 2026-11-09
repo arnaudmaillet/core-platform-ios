@@ -37,6 +37,8 @@ final class ConversationThreadViewController: UIViewController {
         case skeletonDay
         case empty
         case message(String)
+        /// A line about the conversation (#2214): "You created the group".
+        case system(String)
     }
 
     /// Read by the layout's section provider, which must not reach back
@@ -270,6 +272,9 @@ final class ConversationThreadViewController: UIViewController {
     /// while the swap waited for its rise: they land plainly (#725).
     private var deliveredEarly: Set<String> = []
     private var peer = ConversationThreadPerson(id: nil, name: "", avatarURL: nil)
+    /// The conversation is a group (#2214): the header is its identity, and
+    /// each row is signed by its sender among `members`. Nil for a DM.
+    private var group: ConversationThreadGroup?
 
     // MARK: The relation (#752)
 
@@ -789,6 +794,20 @@ final class ConversationThreadViewController: UIViewController {
                 bone.heightAnchor.constraint(equalToConstant: Self.dayBoneSize.height),
             ])
         }
+        // A system line (#2214): centred, quiet, no author.
+        let systemCell = UICollectionView.CellRegistration<UICollectionViewListCell, String> { [weak self] cell, _, id in
+            var content = UIListContentConfiguration.cell()
+            content.text = self?.messagesByID[id]?.body
+            content.textProperties.font = .appFont(forTextStyle: .footnote)
+            content.textProperties.color = .secondaryLabel
+            content.textProperties.alignment = .center
+            content.directionalLayoutMargins = NSDirectionalEdgeInsets(
+                top: Spacing.xs, leading: Spacing.lg, bottom: Spacing.md, trailing: Spacing.lg
+            )
+            cell.contentConfiguration = content
+            cell.backgroundConfiguration = .clear()
+            cell.isUserInteractionEnabled = false
+        }
         let emptyCell = UICollectionView.CellRegistration<CommentsEmptyPageCell, Item> { [weak self] cell, _, _ in
             let copy = ConversationThreadViewController.emptyPageCopy
             cell.configure(
@@ -818,6 +837,8 @@ final class ConversationThreadViewController: UIViewController {
                 collectionView.dequeueConfiguredReusableCell(using: skeletonDayCell, for: indexPath, item: 0)
             case .empty:
                 collectionView.dequeueConfiguredReusableCell(using: emptyCell, for: indexPath, item: item)
+            case .system(let id):
+                collectionView.dequeueConfiguredReusableCell(using: systemCell, for: indexPath, item: id)
             }
         }
         dataSource.supplementaryViewProvider = { collectionView, _, indexPath in
@@ -1189,6 +1210,7 @@ final class ConversationThreadViewController: UIViewController {
     private func bindDriver() {
         driver.onPhaseChange = { [weak self] phase in self?.render(phase) }
         driver.onPeerChange = { [weak self] person in self?.adoptPeer(person) }
+        driver.onGroupChange = { [weak self] group in self?.adoptGroup(group) }
         driver.onViewerChange = { [weak self] person in self?.adoptViewer(person) }
         driver.onReplyStateChange = { [weak self] draft in self?.renderReply(draft) }
         driver.onActionNotice = { [weak self] title, message in self?.presentNotice(title, message) }
@@ -1378,7 +1400,7 @@ final class ConversationThreadViewController: UIViewController {
                     snapshot.appendSections([.day(day)])
                     currentDay = day
                 }
-                snapshot.appendItems([.message(message.id)], toSection: .day(day))
+                snapshot.appendItems([message.isSystem ? .system(message.id) : .message(message.id)], toSection: .day(day))
             }
             // Rows already on screen re-render in place when what they show
             // changed: a name, a face or a quote under a message whose
@@ -1460,9 +1482,33 @@ final class ConversationThreadViewController: UIViewController {
     private func rowSignature(for message: ConversationThreadMessage) -> RowSignature {
         RowSignature(
             message: message,
-            author: message.isMine ? viewer : peer,
-            isGroupMember: !message.isMine && peer.id == nil && !peer.name.isEmpty
+            author: author(of: message),
+            isGroupMember: group == nil && !message.isMine && peer.id == nil && !peer.name.isEmpty
         )
+    }
+
+    /// Who a row is signed by: the viewer, the peer — or, in a group, its
+    /// own sender (#2214); a sender the group doesn't list (someone who
+    /// left) has no name yet, and is signed "Member".
+    private func author(of message: ConversationThreadMessage) -> ConversationThreadPerson {
+        if message.isMine { return viewer }
+        guard let group else { return peer }
+        return group.members[message.senderID] ?? ConversationThreadPerson(id: message.senderID, name: "", avatarURL: nil)
+    }
+
+    /// What a row's sender is called: "You", their name — "Member" for a
+    /// group sender not known (#2214), or any sender of a group drawn with
+    /// no member list.
+    static func authorName(
+        of message: ConversationThreadMessage, author: ConversationThreadPerson, isGroup: Bool, peer: ConversationThreadPerson
+    ) -> String {
+        if message.isMine { return author.name.isEmpty ? "You" : author.name }
+        if isGroup { return author.name.isEmpty ? "Member" : author.name }
+        // A group drawn the old way: the header's name is every member's,
+        // joined, and no per-member name exists — so a neutral label rather
+        // than attributing each message to the whole group.
+        if peer.id == nil, !peer.name.isEmpty { return "Member" }
+        return author.name.isEmpty ? "Message" : author.name
     }
 
     #if DEBUG
@@ -1481,18 +1527,8 @@ final class ConversationThreadViewController: UIViewController {
         #if DEBUG
         debugConfiguredIDs.append(messageID)
         #endif
-        let author = message.isMine ? viewer : peer
-        let name: String
-        if message.isMine {
-            name = author.name.isEmpty ? "You" : author.name
-        } else if peer.id == nil, !peer.name.isEmpty {
-            // A GROUP: the header's name is every member's, joined, and chat
-            // carries no per-member name to sign a row with — so a neutral
-            // label rather than attributing each message to the whole group.
-            name = "Member"
-        } else {
-            name = author.name.isEmpty ? "Message" : author.name
-        }
+        let writer = author(of: message)
+        let name = Self.authorName(of: message, author: writer, isGroup: group != nil, peer: peer)
         cell.row.configure(
             with: CommentDisplayModel(
                 id: message.id,
@@ -1502,12 +1538,16 @@ final class ConversationThreadViewController: UIViewController {
                 // yet: the spinner or the mark stands in its place (#725).
                 metaText: isAwaitingDelivery(message) ? "" : Self.timeFormatter.string(from: message.sentAt),
                 body: body,
-                avatarURL: name == "Member" ? nil : author.avatarURL
+                avatarURL: name == "Member" ? nil : writer.avatarURL
             ),
             imagePipeline: imagePipeline
         )
         cell.row.variant = .message
-        cell.row.onAvatarTap = message.isMine ? nil : { [weak self] in self?.driver.didTapIdentity() }
+        // A group row's face opens its sender (#2214); a DM's, the peer.
+        let sender = message.senderID
+        cell.row.onAvatarTap = message.isMine ? nil : group != nil
+            ? { [weak self] in self?.driver.didTapMember(sender) }
+            : { [weak self] in self?.driver.didTapIdentity() }
         // A row tap answers it — the post's grammar. Nothing to answer in a peek.
         // While the keyboard is up, the tap retires it instead (see
         // `retireKeyboardOr`).
@@ -1617,6 +1657,12 @@ final class ConversationThreadViewController: UIViewController {
             handle: person.handle ?? known?.handle.flatMap { $0.isEmpty ? nil : $0 }
         )
         peer = person
+        // A group's header is the group's (#2214): the peer's name — its
+        // members', joined — signs nothing and draws nothing.
+        guard group == nil else {
+            if hasRenderedContent { applySnapshot(animated: false) }
+            return
+        }
         // Named for VoiceOver, not drawn: no title in the bar.
         view.accessibilityLabel = person.name.isEmpty ? nil : "Conversation with \(person.name)"
         // The @handle under the name once known (#752), as a vertical post's
@@ -1634,6 +1680,33 @@ final class ConversationThreadViewController: UIViewController {
         if !settled { peerPill.settleLayout() }
         if person.id != relationAskedFor { startFromKnownRelation(of: person.id) }
         resolvePeerRelation()
+        fitTrailingRun()
+        if hasRenderedContent { applySnapshot(animated: false) }
+    }
+
+    /// The conversation is a group (#2214): the pill shows its photo, its
+    /// name and its subtitle, and a tap opens its info screen; each row is
+    /// signed by its sender. Nil: a DM after all — the peer's pill again.
+    private func adoptGroup(_ newGroup: ConversationThreadGroup?) {
+        let wasGroup = group != nil
+        group = newGroup
+        guard let newGroup else {
+            peerPill.onGroupTapped = nil
+            if wasGroup { adoptPeer(peer) }
+            return
+        }
+        view.accessibilityLabel = "Group conversation, \(newGroup.name)"
+        let settled = view.window != nil && transitionCoordinator == nil
+        peerPill.setFollowBadge(.none)
+        peerPill.setPerson(
+            id: nil, name: newGroup.name, meta: newGroup.subtitle, avatarURL: newGroup.photoURL,
+            pipeline: imagePipeline, animated: settled
+        )
+        if !settled { peerPill.settleLayout() }
+        peerPill.onGroupTapped = mode == .full ? { [weak self] in
+            guard let self else { return }
+            self.driver.didTapGroupInfo(from: self)
+        } : nil
         fitTrailingRun()
         if hasRenderedContent { applySnapshot(animated: false) }
     }
@@ -2306,6 +2379,20 @@ extension ConversationThreadViewController {
 
     /// The pill's relation badge. Tests.
     var debugPeerFollowBadge: SnapAuthorIdentityView.FollowBadge { peerPill.followBadge }
+    #if DEBUG
+    /// The name a message's row is signed with (#2214). Tests.
+    func debugAuthorName(of messageID: String) -> String? {
+        messagesByID[messageID].map { Self.authorName(of: $0, author: author(of: $0), isGroup: group != nil, peer: peer) }
+    }
+    /// Whether a message is drawn as a system line (#2214). Tests.
+    func debugIsSystemLine(_ messageID: String) -> Bool {
+        dataSource.indexPath(for: .system(messageID)) != nil
+    }
+    /// What the header pill shows (#2214). Tests.
+    var debugPillName: String { peerPill.debugName }
+    /// Taps the header pill (#2214). Tests.
+    func debugTapPill() { peerPill.debugTap() }
+    #endif
 
     #if DEBUG
     /// The long-press menu's titles for a message, flattened. Tests.
@@ -2392,7 +2479,8 @@ extension ConversationThreadViewController {
 
     private func configureVoice(_ view: ThreadVoiceView, for message: ConversationThreadMessage) {
         let state = voiceState(for: message)
-        view.configure(state, senderName: message.isMine ? nil : (peer.name.isEmpty ? nil : peer.name))
+        let sender = message.isMine ? "" : author(of: message).name
+        view.configure(state, senderName: sender.isEmpty ? nil : sender)
         guard state != nil else { return }
         let id = message.id
         view.onPlayTap = { [weak self] in self?.toggleVoice(id) }

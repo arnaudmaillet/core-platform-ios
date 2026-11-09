@@ -113,10 +113,15 @@ public struct ConversationThreadMessage: Equatable, Sendable, Identifiable {
     /// A MEDIA message's photo or video; `body` is then its caption.
     public let media: ConversationThreadMedia?
     public let delivery: ConversationThreadDelivery
+    /// A line about the conversation rather than a message in it (#2214):
+    /// "You created the group". Drawn centred and quiet, with no author, no
+    /// menu and no reply; `body` is its words.
+    public let isSystem: Bool
 
     public init(
         id: String, senderID: ProfileID, body: String, sentAt: Date, isMine: Bool, quote: Quote?,
-        media: ConversationThreadMedia? = nil, delivery: ConversationThreadDelivery = .sent
+        media: ConversationThreadMedia? = nil, delivery: ConversationThreadDelivery = .sent,
+        isSystem: Bool = false
     ) {
         self.id = id
         self.senderID = senderID
@@ -126,6 +131,7 @@ public struct ConversationThreadMessage: Equatable, Sendable, Identifiable {
         self.quote = quote
         self.media = media
         self.delivery = delivery
+        self.isSystem = isSystem
     }
 }
 
@@ -150,6 +156,30 @@ public struct ConversationThreadPerson: Equatable, Sendable {
         self.name = name
         self.avatarURL = avatarURL
         self.handle = handle
+    }
+}
+
+/// A group conversation, as the screen draws it (#2214): its identity for
+/// the header, and its members, to sign each row with its sender.
+///
+/// A DM has none — its header and its rows are the peer
+/// (`onPeerChange`). A group has no single peer: without this, every row of
+/// a group was signed "Member".
+public struct ConversationThreadGroup: Equatable, Sendable {
+    /// Its name, or its members' for a nameless group.
+    public let name: String
+    public let photoURL: URL?
+    /// Under the name in the header: "12 members".
+    public let subtitle: String
+    /// The members the screen knows, by id — a row whose sender isn't here
+    /// (someone who left) is signed "Member".
+    public let members: [ProfileID: ConversationThreadPerson]
+
+    public init(name: String, photoURL: URL?, subtitle: String, members: [ProfileID: ConversationThreadPerson]) {
+        self.name = name
+        self.photoURL = photoURL
+        self.subtitle = subtitle
+        self.members = members
     }
 }
 
@@ -255,6 +285,15 @@ public protocol ConversationThreadDriving: AnyObject {
     /// messages, whether any had media — so its cold skeleton is that shape.
     /// Nil keeps no memory.
     var presenceKey: String? { get }
+
+    /// The conversation is a group (#2214): its header and its members, or
+    /// nil for a DM. Fired again as its members resolve.
+    var onGroupChange: ((ConversationThreadGroup?) -> Void)? { get set }
+    /// The group's header was tapped (#2214): its info screen, pushed from
+    /// `presenter`.
+    func didTapGroupInfo(from presenter: UIViewController)
+    /// A group row's face was tapped (#2214): that member's profile.
+    func didTapMember(_ profileID: ProfileID)
 }
 
 public extension ConversationThreadDriving {
@@ -289,6 +328,15 @@ public extension ConversationThreadDriving {
     func didTapIdentityPill() { didTapIdentity() }
     /// Drivers with no conversation to remember.
     var presenceKey: String? { nil }
+
+    /// Drivers with no groups (#2214): every conversation is a DM.
+    var onGroupChange: ((ConversationThreadGroup?) -> Void)? {
+        get { nil }
+        set {}
+    }
+    func didTapGroupInfo(from presenter: UIViewController) {}
+    /// Drivers with no groups: the one peer's profile.
+    func didTapMember(_ profileID: ProfileID) { didTapIdentity() }
 }
 
 @MainActor

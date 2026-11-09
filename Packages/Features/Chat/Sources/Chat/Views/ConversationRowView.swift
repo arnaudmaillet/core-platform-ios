@@ -21,6 +21,10 @@ final class ConversationRowView: UIView {
     /// The face, wearing the relation mark (#2049): the unread count left it
     /// for the trailing column (`unreadPill`).
     private let avatarView = RelationMarkedAvatarView()
+    /// A photoless group's members, stacked over the face's place (#2214).
+    /// A sibling laid over the face rather than inside it: the face draws
+    /// nothing but its avatar and its badge (`drawsRing`).
+    private let groupFaces = GroupFacesView()
     private var avatarTask: Task<Void, Never>?
     /// The peer this row is currently showing. A reused row can outlive its own
     /// fetch, so the late result is checked against this before it draws —
@@ -55,6 +59,7 @@ final class ConversationRowView: UIView {
         avatarTask = nil
         avatarPeerID = nil
         avatarView.setPicture(nil, pipeline: nil)
+        groupFaces.setFaces([], pipeline: nil)
         // A reused row starts unknown for its next person, never wearing
         // the previous one's mark (#2098).
         avatarView.setMark(.loading, animated: false)
@@ -86,10 +91,19 @@ final class ConversationRowView: UIView {
         // A group keeps its initials, with no mark.
         avatarView.setMark(model.peerID == nil ? .none : mark, animated: false)
         loadAvatar(for: model, imagePipeline: imagePipeline, avatars: avatars)
+        // A photoless group wears its members' faces (#2214); the face's
+        // place stays laid out under them, so nothing moves.
+        let stacks = !model.memberFaceURLs.isEmpty
+        groupFaces.setFaces(model.memberFaceURLs, pipeline: imagePipeline)
+        groupFaces.isHidden = !stacks
+        avatarView.alpha = stacks ? 0 : 1
         titleLabel.text = model.title
-        let preview = model.preview.isEmpty ? "No messages yet" : model.preview
-        if let voice = Self.voicePreview(preview) {
-            previewLabel.attributedText = voice
+        let preview = model.preview.isEmpty ? "No messages yet" : model.previewLine
+        if let voice = Self.voicePreview(model.preview) {
+            // A group's voice message keeps its sender (#2214).
+            let line = NSMutableAttributedString(string: model.previewSender.map { "\($0): " } ?? "")
+            line.append(voice)
+            previewLabel.attributedText = line
         } else {
             previewLabel.text = preview
         }
@@ -112,7 +126,7 @@ final class ConversationRowView: UIView {
             model.isPinned ? "Pinned" : nil,
             model.isMuted ? "Muted" : nil,
             model.timeText,
-            model.preview
+            model.previewLine
         ]
         return states.compactMap(\.self).filter { !$0.isEmpty }.joined(separator: ", ")
     }
@@ -207,6 +221,11 @@ final class ConversationRowView: UIView {
         avatarTask = nil
         avatarPeerID = model.peerID
 
+        // A group's own photo is already a URL (#2214): no lookup.
+        if let photo = model.groupPhotoURL {
+            avatarView.setPicture(photo, pipeline: imagePipeline)
+            return
+        }
         guard let peerID = model.peerID, let avatars, let imagePipeline else {
             avatarView.setPicture(nil, pipeline: nil)
             return
@@ -303,6 +322,13 @@ final class ConversationRowView: UIView {
         row.pin(to: self, insets: NSDirectionalEdgeInsets(
             top: inset, leading: Spacing.lg, bottom: inset, trailing: Spacing.lg
         ))
+        groupFaces.isHidden = true
+        groupFaces.constrain(in: self) { _ in
+            groupFaces.leadingAnchor.constraint(equalTo: avatarView.leadingAnchor)
+            groupFaces.trailingAnchor.constraint(equalTo: avatarView.trailingAnchor)
+            groupFaces.topAnchor.constraint(equalTo: avatarView.topAnchor)
+            groupFaces.bottomAnchor.constraint(equalTo: avatarView.bottomAnchor)
+        }
     }
 }
 
@@ -318,6 +344,10 @@ extension ConversationRowView {
     var debugBadge: RelationBadgeView? { avatarView.badge }
     /// Whether the face has the badge's cutout taken out. Tests.
     var debugFaceIsCutOut: Bool { avatarView.faceIsCutOut }
+    /// The members' faces stacked, while a photoless group shows them. Tests.
+    var debugStackedFaceCount: Int { groupFaces.isHidden ? 0 : groupFaces.faceCount }
+    /// The preview line. Tests.
+    var debugPreviewText: String? { previewLabel.attributedText?.string ?? previewLabel.text }
 }
 #endif
 

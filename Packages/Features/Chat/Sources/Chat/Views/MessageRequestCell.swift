@@ -116,8 +116,11 @@ final class MessageRequestCell: UITableViewCell {
         // activity collapses the whole thing rather than leaving a stray dot.
         timeLabel.text = Self.timestampText(for: model)
         timeLabel.isHidden = timeLabel.text == nil
-        acceptButton.accessibilityLabel = "Accept request from \(model.title)"
-        dismissButton.accessibilityLabel = "Decline request from \(model.title)"
+        // A group's invitation (#2214) is the same decision, about a group.
+        acceptButton.accessibilityLabel = model.invitation == nil
+            ? "Accept request from \(model.title)" : "Accept invitation to \(model.title)"
+        dismissButton.accessibilityLabel = model.invitation == nil
+            ? "Decline request from \(model.title)" : "Decline invitation to \(model.title)"
         // The row itself reads as one sentence; the two buttons stay separate
         // elements so VoiceOver can reach each decision.
         accessibilityElements = [contentView, acceptButton, dismissButton]
@@ -165,8 +168,11 @@ final class MessageRequestCell: UITableViewCell {
     /// A request usually *is* its first message, so the preview carries the
     /// decision. When there is nothing to show, say what the row is rather
     /// than leaving a blank line.
+    ///
+    /// A group's invitation (#2214) says who invited the viewer, and to what.
     static func previewText(for model: ConversationDisplayModel) -> String {
-        model.preview.isEmpty ? "Wants to send you a message" : model.preview
+        if let invitation = model.invitation { return invitation }
+        return model.preview.isEmpty ? "Wants to send you a message" : model.previewLine
     }
 
     /// The timestamp as it reads beside the name — "· 12m". `nil` when the
@@ -201,6 +207,11 @@ final class MessageRequestCell: UITableViewCell {
         avatarTask = nil
         avatarPeerID = model.peerID
 
+        // An invitation's group photo is already a URL (#2214): no lookup.
+        if let photo = model.groupPhotoURL {
+            avatarView.setPicture(photo, pipeline: imagePipeline)
+            return
+        }
         guard let peerID = model.peerID, let avatars, let imagePipeline else {
             avatarView.setPicture(nil, pipeline: nil)
             return

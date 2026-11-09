@@ -177,10 +177,22 @@ final class InboxSearchResultsViewController: UIViewController {
             cell.accessories = []
         }
 
+        // "New group" (#2214): the people rows' anatomy, a symbol for a face.
+        let newGroupRegistration = UICollectionView.CellRegistration<PersonListCell, Row> { cell, _, _ in
+            cell.configure(with: PersonRowContent(
+                displayName: "New group", handle: "Talk with several people at once", monogram: "",
+                subject: .symbol("person.2.fill")
+            ))
+        }
+
         dataSource = UICollectionViewDiffableDataSource<Section, Row>(
             collectionView: collectionView
         ) { collectionView, indexPath, row in
             switch row {
+            case .newGroup:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: newGroupRegistration, for: indexPath, item: row
+                )
             case .conversation(let id):
                 return collectionView.dequeueConfiguredReusableCell(
                     using: conversationRegistration, for: indexPath, item: id

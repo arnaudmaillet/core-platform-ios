@@ -25,28 +25,78 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
     /// whenever `isUnread` is false; see `Conversation.unreadCount` for what
     /// bounds it.
     public let unreadCount: Int
+    /// A group's own photo (#2214): the row's face instead of initials.
+    public let groupPhotoURL: URL?
+    /// A photoless group's members' faces, stacked (#2214): up to three.
+    public let memberFaceURLs: [URL]
+    /// Who wrote a group's last message, as the preview is prefixed: their
+    /// first name, or "You" (#2214). Nil for a DM, and for a group with no
+    /// message yet.
+    public let previewSender: String?
+    /// "Bob invited you to Night photo walk" while the viewer is invited to
+    /// the group (#2214): the row is then an invitation, with Accept and
+    /// Decline. Nil otherwise.
+    public let invitation: String?
 
+    /// `joinedInvitation`: the viewer accepted this group's invitation ahead
+    /// of the next load saying so — the row is a group's like any other.
     public init(
         conversation: Conversation,
         now: Date = Date(),
         isPinned: Bool = false,
         isMuted: Bool = false,
         isUnread: Bool = false,
-        unreadCount: Int = 0
+        unreadCount: Int = 0,
+        joinedInvitation: Bool = false
     ) {
         id = conversation.id
         title = conversation.title
         preview = conversation.lastMessage
         timeText = conversation.lastActivityAt.map { RelativeAgeFormatter.short(from: $0, to: now) } ?? ""
         monogram = MonogramAvatarView.monogram(name: conversation.title, handle: "")
-        peerID = conversation.otherMemberIDs.count == 1 ? conversation.otherMemberIDs.first : nil
+        // A group with an identity is never "the peer" (#2214), even with one
+        // other member left: its face is its photo or its members'.
+        let isGroup = conversation.kind == .group && conversation.identity != nil
+        peerID = !isGroup && conversation.otherMemberIDs.count == 1 ? conversation.otherMemberIDs.first : nil
         peerHandle = peerID == nil ? nil : conversation.directPeerHandle
         self.isPinned = isPinned
         self.isMuted = isMuted
         self.isUnread = isUnread
         self.unreadCount = unreadCount
+        groupPhotoURL = isGroup ? conversation.identity?.photoURL : nil
+        memberFaceURLs = isGroup && conversation.identity?.photoURL == nil
+            ? Array(conversation.memberAvatarURLs.prefix(ConversationIdentity.stackedFaces))
+            : []
+        previewSender = isGroup && !conversation.lastMessage.isEmpty
+            ? Self.previewSender(isMine: conversation.lastMessageIsMine, name: conversation.lastMessageSenderName)
+            : nil
+        invitation = isGroup && conversation.identity?.viewerState == .invited && !joinedInvitation
+            ? Self.invitationLine(inviter: conversation.invitedByName, group: conversation.title)
+            : nil
     }
 
+    /// The preview as the row reads it: "Alice: see you there" in a group,
+    /// the message alone in a DM.
+    public var previewLine: String {
+        guard let previewSender, !preview.isEmpty else { return preview }
+        return "\(previewSender): \(preview)"
+    }
+
+    /// A group's last sender, as the preview names them (#2214): "You", or
+    /// their first name. Nil when the name isn't known — the preview then
+    /// stands alone rather than inventing one.
+    static func previewSender(isMine: Bool, name: String?) -> String? {
+        if isMine { return "You" }
+        guard let name else { return nil }
+        let first = ChatProfile.firstName(of: name)
+        return first.isEmpty ? nil : first
+    }
+
+    /// What an invitation row says (#2214).
+    static func invitationLine(inviter: String?, group: String) -> String {
+        guard let inviter, !inviter.isEmpty else { return "You're invited to \(group)" }
+        return "\(ChatProfile.firstName(of: inviter)) invited you to \(group)"
+    }
 }
 
 /// View-ready message. `senderID`/`sentAt` stay raw here: day grouping and
