@@ -139,6 +139,21 @@ final class CommentsInputBar: UIView {
     /// The field's emote button's width: 0 while it is gone
     /// (`updateEmoteToggle`), so the text and the placeholder run on.
     private var emoteToggleWidth: NSLayoutConstraint!
+    /// Whether the field's emote button was last asked to show: a change
+    /// animates (`animateEmoteToggle`), a repeat does nothing.
+    private var emoteToggleShown = true
+    /// The slot closing for the text once the emote button is out: stopped
+    /// when the button comes back before it ends, or its frames ran on under
+    /// the button's way in — typed fast, the glyph came in stretched from
+    /// the left (the owner's video, 2026-11-09).
+    private var emoteSlotAnimator: UIViewPropertyAnimator?
+    /// The emote button on its way out: its slot stays open until it is.
+    private var emoteToggleLeaving = false
+    /// Whether the bar has had a real layout: the first is never animated.
+    private var hasLaidOutOnce = false
+    /// `speaksFromField` as of the last update: a change of mode is not a
+    /// draft's, and does not animate.
+    private var emoteToggleSpeaks = false
     /// The own bubble steps aside while a locked or paused take covers the
     /// field (it carries its own send): the field takes the row's width.
     private var rowActionStepsAside = false
@@ -415,7 +430,9 @@ final class CommentsInputBar: UIView {
     var debugHoldGlyph: UIImageView { holdGlyph }
     var debugShowsRowAction: Bool { !rowActionButton.isHidden }
     /// The field's emote button shows, with room.
-    var debugShowsFieldEmoteToggle: Bool { !emotes.toggleButton.isHidden && emoteToggleWidth.constant > 0 }
+    /// Whether the field's emote button is shown, or on its way in — not
+    /// once it is leaving.
+    var debugShowsFieldEmoteToggle: Bool { emoteToggleShown && !emotes.toggleButton.isHidden && emoteToggleWidth.constant > 0 }
     /// The emote panel stands in for the keyboard.
     var debugShowsEmotePanel: Bool { emotes.isShowingPanel }
     /// The placeholder's words.
@@ -423,6 +440,10 @@ final class CommentsInputBar: UIView {
     /// The placeholder's frame and the field's, in the field's space.
     var debugPlaceholderFrame: CGRect { placeholderLabel.frame }
     var debugPlaceholderAlignment: NSTextAlignment { placeholderLabel.textAlignment }
+    /// How many times the field's emote button came or went in sight.
+    private(set) var debugEmoteToggleMotions = 0
+    var debugEmoteToggle: UIButton { emotes.toggleButton }
+    var debugEmoteSlotWidth: CGFloat { emoteToggleWidth.constant }
     var debugFieldBounds: CGRect { field.contentView.bounds }
     /// Whether the field's long press would begin now.
     var debugFieldHoldBegins: Bool { gestureRecognizerShouldBegin(fieldVoiceHold) }
@@ -1733,6 +1754,22 @@ final class CommentsInputBar: UIView {
     }
 
     override func layoutSubviews() {
+        // ⚠️ THE FIRST LAYOUT IS NEVER ANIMATED (the owner, 2026-11-08: the
+        // emote button came in from the top-left corner). A conversation's
+        // bar is laid out for the first time inside the push's animation, or
+        // the keyboard's: every button and glyph then grew from a zero frame
+        // at the corner. The first pass lays the whole bar out at once.
+        guard hasLaidOutOnce || UIView.inheritedAnimationDuration == 0 else {
+            UIView.performWithoutAnimation {
+                layOutBar()
+                for subview in subviews { subview.layoutIfNeeded() }
+            }
+            return
+        }
+        layOutBar()
+    }
+
+    private func layOutBar() {
         super.layoutSubviews()
         // The keyboard has placed the field by now; its width follows, in
         // this same pass (see `applyRise`).
@@ -1740,6 +1777,7 @@ final class CommentsInputBar: UIView {
         // The field is placed: its height for the draft lands in this same
         // pass too (see `updateFieldHeight`).
         if updateFieldHeight() { super.layoutSubviews() }
+        if bounds.width > 0 { hasLaidOutOnce = true }
     }
 
     private func sendTapped() {
@@ -2524,14 +2562,46 @@ final class CommentsInputBar: UIView {
     /// The field's emote button: gone while a take covers the field, and —
     /// in a conversation that speaks from the field — until there is a
     /// draft: the bubble is the emote button then.
+    ///
+    /// It comes and goes in sight (the owner, 2026-11-08): a scale with a
+    /// bounce and a fade, about its own centre. At once under a take or with
+    /// Reduce Motion.
     private func updateEmoteToggle() {
         guard emoteToggleWidth != nil else { return }
         let hidden = voiceOverlay != nil || (speaksFromField && !hasDraft)
-        emotes.toggleButton.isHidden = hidden
         let width = hidden && voiceOverlay == nil ? 0 : Metrics.emoteToggleWidth
-        if emoteToggleWidth.constant != width {
-            emoteToggleWidth.constant = width
-            setNeedsLayout()
+        let button = emotes.toggleButton
+        // Only a draft coming or going moves it: the bar setting up its mode
+        // (a conversation's field that speaks) puts it in place at once.
+        let changes = emoteToggleShown != !hidden || emoteToggleSpeaks != speaksFromField
+        let animates = emoteToggleShown != !hidden && emoteToggleSpeaks == speaksFromField
+            && voiceOverlay == nil && window != nil && !MotionPreference.reducesMotion
+        emoteToggleShown = !hidden
+        emoteToggleSpeaks = speaksFromField
+        if animates {
+            animateEmoteToggle(shown: !hidden, width: width)
+        } else if !changes {
+            // The same state again — the next letter of a draft: a way in or
+            // out still running runs to its end (the owner, 2026-11-09: typed
+            // fast, the bounce was cut at the second letter). Only the slot's
+            // width follows a take leaving the field, never mid-way out.
+            if !emoteToggleLeaving, emoteSlotAnimator == nil, emoteToggleWidth.constant != width {
+                emoteToggleWidth.constant = width
+                UIView.performWithoutAnimation { field.contentView.layoutIfNeeded() }
+            }
+        } else {
+            stopEmoteSlotAnimator()
+            emoteToggleLeaving = false
+            button.layer.removeAllAnimations()
+            button.isHidden = hidden
+            button.alpha = 1
+            button.transform = .identity
+            if emoteToggleWidth.constant != width {
+                emoteToggleWidth.constant = width
+                // Laid out now: a later pass inside another animation (the
+                // keyboard's, a push) would slide it from where it was.
+                UIView.performWithoutAnimation { field.contentView.layoutIfNeeded() }
+            }
         }
         textView.accessibilityCustomActions = speaksFromField && !hasDraft && !textView.isFirstResponder
             ? [UIAccessibilityCustomAction(name: "Record voice message") { [weak self] _ in
@@ -2539,6 +2609,67 @@ final class CommentsInputBar: UIView {
                 return true
             }]
             : nil
+    }
+
+    /// The field's emote button in or out (the owner, 2026-11-08: a scale or
+    /// a bounce, and a fade — nothing that swings). Its slot never moves
+    /// under it: in, the slot opens at once and the button bounces up from a
+    /// fifth of its size where it stands; out, it shrinks and fades where it
+    /// stands, and only then does the slot close for the text. A slot that
+    /// widened with it swung the glyph from the field's edge.
+    private func animateEmoteToggle(shown: Bool, width: CGFloat) {
+        let button = emotes.toggleButton
+        let small = CGAffineTransform(scaleX: 0.2, y: 0.2)
+        let options: UIView.AnimationOptions = [.beginFromCurrentState, .allowUserInteraction]
+        #if DEBUG
+        debugEmoteToggleMotions += 1
+        #endif
+        if shown {
+            stopEmoteSlotAnimator()
+            emoteToggleLeaving = false
+            UIView.performWithoutAnimation {
+                emoteToggleWidth.constant = width
+                field.contentView.layoutIfNeeded()
+                // Its glyph too, where it stands: never laid out while it was
+                // hidden at no width, it came in from the corner.
+                button.layoutIfNeeded()
+            }
+            if button.isHidden || button.alpha == 0 {
+                button.isHidden = false
+                button.alpha = 0
+                button.transform = small
+            }
+            UIView.animate(withDuration: 0.15, delay: 0, options: options) { button.alpha = 1 }
+            UIView.animate(springDuration: 0.45, bounce: 0.5, options: options) { button.transform = .identity }
+            return
+        }
+        emoteToggleLeaving = true
+        UIView.animate(withDuration: 0.18, delay: 0, options: options) {
+            button.alpha = 0
+            button.transform = small
+        } completion: { [weak self] _ in
+            guard let self, !self.emoteToggleShown else { return }
+            emoteToggleLeaving = false
+            button.isHidden = true
+            button.alpha = 1
+            button.transform = .identity
+            emoteToggleWidth.constant = width
+            let closing = UIViewPropertyAnimator(duration: 0.25, dampingRatio: 1) {
+                self.field.contentView.layoutIfNeeded()
+            }
+            closing.addCompletion { [weak self, weak closing] _ in
+                if self?.emoteSlotAnimator === closing { self?.emoteSlotAnimator = nil }
+            }
+            emoteSlotAnimator = closing
+            closing.startAnimation()
+        }
+    }
+
+    /// The slot's closing, stopped where it stands: its frames go with it.
+    private func stopEmoteSlotAnimator() {
+        guard let closing = emoteSlotAnimator else { return }
+        emoteSlotAnimator = nil
+        if closing.state == .active { closing.stopAnimation(true) }
     }
 
     /// The own bubble's glyph: the send over a draft; at rest the emote
