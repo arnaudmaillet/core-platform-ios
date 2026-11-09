@@ -295,6 +295,8 @@ final class PostDetailViewController: UIViewController {
     /// flight had no target and the caption appeared as a second one when the
     /// post arrived.
     var seededCaption: (text: String, timestamp: String)?
+    /// The seeded caption's voice (#2207): a voice post's row opens speaking.
+    var seededVoice: PostVoice?
     /// The post's comment count from the opener, before the fetch: the
     /// stream draws no more bones than that — none for zero (#1773).
     var knownCommentCount: Int64?
@@ -1285,10 +1287,13 @@ final class PostDetailViewController: UIViewController {
         authorName: String = "",
         monogram: String = "",
         avatarURL: URL? = nil,
-        metrics: PostCardMetrics? = nil
+        metrics: PostCardMetrics? = nil,
+        voice: PostVoice? = nil
     ) {
-        guard !text.isEmpty, latestPost == nil else { return }
+        // A voice alone is a caption too (#2207).
+        guard !text.isEmpty || voice != nil, latestPost == nil else { return }
         seededCaption = (text, timestamp)
+        seededVoice = voice
         seededAuthor = (authorName, monogram, avatarURL)
         seededCardMetrics = metrics
         loadViewIfNeeded()
