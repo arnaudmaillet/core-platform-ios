@@ -1,5 +1,6 @@
 import MapKit
 import UIKit
+import VoiceKitUI
 
 extension MKAnnotationView {
     /// Wires a single-tap recognizer straight onto the marker so a tap opens it
@@ -40,6 +41,12 @@ extension MKAnnotationView {
 /// `delegate` is weak; the static `shared` is what keeps it alive.
 final class MapMarkerTapGestureDelegate: NSObject, UIGestureRecognizerDelegate {
     static let shared = MapMarkerTapGestureDelegate()
+
+    /// A touch on the text bubble's voice — its play button, its waveform —
+    /// is the voice's (#2208): the rest of the bubble still opens the post.
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        !VoicePostCaptionView.keepsTouch(touch)
+    }
 
     func gestureRecognizer(
         _ gestureRecognizer: UIGestureRecognizer,

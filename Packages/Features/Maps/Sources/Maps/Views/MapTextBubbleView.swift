@@ -2,6 +2,7 @@ import CoreModels
 import DesignSystem
 import PostGrid
 import UIKit
+import VoiceKitUI
 
 /// `-map-text-bubble` (the owner, 2026-11-09): the text marker nearest the
 /// map's centre opens a bubble round it — display first, the words where the
@@ -21,6 +22,11 @@ import UIKit
 /// - **Its author over its words** (the owner, 2026-11-09): the name, then
 ///   the post's age; the words on two lines at most, cut at the second's
 ///   end, the post's blank lines folded.
+/// - **A voice post (#2208, behind `-voice-posts`)** keeps the bubble: the
+///   shared voice component, full size, in the words' place under the
+///   author — play / pause, the waveform, the timer — its words under it.
+///   The voice's taps are its own; the rest of the bubble opens the post. It
+///   stops when the bubble folds (the voice leaves the window).
 /// - **Liquid Glass**, the system's own, its round end concentric with the
 ///   round marker. No shadow: a shadow renders a glass or a blur offscreen,
 ///   cut off from the map it samples (a blur came out flat).
@@ -31,16 +37,19 @@ final class MapTextBubbleView: UIView {
         let authorName: String
         let age: String
         let caption: String
+        /// The caption's voice (#2208), with `-voice-posts` on.
+        var voice: PostVoice? = nil
 
         /// The bubble's words for `post`, its age read against `now`.
-        static func of(_ post: GalleryPost, now: Date = Date()) -> Content {
+        static func of(_ post: GalleryPost, now: Date = Date(), showsVoice: Bool = VoicePostDisplay.areDrawn) -> Content {
             let name = post.authorName ?? post.authorHandle.map { "@\($0)" } ?? ""
             let published = Date(timeIntervalSince1970: TimeInterval(post.publishedAtMS) / 1000)
             return Content(
                 postID: post.id,
                 authorName: name,
                 age: post.publishedAtMS > 0 ? RelativeAgeFormatter.short(from: published, to: now) : "",
-                caption: post.caption.trimmingCharacters(in: .whitespacesAndNewlines)
+                caption: post.caption.trimmingCharacters(in: .whitespacesAndNewlines),
+                voice: showsVoice && post.kind == .text ? post.voice : nil
             )
         }
     }
@@ -63,13 +72,24 @@ final class MapTextBubbleView: UIView {
 
     let authorLabel = UILabel()
     let label = UILabel()
+    /// A voice post's voice, full size, between the author and the words.
+    let voiceCaption = VoicePostCaptionView()
     private let glass = UIVisualEffectView(effect: UIGlassEffect())
     /// The author's line and the words, laid out as one column.
     private let column = UIView()
 
+    /// The glass's vibrancy, for the voice: the label's ink, the bars'
+    /// unplayed share of it, the timer's secondary grey.
+    static let voiceInks = VoiceView.Inks(
+        played: UIColor.label.withAlphaComponent(0.8), unplayed: UIColor.label.withAlphaComponent(0.28),
+        timer: .secondaryLabel
+    )
+
     override init(frame: CGRect) {
         super.init(frame: frame)
-        isUserInteractionEnabled = false
+        // Only the voice takes a touch (`hitTest`): the rest of the bubble is
+        // its marker's, which opens the post.
+        isUserInteractionEnabled = true
         backgroundColor = .clear
         // The words outside a bubble still unfolding stay hidden.
         glass.clipsToBounds = true
@@ -81,6 +101,8 @@ final class MapTextBubbleView: UIView {
         label.numberOfLines = Self.maxLines
         label.lineBreakMode = .byTruncatingTail
         column.addSubview(authorLabel)
+        column.addSubview(voiceCaption)
+        voiceCaption.inks = Self.voiceInks
         column.addSubview(label)
         glass.contentView.addSubview(column)
         isAccessibilityElement = false
@@ -102,6 +124,14 @@ final class MapTextBubbleView: UIView {
         }
         authorLabel.attributedText = name
         label.text = Self.shownText(of: content.caption)
+        if let voice = content.voice {
+            voiceCaption.show(
+                postID: content.postID.rawValue, url: voice.url, duration: voice.duration, levels: voice.waveform,
+                author: content.authorName.isEmpty ? nil : content.authorName, size: .full
+            )
+        } else {
+            voiceCaption.clear()
+        }
         sizeToFit()
         setNeedsLayout()
     }
@@ -122,11 +152,32 @@ final class MapTextBubbleView: UIView {
     private var columnSize: CGSize {
         let room = CGSize(width: Self.textWidth, height: .greatestFiniteMagnitude)
         let author = authorLabel.sizeThatFits(room)
-        let words = label.sizeThatFits(room)
+        let words = hasWords ? label.sizeThatFits(room) : .zero
+        let voice = voiceSize
+        let voiceBlock = voice.height > 0 ? Self.voiceGap + voice.height : 0
         return CGSize(
-            width: ceil(min(Self.textWidth, max(author.width, words.width))),
-            height: ceil(author.height) + Self.lineGap + ceil(words.height)
+            width: ceil(min(Self.textWidth, max(author.width, words.width, voice.width))),
+            height: ceil(author.height) + voiceBlock + (hasWords ? Self.lineGap + ceil(words.height) : 0)
         )
+    }
+
+    /// Between the author's line and the voice, and the voice and the words.
+    static let voiceGap: CGFloat = 4
+
+    /// Whether the words show: always without a voice (as before), only
+    /// when there are any under one.
+    private var hasWords: Bool { voiceCaption.isHidden || !(label.text ?? "").isEmpty }
+
+    /// The voice's size, zero without one: its length's width (`VoiceView
+    /// .width`), held to the column, at its line's height.
+    private var voiceSize: CGSize {
+        guard !voiceCaption.isHidden, let player = voiceCaption.voiceView else { return .zero }
+        let width = min(Self.textWidth, VoiceView.width(forDuration: player.state.duration))
+        let height = voiceCaption.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+        ).height
+        return CGSize(width: width, height: ceil(max(height, VoiceView.buttonSide)))
     }
 
     override func sizeThatFits(_ size: CGSize) -> CGSize {
@@ -151,7 +202,21 @@ final class MapTextBubbleView: UIView {
         )
         let author = ceil(authorLabel.sizeThatFits(CGSize(width: text.width, height: .greatestFiniteMagnitude)).height)
         authorLabel.frame = CGRect(x: 0, y: 0, width: text.width, height: author)
-        label.frame = CGRect(x: 0, y: author + Self.lineGap, width: text.width, height: text.height - author - Self.lineGap)
+        let voice = voiceSize
+        voiceCaption.frame = CGRect(x: 0, y: author + Self.voiceGap, width: voice.width, height: voice.height)
+        let wordsTop = voice.height > 0 ? voiceCaption.frame.maxY + Self.lineGap : author + Self.lineGap
+        label.isHidden = !hasWords
+        label.frame = CGRect(x: 0, y: wordsTop, width: text.width, height: max(0, text.height - wordsTop))
+    }
+
+    /// Only the voice's play button and waveform take a touch — and only
+    /// while the words show; anywhere else the marker under it takes it and
+    /// opens the post (#2208).
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard column.alpha > 0.01, let player = voiceCaption.voiceView, !voiceCaption.isHidden else { return nil }
+        let local = convert(point, to: player)
+        guard player.keepsPress(at: local) else { return nil }
+        return player.hitTest(local, with: event)
     }
 
     /// Where the marker's centre stands in the bubble: its left end.
@@ -175,5 +240,7 @@ final class MapTextBubbleView: UIView {
     var debugHasGlass: Bool { glass.effect != nil }
     /// The words' column, in the bubble.
     var debugColumnFrame: CGRect { column.frame }
+    /// The voice shown, nil for none (#2208).
+    var debugVoice: VoicePostCaptionView? { voiceCaption.isHidden ? nil : voiceCaption }
     #endif
 }

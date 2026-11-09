@@ -4,6 +4,7 @@ import MapKit
 import MediaCore
 import MediaPlayback
 import UIKit
+import VoiceKitUI
 
 /// A cluster of overlapping / co-located pins, rendered to look exactly like a
 /// single post pin: the same rounded, center-anchored square showing its
@@ -154,8 +155,12 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
     /// owns the image pipeline.
     func configure(
         with cluster: MapComputedCluster, dress: MapMarkerDress = .neutral, imagePipeline: ImagePipeline,
-        iconCatalog: (any AnimatedIconProviding)? = nil, previewCatalog: AnimatedIconCatalog? = nil
+        iconCatalog: (any AnimatedIconProviding)? = nil, previewCatalog: AnimatedIconCatalog? = nil,
+        showsVoice: Bool = VoicePostDisplay.areDrawn
     ) {
+        // A group led by a voice post wears its mic (#2208) — above the
+        // idempotence guard, a cheap set.
+        card.setVoiceMark(cluster.representative.wearsVoiceMark(showsVoice: showsVoice))
         self.iconCatalog = iconCatalog
         self.previewCatalog = previewCatalog
         let url = cluster.representative.thumbnailURL
@@ -374,6 +379,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
         applyIconArt(nil)
         card.setPreviewSheet(nil)
         card.resetCover()
+        card.setVoiceMark(false)
         card.setTextAvatar(nil)
         applyDress(.neutral)
         applyFace(.media)
