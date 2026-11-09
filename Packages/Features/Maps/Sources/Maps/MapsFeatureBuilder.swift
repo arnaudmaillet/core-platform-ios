@@ -281,7 +281,10 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             // Always: the locked guest map's card is its only way out, on
             // the fleet too, where there is no country access yet (#564).
             // Members there still see no location controls without it.
-            locator: locator
+            locator: locator,
+            // `-map-text-bubble`: a text post's words, from the feed's store.
+            loadTextPosts: { ids in await feedFeature().galleryPosts(ids) },
+            heldTextPost: { id in feedFeature().heldGalleryPost(id) }
         )
         // The dock's and the rows' people open on their last list (#1776).
         map.peopleCache = peopleCache

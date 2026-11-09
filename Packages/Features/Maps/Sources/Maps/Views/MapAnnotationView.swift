@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import MapKit
 import MediaCore
 import MediaPlayback
@@ -217,6 +218,9 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
     /// a touch on the empty map there must not open a post.
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         guard !card.isAwaitingIcon else { return false }
+        // The featured marker's bubble is the marker's too: a tap anywhere on
+        // it opens the post (`-map-text-bubble`, the owner, 2026-11-09).
+        if let bubble = featuredHalo.bubbleHitFrame, bubble.contains(point) { return true }
         return super.point(inside: point, with: event)
     }
 
@@ -230,7 +234,12 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         if bounds.width != side {
             bounds = CGRect(x: 0, y: 0, width: side, height: side)
         }
-        card.frame = bounds
+        // ⚠️ BOUNDS AND CENTRE, NOT `frame`: a featured card wears a
+        // transform (grown, slid to its bubble's left end), and a frame set
+        // under a transform erases it — the marker jumped back to the middle
+        // of its bubble when a fast zoom changed the group's face.
+        card.bounds = CGRect(origin: .zero, size: bounds.size)
+        card.center = CGPoint(x: bounds.midX, y: bounds.midY)
         card.setFace(face)
         // ⚠️ RE-APPLIED per face, not set once at init: these views are
         // recycled across faces, so a card that last wore an icon (no shadow)
@@ -387,6 +396,26 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         card.reinstallPreviewPlayback()
     }
 
+    // MARK: - Featured by the text bubble (`-map-text-bubble`)
+
+    /// The marker the map's text bubble speaks for (`MapFeaturedHalo`).
+    let featuredHalo = MapFeaturedHalo()
+    var isFeatured: Bool { featuredHalo.isFeatured }
+
+    func setFeatured(_ featured: Bool, animated: Bool) {
+        guard featured != isFeatured else { return }
+        zPriority = featured ? .max : .defaultUnselected
+        featuredHalo.set(featured, card: card, in: self, animated: animated)
+    }
+
+    /// `-map-text-bubble`: the bubble round the featured marker, or none.
+    /// The post the bubble speaks for, while one shows.
+    var bubblePostID: PostID? { featuredHalo.bubblePostID }
+
+    func setBubble(_ content: MapTextBubbleView.Content?, animated: Bool) {
+        featuredHalo.setBubble(content, card: card, in: self, animated: animated)
+    }
+
     override func prepareForReuse() {
         super.prepareForReuse()
         // ⚠️ A CONCEALED MARKER CAN BE RETIRED WHILE CONCEALED. A flight hides
@@ -402,6 +431,8 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         // in, but a view can also be dequeued for a pin that never pops.
         alpha = 1
         transform = .identity
+        featuredHalo.reset(card: card)
+        zPriority = .defaultUnselected
         onSelect = nil
         onReuse?()
         onReuse = nil

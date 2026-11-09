@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import MapKit
 import MediaCore
 import MediaPlayback
@@ -117,6 +118,9 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
     /// a touch on the empty map there must not open a post.
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         guard !card.isAwaitingIcon else { return false }
+        // The featured marker's bubble is the marker's too: a tap anywhere on
+        // it opens the post (`-map-text-bubble`, the owner, 2026-11-09).
+        if let bubble = featuredHalo.bubbleHitFrame, bubble.contains(point) { return true }
         return super.point(inside: point, with: event)
     }
 
@@ -131,7 +135,12 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
         if bounds.width != face.side {
             bounds = CGRect(x: 0, y: 0, width: face.side, height: face.side)
         }
-        card.frame = bounds
+        // ⚠️ BOUNDS AND CENTRE, NOT `frame`: a featured card wears a
+        // transform (grown, slid to its bubble's left end), and a frame set
+        // under a transform erases it — the marker jumped back to the middle
+        // of its bubble when a fast zoom changed the group's face.
+        card.bounds = CGRect(origin: .zero, size: bounds.size)
+        card.center = CGPoint(x: bounds.midX, y: bounds.midY)
         card.setFace(face)
     }
 
@@ -313,8 +322,30 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
     /// bound player to the pool before it is reused for another group.
     var onReuse: (() -> Void)?
 
+    // MARK: - Featured by the text bubble (`-map-text-bubble`)
+
+    /// A group whose face is a text post, featured as a single marker is.
+    let featuredHalo = MapFeaturedHalo()
+    var isFeatured: Bool { featuredHalo.isFeatured }
+
+    func setFeatured(_ featured: Bool, animated: Bool) {
+        guard featured != isFeatured else { return }
+        zPriority = featured ? .max : .defaultUnselected
+        featuredHalo.set(featured, card: card, in: self, animated: animated)
+    }
+
+    /// The post the bubble speaks for, while one shows.
+    var bubblePostID: PostID? { featuredHalo.bubblePostID }
+
+    /// `-map-text-bubble`: the bubble round the featured marker, or none.
+    func setBubble(_ content: MapTextBubbleView.Content?, animated: Bool) {
+        featuredHalo.setBubble(content, card: card, in: self, animated: animated)
+    }
+
     override func prepareForReuse() {
         super.prepareForReuse()
+        featuredHalo.reset(card: card)
+        zPriority = .defaultUnselected
         // ⚠️ BEFORE the rest: the coordinator has to hand its player back while
         // this view still owns the surface. Clearing state first would leave a
         // player bound to a view that is about to draw a different group.
