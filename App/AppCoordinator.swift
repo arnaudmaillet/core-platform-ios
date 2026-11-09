@@ -7,6 +7,7 @@ import CoreRealtime
 import CoreStorage
 import DesignSystem
 import MediaPlayback
+import PostGrid
 import Profile
 import MediaCore
 import UIKit
@@ -130,6 +131,15 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // in the dashboard's Screens.
         if VoiceCatalogViewController.isRequested {
             window.rootViewController = UINavigationController(rootViewController: VoiceCatalogViewController())
+            window.makeKeyAndVisible()
+            return
+        }
+        // `-embed-catalog`: the embed card's sizes and states (#2216), also
+        // in the dashboard's Screens.
+        if EmbedCatalogViewController.isRequested {
+            window.rootViewController = UINavigationController(
+                rootViewController: EmbedCatalogViewController(pipeline: container.imagePipeline)
+            )
             window.makeKeyAndVisible()
             return
         }

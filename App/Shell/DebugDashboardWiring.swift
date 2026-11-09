@@ -183,6 +183,7 @@ enum DebugDashboardWiring {
         ("-lens-lab", "The lens lab"),
         ("-voice-lab", "The voice lab"),
         ("-voice-catalog", "The voice component's sizes (#2205)"),
+        ("-embed-catalog", "The embed card's sizes and states (#2216)"),
     ]
 }
 #endif

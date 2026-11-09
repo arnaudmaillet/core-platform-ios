@@ -6,6 +6,7 @@ import CoreNavigation
 import CoreNetworking
 import DesignSystem
 import LocalStore
+import PostGrid
 import Photos
 import UIKit
 import UserNotifications
@@ -304,6 +305,9 @@ enum DebugDashboardTools {
                 }),
                 .sheet("Voice component", detail: "Full, compact and mark, light and dark, text face and glass (#2205)", make: {
                     UINavigationController(rootViewController: VoiceCatalogViewController())
+                }),
+                .sheet("Embed card", detail: "A channel showcase's card: every size and state, light and dark (#2216)", make: {
+                    UINavigationController(rootViewController: EmbedCatalogViewController())
                 }),
             ]
         )
