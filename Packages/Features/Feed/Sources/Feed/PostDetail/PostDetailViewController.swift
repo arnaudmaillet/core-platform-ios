@@ -1233,7 +1233,24 @@ final class PostDetailViewController: UIViewController {
         guard takes != takesComments else { return }
         takesComments = takes
         composeBar.takesComments = takes
-        if !takes { clearReplyState() }
+        guard !takes else { return }
+        clearReplyState()
+        // ⚠️ THE TABS GO TOO, EVEN THOUGH "ONCE THERE, IT STAYS". The opener's
+        // comment count can bring Popular in before the page knows it is a
+        // showcase — a page opened from a cached entry seeds the count first
+        // (seen on the simulator: Popular / Recent over a showcase). A
+        // showcase has no comments to rank, so the panel goes back to Recent
+        // alone and tells its host, which reads `showsPopular` again.
+        if showsPopular {
+            showsPopular = false
+            if isViewLoaded {
+                pager.setActivePage(Self.recentPage, animated: false)
+                pager.isPagingEnabled = false
+                if lastSettledStream !== stream { visibleStreamDidChange() }
+            }
+            onPopularTabChange?(false)
+            onCommentCountChange?(commentCount)
+        }
     }
 
     private func renderEngagement(_ state: PostDetailViewModel.EngagementState) {

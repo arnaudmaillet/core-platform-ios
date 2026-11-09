@@ -38,6 +38,19 @@ public final class PostEmbedView: UIView {
     /// button shows, and a tap does nothing.
     public static var channelActions: (any ChannelEmbedActing)?
 
+    /// Where `channelActions` comes from when nothing set it yet: the app
+    /// registers this at launch, and it is asked on the first tap — so the
+    /// card acts on a launch that never opened Messages, without building
+    /// Chat before anyone taps (#2216).
+    public static var makeChannelActions: (@MainActor () -> (any ChannelEmbedActing)?)?
+
+    /// The actions a tap uses: the ones set, or the ones made now.
+    static var resolvedChannelActions: (any ChannelEmbedActing)? {
+        if let channelActions { return channelActions }
+        channelActions = makeChannelActions?()
+        return channelActions
+    }
+
     /// The embed shown, as last drawn (a tap's answer included); nil while
     /// nothing is.
     public private(set) var embed: PostEmbed?
@@ -291,7 +304,7 @@ public final class PostEmbedView: UIView {
         guard case .channel(let channel)? = embed, let action = channel.action else { return }
         switch action {
         case .open:
-            Self.channelActions?.open(channel.conversationID)
+            Self.resolvedChannelActions?.open(channel.conversationID)
         case .join:
             run(on: channel) { actions, id in try await actions.join(id) }
         case .requestToJoin:
@@ -312,7 +325,7 @@ public final class PostEmbedView: UIView {
     /// One write: the button loads, the answer shows; a refusal shakes the
     /// button and leaves the card as it was.
     private func run(on channel: ChannelEmbed, _ write: @escaping Write) {
-        guard let actions = Self.channelActions, pendingAction == nil else { return }
+        guard let actions = Self.resolvedChannelActions, pendingAction == nil else { return }
         actionButton.setPhase(.loading, animated: window != nil)
         let id = channel.conversationID
         actionGeneration += 1

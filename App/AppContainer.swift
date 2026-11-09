@@ -1273,21 +1273,23 @@ final class AppContainer {
     private static let unavailableIconCatalog: AnimatedIconCatalog? = nil
     #endif
 
+    /// What a channel showcase's card does (#2216) — Join, Request to join,
+    /// cancel, Open — registered at launch on the card (`PostEmbedView`),
+    /// which Feed, Maps and Profile draw and which can't reach Chat: Chat's
+    /// own, over the repository and the catalog the Channels tab reads. Made
+    /// on the first tap, not here: building Chat is no launch's business,
+    /// and a launch that lands on a post never opens Messages. Nil with
+    /// `-channels` off (`ChatFeatureBuilder.makeChannelEmbedActions`).
+    @MainActor
+    func installChannelEmbedActions() {
+        PostEmbedView.makeChannelActions = { [unowned self] in chatFeature.makeChannelEmbedActions() }
+    }
+
     /// Animated avatars (#1358, #1444): the sheets of the authors the mock
     /// declares animated (about half), baked from the map's clip previews in
     /// the geometry the backend is asked to bake (core-platform-backend#945,
     /// #948). An animated avatar has no photo. Off the mock, none until the
     /// sheet rendition ships.
-    /// What a channel showcase's card does (#2216) — Join, Request to join,
-    /// cancel, Open — registered once on the card (`PostEmbedView`), which
-    /// Feed, Maps and Profile draw and which can't reach Chat: Chat's own,
-    /// over the repository and the catalog the Channels tab reads. Nil with
-    /// `-channels` off (`ChatFeatureBuilder.makeChannelEmbedActions`).
-    @MainActor
-    func installChannelEmbedActions() {
-        PostEmbedView.channelActions = chatFeature.makeChannelEmbedActions()
-    }
-
     @MainActor
     func installAnimatedAvatars() {
         guard environment == .mock, !Self.previewsUnavailable else { return }

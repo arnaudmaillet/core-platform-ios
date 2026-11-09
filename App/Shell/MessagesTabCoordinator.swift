@@ -91,9 +91,6 @@ final class MessagesTabCoordinator: TabCoordinator, GlyphTab {
         // something in Messages" is blank until Messages has been opened, which
         // is the one moment it has nothing left to tell anyone.
         container.chatFeature.primeInbox()
-        // A channel showcase's card acts through the same inbox (#2216): a
-        // channel joined from the feed lands in this Channels tab.
-        container.installChannelEmbedActions()
         // ⚠️ AND THE SCREEN THAT COUNTS IT (#748). The badge is the inbox
         // pages' sum, published from the inbox's `viewDidLoad` on: a tab never
         // opened never loaded its view, so the primed data sat uncounted and

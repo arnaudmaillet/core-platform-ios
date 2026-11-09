@@ -167,6 +167,32 @@ struct PostEmbedViewTests {
         }
     }
 
+    /// SEEN ON THE SIMULATOR: the actions used to be registered when the
+    /// Messages tab was built, so on a launch that opened a post first, Join
+    /// did nothing. The app now registers a maker at launch, asked on the
+    /// first tap.
+    @Test func theFirstTapMakesTheActionsWhenNoneWereSet() async {
+        let spy = SpyActions()
+        let previous = (PostEmbedView.channelActions, PostEmbedView.makeChannelActions)
+        PostEmbedView.channelActions = nil
+        var made = 0
+        PostEmbedView.makeChannelActions = { made += 1; return spy }
+        ChannelEmbedLocalState.reset()
+        let view = card(channel(.none, id: "ch-harbour"))
+        #expect(made == 0, "made before anyone tapped")
+        view.performAction()
+        await view.debugSettle()
+        #expect(made == 1)
+        #expect(spy.calls == ["join ch-harbour"])
+        // Made once: the next tap uses them.
+        view.performAction()
+        #expect(made == 1)
+        #expect(spy.calls.last == "open ch-harbour")
+        PostEmbedView.channelActions = previous.0
+        PostEmbedView.makeChannelActions = previous.1
+        ChannelEmbedLocalState.reset()
+    }
+
     @Test func requestThenCancel() async {
         let spy = SpyActions()
         await with(spy) {
