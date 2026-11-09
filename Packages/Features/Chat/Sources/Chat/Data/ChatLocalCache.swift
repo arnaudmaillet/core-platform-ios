@@ -100,6 +100,7 @@ final class ChatLocalCache: Sendable {
         case .inbox: "chat.inbox"
         case .requests: "chat.requests"
         case .hiddenRequests: "chat.hiddenRequests"
+        case .channels: "chat.channels"
         }
     }
 

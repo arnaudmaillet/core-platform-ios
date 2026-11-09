@@ -112,7 +112,7 @@ private actor StubInboxProvider: ChatProviding {
         case .requests:
             if failsRequests { throw StubError() }
             return InboxPage(conversations: requests, nextPageToken: nil)
-        case .hiddenRequests:
+        case .hiddenRequests, .channels:
             return InboxPage(conversations: [], nextPageToken: nil)
         }
     }

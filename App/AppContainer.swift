@@ -1766,7 +1766,9 @@ final class AppContainer {
             mediaClient: Media_V1_MediaServiceClient(client: authenticatedRPCClient),
             transport: mediaUploadTransport
         ),
-        inboxPageSize: Self.inboxPageSize
+        inboxPageSize: Self.inboxPageSize,
+        // Groups' and channels' own calls (#2213), on backend #995's shape.
+        proposals: ProposedChatClient(client: authenticatedRPCClient)
     )
 
     /// The thread's camera and library (#681): the upload flow's own sheet,

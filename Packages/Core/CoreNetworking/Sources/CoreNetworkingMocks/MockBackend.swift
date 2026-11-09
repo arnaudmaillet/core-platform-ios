@@ -226,7 +226,11 @@ public struct MockBackend: Sendable {
                 socialGraph.isFollowing(sender, recipient) && socialGraph.isFollowing(recipient, sender) ? .open : .request
             default: .open
             }
-        }).register(on: bff)
+        },
+        // Groups and channels (#2213), seeded behind their flags.
+        seedsGroups: ProcessInfo.processInfo.arguments.contains("-group-chats"),
+        seedsChannels: ProcessInfo.processInfo.arguments.contains("-channels")
+        ).register(on: bff)
         socialGraph.register(on: bff)
         // Contacts find a profile only through a channel its owner left on,
         // and never across a block (#412, backend #806).

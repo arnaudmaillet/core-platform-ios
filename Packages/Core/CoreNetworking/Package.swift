@@ -33,7 +33,10 @@ let package = Package(
                 .product(name: "CoreModels", package: "CoreModels"),
                 // `MediaAssetUploader` hands bytes to a `MediaUploadTransport`.
                 .product(name: "MediaCore", package: "MediaCore"),
-                .product(name: "Connect", package: "connect-swift")
+                .product(name: "Connect", package: "connect-swift"),
+                // `ProposedChat` (#2213) carries its JSON in a well-known
+                // `StringValue`.
+                .product(name: "SwiftProtobuf", package: "swift-protobuf")
             ]
         ),
         .target(
