@@ -48,9 +48,18 @@ public protocol ChatFeatureBuilding {
     /// becomes someone else (a sign-out, another account): the next viewer must
     /// never see the previous one's messages, even for a frame.
     func forgetViewer()
+
+    /// What a channel showcase's card does (#2216) — Join, Request to join,
+    /// cancel, Open — over the conversations Chat owns, for Feed, Maps and
+    /// PostGrid, which draw the card and can't depend on Chat. Nil with the
+    /// channels off. The shell registers it once (`PostEmbedView`).
+    func makeChannelEmbedActions() -> (any ChannelEmbedActing)?
 }
 
 extension ChatFeatureBuilding {
+    /// No channels: a builder that has none draws no actions.
+    public func makeChannelEmbedActions() -> (any ChannelEmbedActing)? { nil }
+
     /// The ordinary case: a thread with an empty composer.
     public func makeDraftConversationViewController(
         with profileID: ProfileID,
