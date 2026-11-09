@@ -24,6 +24,11 @@ public enum ConversationRole: Sendable, Hashable, Comparable {
 
     /// Whether this role manages members and identity.
     public var manages: Bool { self == .owner || self == .admin }
+
+    /// Whether this role is a member who talks (#2217): owner, admin,
+    /// member. A group's followers (subscribers) and guests are its
+    /// audience — never listed or counted among its members.
+    public var talks: Bool { self == .owner || self == .admin || self == .member }
 }
 
 /// The viewer's standing in a group or a channel (#2213).
@@ -112,6 +117,10 @@ public struct ConversationIdentity: Equatable, Sendable {
 
     /// The faces a nameless, photoless group shows, stacked: up to three.
     public static let stackedFaces = 3
+
+    /// A group with no room left (#2217): chat.v1's cap reached, so an
+    /// outsider or a follower is offered Follow only.
+    public var isFull: Bool { kind == .group && memberCount >= ConversationDraft.groupCap }
 }
 
 /// A member of a group or a channel, from `ListMembers` (#2213).
@@ -162,7 +171,7 @@ public struct ConversationDraft: Equatable, Sendable {
     }
 
     /// A group holds at most this many members (chat.v1's cap).
-    public static let groupCap = 500
+    public static let groupCap = ProposedChat.groupCap
 }
 
 /// Groups' and channels' reads and writes (#2213), behind the repository —
