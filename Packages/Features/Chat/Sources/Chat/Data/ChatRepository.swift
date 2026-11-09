@@ -501,7 +501,7 @@ public actor ChatRepository: ChatProviding {
 
         let entries = shownEntries(entriesFromWire, in: folder)
         let details = await Self.fetchDetails(for: entries, viewer: viewer, client: chatClient)
-        let identities = await identities(of: entries, viewer: viewer)
+        let entryIdentities = await identities(of: entries, viewer: viewer)
         // A cancelled load must REPORT cancellation, not hand back what it
         // managed to resolve: cancelled Connect calls fail rather than throw,
         // and a row whose details failed is still built — so without this a
@@ -516,7 +516,7 @@ public actor ChatRepository: ChatProviding {
         try Task.checkCancellation()
         let conversations = entries.map {
             conversation(
-                from: $0, detail: details[$0.conversationID], identity: identities[$0.conversationID], viewer: viewer
+                from: $0, detail: details[$0.conversationID], identity: entryIdentities[$0.conversationID], viewer: viewer
             )
         }
         return InboxPage(conversations: conversations, nextPageToken: nextToken.isEmpty ? nil : nextToken)
