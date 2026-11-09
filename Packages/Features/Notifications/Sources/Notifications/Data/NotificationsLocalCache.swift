@@ -131,6 +131,9 @@ final class NotificationsLocalCache: Sendable {
         /// The subject's voice (#2208); optional, so a row stored before it
         /// still reads.
         var voice: PostVoice?
+        /// The subject's showcase card (#2216); optional, so a row stored
+        /// before it still reads.
+        var embed: PostEmbed?
         var hasPreview: Bool
         /// The other side of a supervision (#1106). Optional, so a row stored
         /// before it existed still reads (format unchanged).
@@ -149,6 +152,7 @@ final class NotificationsLocalCache: Sendable {
             thumbnailURL = item.subjectPreview?.thumbnailURL
             excerpt = item.subjectPreview?.excerpt
             voice = item.subjectPreview?.voice
+            embed = item.subjectPreview?.embed
             hasPreview = item.subjectPreview != nil
             isRead = item.isRead
             createdAt = item.createdAt
@@ -164,7 +168,9 @@ final class NotificationsLocalCache: Sendable {
                 otherSenderCount: otherSenderCount,
                 sampleSenders: sampleSenders.map { NotificationActor(id: ProfileID($0.id), name: $0.name, avatarURL: $0.avatarURL) },
                 postSubjectID: postSubjectID.map { PostID($0) },
-                subjectPreview: hasPreview ? NotificationSubjectPreview(thumbnailURL: thumbnailURL, excerpt: excerpt, voice: voice) : nil,
+                subjectPreview: hasPreview ? NotificationSubjectPreview(
+                    thumbnailURL: thumbnailURL, excerpt: excerpt, voice: voice, embed: embed
+                ) : nil,
                 subjectAccountID: subjectAccountID,
                 isRead: isRead,
                 createdAt: createdAt

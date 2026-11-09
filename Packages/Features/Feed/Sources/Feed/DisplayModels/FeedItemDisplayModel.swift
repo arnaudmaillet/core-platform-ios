@@ -94,6 +94,9 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
 
     /// Whether the caption speaks: the one test a surface reads (#2206).
     var hasVoice: Bool { voice != nil }
+    /// What the post shows as a card in its caption's place (#2216): a
+    /// showcase is a TEXT post — `mediaURL` stays nil.
+    let embed: PostEmbed?
 
     init(
         id: PostID,
@@ -113,9 +116,11 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
         headAspectRatio: Double? = nil,
         authorHandle: String? = nil,
         avatarFrameID: String? = nil,
-        voice: PostVoice? = nil
+        voice: PostVoice? = nil,
+        embed: PostEmbed? = nil
     ) {
         self.voice = voice
+        self.embed = embed
         self.avatarFrameID = avatarFrameID
         self.authorHandle = authorHandle.flatMap { $0.isEmpty ? nil : $0 }
         self.headAspectRatio = headAspectRatio.flatMap { $0 > 0 && $0.isFinite ? $0 : nil }
@@ -207,7 +212,8 @@ public struct FeedDisplayModelBuilder: Sendable {
             },
             authorHandle: entry.author.handle,
             avatarFrameID: entry.author.avatarFrameID,
-            voice: entry.post.voice
+            voice: entry.post.voice,
+            embed: entry.post.embed
         )
     }
 

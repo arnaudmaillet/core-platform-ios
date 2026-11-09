@@ -109,7 +109,9 @@ enum GalleryPostProjection {
             // The hydrated model carries it too, so seed and entry agree.
             authorHandle: post.authorHandle,
             // A voice post opens speaking (#2206): the tile knew its voice.
-            voice: post.voice
+            voice: post.voice,
+            // A showcase opens with its card (#2216): the tile knew it.
+            embed: post.embed
         )
     }
 }

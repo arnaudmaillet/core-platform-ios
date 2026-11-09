@@ -351,6 +351,8 @@ extension ForYouRepository {
         )
         // A text post's voice (#2206): the tile stays `.text`.
         post.voice = entry.post.voice
+        // …and a showcase's card (#2216): the tile stays `.text`.
+        post.embed = entry.post.embed
         return post
     }
 }
