@@ -1,3 +1,4 @@
+import AVFoundation
 import UIKit
 import VoiceKit
 
@@ -98,6 +99,25 @@ public final class VoicePlaybackHub {
         refresh()
     }
 
+    /// `view` left the screen — scrolled off, its cell reused, its sheet or
+    /// bubble closed (#2208): its voice stops where it is, keeping its place,
+    /// UNLESS another view on screen shows the same voice. A tap on a card
+    /// opens its post, whose page binds the same id before the card leaves
+    /// the window: the voice goes on there, at the same place.
+    public func viewLeftScreen(_ view: VoiceView) {
+        let key = ObjectIdentifier(view)
+        guard let id = bindings[key]?.id, player.messageID == id else { return }
+        let shownElsewhere = bindings.contains { other, binding in
+            other != key && binding.id == id && binding.view?.window != nil
+        }
+        if !shownElsewhere { stop(id) }
+    }
+
+    /// The id a post's voice plays under, wherever the post is drawn — a
+    /// card, a tile, a pin's bubble, its page (#2208) — so a voice started on
+    /// one goes on, at the same place, on the next. `rawID` is the post's id.
+    public nonisolated static func postID(_ rawID: String) -> String { "post-\(rawID)" }
+
     /// Pauses what plays, keeping its place.
     func pauseForBackground() {
         guard player.state == .playing || player.state == .loading else { return }
@@ -166,6 +186,43 @@ public final class VoicePlaybackHub {
     }
 
     #if DEBUG
+    /// A hub on a player that makes no sound and touches no audio session,
+    /// for the tests of the surfaces that draw a voice post (#2208).
+    public static func silentForTests() -> VoicePlaybackHub {
+        let name = "voice-silent-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name) ?? .standard
+        defaults.removePersistentDomain(forName: name)
+        let center = NotificationCenter()
+        let player = VoicePlayer(
+            session: SilentSession(), makeEngine: { SilentEngine() }, defaults: defaults, notifications: center
+        )
+        return VoicePlaybackHub(player: player, notifications: center)
+    }
+
     public var debugBoundCount: Int { bindings.values.filter { $0.view != nil }.count }
     #endif
 }
+
+#if DEBUG
+/// `VoicePlaybackHub.silentForTests`' session: it takes nothing.
+private final class SilentSession: VoiceAudioSessionControlling {
+    var isInputAvailable = true
+    func setCategory(
+        _ category: AVAudioSession.Category, mode: AVAudioSession.Mode, options: AVAudioSession.CategoryOptions
+    ) throws {}
+    func setActive(_ active: Bool, options: AVAudioSession.SetActiveOptions) throws {}
+    func setAllowHapticsAndSystemSoundsDuringRecording(_ allow: Bool) throws {}
+}
+
+/// Its engine: it plays nothing, and says it is ten seconds long.
+private final class SilentEngine: VoicePlaybackEngine {
+    var onEnd: (() -> Void)?
+    var onFailure: (() -> Void)?
+    var currentTime: TimeInterval = 0
+    var duration: TimeInterval? = 10
+    func load(_ url: URL) {}
+    func play(rate: Float) {}
+    func pause() {}
+    func seek(to seconds: TimeInterval) { currentTime = seconds }
+}
+#endif
