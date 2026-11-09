@@ -69,6 +69,9 @@ final class GroupInfoViewModel {
         var photoURL: URL?
         var description = ""
         var memberCount = 0
+        /// A public group's audience (#2217), counted apart from its members.
+        var followerCount = 0
+        var visibility: ConversationVisibility = .private
         var members: [MemberRow] = []
         var viewerRole: ConversationRole?
         var isMuted = false
@@ -79,8 +82,17 @@ final class GroupInfoViewModel {
         var canEdit: Bool { viewerRole?.manages == true }
         /// Owner and admins add people.
         var canAddMembers: Bool { viewerRole?.manages == true }
-        /// "12 members".
-        var subtitle: String { memberCount == 1 ? "1 member" : "\(memberCount) members" }
+        /// Owner and admins switch Public / Private (#2217).
+        var canChangeVisibility: Bool { viewerRole?.manages == true }
+        /// A member who talks — the one who can leave (#2217): a follower
+        /// unfollows from the thread, an outsider has nothing to leave.
+        var isMember: Bool { viewerRole?.talks == true }
+        /// The viewer follows this public group (#2217).
+        var isFollower: Bool { viewerRole == .subscriber }
+        /// "12 members"; a public group's "40 members · 2.3K followers" (#2217).
+        var subtitle: String { GroupCopy.header(memberCount: memberCount, followerCount: followerCount, visibility: visibility) }
+        /// The Members header's count: members only, never the audience.
+        var memberCountText: String { GroupCopy.memberCount(memberCount) }
     }
 
     var onStateChange: ((State) -> Void)?
@@ -176,21 +188,26 @@ final class GroupInfoViewModel {
     private func adopt(
         _ identity: ConversationIdentity, _ list: [ConversationMember], profiles: [ProfileID: ChatProfile], viewer: ProfileID?
     ) {
+        // A group's followers are its audience (#2217): never listed among
+        // its members, nor counted with them.
+        let talkers = list.filter(\.role.talks)
         viewerID = viewer
-        members = list
+        members = talkers
         var next = state
         next.phase = .loaded
         let viewerRole = list.first { $0.profileID == viewer }?.role ?? identity.viewerState.role
         next.viewerRole = viewerRole
-        next.memberCount = max(identity.memberCount, list.count)
+        next.memberCount = max(identity.memberCount, talkers.count)
+        next.followerCount = identity.subscriberCount
+        next.visibility = identity.visibility
         next.ownName = identity.name
-        let others = list.filter { $0.profileID != viewer }.compactMap { profiles[$0.profileID]?.name }
+        let others = talkers.filter { $0.profileID != viewer }.compactMap { profiles[$0.profileID]?.name }
         next.name = identity.name.isEmpty
             ? ConversationIdentity.memberName(others, total: max(0, next.memberCount - 1))
             : identity.name
         next.photoURL = identity.photoURL
         next.description = identity.description
-        next.members = Self.rows(list, profiles: profiles, viewer: viewer, viewerRole: viewerRole)
+        next.members = Self.rows(talkers, profiles: profiles, viewer: viewer, viewerRole: viewerRole)
         next.isMuted = isMuted()
         state = next
     }
@@ -257,6 +274,20 @@ final class GroupInfoViewModel {
         let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
         write(failure: "Couldn't save the changes") {
             try await groupService.editIdentity(of: id, name: trimmedName, photoURL: photo, description: trimmedDescription)
+        }
+    }
+
+    /// Public or Private, once the screen has asked (#2217) — owner and
+    /// admins. Going public opens what is said from now on to anyone; going
+    /// private closes it to its followers at once. The group is read again:
+    /// the server's answer is the switch.
+    func setVisibility(_ visibility: ConversationVisibility) {
+        guard state.canChangeVisibility, visibility != state.visibility,
+              GroupCopy.choosableVisibilities.contains(visibility) else { return }
+        let groupService = service
+        let id = conversationID
+        write(failure: visibility == .public ? "Couldn't make the group public" : "Couldn't make the group private") {
+            try await groupService.setVisibility(visibility, of: id)
         }
     }
 

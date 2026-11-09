@@ -8,6 +8,10 @@ import UIKit
 /// group (photo, name, description, member count), what the viewer may do
 /// with it (add members, mute), its members with their roles, and Leave.
 ///
+/// Owner and admins switch it Public / Private (#2217), asked first: going
+/// public opens what is said from now on to anyone. A public group's
+/// followers are counted under its name, never listed among its members.
+///
 /// Every rule — who edits, who manages whom, whether the owner may leave —
 /// is the view model's; this draws what it is told. A member's row opens
 /// their profile; its "⋯" (owner and admins only) offers what the viewer
@@ -23,6 +27,7 @@ final class GroupInfoViewController: UIViewController {
     private enum Item: Hashable {
         case identity
         case addMembers
+        case visibility
         case mute
         case member(ProfileID)
         case leave
@@ -105,6 +110,13 @@ final class GroupInfoViewController: UIViewController {
                 content.text = "Add Members"
                 content.image = UIImage(systemName: "person.badge.plus")
                 content.textProperties.color = .tintColor
+            case .visibility:
+                // The switch, and what the current choice means (#2217).
+                content.text = "\(GroupCopy.visibilityTitle(self.state.visibility)) Group"
+                content.secondaryText = GroupCopy.visibilityExplanation(self.state.visibility)
+                content.secondaryTextProperties.color = .secondaryLabel
+                content.image = UIImage(systemName: self.state.visibility == .public ? "globe" : "lock")
+                cell.accessories = [.popUpMenu(self.visibilityMenu(), displayed: .always)]
             case .mute:
                 content.text = "Mute Notifications"
                 content.image = UIImage(systemName: self.state.isMuted ? "bell.slash" : "bell")
@@ -132,7 +144,7 @@ final class GroupInfoViewController: UIViewController {
         ) { [weak self] cell, _, _ in
             var content = UIListContentConfiguration.groupedHeader()
             content.text = "Members"
-            content.secondaryText = self?.state.subtitle
+            content.secondaryText = self?.state.memberCountText
             cell.contentConfiguration = content
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { collectionView, path, item in
@@ -189,17 +201,23 @@ final class GroupInfoViewController: UIViewController {
             statusView.isHidden = true
         }
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.group, .actions, .members, .leave])
+        // A member leaves; a follower mutes, and unfollows from the thread;
+        // an outsider only reads (#2217).
+        snapshot.appendSections([.group, .actions, .members] + (next.isMember ? [.leave] : []))
         snapshot.appendItems([.identity], toSection: .group)
-        snapshot.appendItems((next.canAddMembers ? [.addMembers] : []) + [.mute], toSection: .actions)
+        var actions: [Item] = next.canAddMembers ? [.addMembers] : []
+        if next.canChangeVisibility { actions.append(.visibility) }
+        if next.isMember || next.isFollower { actions.append(.mute) }
+        snapshot.appendItems(actions, toSection: .actions)
         snapshot.appendItems(next.members.map { .member($0.id) }, toSection: .members)
-        snapshot.appendItems([.leave], toSection: .leave)
+        if next.isMember { snapshot.appendItems([.leave], toSection: .leave) }
         // What changed in place: the group's identity, the mute, each member
         // whose row changed (a role, a name).
         var stale: [Item] = []
         if previous.name != next.name || previous.description != next.description || previous.photoURL != next.photoURL
-            || previous.memberCount != next.memberCount || previous.canEdit != next.canEdit {
-            stale.append(.identity)
+            || previous.memberCount != next.memberCount || previous.canEdit != next.canEdit
+            || previous.followerCount != next.followerCount || previous.visibility != next.visibility {
+            stale += [.identity, .visibility]
         }
         if previous.isMuted != next.isMuted { stale.append(.mute) }
         let before = Dictionary(previous.members.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -210,6 +228,38 @@ final class GroupInfoViewController: UIViewController {
     }
 
     // MARK: - Actions
+
+    /// Private or Public, each with what it means (#2217).
+    private func visibilityMenu() -> UIMenu {
+        UIMenu(children: GroupCopy.choosableVisibilities.map { choice in
+            UIAction(
+                title: GroupCopy.visibilityTitle(choice), subtitle: GroupCopy.visibilityExplanation(choice),
+                state: choice == state.visibility ? .on : .off
+            ) { [weak self] _ in self?.confirmVisibility(choice) }
+        })
+    }
+
+    /// A switch is asked first (#2217): going public warns that what is said
+    /// from now on becomes readable by anyone; going private, that its
+    /// followers lose it. Cancelled, the row shows the choice it had.
+    private func confirmVisibility(_ choice: ConversationVisibility) {
+        guard choice != state.visibility else { return }
+        let question = GroupCopy.visibilityConfirmation(choice)
+        let alert = UIAlertController(title: question.title, message: question.message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in self?.reconfigureVisibility() })
+        alert.addAction(UIAlertAction(title: question.button, style: choice == .private ? .destructive : .default) {
+            [weak self] _ in self?.viewModel.setVisibility(choice)
+        })
+        present(alert, animated: true)
+    }
+
+    /// The pop-up's tick back on the current choice.
+    private func reconfigureVisibility() {
+        var snapshot = dataSource.snapshot()
+        guard snapshot.itemIdentifiers.contains(.visibility) else { return }
+        snapshot.reconfigureItems([.visibility])
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
 
     private func presentMemberMenu(_ id: ProfileID, from source: UIView?) {
         guard let row = state.members.first(where: { $0.id == id }), !row.actions.isEmpty else { return }

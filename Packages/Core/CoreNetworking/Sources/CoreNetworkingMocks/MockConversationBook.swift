@@ -16,6 +16,13 @@ final class MockConversationBook: @unchecked Sendable {
         var joinedAtMs: [String: Int64]
         var joinRequests: [ProposedChat.JoinRequest]
         var banned: Set<String> = []
+        /// Members the mock counts but doesn't name (#2217): a big group's
+        /// rest, so "40 members" and a full group of 500 need no 500 profiles.
+        var unnamedMembers = 0
+        /// Since when a public conversation is readable by anyone (#2217,
+        /// chat.v1's public-since watermark): what an outsider or a follower
+        /// reads starts here; members read everything.
+        var publicSinceMs: Int64?
     }
 
     private let lock = NSLock()
@@ -23,6 +30,14 @@ final class MockConversationBook: @unchecked Sendable {
     private var order: [String] = []
     private var created = 0
     let viewer: String
+
+    /// The public groups the viewer doesn't belong to (#2217): one with room
+    /// (an outsider's Join / Follow), one full (Follow only).
+    static let publicGroupID = "grp-coastal"
+    static let fullGroupID = "grp-darkroom"
+    /// The public group the viewer follows (#2217): muted in their inbox,
+    /// and the one `-mock-group-private-after` turns private.
+    static let followedGroupID = "grp-riverside"
 
     init(viewer: String, authors: [String], seedsGroups: Bool, seedsChannels: Bool, now: Int64) {
         self.viewer = viewer
@@ -46,6 +61,26 @@ final class MockConversationBook: @unchecked Sendable {
             add(.init(conversationID: "grp-nightwalk", kind: .group, name: "Night photo walk", photoURL: photo("nightwalk"),
                       visibility: .private, viewerState: .invited, invitedBy: author(3)),
                 members: [author(3): .owner, author(9): .member, author(10): .member], since: now - 2 * day)
+            // Public groups (#2217). Their followers are counted
+            // (`subscriberCount`), not named: the audience plane is unbounded.
+            var coastal: [String: ProposedChat.Role] = [author(20): .owner, author(21): .admin]
+            for index in 22..<28 { coastal[author(index)] = .member }
+            add(.init(conversationID: Self.publicGroupID, kind: .group, name: "Coastal cleanup", photoURL: photo("coastal"),
+                      description: "Beach cleans every other Sunday. Bags and gloves provided.", visibility: .public,
+                      subscriberCount: 2_300),
+                members: coastal, since: now - 60 * day, unnamedMembers: 40 - coastal.count, publicSince: now - 60 * day)
+            var darkroom: [String: ProposedChat.Role] = [author(30): .owner, author(31): .admin]
+            for index in 32..<36 { darkroom[author(index)] = .member }
+            add(.init(conversationID: Self.fullGroupID, kind: .group, name: "Darkroom swap", photoURL: photo("darkroom"),
+                      description: "Chemistry, paper and enlargers changing hands.", visibility: .public,
+                      subscriberCount: 860),
+                members: darkroom, since: now - 300 * day, unnamedMembers: ProposedChat.groupCap - darkroom.count,
+                publicSince: now - 300 * day)
+            add(.init(conversationID: Self.followedGroupID, kind: .group, name: "Riverside sketchers",
+                      photoURL: photo("riverside"), description: "Sketching by the water, Thursday evenings.",
+                      visibility: .public, subscriberCount: 340),
+                members: [author(36): .owner, author(37): .member, author(38): .member, viewer: .subscriber],
+                since: now - 25 * day, unnamedMembers: 15, publicSince: now - 25 * day)
         }
         if seedsChannels {
             add(.init(conversationID: "ch-daily", kind: .channel, name: "Daily light", photoURL: photo("dailylight"),
@@ -77,9 +112,11 @@ final class MockConversationBook: @unchecked Sendable {
 
     private func add(
         _ details: ProposedChat.Details, members: [String: ProposedChat.Role], since: Int64,
-        requests: [ProposedChat.JoinRequest] = []
+        requests: [ProposedChat.JoinRequest] = [], unnamedMembers: Int = 0, publicSince: Int64? = nil
     ) {
         var record = Record(details: details, members: members, joinedAtMs: [:], joinRequests: requests)
+        record.unnamedMembers = unnamedMembers
+        record.publicSinceMs = publicSince
         for (offset, member) in members.keys.sorted().enumerated() { record.joinedAtMs[member] = since + Int64(offset) * 60_000 }
         records[details.conversationID] = record
         order.append(details.conversationID)
@@ -104,6 +141,46 @@ final class MockConversationBook: @unchecked Sendable {
         lock.withLock {
             guard let record = records[id] else { return [] }
             return record.members.keys.sorted().map { ($0, record.members[$0]!, record.joinedAtMs[$0] ?? 0) }
+        }
+    }
+
+    /// Since when `requester` reads conversation `id` (#2217): 0 for a member
+    /// (everything), the public-since watermark for an outsider or a
+    /// follower of a public one, nil when they can't read it at all — a
+    /// private conversation answers an outsider as a missing one, and a
+    /// group turned private closes it to its former followers at once.
+    func readableSince(_ id: String, for requester: String) -> Int64? {
+        lock.withLock {
+            guard let record = records[id] else { return nil }
+            switch record.members[requester] {
+            case .owner?, .admin?, .member?: return 0
+            case .subscriber?, .guest?:
+                // A channel's subscribers are its audience, whatever its
+                // visibility; a group's followers only while it is public.
+                if record.details.kind == .channel { return 0 }
+                return record.details.visibility == .public ? record.publicSinceMs ?? 0 : nil
+            case nil:
+                if record.details.viewerState == .invited, requester == viewer { return 0 }
+                switch record.details.visibility {
+                case .private: return nil
+                case .public: return record.publicSinceMs ?? 0
+                case .listedOnRequest: return 0
+                }
+            }
+        }
+    }
+
+    /// Whether `profile` follows group `id` (#2217).
+    func follows(_ profile: String, group id: String) -> Bool {
+        lock.withLock { records[id]?.details.kind == .group && records[id]?.members[profile] == .subscriber }
+    }
+
+    /// Group `id` turned private by its owner (#2217) — the scripted change
+    /// `-mock-group-private-after` makes while the viewer reads it.
+    func turnPrivateByOwner(_ id: String, now: Int64) {
+        lock.withLock {
+            guard let owner = records[id]?.members.first(where: { $0.value == .owner })?.key else { return }
+            _ = handle(.setVisibility(viewer: owner, conversationID: id, visibility: .private), now: now)
         }
     }
 
@@ -138,10 +215,17 @@ final class MockConversationBook: @unchecked Sendable {
             else { .none }
         }
         let talkers = record.members.values.filter { $0 == .owner || $0 == .admin || $0 == .member }.count
-        if record.details.kind == .group { record.details.memberCount = record.members.count } else {
-            record.details.memberCount = talkers
-        }
+        // A group's followers are its audience, counted apart (#2217): its
+        // members are the ones who talk, named or not.
+        record.details.memberCount = talkers + (record.details.kind == .group ? record.unnamedMembers : 0)
         return record.details
+    }
+
+    /// Whether group `id` has no room left: chat.v1's 500-member cap.
+    private func isFull(_ id: String) -> Bool {
+        guard let record = records[id], record.details.kind == .group else { return false }
+        let talkers = record.members.values.filter { $0 == .owner || $0 == .admin || $0 == .member }.count
+        return talkers + record.unnamedMembers >= ProposedChat.groupCap
     }
 
     private func manages(_ viewer: String, _ id: String) -> Bool {
@@ -206,11 +290,21 @@ final class MockConversationBook: @unchecked Sendable {
                 return refused("CHT-1004: conversation not found")
             }
             if record.banned.contains(viewer) { return refused("CHT-1032: you can't join this") }
-            if record.members[viewer] != nil { return ProposedChat.Reply(details: details(id, for: viewer).map { [$0] } ?? []) }
+            let role = record.members[viewer]
+            // A group's follower joins as a member (#2217); anyone else in
+            // already is answered as they are.
+            let followerJoins = record.details.kind == .group && role == .subscriber
+            if role != nil, !followerJoins {
+                return ProposedChat.Reply(details: details(id, for: viewer).map { [$0] } ?? [])
+            }
+            if record.details.kind == .group, isFull(id) { return refused("CHT-1020: this group is full") }
             if record.details.visibility == .public {
                 records[id]?.members[viewer] = record.details.kind == .channel ? .subscriber : .member
                 records[id]?.joinedAtMs[viewer] = now
+                // A channel gains a subscriber; a follower who joins a group
+                // leaves its audience for its members.
                 if record.details.kind == .channel { records[id]?.details.subscriberCount += 1 }
+                if followerJoins { records[id]?.details.subscriberCount -= 1 }
             } else if !record.joinRequests.contains(where: { $0.profileID == viewer }) {
                 records[id]?.joinRequests.append(.init(profileID: viewer, requestedAtMs: now))
             }
@@ -265,7 +359,21 @@ final class MockConversationBook: @unchecked Sendable {
             return ProposedChat.Reply()
         case let .setVisibility(viewer, id, visibility):
             guard manages(viewer, id) else { return refused("CHT-1030: only an owner or an admin changes visibility") }
+            let was = records[id]?.details.visibility
             records[id]?.details.visibility = visibility
+            if visibility == .public, was != .public {
+                // Readable by anyone from now on, not before (#2217).
+                records[id]?.publicSinceMs = now
+            }
+            if visibility == .private, was == .public, records[id]?.details.kind == .group {
+                // Turned private, a group closes to its followers at once
+                // (#2217, `chat.conversation.unpublished`): they are no
+                // longer in it, and every read of theirs answers not found.
+                let kept = records[id]?.members.filter { $0.value != .subscriber && $0.value != .guest } ?? [:]
+                records[id]?.members = kept
+                records[id]?.details.subscriberCount = 0
+                records[id]?.publicSinceMs = nil
+            }
             return ProposedChat.Reply(details: details(id, for: viewer).map { [$0] } ?? [])
         case let .subscribe(viewer, id):
             guard let record = records[id], record.details.visibility == .public else {

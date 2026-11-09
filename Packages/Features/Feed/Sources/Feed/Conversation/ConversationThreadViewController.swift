@@ -280,6 +280,9 @@ final class ConversationThreadViewController: UIViewController {
     private var readerBar: ConversationReaderBar?
     /// The reader bar's write is on its way (a join, a withdrawal).
     private var readerActionInFlight = false
+    /// Where the viewer stands, while they don't post (#2215, #2217) — kept
+    /// apart from the bar, which hides for a standing with nothing to offer.
+    private var readerStanding: ConversationThreadReaderStanding?
 
     // MARK: The relation (#752)
 
@@ -1769,6 +1772,7 @@ final class ConversationThreadViewController: UIViewController {
     private func applyReaderStanding(_ standing: ConversationThreadReaderStanding?) {
         guard mode == .full else { return }
         readerActionInFlight = false
+        readerStanding = standing
         guard let standing else {
             composeBar.isHidden = false
             readerBar?.isHidden = true
@@ -1779,7 +1783,9 @@ final class ConversationThreadViewController: UIViewController {
         driver.cancelReply()
         composeBar.isHidden = true
         let bar = readerBar ?? makeReaderBar()
-        bar.isHidden = false
+        // A group closed to the viewer (#2217) offers nothing: no bar, the
+        // thread's own line says why.
+        bar.isHidden = ConversationReaderBar.spec(for: standing, isMuted: muted == true).isEmpty
         bar.setWorking(false)
         bar.configure(standing: standing, isMuted: muted == true)
         view.setNeedsLayout()
@@ -1825,6 +1831,22 @@ final class ConversationThreadViewController: UIViewController {
             ) { [weak self] in
                 guard let self else { return }
                 self.driver.leave(from: self)
+            }
+        case .follow:
+            guard !readerActionInFlight else { return }
+            readerActionInFlight = true
+            readerBar?.setWorking(true)
+            driver.follow()
+        case .unfollow:
+            let name = group?.name ?? "this group"
+            confirmReader(
+                title: "Unfollow \(name)?", message: "It leaves your inbox. You can still read it while it's public.",
+                button: "Unfollow"
+            ) { [weak self] in
+                guard let self, !self.readerActionInFlight else { return }
+                self.readerActionInFlight = true
+                self.readerBar?.setWorking(true)
+                self.driver.unfollow()
             }
         }
     }
@@ -2531,9 +2553,11 @@ extension ConversationThreadViewController {
     /// Whether the composer shows — a channel's reader gets the bar (#2215). Tests.
     var debugShowsComposer: Bool { !composeBar.isHidden }
     /// The reader bar's standing while it shows (#2215). Tests.
-    var debugReaderStanding: ConversationThreadReaderStanding? {
-        readerBar.flatMap { $0.isHidden ? nil : $0.standing }
-    }
+    var debugReaderStanding: ConversationThreadReaderStanding? { readerStanding }
+    /// Whether the reader bar shows — a group closed to the viewer hides it (#2217). Tests.
+    var debugShowsReaderBar: Bool { readerBar.map { !$0.isHidden } ?? false }
+    /// A reader bar tap, as the bar sends it (#2217). Tests.
+    func debugReaderAction(_ action: ConversationReaderBar.Action) { performReaderAction(action) }
     /// Taps the header pill (#2214). Tests.
     func debugTapPill() { peerPill.debugTap() }
     #endif
