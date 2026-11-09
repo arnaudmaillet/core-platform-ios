@@ -649,6 +649,20 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         if let index = arguments.firstIndex(of: "-open-post"), index + 1 < arguments.count {
             container.router.route(to: .post(PostID(arguments[index + 1])))
         }
+        #if DEBUG
+        // `-open-voice-post [n]` (#2207): the mock's n-th seeded voice post
+        // (one text post in five speaks), for checking a voice post's page
+        // without hunting for one. With `-voice-posts` it is drawn speaking.
+        if let index = arguments.firstIndex(of: "-open-voice-post") {
+            let turn = index + 1 < arguments.count ? Int(arguments[index + 1]) ?? 0 : 0
+            let dataset = container.mockBackend.dataset
+            let ids = dataset.posts.lazy.filter { dataset.seededVoice(forPostID: $0.postID) != nil }.map(\.postID)
+            if !ids.isEmpty {
+                let all = Array(ids)
+                container.router.route(to: .post(PostID(all[turn % all.count])))
+            }
+        }
+        #endif
         // `-open-unavailable-profile [hidden|suspended]` (#447): one of the
         // mock's seeded profiles no one but their owner reads
         // (`MockSocialServices.hiddenProfiles`), which reads "This account
