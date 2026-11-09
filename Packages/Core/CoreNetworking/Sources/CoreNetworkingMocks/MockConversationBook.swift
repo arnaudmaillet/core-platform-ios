@@ -142,18 +142,12 @@ final class MockConversationBook: @unchecked Sendable {
     func channelEmbed(
         _ id: String, for viewer: String, lastMessage: String?, blocksOwner: (String) -> Bool
     ) -> ChannelEmbed? {
-        lock.withLock {
+        lock.withLock { () -> ChannelEmbed? in
             guard let record = records[id] else {
                 return ChannelEmbed(conversationID: ConversationID(id), availability: .deleted)
             }
             guard record.details.kind == .channel, let details = details(id, for: viewer) else { return nil }
-            let state: ChannelEmbed.ViewerState = switch details.viewerState {
-            case .owner, .admin, .member: .member
-            case .subscriber: .subscriber
-            case .requested: .requested
-            case .banned: .banned
-            case .invited, .none: .none
-            }
+            let state = Self.embedState(details.viewerState)
             let isIn = state == .member || state == .subscriber
             // A private channel tells an outsider nothing — not even its
             // name (#995: it can't be probed).
@@ -177,6 +171,18 @@ final class MockConversationBook: @unchecked Sendable {
                 availability: availability,
                 lastMessagePreview: readable ? lastMessage : nil
             )
+        }
+    }
+
+    /// A standing as the card says it: an owner and an admin are members
+    /// (Open); an invitation is no standing yet.
+    private static func embedState(_ state: ProposedChat.ViewerState) -> ChannelEmbed.ViewerState {
+        switch state {
+        case .owner, .admin, .member: return .member
+        case .subscriber: return .subscriber
+        case .requested: return .requested
+        case .banned: return .banned
+        case .invited, .none: return .none
         }
     }
 
