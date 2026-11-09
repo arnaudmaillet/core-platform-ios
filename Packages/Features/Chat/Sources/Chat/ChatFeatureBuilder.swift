@@ -262,13 +262,13 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         let creation = ChannelCreationViewModel(service: channels)
         let screen = ChannelCreationViewController(viewModel: creation)
         let sheet = UINavigationController(rootViewController: screen)
-        screen.onCancel = { [weak sheet] in sheet?.dismiss(animated: true) }
+        screen.onCancel = { [weak sheet] in _ = sheet?.closePresentation() }
         creation.onCreated = { [weak sheet, catalog, groupNotes, router] id in
             groupNotes.created[id] = Date()
             // The tab behind the thread lists it.
             catalog.refresh()
             if let sheet {
-                sheet.dismiss(animated: true) { router?.route(to: .conversation(id)) }
+                _ = sheet.closePresentation { router?.route(to: .conversation(id)) }
             } else {
                 router?.route(to: .conversation(id))
             }

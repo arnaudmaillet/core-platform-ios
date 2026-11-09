@@ -298,8 +298,10 @@ final class ConversationThreadDriver: ConversationThreadDriving {
             do {
                 if unsubscribes { try await service.unsubscribe(from: id) } else { try await service.leave(id) }
                 context.onMembershipChange(id, true)
-                guard let presenter, let stack = presenter.navigationController else { return }
-                if stack.topViewController === presenter { stack.popViewController(animated: true) }
+                // The channel left, its thread closes — through the stack's
+                // arbiter, as every close does.
+                guard let presenter, presenter.navigationController?.topViewController === presenter else { return }
+                _ = presenter.closeScreen()
             } catch {
                 self?.channelWriteFailed(error, title: "Couldn't leave")
             }
