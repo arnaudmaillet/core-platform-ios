@@ -133,6 +133,11 @@ public final class MockSocialServices: @unchecked Sendable {
         noContact.mentions = .noOne
         noContact.messages = .noOne
         interactionSettings[Self.noContactProfileID] = noContact
+        // Takes messages from mutuals only (#2212): a DM the viewer opens
+        // with it is a request, one message until it answers.
+        var mutualsOnly = Self.defaultInteractionSettings
+        mutualsOnly.messages = .mutuals
+        interactionSettings[Self.requestOnlyProfileID] = mutualsOnly
         // `-mock-takedown-after <seconds> <postID>` (#1409): a post seen in a
         // feed, taken down while the app runs — what a revalidation then
         // answers not-found for.
@@ -146,6 +151,8 @@ public final class MockSocialServices: @unchecked Sendable {
 
     /// The profile that takes no mentions and no messages.
     public static let noContactProfileID = "prof-30"
+    /// Messages from mutuals only (#2212); no seeded conversation has it.
+    public static let requestOnlyProfileID = "prof-29"
 
     private static func verificationRequest(seed: String?) -> Profile_V1_VerificationRequestView? {
         let status: Profile_V1_VerificationRequestStatus

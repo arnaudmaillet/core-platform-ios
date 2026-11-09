@@ -35,9 +35,9 @@ struct MessageRefusalTests {
     @Test func aMessageToSomeoneWhoTakesNoneIsRefused() async throws {
         let refused = ProfileID("prof-30")
         let repository = makeRepository(refusing: refused.rawValue)
-        let conversation = try await repository.directConversation(with: refused)
+        // Refused at the opening now (`OpenDirectConversation`, #2212).
         await #expect(throws: ChatError.messagesRefused) {
-            _ = try await repository.send("Hi!", to: conversation, replyingTo: nil)
+            _ = try await repository.directConversation(with: refused)
         }
 
         let open = try await repository.directConversation(with: ProfileID("prof-31"))

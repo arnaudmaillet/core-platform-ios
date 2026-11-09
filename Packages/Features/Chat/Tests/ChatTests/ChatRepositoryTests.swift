@@ -116,7 +116,7 @@ struct ChatRepositoryTests {
 
         let id = try await repository.directConversation(with: ProfileID("prof-stranger"))
 
-        #expect(id.rawValue.hasPrefix("conv-created-"))
+        #expect(id.rawValue.hasPrefix("dm-"))
     }
 }
 

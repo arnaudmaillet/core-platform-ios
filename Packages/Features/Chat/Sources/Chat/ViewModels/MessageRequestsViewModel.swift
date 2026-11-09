@@ -121,8 +121,8 @@ public final class MessageRequestsViewModel {
         catalog.accept(id)
     }
 
-    /// Dismisses the request. The conversation still exists server-side —
-    /// `chat.v1` has no decline RPC — it simply stops being surfaced.
+    /// Dismisses the request, silently declined server-side
+    /// (`RespondToMessageRequest`, #2212).
     public func decline(_ id: ConversationID) {
         catalog.decline(id)
     }

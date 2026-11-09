@@ -215,6 +215,17 @@ public struct MockBackend: Sendable {
         // A message to someone who takes none is refused (#397).
         MockChatService(dataset: dataset, mayMessage: { _, recipient in
             socialServices.messageAudience(of: recipient) != .noOne
+        }, admission: { sender, recipient in
+            // The recipient's "Who Can Message" (#397) decides a DM's opening
+            // (#656, #2212): outside the audience, the opener's messages are
+            // a request.
+            switch socialServices.messageAudience(of: recipient) {
+            case .noOne: .refused
+            case .followers: socialGraph.isFollowing(sender, recipient) ? .open : .request
+            case .mutuals:
+                socialGraph.isFollowing(sender, recipient) && socialGraph.isFollowing(recipient, sender) ? .open : .request
+            default: .open
+            }
         }).register(on: bff)
         socialGraph.register(on: bff)
         // Contacts find a profile only through a channel its owner left on,

@@ -3,6 +3,15 @@ import CoreContracts
 import CoreNetworking
 import Foundation
 
+/// What a DM opening answers in the mock (backend #656, #2212), from the
+/// peer's "Who Can Message" setting: it opens, the opener's messages are a
+/// request, or it is refused (CHT-1011).
+public enum MockDirectAdmission: Sendable, Equatable {
+    case open
+    case request
+    case refused
+}
+
 /// Fake of chat.v1.ChatService over the shared dataset. Seeds four direct
 /// conversations (viewer ↔ a dataset author) with a short history, persists
 /// sent messages, and accepts MarkRead. Members are dataset authors, so profile
@@ -40,6 +49,10 @@ public final class MockChatService: @unchecked Sendable {
         }
         for index in 0..<16 {
             members["conv-\(index)"] = dataset.authors[index].profileID
+        }
+        // DMs opened in this session (`OpenDirectConversation`, #2212).
+        for direct in store.openedDirects() {
+            members[direct.id] = direct.peer
         }
         return members
     }
@@ -82,9 +95,11 @@ public final class MockChatService: @unchecked Sendable {
 
     private static let hiddenRequestIDs = hiddenRequests.map(\.id)
 
-    /// Every seeded conversation id, newest activity first.
+    /// Every seeded conversation id, newest activity first, then the DMs
+    /// opened in this session (#2212).
     private var conversationIDs: [String] {
         (0..<16).map { "conv-\($0)" } + Self.requestIDs + Self.hiddenRequestIDs
+            + store.openedDirects().map(\.id).sorted()
     }
     private let viewer = MockSocialDataset.viewerProfileID
 
@@ -92,13 +107,19 @@ public final class MockChatService: @unchecked Sendable {
     /// recipient's No One, a message is refused (CHT-1011). A narrower
     /// audience turns it into a request on the fleet; not modelled here.
     private let mayMessage: @Sendable (_ sender: String, _ recipient: String) -> Bool
+    /// Whether `sender` opening a DM with `recipient` opens it, makes it a
+    /// request, or is refused (#2212). Defaults to `mayMessage`: refused or
+    /// open, never a request.
+    private let admission: @Sendable (_ sender: String, _ recipient: String) -> MockDirectAdmission
 
     public init(
         dataset: MockSocialDataset,
-        mayMessage: @escaping @Sendable (_ sender: String, _ recipient: String) -> Bool = { _, _ in true }
+        mayMessage: @escaping @Sendable (_ sender: String, _ recipient: String) -> Bool = { _, _ in true },
+        admission: (@Sendable (_ sender: String, _ recipient: String) -> MockDirectAdmission)? = nil
     ) {
         self.dataset = dataset
         self.mayMessage = mayMessage
+        self.admission = admission ?? { sender, recipient in mayMessage(sender, recipient) ? .open : .refused }
     }
 
     public func register(on bff: MockBFF) {
@@ -156,6 +177,13 @@ public final class MockChatService: @unchecked Sendable {
             if let recipient, !mayMessage(request.senderID, recipient) {
                 return .failure(ConnectError(code: .permissionDenied, message: "CHT-1011: this account doesn't take messages"))
             }
+            // A request waiting for its answer takes one message (#656).
+            if store.pendingRequester(of: request.conversationID) == request.senderID,
+               store.messages(for: request.conversationID, seed: []).contains(where: { $0.senderID == request.senderID }) {
+                return .failure(ConnectError(
+                    code: .failedPrecondition, message: "CHT-1010: a message request is waiting for its answer"
+                ))
+            }
             // The key's shape, as chat.v1 checks it (#795): 8–64 of
             // letters, digits, `-`, `_`; empty is no deduplication.
             if !request.idempotencyKey.isEmpty, !IdempotencyKey.isValid(request.idempotencyKey) {
@@ -173,6 +201,41 @@ public final class MockChatService: @unchecked Sendable {
         // the Unread tab can empty out (and disappear) for real.
         bff.register(path: "/chat.v1.ChatService/MarkRead") { [self] (request: Chat_V1_MarkReadRequest) in
             store.markRead(request.messageID, in: request.conversationID, for: request.memberID)
+            return .success(Chat_V1_CommandResponse())
+        }
+        // The pair's one DM (#656, #2212): a seeded conversation with the
+        // peer, else the one opened before, else a new one — unless the peer
+        // takes messages from no one (CHT-1011). Opened under the peer's
+        // settings: the opener's messages may be a request.
+        bff.register(path: "/chat.v1.ChatService/OpenDirectConversation") { [self] (request: Chat_V1_OpenDirectConversationRequest) -> Result<Chat_V1_OpenDirectConversationResponse, ConnectError> in
+            var response = Chat_V1_OpenDirectConversationResponse()
+            if request.profileID == viewer,
+               let seeded = conversationIDs.first(where: { otherMember[$0] == request.peerID && !store.isOpenedDirect($0) }) {
+                // Opening a request sent to the viewer accepts it.
+                if (Self.requestIDs + Self.hiddenRequestIDs).contains(seeded) { store.answer(seeded, accept: true) }
+                response.conversationID = seeded
+                return .success(response)
+            }
+            if let opened = store.openedDirect(between: request.profileID, and: request.peerID) {
+                response.conversationID = opened
+                response.request = store.pendingRequester(of: opened) == request.profileID
+                return .success(response)
+            }
+            switch admission(request.profileID, request.peerID) {
+            case .refused:
+                return .failure(ConnectError(code: .permissionDenied, message: "CHT-1011: this account doesn't take messages"))
+            case .open:
+                response.conversationID = store.openDirect(request.profileID, with: request.peerID, asRequest: false)
+            case .request:
+                response.conversationID = store.openDirect(request.profileID, with: request.peerID, asRequest: true)
+                response.request = true
+            }
+            return .success(response)
+        }
+        // The viewer answers a request to them (#2212): accepted, it is
+        // filed in the INBOX; declined, it leaves REQUESTS.
+        bff.register(path: "/chat.v1.ChatService/RespondToMessageRequest") { [self] (request: Chat_V1_RespondToMessageRequestRequest) in
+            store.answer(request.conversationID, accept: request.accept)
             return .success(Chat_V1_CommandResponse())
         }
         bff.register(path: "/chat.v1.ChatService/CreateConversation") { [self] (_: Chat_V1_CreateConversationRequest) in
@@ -206,8 +269,12 @@ public final class MockChatService: @unchecked Sendable {
         let members = otherMember
         return conversationIDs.compactMap { id -> Chat_V1_InboxEntryView? in
             let history = store.messages(for: id, seed: seedHistory(for: id))
+            // A DM opened here is listed once it holds a message.
+            if store.isOpenedDirect(id), history.isEmpty { return nil }
+            let answer = store.answer(of: id)
+            if answer == false { return nil }
             let isRequest = (Self.requestIDs + Self.hiddenRequestIDs).contains(id)
-                && !history.contains { $0.senderID == viewer }
+                && !history.contains { $0.senderID == viewer } && answer != true
             let isHidden = Self.hiddenRequestIDs.contains(id)
             switch folder {
             case .inbox: guard !isRequest else { return nil }
@@ -219,6 +286,8 @@ public final class MockChatService: @unchecked Sendable {
             entry.conversationID = id
             entry.kind = .direct
             entry.peerID = members[id] ?? ""
+            // The viewer's own request, waiting for the peer (#2212).
+            entry.request = store.pendingRequester(of: id) == viewer
             let latest = history.max { $0.createdAtMs < $1.createdAtMs }
             entry.lastActivityMs = latest?.createdAtMs ?? nowMs
             entry.muted = store.isMuted(id, for: viewer)
@@ -290,6 +359,8 @@ public final class MockChatService: @unchecked Sendable {
         // paragraph, and back-to-back turnarounds. conv-1 stays short.
         let morning: Int64 = 25 * 60
         let midday: Int64 = 24 * 60 + 30
+        // A DM opened this session (#2212) starts empty: it is new.
+        if store.isOpenedDirect(conversationID) { return [] }
         // Request threads are inbound-only and unanswered by construction —
         // a viewer reply seeded here would answer the request and file it in
         // the INBOX instead.
@@ -542,6 +613,42 @@ public final class MockChatService: @unchecked Sendable {
         func members(of conversationID: String) -> [String] {
             lock.withLock { joined[conversationID] ?? [] }
         }
+
+        /// DMs opened through `OpenDirectConversation` (#2212): id → the
+        /// opener and the peer; and the ones whose opener's messages are a
+        /// request still waiting.
+        private var directs: [String: (opener: String, peer: String)] = [:]
+        private var pendingRequests: [String: String] = [:]
+        /// Requests to the viewer they answered: true accepted, false declined.
+        private var answers: [String: Bool] = [:]
+
+        func openedDirects() -> [(id: String, peer: String)] {
+            lock.withLock { directs.map { (id: $0.key, peer: $0.value.peer) } }
+        }
+
+        func isOpenedDirect(_ id: String) -> Bool { lock.withLock { directs[id] != nil } }
+
+        func openedDirect(between one: String, and other: String) -> String? {
+            lock.withLock {
+                directs.first { Set([$0.value.opener, $0.value.peer]) == Set([one, other]) }?.key
+            }
+        }
+
+        func openDirect(_ opener: String, with peer: String, asRequest: Bool) -> String {
+            lock.withLock {
+                let id = "dm-\(directs.count + 1)"
+                directs[id] = (opener, peer)
+                joined[id] = [opener, peer]
+                if asRequest { pendingRequests[id] = opener }
+                return id
+            }
+        }
+
+        func pendingRequester(of id: String) -> String? { lock.withLock { pendingRequests[id] } }
+
+        func answer(_ id: String, accept: Bool) { lock.withLock { answers[id] = accept } }
+
+        func answer(of id: String) -> Bool? { lock.withLock { answers[id] } }
 
         func newConversationID() -> String {
             lock.withLock {

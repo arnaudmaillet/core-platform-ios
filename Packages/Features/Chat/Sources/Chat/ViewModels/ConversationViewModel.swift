@@ -100,6 +100,12 @@ public final class ConversationViewModel {
     /// again by the first send, so a viewer who types faster than the network
     /// waits exactly once and nobody creates two conversations.
     private var resolution: Task<ConversationID?, Never>?
+    /// Why the draft's DM didn't open, when it didn't: a refusal (CHT-1011)
+    /// is said on the send that waited for it (#2212).
+    private var resolutionError: Error?
+    /// The viewer's messages here are a request the peer has yet to answer
+    /// (`OpenDirectConversation.request`, #2212): the first one sent says so.
+    private(set) var isPendingRequest = false
 
     private var messages: [ChatMessage] = []
     /// Where the next OLDER page of history starts; nil when there is none,
@@ -274,16 +280,22 @@ public final class ConversationViewModel {
         let task = Task<ConversationID?, Never> { [weak self] in
             guard let self else { return nil }
             guard case .draft(let peer, _, _) = self.target else { return self.conversationID }
-            guard let id = try? await self.repository.directConversation(with: peer) else {
+            let opening: DirectConversationOpening
+            do {
+                opening = try await self.repository.openDirectConversation(with: peer)
+            } catch {
                 // Drop the cached task so a later send can try again rather
                 // than inheriting this failure forever, and let the viewer type
                 // into an empty thread in the meantime.
+                self.resolutionError = error
                 self.resolution = nil
                 if case .loading = self.phase { self.emit() }
                 return nil
             }
-            self.adopt(id, peer: peer)
-            return id
+            self.resolutionError = nil
+            self.isPendingRequest = opening.isRequest
+            self.adopt(opening.id, peer: peer)
+            return opening.id
         }
         resolution = task
         return task
@@ -409,6 +421,12 @@ public final class ConversationViewModel {
         // of its own — the wait lands on a message the viewer has committed to.
         guard let id = await resolveConversation().value else {
             markFailed(pendingID)
+            // They take messages from no one (CHT-1011, #2212): said, as a
+            // refused send always was.
+            if let error = resolutionError, (error as? ChatError) == .messagesRefused {
+                let notice = Self.sendFailureNotice(error)
+                onActionNotice?(notice.title, notice.message)
+            }
             return
         }
         let writer = deviceCache?.viewer
@@ -441,6 +459,11 @@ public final class ConversationViewModel {
             deviceCache?.storeSent(message, in: id, as: writer)
             emit()
             onDidSendMessage?(id, message)
+            // The first message of a request: it waits for their answer
+            // (#2212), and the viewer is told before trying a second.
+            if isPendingRequest, messages.filter(\.isMine).count == 1 {
+                onActionNotice?(Self.requestSentNotice.title, Self.requestSentNotice.message)
+            }
             await markRead(id, upTo: message.id)
         } catch {
             markFailed(pendingID)
@@ -448,7 +471,9 @@ public final class ConversationViewModel {
             // — the failed row offers the retry. A failed photo or video
             // says so only when the connection is why (#794): its bubble
             // reads "Not sent", which cannot tell the viewer they're offline.
-            if (error as? ChatError) == .messagesRefused || pending.isText || Self.isConnectionFailure(error) {
+            if (error as? ChatError) == .requestPending { isPendingRequest = true }
+            if (error as? ChatError) == .messagesRefused || (error as? ChatError) == .requestPending
+                || pending.isText || Self.isConnectionFailure(error) {
                 let notice = Self.sendFailureNotice(error, isMedia: !pending.isText, isVoice: pending.isVoice)
                 onActionNotice?(notice.title, notice.message)
             }
@@ -470,12 +495,21 @@ public final class ConversationViewModel {
         if (error as? ChatError) == .messagesRefused {
             return ("Can't Send Message", "This account doesn't take messages.")
         }
+        if (error as? ChatError) == .requestPending {
+            return ("Request Pending", "You can send more messages once they accept your request.")
+        }
         let title = FailureCopy.title(for: error, fallback: "Couldn't send")
         if isVoice { return (title, "Your voice message wasn\u{2019}t sent. Tap it to try again.") }
         return isMedia
             ? (title, "Your photo or video wasn\u{2019}t sent. Tap it to try again.")
             : (title, "Your message wasn\u{2019}t sent. Check your connection and try again.")
     }
+
+    /// What the first message of a request says once it is sent (#2212).
+    static let requestSentNotice = (
+        title: "Message Request Sent",
+        message: "They\u{2019}ll see it in their requests. You can send more once they accept."
+    )
 
     /// Whether a send failed for want of a connection: offline or out of
     /// time — the causes worth a word beyond the failed bubble (#794).

@@ -549,15 +549,23 @@ final class InboxCatalog {
         declined.remove(id)
         accepted.insert(id)
         emit()
+        answer(id, accept: true)
     }
 
     /// Dismisses a request. It leaves the inbox entirely — the conversation
-    /// still exists server-side (`RespondToMessageRequest` isn't wired yet),
-    /// it simply stops being surfaced.
+    /// still exists server-side, silently declined (`RespondToMessageRequest`,
+    /// #2212): the sender keeps seeing it pending.
     func decline(_ id: ConversationID) {
         accepted.remove(id)
         declined.insert(id)
         emit()
+        answer(id, accept: false)
+    }
+
+    /// The answer, written (#2212). Shown at once; the next load agrees.
+    private func answer(_ id: ConversationID, accept: Bool) {
+        let repository = repository
+        Task { try? await repository.respondToMessageRequest(id, accept: accept) }
     }
 
     /// The viewer sent a message in a conversation, and it was accepted.
