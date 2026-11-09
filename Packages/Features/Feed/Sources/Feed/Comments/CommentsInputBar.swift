@@ -142,6 +142,11 @@ final class CommentsInputBar: UIView {
     /// Whether the field's emote button was last asked to show: a change
     /// animates (`animateEmoteToggle`), a repeat does nothing.
     private var emoteToggleShown = true
+    /// The slot closing for the text once the emote button is out: stopped
+    /// when the button comes back before it ends, or its frames ran on under
+    /// the button's way in — typed fast, the glyph came in stretched from
+    /// the left (the owner's video, 2026-11-09).
+    private var emoteSlotAnimator: UIViewPropertyAnimator?
     /// Whether the bar has had a real layout: the first is never animated.
     private var hasLaidOutOnce = false
     /// `speaksFromField` as of the last update: a change of mode is not a
@@ -2573,6 +2578,7 @@ final class CommentsInputBar: UIView {
         if animates {
             animateEmoteToggle(shown: !hidden, width: width)
         } else {
+            stopEmoteSlotAnimator()
             button.layer.removeAllAnimations()
             button.isHidden = hidden
             button.alpha = 1
@@ -2606,6 +2612,7 @@ final class CommentsInputBar: UIView {
         debugEmoteToggleMotions += 1
         #endif
         if shown {
+            stopEmoteSlotAnimator()
             UIView.performWithoutAnimation {
                 emoteToggleWidth.constant = width
                 field.contentView.layoutIfNeeded()
@@ -2631,10 +2638,22 @@ final class CommentsInputBar: UIView {
             button.alpha = 1
             button.transform = .identity
             emoteToggleWidth.constant = width
-            UIView.animate(springDuration: 0.25, bounce: 0, options: options) {
+            let closing = UIViewPropertyAnimator(duration: 0.25, dampingRatio: 1) {
                 self.field.contentView.layoutIfNeeded()
             }
+            closing.addCompletion { [weak self, weak closing] _ in
+                if self?.emoteSlotAnimator === closing { self?.emoteSlotAnimator = nil }
+            }
+            emoteSlotAnimator = closing
+            closing.startAnimation()
         }
+    }
+
+    /// The slot's closing, stopped where it stands: its frames go with it.
+    private func stopEmoteSlotAnimator() {
+        guard let closing = emoteSlotAnimator else { return }
+        emoteSlotAnimator = nil
+        if closing.state == .active { closing.stopAnimation(true) }
     }
 
     /// The own bubble's glyph: the send over a draft; at rest the emote

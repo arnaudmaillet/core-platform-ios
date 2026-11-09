@@ -676,6 +676,34 @@ struct VoiceComposerTests {
         #expect(!(bar.layer.animationKeys() ?? []).isEmpty, "a later layout no longer animates")
     }
 
+    /// Typed fast: the button comes back while its slot is still closing.
+    /// The closing stops where it stands, so no frame of the button runs on
+    /// under its way in (the owner's video, 2026-11-09: the glyph came in
+    /// stretched from the left).
+    @Test func aButtonBackWhileItsSlotClosesCarriesNoFrameMotion() async {
+        let (_, bar, _) = composer()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        bar.frame = CGRect(x: 0, y: 700, width: 390, height: 120)
+        window.addSubview(bar)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        bar.actsFromOwnBubble = true
+        bar.layoutIfNeeded()
+        let toggle = bar.debugEmoteToggle
+        bar.draftText = "a"
+        bar.draftText = ""
+        // Out, and its slot on its way closed.
+        #expect(await settle { toggle.isHidden }, "the emote button never left")
+        bar.draftText = "b"
+        func frameAnimations(_ view: UIView) -> [String] {
+            (view.layer.animationKeys() ?? []).filter { $0.hasPrefix("position") || $0.hasPrefix("bounds") }
+                + view.subviews.flatMap(frameAnimations)
+        }
+        #expect(frameAnimations(toggle).isEmpty, "the slot's closing ran on under the way in: \(frameAnimations(toggle))")
+        #expect(bar.debugEmoteSlotWidth == CommentsInputBar.Metrics.emoteToggleWidth)
+        #expect(toggle.bounds.width == CommentsInputBar.Metrics.emoteToggleWidth)
+    }
+
     /// A post's comments keep today's tap: no hold.
     @Test func aPostsComposerKeepsTheTap() {
         let bar = CommentsInputBar()
