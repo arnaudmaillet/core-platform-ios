@@ -312,6 +312,8 @@ public final class FeedLocalCache: Sendable {
             return media
         }
         view.publishedAtMs = Int64((post.publishedAt.timeIntervalSince1970 * 1000).rounded())
+        // A voice post keeps its voice on the device (#2206).
+        if let voice = post.voice { PostVoiceWire.write(voice, to: &view) }
         return view
     }
 

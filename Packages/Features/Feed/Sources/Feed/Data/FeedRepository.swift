@@ -582,7 +582,9 @@ public actor FeedRepository: FeedProviding {
                     assetID: attachment.assetID.isEmpty ? nil : attachment.assetID
                 )
             },
-            publishedAt: Date(timeIntervalSince1970: TimeInterval(view.publishedAtMs) / 1000)
+            publishedAt: Date(timeIntervalSince1970: TimeInterval(view.publishedAtMs) / 1000),
+            // A text post's voice (#2206), never an attachment.
+            voice: PostVoiceWire.voice(in: view)
         )
     }
 }
