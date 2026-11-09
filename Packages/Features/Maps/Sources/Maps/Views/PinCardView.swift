@@ -1493,7 +1493,10 @@ private final class PinTextFaceView: UIView {
     /// A voice post's mark (#2208): a mic on a small plate at the disc's
     /// foot, over the glyph or the author's face — inside the circle, which
     /// clips.
-    private let micBadge = UIImageView()
+    /// A plain plate holding the mic: not an image view of the face's own,
+    /// whose two (the glyph and the author) the face swaps between.
+    private let micBadge = UIView()
+    private let micGlyph = UIImageView()
     static let micBadgeSide: CGFloat = 16
     var wearsVoiceMark: Bool { !micBadge.isHidden }
 
@@ -1549,11 +1552,14 @@ private final class PinTextFaceView: UIView {
         avatar.isHidden = true
         addSubview(avatar)
 
-        micBadge.image = UIImage(systemName: "mic.fill")?.withConfiguration(
+        micGlyph.image = UIImage(systemName: "mic.fill")?.withConfiguration(
             UIImage.SymbolConfiguration(pointSize: 9, weight: .bold)
         )
-        micBadge.contentMode = .center
-        micBadge.tintColor = .systemBackground
+        micGlyph.contentMode = .center
+        micGlyph.tintColor = .systemBackground
+        micGlyph.frame = CGRect(x: 0, y: 0, width: Self.micBadgeSide, height: Self.micBadgeSide)
+        micGlyph.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        micBadge.addSubview(micGlyph)
         micBadge.backgroundColor = UIColor.label.withAlphaComponent(0.8)
         micBadge.layer.cornerRadius = Self.micBadgeSide / 2
         micBadge.layer.cornerCurve = .circular
