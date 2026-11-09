@@ -376,8 +376,12 @@ final class CommentsInputBar: UIView {
             // button scales its symbols up a text style's step, and the
             // glyph's bare size jumped at the hand-over (filmed, 2026-11-07).
             face.image = nil
-            if var home = bubbleImage(sends: hasDraft || isSending) {
-                if let drawn = rowActionButton.imageView?.preferredSymbolConfiguration {
+            let sends = hasDraft || isSending
+            if var home = bubbleImage(sends: sends) {
+                // The emote face carries its own size (`emoteToggleConfiguration`),
+                // which the button draws as is: the button's would shrink it.
+                let carriesItsSize = speaksFromField && !sends
+                if !carriesItsSize, let drawn = rowActionButton.imageView?.preferredSymbolConfiguration {
                     home = home.applyingSymbolConfiguration(drawn) ?? home
                 }
                 if holdGlyph.image != home {
@@ -418,6 +422,7 @@ final class CommentsInputBar: UIView {
     var debugPlaceholder: String? { placeholderLabel.text }
     /// The placeholder's frame and the field's, in the field's space.
     var debugPlaceholderFrame: CGRect { placeholderLabel.frame }
+    var debugPlaceholderAlignment: NSTextAlignment { placeholderLabel.textAlignment }
     var debugFieldBounds: CGRect { field.contentView.bounds }
     /// Whether the field's long press would begin now.
     var debugFieldHoldBegins: Bool { gestureRecognizerShouldBegin(fieldVoiceHold) }
@@ -854,10 +859,10 @@ final class CommentsInputBar: UIView {
         /// and the rail slot are ONE row, the comment band's height, so the
         /// row reads as the media layout's sound bubble's line.
         @MainActor static var controlSize: CGFloat { SnapActionColumn.bubbleSize }
-        /// The emote toggle inside the field: 36pt wide on the 38pt line —
-        /// room for its widest face, the keyboard glyph (33pt at the large
-        /// scale, `emoteToggleConfiguration`), with a margin either side.
-        static let emoteToggleWidth: CGFloat = 36
+        /// The emote toggle inside the field: 40pt wide on the 38pt line —
+        /// room for its widest face, the keyboard glyph (about 39pt at 20pt
+        /// and the large scale, `emoteToggleConfiguration`).
+        static let emoteToggleWidth: CGFloat = 40
         /// The field's trailing button is the field's trailing CAP: a 38pt
         /// square flush with the field's end, so its glyph is concentric
         /// with the capsule's round end. The send disc (29pt) used to stand
@@ -1000,8 +1005,9 @@ final class CommentsInputBar: UIView {
     static let sendConfiguration = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
     /// A step up, as the row's buttons draw theirs (a glass button scales
     /// its symbols to the large scale): the face matched the waveform and
-    /// the send beside it no longer (the owner, 2026-11-07).
-    static let emoteToggleConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium, scale: .large)
+    /// the send beside it no longer (the owner, 2026-11-07). 20pt since
+    /// 2026-11-08 (the owner: larger, in the field and in the bubble).
+    static let emoteToggleConfiguration = UIImage.SymbolConfiguration(pointSize: 20, weight: .medium, scale: .large)
     /// The send arrow's colour, on every host: the brand's tint (#1124),
     /// NAMED rather than inherited. It was `.tintColor`, which resolves
     /// against the button's ancestors — and came out grey in a conversation
@@ -1383,9 +1389,11 @@ final class CommentsInputBar: UIView {
     /// Vertical-intent gate for the swipe-exit pan only; every other
     /// recognizer keeps UIKit's default answer.
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        // The field's voice hold (#2183): over an empty field, nothing on its way.
+        // The field's voice hold (#2183): over an empty field at rest, nothing
+        // on its way. Focused, the field writes (2026-11-08).
         if gestureRecognizer === fieldVoiceHold {
             return actsFromOwnBubble && holdsToRecord && !hasDraft && !isSending && voiceOverlay == nil
+                && !textView.isFirstResponder
         }
         guard gestureRecognizer === swipeRecognizer,
               let pan = gestureRecognizer as? UIPanGestureRecognizer else {
@@ -1893,7 +1901,9 @@ final class CommentsInputBar: UIView {
     private var viewerImagePipeline: ImagePipeline?
 
     /// The field's own instructions where its long press records (the
-    /// owner, 2026-11-07: "maintenir pour vocal, taper pour écrire").
+    /// owner, 2026-11-07: "maintenir pour vocal, taper pour écrire"). Only
+    /// at rest: focused, the field is for writing — the host's placeholder
+    /// ("Message…"), at the text's start, and no voice hold (2026-11-08).
     static let speakOrWritePlaceholder = "Hold for voice, tap to type"
 
     /// The placeholder, resolved from BOTH axes in one place.
@@ -1915,7 +1925,7 @@ final class CommentsInputBar: UIView {
             placeholderLabel.text = "Sign up to comment"
         } else if let replyName {
             placeholderLabel.text = "Reply to \(replyName)…"
-        } else if speaksFromField {
+        } else if speaksFromField, !textView.isFirstResponder {
             placeholderLabel.text = Self.speakOrWritePlaceholder
         } else if let defaultPlaceholder {
             placeholderLabel.text = defaultPlaceholder
@@ -2523,7 +2533,7 @@ final class CommentsInputBar: UIView {
             emoteToggleWidth.constant = width
             setNeedsLayout()
         }
-        textView.accessibilityCustomActions = speaksFromField && !hasDraft
+        textView.accessibilityCustomActions = speaksFromField && !hasDraft && !textView.isFirstResponder
             ? [UIAccessibilityCustomAction(name: "Record voice message") { [weak self] _ in
                 self?.onVoiceHold?(.accessibilityStart)
                 return true
@@ -2775,9 +2785,17 @@ extension CommentsInputBar: UITextViewDelegate {
         return false
     }
 
+    /// Focused, a conversation's field writes: its placeholder and its
+    /// voice action follow (2026-11-08).
+    func textViewDidBeginEditing(_ textView: UITextView) {
+        applyPlaceholder()
+        updateFieldAction()
+    }
+
     /// The emote panel goes with the keyboard: the bubble's glyph follows,
-    /// once the panel has left (after this turn).
+    /// once the panel has left (after this turn). The field speaks again.
     func textViewDidEndEditing(_ textView: UITextView) {
+        applyPlaceholder()
         DispatchQueue.main.async { [weak self] in self?.updateFieldAction() }
     }
 
