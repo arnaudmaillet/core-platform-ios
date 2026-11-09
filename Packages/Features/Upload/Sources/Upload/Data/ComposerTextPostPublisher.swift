@@ -26,8 +26,9 @@ struct ComposerTextPostPublisher: TextPostPublishing {
     /// post.
     func publishTextPost(_ text: String, voice: TextPostVoice?, as author: AuthorSummary?) async throws -> FeedEntry {
         guard let voice else { return try await publishTextPost(text, as: author) }
-        let content = (author?.id.rawValue ?? "") + "\u{1F}" + text.trimmingCharacters(in: .whitespacesAndNewlines)
-            + "\u{1F}" + voice.fileURL.lastPathComponent
+        let authorID: String = author?.id.rawValue ?? ""
+        let trimmed: String = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let content = "\(authorID)\u{1F}\(trimmed)\u{1F}\(voice.fileURL.lastPathComponent)"
         let entry = try await composer.publishVoicePost(
             caption: text, voice: voice, as: author, idempotencyKey: intent.key(for: content)
         )
