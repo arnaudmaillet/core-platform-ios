@@ -2,6 +2,7 @@ import CoreModels
 import MediaCore
 import DesignSystem
 import EmoteKit
+import PostGrid
 import UIKit
 import VoiceKitUI
 
@@ -173,6 +174,20 @@ final class CommentRowView: UIView {
         textStack.insertArrangedSubview(view, at: 1)
         bodyLabel.isHidden = bodyLabel.text?.isEmpty ?? true
     }
+
+    /// What stands under the body (#2216): a channel showcase's card, the
+    /// author's words above it.
+    private(set) var bodyFooter: UIView?
+
+    /// Puts `view` under the body — nil takes it away.
+    func setBodyFooter(_ view: UIView?) {
+        guard view !== bodyFooter else { return }
+        bodyFooter?.removeFromSuperview()
+        bodyFooter = view
+        guard let view, let textStack else { return }
+        textStack.addArrangedSubview(view)
+        textStack.setCustomSpacing(Spacing.sm, after: bodyLabel)
+    }
     /// The name · time line, for what sits beside the time (#725).
     var headerTextLabel: UILabel { headerLabel }
     /// The avatar's picture on show, nil while the monogram shows. Tests.
@@ -312,7 +327,7 @@ final class CommentRowView: UIView {
         bodyLabel.text = caption
         // A voice post's caption may be its voice alone (#2207): no empty
         // line under it.
-        bodyLabel.isHidden = caption.isEmpty && bodyAccessory != nil
+        bodyLabel.isHidden = caption.isEmpty && (bodyAccessory != nil || bodyFooter != nil)
         avatarView.setMonogram(monogram)
         isReplyRow = false
         refreshTypeDrivenGeometry()
@@ -359,6 +374,7 @@ final class CommentRowView: UIView {
     func prepareForReuse() {
         avatarView.reset()
         setBodyAccessory(nil)
+        setBodyFooter(nil)
         // ⚠️ BACK TO A COMMENT. A row that stood in for a caption has its reply
         // tap, its menu and its like control switched off, and a recycled cell
         // that inherited that would be a comment nobody could interact with —
@@ -944,6 +960,11 @@ final class CaptionBubbleCell: UICollectionViewCell {
     /// The app's one voice hub; tests put their own in.
     static var playbackHub: VoicePlaybackHub = .shared
     private var hub: VoicePlaybackHub { Self.playbackHub }
+    /// A channel showcase's caption (#2216): the author's words, then the
+    /// shared embed card, full size, its action live. Built when first shown.
+    private lazy var embedView = PostEmbedView()
+    /// The embed shown, if any.
+    private(set) var shownEmbed: PostEmbed?
 
     /// The avatar was tapped — the host pushes the author's profile.
     var onAvatarTap: (() -> Void)? {
@@ -970,6 +991,7 @@ final class CaptionBubbleCell: UICollectionViewCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         showVoice(nil, postID: nil, authorName: "")
+        showEmbed(nil, imagePipeline: nil)
         row.prepareForReuse()
     }
 
@@ -989,6 +1011,19 @@ final class CaptionBubbleCell: UICollectionViewCell {
         row.setBodyAccessory(voiceView)
     }
 
+    /// The caption's card, or none (#2216): under the author's words.
+    private func showEmbed(_ embed: PostEmbed?, imagePipeline: ImagePipeline?) {
+        guard let embed else {
+            if shownEmbed != nil { embedView.clear() }
+            shownEmbed = nil
+            row.setBodyFooter(nil)
+            return
+        }
+        shownEmbed = embed
+        embedView.show(embed, size: .full, pipeline: imagePipeline)
+        row.setBodyFooter(embedView)
+    }
+
     /// The page stopped owning the screen — the row left the window: its
     /// voice stops where it is, and keeps its place (#2207).
     override func didMoveToWindow() {
@@ -998,6 +1033,7 @@ final class CaptionBubbleCell: UICollectionViewCell {
 
     #if DEBUG
     var debugVoiceView: VoiceView? { shownVoiceID == nil ? nil : voiceView }
+    var debugEmbedView: PostEmbedView? { shownEmbed == nil ? nil : embedView }
     var debugShowsBody: Bool { !row.bodyTextLabel.isHidden }
     #endif
 
@@ -1034,9 +1070,10 @@ final class CaptionBubbleCell: UICollectionViewCell {
     func configureSeed(
         caption: String, timestamp: String, authorName: String, monogram: String,
         avatarURL: URL?, likeCount: Int64?, imagePipeline: ImagePipeline?,
-        voice: PostVoice? = nil, postID: PostID? = nil
+        voice: PostVoice? = nil, postID: PostID? = nil, embed: PostEmbed? = nil
     ) {
         showVoice(voice, postID: postID, authorName: authorName)
+        showEmbed(embed, imagePipeline: imagePipeline)
         row.configureAsPostCaption(
             authorName: authorName, timestamp: timestamp, caption: caption,
             monogram: monogram, avatarURL: avatarURL, likeCount: likeCount,
@@ -1057,6 +1094,7 @@ final class CaptionBubbleCell: UICollectionViewCell {
         likeCount: Int64? = nil
     ) {
         showVoice(model.voice, postID: model.postID, authorName: model.authorName)
+        showEmbed(model.embed, imagePipeline: imagePipeline)
         row.configureAsPostCaption(
             authorName: model.authorName, timestamp: model.timestampText,
             caption: model.caption, monogram: model.avatarMonogram,

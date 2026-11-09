@@ -426,6 +426,8 @@ final class CommentsInputBar: UIView {
     }
 
     #if DEBUG
+    /// The input row — the avatar and the field — shows (#2216).
+    var debugShowsInputRow: Bool { !field.isHidden && !avatarBubble.isHidden }
     var debugRowActionButton: UIButton { rowActionButton }
     var debugHoldGlyph: UIImageView { holdGlyph }
     var debugShowsRowAction: Bool { !rowActionButton.isHidden }
@@ -1435,7 +1437,8 @@ final class CommentsInputBar: UIView {
     /// So are the emote and completion strips riding over it (#960).
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         if emotes.suggestionsContain(point, in: self) { return true }
-        if point.y >= field.frame.minY, point.y <= field.frame.maxY,
+        // No input row (#2216): its band is the stream's, not the bar's.
+        if takesComments, point.y >= field.frame.minY, point.y <= field.frame.maxY,
            point.x >= bounds.minX, point.x <= bounds.maxX {
             return true
         }
@@ -1461,7 +1464,7 @@ final class CommentsInputBar: UIView {
     /// The field button whose 44pt target holds `point` (bar coordinates),
     /// the nearer one when both do. Internal for tests.
     func fieldButton(near point: CGPoint) -> UIButton? {
-        guard isUserInteractionEnabled, !isHidden, alpha > 0.01 else { return nil }
+        guard isUserInteractionEnabled, !isHidden, alpha > 0.01, takesComments else { return nil }
         var best: (button: UIButton, distance: CGFloat)?
         for button in [emotes.toggleButton, fieldActionButton] {
             guard !button.isHidden, button.isEnabled, button.isUserInteractionEnabled,
@@ -2014,10 +2017,23 @@ final class CommentsInputBar: UIView {
     /// guest has signed up from the button.
     private func applyGuestFace() {
         let isGuest = MemberGates.gate(from: self)?.isMember == false
-        if isGuest, signUpButton == nil { signUpButton = makeSignUpButton() }
-        signUpButton?.isHidden = !isGuest
-        avatarBubble.isHidden = isGuest
-        field.isHidden = isGuest
+        if isGuest, takesComments, signUpButton == nil { signUpButton = makeSignUpButton() }
+        signUpButton?.isHidden = !isGuest || !takesComments
+        avatarBubble.isHidden = isGuest || !takesComments
+        field.isHidden = isGuest || !takesComments
+    }
+
+    /// Whether the post takes comments (#2216): a channel's showcase takes
+    /// none — the conversation is the channel (#2211) — so its page has no
+    /// input row, only the column: its like and its Share. The row is hidden,
+    /// not removed: the column keeps its station, the bar its height, and
+    /// every host's clearance with it.
+    var takesComments = true {
+        didSet {
+            guard takesComments != oldValue else { return }
+            if !takesComments { textView.resignFirstResponder() }
+            applyGuestFace()
+        }
     }
 
     /// The sheet titled for commenting; once signed up, the composer takes
@@ -2037,6 +2053,7 @@ final class CommentsInputBar: UIView {
 
     /// Raises the keyboard into the composer — the row-tap reply trigger.
     func focusComposer() {
+        guard takesComments else { return }
         textView.becomeFirstResponder()
     }
 
