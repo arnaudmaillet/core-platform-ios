@@ -2379,6 +2379,7 @@ extension ConversationThreadViewController {
 
     /// The pill's relation badge. Tests.
     var debugPeerFollowBadge: SnapAuthorIdentityView.FollowBadge { peerPill.followBadge }
+    #if DEBUG
     /// The name a message's row is signed with (#2214). Tests.
     func debugAuthorName(of messageID: String) -> String? {
         messagesByID[messageID].map { Self.authorName(of: $0, author: author(of: $0), isGroup: group != nil, peer: peer) }
@@ -2391,6 +2392,7 @@ extension ConversationThreadViewController {
     var debugPillName: String { peerPill.debugName }
     /// Taps the header pill (#2214). Tests.
     func debugTapPill() { peerPill.debugTap() }
+    #endif
 
     #if DEBUG
     /// The long-press menu's titles for a message, flattened. Tests.
