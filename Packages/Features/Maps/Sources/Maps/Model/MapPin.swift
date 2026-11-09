@@ -115,8 +115,15 @@ public struct MapPin: Sendable, Equatable, Identifiable {
     /// share to make it SEMANTIC (Case B); everything else is generic.
     public var place: MapPlace? { places.first }
 
+    /// The caption's voice (#2206): a voice pin is a TEXT pin — `kind`
+    /// stays `.text` — whose caption speaks.
+    public let voice: PostVoice?
+
     /// Whether this marker shows a symbol instead of a cover image.
     public var isText: Bool { kind == .text }
+
+    /// Whether the caption speaks: the one test a marker reads (#2206).
+    public var hasVoice: Bool { voice != nil }
 
     public init(
         postID: PostID,
@@ -129,8 +136,10 @@ public struct MapPin: Sendable, Equatable, Identifiable {
         places: [MapPlace] = [],
         authorAvatarURL: URL? = nil,
         animatedIconID: String? = nil,
-        previewSheetID: String? = nil
+        previewSheetID: String? = nil,
+        voice: PostVoice? = nil
     ) {
+        self.voice = voice
         self.postID = postID
         self.latitude = latitude
         self.longitude = longitude
@@ -159,7 +168,8 @@ public struct MapPin: Sendable, Equatable, Identifiable {
             places: places,
             authorAvatarURL: authorAvatarURL,
             animatedIconID: animatedIconID,
-            previewSheetID: previewSheetID
+            previewSheetID: previewSheetID,
+            voice: voice
         )
     }
 
@@ -178,7 +188,8 @@ public struct MapPin: Sendable, Equatable, Identifiable {
             places: places,
             authorAvatarURL: authorAvatarURL,
             animatedIconID: animatedIconID,
-            previewSheetID: previewSheetID
+            previewSheetID: previewSheetID,
+            voice: voice
         )
     }
 
@@ -196,7 +207,8 @@ public struct MapPin: Sendable, Equatable, Identifiable {
             places: places,
             authorAvatarURL: authorAvatarURL,
             animatedIconID: animatedIconID,
-            previewSheetID: previewSheetID
+            previewSheetID: previewSheetID,
+            voice: voice
         )
     }
 
@@ -206,7 +218,7 @@ public struct MapPin: Sendable, Equatable, Identifiable {
             postID: postID, latitude: latitude, longitude: longitude,
             thumbnailURL: thumbnailURL, kind: kind, previewVideoURL: previewVideoURL,
             likeCount: likeCount, places: places, authorAvatarURL: authorAvatarURL,
-            animatedIconID: animatedIconID, previewSheetID: previewSheetID
+            animatedIconID: animatedIconID, previewSheetID: previewSheetID, voice: voice
         )
     }
 
@@ -254,7 +266,8 @@ public struct MapPin: Sendable, Equatable, Identifiable {
             places: places,
             authorAvatarURL: authorAvatarURL,
             animatedIconID: animatedIconID,
-            previewSheetID: previewSheetID
+            previewSheetID: previewSheetID,
+            voice: voice
         )
     }
 }

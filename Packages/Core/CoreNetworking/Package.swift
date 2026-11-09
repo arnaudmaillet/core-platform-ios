@@ -33,7 +33,10 @@ let package = Package(
                 .product(name: "CoreModels", package: "CoreModels"),
                 // `MediaAssetUploader` hands bytes to a `MediaUploadTransport`.
                 .product(name: "MediaCore", package: "MediaCore"),
-                .product(name: "Connect", package: "connect-swift")
+                .product(name: "Connect", package: "connect-swift"),
+                // `PostVoiceWire` (#2206) reads and writes a message's
+                // unknown fields.
+                .product(name: "SwiftProtobuf", package: "swift-protobuf")
             ]
         ),
         .target(
@@ -41,6 +44,8 @@ let package = Package(
             dependencies: [
                 "CoreNetworking",
                 "CoreContracts",
+                // `PostVoice`, the seeded voice posts (#2206).
+                .product(name: "CoreModels", package: "CoreModels"),
                 .product(name: "MediaCore", package: "MediaCore"),
                 .product(name: "Connect", package: "connect-swift"),
                 .product(name: "SwiftProtobuf", package: "swift-protobuf")

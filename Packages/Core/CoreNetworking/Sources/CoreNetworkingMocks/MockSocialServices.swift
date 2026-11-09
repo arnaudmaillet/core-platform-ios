@@ -1,5 +1,7 @@
 import Connect
 import CoreContracts
+import CoreModels
+import CoreNetworking
 import Foundation
 
 /// Fakes of timeline.v1 / post.v1 / profile.v1 over one shared dataset,
@@ -113,13 +115,19 @@ public final class MockSocialServices: @unchecked Sendable {
 
     /// `verificationSeed` gives the viewer a request in that state
     /// (`pending`, `rejected` or `approved`); anything else, none.
+    /// `-voice-posts` (#2206), read by the app (`DebugFlags`) and passed in:
+    /// a voice-alone post's text goes only when the surfaces draw its voice.
+    private let drawsVoicePosts: Bool
+
     public init(
         dataset: MockSocialDataset = MockSocialDataset(),
         postStore: MockPostStore? = nil,
         pageSizeCap: Int32 = 50,
         verificationSeed: String? = nil,
-        counters: MockCounterStore? = nil
+        counters: MockCounterStore? = nil,
+        drawsVoicePosts: Bool = false
     ) {
+        self.drawsVoicePosts = drawsVoicePosts
         self.dataset = dataset
         self.postStore = postStore
         self.pageSizeCap = pageSizeCap
@@ -884,6 +892,8 @@ public final class MockSocialServices: @unchecked Sendable {
             if let media = draft.media {
                 view.attachments = [Self.makeAttachment(url: media.url, width: media.width, height: media.height)]
             }
+            // The voice it was created with (#2206), never an attachment.
+            if let voice = draft.voice { PostVoiceWire.write(voice, to: &view) }
             return .success(view)
         }
 
@@ -905,6 +915,13 @@ public final class MockSocialServices: @unchecked Sendable {
                 + record.extraMedia.map {
                     Self.makeAttachment(url: $0.url, width: $0.width, height: $0.height)
                 }
+        }
+        // A seeded voice post (#2206): its caption speaks, its text kept or
+        // not. The text goes only under `-voice-posts`: until every surface
+        // draws the voice, a voice-alone post would read as an empty one.
+        if let seeded = dataset.seededVoice(forPostID: record.postID) {
+            PostVoiceWire.write(seeded.voice, to: &view)
+            if !seeded.keepsText, drawsVoicePosts { view.caption = "" }
         }
         return .success(view)
     }

@@ -30,6 +30,20 @@ public struct MockVoiceCatalog: Sendable {
               waveform: "lstoodfebkuqsm17rsqpg41117vvvvvvvpng10100000001stvuunf111lqm7ntupo8admsttp18ditsp618sstoj41110000000"),
         Voice(id: "voice-mine", duration: 1.8,
               waveform: "157b99buvvusrrqnon8664117qqtrsmooi811110000000000139ab8hrrqssronprrutsqpb3euutuvvvtqnlfc210000000000"),
+        // Voice posts (#2206): a text post's caption that speaks, 6 s to a
+        // near-minute (the longest a post takes is 60 s).
+        Voice(id: "voice-post-bakery", duration: 5.7,
+              waveform: "fssc71tusomr9stnamqumqmstu5oqtqorvqds5mrrutoc1000kq3qrfptrn9tvri1ttrtuvvqkg30001qvt9qd4uvtpsqnkf1000"),
+        Voice(id: "voice-post-hike", duration: 12.6,
+              waveform: "nhjd801quvqqlutr810oqropnoopv9poqqtrnpmb10dpqlptvrsv5opja640prlgsltvqfvrsqlunk110qqiursod618lplmk410"),
+        Voice(id: "voice-post-minute", duration: 51.0,
+              waveform: "vvttsvqtvuupsrtpqrqsspssvurspssnsprnprvutsrtvprvtrvutquvprpssrsququrrlurqorrrrqrutsptuoprsoqotuuuptr"),
+    ]
+
+    /// The voices a seeded voice post speaks (#2206), taken in turn: the
+    /// longest and the shortest first, so even a small corpus has both.
+    public static let postVoiceIDs = [
+        "voice-post-minute", "voice-short", "voice-post-hike", "voice-pair1", "voice-long", "voice-post-bakery",
     ]
 
     private let directory: URL?
