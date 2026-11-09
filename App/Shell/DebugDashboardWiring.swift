@@ -182,6 +182,7 @@ enum DebugDashboardWiring {
         ("-latency-bench", "UIKit's floor bench"),
         ("-lens-lab", "The lens lab"),
         ("-voice-lab", "The voice lab"),
+        ("-voice-catalog", "The voice component's sizes (#2205)"),
     ]
 }
 #endif

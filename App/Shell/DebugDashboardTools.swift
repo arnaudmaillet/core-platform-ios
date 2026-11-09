@@ -9,6 +9,7 @@ import LocalStore
 import Photos
 import UIKit
 import UserNotifications
+import VoiceKitUI
 
 /// The debug dashboard's second batch (#2133), the app's side: the network
 /// log, the caches and resets, the app's preferences, the permissions, a
@@ -297,9 +298,14 @@ enum DebugDashboardTools {
         let playground = DebugSection(
             title: "Screens",
             footer: "Opens over the dashboard. Also -haptic-playground at launch.",
-            rows: [.sheet("Haptics playground", detail: "Every haptic, in context and on the app's roles (#2193)", make: {
-                HapticPlaygroundViewController()
-            })]
+            rows: [
+                .sheet("Haptics playground", detail: "Every haptic, in context and on the app's roles (#2193)", make: {
+                    HapticPlaygroundViewController()
+                }),
+                .sheet("Voice component", detail: "Full, compact and mark, light and dark, text face and glass (#2205)", make: {
+                    UINavigationController(rootViewController: VoiceCatalogViewController())
+                }),
+            ]
         )
         return [playground] + groups.map { title, rows in
             DebugSection(

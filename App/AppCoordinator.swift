@@ -11,6 +11,7 @@ import Profile
 import MediaCore
 import UIKit
 import VoiceKit
+import VoiceKitUI
 #if DEBUG
 import CoreNetworkingMocks
 #endif
@@ -122,6 +123,13 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         // `-voice-lab`: the voice messages' engine on a bench (#2101).
         if VoiceLab.isRequested {
             window.rootViewController = VoiceLab.makeRoot()
+            window.makeKeyAndVisible()
+            return
+        }
+        // `-voice-catalog`: the voice component's three sizes (#2205), also
+        // in the dashboard's Screens.
+        if VoiceCatalogViewController.isRequested {
+            window.rootViewController = UINavigationController(rootViewController: VoiceCatalogViewController())
             window.makeKeyAndVisible()
             return
         }

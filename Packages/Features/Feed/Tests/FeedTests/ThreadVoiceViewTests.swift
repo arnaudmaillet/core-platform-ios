@@ -3,6 +3,7 @@ import DesignSystem
 import FeedInterface
 import Testing
 import UIKit
+import VoiceKitUI
 @testable import Feed
 
 /// The voice message's bubble (#2104).
@@ -38,7 +39,7 @@ struct ThreadVoiceViewTests {
     }
 
     private func view(_ state: ThreadVoiceView.State) -> ThreadVoiceView {
-        let view = ThreadVoiceView()
+        let view = ThreadVoiceView.thread()
         view.frame = CGRect(x: 0, y: 0, width: 360, height: 40)
         view.configure(state, senderName: "Ava")
         view.layoutIfNeeded()
@@ -97,7 +98,7 @@ struct ThreadVoiceViewTests {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 200))
         window.isHidden = false
         defer { window.isHidden = true }
-        let view = ThreadVoiceView()
+        let view = ThreadVoiceView.thread()
         view.frame = CGRect(x: 0, y: 0, width: 360, height: 40)
         window.addSubview(view)
         view.configure(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 4), senderName: nil)
@@ -135,7 +136,7 @@ struct ThreadVoiceViewTests {
     /// swipe never starts on its waveform or its play button.
     @Test func aVoiceMessageOwnsItsHorizontalDrags() {
         let screen = UIView(frame: CGRect(x: 0, y: 0, width: 402, height: 400))
-        let voice = ThreadVoiceView()
+        let voice = ThreadVoiceView.thread()
         voice.configure(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 3), senderName: nil)
         voice.frame = CGRect(x: 0, y: 100, width: 402, height: 60)
         screen.addSubview(voice)
@@ -272,7 +273,7 @@ struct ThreadVoiceViewTests {
         let list = ConversationCollectionView(frame: .zero, collectionViewLayout: UICollectionViewFlowLayout())
         #expect(!list.delaysContentTouches)
         #expect(list.touchesShouldCancel(in: UIButton()), "a scroll may start on any other control")
-        let voice = ThreadVoiceView()
+        let voice = ThreadVoiceView.thread()
         let inside = UIButton()
         voice.addSubview(inside)
         #expect(!list.touchesShouldCancel(in: inside))

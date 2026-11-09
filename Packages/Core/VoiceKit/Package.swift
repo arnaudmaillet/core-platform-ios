@@ -9,17 +9,26 @@ import PackageDescription
 // ⚠️ IT DEPENDS ON NO LOCAL PACKAGE BUT CACHEKIT, for MediaPlayback's reason:
 // AVFoundation needs Apple's system `MediaCore` framework, which a dependency
 // on our `MediaCore` module would shadow. CacheKit depends on nothing.
+//
+// `VoiceKitUI` (#2205) is the voice component every surface draws — the
+// conversation's bubble and a voice post's caption, in three sizes. A
+// separate library so VoiceKit stays UI-free; it adds DesignSystem, which
+// depends on nothing either.
 let package = Package(
     name: "VoiceKit",
     platforms: [.iOS("26.0")],
     products: [
-        .library(name: "VoiceKit", targets: ["VoiceKit"])
+        .library(name: "VoiceKit", targets: ["VoiceKit"]),
+        .library(name: "VoiceKitUI", targets: ["VoiceKitUI"])
     ],
     dependencies: [
-        .package(path: "../CacheKit")
+        .package(path: "../CacheKit"),
+        .package(path: "../DesignSystem")
     ],
     targets: [
         .target(name: "VoiceKit", dependencies: ["CacheKit"]),
-        .testTarget(name: "VoiceKitTests", dependencies: ["VoiceKit", "CacheKit"])
+        .target(name: "VoiceKitUI", dependencies: ["VoiceKit", "DesignSystem"]),
+        .testTarget(name: "VoiceKitTests", dependencies: ["VoiceKit", "CacheKit"]),
+        .testTarget(name: "VoiceKitUITests", dependencies: ["VoiceKitUI", "VoiceKit", "DesignSystem"])
     ]
 )

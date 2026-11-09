@@ -1,5 +1,6 @@
 import DesignSystem
 import UIKit
+import VoiceKitUI
 
 /// The field's place while a voice message is recorded (#2102). Locked
 /// and paused, the time leads on its chip and the waveform fills the rest

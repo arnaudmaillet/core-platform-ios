@@ -29,6 +29,7 @@ struct RawHueGuardTests {
         // Debug and simulator art.
         "AppButtonGalleryViewController.swift": "the DEBUG button gallery's sample gradient",
         "AppButtonCatalogViewController.swift": "the DEBUG button catalog's colour trials for the prominent ground",
+        "VoiceCatalogViewController.swift": "the DEBUG voice catalogue's coloured grounds behind its glass (#2205)",
         "MapIconDebugHUD.swift": "a DEBUG HUD",
         "AppCoordinator.swift": "a DEBUG stand-in picture",
         "LensLab.swift": "the DEBUG lens bench's test backgrounds (#1748)",
