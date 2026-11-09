@@ -9,6 +9,10 @@ public enum MessagesCategory: String, CaseIterable, Sendable {
     /// (bold row, dot, and a count on this tab) rather than split into a tab
     /// of their own.
     case all
+    /// The channels the viewer runs or follows (#2215), behind `-channels`:
+    /// an inbox composed without the flag has no page for it, and a route to
+    /// it lands on the first page instead.
+    case channels
     /// Pending message requests from accounts the viewer doesn't follow.
     case requests
     /// Personalized account recommendations.

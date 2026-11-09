@@ -275,6 +275,11 @@ final class ConversationThreadViewController: UIViewController {
     /// The conversation is a group (#2214): the header is its identity, and
     /// each row is signed by its sender among `members`. Nil for a DM.
     private var group: ConversationThreadGroup?
+    /// A channel's viewer who doesn't post (#2215): the bar in the
+    /// composer's place. Built the first time one is needed.
+    private var readerBar: ConversationReaderBar?
+    /// The reader bar's write is on its way (a join, a withdrawal).
+    private var readerActionInFlight = false
 
     // MARK: The relation (#752)
 
@@ -916,22 +921,37 @@ final class ConversationThreadViewController: UIViewController {
     /// is (#671): [peer pill] … [⋯]. The emote strip that held the slot is
     /// gone — the composer's own emote button is the way to emotes.
     private func configureToolbar() {
-        let more = SnapFooterToolbar.makeMoreItem(menu: UIMenu(children: [
-            UIAction(title: "View Profile", image: UIImage(systemName: "person.crop.circle")) { [weak self] _ in
+        // A channel's menu opens its info (#2215); a person's, their profile.
+        let profile = group?.isChannel == true
+            ? UIAction(title: "Channel Info", image: UIImage(systemName: "info.circle")) { [weak self] _ in
+                guard let self else { return }
+                self.driver.didTapGroupInfo(from: self)
+            }
+            : UIAction(title: "View Profile", image: UIImage(systemName: "person.crop.circle")) { [weak self] _ in
                 self?.driver.didTapIdentity()
-            },
-        ]))
+            }
+        let more = SnapFooterToolbar.makeMoreItem(menu: UIMenu(children: [profile]))
         toolbarItems = SnapFooterToolbar.items(
             leading: peerPill, leadingID: "conversation.peer-pill", actions: mediaItems(), more: more
         )
+        toolbarShape = ToolbarShape(isChannel: group?.isChannel == true, canPost: group?.canPost != false)
     }
+
+    /// What the footer was last built for (#2215): rebuilt only when a
+    /// channel's descriptor changes what it holds.
+    private struct ToolbarShape: Equatable {
+        var isChannel = false
+        var canPost = true
+    }
+    private var toolbarShape = ToolbarShape()
 
     /// `[📷 🖼]` left of the ⋯ (#681): the camera and the library, for a
     /// thread whose driver sends media.
     /// Stock bar items side by side, so the bar puts them in one platter
     /// (#1679).
     private func mediaItems() -> [UIBarButtonItem] {
-        guard mode == .full, driver.sendsMedia else { return [] }
+        // A channel's reader sends nothing (#2215).
+        guard mode == .full, driver.sendsMedia, group?.canPost != false else { return [] }
         let camera = BarItems.icon(
             id: "conversation.camera", image: UIImage(systemName: "camera"), label: "Camera"
         ) { [weak self] in self?.pickMedia(.camera) }
@@ -1161,6 +1181,9 @@ final class ConversationThreadViewController: UIViewController {
     private func renderMuted(_ muted: Bool?) {
         let was = self.muted
         self.muted = muted
+        if let readerBar, !readerBar.isHidden {
+            readerBar.configure(standing: readerBar.standing, isMuted: muted == true)
+        }
         guard let muted else {
             if was != nil {
                 placeMuteItem()
@@ -1491,6 +1514,11 @@ final class ConversationThreadViewController: UIViewController {
     /// own sender (#2214); a sender the group doesn't list (someone who
     /// left) has no name yet, and is signed "Member".
     private func author(of message: ConversationThreadMessage) -> ConversationThreadPerson {
+        // A channel's posts are the channel's (#2215), the viewer's own too:
+        // a stream under its name and photo, as Telegram's channels read.
+        if let group, group.isChannel {
+            return ConversationThreadPerson(id: nil, name: group.name, avatarURL: group.photoURL)
+        }
         if message.isMine { return viewer }
         guard let group else { return peer }
         return group.members[message.senderID] ?? ConversationThreadPerson(id: message.senderID, name: "", avatarURL: nil)
@@ -1500,8 +1528,11 @@ final class ConversationThreadViewController: UIViewController {
     /// group sender not known (#2214), or any sender of a group drawn with
     /// no member list.
     static func authorName(
-        of message: ConversationThreadMessage, author: ConversationThreadPerson, isGroup: Bool, peer: ConversationThreadPerson
+        of message: ConversationThreadMessage, author: ConversationThreadPerson, isGroup: Bool, peer: ConversationThreadPerson,
+        isChannel: Bool = false
     ) -> String {
+        // A channel signs every post itself (#2215).
+        if isChannel { return author.name.isEmpty ? "Channel" : author.name }
         if message.isMine { return author.name.isEmpty ? "You" : author.name }
         if isGroup { return author.name.isEmpty ? "Member" : author.name }
         // A group drawn the old way: the header's name is every member's,
@@ -1528,7 +1559,9 @@ final class ConversationThreadViewController: UIViewController {
         debugConfiguredIDs.append(messageID)
         #endif
         let writer = author(of: message)
-        let name = Self.authorName(of: message, author: writer, isGroup: group != nil, peer: peer)
+        let name = Self.authorName(
+            of: message, author: writer, isGroup: group != nil, peer: peer, isChannel: group?.isChannel == true
+        )
         cell.row.configure(
             with: CommentDisplayModel(
                 id: message.id,
@@ -1545,13 +1578,22 @@ final class ConversationThreadViewController: UIViewController {
         cell.row.variant = .message
         // A group row's face opens its sender (#2214); a DM's, the peer.
         let sender = message.senderID
-        cell.row.onAvatarTap = message.isMine ? nil : group != nil
-            ? { [weak self] in self?.driver.didTapMember(sender) }
-            : { [weak self] in self?.driver.didTapIdentity() }
+        if group?.isChannel == true {
+            // A channel's face is the channel's: its info screen (#2215).
+            cell.row.onAvatarTap = mode == .full ? { [weak self] in
+                guard let self else { return }
+                self.driver.didTapGroupInfo(from: self)
+            } : nil
+        } else {
+            cell.row.onAvatarTap = message.isMine ? nil : group != nil
+                ? { [weak self] in self?.driver.didTapMember(sender) }
+                : { [weak self] in self?.driver.didTapIdentity() }
+        }
         // A row tap answers it — the post's grammar. Nothing to answer in a peek.
         // While the keyboard is up, the tap retires it instead (see
         // `retireKeyboardOr`).
-        cell.row.onReplyTap = mode == .full ? { [weak self] in
+        // A channel's reader has nothing to answer with (#2215).
+        cell.row.onReplyTap = mode == .full && group?.canPost != false ? { [weak self] in
             guard let self else { return }
             self.retireKeyboardOr { self.driver.beginReply(to: messageID) }
         } : nil
@@ -1692,6 +1734,7 @@ final class ConversationThreadViewController: UIViewController {
         group = newGroup
         guard let newGroup else {
             peerPill.onGroupTapped = nil
+            applyReaderStanding(nil)
             if wasGroup { adoptPeer(peer) }
             return
         }
@@ -1707,8 +1750,91 @@ final class ConversationThreadViewController: UIViewController {
             guard let self else { return }
             self.driver.didTapGroupInfo(from: self)
         } : nil
+        if newGroup.isChannel { view.accessibilityLabel = "Channel, \(newGroup.name)" }
+        applyReaderStanding(newGroup.readerStanding)
+        if mode == .full,
+           toolbarShape != ToolbarShape(isChannel: newGroup.isChannel, canPost: newGroup.canPost) {
+            configureToolbar()
+        }
         fitTrailingRun()
         if hasRenderedContent { applySnapshot(animated: false) }
+    }
+
+    // MARK: - A channel's reader (#2215)
+
+    /// The composer for a viewer who posts; for one who doesn't, the reader
+    /// bar in its place. The composer stays laid out under the bar — hidden,
+    /// its height still the stream's clearance — so the transcript doesn't
+    /// move when one swaps for the other.
+    private func applyReaderStanding(_ standing: ConversationThreadReaderStanding?) {
+        guard mode == .full else { return }
+        readerActionInFlight = false
+        guard let standing else {
+            composeBar.isHidden = false
+            readerBar?.isHidden = true
+            readerBar?.setWorking(false)
+            return
+        }
+        composeBar.endEditing(true)
+        driver.cancelReply()
+        composeBar.isHidden = true
+        let bar = readerBar ?? makeReaderBar()
+        bar.isHidden = false
+        bar.setWorking(false)
+        bar.configure(standing: standing, isMuted: muted == true)
+        view.setNeedsLayout()
+    }
+
+    private func makeReaderBar() -> ConversationReaderBar {
+        let bar = ConversationReaderBar()
+        bar.onAction = { [weak self] action in self?.performReaderAction(action) }
+        view.addSubview(bar)
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            bar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Spacing.lg),
+            bar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Spacing.lg),
+            bar.bottomAnchor.constraint(equalTo: composeBar.bottomAnchor),
+        ])
+        readerBar = bar
+        return bar
+    }
+
+    private func performReaderAction(_ action: ConversationReaderBar.Action) {
+        switch action {
+        case .toggleMute:
+            guard let muted else { return }
+            setMuted(!muted, until: nil)
+        case .join:
+            guard !readerActionInFlight else { return }
+            readerActionInFlight = true
+            readerBar?.setWorking(true)
+            driver.join()
+        case .cancelRequest:
+            confirmReader(
+                title: "Withdraw your request?", message: "You can ask again later.", button: "Withdraw"
+            ) { [weak self] in
+                guard let self, !self.readerActionInFlight else { return }
+                self.readerActionInFlight = true
+                self.readerBar?.setWorking(true)
+                self.driver.cancelJoinRequest()
+            }
+        case .leave:
+            let name = group?.name ?? "this channel"
+            confirmReader(
+                title: "Leave \(name)?", message: "You won't see its posts any more.", button: "Leave"
+            ) { [weak self] in
+                guard let self else { return }
+                self.driver.leave(from: self)
+            }
+        }
+    }
+
+    private func confirmReader(title: String, message: String, button: String, _ confirmed: @escaping () -> Void) {
+        guard presentedViewController == nil else { return }
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: button, style: .destructive) { _ in confirmed() })
+        present(alert, animated: true)
     }
 
     private func adoptViewer(_ person: ConversationThreadPerson) {
@@ -1748,6 +1874,11 @@ final class ConversationThreadViewController: UIViewController {
         }
         let delete = UIAction(title: "Delete", image: UIImage(systemName: "trash"), attributes: .destructive) {
             [weak self] _ in self?.confirmDelete(id)
+        }
+        // A channel's reader reads (#2215): no Reply, and nothing of theirs
+        // to delete.
+        if group?.canPost == false {
+            return message.media?.kind == .voice ? nil : UIMenu(children: [copy, select, forward])
         }
         // A voice message has no text to copy or select, and forwarding it
         // waits for a later issue (#2103): Reply and Delete.
@@ -1913,6 +2044,11 @@ final class ConversationThreadViewController: UIViewController {
 
     /// The bottom inset the composer asks for: clear of it, a little air.
     private var restingBottomInset: CGFloat? {
+        // A channel's reader (#2215): clear of the bar in the composer's place.
+        if let readerBar, !readerBar.isHidden, readerBar.bounds.height > 0 {
+            return max(0, view.bounds.height - min(readerBar.frame.minY, composeBar.occupiedMinY)
+                - view.safeAreaInsets.bottom) + Spacing.sm
+        }
         guard composeBar.bounds.height > 0 else { return nil }
         // The bar's top at rest, the risen input row's while the keyboard
         // holds it above the bar (the pin stays down there, under it).
@@ -2382,7 +2518,9 @@ extension ConversationThreadViewController {
     #if DEBUG
     /// The name a message's row is signed with (#2214). Tests.
     func debugAuthorName(of messageID: String) -> String? {
-        messagesByID[messageID].map { Self.authorName(of: $0, author: author(of: $0), isGroup: group != nil, peer: peer) }
+        messagesByID[messageID].map {
+            Self.authorName(of: $0, author: author(of: $0), isGroup: group != nil, peer: peer, isChannel: group?.isChannel == true)
+        }
     }
     /// Whether a message is drawn as a system line (#2214). Tests.
     func debugIsSystemLine(_ messageID: String) -> Bool {
@@ -2390,6 +2528,12 @@ extension ConversationThreadViewController {
     }
     /// What the header pill shows (#2214). Tests.
     var debugPillName: String { peerPill.debugName }
+    /// Whether the composer shows — a channel's reader gets the bar (#2215). Tests.
+    var debugShowsComposer: Bool { !composeBar.isHidden }
+    /// The reader bar's standing while it shows (#2215). Tests.
+    var debugReaderStanding: ConversationThreadReaderStanding? {
+        readerBar.flatMap { $0.isHidden ? nil : $0.standing }
+    }
     /// Taps the header pill (#2214). Tests.
     func debugTapPill() { peerPill.debugTap() }
     #endif

@@ -46,6 +46,13 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// its info screen. Nil — the flag off, or a repository with no groups —
     /// and Messages is DMs only, as it was.
     private let groups: (any GroupChatServicing)?
+    /// Channels (#2215, `-channels`): the Channels tab, creating one, its
+    /// thread's reader bar, its info screen and join requests. Nil — the flag
+    /// off, or a repository with no channels — and Messages has no Channels
+    /// tab, as it was.
+    private let channels: (any GroupChatServicing)?
+    /// Where the Channels tab stands among the inbox's pages (#2215).
+    private let channelsPlacement: ChannelsPlacement
     /// What this session did to groups that the server doesn't say yet.
     private let groupNotes = GroupSessionNotes()
 
@@ -63,9 +70,13 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         localStore: LocalStore? = nil,
         relations: InboxRelations? = nil,
         showsGroups: Bool = DebugFlags.isOn("-group-chats"),
+        showsChannels: Bool = DebugFlags.isOn("-channels"),
+        channelsPlacement: ChannelsPlacement = DebugFlags.isOn("-channels-after-requests") ? .afterRequests : .afterChats,
         threadScreens: @escaping () -> any ConversationThreadScreenBuilding
     ) {
         groups = showsGroups ? repository as? any GroupChatServicing : nil
+        channels = showsChannels ? repository as? any GroupChatServicing : nil
+        self.channelsPlacement = channelsPlacement
         self.threadScreens = threadScreens
         self.relations = relations
         self.mediaPicker = mediaPicker
@@ -74,6 +85,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         let deviceCache = localStore.map(ChatLocalCache.init(store:))
         self.deviceCache = deviceCache
         catalog = InboxCatalog(repository: repository, directory: directory, deviceCache: deviceCache)
+        catalog.loadsChannels = channels != nil
         self.repository = repository
         self.connections = connections
         self.people = people
@@ -187,7 +199,10 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         }
 
         let inbox = MessagesInboxViewController(
-            surfaces: [conversations, requests, suggestions],
+            surfaces: Self.surfaces(
+                chats: conversations, channels: makeChannelsSurface(), requests: requests, suggestions: suggestions,
+                placement: channelsPlacement
+            ),
             searchResults: searchResults,
             initialCategory: initialCategory
         )
@@ -201,6 +216,114 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             }
         }
         return inbox
+    }
+
+    // MARK: - Channels (#2215)
+
+    /// Where the Channels tab stands (#2215). After Chats by default: a
+    /// channel is something the viewer READS, as a chat is, so it sits next
+    /// to the conversations — Requests and Suggestions, the triage pages,
+    /// stay together at the end. `-channels-after-requests` puts it after
+    /// Requests, for the side-by-side the issue asks for.
+    public enum ChannelsPlacement: Sendable {
+        case afterChats
+        case afterRequests
+    }
+
+    /// The inbox's pages, in order; no Channels page without channels.
+    static func surfaces(
+        chats: any InboxSurface, channels: (any InboxSurface)?, requests: any InboxSurface,
+        suggestions: any InboxSurface, placement: ChannelsPlacement
+    ) -> [any InboxSurface] {
+        guard let channels else { return [chats, requests, suggestions] }
+        return switch placement {
+        case .afterChats: [chats, channels, requests, suggestions]
+        case .afterRequests: [chats, requests, channels, suggestions]
+        }
+    }
+
+    /// The Channels tab, or nil with `-channels` off.
+    private func makeChannelsSurface() -> ChannelsViewController? {
+        guard let channels else { return nil }
+        let model = ChannelsViewModel(catalog: catalog, service: channels, router: router)
+        let surface = ChannelsViewController(viewModel: model, imagePipeline: imagePipeline)
+        surface.onCreate = { [self] presenter in presentChannelCreation(from: presenter) }
+        surface.onOpenRequests = { [self, weak model] presenter, runChannels in
+            let list = makeJoinRequests(runChannels) { model?.refreshRequests() }
+            presenter.navigationController?.pushViewController(list, animated: true)
+        }
+        return surface
+    }
+
+    /// The new channel's sheet: its name, description and who may join;
+    /// Create lands in its thread, opened by "You created the channel".
+    private func presentChannelCreation(from presenter: UIViewController) {
+        guard let channels else { return }
+        let creation = ChannelCreationViewModel(service: channels)
+        let screen = ChannelCreationViewController(viewModel: creation)
+        let sheet = UINavigationController(rootViewController: screen)
+        screen.onCancel = { [weak sheet] in sheet?.dismiss(animated: true) }
+        creation.onCreated = { [weak sheet, catalog, groupNotes, router] id in
+            groupNotes.created[id] = Date()
+            // The tab behind the thread lists it.
+            catalog.refresh()
+            if let sheet {
+                sheet.dismiss(animated: true) { router?.route(to: .conversation(id)) }
+            } else {
+                router?.route(to: .conversation(id))
+            }
+        }
+        presenter.present(sheet, animated: true)
+    }
+
+    /// The join requests of `runChannels` (#2215); `onChange` when some were
+    /// answered.
+    private func makeJoinRequests(
+        _ runChannels: [ChannelsViewModel.RunChannel], onChange: @escaping @MainActor () -> Void
+    ) -> UIViewController {
+        guard let channels else { return UIViewController() }
+        let model = ChannelJoinRequestsViewModel(channels: runChannels, service: channels)
+        model.onChange = { [catalog] in
+            onChange()
+            catalog.refresh()
+        }
+        let screen = ChannelJoinRequestsViewController(viewModel: model, imagePipeline: imagePipeline)
+        screen.onOpenProfile = { [router] profileID, name in
+            router?.route(to: .profile(profileID, stub: ProfileIdentityStub(handle: nil, displayName: name)))
+        }
+        return screen
+    }
+
+    /// A channel's info screen (#2215); `onChange` tells the thread behind
+    /// it that the channel changed.
+    private func makeChannelInfo(_ id: ConversationID, onChange: @escaping @MainActor () -> Void) -> UIViewController {
+        guard let channels else { return UIViewController() }
+        let model = ChannelInfoViewModel(
+            conversationID: id, service: channels,
+            isMuted: { [catalog] in catalog.isMuted(id) },
+            setMuted: { [catalog] muted, done in catalog.setMute(id, muted: muted, until: nil, completion: done) }
+        )
+        model.onChange = { [catalog] in
+            onChange()
+            catalog.refresh()
+        }
+        let screen = ChannelInfoViewController(viewModel: model, imagePipeline: imagePipeline)
+        screen.onOpenProfile = { [router] profileID, name in
+            router?.route(to: .profile(profileID, stub: ProfileIdentityStub(handle: nil, displayName: name)))
+        }
+        screen.onOpenRequests = { [self, weak model] presenter, changed in
+            let name = model?.state.name ?? ""
+            let run = ChannelsViewModel.RunChannel(id: id, name: name, photoURL: model?.state.photoURL)
+            let list = makeJoinRequests([run], onChange: changed)
+            presenter.navigationController?.pushViewController(list, animated: true)
+        }
+        // Left: the row goes, and the viewer is back in the inbox.
+        screen.onLeft = { [weak screen, catalog] in
+            catalog.delete([id])
+            catalog.refresh()
+            screen?.navigationController?.popToRootViewController(animated: true)
+        }
+        return screen
     }
 
     // MARK: - Groups (#2214)
@@ -283,11 +406,12 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         return screen
     }
 
-    /// What a group's thread needs (#2214); nil without groups.
+    /// What a group's or a channel's thread needs (#2214, #2215); nil with
+    /// neither.
     private func groupThreadContext() -> GroupThreadContext? {
-        guard let groups else { return nil }
-        return GroupThreadContext(
-            service: groups,
+        guard let conversationService = groups ?? channels else { return nil }
+        var context = GroupThreadContext(
+            service: conversationService,
             makeInfo: { [self] id, onChange in makeGroupInfo(id, onChange: onChange) },
             openProfile: { [router] id, name in
                 router?.route(to: .profile(id, stub: name.isEmpty ? nil : ProfileIdentityStub(handle: nil, displayName: name)))
@@ -295,6 +419,16 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             createdAt: { [groupNotes] id in groupNotes.created[id] },
             knownKind: { [directory] id in directory.summary(for: id)?.kind }
         )
+        context.kinds = Set((groups == nil ? [] : [.group]) + (channels == nil ? [] : [.channel]))
+        if channels != nil {
+            context.knownIdentity = { [directory] id in directory.summary(for: id)?.identity }
+            context.makeChannelInfo = { [self] id, onChange in makeChannelInfo(id, onChange: onChange) }
+            context.onMembershipChange = { [catalog] id, left in
+                if left { catalog.delete([id]) } else { catalog.restore(id) }
+                catalog.refresh()
+            }
+        }
+        return context
     }
 
     public func makeConversationViewController(for conversationID: ConversationID) -> UIViewController {

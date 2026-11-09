@@ -37,6 +37,9 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
     /// the group (#2214): the row is then an invitation, with Accept and
     /// Decline. Nil otherwise.
     public let invitation: String?
+    /// The viewer runs this channel — owner or admin (#2215): the row wears
+    /// a small badge beside its name. False for everything else.
+    public let runsChannel: Bool
 
     /// `joinedInvitation`: the viewer accepted this group's invitation ahead
     /// of the next load saying so — the row is a group's like any other.
@@ -51,19 +54,25 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
     ) {
         id = conversation.id
         title = conversation.title
-        preview = conversation.lastMessage
+        // A channel's row reads its last post's FIRST LINE (#2215): a post
+        // runs to paragraphs, and the row is one line.
+        let isChannel = conversation.kind == .channel && conversation.identity != nil
+        preview = isChannel ? Self.firstLine(of: conversation.lastMessage) : conversation.lastMessage
         timeText = conversation.lastActivityAt.map { RelativeAgeFormatter.short(from: $0, to: now) } ?? ""
         monogram = MonogramAvatarView.monogram(name: conversation.title, handle: "")
         // A group with an identity is never "the peer" (#2214), even with one
         // other member left: its face is its photo or its members'.
         let isGroup = conversation.kind == .group && conversation.identity != nil
-        peerID = !isGroup && conversation.otherMemberIDs.count == 1 ? conversation.otherMemberIDs.first : nil
+        // Nor is a channel's (#2215): its one other member is its owner, not
+        // a correspondent.
+        peerID = !isGroup && !isChannel && conversation.otherMemberIDs.count == 1 ? conversation.otherMemberIDs.first : nil
         peerHandle = peerID == nil ? nil : conversation.directPeerHandle
         self.isPinned = isPinned
         self.isMuted = isMuted
         self.isUnread = isUnread
         self.unreadCount = unreadCount
-        groupPhotoURL = isGroup ? conversation.identity?.photoURL : nil
+        groupPhotoURL = isGroup || isChannel ? conversation.identity?.photoURL : nil
+        runsChannel = isChannel && conversation.identity?.viewerState.runsChannel == true
         memberFaceURLs = isGroup && conversation.identity?.photoURL == nil
             ? Array(conversation.memberAvatarURLs.prefix(ConversationIdentity.stackedFaces))
             : []
@@ -73,6 +82,13 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
         invitation = isGroup && conversation.identity?.viewerState == .invited && !joinedInvitation
             ? Self.invitationLine(inviter: conversation.invitedByName, group: conversation.title)
             : nil
+    }
+
+    /// The first non-empty line of a post (#2215), trimmed.
+    static func firstLine(of text: String) -> String {
+        text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty } ?? ""
     }
 
     /// The preview as the row reads it: "Alice: see you there" in a group,

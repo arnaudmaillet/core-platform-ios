@@ -9,6 +9,7 @@ import Foundation
 ///     https://core-platform.click/s/Ab3_x-…      →  .profileShareToken("Ab3_x-…")
 ///     https://core-platform.click/p/post-0042    →  .post("post-0042")
 ///     https://core-platform.click/family/K7M2…   →  .supervisionInvite("K7M2…")
+///     https://core-platform.click/c/ch-daily     →  .conversation("ch-daily")
 ///     https://core-platform.click/place/country/FR  →  .place(.country(code: "FR"))
 ///     https://core-platform.click/place/city/48.8566,2.3522?name=Paris&country=FR
 ///                                                →  .place(.city(…, name: "Paris", countryCode: "FR"))
@@ -43,6 +44,11 @@ public extension AppRoute {
         case 2 where parts[0].lowercased() == "p":
             guard let id = Self.postID(parts[1]) else { return nil }
             self = .post(PostID(id))
+        case 2 where parts[0].lowercased() == "c":
+            // A channel's or a group's invitation link (#2215): its thread,
+            // which offers Join or Request to Join to a viewer not in it.
+            guard let id = Self.postID(parts[1]) else { return nil }
+            self = .conversation(ConversationID(id))
         case 2 where parts[0].lowercased() == "family":
             guard let code = SupervisionInviteCode.normalized(parts[1]) else { return nil }
             self = .supervisionInvite(code)
@@ -99,6 +105,18 @@ public extension AppRoute {
         components.scheme = "https"
         components.host = webHost
         components.path = "/p/" + id.rawValue
+        return components.url
+    }
+
+    /// A channel's link (#2215): `https://core-platform.click/c/<id>` — what
+    /// its info screen's "Invite People" hands out. Opened, it lands in the
+    /// channel's thread, where a viewer not in it joins or asks to.
+    static func conversationLink(_ id: ConversationID) -> URL? {
+        guard postID(id.rawValue) != nil else { return nil }
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = webHost
+        components.path = "/c/" + id.rawValue
         return components.url
     }
 

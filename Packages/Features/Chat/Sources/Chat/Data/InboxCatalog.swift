@@ -94,6 +94,9 @@ final class InboxCatalog {
         /// the next load saying they are a member (#2214): their rows read
         /// as the group's, no longer as an invitation.
         var joinedInvitations: Set<ConversationID> = []
+        /// The channels the viewer runs or follows (#2215), in the server's
+        /// order — newest activity first. Empty unless `loadsChannels`.
+        var channels: [Conversation] = []
     }
 
     /// Cancels the registration when it is released — surfaces hold one for
@@ -127,10 +130,15 @@ final class InboxCatalog {
     private var requestRows: [Conversation] = []
     private var hiddenRequestRows: [Conversation] = []
     /// The Channels folder (#2213): the channels the viewer is in, behind
-    /// `-channels`. Filled by #2215's tab.
+    /// `-channels` (`loadsChannels`) — the Channels tab's rows (#2215).
     private(set) var channelRows: [Conversation] = []
-    /// Every loaded row, whichever folder it sits in.
-    private var allRows: [Conversation] { conversations + requestRows + hiddenRequestRows }
+    /// Whether a load reads the Channels folder too (#2215): the builder
+    /// sets it with `-channels`. Off, nothing asks for it — the inbox costs
+    /// what it did.
+    var loadsChannels = false
+    /// Every loaded row, whichever folder it sits in — channels included, so
+    /// the thread's warm start knows one is a channel (`directory`).
+    private var allRows: [Conversation] { conversations + requestRows + hiddenRequestRows + channelRows }
     private var observers: [UUID: (Snapshot) -> Void] = [:]
     private var load: Task<Void, Never>?
     private var loadGeneration = 0
@@ -253,6 +261,10 @@ final class InboxCatalog {
             // The hidden requests alongside (#552), best-effort like Requests:
             // a failure keeps the ones already shown.
             async let hidden = try? self.repository.loadInbox(.hiddenRequests, after: nil)
+            // The Channels folder alongside (#2215), best-effort like Requests.
+            let wantsChannels = self.loadsChannels
+            async let channels: InboxPage? = wantsChannels
+                ? (try? await self.repository.loadInbox(.channels, after: nil)) : nil
             do {
                 // Both folders at once. Requests are best-effort: a failure
                 // there keeps the requests already shown rather than failing
@@ -276,6 +288,8 @@ final class InboxCatalog {
                 guard self.loadGeneration == generation else { return }
                 let hiddenPage = await hidden
                 guard self.loadGeneration == generation else { return }
+                let channelPage = await channels
+                guard self.loadGeneration == generation else { return }
 
                 // Both folders land TOGETHER: accepting moves a row from one
                 // to the other, so one assigned before the other could show a
@@ -283,6 +297,7 @@ final class InboxCatalog {
                 self.adopt(firstPage: inboxPage, of: .inbox)
                 if let requestPage { self.adopt(firstPage: requestPage, of: .requests) }
                 if let hiddenPage { self.adopt(firstPage: hiddenPage, of: .hiddenRequests) }
+                if let channelPage { self.adopt(firstPage: channelPage, of: .channels) }
                 // The device keeps what the server answered, not the merge.
                 self.restoredFromDevice = true
                 self.showsDeviceRows = false
@@ -329,6 +344,7 @@ final class InboxCatalog {
         conversations = []
         requestRows = []
         hiddenRequestRows = []
+        channelRows = []
         // ⚠️ NOT asked again for the next viewer: the device's wipe on this
         // same change may not have run yet, and who `StorageScope` says is
         // here can lag a profile switch. The network answers for them.
@@ -567,6 +583,13 @@ final class InboxCatalog {
         emit()
     }
 
+    /// Shows again a conversation removed this session (#2215): a channel
+    /// the viewer left, then joined again from its link.
+    func restore(_ id: ConversationID) {
+        guard deleted.remove(id) != nil else { return }
+        emit()
+    }
+
     /// Lets a request through: it leaves Requests (or Hidden requests) and
     /// joins the active inbox, permanently for the session even though the
     /// peer stays unfollowed.
@@ -641,6 +664,12 @@ final class InboxCatalog {
         } else if let index = hiddenRequestRows.firstIndex(where: { $0.id == id }) {
             conversations.append(hiddenRequestRows.remove(at: index))
         }
+        // A channel's post (#2215): its row rises in Channels, never in All.
+        if let index = channelRows.firstIndex(where: { $0.id == id }) {
+            channelRows.insert(channelRows.remove(at: index).sending(message), at: 0)
+            emit()
+            return
+        }
         guard let index = conversations.firstIndex(where: { $0.id == id }) else { return }
         // To the top, as the next load will list it — and ONLY it moves: the
         // rows keep the server's order, which a full re-sort would not (a
@@ -699,8 +728,9 @@ final class InboxCatalog {
         // Hidden requests included: their rows wear the same unread treatment
         // when opened from Hidden requests. Nothing counts this set into a
         // badge, so they still announce nothing.
+        snapshot.channels = channelRows.filter { !hidden.contains($0.id) }
         snapshot.unreadIDs = Set(
-            (snapshot.active + snapshot.requests + snapshot.hiddenRequests).lazy
+            (snapshot.active + snapshot.requests + snapshot.hiddenRequests + snapshot.channels).lazy
                 .filter { $0.isUnread && !readAhead.contains($0.id) }
                 .map(\.id)
         )
