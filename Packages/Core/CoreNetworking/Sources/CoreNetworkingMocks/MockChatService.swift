@@ -211,6 +211,13 @@ public final class MockChatService: @unchecked Sendable {
             if let recipient, !mayMessage(request.senderID, recipient) {
                 return .failure(ConnectError(code: .permissionDenied, message: "CHT-1011: this account doesn't take messages"))
             }
+            // A channel's owner and admins post; its subscribers read (#2215).
+            if book.kind(of: request.conversationID) == .channel,
+               !book.publishes(request.senderID, in: request.conversationID) {
+                return .failure(ConnectError(
+                    code: .permissionDenied, message: "CHT-1034: only a channel's owner and admins post"
+                ))
+            }
             // A request waiting for its answer takes one message (#656).
             if store.pendingRequester(of: request.conversationID) == request.senderID,
                store.messages(for: request.conversationID, seed: []).contains(where: { $0.senderID == request.senderID }) {
@@ -411,7 +418,8 @@ public final class MockChatService: @unchecked Sendable {
                      (pick(3), "Van leaves at 6:30 sharp", 90)]
         case ("grp-nightwalk", _):
             lines = [(pick(0), "Thinking Friday, after sunset", 200), (pick(1), "Tripods or handheld?", 150)]
-        case (_, .channel?):
+        // A channel created in this session starts empty: it is new (#2215).
+        case (_, .channel?) where !id.contains("-new-"):
             let author = publishers.first ?? pick(0)
             lines = [(author, "Tonight's light: the pier at 19:42, gold all the way down.", 1_500),
                      (author, "Thanks for the kind words on yesterday's post 🙏", 700),

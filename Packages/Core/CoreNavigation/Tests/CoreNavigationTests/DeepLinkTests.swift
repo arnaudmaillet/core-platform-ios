@@ -28,6 +28,16 @@ struct DeepLinkTests {
         #expect(AppRoute.postLink(PostID("post-0042")).flatMap(AppRoute.init(deepLink:)) == .post(PostID("post-0042")))
     }
 
+    /// A channel's invitation link (#2215): its thread, built and read back.
+    @Test func aChannelLink() {
+        #expect(route("https://core-platform.click/c/ch-daily") == .conversation(ConversationID("ch-daily")))
+        #expect(route("wynn:/c/ch-daily") == .conversation(ConversationID("ch-daily")))
+        #expect(route("https://core-platform.click/c/bad%20id") == nil)
+        let link = AppRoute.conversationLink(ConversationID("ch-daily"))
+        #expect(link?.absoluteString == "https://core-platform.click/c/ch-daily")
+        #expect(link.flatMap(AppRoute.init(deepLink:)) == .conversation(ConversationID("ch-daily")))
+    }
+
     @Test func aTagLink() {
         #expect(route("https://core-platform.click/tag/travel") == .hashtag("travel"))
         #expect(route("https://core-platform.click/tag/Travel") == .hashtag("travel"))

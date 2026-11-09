@@ -547,6 +547,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     func debugTapSectionItem() { activeSurface?.scrollToPinnedSection() }
     /// The pager coming to rest on `index`, as a swipe that ended there.
     func debugSettle(on index: Int) { didSettle(on: index) }
+    /// The pages, in order (#2215). Tests.
+    var debugCategories: [MessagesCategory] { surfaces.map(\.category) }
     #endif
 
     /// Opens search, focused — what `-inbox-search-query` drives.

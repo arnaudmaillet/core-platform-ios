@@ -37,6 +37,15 @@ public enum ConversationViewerState: Sendable, Hashable {
     case none
     case banned
 
+    /// Whether this standing writes in a channel (#2215): its owner and
+    /// admins get the composer; everyone else reads — the ONE place it is
+    /// decided, from `ConversationRole.publishesInChannel`.
+    public var publishesInChannel: Bool { role?.publishesInChannel == true }
+
+    /// Whether this standing runs a channel (#2215): owner or admin — the
+    /// Channels tab's badge, the join requests it answers.
+    public var runsChannel: Bool { role?.manages == true }
+
     /// The role this standing gives, if the viewer is in.
     public var role: ConversationRole? {
         switch self {
@@ -52,6 +61,10 @@ public enum ConversationViewerState: Sendable, Hashable {
 /// A group's or a channel's identity and the viewer's place in it (#2213).
 /// A DM has none: it is its peer.
 public struct ConversationIdentity: Equatable, Sendable {
+    /// A group or a channel (#2215): what the thread opened from a link —
+    /// which the inbox has never listed — draws it as. Defaulted to a
+    /// group, every identity #2214 built.
+    public let kind: ConversationKind
     /// Its own name; empty for a group named by its members.
     public let name: String
     public let photoURL: URL?
@@ -64,10 +77,12 @@ public struct ConversationIdentity: Equatable, Sendable {
     public let invitedBy: ProfileID?
 
     public init(
+        kind: ConversationKind = .group,
         name: String = "", photoURL: URL? = nil, description: String = "", visibility: ConversationVisibility = .private,
         memberCount: Int = 0, subscriberCount: Int = 0, viewerState: ConversationViewerState = .member,
         invitedBy: ProfileID? = nil
     ) {
+        self.kind = kind
         self.name = name
         self.photoURL = photoURL
         self.description = description
@@ -235,6 +250,7 @@ extension ConversationViewerState {
 extension ConversationIdentity {
     init(_ details: ProposedChat.Details) {
         self.init(
+            kind: details.kind == .channel ? .channel : .group,
             name: details.name,
             photoURL: details.photoURL.isEmpty ? nil : URL(string: details.photoURL),
             description: details.description,

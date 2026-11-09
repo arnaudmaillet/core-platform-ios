@@ -4,6 +4,7 @@ import FeedInterface
 import Foundation
 import UIKit
 import CoreNavigation
+import CoreNetworking
 
 /// Makes the sheet a message's photo or video is picked (or captured) in:
 /// the upload flow's own (#681), built by the app. It calls back with what
@@ -31,6 +32,18 @@ struct GroupThreadContext {
     /// What the inbox already knows the conversation is; nil when it doesn't
     /// (a cold entry). A known DM never asks for a group's details.
     let knownKind: @MainActor (_ id: ConversationID) -> ConversationKind?
+    /// The kinds drawn as such (#2215): groups with `-group-chats`, channels
+    /// with `-channels`. A kind not here is drawn as it was.
+    var kinds: Set<ConversationKind> = [.group]
+    /// What the inbox's row knows of a channel (#2215) — its name, photo
+    /// and the viewer's place — so its thread is drawn as one from the
+    /// push's first frame: a subscriber never sees the composer come and go.
+    var knownIdentity: @MainActor (_ id: ConversationID) -> ConversationIdentity? = { _ in nil }
+    /// A channel's info screen (#2215), as `makeInfo` is a group's.
+    var makeChannelInfo: (@MainActor (_ id: ConversationID, _ onChange: @escaping @MainActor () -> Void) -> UIViewController)?
+    /// The viewer joined (`left` false) or left a channel from its thread
+    /// (#2215): the inbox reads its rows again.
+    var onMembershipChange: @MainActor (_ id: ConversationID, _ left: Bool) -> Void = { _, _ in }
 }
 
 /// Drives Feed's conversation screen from the thread's view model.
@@ -90,6 +103,8 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     /// The group on show, once its details answered (#2214).
     private(set) var group: ConversationThreadGroup?
     private var groupLoad: Task<Void, Never>?
+    /// A channel's identity as last read (#2215): what Join and Leave act on.
+    private(set) var channelIdentity: ConversationIdentity?
 
     init(
         viewModel: ConversationViewModel,
@@ -151,11 +166,23 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     func loadGroup() {
         guard let context = groupContext, let id = viewModel.currentConversationID else { return }
         let known = context.knownKind(id)
-        guard known == nil || known == .group else { return }
+        if let known, known == .direct || !context.kinds.contains(known) { return }
+        // A channel the inbox listed: drawn as one at once (#2215), read
+        // again below.
+        if known == .channel, group == nil, let identity = context.knownIdentity(id), identity.kind == .channel {
+            adoptChannel(identity)
+        }
         groupLoad?.cancel()
         let service = context.service
+        let kinds = context.kinds
         groupLoad = Task { [weak self] in
-            guard let identity = try? await service.details(of: id) else { return }
+            guard let identity = try? await service.details(of: id), kinds.contains(identity.kind) else { return }
+            // A channel's posts are its own: no members to sign them (#2215).
+            if identity.kind == .channel {
+                guard !Task.isCancelled else { return }
+                self?.adoptChannel(identity)
+                return
+            }
             let members = (try? await service.members(of: id)) ?? []
             let viewerID = try? await service.viewerProfileID()
             let profiles = await service.profiles(members.map(\.profileID))
@@ -187,6 +214,120 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         )
     }
 
+    // MARK: - Channels (#2215)
+
+    /// A channel as the screen draws it (#2215): its name, photo and
+    /// subscriber count in the header, every post signed by it, and — for a
+    /// viewer who doesn't post — where they stand.
+    static func channel(identity: ConversationIdentity) -> ConversationThreadGroup {
+        ConversationThreadGroup(
+            name: identity.name.isEmpty ? "Channel" : identity.name, photoURL: identity.photoURL,
+            subtitle: ChannelCopy.subscriberCount(identity.subscriberCount), members: [:],
+            isChannel: true, readerStanding: readerStanding(for: identity)
+        )
+    }
+
+    /// Who gets the composer, and what the others are offered (#2215):
+    /// owner and admins post (nil); a subscriber reads, with Mute and
+    /// Leave; an outsider joins a public channel or asks to join one on
+    /// request; a pending request waits; a banned viewer is told.
+    static func readerStanding(for identity: ConversationIdentity) -> ConversationThreadReaderStanding? {
+        if identity.viewerState.publishesInChannel { return nil }
+        switch identity.viewerState {
+        case .owner, .admin, .member, .subscriber: return .subscribed
+        case .requested: return .requested
+        case .banned: return .unavailable
+        case .none, .invited:
+            switch identity.visibility {
+            case .public: return .canJoin
+            case .listedOnRequest: return .canRequest
+            case .private: return .unavailable
+            }
+        }
+    }
+
+    private func adoptChannel(_ identity: ConversationIdentity) {
+        channelIdentity = identity
+        adoptGroup(Self.channel(identity: identity))
+    }
+
+    /// Join or Request to Join (#2215): a public channel subscribes at
+    /// once, one on request waits — the details read again say which. A
+    /// refusal is said, and the bar comes back as it was.
+    func join() {
+        guard let context = groupContext, let id = viewModel.currentConversationID else { return }
+        let service = context.service
+        Task { [weak self] in
+            do {
+                _ = try await service.requestToJoin(id)
+                guard let self else { return }
+                context.onMembershipChange(id, false)
+                self.reloadChannel(after: "Couldn't join")
+            } catch {
+                self?.channelWriteFailed(error, title: "Couldn't join")
+            }
+        }
+    }
+
+    /// Withdraws the viewer's request (#2215).
+    func cancelJoinRequest() {
+        guard let context = groupContext, let id = viewModel.currentConversationID else { return }
+        let service = context.service
+        Task { [weak self] in
+            do {
+                try await service.cancelJoinRequest(id)
+                self?.reloadChannel(after: "Couldn't withdraw the request")
+            } catch {
+                self?.channelWriteFailed(error, title: "Couldn't withdraw the request")
+            }
+        }
+    }
+
+    /// Leaves the channel (#2215): a subscriber unsubscribes, an admin
+    /// leaves; the owner hands it over first (chat.v1 refuses their Leave).
+    /// Left, the thread goes and the inbox drops its row.
+    func leave(from presenter: UIViewController) {
+        guard let context = groupContext, let id = viewModel.currentConversationID else { return }
+        if let reason = ChannelCopy.leaveBlockedReason(for: channelIdentity?.viewerState.role) {
+            onActionNotice?("Make someone else the owner", reason)
+            return
+        }
+        let service = context.service
+        let unsubscribes = channelIdentity?.viewerState == .subscriber
+        Task { [weak self, weak presenter] in
+            do {
+                if unsubscribes { try await service.unsubscribe(from: id) } else { try await service.leave(id) }
+                context.onMembershipChange(id, true)
+                // The channel left, its thread closes — through the stack's
+                // arbiter, as every close does.
+                guard let presenter, presenter.navigationController?.topViewController === presenter else { return }
+                _ = presenter.closeScreen()
+            } catch {
+                self?.channelWriteFailed(error, title: "Couldn't leave")
+            }
+        }
+    }
+
+    /// The details again after a write; the bar shows the answer.
+    private func reloadChannel(after failure: String) {
+        guard let context = groupContext, let id = viewModel.currentConversationID else { return }
+        let service = context.service
+        Task { [weak self] in
+            do {
+                let identity = try await service.details(of: id)
+                self?.adoptChannel(identity)
+            } catch {
+                self?.channelWriteFailed(error, title: failure)
+            }
+        }
+    }
+
+    private func channelWriteFailed(_ error: Error, title: String) {
+        onActionNotice?(title, FailureCopy.message(for: error, fallback: "Try again in a moment."))
+        // The bar as it was, no longer working.
+        if let channelIdentity { adoptChannel(channelIdentity) }
+    }
+
     /// Who a reply answers: in a group, the member who wrote the message
     /// (#2214) — the view model knows only the group's name.
     private func replyAuthor(_ draft: ConversationViewModel.ReplyDraft) -> String {
@@ -208,8 +349,11 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     }
 
     func didTapGroupInfo(from presenter: UIViewController) {
-        guard let context = groupContext, group != nil, let id = viewModel.currentConversationID else { return }
-        let info = context.makeInfo(id) { [weak self] in self?.loadGroup() }
+        guard let context = groupContext, let shown = group, let id = viewModel.currentConversationID else { return }
+        let onChange: @MainActor () -> Void = { [weak self] in self?.loadGroup() }
+        let info = shown.isChannel
+            ? context.makeChannelInfo?(id, onChange) ?? context.makeInfo(id, onChange)
+            : context.makeInfo(id, onChange)
         presenter.navigationController?.pushViewController(info, animated: true)
     }
 
@@ -224,7 +368,8 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         guard let context = groupContext, let id = viewModel.currentConversationID,
               let created = context.createdAt(id) else { return [] }
         return [ConversationThreadMessage(
-            id: Self.createdLineID, senderID: ProfileID(""), body: "You created the group", sentAt: created,
+            id: Self.createdLineID, senderID: ProfileID(""),
+            body: group?.isChannel == true ? "You created the channel" : "You created the group", sentAt: created,
             isMine: false, quote: nil, isSystem: true
         )]
     }

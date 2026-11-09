@@ -159,28 +159,62 @@ public struct ConversationThreadPerson: Equatable, Sendable {
     }
 }
 
+/// Where a viewer who doesn't post stands in a channel (#2215): what the
+/// bar in the composer's place offers.
+public enum ConversationThreadReaderStanding: Equatable, Sendable {
+    /// Subscribed: Mute / Unmute and Leave.
+    case subscribed
+    /// Not in a public channel: Join, at once.
+    case canJoin
+    /// Not in a channel on request: Request to Join.
+    case canRequest
+    /// Asked, waiting for an admin: Requested — a tap withdraws it.
+    case requested
+    /// Banned: nothing to offer but saying so.
+    case unavailable
+}
+
 /// A group conversation, as the screen draws it (#2214): its identity for
 /// the header, and its members, to sign each row with its sender.
 ///
 /// A DM has none — its header and its rows are the peer
 /// (`onPeerChange`). A group has no single peer: without this, every row of
 /// a group was signed "Member".
+///
+/// A CHANNEL is one too (#2215), with `isChannel`: its posts read as a
+/// stream under its name and photo — no sender per row, the viewer's own
+/// posts included — and a viewer who doesn't post (`readerStanding`) gets
+/// a bar instead of the composer.
 public struct ConversationThreadGroup: Equatable, Sendable {
     /// Its name, or its members' for a nameless group.
     public let name: String
     public let photoURL: URL?
-    /// Under the name in the header: "12 members".
+    /// Under the name in the header: "12 members", "12.4K subscribers".
     public let subtitle: String
     /// The members the screen knows, by id — a row whose sender isn't here
     /// (someone who left) is signed "Member".
     public let members: [ProfileID: ConversationThreadPerson]
+    /// A channel (#2215): every row is signed by the channel itself.
+    public let isChannel: Bool
+    /// Nil while the viewer posts here (a group's members, a channel's owner
+    /// and admins); otherwise where they stand, and the bar that shows in
+    /// the composer's place (#2215).
+    public let readerStanding: ConversationThreadReaderStanding?
 
-    public init(name: String, photoURL: URL?, subtitle: String, members: [ProfileID: ConversationThreadPerson]) {
+    public init(
+        name: String, photoURL: URL?, subtitle: String, members: [ProfileID: ConversationThreadPerson],
+        isChannel: Bool = false, readerStanding: ConversationThreadReaderStanding? = nil
+    ) {
         self.name = name
         self.photoURL = photoURL
         self.subtitle = subtitle
         self.members = members
+        self.isChannel = isChannel
+        self.readerStanding = readerStanding
     }
+
+    /// Whether the viewer gets the composer (#2215).
+    public var canPost: Bool { readerStanding == nil }
 }
 
 /// The message being answered, previewed above the composer.
@@ -294,6 +328,16 @@ public protocol ConversationThreadDriving: AnyObject {
     func didTapGroupInfo(from presenter: UIViewController)
     /// A group row's face was tapped (#2214): that member's profile.
     func didTapMember(_ profileID: ProfileID)
+
+    /// The reader bar's Join or Request to Join (#2215): a public channel
+    /// subscribes at once, one on request waits for an admin. The answer
+    /// arrives as a new `onGroupChange`.
+    func join()
+    /// The reader bar's Requested, confirmed: the request withdrawn (#2215).
+    func cancelJoinRequest()
+    /// The reader bar's Leave, confirmed (#2215): the viewer leaves the
+    /// channel and is taken back from `presenter`.
+    func leave(from presenter: UIViewController)
 }
 
 public extension ConversationThreadDriving {
@@ -337,6 +381,11 @@ public extension ConversationThreadDriving {
     func didTapGroupInfo(from presenter: UIViewController) {}
     /// Drivers with no groups: the one peer's profile.
     func didTapMember(_ profileID: ProfileID) { didTapIdentity() }
+
+    /// Drivers with no channels (#2215): nothing to join or leave.
+    func join() {}
+    func cancelJoinRequest() {}
+    func leave(from presenter: UIViewController) {}
 }
 
 @MainActor

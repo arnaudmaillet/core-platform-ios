@@ -107,6 +107,14 @@ final class MockConversationBook: @unchecked Sendable {
         }
     }
 
+    /// Whether `profile` posts in channel `id` (#2215): its owner and admins.
+    func publishes(_ profile: String, in id: String) -> Bool {
+        lock.withLock {
+            guard let role = records[id]?.members[profile] else { return false }
+            return role == .owner || role == .admin
+        }
+    }
+
     // MARK: - ProposedChat
 
     func answer(_ call: ProposedChat.Call, now: Int64) -> ProposedChat.Reply {
