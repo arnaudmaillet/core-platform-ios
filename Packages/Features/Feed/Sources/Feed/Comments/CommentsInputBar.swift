@@ -142,6 +142,8 @@ final class CommentsInputBar: UIView {
     /// Whether the field's emote button was last asked to show: a change
     /// animates (`animateEmoteToggle`), a repeat does nothing.
     private var emoteToggleShown = true
+    /// Whether the bar has had a real layout: the first is never animated.
+    private var hasLaidOutOnce = false
     /// `speaksFromField` as of the last update: a change of mode is not a
     /// draft's, and does not animate.
     private var emoteToggleSpeaks = false
@@ -1745,6 +1747,22 @@ final class CommentsInputBar: UIView {
     }
 
     override func layoutSubviews() {
+        // ⚠️ THE FIRST LAYOUT IS NEVER ANIMATED (the owner, 2026-11-08: the
+        // emote button came in from the top-left corner). A conversation's
+        // bar is laid out for the first time inside the push's animation, or
+        // the keyboard's: every button and glyph then grew from a zero frame
+        // at the corner. The first pass lays the whole bar out at once.
+        guard hasLaidOutOnce || UIView.inheritedAnimationDuration == 0 else {
+            UIView.performWithoutAnimation {
+                layOutBar()
+                for subview in subviews { subview.layoutIfNeeded() }
+            }
+            return
+        }
+        layOutBar()
+    }
+
+    private func layOutBar() {
         super.layoutSubviews()
         // The keyboard has placed the field by now; its width follows, in
         // this same pass (see `applyRise`).
@@ -1752,6 +1770,7 @@ final class CommentsInputBar: UIView {
         // The field is placed: its height for the draft lands in this same
         // pass too (see `updateFieldHeight`).
         if updateFieldHeight() { super.layoutSubviews() }
+        if bounds.width > 0 { hasLaidOutOnce = true }
     }
 
     private func sendTapped() {
@@ -2560,7 +2579,9 @@ final class CommentsInputBar: UIView {
             button.transform = .identity
             if emoteToggleWidth.constant != width {
                 emoteToggleWidth.constant = width
-                setNeedsLayout()
+                // Laid out now: a later pass inside another animation (the
+                // keyboard's, a push) would slide it from where it was.
+                UIView.performWithoutAnimation { field.contentView.layoutIfNeeded() }
             }
         }
         textView.accessibilityCustomActions = speaksFromField && !hasDraft && !textView.isFirstResponder
@@ -2588,6 +2609,9 @@ final class CommentsInputBar: UIView {
             UIView.performWithoutAnimation {
                 emoteToggleWidth.constant = width
                 field.contentView.layoutIfNeeded()
+                // Its glyph too, where it stands: never laid out while it was
+                // hidden at no width, it came in from the corner.
+                button.layoutIfNeeded()
             }
             if button.isHidden || button.alpha == 0 {
                 button.isHidden = false

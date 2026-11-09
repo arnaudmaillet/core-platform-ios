@@ -648,6 +648,34 @@ struct VoiceComposerTests {
         #expect(await settle { bar.debugEmoteSlotWidth == 0 }, "the slot never closed for the text")
     }
 
+    /// ⚠️ A bar laid out for the first time inside an animation — a push,
+    /// the keyboard — lays its buttons and glyphs out at once: they grew from
+    /// a zero frame at the top-left corner (the owner, 2026-11-08: the emote
+    /// button came in from there).
+    @Test func aFirstLayoutInsideAnAnimationAnimatesNoButton() {
+        let (_, bar, _) = composer()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        bar.removeFromSuperview()
+        bar.actsFromOwnBubble = true
+        bar.draftText = "hi"
+        bar.frame = CGRect(x: 0, y: 700, width: 390, height: 120)
+        window.addSubview(bar)
+        UIView.animate(withDuration: 1) { window.layoutIfNeeded() }
+        func frameAnimations(_ view: UIView) -> [String] {
+            (view.layer.animationKeys() ?? []).filter { $0.hasPrefix("position") || $0.hasPrefix("bounds") }
+                + view.subviews.flatMap(frameAnimations)
+        }
+        #expect(frameAnimations(bar.debugEmoteToggle).isEmpty, "the emote button grew from a zero frame")
+        #expect(frameAnimations(bar.debugRowActionButton).isEmpty, "the bubble grew from a zero frame")
+        #expect(bar.debugEmoteToggle.frame.minX > 0, "the emote button is still at the corner")
+        // Later layouts animate as asked: the keyboard's rise rides its block.
+        bar.setNeedsLayout()
+        UIView.animate(withDuration: 1) { bar.frame.origin.y = 600; window.layoutIfNeeded() }
+        #expect(!(bar.layer.animationKeys() ?? []).isEmpty, "a later layout no longer animates")
+    }
+
     /// A post's comments keep today's tap: no hold.
     @Test func aPostsComposerKeepsTheTap() {
         let bar = CommentsInputBar()
