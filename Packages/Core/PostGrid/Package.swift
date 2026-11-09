@@ -24,16 +24,25 @@ let package = Package(
         // The cards' live like counts (#896).
         .package(path: "../EntityStore"),
         // Captions and text-post bodies animate their emotes.
-        .package(path: "../EmoteKit")
+        .package(path: "../EmoteKit"),
+        // The voice component (#2205): a voice post's caption on cards,
+        // tiles and history rows (#2208).
+        .package(path: "../VoiceKit")
     ],
     targets: [
         .target(
             name: "PostGrid",
             dependencies: [
                 "CoreModels", "MediaCore", "MediaPlayback", "DesignSystem", "CoreNavigation",
-                "CoreStorage", "EntityStore", "EmoteKit"
+                "CoreStorage", "EntityStore", "EmoteKit",
+                .product(name: "VoiceKitUI", package: "VoiceKit")
             ]
         ),
-        .testTarget(name: "PostGridTests", dependencies: ["PostGrid", "CoreStorage", "EntityStore", "EmoteKit"])
+        .testTarget(
+            name: "PostGridTests",
+            dependencies: [
+                "PostGrid", "CoreStorage", "EntityStore", "EmoteKit", .product(name: "VoiceKitUI", package: "VoiceKit")
+            ]
+        )
     ]
 )

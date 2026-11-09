@@ -21,7 +21,10 @@ let package = Package(
         .package(path: "../../Core/MediaPlayback"),
         .package(path: "../../Core/CacheKit"),
         .package(path: "../../Core/LocalStore"),
-        .package(path: "../../Core/EmoteKit")
+        .package(path: "../../Core/EmoteKit"),
+        // The voice component (#2205): a voice pin's mark and the text
+        // bubble's voice (#2208).
+        .package(path: "../../Core/VoiceKit")
     ],
     targets: [
         .target(
@@ -47,7 +50,8 @@ let package = Package(
                 // The pins of the last viewports, on the device (#893).
                 "LocalStore",
                 // A text post's words on its Shop card, emotes animated (#1075).
-                "EmoteKit"
+                "EmoteKit",
+                .product(name: "VoiceKitUI", package: "VoiceKit")
             ],
             // The world's borders (`CountryAtlas`), imported from Natural
             // Earth by `Scripts/import-country-borders.py`; the round flags
@@ -72,6 +76,7 @@ let package = Package(
                 "CacheKit",
                 "LocalStore",
                 "PostGrid",
+                .product(name: "VoiceKitUI", package: "VoiceKit"),
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
         )

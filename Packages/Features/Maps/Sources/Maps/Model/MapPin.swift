@@ -125,6 +125,12 @@ public struct MapPin: Sendable, Equatable, Identifiable {
     /// Whether the caption speaks: the one test a marker reads (#2206).
     public var hasVoice: Bool { voice != nil }
 
+    /// Whether the marker wears the voice's mark (#2208): a text pin whose
+    /// caption speaks, with `-voice-posts` on — a text pin with a mic.
+    public func wearsVoiceMark(showsVoice: Bool) -> Bool {
+        showsVoice && isText && hasVoice
+    }
+
     public init(
         postID: PostID,
         latitude: Double,

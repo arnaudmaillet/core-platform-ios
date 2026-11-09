@@ -4525,6 +4525,10 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         didEndDisplaying cell: UICollectionViewCell,
         forItemAt indexPath: IndexPath
     ) {
+        // A card or a row scrolled off: a voice it plays stops where it is
+        // (#2208), unless the post's page shows it.
+        (cell as? PostGridListRowCell)?.voiceDidEndDisplaying()
+        (cell as? PostHistoryRowCell)?.voiceDidEndDisplaying()
         // Rows as well as tiles: a cell that left the viewport must give its
         // player back whatever the scroll is doing, or the pool starves.
         guard let playable = cell as? any GridPlaybackCell else { return }
