@@ -527,7 +527,7 @@ public actor ChatRepository: ChatProviding {
         }
         // The inviter of a group the viewer is invited to names its row
         // (#2214) — a member, usually listed already; asked here in case not.
-        let inviters = identities.values.compactMap(\.invitedBy)
+        let inviters = entryIdentities.values.compactMap(\.invitedBy)
         await hydrateNames(for: (peers + inviters).filter { $0 != viewer })
         try Task.checkCancellation()
         let conversations = entries.map {

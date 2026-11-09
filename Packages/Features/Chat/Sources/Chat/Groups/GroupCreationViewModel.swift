@@ -55,11 +55,11 @@ final class GroupCreationViewModel {
     func create() {
         guard phase != .creating else { return }
         phase = .creating
-        let draft = draft
-        let service = service
+        let request = draft
+        let groupService = service
         Task { [weak self] in
             do {
-                let id = try await service.create(draft)
+                let id = try await groupService.create(request)
                 guard let self else { return }
                 self.phase = .editing
                 self.onCreated?(id)

@@ -1527,8 +1527,8 @@ final class ConversationThreadViewController: UIViewController {
         #if DEBUG
         debugConfiguredIDs.append(messageID)
         #endif
-        let author = author(of: message)
-        let name = Self.authorName(of: message, author: author, isGroup: group != nil, peer: peer)
+        let writer = author(of: message)
+        let name = Self.authorName(of: message, author: writer, isGroup: group != nil, peer: peer)
         cell.row.configure(
             with: CommentDisplayModel(
                 id: message.id,
@@ -1538,7 +1538,7 @@ final class ConversationThreadViewController: UIViewController {
                 // yet: the spinner or the mark stands in its place (#725).
                 metaText: isAwaitingDelivery(message) ? "" : Self.timeFormatter.string(from: message.sentAt),
                 body: body,
-                avatarURL: name == "Member" ? nil : author.avatarURL
+                avatarURL: name == "Member" ? nil : writer.avatarURL
             ),
             imagePipeline: imagePipeline
         )

@@ -154,15 +154,15 @@ final class GroupInfoViewModel {
     // MARK: - Reads
 
     func load() {
-        let service = service
+        let groupService = service
         let id = conversationID
         Task { [weak self] in
             do {
-                async let identity = service.details(of: id)
-                async let members = service.members(of: id)
-                let viewer = try? await service.viewerProfileID()
+                async let identity = groupService.details(of: id)
+                async let members = groupService.members(of: id)
+                let viewer = try? await groupService.viewerProfileID()
                 let (details, list) = try await (identity, members)
-                let profiles = await service.profiles(list.map(\.profileID))
+                let profiles = await groupService.profiles(list.map(\.profileID))
                 self?.adopt(details, list, profiles: profiles, viewer: viewer)
             } catch {
                 guard let self else { return }
@@ -224,15 +224,15 @@ final class GroupInfoViewModel {
     func perform(_ action: MemberAction, on profileID: ProfileID) {
         guard let member = members.first(where: { $0.profileID == profileID }),
               Self.actions(by: state.viewerRole, viewer: viewerID, on: member).contains(action) else { return }
-        let service = service
+        let groupService = service
         let id = conversationID
         write(failure: Self.failureWords(for: action)) {
             switch action {
-            case .makeAdmin: try await service.setRole(.admin, of: profileID, in: id)
-            case .removeAdmin: try await service.setRole(.member, of: profileID, in: id)
-            case .transferOwnership: try await service.transferOwnership(of: id, to: profileID)
-            case .remove: try await service.remove(profileID, from: id, ban: false)
-            case .ban: try await service.remove(profileID, from: id, ban: true)
+            case .makeAdmin: try await groupService.setRole(.admin, of: profileID, in: id)
+            case .removeAdmin: try await groupService.setRole(.member, of: profileID, in: id)
+            case .transferOwnership: try await groupService.transferOwnership(of: id, to: profileID)
+            case .remove: try await groupService.remove(profileID, from: id, ban: false)
+            case .ban: try await groupService.remove(profileID, from: id, ban: true)
             }
         }
     }
@@ -250,13 +250,13 @@ final class GroupInfoViewModel {
     /// `GroupCreationViewModel`).
     func editIdentity(name: String, description: String) {
         guard state.canEdit else { return }
-        let service = service
+        let groupService = service
         let id = conversationID
         let photo = state.photoURL
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
         write(failure: "Couldn't save the changes") {
-            try await service.editIdentity(of: id, name: trimmedName, photoURL: photo, description: trimmedDescription)
+            try await groupService.editIdentity(of: id, name: trimmedName, photoURL: photo, description: trimmedDescription)
         }
     }
 
@@ -264,10 +264,10 @@ final class GroupInfoViewModel {
     /// accept from their inbox).
     func add(_ profileIDs: [ProfileID]) {
         guard state.canAddMembers, !profileIDs.isEmpty else { return }
-        let service = service
+        let groupService = service
         let id = conversationID
         write(failure: "Couldn't add them") {
-            try await service.invite(profileIDs, to: id)
+            try await groupService.invite(profileIDs, to: id)
         }
     }
 
@@ -293,12 +293,12 @@ final class GroupInfoViewModel {
             onNotice?("Make someone else the owner", reason)
             return
         }
-        let service = service
+        let groupService = service
         let id = conversationID
         state.isWorking = true
         Task { [weak self] in
             do {
-                try await service.leave(id)
+                try await groupService.leave(id)
                 self?.state.isWorking = false
                 self?.onLeft?()
             } catch {
