@@ -7,6 +7,7 @@ import FeedInterface
 import MediaCore
 import UIKit
 import VoiceKit
+import VoiceKitUI
 
 /// A conversation, drawn as a text post's screen.
 ///
@@ -2369,7 +2370,7 @@ extension ConversationThreadViewController {
     private func voiceState(for message: ConversationThreadMessage) -> ThreadVoiceView.State? {
         guard let media = message.media, media.kind == .voice else { return nil }
         var state = ThreadVoiceView.State()
-        state.delivery = message.isMine ? message.delivery : .sent
+        state.delivery = message.isMine ? .init(message.delivery) : .sent
         state.levels = media.waveform
         state.duration = media.duration ?? (voicePlayer.messageID == message.id ? voicePlayer.duration : nil) ?? 0
         state.unplayed = !message.isMine && !voicePlayed.isPlayed(message.id)

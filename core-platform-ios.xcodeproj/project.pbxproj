@@ -38,6 +38,7 @@
 		5F00000000000000000050B1 /* LocalStore in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000050C1 /* LocalStore */; };
 		5F00000000000000000060B1 /* EntityStore in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000060C1 /* EntityStore */; };
 		5F00000000000000000070B1 /* VoiceKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000070C1 /* VoiceKit */; };
+		5F00000000000000000071B1 /* VoiceKitUI in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000071C1 /* VoiceKitUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -117,6 +118,7 @@
 				5F00000000000000000050B1 /* LocalStore in Frameworks */,
 				5F00000000000000000060B1 /* EntityStore in Frameworks */,
 				5F00000000000000000070B1 /* VoiceKit in Frameworks */,
+				5F00000000000000000071B1 /* VoiceKitUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -191,6 +193,7 @@
 				5F00000000000000000050C1 /* LocalStore */,
 				5F00000000000000000060C1 /* EntityStore */,
 				5F00000000000000000070C1 /* VoiceKit */,
+				5F00000000000000000071C1 /* VoiceKitUI */,
 			);
 			productName = "core-platform-ios";
 			productReference = 51A1B7722FFBCAB6005918BC /* core-platform-ios.app */;
@@ -843,6 +846,10 @@
 		5F00000000000000000070C1 /* VoiceKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = VoiceKit;
+		};
+		5F00000000000000000071C1 /* VoiceKitUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoiceKitUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

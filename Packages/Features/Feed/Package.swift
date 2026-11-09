@@ -47,6 +47,9 @@ let package = Package(
                 "MediaCore",
                 "MediaPlayback",
                 "VoiceKit",
+                // The voice component, shared with every surface that draws
+                // a voice post (#2205).
+                .product(name: "VoiceKitUI", package: "VoiceKit"),
                 "CoreNavigation",
                 "CoreRealtime",
                 "CoreStorage",
@@ -73,6 +76,7 @@ let package = Package(
             dependencies: [
                 "Feed",
                 "DesignSystem",
+                .product(name: "VoiceKitUI", package: "VoiceKit"),
                 "EmoteKit",
                 "CoreNavigation",
                 "CoreNetworking",

@@ -1,6 +1,7 @@
 import DesignSystem
 import FeedInterface
 import UIKit
+import VoiceKitUI
 
 /// A comment row that can be LIFTED into a context menu — the cell a
 /// conversation's messages and a text post's resting comments share.
@@ -28,7 +29,7 @@ final class ThreadRowCell: UICollectionViewCell {
     /// A media message's photo or video (#681); hidden otherwise.
     let mediaView = ThreadMediaView()
     /// A voice message (#2104); hidden otherwise.
-    let voiceView = ThreadVoiceView()
+    let voiceView = ThreadVoiceView.thread()
     private let liftPlate = UIView()
     private let quoteView = ThreadQuoteView(indented: false)
     private let stack = UIStackView()

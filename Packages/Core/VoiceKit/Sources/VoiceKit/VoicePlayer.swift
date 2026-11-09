@@ -128,6 +128,16 @@ public final class VoicePlayer {
     /// playing, at the display's rate.
     public var onChange: (() -> Void)?
 
+    /// Posted with every `onChange` (#2205): the one closure is the
+    /// conversation's; the voice posts' views — several on one id, a card
+    /// and the post's page — listen here.
+    public static let didChange = Notification.Name("VoicePlayer.didChange")
+
+    private func changed() {
+        onChange?()
+        notifications.post(name: Self.didChange, object: self)
+    }
+
     private let session: any VoiceAudioSessionControlling
     private let makeEngine: () -> any VoicePlaybackEngine
     private let defaults: UserDefaults
@@ -196,7 +206,7 @@ public final class VoicePlayer {
         }
         pendingFraction = nil
         engine.seek(to: duration * fraction)
-        if state == .ended { set(.paused) } else { onChange?() }
+        if state == .ended { set(.paused) } else { changed() }
     }
 
     /// The app-wide speed, applied now to what plays and kept.
@@ -204,7 +214,7 @@ public final class VoicePlayer {
         self.speed = speed
         defaults.set(speed.rawValue, forKey: Self.speedKey)
         if state == .playing { engine?.play(rate: Float(speed.rawValue)) }
-        onChange?()
+        changed()
     }
 
     /// Stops and forgets the message on show.
@@ -248,7 +258,7 @@ public final class VoicePlayer {
 
     private func set(_ state: State) {
         self.state = state
-        onChange?()
+        changed()
     }
 
     // MARK: - Focus
@@ -282,7 +292,7 @@ public final class VoicePlayer {
             self.pendingFraction = nil
             engine.seek(to: duration * pendingFraction)
         }
-        onChange?()
+        changed()
     }
 
     private func stopLink() {
