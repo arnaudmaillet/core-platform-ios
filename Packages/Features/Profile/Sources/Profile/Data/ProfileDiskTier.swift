@@ -174,6 +174,9 @@ struct ProfileDiskRecord: Codable, Equatable {
         var authorAvatarURL: URL?
         var reactionCount: Int64?
         var commentCount: Int64?
+        /// The caption's voice (#2206); optional, so a row stored before it
+        /// decodes with none.
+        var voice: PostVoice?
 
         struct Page: Codable, Equatable {
             var thumbnailURL: URL?
@@ -338,6 +341,7 @@ extension ProfileDiskRecord.Post {
         authorAvatarURL = post.authorAvatarURL
         reactionCount = post.reactionCount
         commentCount = post.commentCount
+        voice = post.voice
     }
 
     var galleryPost: GalleryPost? {
@@ -364,6 +368,7 @@ extension ProfileDiskRecord.Post {
             reactionCount: reactionCount,
             commentCount: commentCount
         )
+        post.voice = voice
         return post
     }
 }

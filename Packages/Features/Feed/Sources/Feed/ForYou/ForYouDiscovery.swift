@@ -321,7 +321,7 @@ extension ForYouRepository {
         // took `.first` and the collection died here rather than on the
         // wire. The kind above still reads the first page, because a
         // post is one thing in a filter even when it is five photos.
-        return GalleryPost(
+        var post = GalleryPost(
             id: entry.post.id,
             kind: kind,
             isRepost: false,
@@ -349,5 +349,8 @@ extension ForYouRepository {
             authorAvatarURL: entry.author.avatarURL,
             reactionCount: entry.likeCount
         )
+        // A text post's voice (#2206): the tile stays `.text`.
+        post.voice = entry.post.voice
+        return post
     }
 }

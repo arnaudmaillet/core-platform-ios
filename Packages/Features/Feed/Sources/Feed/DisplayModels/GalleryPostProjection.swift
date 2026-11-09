@@ -107,7 +107,9 @@ enum GalleryPostProjection {
             // with, before it has downloaded a picture to measure.
             headAspectRatio: post.pages.first?.aspectRatio,
             // The hydrated model carries it too, so seed and entry agree.
-            authorHandle: post.authorHandle
+            authorHandle: post.authorHandle,
+            // A voice post opens speaking (#2206): the tile knew its voice.
+            voice: post.voice
         )
     }
 }

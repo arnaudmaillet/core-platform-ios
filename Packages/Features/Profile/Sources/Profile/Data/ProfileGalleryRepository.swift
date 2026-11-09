@@ -368,6 +368,8 @@ struct HydratedPost {
             caption: view.caption,
             publishedAtMS: view.publishedAtMs
         )
+        // A text post's voice (#2206): the tile stays `.text`.
+        built.voice = PostVoiceWire.voice(in: view)
         post = built
         authorProfileID = ProfileID(view.profileID)
     }

@@ -153,6 +153,9 @@ final class MapPinsLocalCache: Sendable {
         var thumbnailURL: URL?
         var kind: String
         var likeCount: Int64
+        /// The caption's voice (#2206); optional, so a file stored before it
+        /// decodes with none.
+        var voice: PostVoice?
 
         init(_ pin: MapPin) {
             id = pin.postID.rawValue
@@ -165,6 +168,7 @@ final class MapPinsLocalCache: Sendable {
             case .text: "text"
             }
             likeCount = pin.likeCount
+            voice = pin.voice
         }
 
         var pin: MapPin {
@@ -175,7 +179,7 @@ final class MapPinsLocalCache: Sendable {
             }
             return MapPin(
                 postID: PostID(id), latitude: latitude, longitude: longitude,
-                thumbnailURL: thumbnailURL, kind: storedKind, likeCount: likeCount
+                thumbnailURL: thumbnailURL, kind: storedKind, likeCount: likeCount, voice: voice
             )
         }
     }
