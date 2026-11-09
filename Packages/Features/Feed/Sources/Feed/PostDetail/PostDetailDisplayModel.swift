@@ -19,8 +19,15 @@ public struct PostDetailDisplayModel: Sendable, Equatable {
     public let mediaURL: URL?
     public let mediaAspectRatio: Double
     public let hasMedia: Bool
+    /// The caption's voice, when voice posts are drawn (#2207, `-voice-posts`):
+    /// the caption row is the voice component, its words under it.
+    public let voice: PostVoice?
 
-    public init(entry: FeedEntry, now: Date = Date()) {
+    /// Whether the stream leads with a caption row: words, or a voice.
+    public var showsCaptionRow: Bool { hasCaption || voice != nil }
+
+    public init(entry: FeedEntry, now: Date = Date(), showsVoice: Bool = VoicePosts.areDrawn) {
+        voice = showsVoice ? entry.post.voice : nil
         postID = entry.post.id
         authorID = entry.author.id
         authorName = entry.author.displayName

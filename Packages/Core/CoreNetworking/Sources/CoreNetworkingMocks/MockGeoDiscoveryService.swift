@@ -1,5 +1,7 @@
 import Connect
 import CoreContracts
+import CoreModels
+import CoreNetworking
 import Foundation
 
 /// Fake of geo_discovery.v1.GeoDiscoveryService over the shared dataset. Radar
@@ -606,6 +608,10 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
             pin.thumbnailURL = post.media.map {
                 Self.pinURL(forMediaURL: $0.url, catalog: dataset.mediaCatalog)
             } ?? ""
+            // A voice post's pin says so (#2206; `has_voice` once #994 lands).
+            if let seeded = dataset.seededVoice(forPostID: post.postID) {
+                PostVoiceWire.write(seeded.voice, to: &pin)
+            }
             return pin
         }
 

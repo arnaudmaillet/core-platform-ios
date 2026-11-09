@@ -72,7 +72,36 @@ public final class FeedSoundSession {
     /// (`setWatching(_:by:readsRinger:)`), and never over another app's
     /// audio, which `.playback` would stop.
     public var isHeard: Bool {
-        isTurnedOn || (ringsWhileFollowing == true && !readsOtherAudio())
+        !voiceHoldsFloor && (isTurnedOn || (ringsWhileFollowing == true && !readsOtherAudio()))
+    }
+
+    /// A voice holds the floor (#2207): a voice post or a voice message plays,
+    /// or a take records (VoiceKit's `VoiceAudioFocus`). The feed — the clip
+    /// pool, the song — is not heard meanwhile, and comes back when it lets
+    /// go, under the same rules as before. Read by name: MediaPlayback does
+    /// not import VoiceKit.
+    public private(set) var voiceHoldsFloor = false
+
+    /// VoiceKit's `VoiceAudioFocus` names, spelled here.
+    public static let voiceTakesFloor = Notification.Name("VoiceAudioFocus.didTake")
+    public static let voiceReleasesFloor = Notification.Name("VoiceAudioFocus.didRelease")
+
+    private var floorObservers: [NSObjectProtocol] = []
+
+    /// Listens for a voice taking and releasing the floor, on `center`.
+    public func followVoiceFloor(on center: NotificationCenter = .default) {
+        guard floorObservers.isEmpty else { return }
+        for (name, holds) in [(Self.voiceTakesFloor, true), (Self.voiceReleasesFloor, false)] {
+            floorObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.setVoiceHoldsFloor(holds) }
+            })
+        }
+    }
+
+    func setVoiceHoldsFloor(_ holds: Bool) {
+        guard holds != voiceHoldsFloor else { return }
+        voiceHoldsFloor = holds
+        NotificationCenter.default.post(name: Self.audibilityDidChange, object: self)
     }
 
     /// What the last ringer check read while the sound follows the device:
