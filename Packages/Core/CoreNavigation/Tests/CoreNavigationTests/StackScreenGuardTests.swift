@@ -64,6 +64,7 @@ struct StackScreenGuardTests {
         "CaptureViewController": "the camera's root",
         "HapticPlaygroundViewController": "a DEBUG sheet",
         "VoiceCatalogViewController": "a DEBUG sheet, and the root of -voice-catalog (#2205)",
+        "EmbedCatalogViewController": "a DEBUG sheet, and the root of -embed-catalog (#2216)",
         "AppButtonCatalogViewController": "a DEBUG sheet",
         "SnapCommentsSheetViewController": "a sheet",
         "ToastOverlayRootController": "the toast window's root",
