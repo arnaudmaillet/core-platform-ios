@@ -88,6 +88,12 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
     /// measured, and a hero composes with it on a cold open
     /// (`SnapFeedViewController.zoomPageFraming`).
     let headAspectRatio: Double?
+    /// The caption's voice (#2206): a voice post is a TEXT post — `mediaURL`
+    /// stays nil — whose caption speaks.
+    let voice: PostVoice?
+
+    /// Whether the caption speaks: the one test a surface reads (#2206).
+    var hasVoice: Bool { voice != nil }
 
     init(
         id: PostID,
@@ -106,8 +112,10 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
         extraMedia: [GalleryPost.MediaPage] = [],
         headAspectRatio: Double? = nil,
         authorHandle: String? = nil,
-        avatarFrameID: String? = nil
+        avatarFrameID: String? = nil,
+        voice: PostVoice? = nil
     ) {
+        self.voice = voice
         self.avatarFrameID = avatarFrameID
         self.authorHandle = authorHandle.flatMap { $0.isEmpty ? nil : $0 }
         self.headAspectRatio = headAspectRatio.flatMap { $0 > 0 && $0.isFinite ? $0 : nil }
@@ -198,7 +206,8 @@ public struct FeedDisplayModelBuilder: Sendable {
                 $0.pixelWidth > 0 && $0.pixelHeight > 0 ? $0.aspectRatio : nil
             },
             authorHandle: entry.author.handle,
-            avatarFrameID: entry.author.avatarFrameID
+            avatarFrameID: entry.author.avatarFrameID,
+            voice: entry.post.voice
         )
     }
 

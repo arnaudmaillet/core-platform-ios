@@ -147,7 +147,10 @@ public actor GeoDiscoveryRepository: GeoDiscoveryProviding {
             longitude: pin.lng,
             thumbnailURL: thumbnailURL,
             kind: kind,
-            previewVideoURL: previewVideoURL(for: pin, kind: kind, thumbnailURL: thumbnailURL)
+            previewVideoURL: previewVideoURL(for: pin, kind: kind, thumbnailURL: thumbnailURL),
+            // A text post's voice (#2206), from the pin's `has_voice` summary
+            // once #994 lands; the proposed field until then.
+            voice: kind == .text ? PostVoiceWire.voice(in: pin) : nil
         )
     }
 

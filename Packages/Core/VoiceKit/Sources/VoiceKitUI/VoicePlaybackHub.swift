@@ -24,6 +24,7 @@ public final class VoicePlaybackHub {
     private var shownID: String?
     private var bindings: [ObjectIdentifier: Binding] = [:]
     private var observer: NSObjectProtocol?
+    private var backgroundObserver: NSObjectProtocol?
 
     private struct Binding {
         weak var view: VoiceView?
@@ -37,6 +38,13 @@ public final class VoicePlaybackHub {
         self.player = player
         observer = notifications.addObserver(forName: VoicePlayer.didChange, object: player, queue: nil) { [weak self] _ in
             MainActor.assumeIsolated { self?.playerChanged() }
+        }
+        // Sent to the background, a voice post pauses where it is (#2207): it
+        // is a deliberate tap's listening, not a Background Play track.
+        backgroundObserver = notifications.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.pauseForBackground() }
         }
     }
 
@@ -87,6 +95,14 @@ public final class VoicePlaybackHub {
         guard player.messageID == id else { return }
         rememberShown()
         player.stop()
+        refresh()
+    }
+
+    /// Pauses what plays, keeping its place.
+    func pauseForBackground() {
+        guard player.state == .playing || player.state == .loading else { return }
+        rememberShown()
+        player.pause()
         refresh()
     }
 

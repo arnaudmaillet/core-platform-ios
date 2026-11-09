@@ -108,6 +108,9 @@ public final class VoiceRecorder {
     /// 15): the last `warningLead` seconds count down, and the take stops
     /// into a finished draft at the limit.
     public static let maximumDuration: TimeInterval = 5 * 60
+    /// This recorder's limit: a voice message's five minutes, a voice post's
+    /// minute (#2209).
+    public var limit: TimeInterval = VoiceRecorder.maximumDuration
     /// How long before the limit `onTimeRunningOut` is told.
     public static let warningLead: TimeInterval = 10
     /// The metering's rate: 20 Hz.
@@ -256,11 +259,11 @@ public final class VoiceRecorder {
             setLevel(VoiceWaveform.amplitude(decibels: meter.average))
         }
         let elapsed = device.currentTime
-        if !warned, elapsed >= Self.maximumDuration - Self.warningLead {
+        if !warned, elapsed >= limit - Self.warningLead {
             warned = true
             onTimeRunningOut?()
         }
-        if elapsed >= Self.maximumDuration { autoFinish() }
+        if elapsed >= limit { autoFinish() }
     }
 
     private func setLevel(_ level: Float) {

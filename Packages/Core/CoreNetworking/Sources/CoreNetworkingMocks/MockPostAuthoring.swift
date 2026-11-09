@@ -1,5 +1,6 @@
 import Connect
 import CoreContracts
+import CoreModels
 import CoreNetworking
 import Foundation
 
@@ -15,6 +16,8 @@ public final class MockPostStore: @unchecked Sendable {
         var media: (url: String, width: Int, height: Int)?
         var createdAtMS: Int64
         var published: Bool
+        /// The caption's voice (#2206), from the create request.
+        var voice: PostVoice?
     }
 
     /// The viewer's own profile, so hydration of their authored posts resolves.
@@ -77,7 +80,7 @@ public final class MockPostStore: @unchecked Sendable {
     /// in flight has no window here: a mock call is answered whole.)
     func create(
         profileID: String, caption: String, media: (url: String, width: Int, height: Int)?,
-        idempotencyKey: String = ""
+        voice: PostVoice? = nil, idempotencyKey: String = ""
     ) -> String {
         lock.withLock {
             let nowMS = Int64(Date().timeIntervalSince1970 * 1000)
@@ -88,7 +91,7 @@ public final class MockPostStore: @unchecked Sendable {
             let postID = "post-authored-\(UUID().uuidString.prefix(8))"
             drafts[postID] = DraftRecord(
                 postID: postID, profileID: profileID, caption: caption,
-                media: media, createdAtMS: nowMS, published: false
+                media: media, createdAtMS: nowMS, published: false, voice: voice
             )
             if !idempotencyKey.isEmpty { keyed[scope] = (postID, nowMS) }
             return postID
@@ -167,6 +170,8 @@ public final class MockPostAuthoringService: @unchecked Sendable {
         let media = attachment.map { (url: $0.cdnURL, width: Int($0.width), height: Int($0.height)) }
         let postID = store.create(
             profileID: request.profileID, caption: request.caption, media: media,
+            // A voice post keeps its voice (#2206): a text post, no attachment.
+            voice: PostVoiceWire.voice(in: request),
             idempotencyKey: request.idempotencyKey
         )
 

@@ -3,6 +3,7 @@ import MediaCore
 import DesignSystem
 import EmoteKit
 import UIKit
+import VoiceKitUI
 
 /// A single comment: identity disc, "Name · time" header (display name
 /// only — the @handle identifier was removed for reading comfort), and body.
@@ -153,6 +154,25 @@ final class CommentRowView: UIView {
 
     /// The body's label — what Select Text lays its overlay over.
     var bodyTextLabel: UILabel { bodyLabel }
+
+    /// The text column: the header, then the body.
+    private var textStack: UIStackView?
+    /// What stands between the header and the body (#2207): a voice post's
+    /// voice, the caption's own words under it.
+    private(set) var bodyAccessory: UIView?
+
+    /// Puts `view` under the header, above the body — nil takes it away.
+    func setBodyAccessory(_ view: UIView?) {
+        guard view !== bodyAccessory else { return }
+        bodyAccessory?.removeFromSuperview()
+        bodyAccessory = view
+        guard let view, let textStack else {
+            bodyLabel.isHidden = bodyLabel.text?.isEmpty ?? true
+            return
+        }
+        textStack.insertArrangedSubview(view, at: 1)
+        bodyLabel.isHidden = bodyLabel.text?.isEmpty ?? true
+    }
     /// The name · time line, for what sits beside the time (#725).
     var headerTextLabel: UILabel { headerLabel }
     /// The avatar's picture on show, nil while the monogram shows. Tests.
@@ -290,7 +310,9 @@ final class CommentRowView: UIView {
         bodyLabel.textColor = .label
         headerLabel.text = timestamp.isEmpty ? authorName : "\(authorName) · \(timestamp)"
         bodyLabel.text = caption
-        bodyLabel.isHidden = false
+        // A voice post's caption may be its voice alone (#2207): no empty
+        // line under it.
+        bodyLabel.isHidden = caption.isEmpty && bodyAccessory != nil
         avatarView.setMonogram(monogram)
         isReplyRow = false
         refreshTypeDrivenGeometry()
@@ -336,6 +358,7 @@ final class CommentRowView: UIView {
     /// identity it belonged to. Called from `CommentCell.prepareForReuse`.
     func prepareForReuse() {
         avatarView.reset()
+        setBodyAccessory(nil)
         // ⚠️ BACK TO A COMMENT. A row that stood in for a caption has its reply
         // tap, its menu and its like control switched off, and a recycled cell
         // that inherited that would be a comment nobody could interact with —
@@ -860,6 +883,7 @@ final class CommentRowView: UIView {
         headerRow.spacing = Spacing.sm
 
         let textStack = UIStackView(arrangedSubviews: [headerRow, bodyLabel])
+        self.textStack = textStack
         textStack.axis = .vertical
         textStack.spacing = Metrics.lineSpacing
 
@@ -909,6 +933,17 @@ final class CommentRowView: UIView {
 /// `CommentRowView.configureAsPostCaption`.
 final class CaptionBubbleCell: UICollectionViewCell {
     private let row = CommentRowView()
+    /// A voice post's caption (#2207): the shared voice component, full size,
+    /// under the author line — the caption's words under it.
+    private lazy var voiceView: VoiceView = {
+        let view = VoiceView(size: .full)
+        return view
+    }()
+    /// The voice shown, and the id it plays under.
+    private(set) var shownVoiceID: String?
+    /// The app's one voice hub; tests put their own in.
+    static var playbackHub: VoicePlaybackHub = .shared
+    private var hub: VoicePlaybackHub { Self.playbackHub }
 
     /// The avatar was tapped — the host pushes the author's profile.
     var onAvatarTap: (() -> Void)? {
@@ -934,8 +969,37 @@ final class CaptionBubbleCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        showVoice(nil, postID: nil, authorName: "")
         row.prepareForReuse()
     }
+
+    /// The caption's voice, or none (#2207).
+    private func showVoice(_ voice: PostVoice?, postID: PostID?, authorName: String) {
+        guard let voice, let postID else {
+            if shownVoiceID != nil { hub.unbind(voiceView) }
+            shownVoiceID = nil
+            row.setBodyAccessory(nil)
+            return
+        }
+        let id = VoicePosts.playbackID(postID)
+        shownVoiceID = id
+        voiceView.role = .post(author: authorName.isEmpty ? nil : authorName)
+        hub.bind(voiceView, id: id, url: voice.url, duration: voice.duration,
+                 levels: voice.waveform.isEmpty ? nil : voice.waveform)
+        row.setBodyAccessory(voiceView)
+    }
+
+    /// The page stopped owning the screen — the row left the window: its
+    /// voice stops where it is, and keeps its place (#2207).
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil, let shownVoiceID { hub.stop(shownVoiceID) }
+    }
+
+    #if DEBUG
+    var debugVoiceView: VoiceView? { shownVoiceID == nil ? nil : voiceView }
+    var debugShowsBody: Bool { !row.bodyTextLabel.isHidden }
+    #endif
 
     /// Measures this row at the width the layout is actually going to give it,
     /// rather than at whatever width the cell happens to be carrying.
@@ -969,8 +1033,10 @@ final class CaptionBubbleCell: UICollectionViewCell {
     /// to. The feed knows the name and the picture already.
     func configureSeed(
         caption: String, timestamp: String, authorName: String, monogram: String,
-        avatarURL: URL?, likeCount: Int64?, imagePipeline: ImagePipeline?
+        avatarURL: URL?, likeCount: Int64?, imagePipeline: ImagePipeline?,
+        voice: PostVoice? = nil, postID: PostID? = nil
     ) {
+        showVoice(voice, postID: postID, authorName: authorName)
         row.configureAsPostCaption(
             authorName: authorName, timestamp: timestamp, caption: caption,
             monogram: monogram, avatarURL: avatarURL, likeCount: likeCount,
@@ -990,6 +1056,7 @@ final class CaptionBubbleCell: UICollectionViewCell {
         imagePipeline: ImagePipeline?,
         likeCount: Int64? = nil
     ) {
+        showVoice(model.voice, postID: model.postID, authorName: model.authorName)
         row.configureAsPostCaption(
             authorName: model.authorName, timestamp: model.timestampText,
             caption: model.caption, monogram: model.avatarMonogram,

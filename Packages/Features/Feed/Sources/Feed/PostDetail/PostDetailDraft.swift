@@ -1,4 +1,5 @@
 import CoreModels
+import FeedInterface
 
 /// How a post that does not exist yet comes to exist: its first message,
 /// published as the post, comes back as the entry it became.
@@ -8,4 +9,15 @@ import CoreModels
 /// published page will read before the entry is returned.
 struct PostDetailDraft: Sendable {
     let publish: @Sendable (_ text: String, _ author: AuthorSummary?) async throws -> FeedEntry
+    /// A voice post's first message (#2209): the take, and the words under
+    /// it. Nil: the draft takes text only (`-voice-posts` off).
+    var publishVoice: (@Sendable (_ text: String, _ voice: TextPostVoice, _ author: AuthorSummary?) async throws -> FeedEntry)?
+
+    init(
+        publish: @escaping @Sendable (_ text: String, _ author: AuthorSummary?) async throws -> FeedEntry,
+        publishVoice: (@Sendable (_ text: String, _ voice: TextPostVoice, _ author: AuthorSummary?) async throws -> FeedEntry)? = nil
+    ) {
+        self.publish = publish
+        self.publishVoice = publishVoice
+    }
 }
