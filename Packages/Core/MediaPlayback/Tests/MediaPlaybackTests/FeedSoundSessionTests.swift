@@ -60,6 +60,33 @@ struct FeedSoundSessionTests {
 
     /// With music from another app, a key is about that music: the feed
     /// stays mixed and silent.
+    /// A voice holding the floor silences the feed, and it comes back
+    /// when the voice lets go (#2207).
+    @Test func theFeedYieldsToAVoiceAndComesBack() {
+        let probe = Probe()
+        let sound = session(probe)
+        let owner = NSObject()
+        sound.setWatching(true, by: owner)
+        sound.volumeDidChange()
+        #expect(sound.isHeard)
+        let center = NotificationCenter()
+        sound.followVoiceFloor(on: center)
+        var told = 0
+        let observer = NotificationCenter.default.addObserver(
+            forName: FeedSoundSession.audibilityDidChange, object: sound, queue: nil
+        ) { _ in told += 1 }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        center.post(name: FeedSoundSession.voiceTakesFloor, object: nil)
+        #expect(!sound.isHeard, "the feed is heard over a voice")
+        #expect(sound.voiceHoldsFloor)
+        center.post(name: FeedSoundSession.voiceReleasesFloor, object: nil)
+        #expect(sound.isHeard, "the feed did not come back")
+        #expect(told == 2, "the feed's players were not told")
+        // The names are VoiceKit's own.
+        #expect(FeedSoundSession.voiceTakesFloor.rawValue == "VoiceAudioFocus.didTake")
+        #expect(FeedSoundSession.voiceReleasesFloor.rawValue == "VoiceAudioFocus.didRelease")
+    }
+
     @Test func aVolumeKeyOverAnotherAppsAudioChangesNothing() {
         let probe = Probe()
         probe.otherAudio = true
