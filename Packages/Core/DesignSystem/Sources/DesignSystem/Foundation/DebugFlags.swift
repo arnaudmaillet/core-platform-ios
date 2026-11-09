@@ -25,6 +25,8 @@ public enum DebugFlags {
     /// `isOn(_:)` cannot be switched, so a new one is added here and read
     /// through it.
     public static let all: [Flag] = [
+        Flag(argument: "-map-text-bubble", title: "Map text-post bubble",
+             detail: "The text marker nearest the map's centre opens a glass bubble with its author and words", appliesAtLaunch: true),
         Flag(argument: "-viewport-share", title: "Viewport share trace",
              detail: "Logs the half-the-display playback measure (#1914)", appliesAtLaunch: false),
         Flag(argument: "-still-video-backdrop", title: "Still video backdrops",

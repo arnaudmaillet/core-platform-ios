@@ -7,6 +7,7 @@ import MapKit
 import MapsInterface
 import MediaCore
 import MediaPlayback
+import PostGrid
 import UIKit
 
 /// The Explore tab's surface: a full-bleed `MKMapView` that re-queries
@@ -292,6 +293,21 @@ final class MapsViewController: UIViewController {
     /// The row above the filter bars: the locate button, or the "See posts
     /// around you" card while nothing is open (guest mode §3.1).
     private let locationControls = MapLocationControlsView()
+
+    // MARK: The text bubble (`-map-text-bubble`, the owner 2026-11-09)
+
+    /// Whether the text marker nearest the map's centre opens a bubble round
+    /// it with its author and words (`MapTextBubbleView`).
+    let usesTextBubble = DebugFlags.isOn("-map-text-bubble")
+    /// The marker the bubble speaks for.
+    var textBubbleFeatured: (any MKAnnotation)?
+    /// The text posts' words, as they arrive.
+    var textBubblePosts: [PostID: GalleryPost] = [:]
+    /// The bubble's next pick, waiting for the map to rest a moment.
+    var textBubbleSettle: DispatchWorkItem?
+    /// The posts' words, asked for together; and one already in hand.
+    let loadTextPosts: ([PostID]) async -> [PostID: GalleryPost]
+    let heldTextPost: (PostID) -> GalleryPost?
     /// A tap asked where the device is: fly to its country once it is known.
     private var fliesToCurrentCountry = false
 
@@ -361,7 +377,7 @@ final class MapsViewController: UIViewController {
     /// True between `regionWillChange` and `regionDidChange` — i.e. while a
     /// zoom/pan is animating. The cluster layout depends on the zoom level, so
     /// it is recomputed on the settle, not mid-flight.
-    private var isRegionTransitioning = false
+    var isRegionTransitioning = false
     /// A diff folded into the model during a transition still owes a layout;
     /// this asks the settle to run one.
     private var layoutPending = false
@@ -429,8 +445,12 @@ final class MapsViewController: UIViewController {
         stakePacks: (any StakePackSelling)? = nil,
         profileItems: (any ProfileItemSelling)? = nil,
         isMember: @escaping @MainActor () -> Bool = { true },
-        locator: (any CurrentCountryLocating)? = nil
+        locator: (any CurrentCountryLocating)? = nil,
+        loadTextPosts: @escaping ([PostID]) async -> [PostID: GalleryPost] = { _ in [:] },
+        heldTextPost: @escaping (PostID) -> GalleryPost? = { _ in nil }
     ) {
+        self.loadTextPosts = loadTextPosts
+        self.heldTextPost = heldTextPost
         self.isMember = isMember
         self.locator = locator
         self.countryAccess = countryAccess
@@ -1190,8 +1210,9 @@ final class MapsViewController: UIViewController {
         applyMapInteraction()
         // The guest moves the map now (#1907): the compass follows it.
         mapView.showsCompass = true
-        // They filter posts the guest cannot see; the card is what matters.
+        // They filter posts the guest cannot see.
         filterBar.isHidden = locked
+        if usesTextBubble { updateTextBubble(animated: view.window != nil) }
         if locked {
             subFilterBar.isHidden = true
             pendingQuery?.cancel()
@@ -2478,6 +2499,7 @@ final class MapsViewController: UIViewController {
                     iconCatalog: iconCatalog, previewCatalog: previewCatalog
                 )
         }
+        textBubbleMarkerChanged(annotation)
     }
 
     /// Screen points per map point at the current region — the projection the
@@ -2623,6 +2645,7 @@ extension MapsViewController: MKMapViewDelegate {
         // A zoom/pan started: hold annotation mutations until it settles.
         isRegionTransitioning = true
         idlePrerollWork?.cancel()
+        textBubbleRegionWillChange()
         #if DEBUG
         OfferLog.note("region will change")
         #endif
@@ -2644,6 +2667,7 @@ extension MapsViewController: MKMapViewDelegate {
         idlePrerollRested = false
         idlePrerollRetries = 0
         scheduleIdlePreroll()
+        textBubbleRegionSettled()
     }
 
     func mapView(_ mapView: MKMapView, didAdd views: [MKAnnotationView]) {
@@ -2677,6 +2701,7 @@ extension MapsViewController: MKMapViewDelegate {
         // warm the visible posts so a tap opens instantly.
         refreshVideoPlayback()
         prewarmVisiblePosts()
+        textBubbleViewsAdded(views)
         #if DEBUG
         debugOpenFirstPinIfRequested(among: views)
         debugOpenFirstClusterIfRequested(among: views)
@@ -2966,7 +2991,7 @@ extension MapsViewController: MKMapViewDelegate {
         pins.min { center.distance(to: $0.point) < center.distance(to: $1.point) }?.id
     }
 
-    private func openAnnotation(_ annotation: any MKAnnotation, thumbnail: UIImage?) {
+    func openAnnotation(_ annotation: any MKAnnotation, thumbnail: UIImage?) {
         // ⚠️ AN OPEN OFFER SWALLOWS THE TAP (#686), as a tap on the map does:
         // tapping away is "no thanks". Here, ahead of everything, so the
         // instant tap, MapKit's `didSelect`, VoiceOver and the DEBUG hooks all
