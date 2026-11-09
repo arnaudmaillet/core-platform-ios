@@ -147,6 +147,8 @@ final class CommentsInputBar: UIView {
     /// the button's way in — typed fast, the glyph came in stretched from
     /// the left (the owner's video, 2026-11-09).
     private var emoteSlotAnimator: UIViewPropertyAnimator?
+    /// The emote button on its way out: its slot stays open until it is.
+    private var emoteToggleLeaving = false
     /// Whether the bar has had a real layout: the first is never animated.
     private var hasLaidOutOnce = false
     /// `speaksFromField` as of the last update: a change of mode is not a
@@ -2571,14 +2573,25 @@ final class CommentsInputBar: UIView {
         let button = emotes.toggleButton
         // Only a draft coming or going moves it: the bar setting up its mode
         // (a conversation's field that speaks) puts it in place at once.
+        let changes = emoteToggleShown != !hidden || emoteToggleSpeaks != speaksFromField
         let animates = emoteToggleShown != !hidden && emoteToggleSpeaks == speaksFromField
             && voiceOverlay == nil && window != nil && !MotionPreference.reducesMotion
         emoteToggleShown = !hidden
         emoteToggleSpeaks = speaksFromField
         if animates {
             animateEmoteToggle(shown: !hidden, width: width)
+        } else if !changes {
+            // The same state again — the next letter of a draft: a way in or
+            // out still running runs to its end (the owner, 2026-11-09: typed
+            // fast, the bounce was cut at the second letter). Only the slot's
+            // width follows a take leaving the field, never mid-way out.
+            if !emoteToggleLeaving, emoteSlotAnimator == nil, emoteToggleWidth.constant != width {
+                emoteToggleWidth.constant = width
+                UIView.performWithoutAnimation { field.contentView.layoutIfNeeded() }
+            }
         } else {
             stopEmoteSlotAnimator()
+            emoteToggleLeaving = false
             button.layer.removeAllAnimations()
             button.isHidden = hidden
             button.alpha = 1
@@ -2613,6 +2626,7 @@ final class CommentsInputBar: UIView {
         #endif
         if shown {
             stopEmoteSlotAnimator()
+            emoteToggleLeaving = false
             UIView.performWithoutAnimation {
                 emoteToggleWidth.constant = width
                 field.contentView.layoutIfNeeded()
@@ -2629,11 +2643,13 @@ final class CommentsInputBar: UIView {
             UIView.animate(springDuration: 0.45, bounce: 0.5, options: options) { button.transform = .identity }
             return
         }
+        emoteToggleLeaving = true
         UIView.animate(withDuration: 0.18, delay: 0, options: options) {
             button.alpha = 0
             button.transform = small
         } completion: { [weak self] _ in
             guard let self, !self.emoteToggleShown else { return }
+            emoteToggleLeaving = false
             button.isHidden = true
             button.alpha = 1
             button.transform = .identity

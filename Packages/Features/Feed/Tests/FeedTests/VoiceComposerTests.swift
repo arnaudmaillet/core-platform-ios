@@ -704,6 +704,34 @@ struct VoiceComposerTests {
         #expect(toggle.bounds.width == CommentsInputBar.Metrics.emoteToggleWidth)
     }
 
+    /// Typed fast: the next letters of the draft leave the emote button's
+    /// way in running to its end, and its way out too (the owner,
+    /// 2026-11-09: the bounce was cut at the second letter).
+    @Test func theNextLettersLeaveTheEmoteButtonsMotionRunning() async {
+        let (_, bar, _) = composer()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        bar.frame = CGRect(x: 0, y: 700, width: 390, height: 120)
+        window.addSubview(bar)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        bar.actsFromOwnBubble = true
+        bar.layoutIfNeeded()
+        let toggle = bar.debugEmoteToggle
+        bar.draftText = "h"
+        #expect(toggle.layer.animation(forKey: "transform") != nil, "no bounce on the way in")
+        bar.draftText = "he"
+        bar.draftText = "hey"
+        #expect(toggle.layer.animation(forKey: "transform") != nil, "the next letters cut the bounce")
+        #expect(toggle.transform == .identity, "the bounce does not end at full size")
+        bar.draftText = ""
+        let leaving = toggle.layer.animationKeys() ?? []
+        bar.draftText = ""
+        #expect(!leaving.isEmpty, "no motion on the way out")
+        #expect(!(toggle.layer.animationKeys() ?? []).isEmpty, "the same empty field again cut the way out")
+        #expect(bar.debugEmoteSlotWidth == CommentsInputBar.Metrics.emoteToggleWidth, "the slot closed under the way out")
+        #expect(await settle { toggle.isHidden && bar.debugEmoteSlotWidth == 0 }, "the way out never ended")
+    }
+
     /// A post's comments keep today's tap: no hold.
     @Test func aPostsComposerKeepsTheTap() {
         let bar = CommentsInputBar()
