@@ -79,7 +79,10 @@ final class AppContainer {
             // A place page asked by country code (#643): the map's borders.
             countryOf: { latitude, longitude in
                 CountryAtlas.shared.country(owning: CLLocationCoordinate2D(latitude: latitude, longitude: longitude))?.code
-            }
+            },
+            // Voice posts drawn (#2206): the mock then serves voice-alone
+            // posts without their text.
+            drawsVoicePosts: DebugFlags.isOn("-voice-posts")
         )
         backend.bff.faults = mockNetworkFaults
         #if DEBUG

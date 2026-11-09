@@ -115,13 +115,19 @@ public final class MockSocialServices: @unchecked Sendable {
 
     /// `verificationSeed` gives the viewer a request in that state
     /// (`pending`, `rejected` or `approved`); anything else, none.
+    /// `-voice-posts` (#2206), read by the app (`DebugFlags`) and passed in:
+    /// a voice-alone post's text goes only when the surfaces draw its voice.
+    private let drawsVoicePosts: Bool
+
     public init(
         dataset: MockSocialDataset = MockSocialDataset(),
         postStore: MockPostStore? = nil,
         pageSizeCap: Int32 = 50,
         verificationSeed: String? = nil,
-        counters: MockCounterStore? = nil
+        counters: MockCounterStore? = nil,
+        drawsVoicePosts: Bool = false
     ) {
+        self.drawsVoicePosts = drawsVoicePosts
         self.dataset = dataset
         self.postStore = postStore
         self.pageSizeCap = pageSizeCap
@@ -915,7 +921,7 @@ public final class MockSocialServices: @unchecked Sendable {
         // draws the voice, a voice-alone post would read as an empty one.
         if let seeded = dataset.seededVoice(forPostID: record.postID) {
             PostVoiceWire.write(seeded.voice, to: &view)
-            if !seeded.keepsText, ProcessInfo.processInfo.arguments.contains("-voice-posts") { view.caption = "" }
+            if !seeded.keepsText, drawsVoicePosts { view.caption = "" }
         }
         return .success(view)
     }
