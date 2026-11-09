@@ -65,6 +65,7 @@ final class VoiceComposer {
 
     init(
         recorder: VoiceRecorder = VoiceRecorder(), draftKey: String?, now: @escaping () -> Date = Date.init,
+        limit: TimeInterval = VoiceRecorder.maximumDuration,
         join: @escaping (VoiceDraft, VoiceDraft) async throws -> VoiceDraft = { first, second in
             try await VoiceTakeJoin.join(
                 first, second,
@@ -73,6 +74,7 @@ final class VoiceComposer {
         }
     ) {
         self.recorder = recorder
+        recorder.limit = limit
         self.draftKey = draftKey
         self.now = now
         self.join = join
@@ -493,7 +495,7 @@ final class VoiceComposer {
 
     private func tickClock() {
         let total = elapsed
-        let remaining = VoiceRecorder.maximumDuration - total
+        let remaining = recorder.limit - total
         strip.setTime(total, remaining: remaining)
         // Recording on counts from the whole take: the limit is the take's,
         // where the recorder only knows its own part.

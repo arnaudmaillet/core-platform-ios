@@ -3,6 +3,7 @@ import DesignSystem
 import EmoteKit
 import MediaCore
 import UIKit
+import VoiceKitUI
 
 /// ONE POST PER ROW (the owner, 2026-11-07, #2170) — the profile's History,
 /// as the owner drew it:
@@ -69,9 +70,13 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     /// The square's side for these faces — the two lines (each trailing
     /// value under its line when `wraps`), their gap and padding — never
     /// under `minimumSquareSide`.
-    public static func squareSide(titleFont: UIFont, detailFont: UIFont, wraps: Bool) -> CGFloat {
+    ///
+    /// A voice post's first line is its voice (#2208): `speaks` measures it
+    /// at the voice's height when that is taller than the title's line.
+    public static func squareSide(titleFont: UIFont, detailFont: UIFont, wraps: Bool, speaks: Bool = false) -> CGFloat {
         let detailLine = detailFont.lineHeight.rounded(.up)
-        let first = titleFont.lineHeight.rounded(.up) + (wraps ? detailLine : 0)
+        let titleLine = titleFont.lineHeight.rounded(.up)
+        let first = (speaks ? max(titleLine, VoiceView.buttonSide) : titleLine) + (wraps ? detailLine : 0)
         let second = avatarDiameter(detailFont: detailFont) + (wraps ? detailLine : 0)
         let side = verticalPadding * 2 + first + lineGap + second
         return max(minimumSquareSide, side.rounded(.up))
@@ -100,10 +105,22 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
 
     /// VoiceOver's one element (#2170): "title, by author, viewed 2 hours
     /// ago, 1,200 likes" — what is absent is left out.
-    public static func accessibilityLabel(for post: GalleryPost, viewedAt: Date?, now: Date) -> String {
+    ///
+    /// A voice post's row (#2208) opens on its voice: "Voice post, 13
+    /// seconds, From the ridge, by …".
+    public static func accessibilityLabel(
+        for post: GalleryPost, viewedAt: Date?, now: Date, speaks: Bool = false
+    ) -> String {
         var parts: [String] = []
         let title = title(for: post)
-        parts.append(title.isEmpty ? kindName(post) : title)
+        if speaks, let voice = post.voice {
+            parts.append(VoiceView.accessibilityLabel(
+                role: .post(author: nil), senderName: nil, duration: voice.duration, unplayed: false
+            ))
+            if !title.isEmpty { parts.append(title) }
+        } else {
+            parts.append(title.isEmpty ? kindName(post) : title)
+        }
         if let author = post.authorName ?? post.authorHandle.map({ "@\($0)" }), !author.isEmpty {
             parts.append("by \(author)")
         }
@@ -209,7 +226,7 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     /// Where the slid parts and the circle stand for the mode.
     private func applySelectionPlacement() {
         let shift = isSelecting ? CGAffineTransform(translationX: Self.selectionShift * layoutSign, y: 0) : .identity
-        for view in [square as UIView, titleLabel, authorView] { view.transform = shift }
+        for view in [square as UIView, titleLabel, voiceCaption, authorView] { view.transform = shift }
         selectionMark.alpha = isSelecting ? 1 : 0
         selectionMark.transform = isSelecting ? .identity : CGAffineTransform(scaleX: 0.5, y: 0.5)
     }
@@ -301,6 +318,10 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
 
     private let square = PostHistorySquareView()
     private let titleLabel = EmoteLabel()
+    /// A voice post's first line (#2208, behind `-voice-posts`): the shared
+    /// voice component, full size, in the title's place — the post's words
+    /// stay in the square's miniature, under it in reading order.
+    private let voiceCaption = VoicePostCaptionView()
     private let timeLabel = UILabel()
     private let authorView = UIView()
     private let avatar = AvatarView(diameter: 16, size: .avatar)
@@ -370,7 +391,11 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
         authorView.setContentHuggingPriority(.defaultHigh, for: .horizontal)
         authorView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        for (line, views) in [(firstLine, [titleLabel, timeLabel]), (secondLine, [authorView, spacer, likes])] {
+        voiceCaption.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
+        voiceCaption.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for (line, views) in [
+            (firstLine, [titleLabel, voiceCaption, timeLabel]), (secondLine, [authorView, spacer, likes]),
+        ] {
             views.forEach(line.addArrangedSubview)
             line.spacing = Self.trailingGap
         }
@@ -430,11 +455,14 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     /// Dresses the row for `post`, viewed at `viewedAt` (nil: no time),
     /// read against `now`.
     public func configure(
-        with post: GalleryPost, viewedAt: Date?, now: Date = Date(), imagePipeline: ImagePipeline?
+        with post: GalleryPost, viewedAt: Date?, now: Date = Date(), imagePipeline: ImagePipeline?,
+        showsVoice: Bool = VoicePostDisplay.areDrawn
     ) {
         self.post = post
         self.viewedAt = viewedAt
-        square.configure(with: post, imagePipeline: imagePipeline)
+        let voiced = Self.voiceSize(for: post, showsVoice: showsVoice) != nil
+        square.configure(with: post, imagePipeline: imagePipeline, speaks: voiced)
+        applyVoice(voiced ? post : nil)
         // A post with no caption keeps the line's height (`titleHeight`).
         titleLabel.attributedText = nil
         titleLabel.text = Self.title(for: post)
@@ -455,16 +483,47 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
         let hasAuthor = post.authorID != nil
         opening.hasPerson = { hasAuthor }
         likes.set(post.reactionCount)
-        accessibilityLabel = Self.accessibilityLabel(for: post, viewedAt: viewedAt, now: now)
+        accessibilityLabel = Self.accessibilityLabel(for: post, viewedAt: viewedAt, now: now, speaks: voiced)
         wrapWidth = -1
         setNeedsLayout()
+    }
+
+    // MARK: - A voice post (#2208)
+
+    /// The size a row gives a voice post's caption: full, in the title's
+    /// place, for a text post that speaks with the switch on. Pure.
+    public static func voiceSize(for post: GalleryPost, showsVoice: Bool) -> VoicePostDisplay.Size? {
+        showsVoice && post.kind == .text && post.voice != nil ? .full : nil
+    }
+
+    /// Whether the first line is a voice now.
+    private var speaks: Bool { !voiceCaption.isHidden }
+
+    private func applyVoice(_ post: GalleryPost?) {
+        if let post, let voice = post.voice {
+            voiceCaption.show(
+                postID: post.id.rawValue, url: voice.url, duration: voice.duration, levels: voice.waveform,
+                author: post.authorName, size: .full
+            )
+        } else {
+            voiceCaption.clear()
+        }
+        titleLabel.isHidden = speaks
+        refreshAccessibilityActions()
+        applyWrap(wrapsTrailingValues)
+    }
+
+    /// The row left the screen (a list's `didEndDisplaying`): a voice it
+    /// plays stops where it is, unless the post's page shows it.
+    public func voiceDidEndDisplaying() {
+        voiceCaption.leftScreen()
     }
 
     /// New counters on the same post: the likes, and VoiceOver's words.
     public func updateCounts(from post: GalleryPost) {
         self.post = post
         likes.set(post.reactionCount)
-        accessibilityLabel = Self.accessibilityLabel(for: post, viewedAt: viewedAt, now: Date())
+        accessibilityLabel = Self.accessibilityLabel(for: post, viewedAt: viewedAt, now: Date(), speaks: speaks)
     }
 
     private func applyFonts() {
@@ -515,7 +574,8 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
         // the label's own text layout, whose baseline `UILabel` does not
         // report — the time stood a line above it (seen on the simulator).
         squareSide?.constant = Self.squareSide(
-            titleFont: titleLabel.font ?? Self.titleFont(), detailFont: timeLabel.font ?? Self.detailFont(), wraps: wraps
+            titleFont: titleLabel.font ?? Self.titleFont(), detailFont: timeLabel.font ?? Self.detailFont(), wraps: wraps,
+            speaks: speaks
         )
     }
 
@@ -544,6 +604,13 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
 
     private func refreshAccessibilityActions() {
         var actions: [UIAccessibilityCustomAction] = []
+        // The row is one element: its voice plays through an action (#2208).
+        if let player = voiceCaption.voiceView, speaks {
+            actions.append(UIAccessibilityCustomAction(name: "Play or pause the voice") { [weak player] _ in
+                player?.onPlayTap?()
+                return player != nil
+            })
+        }
         if onAuthorHeld != nil {
             actions.append(UIAccessibilityCustomAction(name: Self.openProfileActionName) { [weak self] _ in
                 guard let self, post?.authorID != nil, let onAuthorHeld else { return false }
@@ -606,6 +673,8 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
         onAuthorHeld = nil
         rowAction = nil
         onCoverLoaded = nil
+        // A voice it played stops: the row is another post's now (#2208).
+        applyVoice(nil)
         post = nil
         viewedAt = nil
     }
@@ -613,6 +682,12 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     #if DEBUG
     /// What the lines read, for tests.
     public var debugTitle: String? { titleLabel.text }
+    /// The voice in the title's place, nil for none (#2208).
+    public var debugVoiceCaption: VoicePostCaptionView? { speaks ? voiceCaption : nil }
+    /// The voice part, shown or not — for a test to put its own hub in.
+    public var debugVoicePart: VoicePostCaptionView { voiceCaption }
+    /// Whether the title shows.
+    public var debugShowsTitle: Bool { !titleLabel.isHidden }
     public var debugViewedText: String? { timeLabel.isHidden ? nil : timeLabel.text }
     public var debugAuthor: String? { nameLabel.text }
     public var debugTitleLineBreakMode: NSLineBreakMode { titleLabel.lineBreakMode }
@@ -665,6 +740,8 @@ public final class PostHistorySquareView: UIView {
     private let textLabel = UILabel()
     private let playMark = UIImageView()
     private let stackMark = UIImageView()
+    /// A voice alone's mark on its text tile (#2208).
+    private let micMark = UIImageView()
     private let outline = CAShapeLayer()
     private let edge = CAShapeLayer()
     private lazy var media: MediaSurface = {
@@ -706,6 +783,11 @@ public final class PostHistorySquareView: UIView {
             mark.layer.shadowOffset = .zero
             addSubview(mark)
         }
+        micMark.image = UIImage(systemName: "mic.fill")
+        micMark.tintColor = VoiceView.ink
+        micMark.contentMode = .center
+        micMark.isHidden = true
+        addSubview(micMark)
         // The card's dark-mode hairline, on the tile's own outline.
         edge.fillColor = UIColor.clear.cgColor
         layer.addSublayer(edge)
@@ -719,8 +801,11 @@ public final class PostHistorySquareView: UIView {
 
     /// A square for `post` as a cell draws it, its cover loaded through
     /// `imagePipeline`.
-    func configure(with post: GalleryPost, imagePipeline: ImagePipeline?) {
+    func configure(with post: GalleryPost, imagePipeline: ImagePipeline?, speaks: Bool = false) {
         dress(for: post)
+        // A voice alone (#2208): a mic in the text tile, where the words
+        // would be; a voice with words keeps them.
+        micMark.isHidden = !(speaks && post.kind == .text && textLabel.text?.isEmpty != false)
         guard post.kind != .text else {
             media.reset()
             return
@@ -761,6 +846,7 @@ public final class PostHistorySquareView: UIView {
     }
 
     func reset() {
+        micMark.isHidden = true
         media.reset()
         imageView.image = nil
         textLabel.text = nil
@@ -789,6 +875,8 @@ public final class PostHistorySquareView: UIView {
         playMark.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: playSide * 0.6, weight: .semibold)
         stackMark.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: markSide * 0.5, weight: .semibold)
         playMark.frame = CGRect(x: (side - playSide) / 2, y: (side - playSide) / 2, width: playSide, height: playSide)
+        micMark.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: playSide * 0.6, weight: .semibold)
+        micMark.frame = playMark.frame
         let corner = (side * 0.1).rounded()
         stackMark.frame = CGRect(x: side - markSide - corner / 2, y: corner / 2, width: markSide, height: markSide)
     }

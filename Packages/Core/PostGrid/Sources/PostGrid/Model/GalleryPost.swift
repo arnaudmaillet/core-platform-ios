@@ -124,6 +124,12 @@ public struct GalleryPost: Equatable, Sendable {
     public var authorAvatarURL: URL?
     public var reactionCount: Int64?
     public var commentCount: Int64?
+    /// The caption's voice (#2206), when the projection carried it: a voice
+    /// post stays `.text` — only its caption speaks.
+    public var voice: PostVoice?
+
+    /// Whether the caption speaks: the one test a tile reads (#2206).
+    public var hasVoice: Bool { voice != nil }
 
     public init(
         id: PostID,

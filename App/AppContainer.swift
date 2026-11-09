@@ -84,6 +84,9 @@ final class AppContainer {
             // their flags.
             seedsGroups: DebugFlags.isOn("-group-chats"),
             seedsChannels: DebugFlags.isOn("-channels"),
+            // Voice posts drawn (#2206): the mock then serves voice-alone
+            // posts without their text.
+            drawsVoicePosts: DebugFlags.isOn("-voice-posts"),
             groupGoesPrivateAfter: Self.groupGoesPrivateAfter
         )
         backend.bff.faults = mockNetworkFaults

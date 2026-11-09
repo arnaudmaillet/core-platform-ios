@@ -43,10 +43,13 @@ public struct NotificationSubjectPreview: Equatable, Sendable {
     public let thumbnailURL: URL?
     /// The post's text, for a post with no picture to show.
     public let excerpt: String?
+    /// The caption's voice (#2206), for a voice post's preview text (#2208).
+    public let voice: PostVoice?
 
-    public init(thumbnailURL: URL?, excerpt: String?) {
+    public init(thumbnailURL: URL?, excerpt: String?, voice: PostVoice? = nil) {
         self.thumbnailURL = thumbnailURL
         self.excerpt = excerpt
+        self.voice = voice
     }
 }
 
@@ -494,9 +497,11 @@ public actor NotificationsRepository: NotificationsProviding, ViewerScoped {
             )
         }
         let text = post.caption.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return nil }
-        let excerpt = text.count > excerptLimit ? String(text.prefix(excerptLimit)) + "…" : text
-        return NotificationSubjectPreview(thumbnailURL: nil, excerpt: excerpt)
+        // A voice post with no text still has something to say (#2206).
+        let voice = PostVoiceWire.voice(in: post)
+        guard !text.isEmpty || voice != nil else { return nil }
+        let excerpt = text.isEmpty ? nil : text.count > excerptLimit ? String(text.prefix(excerptLimit)) + "…" : text
+        return NotificationSubjectPreview(thumbnailURL: nil, excerpt: excerpt, voice: voice)
     }
 
     /// The sampled senders other than the primary, in the server's order.

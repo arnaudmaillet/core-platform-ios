@@ -1,0 +1,103 @@
+import CoreModels
+import MediaCore
+import PostGrid
+import Testing
+import UIKit
+import VoiceKitUI
+@testable import Maps
+
+/// A voice post on the map (#2208): a voice pin is a text pin with the mic;
+/// the text bubble draws the full voice in the words' place, its taps its
+/// own, the rest of the bubble its marker's; and none of it with the switch
+/// off.
+@MainActor
+struct MapVoicePostTests {
+    private let voice = PostVoice(assetID: "voice-post-hike", url: URL(fileURLWithPath: "/tmp/hike.m4a"),
+                                  duration: 12.6, waveform: Array(repeating: 14, count: 100))
+
+    private func pin(kind: MapPin.Kind = .text, speaks: Bool = true) -> MapPin {
+        MapPin(postID: PostID("p-voice"), latitude: 48.85, longitude: 2.35, thumbnailURL: nil, kind: kind,
+               voice: speaks ? voice : nil)
+    }
+
+    private func post(caption: String) -> GalleryPost {
+        var post = GalleryPost(
+            id: PostID("p-voice"), kind: .text, isRepost: false, thumbnailURL: nil,
+            caption: caption, publishedAtMS: 1_800_000_000_000,
+            authorID: ProfileID("ava"), authorName: "Ava Moreau", authorHandle: "ava"
+        )
+        post.voice = voice
+        return post
+    }
+
+    // MARK: - The pin
+
+    @Test func aVoicePinIsATextPinWithTheMic() {
+        #expect(pin().wearsVoiceMark(showsVoice: true))
+        #expect(!pin().wearsVoiceMark(showsVoice: false), "the switch off drew a mic")
+        #expect(!pin(speaks: false).wearsVoiceMark(showsVoice: true))
+        #expect(!pin(kind: .photo).wearsVoiceMark(showsVoice: true))
+    }
+
+    @Test func theMarkerWearsTheMicAndSaysSo() {
+        let pipeline = ImagePipeline(fetcher: PlaceholderImageFetcher())
+        let view = MapAnnotationView(annotation: nil, reuseIdentifier: MapAnnotationView.reuseIdentifier)
+        view.configure(with: pin(), imagePipeline: pipeline, showsVoice: true)
+        #expect(view.debugWearsVoiceMark)
+        #expect(view.accessibilityValue == "Voice post, 13 seconds")
+        view.prepareForReuse()
+        #expect(!view.debugWearsVoiceMark, "a recycled marker kept the mic")
+        view.configure(with: pin(), imagePipeline: pipeline, showsVoice: false)
+        #expect(!view.debugWearsVoiceMark)
+        #expect(view.accessibilityValue == nil)
+    }
+
+    // MARK: - The bubble
+
+    private func bubble(caption: String) -> MapTextBubbleView {
+        let bubble = MapTextBubbleView()
+        bubble.voiceCaption.hub = VoicePlaybackHub.silentForTests()
+        bubble.markerSide = 44 * MapFeaturedHalo.scale
+        bubble.setContent(.of(post(caption: caption), showsVoice: true))
+        bubble.layoutIfNeeded()
+        return bubble
+    }
+
+    @Test func theBubbleSpeaksInTheWordsPlace() throws {
+        #expect(MapTextBubbleView.Content.of(post(caption: ""), showsVoice: false).voice == nil)
+        let alone = bubble(caption: "")
+        let shown = try #require(alone.debugVoice)
+        #expect(shown.voiceView?.size == .full)
+        #expect(alone.label.isHidden, "an empty line under a voice alone")
+        #expect(shown.voiceView?.inks == MapTextBubbleView.voiceInks, "the voice didn't take the glass's ink")
+
+        let worded = bubble(caption: "From the ridge")
+        let voiceFrame = try #require(worded.debugVoice).frame
+        #expect(!worded.label.isHidden)
+        #expect(worded.label.frame.minY >= voiceFrame.maxY, "the words aren't under the voice")
+    }
+
+    @Test func onlyTheVoiceTakesATouch() throws {
+        let worded = bubble(caption: "From the ridge")
+        let player = try #require(worded.debugVoice?.voiceView)
+        let button = player.debugPlayButton
+        let onButton = button.convert(CGPoint(x: button.bounds.midX, y: button.bounds.midY), to: worded)
+        #expect(worded.hitTest(onButton, with: nil) != nil, "the play button gave its tap to the marker")
+        let onWords = worded.label.convert(CGPoint(x: worded.label.bounds.midX, y: worded.label.bounds.midY), to: worded)
+        #expect(worded.hitTest(onWords, with: nil) == nil, "the words took the marker's tap")
+    }
+
+    @Test func aFoldedBubbleStopsItsVoice() throws {
+        let worded = bubble(caption: "")
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        window.isHidden = false
+        window.addSubview(worded)
+        let caption = try #require(worded.debugVoice)
+        caption.voiceView?.onPlayTap?()
+        let id = VoicePlaybackHub.postID("p-voice")
+        #expect(caption.hub.isPlaying(id))
+        worded.removeFromSuperview()
+        #expect(!caption.hub.isPlaying(id), "the voice went on with its bubble gone")
+        window.isHidden = true
+    }
+}

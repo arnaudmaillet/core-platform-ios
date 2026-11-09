@@ -5,6 +5,7 @@ import EmoteKit
 import MediaCore
 import MediaPlayback
 import UIKit
+import VoiceKitUI
 
 // MARK: - Timeline row
 
@@ -151,7 +152,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         let text = captionLabel.sizeThatFits(
             CGSize(width: available, height: .greatestFiniteMagnitude)
         )
-        return Self.captionTopInset + ceil(text.height)
+        // A voice post's caption starts under its voice (#2208).
+        return Self.captionTopInset + voiceBlockHeight + ceil(text.height)
     }
 
     /// The preview's rect in this cell's own space, or nil for a text-only row    /// The preview's rect in this cell's own space, or nil for a text-only row
@@ -1830,6 +1832,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The caption hangs off the band — at the band's gap when the band draws
     /// something, and flush when it has collapsed to nothing.
     private var captionFollowsBand: NSLayoutConstraint!
+    /// A voice post's caption (#2208, behind `-voice-posts`): the shared
+    /// voice component where the caption starts — full on a list card, compact
+    /// on a shelf's fixed card — the caption's words under it on full size.
+    private let voiceCaption = VoicePostCaptionView()
+    /// The voice hangs off the band as the caption does; the caption then
+    /// hangs off the voice.
+    private var voiceFollowsBand: NSLayoutConstraint!
+    private var captionFollowsVoice: NSLayoutConstraint!
     /// Emoji and `:code:` emotes animate in the caption (`plain` marks them).
     private let captionLabel = EmoteLabel()
     private var isCaptionExpanded = false
@@ -1999,6 +2009,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             equalTo: authorBand.bottomAnchor, constant: Self.authorFollowGap
         )
         captionFollowsBand.isActive = true
+        buildVoiceCaption()
         authorBand.onShapeChange = { [weak self] in self?.syncCaptionToBand() }
 
         mediaView.contentMode = .scaleAspectFill
@@ -2307,7 +2318,81 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// collapsed — a profile's own post with nothing to offer in a "...".
     private func syncCaptionToBand() {
         captionFollowsBand.constant = authorBand.isCollapsed ? 0 : Self.authorFollowGap
+        voiceFollowsBand.constant = captionFollowsBand.constant
     }
+
+    // MARK: - A voice post's caption (#2208)
+
+    /// Between the voice and the caption's words under it.
+    public static let voiceCaptionGap: CGFloat = Spacing.sm
+
+    /// The size a card gives a voice post's caption (#2208), nil for a post
+    /// that does not speak or with the switch off: full on the list's card,
+    /// compact on a card of a FIXED height (`captionLines` — a shelf's, where
+    /// a drag on the waveform would fight the shelf's scroll). Pure.
+    public static func voiceSize(
+        for post: GalleryPost, captionLines: Int?, showsVoice: Bool
+    ) -> VoicePostDisplay.Size? {
+        guard showsVoice, post.kind == .text, post.voice != nil else { return nil }
+        return captionLines == nil ? .full : .compact
+    }
+
+    private func buildVoiceCaption() {
+        voiceCaption.translatesAutoresizingMaskIntoConstraints = false
+        card.addSubview(voiceCaption)
+        // Nothing in it, it stands zero tall: what it holds outranks this.
+        let empty = voiceCaption.heightAnchor.constraint(equalToConstant: 0)
+        empty.priority = .defaultLow - 1
+        voiceFollowsBand = voiceCaption.topAnchor.constraint(
+            equalTo: authorBand.bottomAnchor, constant: Self.authorFollowGap
+        )
+        captionFollowsVoice = captionLabel.topAnchor.constraint(
+            equalTo: voiceCaption.bottomAnchor, constant: Self.voiceCaptionGap
+        )
+        NSLayoutConstraint.activate([
+            voiceCaption.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: Self.captionInset),
+            voiceCaption.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -Self.captionInset),
+            voiceFollowsBand, empty,
+        ])
+    }
+
+    /// Shows `post`'s voice at `size`, or none: the caption then hangs off
+    /// the voice (flush under a voice alone), or off the band as before.
+    private func applyVoice(_ size: VoicePostDisplay.Size?, for post: GalleryPost?) {
+        guard let size, let post, let voice = post.voice else {
+            voiceCaption.clear()
+            captionFollowsVoice.isActive = false
+            captionFollowsBand.isActive = true
+            return
+        }
+        voiceCaption.show(
+            postID: post.id.rawValue, url: voice.url, duration: voice.duration, levels: voice.waveform,
+            author: post.authorName, size: size
+        )
+        captionFollowsBand.isActive = false
+        captionFollowsVoice.constant = fullCaption.isEmpty ? 0 : Self.voiceCaptionGap
+        captionFollowsVoice.isActive = true
+    }
+
+    /// How far the voice pushes the caption down, measured — zero without one.
+    private var voiceBlockHeight: CGFloat {
+        guard !voiceCaption.isHidden else { return 0 }
+        let height = voiceCaption.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).height
+        return ceil(height) + captionFollowsVoice.constant
+    }
+
+    /// The card left the screen (a list's `didEndDisplaying`): a voice it
+    /// plays stops where it is, unless the post's page shows it (#2208).
+    public func voiceDidEndDisplaying() {
+        voiceCaption.leftScreen()
+    }
+
+    #if DEBUG
+    /// The voice the card draws in its caption's place, nil for none.
+    public var debugVoiceCaption: VoicePostCaptionView? { voiceCaption.isHidden ? nil : voiceCaption }
+    /// The voice part, shown or not — for a test to put its own hub in.
+    public var debugVoicePart: VoicePostCaptionView { voiceCaption }
+    #endif
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -2352,6 +2437,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         carousel?.isHidden = true
         pageIndicator.isHidden = true
         onRevealFullCaption = nil
+        // A voice it played stops: the card is another post's now (#2208).
+        applyVoice(nil, for: nil)
         // Back to truncated. A recycled row must not inherit the previous
         // post's expansion — `configure` re-applies the host's answer for the
         // post it is actually bound to.
@@ -2500,7 +2587,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     ///   `fixedCaptionLines`. Nil: the list's card, sized to its content.
     public func configure(
         with post: GalleryPost, imagePipeline: ImagePipeline, captionExpanded: Bool = false,
-        showsAuthorIdentity: Bool = true, captionLines: Int? = nil
+        showsAuthorIdentity: Bool = true, captionLines: Int? = nil,
+        showsVoice: Bool = VoicePostDisplay.areDrawn
     ) {
         fixedCaptionLines = captionLines
         isCaptionExpanded = captionExpanded && captionLines == nil
@@ -2508,13 +2596,17 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // The fixed card's label cuts its own tail; the list's card writes
         // its ellipsis and "Show more" into the text (`composeCaption`).
         captionLabel.lineBreakMode = captionLines == nil ? .byWordWrapping : .byTruncatingTail
-        fullCaption = post.caption
+        // A voice post (#2208): the voice in the caption's place — its words
+        // under it on the list's card, the voice alone on a shelf's.
+        let voiceSize = Self.voiceSize(for: post, captionLines: captionLines, showsVoice: showsVoice)
+        fullCaption = voiceSize == .compact ? "" : post.caption
         bindAuthorBand(to: post, imagePipeline: imagePipeline, showsIdentity: showsAuthorIdentity)
         showMoreRange = nil
+        applyVoice(voiceSize, for: post)
         // Provisional: the real composition needs the row's final width, which
         // only `preferredLayoutAttributesFitting` knows. Set here so a cell
         // that is never sized (a measuring instance) still reads correctly.
-        captionLabel.attributedText = Self.plain(post.caption, font: captionLabel.font)
+        captionLabel.attributedText = Self.plain(fullCaption, font: captionLabel.font)
         let hasMedia = post.kind != .text
         mediaAspectRatio = post.aspectRatio
         mediaPageCount = post.isCollection ? post.pages.count : 1
@@ -2896,7 +2988,58 @@ public final class PostGridTileCell: UICollectionViewCell {
         infoReferenceSize = nil
         infoDecidedSize = nil
         removeInfoOverlay()
+        if voiceMarkIsBuilt {
+            voiceMark.clear()
+            accessibilityLabel = nil
+        }
     }
+
+    // MARK: - A voice post's mark (#2208)
+
+    /// A voice post's tile (behind `-voice-posts`): its text face, the mark —
+    /// a mic, a still waveform, the length — in the middle, the caption gone.
+    /// Not interactive: a tap is the tile's, it opens the post.
+    private lazy var voiceMark: VoicePostCaptionView = {
+        let mark = VoicePostCaptionView()
+        mark.isUserInteractionEnabled = false
+        mark.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(mark)
+        NSLayoutConstraint.activate([
+            mark.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            mark.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            mark.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, constant: -8),
+        ])
+        return mark
+    }()
+
+    /// The size a tile gives a voice post's caption: the mark, for a text
+    /// post that speaks with the switch on; nil otherwise. Pure.
+    public static func voiceSize(for post: GalleryPost, showsVoice: Bool) -> VoicePostDisplay.Size? {
+        showsVoice && post.kind == .text && post.voice != nil ? .mark : nil
+    }
+
+    private func applyVoiceMark(_ size: VoicePostDisplay.Size?, for post: GalleryPost) {
+        guard let size, let voice = post.voice else {
+            // Only a tile that wore a mark built it, and only that one says so.
+            if voiceMarkIsBuilt { voiceMark.clear() }
+            return
+        }
+        voiceMarkIsBuilt = true
+        voiceMark.show(
+            postID: post.id.rawValue, url: voice.url, duration: voice.duration, levels: voice.waveform,
+            author: post.authorName, size: size
+        )
+        accessibilityLabel = voiceMark.accessibilityDescription
+    }
+
+    /// Whether the mark was ever built: most tiles never wear one, and a
+    /// lazy view touched on every configure would be built for each.
+    private var voiceMarkIsBuilt = false
+
+    #if DEBUG
+    /// The mark the tile wears in its words' place, nil for none.
+    public var debugVoiceMark: VoicePostCaptionView? { voiceMarkIsBuilt && !voiceMark.isHidden ? voiceMark : nil }
+    #endif
 
     override public func layoutSubviews() {
         super.layoutSubviews()
@@ -3082,13 +3225,15 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// wearing exactly what the tile wore and the flight fades it. Nil when a
     /// tile of that size wears none.
     public static func makeInfoOverlay(
-        for post: GalleryPost, restingSize: CGSize, imagePipeline: ImagePipeline?, viewerStake: Int = 0
+        for post: GalleryPost, restingSize: CGSize, imagePipeline: ImagePipeline?, viewerStake: Int = 0,
+        showsVoice: Bool = VoicePostDisplay.areDrawn
     ) -> PostCardCaptionOverlay? {
         let variant = PostTileInfo.variant(for: restingSize)
         guard variant != .none else { return nil }
         let overlay = makeInfoOverlay(
             for: post, variant: variant, referenceSize: restingSize,
-            imagePipeline: imagePipeline, viewerStake: viewerStake
+            imagePipeline: imagePipeline, viewerStake: viewerStake,
+            voiceAlone: voiceSize(for: post, showsVoice: showsVoice) != nil
         )
         overlay.frame = CGRect(origin: .zero, size: restingSize)
         UIView.performWithoutAnimation { overlay.layoutIfNeeded() }
@@ -3103,10 +3248,12 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// offscreen pass apiece (`PostCardCaptionOverlay.TextShadow`).
     private static func makeInfoOverlay(
         for post: GalleryPost, variant: PostTileInfo.Variant, referenceSize: CGSize?,
-        imagePipeline: ImagePipeline?, viewerStake: Int
+        imagePipeline: ImagePipeline?, viewerStake: Int, voiceAlone: Bool
     ) -> PostCardCaptionOverlay {
         PostCardCaptionOverlay(
-            post: post, placement: .onMedia, captionLines: variant.captionLines,
+            // A voice post's tile wears its mark, alone, in the words' place
+            // (#2208): the author line stays, the caption goes.
+            post: post, placement: .onMedia, captionLines: voiceAlone ? 0 : variant.captionLines,
             referenceSize: referenceSize, imagePipeline: imagePipeline, viewerStake: viewerStake,
             textShadow: .inline
         )
@@ -3130,7 +3277,8 @@ public final class PostGridTileCell: UICollectionViewCell {
         if variant != .none, let infoPost {
             let overlay = Self.makeInfoOverlay(
                 for: infoPost, variant: variant, referenceSize: infoReferenceSize,
-                imagePipeline: infoImagePipeline, viewerStake: infoViewerStake
+                imagePipeline: infoImagePipeline, viewerStake: infoViewerStake,
+                voiceAlone: voiceMarkIsBuilt && !voiceMark.isHidden
             )
             overlay.frame = contentView.bounds
             // Above the picture and any video surface (both sit just above
@@ -3166,8 +3314,11 @@ public final class PostGridTileCell: UICollectionViewCell {
     ///   `infoReferenceSize`. Nil for a cell.
     public func configure(
         with post: GalleryPost, imagePipeline: ImagePipeline,
-        showsInfo: Bool = false, infoReferenceSize: CGSize? = nil
+        showsInfo: Bool = false, infoReferenceSize: CGSize? = nil,
+        showsVoice: Bool = VoicePostDisplay.areDrawn
     ) {
+        // A voice post's tile: its text face, its mark in the words' place (#2208).
+        applyVoiceMark(Self.voiceSize(for: post, showsVoice: showsVoice), for: post)
         // The media ground under a picture, the card under words (#1771) —
         // on a dark page, the on-dark ground and bone (`groundsOnDark`).
         contentView.backgroundColor = groundsOnDark && post.kind != .text

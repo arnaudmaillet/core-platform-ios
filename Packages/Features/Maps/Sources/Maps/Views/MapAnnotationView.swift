@@ -4,6 +4,7 @@ import MapKit
 import MediaCore
 import MediaPlayback
 import UIKit
+import VoiceKitUI
 
 /// A marker that can say whether it has anything to show yet.
 ///
@@ -251,12 +252,15 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
     /// instead of a cover.
     func configure(
         with pin: MapPin, dress: MapMarkerDress = .neutral, imagePipeline: ImagePipeline,
-        iconCatalog: (any AnimatedIconProviding)? = nil, previewCatalog: AnimatedIconCatalog? = nil
+        iconCatalog: (any AnimatedIconProviding)? = nil, previewCatalog: AnimatedIconCatalog? = nil,
+        showsVoice: Bool = VoicePostDisplay.areDrawn
     ) {
         self.imagePipeline = imagePipeline
         // ABOVE the guard, like the cluster's: an unlock changes the dress of
         // a pin whose post — and so everything below — is unchanged.
         applyDress(dress)
+        // A voice pin is a text pin with the mic (#2208); a cheap set.
+        applyVoiceMark(pin.wearsVoiceMark(showsVoice: showsVoice) ? pin.voice : nil)
         // Idempotent: a reconcile re-configures every surviving marker, so a
         // marker already showing this post must be left exactly as it is —
         // blanking and re-fetching an unchanged thumbnail is what flashes it.
@@ -446,9 +450,23 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         // photograph is worse than a stale avatar: it moves.
         applyIconArt(nil)
         card.setTextAvatar(nil)
+        applyVoiceMark(nil)
         applyDress(.neutral)
         applyFace(.media)
     }
+
+    /// The voice's mark on a text marker, and what VoiceOver adds for it
+    /// (#2208) — nil takes both away.
+    private func applyVoiceMark(_ voice: PostVoice?) {
+        card.setVoiceMark(voice != nil)
+        accessibilityValue = voice.map {
+            VoiceView.accessibilityLabel(role: .post(author: nil), senderName: nil, duration: $0.duration, unplayed: false)
+        }
+    }
+
+    #if DEBUG
+    var debugWearsVoiceMark: Bool { card.debugWearsVoiceMark }
+    #endif
 
     /// See `MapClusterAnnotationView.applyDress`. A local lone pin speaks for
     /// no place, so all it wears beyond the neutral ring is the lock; a band's

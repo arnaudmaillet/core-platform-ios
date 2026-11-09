@@ -34,8 +34,9 @@ let package = Package(
                 // `MediaAssetUploader` hands bytes to a `MediaUploadTransport`.
                 .product(name: "MediaCore", package: "MediaCore"),
                 .product(name: "Connect", package: "connect-swift"),
-                // `ProposedChat` (#2213) carries its JSON in a well-known
-                // `StringValue`.
+                // `PostVoiceWire` (#2206) reads and writes a message's
+                // unknown fields; `ProposedChat` (#2213) carries its JSON in
+                // a well-known `StringValue`.
                 .product(name: "SwiftProtobuf", package: "swift-protobuf")
             ]
         ),
@@ -44,6 +45,8 @@ let package = Package(
             dependencies: [
                 "CoreNetworking",
                 "CoreContracts",
+                // `PostVoice`, the seeded voice posts (#2206).
+                .product(name: "CoreModels", package: "CoreModels"),
                 .product(name: "MediaCore", package: "MediaCore"),
                 .product(name: "Connect", package: "connect-swift"),
                 .product(name: "SwiftProtobuf", package: "swift-protobuf")

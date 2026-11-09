@@ -98,6 +98,8 @@ final class CommentStream: NSObject {
     private var composerTracksKeyboard: Bool { host.composerTracksKeyboard }
     private var captionLikeCount: Int64? { host.captionLikeCount }
     private var seededCaption: (text: String, timestamp: String)? { host.seededCaption }
+    /// The seeded caption's voice (#2207), when voice posts are drawn.
+    private var seededVoice: PostVoice? { host.seededVoice }
     private var seededAuthor: (name: String, monogram: String, avatarURL: URL?)? { host.seededAuthor }
     private var knownCommentCount: Int64? { host.knownCommentCount }
     private var expandedReplyParents: Set<String> {
@@ -1194,7 +1196,9 @@ final class CommentStream: NSObject {
                     monogram: self.seededAuthor?.monogram ?? "",
                     avatarURL: self.seededAuthor?.avatarURL,
                     likeCount: self.captionLikeCount,
-                    imagePipeline: self.imagePipeline
+                    imagePipeline: self.imagePipeline,
+                    voice: self.seededVoice,
+                    postID: self.viewModel.postID
                 )
             } else {
                 return
@@ -1318,7 +1322,7 @@ final class CommentStream: NSObject {
         //
         // Recent's caption is the oldest message (#2007): at the top of the
         // history once there is nothing older to load.
-        if latestPost?.hasCaption == true || seededCaption != nil,
+        if latestPost?.showsCaptionRow == true || seededCaption != nil,
            kind == .popular || !viewModel.hasOlderComments {
             items.append(.caption)
         }
@@ -1567,7 +1571,10 @@ final class CommentStream: NSObject {
             rowHeightsCategory = category
         }
         if case .caption = item {
-            let caption = latestPost?.caption ?? seededCaption?.text ?? ""
+            // The voice is part of the key (#2207): the same words with a
+            // voice above them stand taller.
+            let speaks = (latestPost?.voice ?? seededVoice) != nil
+            let caption = (latestPost?.caption ?? seededCaption?.text ?? "") + (speaks ? "\u{1}voice" : "")
             if let known = captionHeight, known.caption == caption { return known.height }
             let height = captionRowHeight(width: width)
             captionHeight = (caption, height)
@@ -2023,7 +2030,7 @@ final class CommentStream: NSObject {
         // the caption row will be, and a closing line it was not given is a
         // line of height it does not reserve.
         if let post = latestPost {
-            guard post.hasCaption else { return 0 }
+            guard post.showsCaptionRow else { return 0 }
             sizingCell.configure(with: post, imagePipeline: nil, likeCount: captionLikeCount)
         } else if let seed = seededCaption {
             // A SEEDED caption is on screen too — the row the opener handed
@@ -2037,7 +2044,9 @@ final class CommentStream: NSObject {
                 monogram: seededAuthor?.monogram ?? "",
                 avatarURL: nil,
                 likeCount: captionLikeCount,
-                imagePipeline: nil
+                imagePipeline: nil,
+                voice: seededVoice,
+                postID: viewModel.postID
             )
         } else {
             return 0

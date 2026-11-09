@@ -6,6 +6,7 @@ import MediaCore
 import MediaPlayback
 import PostGrid
 import UIKit
+import VoiceKitUI
 
 /// What a long press on a For You row lifts: the post, bigger — the native
 /// context-menu PREVIEW, the way a long press on a conversation in Messages
@@ -303,6 +304,11 @@ final class TextCardPreview {
     let band = PostAuthorBandView()
     let likes = PostLikeReadoutView(ground: .card, font: ForYouPostPreviewViewController.likeFont)
     let caption = EmoteLabel()
+    /// A voice post's caption (#2208, behind `-voice-posts`): the shared
+    /// voice component, full size, under the band — the caption's words under
+    /// it. Bound to the post's voice, so a voice playing on the card shows
+    /// here where it is.
+    let voice = VoicePostCaptionView()
     let rule = UIView()
     /// The comments shown — those that fit, in order.
     private(set) var rows: [CommentRowView] = []
@@ -311,7 +317,10 @@ final class TextCardPreview {
     /// The card's measured size.
     private(set) var size: CGSize = .zero
 
-    init(post: GalleryPost, comments: [CommentEntry], width: CGFloat, imagePipeline: ImagePipeline) {
+    init(
+        post: GalleryPost, comments: [CommentEntry], width: CGFloat, imagePipeline: ImagePipeline,
+        showsVoice: Bool = VoicePosts.areDrawn, voiceHub: VoicePlaybackHub? = nil
+    ) {
         let inset = Self.inset
         let inner = max(0, width - 2 * inset)
         var y = inset
@@ -326,6 +335,20 @@ final class TextCardPreview {
         let bandTrailing = likes.isHidden ? width - inset : width - inset - likeSize.width - 8
         frames[band] = CGRect(x: inset, y: y, width: max(0, bandTrailing - inset), height: bandHeight)
         y += bandHeight + Self.gap
+
+        if let size = Self.voiceSize(for: post, showsVoice: showsVoice), let spoken = post.voice {
+            if let voiceHub { voice.hub = voiceHub }
+            voice.show(
+                postID: post.id.rawValue, url: spoken.url, duration: spoken.duration, levels: spoken.waveform,
+                author: post.authorName, size: size
+            )
+            let voiceHeight = ceil(voice.systemLayoutSizeFitting(
+                CGSize(width: inner, height: UIView.layoutFittingCompressedSize.height),
+                withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+            ).height)
+            frames[voice] = CGRect(x: inset, y: y, width: inner, height: voiceHeight)
+            y += voiceHeight + (post.caption.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0 : Self.gap)
+        }
 
         caption.font = Self.captionFont
         caption.textColor = .label
@@ -366,9 +389,17 @@ final class TextCardPreview {
         size = CGSize(width: width, height: min(maxHeight, ceil(y + inset)))
     }
 
+    /// The size a lift gives a voice post's caption: full, for a text post
+    /// that speaks with the switch on (#2208). Pure.
+    static func voiceSize(for post: GalleryPost, showsVoice: Bool) -> VoicePostDisplay.Size? {
+        showsVoice && post.kind == .text && post.voice != nil ? .full : nil
+    }
+
     /// Puts every piece in `view`, at its measured frame.
     func install(in view: UIView) {
-        for piece in [band, likes, caption] as [UIView] + (rows.isEmpty ? [] : [rule]) + rows {
+        let head: [UIView] = voice.isHidden ? [band, likes, caption] : [band, likes, voice, caption]
+        let tail: [UIView] = rows.isEmpty ? [] : [rule]
+        for piece in head + tail + rows {
             piece.translatesAutoresizingMaskIntoConstraints = true
             piece.frame = frames[piece] ?? .zero
             view.addSubview(piece)

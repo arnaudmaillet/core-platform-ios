@@ -72,15 +72,15 @@ public final class ShareItemSource: NSObject, UIActivityItemSource {
     public func activityViewController(
         _ controller: UIActivityViewController, subjectForActivityType activityType: UIActivity.ActivityType?
     ) -> String {
-        // Mail's subject line.
-        "\(card.displayName) (\(card.handle))"
+        // Mail's subject line; a voice post's words when it has them (#2208).
+        card.detail.map { "\(card.displayName) · \($0)" } ?? "\(card.displayName) (\(card.handle))"
     }
 
     public func activityViewControllerLinkMetadata(_ controller: UIActivityViewController) -> LPLinkMetadata? {
         let metadata = LPLinkMetadata()
         metadata.originalURL = card.url
         metadata.url = card.url
-        metadata.title = "\(card.displayName) · \(card.handle)"
+        metadata.title = card.shareTitle
         if let icon {
             metadata.iconProvider = NSItemProvider(object: icon)
         }

@@ -106,6 +106,17 @@ struct ShareSheetTests {
         let images = view.allSubviews.compactMap { ($0 as? UIImageView)?.image }
         #expect(images.contains { $0 === flag })
     }
+
+    /// A voice post's share (#2208): the system sheet's title says what the
+    /// post says; any other card keeps its name and its line.
+    @Test func aVoicePostsShareTitleSaysItsVoice() {
+        let link = URL(string: "https://core-platform.click/p/1")!
+        let voice = ShareCard(displayName: "Ava Moreau", handle: "@ava", avatarURL: nil, url: link,
+                              detail: "🎙 Voice post · 0:32")
+        #expect(voice.shareTitle == "Ava Moreau · 🎙 Voice post · 0:32")
+        let plain = ShareCard(displayName: "Ava Moreau", handle: "@ava", avatarURL: nil, url: link)
+        #expect(plain.shareTitle == "Ava Moreau · @ava")
+    }
 }
 
 private extension UIView {

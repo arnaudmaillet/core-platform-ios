@@ -49,6 +49,7 @@ public struct MockBackend: Sendable {
         persistence: UserDefaults = .standard,
         seedsGroups: Bool = false,
         seedsChannels: Bool = false,
+        drawsVoicePosts: Bool = false,
         groupGoesPrivateAfter: TimeInterval? = nil
     ) {
         // The world beyond France (`MockWorldSeed`) rides the same decision
@@ -88,7 +89,8 @@ public struct MockBackend: Sendable {
             index + 1 < arguments.count ? arguments[index + 1] : nil
         }
         let socialServices = MockSocialServices(
-            dataset: dataset, postStore: postStore, verificationSeed: verificationSeed, counters: counterStore
+            dataset: dataset, postStore: postStore, verificationSeed: verificationSeed, counters: counterStore,
+            drawsVoicePosts: drawsVoicePosts
         )
         socialServices.register(on: bff)
         // Following a private profile asks (backend #655); profile.v1 owns

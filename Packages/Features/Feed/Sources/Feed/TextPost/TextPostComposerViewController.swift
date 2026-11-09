@@ -1,4 +1,5 @@
 import CoreModels
+import FeedInterface
 import CoreNavigation
 import CoreStorage
 import DesignSystem
@@ -48,6 +49,9 @@ final class TextPostComposerViewController: UIViewController {
     /// over it, and publishing deletes it.
     private(set) var editingDraftID: String?
     private var composerText = ""
+    /// The thread's voice composer, on the text composer (#2209,
+    /// `-voice-posts`): the first message can be a voice.
+    private(set) var voiceComposer: VoiceComposer?
     /// Whether the sheet grew to make room for the keyboard — so it shrinks
     /// back when the keyboard goes, and only then.
     private var expandedForKeyboard = false
@@ -127,6 +131,60 @@ final class TextPostComposerViewController: UIViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    // MARK: - Voice posts (#2209)
+
+    /// The thread's hold-to-record on the text composer, with a voice post's
+    /// minute: a first message can be a voice, a voice then words (the words
+    /// typed so far go with it as its caption), or words alone as before.
+    private func installVoiceComposer() {
+        guard panel.viewModel.acceptsVoice, voiceComposer == nil else { return }
+        let composer = VoiceComposer(draftKey: "text-post-voice", limit: TextPostVoice.maximumDuration)
+        composer.onSend = { [weak self] take in
+            guard let self else { return }
+            panel.viewModel.publishVoice(
+                TextPostVoice(fileURL: take.fileURL, duration: take.duration, waveform: take.waveform),
+                text: composerText
+            )
+        }
+        composer.onHint = { [weak self] hint in
+            guard let self else { return }
+            Feedback.info(hint, symbol: "mic", from: self)
+        }
+        composer.onPermissionDenied = { [weak self] in self?.offerMicrophoneSettings() }
+        composer.attach(to: panel.composeBar, host: view)
+        // A failed upload keeps the take and offers to try again, as a failed
+        // chat send does.
+        panel.viewModel.onVoicePublishFailed = { [weak self] voice, text in
+            self?.offerVoiceRetry(voice, text: text)
+        }
+        voiceComposer = composer
+    }
+
+    /// The take that didn't go, offered again.
+    private func offerVoiceRetry(_ voice: TextPostVoice, text: String) {
+        let alert = UIAlertController(
+            title: "Couldn\u{2019}t Post", message: "Your voice post wasn\u{2019}t sent.", preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Try Again", style: .default) { [weak self] _ in
+            self?.panel.viewModel.publishVoice(voice, text: text)
+        })
+        present(alert, animated: true)
+    }
+
+    /// Once refused, a hold offers Settings — the thread's (#2102).
+    private func offerMicrophoneSettings() {
+        let alert = UIAlertController(
+            title: "Microphone Access", message: "Allow microphone access to record a voice post.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Not Now", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Open Settings", style: .default) { _ in
+            if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+        })
+        present(alert, animated: true)
+    }
+
     // MARK: - Lifecycle
 
     override func viewDidLoad() {
@@ -153,6 +211,7 @@ final class TextPostComposerViewController: UIViewController {
             },
         ]
         observeKeyboard()
+        installVoiceComposer()
         // The invitation grows with the text size, and so may the least the
         // sheet rests at.
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {

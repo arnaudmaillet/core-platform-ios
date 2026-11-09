@@ -35,6 +35,31 @@ public struct MediaAttachment: Sendable, Equatable, Codable {
     }
 }
 
+/// A voice post's voice (#2204, #2206): a property of a TEXT post's caption,
+/// not a kind of post. A voice post is drawn as a text post whose caption is
+/// the voice component.
+///
+/// - ⚠️ **Never in `attachments`:** every `attachments.isEmpty` test would
+///   read the post as media, and the MIME would make it an image.
+/// - ⚠️ **Never `audio_ref`:** that is the reusable sound — a text post has
+///   no sound (#1999).
+public struct PostVoice: Sendable, Equatable, Hashable, Codable {
+    /// The audio asset (media.v1), the cache's stable key.
+    public let assetID: String
+    /// Where it plays from (signed, through `VoiceFileCache`).
+    public let url: URL?
+    public let duration: TimeInterval
+    /// 100 levels, 0–31 (`VoiceWaveform`); empty when the summary has none.
+    public let waveform: [UInt8]
+
+    public init(assetID: String, url: URL?, duration: TimeInterval, waveform: [UInt8]) {
+        self.assetID = assetID
+        self.url = url
+        self.duration = duration
+        self.waveform = waveform
+    }
+}
+
 /// A published post, hydrated for rendering.
 public struct Post: Sendable, Equatable, Codable {
     public let id: PostID
@@ -42,17 +67,26 @@ public struct Post: Sendable, Equatable, Codable {
     public let caption: String
     public let attachments: [MediaAttachment]
     public let publishedAt: Date
+    /// The caption's voice (#2206): a text post that speaks. Optional, so a
+    /// snapshot stored before it decodes with none.
+    public let voice: PostVoice?
+
+    /// Whether the post speaks — the ONE test a surface reads to draw a
+    /// voice (#2206), never a URL, a MIME or a caption.
+    public var hasVoice: Bool { voice != nil }
     // No "likes hidden" (#1713, the owner): a post's likes always show — the
     // client honours no hiding, and an old snapshot's key is ignored.
 
     public init(
-        id: PostID, authorID: ProfileID, caption: String, attachments: [MediaAttachment], publishedAt: Date
+        id: PostID, authorID: ProfileID, caption: String, attachments: [MediaAttachment], publishedAt: Date,
+        voice: PostVoice? = nil
     ) {
         self.id = id
         self.authorID = authorID
         self.caption = caption
         self.attachments = attachments
         self.publishedAt = publishedAt
+        self.voice = voice
     }
 
     public init(from decoder: any Decoder) throws {
@@ -62,6 +96,7 @@ public struct Post: Sendable, Equatable, Codable {
         caption = try container.decode(String.self, forKey: .caption)
         attachments = try container.decode([MediaAttachment].self, forKey: .attachments)
         publishedAt = try container.decode(Date.self, forKey: .publishedAt)
+        voice = try container.decodeIfPresent(PostVoice.self, forKey: .voice)
     }
 }
 

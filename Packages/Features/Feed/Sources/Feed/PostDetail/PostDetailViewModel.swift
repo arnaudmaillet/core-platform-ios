@@ -1,4 +1,5 @@
 import CoreModels
+import FeedInterface
 import CoreNavigation
 import CoreNetworking
 import EntityStore
@@ -504,6 +505,40 @@ public final class PostDetailViewModel {
             }
         }
     }
+
+    /// Whether the draft's first message can be a voice (#2209).
+    var acceptsVoice: Bool { draft?.publishVoice != nil }
+
+    /// A voice post's first message (#2209): the take, with `text` (possibly
+    /// empty) under it, published as the post. A failure gives the take back
+    /// (`onVoicePublishFailed`) so the viewer can try again.
+    func publishVoice(_ voice: TextPostVoice, text: String) {
+        guard let draft, let publishVoice = draft.publishVoice else { return }
+        setComposing(true)
+        let commentsProvider = commentsProvider
+        let shown = shownIdentity?.author
+        Task { [weak self] in
+            var author = shown
+            if author == nil { author = await commentsProvider?.viewerIdentity()?.author }
+            guard let author else {
+                self?.setComposing(false)
+                self?.onVoicePublishFailed?(voice, text)
+                return
+            }
+            do {
+                let entry = try await publishVoice(text, voice, author)
+                self?.adoptPublished(entry)
+                self?.setComposing(false)
+            } catch {
+                self?.setComposing(false)
+                self?.publishFailureReason = (error as? LocalizedError)?.errorDescription
+                self?.onVoicePublishFailed?(voice, text)
+            }
+        }
+    }
+
+    /// A voice post that didn't go (#2209): its take and words, to try again.
+    var onVoicePublishFailed: ((TextPostVoice, String) -> Void)?
 
     /// Becomes the post the draft just published — in ONE turn, so nothing can
     /// observe a screen that is half draft and half post.

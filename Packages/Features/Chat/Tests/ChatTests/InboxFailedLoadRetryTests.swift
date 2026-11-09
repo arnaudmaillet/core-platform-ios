@@ -88,8 +88,14 @@ struct InboxFailedLoadRetryTests {
     }
 
     /// The failure's Try Again, checked live: shown, enabled, and worded.
-    private func tryAgain(on screen: UIViewController) async throws -> UIButton {
-        try #require(await settle { statusView(of: screen) != nil }, "the failure was not shown")
+    ///
+    /// ⚠️ **THE FAILURE, NOT ANY STATUS.** Past 10 s of wall clock the screen
+    /// shows "taking longer" in the same status view, with its own Try Again
+    /// (`ScreenLoadingHost.onTakingLonger`). On a starved runner that came
+    /// before the first ask had even run, and the test read `loads == 0`
+    /// (#2224's run): `failed` waits for the answer to have failed.
+    private func tryAgain(on screen: UIViewController, failed: () -> Bool) async throws -> UIButton {
+        try #require(await settle { failed() && statusView(of: screen) != nil }, "the failure was not shown")
         let status = try #require(statusView(of: screen))
         let button = try #require(Self.firstView(UIButton.self, in: status))
         #expect(!button.isHidden)
@@ -135,7 +141,10 @@ struct InboxFailedLoadRetryTests {
         let screen = screen(ConversationListViewController(viewModel: viewModel))
         catalog.reload()
 
-        let button = try await tryAgain(on: screen)
+        let button = try await tryAgain(on: screen) {
+            if case .failed = viewModel.phase { return true }
+            return false
+        }
         #expect(await inbox.inboxLoads == 1)
 
         await inbox.startAnswering()
@@ -157,7 +166,10 @@ struct InboxFailedLoadRetryTests {
         let screen = screen(MessageRequestsViewController(viewModel: viewModel))
         catalog.reload()
 
-        let button = try await tryAgain(on: screen)
+        let button = try await tryAgain(on: screen) {
+            if case .failed = viewModel.phase { return true }
+            return false
+        }
         #expect(await inbox.inboxLoads == 1)
 
         await inbox.startAnswering()
@@ -178,7 +190,10 @@ struct InboxFailedLoadRetryTests {
         let screen = screen(SuggestionsViewController(viewModel: viewModel, imagePipeline: nil))
         viewModel.loadIfNeeded()
 
-        let button = try await tryAgain(on: screen)
+        let button = try await tryAgain(on: screen) {
+            if case .failed = viewModel.phase { return true }
+            return false
+        }
         #expect(await suggestions.loads == 1)
 
         await suggestions.startAnswering()

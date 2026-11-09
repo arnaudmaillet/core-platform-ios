@@ -605,6 +605,16 @@ final class PinCardView: UIView {
     /// Idempotence is the CALLER's business (an annotation view re-configures
     /// every surviving marker on each reconcile), but this is safe to call
     /// repeatedly — it only sets state.
+    /// A voice post's marker (#2208): the text marker with the voice's mark —
+    /// on a 44 pt disc, its mic alone (the mark's bars and length do not fit).
+    func setVoiceMark(_ shown: Bool) {
+        textFaceView.setVoiceMark(shown)
+    }
+
+    #if DEBUG
+    var debugWearsVoiceMark: Bool { textFaceView.wearsVoiceMark }
+    #endif
+
     /// The author's face for a TEXT marker — see `PinTextFaceView.setAvatar`.
     /// A no-op on a media face, which has a cover of its own.
     func setTextAvatar(_ image: UIImage?) {
@@ -1464,6 +1474,10 @@ private final class PinTextFaceView: UIView {
         // latter is a superellipse rather than a circle.
         layer.cornerCurve = .circular
         layer.masksToBounds = floorCornerRadius > 0
+        // At the disc's foot, centred: the one place a plate this size stays
+        // whole inside the circle.
+        let side = Self.micBadgeSide
+        micBadge.frame = CGRect(x: (bounds.width - side) / 2, y: bounds.height - side - 3, width: side, height: side)
     }
 
     /// The disc's opaque ground. Named for what it is now that it carries no
@@ -1476,6 +1490,15 @@ private final class PinTextFaceView: UIView {
     let faceBone = AvatarSkeletonView()
     /// The author's face is on its way: the glyph keeps out of sight.
     private var isAvatarPending = false
+    /// A voice post's mark (#2208): a mic on a small plate at the disc's
+    /// foot, over the glyph or the author's face — inside the circle, which
+    /// clips.
+    /// A plain plate holding the mic: not an image view of the face's own,
+    /// whose two (the glyph and the author) the face swaps between.
+    private let micBadge = UIView()
+    private let micGlyph = UIImageView()
+    static let micBadgeSide: CGFloat = 16
+    var wearsVoiceMark: Bool { !micBadge.isHidden }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1528,6 +1551,27 @@ private final class PinTextFaceView: UIView {
         avatar.isUserInteractionEnabled = false
         avatar.isHidden = true
         addSubview(avatar)
+
+        micGlyph.image = UIImage(systemName: "mic.fill")?.withConfiguration(
+            UIImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+        )
+        micGlyph.contentMode = .center
+        micGlyph.tintColor = .systemBackground
+        micGlyph.frame = CGRect(x: 0, y: 0, width: Self.micBadgeSide, height: Self.micBadgeSide)
+        micGlyph.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        micBadge.addSubview(micGlyph)
+        micBadge.backgroundColor = UIColor.label.withAlphaComponent(0.8)
+        micBadge.layer.cornerRadius = Self.micBadgeSide / 2
+        micBadge.layer.cornerCurve = .circular
+        micBadge.clipsToBounds = true
+        micBadge.isUserInteractionEnabled = false
+        micBadge.isHidden = true
+        addSubview(micBadge)
+    }
+
+    func setVoiceMark(_ shown: Bool) {
+        micBadge.isHidden = !shown
+        setNeedsLayout()
     }
 
     /// The author's face, or nil to fall back to the glyph.
@@ -1582,6 +1626,7 @@ private final class PinTextFaceView: UIView {
         // take it.
         glyph.alpha = alpha
         avatar.alpha = alpha
+        micBadge.alpha = alpha
     }
 
     /// The disc's colour, for a page to wear while a reveal opened from this

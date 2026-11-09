@@ -11,6 +11,7 @@ import MediaPlayback
 import PostGrid
 import ShareSheet
 import UIKit
+import VoiceKitUI
 
 /// The full-screen, page-snapping timeline. Drives the *same* `FeedViewModel`
 /// as the classic feed — pagination, likes, realtime, compose hand-off all come
@@ -2875,6 +2876,9 @@ final class SnapFeedViewController: UIViewController {
         // The sound turned on, or off by the silent switch (#1931), or the
         // switch moved while it follows the device (#483): Background Play and
         // Picture in Picture follow it.
+        // A voice post or a voice message holding the floor silences the
+        // feed until it lets go (#2207).
+        FeedSoundSession.shared.followVoiceFloor()
         for name in [FeedSoundSession.didTurnOn, FeedSoundSession.didTurnOff, FeedSoundSession.audibilityDidChange] {
             appObservers.add(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refreshAudibleSurface() }
@@ -4274,7 +4278,9 @@ final class SnapFeedViewController: UIViewController {
         )
         // The caption the FEED already has, so the row exists while the hero
         // is in the air rather than arriving with the post fetch.
-        if let model = modelsByID[id], let caption = model.caption, !caption.isEmpty {
+        let seededVoice = VoicePosts.areDrawn ? modelsByID[id]?.voice : nil
+        if let model = modelsByID[id], let caption = model.caption ?? (seededVoice == nil ? nil : ""),
+           !caption.isEmpty || seededVoice != nil {
             // The AUTHOR travels with the caption: the row is an avatar beside
             // a bubble for every post now, and this path — the text page's
             // resting interface — is the one that mounts before any fetch, so
@@ -4286,7 +4292,8 @@ final class SnapFeedViewController: UIViewController {
                 monogram: CommentsInputBar.monogram(model.authorName),
                 avatarURL: model.avatarURL,
                 metrics: model.cardMetrics
-                    ?? PostCardMetrics(reactions: model.likeCount, comments: nil)
+                    ?? PostCardMetrics(reactions: model.likeCount, comments: nil),
+                voice: seededVoice
             )
         }
         // The count the feed knows: no comment bones for a post with none.
@@ -5843,7 +5850,9 @@ final class SnapFeedViewController: UIViewController {
             displayName: model.authorName,
             handle: SnapAuthorIdentityView.pillMetaLine(fromMeta: model.metaText),
             avatarURL: model.avatarURL,
-            url: link
+            url: link,
+            // A voice post says its voice where no player is drawn (#2208).
+            detail: VoicePosts.shareText(caption: model.caption, voice: model.voice)
         )
         let sheet = ShareSheetViewController(
             card: card,
@@ -6297,6 +6306,10 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     }
 
     func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        // Paged away: a voice post's voice stops where it is (#2207).
+        if let snapCell = cell as? SnapFeedCell, let id = snapCell.representedPostID {
+            VoicePlaybackHub.shared.stop(VoicePosts.playbackID(id))
+        }
         // Belt-and-suspenders release: a cell scrolled fully off is never active,
         // and this guarantees the resign even if it's recycled before a settle.
         // Fully off screen: the loan goes back, because the grid behind is
