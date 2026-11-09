@@ -6,6 +6,7 @@ import CoreStorage
 import DesignSystem
 import FeedInterface
 import MediaCore
+import PostGrid
 import ProfileInterface
 import UIKit
 
@@ -106,7 +107,10 @@ final class CommentStream: NSObject {
     /// comments, so the stream is its caption row alone — no bones, no
     /// "no comments yet", no threads. The hydrated post decides once it has
     /// landed; the opener's seed until then.
-    private var isShowcase: Bool { latestPost.map { $0.embed != nil } ?? (seededEmbed != nil) }
+    /// The hydrated post's card, behind the switch like the seed's: off, a
+    /// showcase is the text post it is, comments and all.
+    private var latestEmbed: PostEmbed? { PostEmbeds.shown(latestPost?.embed) }
+    private var isShowcase: Bool { latestPost == nil ? seededEmbed != nil : latestEmbed != nil }
     private var seededAuthor: (name: String, monogram: String, avatarURL: URL?)? { host.seededAuthor }
     private var knownCommentCount: Int64? { host.knownCommentCount }
     private var expandedReplyParents: Set<String> {
@@ -1586,7 +1590,7 @@ final class CommentStream: NSObject {
             let speaks = (latestPost?.voice ?? seededVoice) != nil
             // …and so is the card (#2216), whose drawing follows its state.
             // Typed parts, not one chain: Xcode 26 gives up on a long one.
-            let shownEmbed: PostEmbed? = latestPost?.embed ?? seededEmbed
+            let shownEmbed: PostEmbed? = latestEmbed ?? seededEmbed
             let card: String = shownEmbed.map { "\u{1}embed\($0.hashValue)" } ?? ""
             let words: String = latestPost?.caption ?? seededCaption?.text ?? ""
             let voiceKey: String = speaks ? "\u{1}voice" : ""
