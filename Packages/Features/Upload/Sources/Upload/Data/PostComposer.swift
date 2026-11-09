@@ -1,4 +1,6 @@
 import AuthInterface
+import CryptoKit
+import FeedInterface
 import CoreContracts
 import CoreNetworking
 import MediaCore
@@ -202,9 +204,25 @@ public protocol PostComposing: Sendable {
         media: [ComposeMedia], caption: String, as author: AuthorSummary?, idempotencyKey: String,
         progress: @escaping @Sendable (Double) -> Void
     ) async throws -> FeedEntry
+
+    /// A voice post (#2209): `voice` uploaded as an audio asset, then a TEXT
+    /// post created with it as its caption's voice and `caption` (possibly
+    /// empty) as its words — no attachment, no `audio_ref`.
+    @discardableResult
+    func publishVoicePost(
+        caption: String, voice: TextPostVoice, as author: AuthorSummary?, idempotencyKey: String
+    ) async throws -> FeedEntry
 }
 
 public extension PostComposing {
+    /// Composers that send no voice (fakes).
+    @discardableResult
+    func publishVoicePost(
+        caption: String, voice: TextPostVoice, as author: AuthorSummary?, idempotencyKey: String
+    ) async throws -> FeedEntry {
+        throw TextPostVoiceUnsupported()
+    }
+
     /// Composers with no key to send (fakes): the publish as it was.
     @discardableResult
     func publish(
@@ -418,6 +436,48 @@ public actor PostComposer: PostComposing {
         return entry
     }
 
+    // MARK: - Voice posts (#2209)
+
+    public func publishVoicePost(
+        caption: String, voice: TextPostVoice, as author: AuthorSummary?, idempotencyKey: String
+    ) async throws -> FeedEntry {
+        guard voice.duration > 0 else { throw ComposeError.emptyPost }
+        let trimmedCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        let viewer = try await resolveViewer(as: author)
+        let data: Data
+        do { data = try Data(contentsOf: voice.fileURL) } catch {
+            throw ComposeError.media("the recording couldn't be read", failure: nil)
+        }
+        let asset = try await uploadAsset(
+            ownerID: viewer.accountID,
+            mimeType: "audio/mp4",
+            sizeBytes: UInt64(data.count),
+            sha256: SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined(),
+            idempotencyKey: idempotencyKey + "-voice",
+            payload: .file(voice.fileURL)
+        )
+        // A tenth of a second, as the server keeps it.
+        let duration = (voice.duration * 10).rounded() / 10
+        let served = PostVoice(assetID: asset.assetID, url: asset.url, duration: duration, waveform: voice.waveform)
+        let postID = try await createDraft(
+            profileID: viewer.author.id, caption: trimmedCaption, attachments: [], hasMedia: false,
+            idempotencyKey: idempotencyKey, voice: served
+        )
+        try await publishDraft(postID: postID, profileID: viewer.author.id)
+        // The author's own voice plays at once, from the take (#2209).
+        let local = PostVoice(assetID: asset.assetID, url: voice.fileURL, duration: duration, waveform: voice.waveform)
+        let entry = FeedEntry(
+            post: Post(
+                id: postID, authorID: viewer.author.id, caption: trimmedCaption, attachments: [],
+                publishedAt: now(), voice: local
+            ),
+            author: viewer.author,
+            likeCount: 0
+        )
+        await composedChannel.publish(entry)
+        return entry
+    }
+
     // MARK: - Steps
 
     private func uploadImage(_ picked: PickedImage, ownerID: AccountID) async throws -> MediaAttachment {
@@ -585,7 +645,7 @@ public actor PostComposer: PostComposing {
     /// wait fails like any other.
     private func createDraft(
         profileID: ProfileID, caption: String, attachments: [Post_V1_MediaAttachmentInput], hasMedia: Bool,
-        idempotencyKey: String
+        idempotencyKey: String, voice: PostVoice? = nil
     ) async throws -> PostID {
         var request = Post_V1_CreatePostRequest()
         request.profileID = profileID.rawValue
@@ -593,6 +653,9 @@ public actor PostComposer: PostComposing {
         request.caption = caption
         request.attachments = attachments
         request.idempotencyKey = IdempotencyKey.wire(idempotencyKey)
+        // A voice post's voice (#2209), on the proposed field until backend
+        // #994: never an attachment, never `audio_ref`.
+        if let voice { PostVoiceWire.write(voice, to: &request) }
 
         var waits = inFlightRetryDelays[...]
         while true {

@@ -1766,12 +1766,25 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     func makeTextPostScreen(publisher: any TextPostPublishing, bookmarks: PostBookmarkStore) -> UIViewController {
         let repository = repository
         let commentsProvider = commentsProvider
-        let draft = PostDetailDraft { text, author in
+        // A voice post (#2209): the same priming as a text post's; none
+        // without `-voice-posts`.
+        let publishVoice: (@Sendable (String, TextPostVoice, AuthorSummary?) async throws -> FeedEntry)?
+        if VoicePosts.areDrawn {
+            publishVoice = { text, voice, author in
+                let entry = try await publisher.publishTextPost(text, voice: voice, as: author)
+                await repository.remember(entry)
+                commentsProvider?.seedTopComments([], for: entry.post.id)
+                return entry
+            }
+        } else {
+            publishVoice = nil
+        }
+        let draft = PostDetailDraft(publish: { text, author in
             let entry = try await publisher.publishTextPost(text, as: author)
             await repository.remember(entry)
             commentsProvider?.seedTopComments([], for: entry.post.id)
             return entry
-        }
+        }, publishVoice: publishVoice)
         let panel = Self.makeCommentsPanel(
             viewModel: PostDetailViewModel(
                 draft: draft,

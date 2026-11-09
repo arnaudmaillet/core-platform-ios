@@ -20,4 +20,18 @@ struct ComposerTextPostPublisher: TextPostPublishing {
         intent.settle()
         return entry
     }
+
+    /// A voice post (#2209): the take is uploaded, then the text post is
+    /// created carrying it. The key covers the voice too: a new take is a new
+    /// post.
+    func publishTextPost(_ text: String, voice: TextPostVoice?, as author: AuthorSummary?) async throws -> FeedEntry {
+        guard let voice else { return try await publishTextPost(text, as: author) }
+        let content = (author?.id.rawValue ?? "") + "\u{1F}" + text.trimmingCharacters(in: .whitespacesAndNewlines)
+            + "\u{1F}" + voice.fileURL.lastPathComponent
+        let entry = try await composer.publishVoicePost(
+            caption: text, voice: voice, as: author, idempotencyKey: intent.key(for: content)
+        )
+        intent.settle()
+        return entry
+    }
 }
