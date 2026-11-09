@@ -2,6 +2,7 @@ import Connect
 import CoreContracts
 import CoreNetworking
 import Foundation
+import SwiftProtobuf
 
 /// What a DM opening answers in the mock (backend #656, #2212), from the
 /// peer's "Who Can Message" setting: it opens, the opener's messages are a
@@ -100,7 +101,11 @@ public final class MockChatService: @unchecked Sendable {
     private var conversationIDs: [String] {
         (0..<16).map { "conv-\($0)" } + Self.requestIDs + Self.hiddenRequestIDs
             + store.openedDirects().map(\.id).sorted()
+            + book.inboxIDs
     }
+
+    /// The seeded groups and channels (#2213), and the ones created.
+    private let book: MockConversationBook
     private let viewer = MockSocialDataset.viewerProfileID
 
     /// Whether `sender` may message `recipient` (backend #656): with the
@@ -115,9 +120,15 @@ public final class MockChatService: @unchecked Sendable {
     public init(
         dataset: MockSocialDataset,
         mayMessage: @escaping @Sendable (_ sender: String, _ recipient: String) -> Bool = { _, _ in true },
-        admission: (@Sendable (_ sender: String, _ recipient: String) -> MockDirectAdmission)? = nil
+        admission: (@Sendable (_ sender: String, _ recipient: String) -> MockDirectAdmission)? = nil,
+        seedsGroups: Bool = false,
+        seedsChannels: Bool = false
     ) {
         self.dataset = dataset
+        book = MockConversationBook(
+            viewer: MockSocialDataset.viewerProfileID, authors: dataset.authors.map(\.profileID),
+            seedsGroups: seedsGroups, seedsChannels: seedsChannels, now: Int64(Date().timeIntervalSince1970 * 1000)
+        )
         self.mayMessage = mayMessage
         self.admission = admission ?? { sender, recipient in mayMessage(sender, recipient) ? .open : .refused }
     }
@@ -142,8 +153,31 @@ public final class MockChatService: @unchecked Sendable {
             response.nextPageToken = end < entries.count ? String(end) : ""
             return .success(response)
         }
-        bff.register(path: "/chat.v1.ChatService/ListMembers") { [self] (request: Chat_V1_ListMembersRequest) in
+        // Groups' and channels' needs (#2213), until chat.v1 carries them.
+        bff.register(path: ProposedChat.path) { [self] (request: Google_Protobuf_StringValue) -> Result<Google_Protobuf_StringValue, ConnectError> in
+            guard let call = try? ProposedChat.unwrap(ProposedChat.Call.self, from: request),
+                  let reply = try? ProposedChat.wrap(book.answer(call, now: Int64(Date().timeIntervalSince1970 * 1000))) else {
+                return .failure(ConnectError(code: .invalidArgument, message: "unreadable call"))
+            }
+            return .success(reply)
+        }
+        bff.register(path: "/chat.v1.ChatService/ListMembers") { [self] (request: Chat_V1_ListMembersRequest) -> Result<Chat_V1_ListMembersResponse, ConnectError> in
             var response = Chat_V1_ListMembersResponse()
+            if book.kind(of: request.conversationID) != nil {
+                response.members = book.members(of: request.conversationID).map { row in
+                    var view = member(row.profileID, lastRead: row.profileID == viewer ? viewerLastRead(in: request.conversationID) : "")
+                    view.joinedAtMs = row.joinedAtMs
+                    view.role = switch row.role {
+                    case .owner: .owner
+                    case .admin: .admin
+                    case .member: .member
+                    case .subscriber: .subscriber
+                    case .guest: .guest
+                    }
+                    return view
+                }
+                return .success(response)
+            }
             // The viewer's member view carries `last_read`, which is what the
             // inbox derives its Unread tab from — so it has to be real state,
             // not a blank field, and MarkRead below has to move it.
@@ -284,8 +318,13 @@ public final class MockChatService: @unchecked Sendable {
             }
             var entry = Chat_V1_InboxEntryView()
             entry.conversationID = id
-            entry.kind = .direct
-            entry.peerID = members[id] ?? ""
+            switch book.kind(of: id) {
+            case .group?: entry.kind = .group
+            case .channel?: entry.kind = .channel
+            default:
+                entry.kind = .direct
+                entry.peerID = members[id] ?? ""
+            }
             // The viewer's own request, waiting for the peer (#2212).
             entry.request = store.pendingRequester(of: id) == viewer
             let latest = history.max { $0.createdAtMs < $1.createdAtMs }
@@ -351,6 +390,45 @@ public final class MockChatService: @unchecked Sendable {
     /// future date rather than counting backwards).
     private static let justArrived: Int64 = -5
 
+    /// A group's history with several senders, a channel's its owner's and
+    /// admins' posts (#2213).
+    private func bookHistory(for id: String, minute: Int64) -> [Chat_V1_MessageView] {
+        let members = book.members(of: id)
+        let others = members.map(\.profileID).filter { $0 != viewer }
+        func pick(_ index: Int) -> String { others.isEmpty ? viewer : others[index % others.count] }
+        let publishers = members.filter { $0.role == .owner || $0.role == .admin }.map(\.profileID)
+        let lines: [(String, String, Int64)]
+        switch (id, book.kind(of: id)) {
+        case ("grp-hike", _):
+            lines = [(pick(0), "Forecast says clear until noon ☀️", 180), (pick(1), "I can drive, room for three", 175),
+                     (viewer, "Perfect, meet at the station at 7?", 170), (pick(2), "7 works", 160),
+                     (pick(1), "Bringing the good coffee", 30), (pick(3), "See you there 🥾", 12)]
+        case ("grp-studio", _):
+            lines = [(pick(0), "New paper arrived", 300), (viewer, "Finally!", 290), (pick(1), "Test prints tomorrow?", 45)]
+        case ("grp-printfair", _):
+            lines = [(pick(0), "Rota is up for Saturday", 600), (pick(1), "I'll take the morning shift", 590),
+                     (pick(2), "Who has the card reader?", 400), (viewer, "Me, I'll bring it", 395),
+                     (pick(3), "Van leaves at 6:30 sharp", 90)]
+        case ("grp-nightwalk", _):
+            lines = [(pick(0), "Thinking Friday, after sunset", 200), (pick(1), "Tripods or handheld?", 150)]
+        case (_, .channel?):
+            let author = publishers.first ?? pick(0)
+            lines = [(author, "Tonight's light: the pier at 19:42, gold all the way down.", 1_500),
+                     (author, "Thanks for the kind words on yesterday's post 🙏", 700),
+                     (author, "New series starts Monday.", 60)]
+        default:
+            lines = []
+        }
+        return lines.enumerated().map { index, spec in
+            var view = Chat_V1_MessageView()
+            view.messageID = "\(id)-m\(index)"
+            view.senderID = spec.0
+            view.body = spec.1
+            view.createdAtMs = nowMs - spec.2 * minute
+            return view
+        }
+    }
+
     private func seedHistory(for conversationID: String) -> [Chat_V1_MessageView] {
         let other = otherMember[conversationID] ?? viewer
         let minute: Int64 = 60_000
@@ -361,6 +439,8 @@ public final class MockChatService: @unchecked Sendable {
         let midday: Int64 = 24 * 60 + 30
         // A DM opened this session (#2212) starts empty: it is new.
         if store.isOpenedDirect(conversationID) { return [] }
+        // A group's or a channel's own (#2213).
+        if book.kind(of: conversationID) != nil { return bookHistory(for: conversationID, minute: minute) }
         // Request threads are inbound-only and unanswered by construction —
         // a viewer reply seeded here would answer the request and file it in
         // the INBOX instead.

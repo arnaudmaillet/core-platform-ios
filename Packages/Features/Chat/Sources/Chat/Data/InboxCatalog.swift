@@ -112,6 +112,9 @@ final class InboxCatalog {
     private var conversations: [Conversation] = []
     private var requestRows: [Conversation] = []
     private var hiddenRequestRows: [Conversation] = []
+    /// The Channels folder (#2213): the channels the viewer is in, behind
+    /// `-channels`. Filled by #2215's tab.
+    private(set) var channelRows: [Conversation] = []
     /// Every loaded row, whichever folder it sits in.
     private var allRows: [Conversation] { conversations + requestRows + hiddenRequestRows }
     private var observers: [UUID: (Snapshot) -> Void] = [:]
@@ -412,6 +415,7 @@ final class InboxCatalog {
         case .inbox: conversations
         case .requests: requestRows
         case .hiddenRequests: hiddenRequestRows
+        case .channels: channelRows
         }
     }
 
@@ -424,6 +428,7 @@ final class InboxCatalog {
         case .inbox: conversations = rows
         case .requests: requestRows = rows
         case .hiddenRequests: hiddenRequestRows = rows
+        case .channels: channelRows = rows
         }
     }
 

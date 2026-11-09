@@ -80,6 +80,10 @@ final class AppContainer {
             countryOf: { latitude, longitude in
                 CountryAtlas.shared.country(owning: CLLocationCoordinate2D(latitude: latitude, longitude: longitude))?.code
             },
+            // Groups and channels (#2213): the mock seeds them only under
+            // their flags.
+            seedsGroups: DebugFlags.isOn("-group-chats"),
+            seedsChannels: DebugFlags.isOn("-channels"),
             // Voice posts drawn (#2206): the mock then serves voice-alone
             // posts without their text.
             drawsVoicePosts: DebugFlags.isOn("-voice-posts")
@@ -1769,7 +1773,9 @@ final class AppContainer {
             mediaClient: Media_V1_MediaServiceClient(client: authenticatedRPCClient),
             transport: mediaUploadTransport
         ),
-        inboxPageSize: Self.inboxPageSize
+        inboxPageSize: Self.inboxPageSize,
+        // Groups' and channels' own calls (#2213), on backend #995's shape.
+        proposals: ProposedChatClient(client: authenticatedRPCClient)
     )
 
     /// The thread's camera and library (#681): the upload flow's own sheet,

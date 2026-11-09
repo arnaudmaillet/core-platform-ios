@@ -2,6 +2,7 @@ import AuthInterface
 import CoreContracts
 import CoreModels
 import CoreNetworking
+import DesignSystem
 import Foundation
 import MediaCore
 import UIKit
@@ -16,6 +17,9 @@ public enum ChatError: Error, Equatable, Sendable {
     /// CHT-1010: the viewer's first message to this person is a request
     /// still waiting for their answer (#656, #2212); one message until then.
     case requestPending
+    /// A group's or a channel's call the server refused (#2213): not
+    /// allowed, not found, full — its message says which.
+    case refused(message: String)
     /// The photo or video could not be uploaded (#681); nothing was sent.
     /// `failure` keeps WHY, from the uploader's error (#794), so the screen
     /// can say "You’re offline"; defaulted, like `transport`'s.
@@ -74,6 +78,12 @@ public struct Conversation: Equatable, Sendable, Identifiable {
     /// The viewer's own message request here, waiting for the peer's answer
     /// (chat.v1 `InboxEntryView.request`, #2212).
     public let isOutgoingRequest: Bool
+    /// A group's or a channel's identity and the viewer's place in it
+    /// (#2213); nil for a DM, whose identity is its peer.
+    public let identity: ConversationIdentity?
+    /// The faces a nameless, photoless group stacks: up to three members'
+    /// avatars (#2213).
+    public let memberAvatarURLs: [URL]
     public let title: String
     public let lastMessage: String
     public let lastActivityAt: Date?
@@ -133,11 +143,15 @@ public struct Conversation: Equatable, Sendable, Identifiable {
         unreadCount: Int = 0,
         isMuted: Bool = false,
         kind: ConversationKind = .direct,
-        isOutgoingRequest: Bool = false
+        isOutgoingRequest: Bool = false,
+        identity: ConversationIdentity? = nil,
+        memberAvatarURLs: [URL] = []
     ) {
         self.id = id
         self.kind = kind
         self.isOutgoingRequest = isOutgoingRequest
+        self.identity = identity
+        self.memberAvatarURLs = memberAvatarURLs
         self.title = title
         self.lastMessage = lastMessage
         self.lastActivityAt = lastActivityAt
@@ -227,6 +241,10 @@ public enum InboxFolder: Sendable, Hashable {
     /// sorted at read time with the CURRENT filter (#552) — the Hidden
     /// requests row at the bottom of Requests.
     case hiddenRequests
+    /// The channels the viewer runs or follows (#2213) — the Channels tab
+    /// (#2215). chat.v1 lists them in its INBOX folder with their kind; the
+    /// repository splits them out, so the All tab never shows one.
+    case channels
 }
 
 /// One page of a conversation's history, oldest first, and where the OLDER
@@ -384,6 +402,14 @@ public actor ChatRepository: ChatProviding {
     private let viewer: any ViewerProviding
     private var nameCache: [ProfileID: String] = [:]
     private var handleCache: [ProfileID: String] = [:]
+    private var avatarCache: [ProfileID: URL] = [:]
+    /// Groups' and channels' own calls (#2213), on the shape backend #995
+    /// describes; nil: none (DMs only).
+    let proposals: ProposedChatClient?
+    /// `-group-chats` and `-channels` (#2213): without them the inbox is as
+    /// it was — DMs only — whatever the server lists.
+    let showsGroups: Bool
+    let showsChannels: Bool
     /// Uploads a message's photo or video (#681); nil sends no media.
     private let mediaUploader: MediaAssetUploader?
     private let encoder: MediaEncoder
@@ -400,8 +426,14 @@ public actor ChatRepository: ChatProviding {
         encoder: MediaEncoder = MediaEncoder(),
         pageSize: Int32 = 50,
         inboxPageSize: Int32 = 20,
-        inFlightRetryDelays: [Duration] = IdempotencyKey.inFlightRetryDelays
+        inFlightRetryDelays: [Duration] = IdempotencyKey.inFlightRetryDelays,
+        proposals: ProposedChatClient? = nil,
+        showsGroups: Bool = DebugFlags.isOn("-group-chats"),
+        showsChannels: Bool = DebugFlags.isOn("-channels")
     ) {
+        self.proposals = proposals
+        self.showsGroups = showsGroups
+        self.showsChannels = showsChannels
         self.mediaUploader = mediaUploader
         self.inFlightRetryDelays = inFlightRetryDelays
         self.encoder = encoder
@@ -452,21 +484,24 @@ public actor ChatRepository: ChatProviding {
         case .inbox: .inbox
         case .requests: .requests
         case .hiddenRequests: .hiddenRequests
+        case .channels: .inbox
         }
         request.limit = inboxPageSize
         request.pageToken = pageToken ?? ""
         let response = await chatClient.listInbox(request: request, headers: [:])
-        let entries: [Chat_V1_InboxEntryView]
+        let entriesFromWire: [Chat_V1_InboxEntryView]
         let nextToken: String
         switch response.result {
         case .success(let body):
-            entries = body.entries
+            entriesFromWire = body.entries
             nextToken = body.nextPageToken
         case .failure(let error):
             throw ChatError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
 
+        let entries = shownEntries(entriesFromWire, in: folder)
         let details = await Self.fetchDetails(for: entries, viewer: viewer, client: chatClient)
+        let entryIdentities = await identities(of: entries, viewer: viewer)
         // A cancelled load must REPORT cancellation, not hand back what it
         // managed to resolve: cancelled Connect calls fail rather than throw,
         // and a row whose details failed is still built — so without this a
@@ -479,7 +514,11 @@ public actor ChatRepository: ChatProviding {
         }
         await hydrateNames(for: peers.filter { $0 != viewer })
         try Task.checkCancellation()
-        let conversations = entries.map { conversation(from: $0, detail: details[$0.conversationID], viewer: viewer) }
+        let conversations = entries.map {
+            conversation(
+                from: $0, detail: details[$0.conversationID], identity: entryIdentities[$0.conversationID], viewer: viewer
+            )
+        }
         return InboxPage(conversations: conversations, nextPageToken: nextToken.isEmpty ? nil : nextToken)
     }
 
@@ -522,11 +561,27 @@ public actor ChatRepository: ChatProviding {
         }
     }
 
-    private func conversation(from entry: Chat_V1_InboxEntryView, detail: EntryDetail?, viewer: ProfileID) -> Conversation {
+    private func conversation(
+        from entry: Chat_V1_InboxEntryView, detail: EntryDetail?, identity: ConversationIdentity?, viewer: ProfileID
+    ) -> Conversation {
         let otherIDs = entry.peerID.isEmpty
             ? (detail?.members ?? []).map { ProfileID($0.profileID) }.filter { $0 != viewer }
             : [ProfileID(entry.peerID)]
-        let title = otherIDs.compactMap { nameCache[$0] }.joined(separator: ", ")
+        let kind = Self.kind(of: entry.kind)
+        let names = otherIDs.compactMap { nameCache[$0] }
+        // A group's or a channel's own name; a nameless group's members'
+        // (#2213, `ConversationIdentity.memberName`, the one place).
+        let title: String = switch kind {
+        case .direct: names.joined(separator: ", ")
+        case .group, .channel:
+            if let name = identity?.name, !name.isEmpty {
+                name
+            } else if kind == .group {
+                ConversationIdentity.memberName(names, total: identity.map { max(0, $0.memberCount - 1) })
+            } else {
+                names.joined(separator: ", ")
+            }
+        }
         let last = entry.hasLastMessage ? entry.lastMessage : nil
         let viewerLastRead = detail?.members?.first { ProfileID($0.profileID) == viewer }?.lastRead
         return Conversation(
@@ -548,8 +603,12 @@ public actor ChatRepository: ChatProviding {
                 isUnread: entry.unread
             ),
             isMuted: entry.muted,
-            kind: Self.kind(of: entry.kind),
-            isOutgoingRequest: entry.request
+            kind: kind,
+            isOutgoingRequest: entry.request,
+            identity: identity,
+            memberAvatarURLs: kind == .group && identity?.photoURL == nil
+                ? Array(otherIDs.compactMap { avatarCache[$0] }.prefix(ConversationIdentity.stackedFaces))
+                : []
         )
     }
 
@@ -842,23 +901,24 @@ public actor ChatRepository: ChatProviding {
         let missing = Set(ids).filter { nameCache[$0] == nil && !$0.rawValue.isEmpty }
         guard !missing.isEmpty else { return }
         let client = profileClient
-        let fetched = await withTaskGroup(of: (ProfileID, String, String)?.self) { group in
+        let fetched = await withTaskGroup(of: (ProfileID, String, String, String)?.self) { group in
             for id in missing {
                 group.addTask {
                     var request = Profile_V1_GetProfileByIdRequest()
                     request.profileID = id.rawValue
                     let response = await client.getProfileByID(request: request, headers: [:])
                     guard let view = response.message else { return nil }
-                    return (id, view.displayName, view.handle)
+                    return (id, view.displayName, view.handle, view.avatarURL)
                 }
             }
-            return await group.reduce(into: [(ProfileID, String, String)]()) { partial, triple in
-                if let triple { partial.append(triple) }
+            return await group.reduce(into: [(ProfileID, String, String, String)]()) { partial, row in
+                if let row { partial.append(row) }
             }
         }
-        for (id, name, handle) in fetched {
+        for (id, name, handle, avatar) in fetched {
             nameCache[id] = name
             if !handle.isEmpty { handleCache[id] = handle }
+            if let url = URL(string: avatar), !avatar.isEmpty { avatarCache[id] = url }
         }
     }
 
@@ -921,7 +981,7 @@ public actor ChatRepository: ChatProviding {
 
     /// `write` names the caller when it is a write, so a guest reaching it is
     /// reported (`GateAudit`): the member gate should have stopped them first.
-    private func resolveViewerProfileID(forWrite write: String? = nil) async throws -> ProfileID {
+    func resolveViewerProfileID(forWrite write: String? = nil) async throws -> ProfileID {
         do {
             return try await viewer.activeProfileID()
         } catch ViewerError.requiresMember {

@@ -47,6 +47,8 @@ public struct MockBackend: Sendable {
         enforcesEdgePolicy: Bool = false,
         countryOf: (@Sendable (Double, Double) -> String?)? = nil,
         persistence: UserDefaults = .standard,
+        seedsGroups: Bool = false,
+        seedsChannels: Bool = false,
         drawsVoicePosts: Bool = false
     ) {
         // The world beyond France (`MockWorldSeed`) rides the same decision
@@ -228,7 +230,12 @@ public struct MockBackend: Sendable {
                 socialGraph.isFollowing(sender, recipient) && socialGraph.isFollowing(recipient, sender) ? .open : .request
             default: .open
             }
-        }).register(on: bff)
+        },
+        // Groups and channels (#2213), seeded behind their flags — read by
+        // the app (`DebugFlags`) and handed in.
+        seedsGroups: seedsGroups,
+        seedsChannels: seedsChannels
+        ).register(on: bff)
         socialGraph.register(on: bff)
         // Contacts find a profile only through a channel its owner left on,
         // and never across a block (#412, backend #806).

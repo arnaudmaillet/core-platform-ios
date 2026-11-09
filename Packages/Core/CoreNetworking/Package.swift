@@ -35,7 +35,8 @@ let package = Package(
                 .product(name: "MediaCore", package: "MediaCore"),
                 .product(name: "Connect", package: "connect-swift"),
                 // `PostVoiceWire` (#2206) reads and writes a message's
-                // unknown fields.
+                // unknown fields; `ProposedChat` (#2213) carries its JSON in
+                // a well-known `StringValue`.
                 .product(name: "SwiftProtobuf", package: "swift-protobuf")
             ]
         ),
