@@ -19,6 +19,10 @@ import SwiftProtobuf
 public enum ProposedChat {
     public static let path = "/chat.v1.proposed.ConversationService/Call"
 
+    /// A group holds at most this many members (chat.v1's cap): the mock
+    /// refuses a join past it, the app offers Follow only (#2217).
+    public static let groupCap = 500
+
     public enum Kind: String, Codable, Sendable { case direct, group, channel }
 
     /// Who may find and join: members only (`private`), anyone (`public`), or

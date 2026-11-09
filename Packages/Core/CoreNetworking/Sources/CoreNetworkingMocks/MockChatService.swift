@@ -123,7 +123,8 @@ public final class MockChatService: @unchecked Sendable {
         mayMessage: @escaping @Sendable (_ sender: String, _ recipient: String) -> Bool = { _, _ in true },
         admission: (@Sendable (_ sender: String, _ recipient: String) -> MockDirectAdmission)? = nil,
         seedsGroups: Bool = false,
-        seedsChannels: Bool = false
+        seedsChannels: Bool = false,
+        groupGoesPrivateAfter: TimeInterval? = nil
     ) {
         self.dataset = dataset
         book = MockConversationBook(
@@ -132,6 +133,18 @@ public final class MockChatService: @unchecked Sendable {
         )
         self.mayMessage = mayMessage
         self.admission = admission ?? { sender, recipient in mayMessage(sender, recipient) ? .open : .refused }
+        guard seedsGroups else { return }
+        // The group the viewer follows sits muted in their inbox, as Follow
+        // leaves it (#2217): the app mutes what it follows.
+        store.setMuted(true, until: 0, in: MockConversationBook.followedGroupID, for: viewer)
+        // `-mock-group-private-after <seconds>` (#2217): its owner turns it
+        // private that long after launch — the one other account the mock
+        // has, so a follower can watch it close with the thread open.
+        if let groupGoesPrivateAfter {
+            DispatchQueue.global().asyncAfter(deadline: .now() + groupGoesPrivateAfter) { [book] in
+                book.turnPrivateByOwner(MockConversationBook.followedGroupID, now: Int64(Date().timeIntervalSince1970 * 1000))
+            }
+        }
     }
 
     /// Channel `id` as a showcase's card shows it to the viewer (#2216),
@@ -201,9 +214,19 @@ public final class MockChatService: @unchecked Sendable {
             ]
             return .success(response)
         }
-        bff.register(path: "/chat.v1.ChatService/GetHistory") { [self] (request: Chat_V1_GetHistoryRequest) in
+        bff.register(path: "/chat.v1.ChatService/GetHistory") { [self] (request: Chat_V1_GetHistoryRequest) -> Result<Chat_V1_GetHistoryResponse, ConnectError> in
             var response = Chat_V1_GetHistoryResponse()
-            let all = store.messages(for: request.conversationID, seed: seedHistory(for: request.conversationID))
+            var all = store.messages(for: request.conversationID, seed: seedHistory(for: request.conversationID))
+            // A group's or a channel's history as the requester may read it
+            // (#2217): a private one answers an outsider — a former follower
+            // included — as a missing one; an outsider or a follower of a
+            // public one reads from its public-since watermark.
+            if book.kind(of: request.conversationID) != nil {
+                guard let since = book.readableSince(request.conversationID, for: request.requesterID) else {
+                    return .failure(ConnectError(code: .notFound, message: "CHT-1004: conversation not found"))
+                }
+                all.removeAll { $0.createdAtMs < since }
+            }
             // A real page: the newest `limit` messages, not a special case for
             // 1. The inbox now asks for a window rather than a single message,
             // because it counts the unread tail inside it — answering that with
@@ -415,7 +438,8 @@ public final class MockChatService: @unchecked Sendable {
     /// admins' posts (#2213).
     private func bookHistory(for id: String, minute: Int64) -> [Chat_V1_MessageView] {
         let members = book.members(of: id)
-        let others = members.map(\.profileID).filter { $0 != viewer }
+        // A group's followers read; they never write in it (#2217).
+        let others = members.filter { $0.role != .subscriber && $0.role != .guest }.map(\.profileID).filter { $0 != viewer }
         func pick(_ index: Int) -> String { others.isEmpty ? viewer : others[index % others.count] }
         let publishers = members.filter { $0.role == .owner || $0.role == .admin }.map(\.profileID)
         let lines: [(String, String, Int64)]
@@ -432,6 +456,16 @@ public final class MockChatService: @unchecked Sendable {
                      (pick(3), "Van leaves at 6:30 sharp", 90)]
         case ("grp-nightwalk", _):
             lines = [(pick(0), "Thinking Friday, after sunset", 200), (pick(1), "Tripods or handheld?", 150)]
+        case (MockConversationBook.publicGroupID, _):
+            lines = [(pick(0), "Next clean: Sunday 10:00 at the north jetty", 1_400), (pick(1), "I'll bring the litter pickers", 1_300),
+                     (pick(2), "Tide is low at 11, perfect timing", 600), (pick(3), "Count me in, with two friends", 240),
+                     (pick(4), "Last time we filled 38 bags 💪", 35)]
+        case (MockConversationBook.fullGroupID, _):
+            lines = [(pick(0), "Swapping a Durst enlarger for fibre paper", 900), (pick(1), "Anyone got spare fixer?", 400),
+                     (pick(2), "Meetup at the lab on Saturday", 50)]
+        case (MockConversationBook.followedGroupID, _):
+            lines = [(pick(0), "Thursday: the old boathouse, 18:30", 2_000), (pick(1), "Bringing the new watercolour set", 900),
+                     (pick(2), "Light was lovely tonight", 120)]
         // A channel created in this session starts empty: it is new (#2215).
         case (_, .channel?) where !id.contains("-new-"):
             let author = publishers.first ?? pick(0)

@@ -428,13 +428,17 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             knownKind: { [directory] id in directory.summary(for: id)?.kind }
         )
         context.kinds = Set((groups == nil ? [] : [.group]) + (channels == nil ? [] : [.channel]))
+        // A channel's row (#2215), and a followed public group's (#2217):
+        // drawn as such from the push's first frame.
+        context.knownIdentity = { [directory] id in directory.summary(for: id)?.identity }
+        // Joined, followed or left — a channel (#2215), a public group
+        // (#2217): the inbox reads its rows again.
+        context.onMembershipChange = { [catalog] id, left in
+            if left { catalog.delete([id]) } else { catalog.restore(id) }
+            catalog.refresh()
+        }
         if channels != nil {
-            context.knownIdentity = { [directory] id in directory.summary(for: id)?.identity }
             context.makeChannelInfo = { [self] id, onChange in makeChannelInfo(id, onChange: onChange) }
-            context.onMembershipChange = { [catalog] id, left in
-                if left { catalog.delete([id]) } else { catalog.restore(id) }
-                catalog.refresh()
-            }
         }
         return context
     }

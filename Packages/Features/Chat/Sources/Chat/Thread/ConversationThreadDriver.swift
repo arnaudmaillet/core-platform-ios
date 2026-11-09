@@ -105,6 +105,16 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     private var groupLoad: Task<Void, Never>?
     /// A channel's identity as last read (#2215): what Join and Leave act on.
     private(set) var channelIdentity: ConversationIdentity?
+    /// A group's identity as last read (#2217): where the viewer stands —
+    /// member, follower, outsider — and what the audience watch compares.
+    private(set) var groupIdentity: ConversationIdentity?
+    /// When a public group closed to the viewer reading it from outside
+    /// (#2217): its thread keeps what it showed, ends on "This group is
+    /// private now", and offers nothing more.
+    private(set) var closedAt: Date?
+    private var audienceWatch: Task<Void, Never>?
+    /// How often a public group's reader checks it is still public (#2217).
+    var audienceWatchInterval: Duration = .seconds(5)
 
     init(
         viewModel: ConversationViewModel,
@@ -172,11 +182,28 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         if known == .channel, group == nil, let identity = context.knownIdentity(id), identity.kind == .channel {
             adoptChannel(identity)
         }
+        // A group the viewer follows, from its inbox row (#2217): its bar
+        // from the push's first frame — never the composer coming and going.
+        if known == .group, group == nil, let identity = context.knownIdentity(id), identity.kind == .group,
+           Self.groupReaderStanding(for: identity) != nil {
+            groupIdentity = identity
+            adoptGroup(Self.group(identity: identity, members: [], profiles: [:], viewer: nil))
+        }
         groupLoad?.cancel()
         let service = context.service
         let kinds = context.kinds
         groupLoad = Task { [weak self] in
-            guard let identity = try? await service.details(of: id), kinds.contains(identity.kind) else { return }
+            let identity: ConversationIdentity
+            do {
+                identity = try await service.details(of: id)
+            } catch {
+                guard !Task.isCancelled, let self else { return }
+                // A public group read from outside that now answers "not
+                // found" has turned private (#2217).
+                if Self.isNotFound(error) { self.closeToReader() } else if let shown = self.group { self.adoptGroup(shown) }
+                return
+            }
+            guard kinds.contains(identity.kind) else { return }
             // A channel's posts are its own: no members to sign them (#2215).
             if identity.kind == .channel {
                 guard !Task.isCancelled else { return }
@@ -186,32 +213,178 @@ final class ConversationThreadDriver: ConversationThreadDriving {
             let members = (try? await service.members(of: id)) ?? []
             let viewerID = try? await service.viewerProfileID()
             let profiles = await service.profiles(members.map(\.profileID))
-            guard !Task.isCancelled, let self else { return }
+            guard !Task.isCancelled, let self, self.closedAt == nil else { return }
+            self.groupIdentity = identity
             self.adoptGroup(Self.group(identity: identity, members: members, profiles: profiles, viewer: viewerID))
+            self.watchAudience()
         }
     }
 
     /// The group as the screen draws it (#2214): its name — or its other
     /// members', for a nameless one — its photo, "N members", and every
     /// member the profiles named.
+    ///
+    /// A public group's header counts its followers apart, "40 members ·
+    /// 2.3K followers", and a viewer who isn't a member gets the reader bar
+    /// (#2217). Followers are never members: not listed, not counted, no
+    /// presence of theirs drawn.
     static func group(
         identity: ConversationIdentity, members: [ConversationMember], profiles: [ProfileID: ChatProfile], viewer: ProfileID?
     ) -> ConversationThreadGroup {
+        let talkers = members.filter(\.role.talks)
         var people: [ProfileID: ConversationThreadPerson] = [:]
-        for member in members {
+        for member in talkers {
             let profile = profiles[member.profileID]
             people[member.profileID] = ConversationThreadPerson(
                 id: member.profileID, name: profile?.name ?? "", avatarURL: profile?.avatarURL, handle: profile?.handle
             )
         }
-        let count = max(identity.memberCount, members.count)
-        let others = members.filter { $0.profileID != viewer }.compactMap { profiles[$0.profileID]?.name }
+        let count = max(identity.memberCount, talkers.count)
+        let others = talkers.filter { $0.profileID != viewer }.compactMap { profiles[$0.profileID]?.name }
         let name = identity.name.isEmpty
             ? ConversationIdentity.memberName(others, total: max(0, count - 1))
             : identity.name
         return ConversationThreadGroup(
-            name: name, photoURL: identity.photoURL, subtitle: memberCountText(count), members: people
+            name: name, photoURL: identity.photoURL,
+            subtitle: GroupCopy.header(memberCount: count, followerCount: identity.subscriberCount, visibility: identity.visibility),
+            members: people, readerStanding: groupReaderStanding(for: identity)
         )
+    }
+
+    // MARK: - Public groups (#2217)
+
+    /// Who gets a group's composer, and what the others are offered
+    /// (#2217): members write (nil); a follower reads, with Join while the
+    /// group has room and Following; an outsider of a public group joins or
+    /// follows; a private group answers an outsider as a missing one, so
+    /// one seen here has closed to them.
+    static func groupReaderStanding(for identity: ConversationIdentity) -> ConversationThreadReaderStanding? {
+        switch identity.viewerState {
+        // An invitation is answered from the inbox (#2214): the thread as it was.
+        case .owner, .admin, .member, .invited: return nil
+        case .subscriber: return .following(isFull: identity.isFull)
+        case .requested: return .requested
+        case .banned: return .unavailable
+        case .none:
+            switch identity.visibility {
+            case .public: return .canJoinOrFollow(isFull: identity.isFull)
+            case .listedOnRequest: return .canRequest
+            case .private: return .closed
+            }
+        }
+    }
+
+    /// Whether the viewer reads this group from its audience (#2217): an
+    /// outsider or a follower of a public group — whose reading ends the
+    /// moment it turns private.
+    static func readsFromAudience(_ identity: ConversationIdentity) -> Bool {
+        identity.kind == .group && identity.visibility == .public
+            && (identity.viewerState == .subscriber || identity.viewerState == .none)
+    }
+
+    /// The server's "no such conversation" — what a private group answers
+    /// an outsider, a former follower included.
+    static func isNotFound(_ error: Error) -> Bool {
+        if case ChatError.refused(let message) = error { return message.contains("CHT-1004") }
+        return false
+    }
+
+    /// A full group's refusal of a join (CHT-1020).
+    static func isFullRefusal(_ error: Error) -> Bool {
+        if case ChatError.refused(let message) = error { return message.contains("CHT-1020") }
+        return false
+    }
+
+    /// Stands in for the audience's stream while chat.v1's live delivery
+    /// isn't wired (#2217): the server closes `StreamPublic` when a group
+    /// turns private (`chat.conversation.unpublished`); until the app holds
+    /// that stream, a reader of a public group asks every few seconds
+    /// whether it still is — and only such a reader, only while its thread
+    /// lives.
+    private func watchAudience() {
+        guard closedAt == nil, let identity = groupIdentity, Self.readsFromAudience(identity) else {
+            audienceWatch?.cancel()
+            audienceWatch = nil
+            return
+        }
+        guard audienceWatch == nil, let context = groupContext, let id = viewModel.currentConversationID else { return }
+        let service = context.service
+        let interval = audienceWatchInterval
+        audienceWatch = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled else { return }
+                do {
+                    let fresh = try await service.details(of: id)
+                    guard let self, !Task.isCancelled else { return }
+                    // Its counts or the viewer's place moved: read it again.
+                    if fresh != self.groupIdentity { self.loadGroup() }
+                } catch {
+                    guard let self, !Task.isCancelled else { return }
+                    if Self.isNotFound(error) {
+                        self.closeToReader()
+                        return
+                    }
+                }
+            }
+        }
+    }
+
+    /// The group turned private under a reader from its audience (#2217):
+    /// the thread keeps what it showed and ends on "This group is private
+    /// now"; the bar goes, and a follower's inbox drops the group at once.
+    func closeToReader() {
+        guard closedAt == nil, let identity = groupIdentity, Self.readsFromAudience(identity), let shown = group,
+              let id = viewModel.currentConversationID else { return }
+        closedAt = Date()
+        audienceWatch?.cancel()
+        audienceWatch = nil
+        groupLoad?.cancel()
+        adoptGroup(ConversationThreadGroup(
+            name: shown.name, photoURL: shown.photoURL, subtitle: shown.subtitle, members: shown.members,
+            readerStanding: .closed
+        ))
+        if identity.viewerState == .subscriber { groupContext?.onMembershipChange(id, true) }
+    }
+
+    /// Follow (#2217): subscribed, the group reads along in the viewer's
+    /// inbox, muted — chat.v1 has no muted subscription, so the app writes
+    /// the mute, and only then has the inbox read its rows again.
+    func follow() {
+        guard let context = groupContext, let id = viewModel.currentConversationID else { return }
+        let service = context.service
+        Task { [weak self] in
+            do {
+                try await service.subscribe(to: id)
+                guard let self else { return }
+                self.setMuted(true, until: nil) { _ in context.onMembershipChange(id, false) }
+                self.loadGroup()
+            } catch {
+                self?.channelWriteFailed(error, title: "Couldn't follow")
+            }
+        }
+    }
+
+    /// Unfollow, confirmed (#2217): the group leaves the inbox; the thread
+    /// stays, read as anyone reads a public group.
+    func unfollow() {
+        guard let context = groupContext, let id = viewModel.currentConversationID else { return }
+        let service = context.service
+        Task { [weak self] in
+            do {
+                try await service.unsubscribe(from: id)
+                context.onMembershipChange(id, true)
+                self?.loadGroup()
+            } catch {
+                self?.channelWriteFailed(error, title: "Couldn't unfollow")
+            }
+        }
+    }
+
+    /// The details again after a join or a withdrawal: a group's with its
+    /// members (#2217), a channel's alone (#2215).
+    private func reloadAfterWrite(_ failure: String) {
+        if let group, !group.isChannel { loadGroup() } else { reloadChannel(after: failure) }
     }
 
     // MARK: - Channels (#2215)
@@ -262,7 +435,7 @@ final class ConversationThreadDriver: ConversationThreadDriving {
                 _ = try await service.requestToJoin(id)
                 guard let self else { return }
                 context.onMembershipChange(id, false)
-                self.reloadChannel(after: "Couldn't join")
+                self.reloadAfterWrite("Couldn't join")
             } catch {
                 self?.channelWriteFailed(error, title: "Couldn't join")
             }
@@ -276,7 +449,7 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         Task { [weak self] in
             do {
                 try await service.cancelJoinRequest(id)
-                self?.reloadChannel(after: "Couldn't withdraw the request")
+                self?.reloadAfterWrite("Couldn't withdraw the request")
             } catch {
                 self?.channelWriteFailed(error, title: "Couldn't withdraw the request")
             }
@@ -323,9 +496,16 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     }
 
     private func channelWriteFailed(_ error: Error, title: String) {
+        // A group filled up under the viewer (#2217): said, and the bar read
+        // again — Follow only now.
+        if Self.isFullRefusal(error) {
+            onActionNotice?(title, "This group is full.")
+            loadGroup()
+            return
+        }
         onActionNotice?(title, FailureCopy.message(for: error, fallback: "Try again in a moment."))
-        // The bar as it was, no longer working.
-        if let channelIdentity { adoptChannel(channelIdentity) }
+        // The bar as it was, no longer working: the channel, or the group.
+        if let channelIdentity { adoptChannel(channelIdentity) } else if let group { adoptGroup(group) }
     }
 
     /// Who a reply answers: in a group, the member who wrote the message
@@ -337,9 +517,7 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     }
 
     /// "1 member", "12 members" — the header's subtitle (#2214).
-    static func memberCountText(_ count: Int) -> String {
-        count == 1 ? "1 member" : "\(count) members"
-    }
+    static func memberCountText(_ count: Int) -> String { GroupCopy.memberCount(count) }
 
     private func adoptGroup(_ group: ConversationThreadGroup) {
         self.group = group
@@ -365,17 +543,29 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     /// The system lines a group's thread opens with (#2214): "You created
     /// the group" for one the viewer created this session.
     private func systemLines() -> [ConversationThreadMessage] {
-        guard let context = groupContext, let id = viewModel.currentConversationID,
-              let created = context.createdAt(id) else { return [] }
-        return [ConversationThreadMessage(
-            id: Self.createdLineID, senderID: ProfileID(""),
-            body: group?.isChannel == true ? "You created the channel" : "You created the group", sentAt: created,
-            isMine: false, quote: nil, isSystem: true
-        )]
+        guard let context = groupContext, let id = viewModel.currentConversationID else { return [] }
+        var lines: [ConversationThreadMessage] = []
+        if let created = context.createdAt(id) {
+            lines.append(ConversationThreadMessage(
+                id: Self.createdLineID, senderID: ProfileID(""),
+                body: group?.isChannel == true ? "You created the channel" : "You created the group", sentAt: created,
+                isMine: false, quote: nil, isSystem: true
+            ))
+        }
+        // A public group turned private under its reader (#2217).
+        if let closedAt {
+            lines.append(ConversationThreadMessage(
+                id: Self.privateNowLineID, senderID: ProfileID(""), body: GroupCopy.privateNow, sentAt: closedAt,
+                isMine: false, quote: nil, isSystem: true
+            ))
+        }
+        return lines
     }
 
     /// The id of the "You created the group" line.
     static let createdLineID = "system.created"
+    /// The id of the "This group is private now" line (#2217).
+    static let privateNowLineID = "system.private-now"
 
     /// `messages` with `lines` in place by time, oldest first — a line at
     /// the same time as a message goes before it.
@@ -471,6 +661,9 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         case .loading:
             onPhaseChange?(.loading)
         case .failed(let message):
+            // A group closed to its reader (#2217) answers every read "not
+            // found": what it showed stays, under its last line.
+            if closedAt != nil, let lastMessages { return forward(.content(lastMessages)) }
             onPhaseChange?(.failed(message))
         case .content(let models):
             lastMessages = models

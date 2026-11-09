@@ -50,7 +50,8 @@ public struct MockBackend: Sendable {
         persistence: UserDefaults = .standard,
         seedsGroups: Bool = false,
         seedsChannels: Bool = false,
-        drawsVoicePosts: Bool = false
+        drawsVoicePosts: Bool = false,
+        groupGoesPrivateAfter: TimeInterval? = nil
     ) {
         // The world beyond France (`MockWorldSeed`) rides the same decision
         // as the European seed: it is what the map's places are for.
@@ -235,7 +236,9 @@ public struct MockBackend: Sendable {
         // Groups and channels (#2213), seeded behind their flags — read by
         // the app (`DebugFlags`) and handed in.
         seedsGroups: seedsGroups,
-        seedsChannels: seedsChannels
+        seedsChannels: seedsChannels,
+        // The followed public group turned private by its owner (#2217).
+        groupGoesPrivateAfter: groupGoesPrivateAfter
         )
         chatService.register(on: bff)
         // Channel showcases (#2216), with the channels: text posts whose

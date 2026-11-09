@@ -86,7 +86,8 @@ final class AppContainer {
             seedsChannels: DebugFlags.isOn("-channels"),
             // Voice posts drawn (#2206): the mock then serves voice-alone
             // posts without their text.
-            drawsVoicePosts: DebugFlags.isOn("-voice-posts")
+            drawsVoicePosts: DebugFlags.isOn("-voice-posts"),
+            groupGoesPrivateAfter: Self.groupGoesPrivateAfter
         )
         backend.bff.faults = mockNetworkFaults
         #if DEBUG
@@ -1811,6 +1812,21 @@ final class AppContainer {
                 fileOwner: exported.file
             ))
         }
+    }
+
+    /// `-mock-group-private-after <seconds>` (DEBUG, #2217): the public
+    /// group the mock's viewer follows is turned private by its owner that
+    /// long after launch — so a follower can watch "This group is private
+    /// now" with its thread open, the mock having no other account to do it.
+    private static var groupGoesPrivateAfter: TimeInterval? {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-mock-group-private-after"), index + 1 < arguments.count,
+           let seconds = TimeInterval(arguments[index + 1]), seconds >= 0 {
+            return seconds
+        }
+        #endif
+        return nil
     }
 
     /// Conversations per inbox page (#593).

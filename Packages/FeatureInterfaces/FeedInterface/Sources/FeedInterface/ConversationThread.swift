@@ -159,8 +159,8 @@ public struct ConversationThreadPerson: Equatable, Sendable {
     }
 }
 
-/// Where a viewer who doesn't post stands in a channel (#2215): what the
-/// bar in the composer's place offers.
+/// Where a viewer who doesn't post stands in a channel (#2215) or a public
+/// group (#2217): what the bar in the composer's place offers.
 public enum ConversationThreadReaderStanding: Equatable, Sendable {
     /// Subscribed: Mute / Unmute and Leave.
     case subscribed
@@ -172,6 +172,16 @@ public enum ConversationThreadReaderStanding: Equatable, Sendable {
     case requested
     /// Banned: nothing to offer but saying so.
     case unavailable
+    /// Not in a public group (#2217): Join, to write, or Follow, to read
+    /// along — Join only while it has room (`isFull`: "This group is full").
+    case canJoinOrFollow(isFull: Bool)
+    /// Following a public group (#2217): Join while it has room, and
+    /// Following — a tap unfollows.
+    case following(isFull: Bool)
+    /// The group turned private while the viewer read it from outside
+    /// (#2217): nothing left to offer — the thread says so in a line, and
+    /// neither the bar nor the composer shows.
+    case closed
 }
 
 /// A group conversation, as the screen draws it (#2214): its identity for
@@ -338,6 +348,13 @@ public protocol ConversationThreadDriving: AnyObject {
     /// The reader bar's Leave, confirmed (#2215): the viewer leaves the
     /// channel and is taken back from `presenter`.
     func leave(from presenter: UIViewController)
+    /// The reader bar's Follow (#2217): the viewer subscribes to a public
+    /// group — reads along, the group in their inbox, muted. The answer
+    /// arrives as a new `onGroupChange`.
+    func follow()
+    /// The reader bar's Following, confirmed (#2217): the viewer stops
+    /// following; the group leaves their inbox, and they read it as anyone.
+    func unfollow()
 }
 
 public extension ConversationThreadDriving {
@@ -386,6 +403,10 @@ public extension ConversationThreadDriving {
     func join() {}
     func cancelJoinRequest() {}
     func leave(from presenter: UIViewController) {}
+
+    /// Drivers with no public groups (#2217): nothing to follow.
+    func follow() {}
+    func unfollow() {}
 }
 
 @MainActor
