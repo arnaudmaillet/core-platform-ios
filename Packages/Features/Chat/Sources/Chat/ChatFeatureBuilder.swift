@@ -211,7 +211,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         guard let groups else { return }
         let picker = makeMemberPicker(purpose: .create, excluded: [], title: "New Group", nextTitle: "Next")
         let sheet = UINavigationController(rootViewController: picker)
-        picker.onCancel = { [weak sheet] in sheet?.dismiss(animated: true) }
+        picker.onCancel = { [weak sheet] in _ = sheet?.closePresentation() }
         picker.onNext = { [weak sheet, catalog, groupNotes, router] people in
             let creation = GroupCreationViewModel(members: people, service: groups)
             creation.onCreated = { [weak sheet] id in
@@ -219,7 +219,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
                 // The inbox behind the thread lists it.
                 catalog.refresh()
                 if let sheet {
-                    sheet.dismiss(animated: true) { router?.route(to: .conversation(id)) }
+                    _ = sheet.closePresentation { router?.route(to: .conversation(id)) }
                 } else {
                     router?.route(to: .conversation(id))
                 }
@@ -267,9 +267,9 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
                 purpose: .add(memberCount: memberCount), excluded: excluded, title: "Add Members", nextTitle: "Add"
             )
             let sheet = UINavigationController(rootViewController: picker)
-            picker.onCancel = { [weak sheet] in sheet?.dismiss(animated: true) }
+            picker.onCancel = { [weak sheet] in _ = sheet?.closePresentation() }
             picker.onNext = { [weak sheet] people in
-                sheet?.dismiss(animated: true)
+                _ = sheet?.closePresentation()
                 completion(people.map(\.id))
             }
             presenter.present(sheet, animated: true)

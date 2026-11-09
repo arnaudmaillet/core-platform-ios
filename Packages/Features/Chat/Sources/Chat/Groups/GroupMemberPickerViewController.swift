@@ -1,3 +1,4 @@
+import CoreNavigation
 import CoreModels
 import DesignSystem
 import MediaCore
@@ -254,4 +255,8 @@ extension GroupMemberPickerViewController: UICollectionViewDelegate {
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
         viewModel.toggle(id)
     }
+}
+
+extension GroupMemberPickerViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
 }

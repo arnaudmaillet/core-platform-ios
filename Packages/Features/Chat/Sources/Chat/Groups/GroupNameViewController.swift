@@ -1,3 +1,4 @@
+import CoreNavigation
 import CoreModels
 import DesignSystem
 import MediaCore
@@ -105,4 +106,8 @@ final class GroupNameViewController: UIViewController {
             errorLabel.isHidden = true
         }
     }
+}
+
+extension GroupNameViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
 }

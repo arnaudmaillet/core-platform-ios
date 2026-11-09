@@ -1,3 +1,4 @@
+import CoreNavigation
 import CoreModels
 import DesignSystem
 import MediaCore
@@ -368,4 +369,8 @@ final class GroupIdentityCell: UICollectionViewListCell {
         photo.setPicture(state.photoURL, pipeline: pipeline)
         accessibilityLabel = [state.name, state.subtitle, state.description].filter { !$0.isEmpty }.joined(separator: ", ")
     }
+}
+
+extension GroupInfoViewController: StackScreen {
+    var leaving: ScreenLeaving { .nativeBack }
 }
