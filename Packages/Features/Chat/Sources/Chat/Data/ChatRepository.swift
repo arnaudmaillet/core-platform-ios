@@ -13,6 +13,9 @@ public enum ChatError: Error, Equatable, Sendable {
     /// CHT-1011: the recipient takes no messages ("Who Can Message": No
     /// One, #397). A narrower audience makes the message a request instead.
     case messagesRefused
+    /// CHT-1010: the viewer's first message to this person is a request
+    /// still waiting for their answer (#656, #2212); one message until then.
+    case requestPending
     /// The photo or video could not be uploaded (#681); nothing was sent.
     /// `failure` keeps WHY, from the uploader's error (#794), so the screen
     /// can say "You’re offline"; defaulted, like `transport`'s.
@@ -35,10 +38,42 @@ extension ChatError: NetworkFailureCarrying {
     }
 }
 
+/// What a conversation is (chat.v1 `ConversationKind`, #2212): a DM, unique
+/// per pair (`OpenDirectConversation`, #656), a group, or a channel.
+///
+/// ⚠️ The ONE way to tell them apart — never a member count or an empty
+/// `peer_id`. A conversation made by the old find-or-create path is a group
+/// of two: it stays a group, listed as before, and is no longer "the DM
+/// with" its other member (#2212).
+public enum ConversationKind: Sendable, Hashable {
+    case direct
+    case group
+    case channel
+}
+
+/// What opening a DM answered (`OpenDirectConversation`, #2212): the
+/// conversation, and whether the viewer's messages there are a request the
+/// peer has yet to answer — one message until then (CHT-1010).
+public struct DirectConversationOpening: Equatable, Sendable {
+    public let id: ConversationID
+    public let isRequest: Bool
+
+    public init(id: ConversationID, isRequest: Bool) {
+        self.id = id
+        self.isRequest = isRequest
+    }
+}
+
 /// A conversation summary for the list: a title (the other member(s)), the last
 /// message preview, and when it last had activity.
 public struct Conversation: Equatable, Sendable, Identifiable {
     public let id: ConversationID
+    /// A DM, a group or a channel (#2212). Defaulted to `.direct`: every
+    /// conversation the app drew before groups was one.
+    public let kind: ConversationKind
+    /// The viewer's own message request here, waiting for the peer's answer
+    /// (chat.v1 `InboxEntryView.request`, #2212).
+    public let isOutgoingRequest: Bool
     public let title: String
     public let lastMessage: String
     public let lastActivityAt: Date?
@@ -96,9 +131,13 @@ public struct Conversation: Equatable, Sendable, Identifiable {
         lastMessageID: String = "",
         isUnread: Bool = false,
         unreadCount: Int = 0,
-        isMuted: Bool = false
+        isMuted: Bool = false,
+        kind: ConversationKind = .direct,
+        isOutgoingRequest: Bool = false
     ) {
         self.id = id
+        self.kind = kind
+        self.isOutgoingRequest = isOutgoingRequest
         self.title = title
         self.lastMessage = lastMessage
         self.lastActivityAt = lastActivityAt
@@ -111,10 +150,11 @@ public struct Conversation: Equatable, Sendable, Identifiable {
         self.isMuted = isMuted
     }
 
-    /// The DM correspondent: the single other member. `nil` for group shapes,
-    /// where "the peer" is not a meaningful destination.
+    /// The DM correspondent: the other member of a DIRECT conversation. `nil`
+    /// for a group or a channel — a group of two included (#2212) — where
+    /// "the peer" is not a meaningful destination.
     public var directPeerID: ProfileID? {
-        otherMemberIDs.count == 1 ? otherMemberIDs.first : nil
+        kind == .direct && otherMemberIDs.count == 1 ? otherMemberIDs.first : nil
     }
 
     /// The inbox's row order: newest activity first, ties broken on id.
@@ -260,9 +300,25 @@ public protocol ChatProviding: ViewerIdentityProviding {
     /// The direct-message conversation with `profileID`, reusing an existing
     /// 1:1 conversation or creating one.
     func directConversation(with profileID: ProfileID) async throws -> ConversationID
+    /// The DM with `profileID` through `OpenDirectConversation` (#656,
+    /// #2212): one per pair, whoever opens it, and whether the viewer's
+    /// messages there are a request. `ChatError.messagesRefused` when they
+    /// take messages from no one (CHT-1011).
+    func openDirectConversation(with profileID: ProfileID) async throws -> DirectConversationOpening
+    /// Answers a message request to the viewer (`RespondToMessageRequest`,
+    /// #2212): accepted, the conversation opens; declined, silently.
+    func respondToMessageRequest(_ conversationID: ConversationID, accept: Bool) async throws
 }
 
 extension ChatProviding {
+    /// Providers with no request rules (fakes): the DM opens.
+    public func openDirectConversation(with profileID: ProfileID) async throws -> DirectConversationOpening {
+        DirectConversationOpening(id: try await directConversation(with: profileID), isRequest: false)
+    }
+
+    /// Providers with no requests to answer (fakes): the inbox keeps it locally.
+    public func respondToMessageRequest(_ conversationID: ConversationID, accept: Bool) async throws {}
+
     /// Providers with no mute to write (fakes): the inbox keeps it locally.
     public func setMuted(_ muted: Bool, for conversationID: ConversationID) async throws {}
 
@@ -491,8 +547,19 @@ public actor ChatRepository: ChatProviding {
                 viewerLastRead: viewerLastRead,
                 isUnread: entry.unread
             ),
-            isMuted: entry.muted
+            isMuted: entry.muted,
+            kind: Self.kind(of: entry.kind),
+            isOutgoingRequest: entry.request
         )
+    }
+
+    /// The app's kind for the wire's (#2212).
+    static func kind(of kind: Chat_V1_ConversationKind) -> ConversationKind {
+        switch kind {
+        case .direct: .direct
+        case .channel: .channel
+        default: .group
+        }
     }
 
     public func setMuted(_ muted: Bool, for conversationID: ConversationID) async throws {
@@ -713,6 +780,7 @@ public actor ChatRepository: ChatProviding {
                     continue
                 }
                 if (error.message ?? "").contains("CHT-1011") { throw ChatError.messagesRefused }
+                if (error.message ?? "").contains("CHT-1010") { throw ChatError.requestPending }
                 throw ChatError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
             }
         }
@@ -731,59 +799,41 @@ public actor ChatRepository: ChatProviding {
     // MARK: - Direct message
 
     public func directConversation(with profileID: ProfileID) async throws -> ConversationID {
+        try await openDirectConversation(with: profileID).id
+    }
+
+    /// `OpenDirectConversation` (#656, #2212): the server finds or opens the
+    /// pair's one DM and applies the peer's message settings — open, a
+    /// request, or refused (CHT-1011). It replaced a find-or-create that
+    /// made a GROUP of two and joined the peer itself: not unique per pair,
+    /// blind to the request rules, and indistinguishable from a real group.
+    public func openDirectConversation(with profileID: ProfileID) async throws -> DirectConversationOpening {
         let viewer = try await resolveViewerProfileID(forWrite: "directConversation")
-
-        // Reuse an existing 1:1 conversation (exactly viewer + target) if any.
-        if let existing = await existingDirectConversation(viewer: viewer, other: profileID) {
-            return existing
+        var request = Chat_V1_OpenDirectConversationRequest()
+        request.profileID = viewer.rawValue
+        request.peerID = profileID.rawValue
+        let response = await chatClient.openDirectConversation(request: request, headers: [:])
+        switch response.result {
+        case .success(let body) where !body.conversationID.isEmpty:
+            return DirectConversationOpening(id: ConversationID(body.conversationID), isRequest: body.request)
+        case .success:
+            throw ChatError.transport(message: "couldn't start a conversation")
+        case .failure(let error):
+            if (error.message ?? "").contains("CHT-1011") { throw ChatError.messagesRefused }
+            throw ChatError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
-
-        // Otherwise create one and add both members.
-        var create = Chat_V1_CreateConversationRequest()
-        create.kind = .group
-        create.ownerID = viewer.rawValue
-        let response = await chatClient.createConversation(request: create, headers: [:])
-        guard let id = response.message?.conversationID, !id.isEmpty else {
-            throw ChatError.transport(message: response.error?.message ?? "couldn't start a conversation", failure: response.error.map { NetworkFailure($0) })
-        }
-        let conversationID = ConversationID(id)
-        for member in [viewer, profileID] {
-            await joinAndSubscribe(conversationID, member: member)
-        }
-        return conversationID
     }
 
-    private func existingDirectConversation(viewer: ProfileID, other: ProfileID) async -> ConversationID? {
-        var request = Chat_V1_ListSubscriptionsRequest()
-        request.subscriberID = viewer.rawValue
-        request.limit = pageSize
-        guard let ids = (await chatClient.listSubscriptions(request: request, headers: [:])).message?.conversationIds else {
-            return nil
+    public func respondToMessageRequest(_ conversationID: ConversationID, accept: Bool) async throws {
+        let viewer = try await resolveViewerProfileID(forWrite: "respondToMessageRequest")
+        var request = Chat_V1_RespondToMessageRequestRequest()
+        request.conversationID = conversationID.rawValue
+        request.profileID = viewer.rawValue
+        request.accept = accept
+        let response = await chatClient.respondToMessageRequest(request: request, headers: [:])
+        if let error = response.error {
+            throw ChatError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
-        let wanted: Set<ProfileID> = [viewer, other]
-        for id in ids {
-            var membersRequest = Chat_V1_ListMembersRequest()
-            membersRequest.conversationID = id
-            membersRequest.requesterID = viewer.rawValue
-            let members = (await chatClient.listMembers(request: membersRequest, headers: [:]))
-                .message?.members.map { ProfileID($0.profileID) } ?? []
-            if Set(members) == wanted {
-                return ConversationID(id)
-            }
-        }
-        return nil
-    }
-
-    private func joinAndSubscribe(_ conversationID: ConversationID, member: ProfileID) async {
-        var join = Chat_V1_JoinAsMemberRequest()
-        join.conversationID = conversationID.rawValue
-        join.profileID = member.rawValue
-        _ = await chatClient.joinAsMember(request: join, headers: [:])
-
-        var subscribe = Chat_V1_SubscribeRequest()
-        subscribe.conversationID = conversationID.rawValue
-        subscribe.subscriberID = member.rawValue
-        _ = await chatClient.subscribe(request: subscribe, headers: [:])
     }
 
     // MARK: - Hydration
