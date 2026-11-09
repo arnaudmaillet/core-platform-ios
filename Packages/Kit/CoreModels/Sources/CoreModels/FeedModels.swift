@@ -74,12 +74,16 @@ public struct Post: Sendable, Equatable, Codable {
     /// Whether the post speaks — the ONE test a surface reads to draw a
     /// voice (#2206), never a URL, a MIME or a caption.
     public var hasVoice: Bool { voice != nil }
+    /// What the post shows as a card in its caption's place (#2216): a
+    /// channel's showcase. Optional, so a snapshot stored before it decodes
+    /// with none; the post stays a text post.
+    public let embed: PostEmbed?
     // No "likes hidden" (#1713, the owner): a post's likes always show — the
     // client honours no hiding, and an old snapshot's key is ignored.
 
     public init(
         id: PostID, authorID: ProfileID, caption: String, attachments: [MediaAttachment], publishedAt: Date,
-        voice: PostVoice? = nil
+        voice: PostVoice? = nil, embed: PostEmbed? = nil
     ) {
         self.id = id
         self.authorID = authorID
@@ -87,6 +91,7 @@ public struct Post: Sendable, Equatable, Codable {
         self.attachments = attachments
         self.publishedAt = publishedAt
         self.voice = voice
+        self.embed = embed
     }
 
     public init(from decoder: any Decoder) throws {
@@ -97,6 +102,9 @@ public struct Post: Sendable, Equatable, Codable {
         attachments = try container.decode([MediaAttachment].self, forKey: .attachments)
         publishedAt = try container.decode(Date.self, forKey: .publishedAt)
         voice = try container.decodeIfPresent(PostVoice.self, forKey: .voice)
+        // An embed this build can't read (a later case, a later state) is
+        // none: the post still reads, as the text post it is (#2216).
+        embed = (try? container.decodeIfPresent(PostEmbed.self, forKey: .embed)) ?? nil
     }
 }
 
