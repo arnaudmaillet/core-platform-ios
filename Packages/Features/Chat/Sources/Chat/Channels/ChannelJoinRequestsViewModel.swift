@@ -4,8 +4,8 @@ import Foundation
 
 /// The join requests waiting on the channels the viewer runs (#2215): who
 /// asked, when, and Approve / Decline — one by one, or all at once. Opened
-/// from the Channels tab's requests row (every channel the viewer runs) or
-/// from one channel's info screen (that channel alone).
+/// for one channel: from its row in Requests' Join requests section
+/// (#2230), or from its info screen.
 ///
 /// An answer leaves the list at once and is written; a refusal puts it back
 /// and says so. The server's list is read again after "all".
@@ -21,7 +21,7 @@ final class ChannelJoinRequestsViewModel {
     }
 
     nonisolated struct Group: Equatable, Sendable {
-        let channel: ChannelsViewModel.RunChannel
+        let channel: RunChannel
         var rows: [Row]
     }
 
@@ -43,14 +43,14 @@ final class ChannelJoinRequestsViewModel {
 
     var onStateChange: ((State) -> Void)?
     var onFailure: ((String) -> Void)?
-    /// Some were answered: the tab's count and the info screen read again.
+    /// Some were answered: Requests' count and the info screen read again.
     var onChange: (() -> Void)?
 
     private(set) var state = State() { didSet { if state != oldValue { onStateChange?(state) } } }
-    let channels: [ChannelsViewModel.RunChannel]
+    let channels: [RunChannel]
     private let service: any GroupChatServicing
 
-    init(channels: [ChannelsViewModel.RunChannel], service: any GroupChatServicing) {
+    init(channels: [RunChannel], service: any GroupChatServicing) {
         self.channels = channels
         self.service = service
     }

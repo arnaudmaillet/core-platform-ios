@@ -13,6 +13,10 @@ import UIKit
 ///
 /// Pushed on its own over the HIDDEN REQUESTS folder, it is also the **Hidden
 /// requests** list (#552) that the Requests list's last row opens.
+///
+/// With channels (#2230), the list leads with a **Join requests** section,
+/// always titled: one row per channel the viewer runs with requests
+/// waiting, which opens that channel's requests list.
 final class MessageRequestsViewController: UIViewController {
     private let viewModel: MessageRequestsViewModel
 
@@ -55,6 +59,31 @@ final class MessageRequestsViewController: UIViewController {
 
     private var dataSource: SectionedConversationDataSource!
     private var modelsByID: [ConversationID: ConversationDisplayModel] = [:]
+    /// The Join requests rows on show (#2230), by channel: a channel's id is
+    /// never a request's, so the two kinds of row share the data source.
+    private var joinRequestsByID: [ConversationID: ChannelJoinRequestsDigest.Entry] = [:]
+    /// A Join requests row was picked (#2230): the host pushes that
+    /// channel's requests list.
+    var onOpenJoinRequests: ((_ presenter: UIViewController, _ channel: RunChannel) -> Void)?
+
+    /// The section at `index` when it wears a header: the Join requests
+    /// section always does (#2230) — alone, nothing else would say what its
+    /// rows are; New and Recent only beside another section, as before.
+    private func headedSection(at index: Int) -> InboxListSection? {
+        let current = dataSource.snapshot()
+        guard current.sectionIdentifiers.indices.contains(index) else { return nil }
+        let section = current.sectionIdentifiers[index]
+        if section == .joinRequests { return section }
+        return dataSource.headedSection(at: index)
+    }
+
+    /// What a section's header counts: its new requests (#2171), or — Join
+    /// requests — every request waiting there, as the badge adds them.
+    private func headerCount(for section: InboxListSection) -> Int {
+        section == .joinRequests
+            ? viewModel.joinRequests.reduce(0) { $0 + $1.count }
+            : renderedSections.unreadRows(in: section)
+    }
     /// The sections as last rendered — what the headers count (#1210).
     private var renderedSections = InboxListSections()
 
@@ -62,9 +91,9 @@ final class MessageRequestsViewController: UIViewController {
     /// the badge's count (#2171).
     private func refreshHeaderCounts() {
         for index in 0..<tableView.numberOfSections {
-            guard let section = dataSource.headedSection(at: index),
+            guard let section = headedSection(at: index),
                   let header = tableView.headerView(forSection: index) as? InboxSectionHeaderView else { continue }
-            header.setCount(renderedSections.unreadRows(in: section))
+            header.setCount(headerCount(for: section))
         }
         // The bar names the stuck section with the same count.
         updatePinnedSection()
@@ -79,8 +108,8 @@ final class MessageRequestsViewController: UIViewController {
         // A list off screen behind the skeleton or a status names nothing.
         let isShowing = !tableView.isHidden
         pinnedTracker.update(in: tableView) { index in
-            guard isShowing, let section = dataSource.headedSection(at: index) else { return nil }
-            return InboxPinnedSection(section: section, count: renderedSections.unreadRows(in: section))
+            guard isShowing, let section = self.headedSection(at: index) else { return nil }
+            return InboxPinnedSection(section: section, count: self.headerCount(for: section))
         }
     }
 
@@ -214,6 +243,7 @@ final class MessageRequestsViewController: UIViewController {
 
     private func configureTableView() {
         tableView.register(MessageRequestCell.self, forCellReuseIdentifier: MessageRequestCell.reuseIdentifier)
+        tableView.register(JoinRequestsCell.self, forCellReuseIdentifier: JoinRequestsCell.reuseIdentifier)
         // No indicators on the inbox's pages either — the tabs sit above them
         // and each page keeps its own position, so a bar that flashes on every
         // switch reads as motion nobody asked for.
@@ -243,6 +273,14 @@ final class MessageRequestsViewController: UIViewController {
 
         dataSource = SectionedConversationDataSource(tableView: tableView) {
             [weak self] tableView, indexPath, id in
+            // A channel with join requests waiting (#2230).
+            if let entry = self?.joinRequestsByID[id] {
+                let cell = tableView.dequeueReusableCell(
+                    withIdentifier: JoinRequestsCell.reuseIdentifier, for: indexPath
+                ) as! JoinRequestsCell
+                cell.configure(with: entry)
+                return cell
+            }
             let cell = tableView.dequeueReusableCell(
                 withIdentifier: MessageRequestCell.reuseIdentifier, for: indexPath
             ) as! MessageRequestCell
@@ -284,6 +322,15 @@ final class MessageRequestsViewController: UIViewController {
             // is not dequeued again, and reading a row changes its count.
             DispatchQueue.main.async { [weak self] in self?.refreshHeaderCounts() }
             var snapshot = NSDiffableDataSourceSnapshot<InboxListSection, ConversationID>()
+            // The channels' join requests first (#2230): what waits on the
+            // viewer as the channel's owner or admin.
+            let joinRequests = viewModel.joinRequests
+            let previousJoinRequests = joinRequestsByID
+            joinRequestsByID = Dictionary(joinRequests.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            if !joinRequests.isEmpty {
+                snapshot.appendSections([.joinRequests])
+                snapshot.appendItems(joinRequests.map(\.id), toSection: .joinRequests)
+            }
             if !sections.new.isEmpty {
                 snapshot.appendSections([.new])
                 snapshot.appendItems(sections.new.map(\.id), toSection: .new)
@@ -297,6 +344,9 @@ final class MessageRequestsViewController: UIViewController {
             // moving it. See `InboxRowDiff`.
             let models = sections.all
             snapshot.reconfigureItems(InboxRowDiff.changedRows(in: models, against: modelsByID))
+            // A channel's count that changed redraws its row in place.
+            let recounted = joinRequests.filter { previousJoinRequests[$0.id] != nil && previousJoinRequests[$0.id] != $0 }
+            snapshot.reconfigureItems(recounted.map(\.id))
             modelsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
             // Animate only while visible — an off-screen change would replay
             // its animation after the next transition.
@@ -443,14 +493,14 @@ extension MessageRequestsViewController: UITableViewDelegate {
 
     /// The glass pill, and the tap that scrolls to the section it names.
     func tableView(_ tableView: UITableView, viewForHeaderInSection index: Int) -> UIView? {
-        guard let section = dataSource.headedSection(at: index) else { return nil }
+        guard let section = headedSection(at: index) else { return nil }
         let header = tableView.dequeueReusableHeaderFooterView(
             withIdentifier: InboxSectionHeaderView.reuseIdentifier
         ) as? InboxSectionHeaderView
         // The separation between sections is the footer's job — see
         // `heightForFooterInSection` — so the header has nothing to pad.
         header?.setTitle(section.title)
-        header?.setCount(renderedSections.unreadRows(in: section))
+        header?.setCount(headerCount(for: section))
         // The section's own first row, so tapping "Recent" puts Recent under
         // the header rather than wherever the list happened to be.
         header?.onTap = { [weak self] in
@@ -464,7 +514,7 @@ extension MessageRequestsViewController: UITableViewDelegate {
     /// section a default height even when its header view is nil, which would
     /// leave a blank band above a list that has no header at all.
     func tableView(_ tableView: UITableView, heightForHeaderInSection index: Int) -> CGFloat {
-        dataSource.headedSection(at: index) == nil ? .leastNormalMagnitude : UITableView.automaticDimension
+        headedSection(at: index) == nil ? .leastNormalMagnitude : UITableView.automaticDimension
     }
 
     /// ⚠️ A FOOTER, not a bigger header margin.
@@ -489,6 +539,10 @@ extension MessageRequestsViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
+        if let entry = joinRequestsByID[id] {
+            onOpenJoinRequests?(self, entry.channel)
+            return
+        }
         viewModel.didSelect(id)
     }
 
@@ -506,7 +560,8 @@ extension MessageRequestsViewController: UITableViewDelegate {
         contextMenuConfigurationForRowAt indexPath: IndexPath,
         point: CGPoint
     ) -> UIContextMenuConfiguration? {
-        guard let id = dataSource.itemIdentifier(for: indexPath) else { return nil }
+        // A Join requests row is no conversation: nothing to peek (#2230).
+        guard let id = dataSource.itemIdentifier(for: indexPath), joinRequestsByID[id] == nil else { return nil }
         let makePreview = threadPreviewProvider
         return UIContextMenuConfiguration(
             identifier: id.rawValue as NSString,

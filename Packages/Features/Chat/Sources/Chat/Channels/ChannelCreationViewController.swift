@@ -2,10 +2,14 @@ import CoreModels
 import DesignSystem
 import UIKit
 
-/// The new channel's sheet (#2215): where its photo will go (its initials,
-/// no picker yet — `ChannelCreationViewModel`), its name, its description,
-/// who may join — Public or On request, each said in a line — and
-/// "Create".
+/// The new channel's sheet (#2215): what a channel is, in two lines
+/// (#2230), where its photo will go (its initials, no picker yet —
+/// `ChannelCreationViewModel`), its name, its description, who may join —
+/// Public or On request, each said in a line — and "Create".
+///
+/// Opened from the "+" menu and the inbox search (#2230): with the
+/// Channels tab gone, nothing around it says what a channel is any more,
+/// so its header does — the words the empty tab said.
 ///
 /// With the showcases (#2216), creating ends on a last step: the channel is
 /// ready, "Share as a Post" (prominent: a new channel's first readers come
@@ -22,6 +26,8 @@ final class ChannelCreationViewController: UIViewController {
     var onShareAsPost: ((ConversationID, PostEmbed) -> Void)?
 
     private let scrollView = UIScrollView()
+    /// What a channel is (#2230), over everything else.
+    private let introLabel = UILabel()
     private let disc = MonogramAvatarView(diameter: GroupNameViewController.discDiameter)
     private let nameField = UITextField()
     private let descriptionField = UITextField()
@@ -53,6 +59,12 @@ final class ChannelCreationViewController: UIViewController {
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             systemItem: .cancel, primaryAction: UIAction { [weak self] _ in self?.onCancel?() }
         )
+        introLabel.text = ChannelCopy.whatItIs
+        introLabel.font = .appFont(forTextStyle: .subheadline)
+        introLabel.textColor = .secondaryLabel
+        introLabel.numberOfLines = 0
+        introLabel.textAlignment = .center
+        introLabel.adjustsFontForContentSizeCategory = true
         disc.setMonogram(MonogramAvatarView.monogram(name: "Channel", handle: ""))
         disc.accessibilityLabel = "Channel photo"
 
@@ -108,7 +120,7 @@ final class ChannelCreationViewController: UIViewController {
         openButton.addAction(UIAction { [weak self] _ in self?.openCreated() }, for: .primaryActionTriggered)
 
         let stack = UIStackView(arrangedSubviews: [
-            disc, nameField, descriptionField, visibilityControl, visibilityNote, errorLabel, createButton,
+            introLabel, disc, nameField, descriptionField, visibilityControl, visibilityNote, errorLabel, createButton,
             createdTitle, createdNote, shareButton, openButton,
         ])
         stack.axis = .vertical
@@ -125,6 +137,7 @@ final class ChannelCreationViewController: UIViewController {
             stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -Spacing.xl)
             stack.leadingAnchor.constraint(equalTo: scroll.frameLayoutGuide.leadingAnchor, constant: Spacing.lg)
             stack.trailingAnchor.constraint(equalTo: scroll.frameLayoutGuide.trailingAnchor, constant: -Spacing.lg)
+            introLabel.widthAnchor.constraint(equalTo: stack.widthAnchor)
             nameField.widthAnchor.constraint(equalTo: stack.widthAnchor)
             descriptionField.widthAnchor.constraint(equalTo: stack.widthAnchor)
             visibilityControl.widthAnchor.constraint(equalTo: stack.widthAnchor)
@@ -202,11 +215,13 @@ extension ChannelCreationViewController {
 
     /// The channel exists: the form steps aside for its two ways on. No
     /// Cancel — there is nothing left to cancel; a swipe down leaves it on
-    /// the Channels tab, which lists it.
+    /// Chats, which lists it. The intro goes too (#2230): it says what a
+    /// channel is to someone about to make one, and this one exists.
     private func showCreated() {
         view.endEditing(true)
         createButton.setPhase(.content, animated: false)
-        for part in [nameField, descriptionField, visibilityControl, visibilityNote, errorLabel, createButton] as [UIView] {
+        let form: [UIView] = [introLabel, nameField, descriptionField, visibilityControl, visibilityNote, errorLabel, createButton]
+        for part in form {
             part.isHidden = true
         }
         createdTitle.text = "\(viewModel.draft.name) is ready"

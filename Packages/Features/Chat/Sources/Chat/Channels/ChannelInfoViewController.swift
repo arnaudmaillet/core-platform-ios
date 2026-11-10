@@ -355,7 +355,7 @@ final class ChannelInfoViewController: UIViewController {
     private func confirmLeave() {
         if ChannelCopy.leaveBlockedReason(for: state.viewerRole) != nil { return viewModel.leave() }
         let alert = UIAlertController(
-            title: "Leave \(state.name)?", message: "You won't see its posts any more.", preferredStyle: .alert
+            title: ChannelCopy.leaveTitle(state.name), message: ChannelCopy.leaveMessage, preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: "Leave", style: .destructive) { [weak self] _ in self?.viewModel.leave() })

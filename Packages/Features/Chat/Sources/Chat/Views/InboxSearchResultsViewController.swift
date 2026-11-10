@@ -185,6 +185,14 @@ final class InboxSearchResultsViewController: UIViewController {
             ))
         }
 
+        // "New channel" (#2230): the same anatomy, the channel's megaphone.
+        let newChannelRegistration = UICollectionView.CellRegistration<PersonListCell, Row> { cell, _, _ in
+            cell.configure(with: PersonRowContent(
+                displayName: "New channel", handle: ChannelCopy.newChannelMessage, monogram: "",
+                subject: .symbol(ConversationRowView.channelBadgeSymbol)
+            ))
+        }
+
         dataSource = UICollectionViewDiffableDataSource<Section, Row>(
             collectionView: collectionView
         ) { collectionView, indexPath, row in
@@ -192,6 +200,10 @@ final class InboxSearchResultsViewController: UIViewController {
             case .newGroup:
                 return collectionView.dequeueConfiguredReusableCell(
                     using: newGroupRegistration, for: indexPath, item: row
+                )
+            case .newChannel:
+                return collectionView.dequeueConfiguredReusableCell(
+                    using: newChannelRegistration, for: indexPath, item: row
                 )
             case .conversation(let id):
                 return collectionView.dequeueConfiguredReusableCell(

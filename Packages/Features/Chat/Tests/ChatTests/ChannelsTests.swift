@@ -10,14 +10,15 @@ import Testing
 import UIKit
 @testable import Chat
 
-/// Channels in Messages (#2215), on the mock's channels (`-channels`): the
-/// Channels folder and its tab, who gets a composer, joining and the
-/// requests an admin answers, the subscriber count, visibility — and the
-/// flag off, no tab.
+/// Channels in Messages (#2215), on the mock's channels (`-channels`):
+/// their rows in Chats with every other conversation (#2230), who gets a
+/// composer, joining (muted, #2230) and the requests an admin answers — now
+/// in Requests (#2230) — the subscriber count, visibility, and the flag off.
 ///
 /// The mock's viewer: owner of ch-daily (public, 12 400) and of
 /// ch-studio-requests (on request, three pending requests); subscriber of
-/// ch-botanic; a pending request on ch-film; not in ch-harbour (public, 10).
+/// ch-botanic (joined muted) and of ch-tides (notifications on); a pending
+/// request on ch-film; not in ch-harbour (public, 10).
 @MainActor
 struct ChannelsTests {
     private struct Session: AuthSessionProviding {
@@ -28,11 +29,17 @@ struct ChannelsTests {
         func logout() async {}
     }
 
-    private func make(channels: Bool = true) -> ChatRepository {
+    @MainActor
+    private final class SpyRouter: Router {
+        private(set) var routes: [AppRoute] = []
+        func route(to route: AppRoute) { routes.append(route) }
+    }
+
+    private func make(channels: Bool = true, groups: Bool = false) -> ChatRepository {
         let dataset = MockSocialDataset()
         let bff = MockBFF()
         MockSocialServices(dataset: dataset).register(on: bff)
-        MockChatService(dataset: dataset, seedsGroups: false, seedsChannels: true).register(on: bff)
+        MockChatService(dataset: dataset, seedsGroups: groups, seedsChannels: true).register(on: bff)
         let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
         return ChatRepository(
             chatClient: Chat_V1_ChatServiceClient(client: client),
@@ -40,7 +47,7 @@ struct ChannelsTests {
             authSession: Session(),
             inboxPageSize: 100,
             proposals: ProposedChatClient(client: client),
-            showsGroups: false,
+            showsGroups: groups,
             showsChannels: channels
         )
     }
@@ -51,108 +58,257 @@ struct ChannelsTests {
         }
     }
 
+    private func loadedCatalog(_ repository: ChatRepository) async -> InboxCatalog {
+        let catalog = InboxCatalog(repository: repository)
+        catalog.reload()
+        await settle { catalog.snapshot.phase == .loaded }
+        return catalog
+    }
+
     private let daily = ConversationID("ch-daily")
     private let botanic = ConversationID("ch-botanic")
+    private let tides = ConversationID("ch-tides")
     private let film = ConversationID("ch-film")
     private let harbour = ConversationID("ch-harbour")
     private let studio = ConversationID("ch-studio-requests")
 
-    // MARK: - The Channels folder
+    // MARK: - Channels in Chats (#2230)
 
-    @Test func theChannelsFolderHoldsTheViewersChannelsAndOnlyThem() async throws {
+    @Test func channelsSitInChatsSortedWithTheRest() async throws {
         let repository = make()
-        let rows = try await repository.loadInbox(.channels, after: nil).conversations
-        #expect(Set(rows.map(\.id)) == [daily, botanic, studio], "\(rows.map(\.id.rawValue))")
-        #expect(rows.allSatisfy { $0.kind == .channel })
-        let chats = try await repository.loadInbox(.inbox, after: nil).conversations
-        #expect(!chats.contains { $0.kind == .channel }, "a channel in Chats")
+        let rows = try await repository.loadInbox(.inbox, after: nil).conversations
+        let channels = rows.filter { $0.kind == .channel }
+        #expect(Set(channels.map(\.id)) == [daily, botanic, tides, studio], "\(channels.map(\.id.rawValue))")
+        #expect(rows.contains { $0.kind == .direct }, "the DMs went")
+        // One list, newest activity first, channels among the DMs.
+        #expect(rows == rows.sorted(by: Conversation.isOrderedBefore), "a channel sorted apart")
+
+        let catalog = await loadedCatalog(repository)
+        let active = catalog.snapshot.active
+        #expect(Set(active.filter { $0.kind == .channel }.map(\.id)) == [daily, botanic, tides, studio])
+        #expect(active == active.sorted(by: Conversation.isOrderedBefore))
+        // Pinned, a channel rises like any row.
+        catalog.togglePin(botanic)
+        #expect(catalog.snapshot.active.first?.id == botanic)
     }
 
-    @Test func aChannelsRowShowsItsPhotoFirstLineAndWhetherTheViewerRunsIt() async throws {
-        let rows = try await make().loadInbox(.channels, after: nil).conversations
+    @Test func withTheFlagOffChatsHasNoChannel() async throws {
+        let rows = try await make(channels: false).loadInbox(.inbox, after: nil).conversations
+        #expect(!rows.isEmpty)
+        #expect(!rows.contains { $0.kind == .channel })
+    }
+
+    @Test func everyChannelRowWearsTheMegaphoneAndAPreviewWithoutASender() async throws {
+        let rows = try await make(groups: true).loadInbox(.inbox, after: nil).conversations
         let owned = ConversationDisplayModel(conversation: try #require(rows.first { $0.id == daily }))
         #expect(owned.title == "Daily light")
-        #expect(owned.groupPhotoURL != nil)
-        #expect(owned.runsChannel)
+        #expect(owned.groupPhotoURL != nil, "the channel's photo")
+        #expect(owned.isChannel && owned.runsChannel && owned.ownsChannel)
         #expect(owned.previewSender == nil, "a channel's post is signed by the channel")
+        #expect(owned.previewLine == owned.preview)
         let followed = ConversationDisplayModel(conversation: try #require(rows.first { $0.id == botanic }))
-        #expect(!followed.runsChannel)
+        #expect(followed.isChannel && !followed.runsChannel && !followed.ownsChannel)
         #expect(followed.peerID == nil, "a channel's owner passed for a DM's peer")
+        #expect(followed.previewSender == nil)
+        // A group keeps "Alice: …"; a DM is unchanged.
+        let group = ConversationDisplayModel(conversation: try #require(rows.first { $0.id == ConversationID("grp-hike") }))
+        #expect(!group.isChannel && group.previewSender != nil)
+        let direct = ConversationDisplayModel(conversation: try #require(rows.first { $0.kind == .direct }))
+        #expect(!direct.isChannel && direct.previewSender == nil)
 
         let row = ConversationRowView()
         row.configure(with: owned)
-        #expect(row.debugShowsRunsBadge)
+        #expect(row.debugShowsChannelBadge, "the megaphone on a channel the viewer runs")
         row.configure(with: followed)
-        #expect(!row.debugShowsRunsBadge)
+        #expect(row.debugShowsChannelBadge, "the megaphone on a channel the viewer follows")
+        #expect(row.debugPreviewText == followed.preview, "a sender on a channel's preview")
+        row.configure(with: group)
+        #expect(!row.debugShowsChannelBadge)
+        row.configure(with: direct)
+        #expect(!row.debugShowsChannelBadge)
         #expect(ConversationDisplayModel.firstLine(of: "\n  New series  \nstarts Monday") == "New series")
     }
 
-    @Test func theCatalogReadsTheChannelsFolderOnlyWhenAsked() async {
+    @Test func searchFindsChannelsWithTheConversations() async throws {
         let repository = make()
-        let asked = InboxCatalog(repository: repository)
-        asked.loadsChannels = true
-        asked.reload()
-        await settle { asked.snapshot.phase == .loaded && !asked.snapshot.channels.isEmpty }
-        #expect(asked.snapshot.channels.count == 3)
-        #expect(!asked.snapshot.active.contains { $0.kind == .channel })
-
-        let unasked = InboxCatalog(repository: repository)
-        unasked.reload()
-        await settle { unasked.snapshot.phase == .loaded }
-        #expect(unasked.snapshot.channels.isEmpty)
-    }
-
-    // MARK: - The tab
-
-    @Test func theTabPutsTheRequestsRowFirstThenCreateThenTheChannels() {
-        let ids = [daily, botanic]
-        #expect(ChannelsViewModel.items(channels: ids, requestCount: 3) == [.joinRequests, .create, .channel(daily), .channel(botanic)])
-        #expect(ChannelsViewModel.items(channels: ids, requestCount: 0) == [.create, .channel(daily), .channel(botanic)])
-        #expect(ChannelsViewModel.items(channels: [], requestCount: 2).isEmpty, "no channel: the empty state")
-    }
-
-    /// The row says which channel the requests are for (the owner,
-    /// 2026-11-10: "3 requests to join" — to join what?).
-    @Test func theRequestsRowNamesItsChannel() {
-        #expect(ChannelCopy.joinRequests(3, channels: ["Studio drops"]) == "3 requests to join Studio drops")
-        #expect(ChannelCopy.joinRequests(1, channels: ["Studio drops"]) == "1 request to join Studio drops")
-        #expect(ChannelCopy.joinRequests(5, channels: ["Studio drops", "Daily light"]) == "5 requests to join 2 channels")
-        #expect(ChannelCopy.joinRequests(2, channels: []) == "2 requests to join", "no name known: the count alone")
-    }
-
-    @Test func theTabCountsTheRequestsOfTheChannelsTheViewerRuns() async throws {
-        let repository = make()
-        let catalog = InboxCatalog(repository: repository)
-        catalog.loadsChannels = true
-        let model = ChannelsViewModel(catalog: catalog, service: repository)
-        catalog.reload()
-        await settle { model.requestCount == 3 }
-        #expect(model.requestCount == 3, "ch-studio-requests' three")
-        #expect(model.requestingChannelNames == ["Studio drops"], "only the channel with requests is named")
-        #expect(Set(model.runChannels.map(\.id)) == [daily, studio])
-        guard case .content(let items) = model.phase else { Issue.record("\(model.phase)"); return }
-        #expect(items.first == .joinRequests)
-        #expect(items.contains(.channel(botanic)))
-    }
-
-    @Test func anEmptyTabOffersToCreateAChannel() async {
-        let dataset = MockSocialDataset()
-        let bff = MockBFF()
-        MockSocialServices(dataset: dataset).register(on: bff)
-        MockChatService(dataset: dataset, seedsGroups: false, seedsChannels: false).register(on: bff)
-        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
-        let repository = ChatRepository(
-            chatClient: Chat_V1_ChatServiceClient(client: client),
-            profileClient: Profile_V1_ProfileServiceClient(client: client),
-            authSession: Session(), inboxPageSize: 100, proposals: ProposedChatClient(client: client),
-            showsGroups: false, showsChannels: true
+        let catalog = await loadedCatalog(repository)
+        let search = InboxSearchViewModel(
+            catalog: catalog, viewer: repository, debounce: .zero, showsNewGroup: false, showsNewChannel: false
         )
-        let catalog = InboxCatalog(repository: repository)
-        catalog.loadsChannels = true
-        let model = ChannelsViewModel(catalog: catalog, service: repository)
+        var phase: InboxSearchViewModel.Phase?
+        search.onPhaseChange = { phase = $0 }
+        search.queryChanged("Botanical")
+        await settle { if case .content = phase { true } else { false } }
+        guard case .content(let sections) = phase else { Issue.record("\(String(describing: phase))"); return }
+        #expect(sections.first { $0.kind == .messages }?.rows.contains(.conversation(botanic)) == true)
+    }
+
+    // MARK: - The noise (#2230)
+
+    @Test func aMutedChannelsPostsStayOnItsRowAndOffTheBadge() async throws {
+        let repository = make()
+        let catalog = await loadedCatalog(repository)
+        #expect(catalog.isMuted(botanic), "a followed channel joined muted")
+        #expect(!catalog.isMuted(tides), "notifications turned on")
+        let snapshot = catalog.snapshot
+        #expect(snapshot.unreadIDs.contains(botanic) && snapshot.unreadIDs.contains(tides))
+
+        let list = ConversationListViewModel(catalog: catalog)
+        await settle { if case .content = list.phase { true } else { false } }
+        guard case .content(let sections) = list.phase else { Issue.record("\(list.phase)"); return }
+        let muted = try #require(sections.all.first { $0.id == botanic })
+        #expect(muted.isUnread && muted.unreadCount > 0, "the row still shows its posts")
+        #expect(!muted.countsInBadge)
+        let notifying = try #require(sections.all.first { $0.id == tides })
+        #expect(notifying.countsInBadge)
+        // The badge: every unread row's messages but the muted channel's.
+        let expected = snapshot.active
+            .filter { $0.id != botanic && snapshot.unreadIDs.contains($0.id) }
+            .reduce(0) { $0 + $1.unreadCount }
+        #expect(list.newCount == expected)
+        // The headers add up to it.
+        let headers = sections.unreadMessages(in: .new) + sections.unreadMessages(in: .earlier)
+        #expect(headers == list.newCount)
+
+        // Notifications on: its posts count again.
+        catalog.setMute(botanic, muted: false, until: nil)
+        #expect(list.newCount == expected + muted.unreadCount)
+    }
+
+    @Test func aMutedDMOrGroupStillCounts() {
+        let dm = Conversation(id: ConversationID("dm"), title: "Ada", lastMessage: "hi", lastActivityAt: Date(),
+                              otherMemberIDs: [ProfileID("ada")], isUnread: true, unreadCount: 2)
+        let model = ConversationDisplayModel(conversation: dm, isMuted: true, isUnread: true, unreadCount: 2)
+        #expect(model.countsInBadge)
+        #expect(InboxListSections.unreadMessages(in: [model]) == 2)
+    }
+
+    @Test func joiningFromTheThreadMutesTheChannel() async throws {
+        let repository = make()
+        let catalog = await loadedCatalog(repository)
+        let viewModel = ConversationViewModel(conversationID: harbour, repository: repository)
+        var context = GroupThreadContext(
+            service: repository, makeInfo: { _, _ in UIViewController() }, openProfile: { _, _ in },
+            createdAt: { _ in nil }, knownKind: { _ in nil }
+        )
+        context.kinds = [.channel]
+        var joined: [ConversationID] = []
+        context.onMembershipChange = { id, left in if !left { joined.append(id) } }
+        let driver = ConversationThreadDriver(
+            viewModel: viewModel, viewer: repository, avatars: nil, pins: catalog, groupContext: context
+        )
+        var group: ConversationThreadGroup?
+        driver.onGroupChange = { group = $0 }
+        driver.viewDidLoad()
+        await settle { group?.readerStanding == .canJoin }
+        driver.join()
+        await settle { !joined.isEmpty }
+        #expect(catalog.isMuted(harbour), "a channel joins muted")
+        #expect(joined == [harbour])
         catalog.reload()
-        await settle { model.phase == .empty }
-        #expect(model.phase == .empty)
+        await settle { catalog.snapshot.active.contains { $0.id == harbour } }
+        #expect(try #require(catalog.snapshot.active.first { $0.id == harbour }).isMuted, "the server's word: muted")
+    }
+
+    @Test func aChannelTheViewerCreatesIsNotMuted() async throws {
+        let repository = make()
+        let created = try await repository.create(ConversationDraft(kind: .channel, name: "Night trains"))
+        let rows = try await repository.loadInbox(.inbox, after: nil).conversations
+        let row = try #require(rows.first { $0.id == created }, "a new channel missing from Chats")
+        #expect(!row.isMuted, "the viewer posts there: no mute")
+    }
+
+    @Test func anApprovedRequesterJoinsMuted() async throws {
+        // The mock's own rule for #995: an approval subscribes muted too.
+        let repository = make()
+        let requests = try await repository.joinRequests(to: studio)
+        let requester = try #require(requests.first).profileID
+        try await repository.answerJoinRequest(from: requester, to: studio, approve: true)
+        #expect(try await repository.members(of: studio).contains { $0.profileID == requester && $0.role == .subscriber })
+    }
+
+    // MARK: - Leaving from the row (#2230)
+
+    @Test func leavingFromTheRowUnsubscribesAndTheOwnerIsSentToTheTransfer() async throws {
+        let repository = make()
+        let catalog = await loadedCatalog(repository)
+        var written: Bool?
+        catalog.leaveChannel(botanic) { written = $0 }
+        #expect(!catalog.snapshot.active.contains { $0.id == botanic }, "the row goes at once")
+        await settle { written != nil }
+        #expect(written == true)
+        #expect(try await repository.details(of: botanic).viewerState == .none)
+
+        // The owner can't: the row never lets them through.
+        var ownerWritten: Bool?
+        catalog.leaveChannel(daily) { ownerWritten = $0 }
+        #expect(ownerWritten == false)
+        #expect(catalog.snapshot.active.contains { $0.id == daily })
+        #expect(try await repository.details(of: daily).viewerState == .owner)
+        let owned = ConversationDisplayModel(conversation: try #require(catalog.snapshot.active.first { $0.id == daily }))
+        #expect(owned.ownsChannel)
+        #expect(ChannelCopy.leaveTitle("Botanical prints") == "Leave Botanical prints?")
+    }
+
+    // MARK: - Join requests in Requests (#2230)
+
+    @Test func theDigestListsTheChannelsTheViewerRunsWithRequestsWaiting() async throws {
+        let repository = make()
+        let catalog = InboxCatalog(repository: repository)
+        let digest = ChannelJoinRequestsDigest(catalog: catalog, service: repository)
+        catalog.reload()
+        await settle { digest.total == 3 }
+        #expect(Set(digest.runChannels.map(\.id)) == [daily, studio])
+        #expect(digest.entries.map(\.id) == [studio], "only the channel with requests: ch-daily has none")
+        #expect(digest.entries.first?.count == 3)
+        #expect(digest.entries.first?.channel.name == "Studio drops")
+    }
+
+    @Test func theRowSaysTheChannelAndItsCount() {
+        #expect(ChannelCopy.joinRequestsRow(channel: "Night walks", count: 3) == "Night walks · 3 requests")
+        #expect(ChannelCopy.joinRequestsRow(channel: "Night walks", count: 1) == "Night walks · 1 request")
+        let a = RunChannel(id: daily, name: "Daily light", photoURL: nil)
+        let b = RunChannel(id: studio, name: "Studio drops", photoURL: nil)
+        let entries = ChannelJoinRequestsDigest.entries([a, b], counts: [daily: 0, studio: 2])
+        #expect(entries == [ChannelJoinRequestsDigest.Entry(channel: b, count: 2)], "a channel with none answered leaves")
+        let cell = JoinRequestsCell(style: .default, reuseIdentifier: nil)
+        cell.configure(with: ChannelJoinRequestsDigest.Entry(channel: b, count: 2))
+        #expect(cell.debugTitle == "Studio drops · 2 requests")
+    }
+
+    @Test func requestsCountTheJoinRequestsInTheirBadgeAndLeaveOnceAnswered() async throws {
+        let repository = make()
+        let catalog = InboxCatalog(repository: repository)
+        let digest = ChannelJoinRequestsDigest(catalog: catalog, service: repository)
+        let requests = MessageRequestsViewModel(catalog: catalog, joinRequests: digest)
+        let plain = MessageRequestsViewModel(catalog: catalog)
+        catalog.reload()
+        await settle { requests.joinRequests.count == 1 && catalog.snapshot.phase == .loaded }
+        #expect(requests.joinRequests.map(\.id) == [studio])
+        #expect(requests.newCount == plain.newCount + 3, "one per request waiting, as a message request is one")
+        guard case .content = requests.phase else { Issue.record("\(requests.phase)"); return }
+
+        // Answered, all of them: the section empties, the badge falls.
+        let list = ChannelJoinRequestsViewModel(channels: [RunChannel(id: studio, name: "Studio drops", photoURL: nil)],
+                                                service: repository)
+        list.onChange = { requests.refreshJoinRequests() }
+        list.load()
+        await settle { list.state.count == 3 }
+        list.answerAll(approve: true)
+        await settle { requests.joinRequests.isEmpty }
+        #expect(requests.joinRequests.isEmpty, "a channel whose requests were all answered leaves the section")
+        #expect(requests.newCount == plain.newCount)
+    }
+
+    @Test func theHiddenRequestsListNeverShowsJoinRequests() async {
+        let repository = make()
+        let catalog = InboxCatalog(repository: repository)
+        let digest = ChannelJoinRequestsDigest(catalog: catalog, service: repository)
+        let hidden = MessageRequestsViewModel(catalog: catalog, folder: .hiddenRequests, joinRequests: digest)
+        catalog.reload()
+        await settle { digest.total == 3 }
+        #expect(hidden.joinRequests.isEmpty)
+        #expect(hidden.newCount == 0)
     }
 
     // MARK: - Creating
@@ -176,7 +332,16 @@ struct ChannelsTests {
         #expect(details.kind == .channel)
         #expect(details.viewerState == .owner)
         #expect(details.visibility == .listedOnRequest)
-        #expect(try await repository.loadInbox(.channels, after: nil).conversations.contains { $0.id == created })
+        #expect(try await repository.loadInbox(.inbox, after: nil).conversations.contains { $0.id == created })
+    }
+
+    /// From the "+": Messages, on Chats, then the thread pushed over it —
+    /// the app's cross-tab routes. From the inbox search: the thread alone.
+    @Test func createLandsInMessagesOnChatsFromThePlusMenu() {
+        let id = ConversationID("ch-new-1")
+        #expect(ChatFeatureBuilder.landingRoutes(for: id, landing: .inMessages) == [.messages(.all), .conversation(id)])
+        #expect(ChatFeatureBuilder.landingRoutes(for: id, landing: .onTheStack) == [.conversation(id)])
+        #expect(ChannelCopy.whatItIs.contains("channel"), "the sheet says what a channel is")
     }
 
     // MARK: - Who gets a composer
@@ -292,7 +457,7 @@ struct ChannelsTests {
 
     @Test func anAdminApprovesAndDeclinesOneByOne() async throws {
         let repository = make()
-        let run = ChannelsViewModel.RunChannel(id: studio, name: "Studio drops", photoURL: nil)
+        let run = RunChannel(id: studio, name: "Studio drops", photoURL: nil)
         let list = ChannelJoinRequestsViewModel(channels: [run], service: repository)
         var changes = 0
         list.onChange = { changes += 1 }
@@ -313,7 +478,7 @@ struct ChannelsTests {
 
     @Test func anAdminAnswersThemAll() async throws {
         let repository = make()
-        let run = ChannelsViewModel.RunChannel(id: studio, name: "Studio drops", photoURL: nil)
+        let run = RunChannel(id: studio, name: "Studio drops", photoURL: nil)
         let list = ChannelJoinRequestsViewModel(channels: [run], service: repository)
         list.load()
         await settle { list.state.phase == .loaded && list.state.count == 3 }
@@ -384,7 +549,7 @@ struct ChannelsTests {
         await settle { left }
         #expect(left)
         #expect(try await repository.details(of: botanic).subscriberCount == 819)
-        #expect(!(try await repository.loadInbox(.channels, after: nil).conversations).contains { $0.id == botanic })
+        #expect(!(try await repository.loadInbox(.inbox, after: nil).conversations).contains { $0.id == botanic })
     }
 
     @Test func theSubscriberCountReadsCompact() {
@@ -418,24 +583,67 @@ struct ChannelsTests {
         return inbox.debugCategories
     }
 
-    @Test func withTheFlagOffMessagesHasNoChannelsTab() throws {
+    /// Messages has three pages whatever the flags (#2230): the channels
+    /// are in Chats. A "channels" token — a debug hook, a stored tab — no
+    /// longer parses, and the callers' fallback is Chats.
+    @Test func messagesHasThreePagesAndNoChannelsCategory() throws {
         let screens = NoScreens()
-        let off = ChatFeatureBuilder(repository: make(channels: false), showsChannels: false, threadScreens: { screens })
+        let off = ChatFeatureBuilder(
+            repository: make(channels: false), showsGroups: false, showsChannels: false, threadScreens: { screens }
+        )
         #expect(try categories(off) == [.all, .requests, .suggestions])
-        // A repository with no channels shows none, whatever the flag.
-        let none = ChatFeatureBuilder(repository: Stub(), showsChannels: true, threadScreens: { screens })
-        #expect(try categories(none) == [.all, .requests, .suggestions])
+        let on = ChatFeatureBuilder(repository: make(), showsGroups: true, showsChannels: true, threadScreens: { screens })
+        #expect(try categories(on) == [.all, .requests, .suggestions])
+        #expect(MessagesCategory.allCases == [.all, .requests, .suggestions])
+        #expect(MessagesCategory(rawValue: "channels") == nil, "`-open-messages channels`")
+        #expect((MessagesCategory(rawValue: "channels") ?? .all) == .all, "a route to it lands on Chats")
+        #expect(MessagesCategory.all.title == "Chats")
     }
 
-    @Test func withTheFlagOnTheTabFollowsChatsOrRequests() throws {
+    /// The "+" menu's "New Channel" exists only with the channels: the
+    /// builder makes the sheet, or nothing (the menu then has no entry).
+    @Test func theCreationSheetExistsOnlyWithTheChannels() throws {
         let screens = NoScreens()
-        let afterChats = ChatFeatureBuilder(repository: make(), showsChannels: true, channelsPlacement: .afterChats,
-                                            threadScreens: { screens })
-        #expect(try categories(afterChats) == [.all, .channels, .requests, .suggestions])
-        let afterRequests = ChatFeatureBuilder(repository: make(), showsChannels: true, channelsPlacement: .afterRequests,
-                                               threadScreens: { screens })
-        #expect(try categories(afterRequests) == [.all, .requests, .channels, .suggestions])
-        #expect(MessagesCategory.channels.title == "Channels")
-        #expect(MessagesCategory(rawValue: "channels") == .channels, "`-open-messages channels`")
+        let on = ChatFeatureBuilder(repository: make(), showsChannels: true, threadScreens: { screens })
+        let sheet = try #require(on.makeChannelCreationViewController() as? UINavigationController)
+        #expect(sheet.viewControllers.first is ChannelCreationViewController)
+        let off = ChatFeatureBuilder(repository: make(channels: false), showsChannels: false, threadScreens: { screens })
+        #expect(off.makeChannelCreationViewController() == nil)
+        // A repository with no channels makes none, whatever the flag.
+        let none = ChatFeatureBuilder(repository: Stub(), showsChannels: true, threadScreens: { screens })
+        #expect(none.makeChannelCreationViewController() == nil)
+    }
+
+    /// The empty search's create rows, for each pair of flags (#2230): one
+    /// "Create" section, no section with neither.
+    @Test func theSearchOffersItsCreateRowsForEachPairOfFlags() async {
+        typealias Search = InboxSearchViewModel
+        #expect(Search.createRows(showsNewGroup: true, showsNewChannel: true) == [.newGroup, .newChannel])
+        #expect(Search.createRows(showsNewGroup: true, showsNewChannel: false) == [.newGroup])
+        #expect(Search.createRows(showsNewGroup: false, showsNewChannel: true) == [.newChannel])
+        #expect(Search.createRows(showsNewGroup: false, showsNewChannel: false).isEmpty)
+
+        let repository = make()
+        let catalog = await loadedCatalog(repository)
+        for (groups, channels) in [(true, true), (true, false), (false, true), (false, false)] {
+            let search = Search(catalog: catalog, viewer: repository, showsNewGroup: groups, showsNewChannel: channels)
+            var phase: Search.Phase?
+            search.onPhaseChange = { phase = $0 }
+            search.queryChanged("")
+            guard case .content(let sections) = phase else { Issue.record("\(String(describing: phase))"); continue }
+            let create = sections.first { $0.kind == .create }
+            if groups || channels {
+                #expect(sections.first?.kind == .create, "the create rows lead the empty field")
+                #expect(create?.title == "Create")
+                #expect(create?.rows == Search.createRows(showsNewGroup: groups, showsNewChannel: channels))
+            } else {
+                #expect(create == nil, "no section with neither flag")
+            }
+        }
+        var picked = false
+        let search = Search(catalog: catalog, viewer: repository, showsNewGroup: false, showsNewChannel: true)
+        search.onNewChannel = { picked = true }
+        search.didSelect(.newChannel)
+        #expect(picked)
     }
 }

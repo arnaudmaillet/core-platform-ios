@@ -351,7 +351,7 @@ struct GroupChatsTests {
             #expect(model.previewLine == model.preview)
         }
         let search = InboxSearchViewModel(catalog: InboxCatalog(repository: make(groups: false)), viewer: make(groups: false),
-                                          showsNewGroup: false)
+                                          showsNewGroup: false, showsNewChannel: false)
         var phases: [InboxSearchViewModel.Phase] = []
         search.onPhaseChange = { phases.append($0) }
         search.queryChanged("")
@@ -362,7 +362,9 @@ struct GroupChatsTests {
 
     @Test func withTheFlagOnTheEmptySearchOffersANewGroup() {
         let repository = make()
-        let search = InboxSearchViewModel(catalog: InboxCatalog(repository: repository), viewer: repository, showsNewGroup: true)
+        let search = InboxSearchViewModel(
+            catalog: InboxCatalog(repository: repository), viewer: repository, showsNewGroup: true, showsNewChannel: false
+        )
         var sections: [InboxSearchViewModel.Section] = []
         search.onPhaseChange = { if case .content(let shown) = $0 { sections = shown } }
         var opened = false

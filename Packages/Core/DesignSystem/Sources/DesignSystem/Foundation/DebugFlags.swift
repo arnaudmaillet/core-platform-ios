@@ -28,7 +28,7 @@ public enum DebugFlags {
         Flag(argument: "-group-chats", title: "Group chats",
              detail: "Groups in Messages: create, inbox rows, senders, the info screen (#2211)", appliesAtLaunch: true),
         Flag(argument: "-channels", title: "Channels",
-             detail: "Channels: their own tab in Messages, and their showcases on the feed and the map (#2211)",
+             detail: "Channels: in Chats, made from the + menu and the inbox search, and their showcases on the feed and the map (#2211)",
              appliesAtLaunch: true),
         Flag(argument: "-voice-posts", title: "Voice posts",
              detail: "A text post's caption can be a voice: drawn on every surface, recorded in the composer (#2204)",

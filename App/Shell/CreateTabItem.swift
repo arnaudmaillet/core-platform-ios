@@ -1,8 +1,9 @@
 import UIKit
 
 /// The bar's detached trailing item: a "+" that opens a menu of ways to make a
-/// post — Camera, Upload Media, Text Post. It is NOT a place anyone stands on,
-/// which is why it is not an `AppTab` and has no coordinator or stack.
+/// post — Camera, Upload Media, Text Post — and, with `-channels`, a channel
+/// (#2230). It is NOT a place anyone stands on, which is why it is not an
+/// `AppTab` and has no coordinator or stack.
 ///
 /// # Why it is still a `UISearchTab`
 ///
@@ -52,16 +53,31 @@ import UIKit
 /// becomes one.
 @MainActor
 final class CreateTabItem {
-    /// What the menu offers, in declaration order.
+    /// What the menu can offer, in declaration order (`destinations` says
+    /// which it does).
     enum Destination: String, CaseIterable {
         case camera
         case upload
         case text
+        /// "New Channel" (#2230): a channel addresses an audience — it is
+        /// shown in the feed and on the map (#2216) — so it is made where
+        /// posts are. A group stays out: writing to several people is a
+        /// conversation, not a publication.
+        case channel
+    }
+
+    /// The menu's entries, in order (#2230): the three ways to make a post,
+    /// then "New Channel" after Text Post with the channels on. Without
+    /// them, the menu is as it was before the epic.
+    static func destinations(offersChannel: Bool) -> [Destination] {
+        Destination.allCases.filter { $0 != .channel || offersChannel }
     }
 
     let tab: UITab
     /// Kept aligned over the bubble by `MainTabCoordinator`, which owns the bar.
     let overlay: UIButton
+    /// What the menu and its fallback sheet offer, in order.
+    let destinations: [Destination]
     private let opener: @MainActor (Destination) -> Void
     /// Whether the bubble is a guest's "Sign in" rather than the "+" (#626).
     private(set) var isSignIn = false
@@ -71,8 +87,9 @@ final class CreateTabItem {
     /// sheet's "Log in or sign up".
     static let signInSymbol = "person.crop.circle.badge.plus"
 
-    init(open: @escaping @MainActor (Destination) -> Void) {
+    init(destinations: [Destination] = CreateTabItem.destinations(offersChannel: false), open: @escaping @MainActor (Destination) -> Void) {
         self.opener = open
+        self.destinations = destinations
         // The provider is never asked for a screen that is shown — selection
         // is vetoed — but it must answer one.
         let tab = UISearchTab { _ in UIViewController() }
@@ -85,7 +102,7 @@ final class CreateTabItem {
         // A `UIControl` ships with this off, which leaves a `menu` inert.
         button.isContextMenuInteractionEnabled = true
         button.showsMenuAsPrimaryAction = true
-        button.menu = Self.menu(open: open)
+        button.menu = Self.menu(destinations, open: open)
         button.isUserInteractionEnabled = false
         button.isAccessibilityElement = false
         overlay = button
@@ -136,7 +153,7 @@ final class CreateTabItem {
     /// placed. Anchored on the tab itself, which is a popover source item.
     func makeFallbackSheet() -> UIAlertController {
         let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
-        for destination in Destination.allCases {
+        for destination in destinations {
             sheet.addAction(UIAlertAction(title: destination.title, style: .default) { [opener] _ in
                 opener(destination)
             })
@@ -155,8 +172,8 @@ final class CreateTabItem {
     /// the Messages and Profile buttons. Nothing public sets a menu's width.
     /// The brief was icons only IF the menu could be narrowed, labels
     /// otherwise, so this is the "otherwise".
-    private static func menu(open: @escaping @MainActor (Destination) -> Void) -> UIMenu {
-        let actions = Destination.allCases.map { destination in
+    private static func menu(_ destinations: [Destination], open: @escaping @MainActor (Destination) -> Void) -> UIMenu {
+        let actions = destinations.map { destination in
             UIAction(title: destination.title, image: UIImage(systemName: destination.symbolName)) { _ in
                 open(destination)
             }
@@ -171,6 +188,7 @@ extension CreateTabItem.Destination {
         case .camera: "Camera"
         case .upload: "Upload Media"
         case .text: "Text Post"
+        case .channel: "New Channel"
         }
     }
 
@@ -179,6 +197,7 @@ extension CreateTabItem.Destination {
         case .camera: "camera"
         case .upload: "photo.on.rectangle"
         case .text: "textformat"
+        case .channel: "megaphone"
         }
     }
 }

@@ -14,6 +14,11 @@ import Foundation
 /// It shares `InboxCatalog` with the conversation list, so the inbox is
 /// fetched once and a request accepted here appears in All immediately — the
 /// two tabs are two projections of one truth, never two copies of it.
+///
+/// With channels (#2230, `-channels`), the Requests list also leads with a
+/// **Join requests** section: the channels the viewer runs with requests
+/// waiting, one row each (`ChannelJoinRequestsDigest`), counted in the badge
+/// one per request, as a message request is (#2171).
 @MainActor
 public final class MessageRequestsViewModel {
     public nonisolated enum Phase: Equatable, Sendable {
@@ -33,8 +38,20 @@ public final class MessageRequestsViewModel {
     /// 2026-11-07, #2171; it counted their unread messages, #1210): the
     /// requests the row marks new with its bold preview, falling as one is
     /// opened. The Chats tab keeps counting messages. The watermark still
-    /// splits the list into New and Recent.
+    /// splits the list into New and Recent. Every join request waiting on
+    /// a channel the viewer runs adds one too (#2230), until it is answered.
     private(set) public var newCount = 0
+
+    /// The Join requests section's rows (#2230): the channels the viewer
+    /// runs with requests waiting. Empty without channels, and always on the
+    /// Hidden requests list.
+    private(set) var joinRequests: [ChannelJoinRequestsDigest.Entry] = []
+    /// The section's rows changed.
+    var onJoinRequestsChange: (([ChannelJoinRequestsDigest.Entry]) -> Void)?
+    /// Where they come from; nil without channels.
+    private let joinRequestsDigest: ChannelJoinRequestsDigest?
+    /// The catalog's last word, re-projected when the join requests change.
+    private var lastSnapshot: InboxCatalog.Snapshot?
 
     private let catalog: InboxCatalog
     private let router: (any Router)?
@@ -49,18 +66,26 @@ public final class MessageRequestsViewModel {
     private var observation: InboxCatalog.ObservationToken?
     private var watermark: InboxTabWatermark
 
+    /// `joinRequests`: the channels' join requests (#2230), for the
+    /// Requests list only — the hidden one never shows them.
     init(
         catalog: InboxCatalog,
         router: (any Router)? = nil,
         folder: InboxFolder = .requests,
+        joinRequests: ChannelJoinRequestsDigest? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.catalog = catalog
         self.router = router
         self.folder = folder
         self.now = now
+        joinRequestsDigest = folder == .requests ? joinRequests : nil
         watermark = InboxTabWatermark(openedAt: Self.openingBaseline(now()))
         observation = catalog.observe { [weak self] snapshot in self?.project(snapshot) }
+        joinRequestsDigest?.onChange = { [weak self] in
+            guard let self, let snapshot = self.lastSnapshot else { return }
+            self.project(snapshot)
+        }
     }
 
     /// Standalone construction — used by tests; the app injects the shared
@@ -107,6 +132,12 @@ public final class MessageRequestsViewModel {
 
     public func refresh() {
         catalog.refresh()
+        joinRequestsDigest?.refresh()
+    }
+
+    /// Counts the join requests again (#2230): the list answered some.
+    func refreshJoinRequests() {
+        joinRequestsDigest?.refresh()
     }
 
     /// Opening a request reads it — the thread is the same screen as any
@@ -154,12 +185,20 @@ public final class MessageRequestsViewModel {
     }
 
     private func project(_ snapshot: InboxCatalog.Snapshot) {
+        lastSnapshot = snapshot
         let isHiddenFolder = folder == .hiddenRequests
         let requests = isHiddenFolder ? snapshot.hiddenRequests : snapshot.requests
         hasMore = snapshot.hasMore.contains(folder)
+        let channelRequests = joinRequestsDigest?.entries ?? []
+        if channelRequests != joinRequests {
+            joinRequests = channelRequests
+            onJoinRequestsChange?(channelRequests)
+        }
         // A hidden request announces nothing: the server sends no push for it,
         // and the badge would point at a list it isn't on.
-        publishNewCount(isHiddenFolder ? 0 : requests.count { snapshot.unreadIDs.contains($0.id) })
+        let unreadRequests = isHiddenFolder ? 0 : requests.count { snapshot.unreadIDs.contains($0.id) }
+        let waitingToJoin: Int = joinRequestsDigest?.total ?? 0
+        publishNewCount(unreadRequests + waitingToJoin)
         showsHiddenRequestsRow = !isHiddenFolder
             && (!snapshot.hiddenRequests.isEmpty || snapshot.hasMore.contains(.hiddenRequests))
         switch snapshot.phase {
@@ -169,9 +208,10 @@ public final class MessageRequestsViewModel {
             phase = .failed(message: message)
         case .loaded:
             guard !requests.isEmpty else {
-                // No visible request, but hidden ones: the list still shows,
-                // empty, so its Hidden requests row stays reachable.
-                phase = showsHiddenRequestsRow ? .content(InboxListSections()) : .empty
+                // No visible request, but hidden ones, or join requests
+                // (#2230): the list still shows, so its Hidden requests row
+                // and its Join requests section stay reachable.
+                phase = showsHiddenRequestsRow || !channelRequests.isEmpty ? .content(InboxListSections()) : .empty
                 return
             }
             let now = now()

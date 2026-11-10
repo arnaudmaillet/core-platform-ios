@@ -6,14 +6,15 @@ import Foundation
 // MARK: - Groups and channels (#2213)
 
 extension ChatRepository {
-    /// The entries a folder shows (#2213): channels only in Channels, never
-    /// in All; groups only with `-group-chats`; channels only with
-    /// `-channels`. Without the flags the inbox is DMs only, as it was.
+    /// The entries a folder shows (#2213): groups only with `-group-chats`;
+    /// channels only with `-channels`, and only in the INBOX folder — with
+    /// the DMs and the groups since #2230, where they had a folder of their
+    /// own for the Channels tab (#2215). Without the flags the inbox is DMs
+    /// only, as it was.
     func shownEntries(_ entries: [Chat_V1_InboxEntryView], in folder: InboxFolder) -> [Chat_V1_InboxEntryView] {
         entries.filter { entry in
             switch (folder, Self.kind(of: entry.kind)) {
-            case (.channels, .channel): showsChannels
-            case (.channels, _): false
+            case (.inbox, .channel): showsChannels
             case (_, .channel): false
             case (_, .group): showsGroups
             case (_, .direct): true

@@ -190,7 +190,7 @@ extension MainTabCoordinator {
                 }
             }
         }
-        // `-open-create <camera|upload|text>` opens one of the "+" menu's
+        // `-open-create <camera|upload|text|channel>` opens one of the "+" menu's
         // destinations on launch through the menu's own code path, minus the
         // menu. Deferred ~0.6s rather than a tick: a PRESENTATION from a
         // controller that is not in a window yet is refused outright.

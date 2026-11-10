@@ -27,7 +27,9 @@ public final class ConversationListViewModel {
     /// unread rows' counts, falling as a conversation is read. It counted
     /// the conversations new since the visit (`InboxTabWatermark`) — 3 on a
     /// tab holding 4 unread messages, and never lowered by reading. The
-    /// watermark still splits the list into New and Recent.
+    /// watermark still splits the list into New and Recent. A muted
+    /// channel's posts are left out (#2230,
+    /// `ConversationDisplayModel.countsInBadge`).
     public private(set) var newCount = 0
 
     private let catalog: InboxCatalog
@@ -176,6 +178,22 @@ public final class ConversationListViewModel {
     }
     public func delete(_ ids: Set<ConversationID>) { catalog.delete(ids) }
 
+    // MARK: - Channels (#2230)
+
+    /// Leaves a channel from its row, once the viewer confirmed: its Delete
+    /// (#2230). The row goes at once; a refusal puts it back and is said
+    /// (`onLeaveRefused`). The owner never gets here — the row sends them to
+    /// the transfer (`ConversationDisplayModel.ownsChannel`).
+    public func leaveChannel(_ id: ConversationID) {
+        catalog.leaveChannel(id) { [weak self] written in
+            guard !written else { return }
+            self?.onLeaveRefused?("Couldn't leave the channel")
+        }
+    }
+
+    /// A channel's Leave the server refused: the words to show.
+    public var onLeaveRefused: ((String) -> Void)?
+
     // MARK: - Group invitations (#2214)
 
     /// Accepts or declines a group's invitation from its row. The row changes
@@ -202,7 +220,12 @@ public final class ConversationListViewModel {
         let rows = snapshot.active
         hasMore = snapshot.hasMore.contains(.inbox)
         publishNewCount(rows.reduce(0) { total, row in
-            total + (snapshot.unreadIDs.contains(row.id) ? row.unreadCount : 0)
+            // A muted channel's posts stay on its row and off the badge (#2230).
+            // The display model's rule (`countsInBadge`), so the headers
+            // add up to it.
+            let isChannel = row.kind == .channel && row.identity != nil
+            let counts = !(isChannel && snapshot.muted.contains(row.id))
+            return total + (counts && snapshot.unreadIDs.contains(row.id) ? row.unreadCount : 0)
         })
         switch snapshot.phase {
         case .loading:

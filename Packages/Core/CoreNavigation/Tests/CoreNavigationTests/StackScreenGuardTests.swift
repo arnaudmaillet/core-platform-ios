@@ -26,7 +26,6 @@ struct StackScreenGuardTests {
         "ForYouViewController": "a page of For You's sector",
         "ConversationListViewController": "a page of the inbox",
         "SuggestionsViewController": "a page of the inbox",
-        "ChannelsViewController": "a page of the inbox (#2215)",
         "InboxSearchResultsViewController": "the inbox search's results controller",
         "SearchPeoplePage": "a page of search results",
         "SearchPendingSurfaceViewController": "a page of search results",

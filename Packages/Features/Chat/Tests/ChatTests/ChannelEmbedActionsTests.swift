@@ -9,9 +9,9 @@ import Testing
 @testable import Chat
 
 /// A channel showcase's card actions (#2216), over Chat's repository on the
-/// mock's channels: Join subscribes and the channel lands in the Channels
-/// folder; Request to join asks, and the cancel takes it back; Open routes to
-/// the conversation.
+/// mock's channels: Join subscribes — muted (#2230) — and the channel lands
+/// in Chats; Request to join asks, and the cancel takes it back; Open routes
+/// to the conversation.
 @MainActor
 struct ChannelEmbedActionsTests {
     private struct Session: AuthSessionProviding {
@@ -31,6 +31,7 @@ struct ChannelEmbedActionsTests {
     @MainActor
     private final class Counter {
         var count = 0
+        var ids: [ConversationID] = []
     }
 
     private func repository() -> ChatRepository {
@@ -50,16 +51,22 @@ struct ChannelEmbedActionsTests {
         )
     }
 
-    @Test func joinSubscribesAndTheChannelsFolderFollows() async throws {
+    @Test func joinSubscribesMutedAndChatsFollows() async throws {
         let repository = repository()
         let reloads = Counter()
-        let actions = ChannelEmbedActions(service: repository, router: nil) { reloads.count += 1 }
+        let subscribed = Counter()
+        let actions = ChannelEmbedActions(
+            service: repository, router: nil, membershipDidChange: { reloads.count += 1 },
+            didSubscribe: { subscribed.ids.append($0) }
+        )
         let harbour = ConversationID("ch-harbour")
         let state = try await actions.join(harbour)
         #expect(state == .subscriber)
-        #expect(reloads.count == 1, "the Channels tab was not told")
-        let rows = try await repository.loadInbox(.channels, after: nil).conversations
-        #expect(rows.contains { $0.id == harbour }, "a joined channel missing from the Channels folder")
+        #expect(reloads.count == 1, "Chats was not told")
+        #expect(subscribed.ids == [harbour], "the join wasn't muted (#2230)")
+        let rows = try await repository.loadInbox(.inbox, after: nil).conversations
+        let row = try #require(rows.first { $0.id == harbour }, "a joined channel missing from Chats")
+        #expect(row.isMuted, "the mock didn't mute the join (#2230)")
     }
 
     @Test func requestThenCancel() async throws {
@@ -71,7 +78,7 @@ struct ChannelEmbedActionsTests {
         #expect(try await repository.details(of: printroom).viewerState == .requested)
         #expect(try await actions.cancelJoinRequest(printroom) == ChannelEmbed.ViewerState.none)
         #expect(try await repository.details(of: printroom).viewerState == .none)
-        #expect(reloads.count == 0, "a request reloaded the Channels tab")
+        #expect(reloads.count == 0, "a request reloaded Chats")
     }
 
     @Test func aRefusalThrows() async {

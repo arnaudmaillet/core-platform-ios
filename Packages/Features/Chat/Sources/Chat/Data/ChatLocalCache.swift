@@ -100,12 +100,19 @@ final class ChatLocalCache: Sendable {
         case .inbox: "chat.inbox"
         case .requests: "chat.requests"
         case .hiddenRequests: "chat.hiddenRequests"
-        case .channels: "chat.channels"
         }
     }
 
     private static func listPage(_ page: InboxPage, tier: CacheTier) -> LocalListPage {
-        let writes = page.conversations.compactMap { conversation -> LocalEntityWrite? in
+        // ⚠️ NO CHANNEL ROW ON THE DEVICE (#2230). Channels joined the INBOX
+        // folder (they had one of their own, never stored, #2215), but the
+        // record keeps none of what makes a row a channel — its kind, its
+        // identity — so one read back would be a DM with its owner: the
+        // owner's face, Delete for Leave, and `directConversationID(with:)`
+        // answering the channel for a message to them. They come from the
+        // network, as they did.
+        let stored = page.conversations.filter { $0.kind != .channel }
+        let writes = stored.compactMap { conversation -> LocalEntityWrite? in
             guard let payload = try? JSONEncoder().encode(ConversationRecord(conversation)) else { return nil }
             return LocalEntityWrite(
                 key: LocalEntityKey(type: conversationType, id: conversation.id.rawValue),

@@ -246,7 +246,9 @@ public protocol ViewerIdentityProviding: Sendable {
 
 /// A folder of the viewer's inbox (chat.v1 `InboxFolder`, #593).
 public enum InboxFolder: Sendable, Hashable {
-    /// Accepted conversations — the All tab.
+    /// Accepted conversations — the Chats tab: DMs, groups and, since #2230,
+    /// the channels the viewer runs or follows, sorted together by their
+    /// last activity as chat.v1 lists them.
     case inbox
     /// Unanswered message requests to the viewer — the Requests tab.
     case requests
@@ -254,10 +256,6 @@ public enum InboxFolder: Sendable, Hashable {
     /// sorted at read time with the CURRENT filter (#552) — the Hidden
     /// requests row at the bottom of Requests.
     case hiddenRequests
-    /// The channels the viewer runs or follows (#2213) — the Channels tab
-    /// (#2215). chat.v1 lists them in its INBOX folder with their kind; the
-    /// repository splits them out, so the All tab never shows one.
-    case channels
 }
 
 /// One page of a conversation's history, oldest first, and where the OLDER
@@ -497,7 +495,6 @@ public actor ChatRepository: ChatProviding {
         case .inbox: .inbox
         case .requests: .requests
         case .hiddenRequests: .hiddenRequests
-        case .channels: .inbox
         }
         request.limit = inboxPageSize
         request.pageToken = pageToken ?? ""
