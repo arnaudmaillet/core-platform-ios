@@ -46,13 +46,12 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     /// its info screen. Nil — the flag off, or a repository with no groups —
     /// and Messages is DMs only, as it was.
     private let groups: (any GroupChatServicing)?
-    /// Channels (#2215, `-channels`): the Channels tab, creating one, its
-    /// thread's reader bar, its info screen and join requests. Nil — the flag
-    /// off, or a repository with no channels — and Messages has no Channels
-    /// tab, as it was.
+    /// Channels (#2215, `-channels`): their rows in Chats (#2230), creating
+    /// one from the "+" menu and the inbox search, its thread's reader bar,
+    /// its info screen, and the join requests in Requests. Nil — the flag
+    /// off, or a repository with no channels — and Messages has none of it,
+    /// as it was.
     private let channels: (any GroupChatServicing)?
-    /// Where the Channels tab stands among the inbox's pages (#2215).
-    private let channelsPlacement: ChannelsPlacement
     /// What this session did to groups that the server doesn't say yet.
     private let groupNotes = GroupSessionNotes()
 
@@ -71,12 +70,10 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         relations: InboxRelations? = nil,
         showsGroups: Bool = DebugFlags.isOn("-group-chats"),
         showsChannels: Bool = DebugFlags.isOn("-channels"),
-        channelsPlacement: ChannelsPlacement = DebugFlags.isOn("-channels-after-requests") ? .afterRequests : .afterChats,
         threadScreens: @escaping () -> any ConversationThreadScreenBuilding
     ) {
         groups = showsGroups ? repository as? any GroupChatServicing : nil
         channels = showsChannels ? repository as? any GroupChatServicing : nil
-        self.channelsPlacement = channelsPlacement
         self.threadScreens = threadScreens
         self.relations = relations
         self.mediaPicker = mediaPicker
@@ -85,7 +82,6 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         let deviceCache = localStore.map(ChatLocalCache.init(store:))
         self.deviceCache = deviceCache
         catalog = InboxCatalog(repository: repository, directory: directory, deviceCache: deviceCache)
-        catalog.loadsChannels = channels != nil
         self.repository = repository
         self.connections = connections
         self.people = people
@@ -109,11 +105,15 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     }
 
     /// The showcase card's actions (#2216), with the channels on: over the
-    /// same repository the Channels tab reads, reloading its catalog when the
-    /// viewer's standing changes.
+    /// same repository Chats reads, reloading its catalog when the viewer's
+    /// standing changes. A channel joined from its card joins muted (#2230).
     public func makeChannelEmbedActions() -> (any ChannelEmbedActing)? {
         guard let channels else { return nil }
-        return ChannelEmbedActions(service: channels, router: router) { [catalog] in catalog.reload() }
+        return ChannelEmbedActions(
+            service: channels, router: router,
+            membershipDidChange: { [catalog] in catalog.reload() },
+            didSubscribe: { [catalog] id in catalog.setMute(id, muted: true, until: nil) }
+        )
     }
 
     public func makeInboxViewController(
@@ -148,14 +148,30 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         }
         conversations.threadPreviewProvider = makeThreadPreview
 
+        // The channels' join requests, Requests' first section (#2230).
+        let joinRequests = channels.map { ChannelJoinRequestsDigest(catalog: catalog, service: $0) }
+        let requestsModel = MessageRequestsViewModel(catalog: catalog, router: router, joinRequests: joinRequests)
         let requests = MessageRequestsViewController(
-            viewModel: MessageRequestsViewModel(catalog: catalog, router: router),
+            viewModel: requestsModel,
             imagePipeline: imagePipeline,
             avatars: connections as? any PeerAvatarProviding,
             // The faces wear the relation mark, as All's (#2088).
             relations: relations
         )
         requests.threadPreviewProvider = makeThreadPreview
+        // A channel's join requests, pushed: answered there, its row in
+        // Requests counts again (#2230).
+        requests.onOpenJoinRequests = { [self, weak requestsModel] presenter, channel in
+            let list = makeJoinRequests([channel]) { requestsModel?.refreshJoinRequests() }
+            presenter.navigationController?.pushViewController(list, animated: true)
+        }
+        // The owner who asked to leave a channel from its row: its info
+        // screen, where they hand it over (#2230).
+        if channels != nil {
+            conversations.onOpenChannelInfo = { [self] presenter, id in
+                presenter.navigationController?.pushViewController(makeChannelInfo(id, onChange: {}), animated: true)
+            }
+        }
         // The Hidden requests list (#552): the same screen over the hidden
         // folder of the same catalog, so accepting one there lands in All.
         requests.hiddenRequestsProvider = { [self] in
@@ -206,11 +222,9 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             }
         }
 
+        // Three pages (#2230): the channels are in Chats.
         let inbox = MessagesInboxViewController(
-            surfaces: Self.surfaces(
-                chats: conversations, channels: makeChannelsSurface(), requests: requests, suggestions: suggestions,
-                placement: channelsPlacement
-            ),
+            surfaces: [conversations, requests, suggestions],
             searchResults: searchResults,
             initialCategory: initialCategory
         )
@@ -223,71 +237,74 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
                 presentGroupCreation(from: inbox)
             }
         }
+        // "New channel" beside it (#2230): the creation sheet, over the
+        // inbox; Create pushes the channel's thread there.
+        if channels != nil {
+            searchViewModel.onNewChannel = { [weak inbox, self] in
+                guard let inbox, let sheet = makeChannelCreationSheet(landing: .onTheStack) else { return }
+                inbox.present(sheet, animated: true)
+            }
+        }
         return inbox
     }
 
-    // MARK: - Channels (#2215)
+    // MARK: - Channels (#2215, #2230)
 
-    /// Where the Channels tab stands (#2215). After Chats by default: a
-    /// channel is something the viewer READS, as a chat is, so it sits next
-    /// to the conversations — Requests and Suggestions, the triage pages,
-    /// stay together at the end. `-channels-after-requests` puts it after
-    /// Requests, for the side-by-side the issue asks for.
-    public enum ChannelsPlacement: Sendable {
-        case afterChats
-        case afterRequests
+    /// Where Create leaves the viewer (#2230).
+    nonisolated enum ChannelLanding: Equatable, Sendable {
+        /// From the "+" menu: Messages, on Chats, the thread pushed over it —
+        /// the app's cross-tab routes (`.messages(.all)`, then
+        /// `.conversation`). The back chevron returns to Chats: a native
+        /// push closes with a native pop.
+        case inMessages
+        /// From the inbox search: the thread pushed on the stack the inbox
+        /// is on, as a new group's is.
+        case onTheStack
     }
 
-    /// The inbox's pages, in order; no Channels page without channels.
-    static func surfaces(
-        chats: any InboxSurface, channels: (any InboxSurface)?, requests: any InboxSurface,
-        suggestions: any InboxSurface, placement: ChannelsPlacement
-    ) -> [any InboxSurface] {
-        guard let channels else { return [chats, requests, suggestions] }
-        return switch placement {
-        case .afterChats: [chats, channels, requests, suggestions]
-        case .afterRequests: [chats, requests, channels, suggestions]
-        }
+    /// The new channel's sheet, for the "+" menu (#2230); nil with the
+    /// channels off — the menu then has no entry for it. Presented over the
+    /// shell like the menu's other destinations.
+    public func makeChannelCreationViewController() -> UIViewController? {
+        makeChannelCreationSheet(landing: .inMessages)
     }
 
-    /// The Channels tab, or nil with `-channels` off.
-    private func makeChannelsSurface() -> ChannelsViewController? {
+    /// The new channel's sheet: what a channel is, its name, description and
+    /// who may join; Create closes it and lands in the channel's thread,
+    /// opened by "You created the channel". A channel the viewer creates is
+    /// not muted (#2230): they are the one posting.
+    func makeChannelCreationSheet(landing: ChannelLanding) -> UINavigationController? {
         guard let channels else { return nil }
-        let model = ChannelsViewModel(catalog: catalog, service: channels, router: router)
-        let surface = ChannelsViewController(viewModel: model, imagePipeline: imagePipeline)
-        surface.onCreate = { [self] presenter in presentChannelCreation(from: presenter) }
-        surface.onOpenRequests = { [self, weak model] presenter, runChannels in
-            let list = makeJoinRequests(runChannels) { model?.refreshRequests() }
-            presenter.navigationController?.pushViewController(list, animated: true)
-        }
-        return surface
-    }
-
-    /// The new channel's sheet: its name, description and who may join;
-    /// Create lands in its thread, opened by "You created the channel".
-    private func presentChannelCreation(from presenter: UIViewController) {
-        guard let channels else { return }
         let creation = ChannelCreationViewModel(service: channels)
         let screen = ChannelCreationViewController(viewModel: creation)
         let sheet = UINavigationController(rootViewController: screen)
         screen.onCancel = { [weak sheet] in _ = sheet?.closePresentation() }
         creation.onCreated = { [weak sheet, catalog, groupNotes, router] id in
             groupNotes.created[id] = Date()
-            // The tab behind the thread lists it.
+            // Chats, behind the thread, lists it.
             catalog.refresh()
+            let routes = Self.landingRoutes(for: id, landing: landing)
             if let sheet {
-                _ = sheet.closePresentation { router?.route(to: .conversation(id)) }
+                _ = sheet.closePresentation { for route in routes { router?.route(to: route) } }
             } else {
-                router?.route(to: .conversation(id))
+                for route in routes { router?.route(to: route) }
             }
         }
-        presenter.present(sheet, animated: true)
+        return sheet
+    }
+
+    /// The routes Create takes to the new channel (#2230). Pure, for tests.
+    nonisolated static func landingRoutes(for id: ConversationID, landing: ChannelLanding) -> [AppRoute] {
+        switch landing {
+        case .inMessages: [.messages(.all), .conversation(id)]
+        case .onTheStack: [.conversation(id)]
+        }
     }
 
     /// The join requests of `runChannels` (#2215); `onChange` when some were
     /// answered.
     private func makeJoinRequests(
-        _ runChannels: [ChannelsViewModel.RunChannel], onChange: @escaping @MainActor () -> Void
+        _ runChannels: [RunChannel], onChange: @escaping @MainActor () -> Void
     ) -> UIViewController {
         guard let channels else { return UIViewController() }
         let model = ChannelJoinRequestsViewModel(channels: runChannels, service: channels)
@@ -321,7 +338,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         }
         screen.onOpenRequests = { [self, weak model] presenter, changed in
             let name = model?.state.name ?? ""
-            let run = ChannelsViewModel.RunChannel(id: id, name: name, photoURL: model?.state.photoURL)
+            let run = RunChannel(id: id, name: name, photoURL: model?.state.photoURL)
             let list = makeJoinRequests([run], onChange: changed)
             presenter.navigationController?.pushViewController(list, animated: true)
         }

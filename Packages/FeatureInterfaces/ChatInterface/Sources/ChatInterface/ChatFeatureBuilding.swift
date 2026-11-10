@@ -6,7 +6,7 @@ import UIKit
 /// interface package — never on the Chat implementation.
 @MainActor
 public protocol ChatFeatureBuilding {
-    /// The Messages inbox: the paged All / Requests / Suggestions container,
+    /// The Messages inbox: the paged Chats / Requests / Suggestions container,
     /// opened on `initialCategory`. Selecting a conversation routes to it.
     /// `onUnreadCountChange` reports every tab's badge added together, for the
     /// shell's own bar item. It fires whenever any of them changes — including
@@ -54,11 +54,19 @@ public protocol ChatFeatureBuilding {
     /// PostGrid, which draw the card and can't depend on Chat. Nil with the
     /// channels off. The shell registers it once (`PostEmbedView`).
     func makeChannelEmbedActions() -> (any ChannelEmbedActing)?
+
+    /// The new channel's sheet, for the tab bar's "+" menu (#2230): Create
+    /// closes it and lands in Messages, on Chats, with the channel's thread
+    /// pushed. Nil with the channels off — the menu then offers no channel.
+    func makeChannelCreationViewController() -> UIViewController?
 }
 
 extension ChatFeatureBuilding {
     /// No channels: a builder that has none draws no actions.
     public func makeChannelEmbedActions() -> (any ChannelEmbedActing)? { nil }
+
+    /// No channels: nothing to create.
+    public func makeChannelCreationViewController() -> UIViewController? { nil }
 
     /// The ordinary case: a thread with an empty composer.
     public func makeDraftConversationViewController(

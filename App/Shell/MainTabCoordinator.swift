@@ -175,7 +175,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// anyone stands on. See `CreateTabItem`.
     ///
     /// Internal (not private) only for the +QA hooks.
-    private(set) lazy var createItem = CreateTabItem { [weak self] destination in
+    private(set) lazy var createItem = CreateTabItem(
+        // "New Channel" with the channels on (#2230).
+        destinations: CreateTabItem.destinations(offersChannel: DebugFlags.isOn("-channels"))
+    ) { [weak self] destination in
         self?.openCreate(destination)
     }
 
@@ -828,11 +831,16 @@ extension MainTabCoordinator {
         // A second presentation would be refused. The bar cannot be tapped
         // under one, so this only ever turns away the debug hook.
         guard tabBarController.presentedViewController == nil else { return }
-        let screen: UIViewController = switch destination {
+        let screen: UIViewController? = switch destination {
         case .camera: container.uploadFeature.makeCameraViewController()
         case .upload: container.uploadFeature.makeMediaUploadViewController()
         case .text: container.uploadFeature.makeTextPostViewController()
+        // The channel's creation sheet (#2230): Create lands in Messages,
+        // on Chats, with the thread pushed (Chat routes it). Nil with the
+        // channels off, where the menu never offers it.
+        case .channel: container.chatFeature.makeChannelCreationViewController()
         }
+        guard let screen else { return }
         tabBarController.present(screen, animated: true)
     }
 }

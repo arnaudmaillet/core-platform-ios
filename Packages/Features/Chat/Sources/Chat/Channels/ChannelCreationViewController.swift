@@ -2,10 +2,14 @@ import CoreModels
 import DesignSystem
 import UIKit
 
-/// The new channel's sheet (#2215): where its photo will go (its initials,
-/// no picker yet — `ChannelCreationViewModel`), its name, its description,
-/// who may join — Public or On request, each said in a line — and
-/// "Create".
+/// The new channel's sheet (#2215): what a channel is, in two lines
+/// (#2230), where its photo will go (its initials, no picker yet —
+/// `ChannelCreationViewModel`), its name, its description, who may join —
+/// Public or On request, each said in a line — and "Create".
+///
+/// Opened from the "+" menu and the inbox search (#2230): with the
+/// Channels tab gone, nothing around it says what a channel is any more,
+/// so its header does — the words the empty tab said.
 final class ChannelCreationViewController: UIViewController {
     private let viewModel: ChannelCreationViewModel
 
@@ -13,6 +17,8 @@ final class ChannelCreationViewController: UIViewController {
     var onCancel: (() -> Void)?
 
     private let scrollView = UIScrollView()
+    /// What a channel is (#2230), over everything else.
+    private let introLabel = UILabel()
     private let disc = MonogramAvatarView(diameter: GroupNameViewController.discDiameter)
     private let nameField = UITextField()
     private let descriptionField = UITextField()
@@ -36,6 +42,12 @@ final class ChannelCreationViewController: UIViewController {
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             systemItem: .cancel, primaryAction: UIAction { [weak self] _ in self?.onCancel?() }
         )
+        introLabel.text = ChannelCopy.whatItIs
+        introLabel.font = .appFont(forTextStyle: .subheadline)
+        introLabel.textColor = .secondaryLabel
+        introLabel.numberOfLines = 0
+        introLabel.textAlignment = .center
+        introLabel.adjustsFontForContentSizeCategory = true
         disc.setMonogram(MonogramAvatarView.monogram(name: "Channel", handle: ""))
         disc.accessibilityLabel = "Channel photo"
 
@@ -74,7 +86,7 @@ final class ChannelCreationViewController: UIViewController {
         createButton.addAction(UIAction { [weak self] _ in self?.create() }, for: .primaryActionTriggered)
 
         let stack = UIStackView(arrangedSubviews: [
-            disc, nameField, descriptionField, visibilityControl, visibilityNote, errorLabel, createButton,
+            introLabel, disc, nameField, descriptionField, visibilityControl, visibilityNote, errorLabel, createButton,
         ])
         stack.axis = .vertical
         stack.alignment = .center
@@ -90,6 +102,7 @@ final class ChannelCreationViewController: UIViewController {
             stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -Spacing.xl)
             stack.leadingAnchor.constraint(equalTo: scroll.frameLayoutGuide.leadingAnchor, constant: Spacing.lg)
             stack.trailingAnchor.constraint(equalTo: scroll.frameLayoutGuide.trailingAnchor, constant: -Spacing.lg)
+            introLabel.widthAnchor.constraint(equalTo: stack.widthAnchor)
             nameField.widthAnchor.constraint(equalTo: stack.widthAnchor)
             descriptionField.widthAnchor.constraint(equalTo: stack.widthAnchor)
             visibilityControl.widthAnchor.constraint(equalTo: stack.widthAnchor)
