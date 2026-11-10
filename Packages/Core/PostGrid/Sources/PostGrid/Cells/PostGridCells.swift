@@ -1703,7 +1703,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     public func updateCounts(from post: GalleryPost) {
         baseReactionCount = post.reactionCount
         applyReactionCount(animated: true)
-        applyCommentCount(post.commentCount, animated: true)
+        applyCommentCount(showsShowcase ? nil : post.commentCount, animated: true)
     }
 
     /// The likes: the post's count, and the heart turned to the points' red
@@ -1845,6 +1845,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// on a shelf's fixed card. Its action button takes its own tap; the rest
     /// of it is the card's, which opens the post.
     private let embedCard = PostEmbedView()
+    /// Whether the card shows a showcase's embed: it then draws no comment
+    /// count (#2216).
+    private var showsShowcase = false
     /// The card hangs off the caption; while it shows, the closing line (or
     /// the card's foot) hangs off the card instead of the caption.
     private var embedFollowsCaption: NSLayoutConstraint!
@@ -2464,6 +2467,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     #if DEBUG
     /// The showcase's card under the card's words, nil for none (#2216).
     public var debugEmbedCard: PostEmbedView? { embedCard.isHidden ? nil : embedCard }
+    /// Whether the comment count shows (#2216: a showcase draws none).
+    public var debugShowsCommentCount: Bool { !commentsAction.isHidden }
     #endif
 
     #if DEBUG
@@ -2725,8 +2730,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         baseReactionCount = post.reactionCount
         configuredReactionCount = post.reactionCount
         applyReactionCount(animated: false)
-        // A number the post does not have draws no action at all.
-        applyCommentCount(post.commentCount, animated: false)
+        // A number the post does not have draws no action at all — nor does
+        // a showcase, which takes no comments (#2216: the conversation is
+        // the channel), whatever count the post carries.
+        showsShowcase = embedSize != nil
+        applyCommentCount(showsShowcase ? nil : post.commentCount, animated: false)
         // ⚠️ THE COUNT IS A CONTROL ON EVERY CARD, TEXT POSTS INCLUDED.
         //
         // It used to be switched off on a text post, on the argument that its

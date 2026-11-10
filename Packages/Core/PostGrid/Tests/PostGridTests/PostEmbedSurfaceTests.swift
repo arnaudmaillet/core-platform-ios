@@ -91,6 +91,22 @@ struct PostEmbedSurfaceTests {
         #expect(cell.debugCaptionText?.isEmpty ?? true, "a compact card keeps no words")
     }
 
+    /// A showcase takes no comments (#2216), so its card draws no comment
+    /// count, whatever the post carries — seen on a profile's list card
+    /// ("130") on the simulator.
+    @Test func aShowcasesCardDrawsNoCommentCount() {
+        var showcase = post()
+        showcase.commentCount = 130
+        #expect(!listCard(showcase).debugShowsCommentCount)
+        var plain = post(embed: nil)
+        plain.commentCount = 130
+        #expect(listCard(plain).debugShowsCommentCount)
+        // A count refresh keeps it away.
+        let cell = listCard(showcase)
+        cell.updateCounts(from: showcase)
+        #expect(!cell.debugShowsCommentCount)
+    }
+
     @Test func theSwitchOffShowsTodaysCard() {
         let cell = listCard(post(), showsEmbed: false)
         #expect(cell.debugEmbedCard == nil)
