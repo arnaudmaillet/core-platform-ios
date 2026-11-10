@@ -72,7 +72,6 @@ extension MessagesCategory {
     var title: String {
         switch self {
         case .all: "Chats"
-        case .channels: "Channels"
         case .requests: "Requests"
         case .suggestions: "Suggestions"
         }

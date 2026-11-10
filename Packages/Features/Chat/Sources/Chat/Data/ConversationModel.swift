@@ -47,8 +47,8 @@ public enum ConversationViewerState: Sendable, Hashable {
     /// decided, from `ConversationRole.publishesInChannel`.
     public var publishesInChannel: Bool { role?.publishesInChannel == true }
 
-    /// Whether this standing runs a channel (#2215): owner or admin — the
-    /// Channels tab's badge, the join requests it answers.
+    /// Whether this standing runs a channel (#2215): owner or admin — who
+    /// answers its join requests, in Requests (#2230).
     public var runsChannel: Bool { role?.manages == true }
 
     /// The role this standing gives, if the viewer is in.

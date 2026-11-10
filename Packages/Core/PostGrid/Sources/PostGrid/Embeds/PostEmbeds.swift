@@ -107,7 +107,7 @@ public enum ChannelEmbedCopy {
         }
     }
 
-    /// A channel's glyph: the megaphone the Channels tab and its badge wear.
+    /// A channel's glyph: the megaphone every channel row in Chats wears (#2230).
     public static let channelSymbol = "megaphone.fill"
 
     /// What VoiceOver reads for the card: "Channel Harbour notes, 10
