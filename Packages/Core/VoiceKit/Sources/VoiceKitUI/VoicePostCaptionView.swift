@@ -11,13 +11,15 @@ public enum VoicePostDisplay {
 
     /// How much room a surface gives the caption's voice (#2208) — the
     /// owner's rule: the TEXT post's design everywhere, only the caption
-    /// becomes the voice, sized to the room.
+    /// becomes the voice, sized to the room. Both players are the same
+    /// neutral panel, filling the width their host gives (#2241).
     public enum Size: Sendable, Equatable {
-        /// Play / pause, the waveform (tap and drag to seek), the timer: the
-        /// map's text bubble, For You's card preview, list cards, history rows.
+        /// Play / pause, the waveform (tap and drag to seek), the timer: a
+        /// post's page, For You's card preview, list cards.
         case full
-        /// The same, but no drag on the waveform — it would fight the
-        /// shelf's scroll: cards in horizontal shelves.
+        /// The same panel a little shorter, and no drag on the waveform — it
+        /// would fight what scrolls or pans under it: cards in horizontal
+        /// shelves, history rows, the map's text bubble (#2241's table).
         case compact
         /// A mic, a still waveform, the length; not interactive — a tap is
         /// the tile's: grid tiles, map pins.
@@ -32,7 +34,8 @@ public enum VoicePostDisplay {
 ///
 /// - **`.full` / `.compact`:** a `VoiceView`, bound to the hub — its play
 ///   button and waveform take their own taps; the rest of the card keeps its
-///   action (a host's tap recognizer asks `keepsTouch(_:)`).
+///   action (a host's tap recognizer asks `keepsTouch(_:)`). Its panel takes
+///   this view's whole width (#2241): a host sizes the view, not the voice.
 /// - **`.mark`:** a `VoiceMarkView`; no binding, no taps.
 /// - **It stops when its card leaves the screen** — out of the window,
 ///   reused (`clear()`), or a list's `didEndDisplaying` (`leftScreen()`) —
