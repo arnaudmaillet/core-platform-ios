@@ -307,7 +307,8 @@ final class TextCardPreview {
     /// A voice post's caption (#2208, behind `-voice-posts`): the shared
     /// voice component, full size, under the band — the caption's words under
     /// it. Bound to the post's voice, so a voice playing on the card shows
-    /// here where it is.
+    /// here where it is. Framed at the lift's inner width, the neutral panel
+    /// spans it (#2241).
     let voice = VoicePostCaptionView()
     /// A showcase's card (#2216, behind `-channels`): the shared embed card,
     /// full size, under the author's words. Display only — UIKit's preview

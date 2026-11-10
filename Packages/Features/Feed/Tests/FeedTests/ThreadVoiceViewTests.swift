@@ -6,16 +6,27 @@ import UIKit
 import VoiceKitUI
 @testable import Feed
 
-/// The voice message's bubble (#2104).
+/// The voice message's bubble (#2104) — the neutral panel since #2241.
 @MainActor
 struct ThreadVoiceViewTests {
-    @Test func theWidthSaysTheLength() {
-        #expect(ThreadVoiceView.width(forDuration: 1) == 140)
-        #expect(ThreadVoiceView.width(forDuration: 0.4) == 140)
-        #expect(ThreadVoiceView.width(forDuration: 30) == 240)
-        #expect(ThreadVoiceView.width(forDuration: 900) == 240)
-        let middle = ThreadVoiceView.width(forDuration: 15.5)
-        #expect(middle > 140 && middle < 240)
+    /// The thread's panel starts at the text column and takes the row's
+    /// width, capped at `conversationMaxWidth` (#2241) — whatever the
+    /// message's length.
+    @Test func aMessagesPanelTakesTheTextColumnCapped() {
+        let leading = CommentRowView.avatarSize + CommentRowView.avatarGap
+        func panel(width: CGFloat, duration: TimeInterval) -> CGRect {
+            let view = ThreadVoiceView.thread()
+            view.configure(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: duration), senderName: nil)
+            view.frame = CGRect(x: 0, y: 0, width: width, height: ThreadVoiceView.panelHeight(for: .full))
+            view.layoutIfNeeded()
+            return view.debugPanelFrame
+        }
+        let phone = panel(width: 300, duration: 2)
+        #expect(phone.minX == leading)
+        #expect(abs(phone.width - (300 - leading)) < 0.5, "\(phone)")
+        let wide = panel(width: 900, duration: 2)
+        #expect(abs(wide.width - ThreadVoiceView.conversationMaxWidth) < 0.5, "\(wide)")
+        #expect(panel(width: 900, duration: 50) == wide, "the length changed the width")
     }
 
     /// 2 pt bars 2 pt apart: about 45 at 180 pt, re-binned from 100 levels
@@ -40,7 +51,7 @@ struct ThreadVoiceViewTests {
 
     private func view(_ state: ThreadVoiceView.State) -> ThreadVoiceView {
         let view = ThreadVoiceView.thread()
-        view.frame = CGRect(x: 0, y: 0, width: 360, height: 40)
+        view.frame = CGRect(x: 0, y: 0, width: 360, height: ThreadVoiceView.panelHeight(for: .full))
         view.configure(state, senderName: "Ava")
         view.layoutIfNeeded()
         return view
@@ -83,12 +94,14 @@ struct ThreadVoiceViewTests {
         #expect(view.debugGlyph == "arrow.clockwise")
     }
 
-    /// The sent copy keeps the pending one's width (the owner, 2026-11-07):
-    /// its length comes back to a tenth of a second, and at full precision
-    /// the bubble changed by a point and its bars by one.
-    @Test func theWidthReadsTheLengthToATenth() {
-        #expect(ThreadVoiceView.width(forDuration: 4.37) == ThreadVoiceView.width(forDuration: 4.4))
-        #expect(ThreadVoiceView.width(forDuration: 12.04) == ThreadVoiceView.width(forDuration: 12.0))
+    /// The sent copy keeps the pending one's bars (the owner, 2026-11-07):
+    /// its length comes back to a tenth of a second, and the panel no longer
+    /// reads its width from the length (#2241), so nothing moves.
+    @Test func theSentCopyKeepsThePendingOnesBars() {
+        let pending = view(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 4.37))
+        let sent = view(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 4.4))
+        #expect(pending.debugPanelFrame == sent.debugPanelFrame)
+        #expect(pending.waveform.bars.count == sent.waveform.bars.count)
     }
 
     /// A row filled afresh — the sent copy in the pending one's place —
@@ -99,7 +112,7 @@ struct ThreadVoiceViewTests {
         window.isHidden = false
         defer { window.isHidden = true }
         let view = ThreadVoiceView.thread()
-        view.frame = CGRect(x: 0, y: 0, width: 360, height: 40)
+        view.frame = CGRect(x: 0, y: 0, width: 360, height: ThreadVoiceView.panelHeight(for: .full))
         window.addSubview(view)
         view.configure(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 4), senderName: nil)
         #expect(!view.debugWaveformRising, "a fresh row's waveform rose")
@@ -121,15 +134,14 @@ struct ThreadVoiceViewTests {
         #expect(!view.debugPlayEnabled)
     }
 
-    /// The glyph alone — the app's glyph button, no glass bubble — on a
-    /// 32 pt square (the owner's device check,
-    /// 2026-11-06).
-    @Test func theGlyphStandsAloneWithNoBubble() {
+    /// A filled disc (#2241): the app's icon button as the monochrome
+    /// bubble, 40 pt in full, the glyph knocked out of it.
+    @Test func thePlayButtonIsAFilledDisc() {
         let view = view(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 3))
         view.layoutIfNeeded()
         #expect(view.debugButtonImage != nil)
-        #expect(view.debugPlayButtonIsTheAppsGlyph)
-        #expect(view.debugButtonSize == CGSize(width: 32, height: 32))
+        #expect(view.debugPlayButtonIsAFilledDisc)
+        #expect(view.debugButtonSize == CGSize(width: 40, height: 40))
     }
 
     /// A voice message owns horizontal drags: the conversation's leftward
@@ -146,7 +158,7 @@ struct ThreadVoiceViewTests {
         #expect(ConversationThreadViewController.ownsHorizontalDrag(at: CGPoint(x: 100, y: 116), in: screen, composer: composer))
         #expect(!ConversationThreadViewController.ownsHorizontalDrag(at: CGPoint(x: 200, y: 20), in: screen, composer: composer))
         #expect(!ConversationThreadViewController.ownsHorizontalDrag(at: CGPoint(x: 398, y: 120), in: screen, composer: composer),
-                "the row's room beside a short bubble is the screen's")
+                "the row's room beside a capped panel is the screen's")
     }
 
     /// Playing, the chip stands right of the timer, level with it, and the
@@ -159,7 +171,7 @@ struct ThreadVoiceViewTests {
         view.update(state)
         view.layoutIfNeeded()
         #expect(view.systemLayoutSizeFitting(CGSize(width: 360, height: 0)).height == rest)
-        #expect(rest == ThreadVoiceView.buttonSide)
+        #expect(rest == ThreadVoiceView.panelHeight(for: .full))
         #expect(view.debugChipIsTheAppsPill, "the app's pill, not a system button")
         let chip = view.debugChipFrame, timer = view.debugTimerFrame, bars = view.debugWaveformFrame
         #expect(chip.minX >= timer.maxX, "\(chip) right of \(timer)")
@@ -259,10 +271,12 @@ struct ThreadVoiceViewTests {
     @Test func itsControlsKeepThePressFromTheRow() {
         let view = view(ThreadVoiceView.State(levels: Array(repeating: 9, count: 100), duration: 12))
         let leading = CommentRowView.avatarSize + CommentRowView.avatarGap
-        let mid = ThreadVoiceView.buttonSide / 2
+        let side = ThreadVoiceView.buttonSide(for: .full)
+        let pad = ThreadVoiceView.panelPadding(for: .full)
+        let mid = pad + side / 2
         #expect(view.keepsPress(at: CGPoint(x: leading + mid, y: mid)), "the play button")
-        #expect(view.keepsPress(at: CGPoint(x: leading + ThreadVoiceView.buttonSide + Spacing.sm + 20, y: mid)), "the waveform")
-        #expect(!view.keepsPress(at: CGPoint(x: 2, y: mid)), "beside the bubble")
+        #expect(view.keepsPress(at: CGPoint(x: leading + pad + side + Spacing.sm + 20, y: mid)), "the waveform")
+        #expect(!view.keepsPress(at: CGPoint(x: 2, y: mid)), "beside the panel")
         view.configure(nil)
         #expect(!view.keepsPress(at: CGPoint(x: leading + mid, y: mid)), "a row with no voice")
     }
