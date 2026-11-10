@@ -366,10 +366,13 @@ struct ProfileChannelsTests {
     @Test func aRefusedWriteLeavesTheRow() async {
         let actions = Actions()
         actions.refuses = true
-        let model = await loaded(model(Provider([owner: [channel("harbour")]]), actions: actions), owner: owner)
+        // A channel of its own: standings are announced app-wide, and a join
+        // of "harbour" in a test running beside this one turned this row to
+        // Open (seen running the suite).
+        let model = await loaded(model(Provider([owner: [channel("harbour-refused")]]), actions: actions), owner: owner)
         var failed: [ConversationID] = []
         model.onActionFailed = { failed.append($0) }
-        let id = ConversationID("harbour")
+        let id = ConversationID("harbour-refused")
         model.performAction(on: id)
         await settle { !failed.isEmpty }
         #expect(failed == [id])
