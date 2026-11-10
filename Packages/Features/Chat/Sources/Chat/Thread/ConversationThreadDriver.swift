@@ -401,9 +401,9 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     }
 
     /// Who gets the composer, and what the others are offered (#2215):
-    /// owner and admins post (nil); a subscriber reads, with Mute and
-    /// Leave; an outsider joins a public channel or asks to join one on
-    /// request; a pending request waits; a banned viewer is told.
+    /// owner and admins post (nil); a subscriber reads, leaving from the ⋯
+    /// menu (#2236); an outsider joins a public channel or asks to join one
+    /// on request; a pending request waits; a banned viewer is told.
     static func readerStanding(for identity: ConversationIdentity) -> ConversationThreadReaderStanding? {
         if identity.viewerState.publishesInChannel { return nil }
         switch identity.viewerState {
@@ -468,7 +468,13 @@ final class ConversationThreadDriver: ConversationThreadDriving {
 
     /// Leaves the channel (#2215): a subscriber unsubscribes, an admin
     /// leaves; the owner hands it over first (chat.v1 refuses their Leave).
-    /// Left, the thread goes and the inbox drops its row.
+    /// Left, the inbox drops its row.
+    ///
+    /// ⚠️ THE THREAD STAYS WHILE THE CHANNEL IS STILL READABLE (#2236): Leave
+    /// is the ⋯ menu's now, and the reader bar comes back with the way in
+    /// (Join, Request to Join), as Unfollow leaves a public group on screen
+    /// (#2217). A private channel can't be read from outside: its thread
+    /// closes, as every Leave did before.
     func leave(from presenter: UIViewController) {
         guard let context = groupContext, let id = viewModel.currentConversationID else { return }
         if let reason = ChannelCopy.leaveBlockedReason(for: channelIdentity?.viewerState.role) {
@@ -481,8 +487,13 @@ final class ConversationThreadDriver: ConversationThreadDriving {
             do {
                 if unsubscribes { try await service.unsubscribe(from: id) } else { try await service.leave(id) }
                 context.onMembershipChange(id, true)
-                // The channel left, its thread closes — through the stack's
-                // arbiter, as every close does.
+                let after: ConversationIdentity? = try? await service.details(of: id)
+                if let after, after.visibility != .private {
+                    self?.adoptChannel(after)
+                    return
+                }
+                // Nothing left to read: the thread closes — through the
+                // stack's arbiter, as every close does.
                 guard let presenter, presenter.navigationController?.topViewController === presenter else { return }
                 _ = presenter.closeScreen()
             } catch {
