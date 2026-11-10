@@ -164,6 +164,24 @@ struct DismissalDriverArbitrationTests {
         #expect(animator !== rig.saved.animator)
     }
 
+    /// ⚠️ A NATIVE PUSH KEEPS ITS CLOSE AFTER PAGING ONTO THE OTHER KIND
+    /// (#2243, #2015): a flat text row opened the feed with the stack's own
+    /// push, and the viewer paged onto a photograph. The page now reports
+    /// `.hero`, and the landing's refusal is what keeps the pop native — never
+    /// handed to a flight, never a window.
+    @Test func aNativePushPagedOntoAPhotographStillPopsNatively() {
+        let rig = rig(kind: .card)
+        rig.driver.heroLandingAcceptsHero = { false }
+        rig.feed.kind = .hero
+
+        let animator = popAnimator(rig)
+
+        #expect(rig.saved.animatorAsks == 0, "a native push's pop was offered to a flight")
+        #expect(animator != nil)
+        #expect(animator is RevealPopAnimator == false, "a native push closed as a window")
+        #expect(animator !== rig.saved.animator)
+    }
+
     // MARK: - Preparation
 
     /// ⚠️ THE PREPARATION RUNS BEFORE THE GEOMETRY IS READ.
