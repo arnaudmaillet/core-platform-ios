@@ -1531,6 +1531,128 @@ struct SnapMediaPageBarTests {
             }
         }
     }
+
+    // MARK: - The caption drives the strip (#2269)
+
+    /// A slide on the caption scrubs a clip RELATIVELY: from the playhead,
+    /// one bar's width of travel for the whole clip, the release landing on
+    /// it — the strip's own scrub, not a copy of it.
+    @Test func aCaptionSlideScrubsAClipFromThePlayhead() throws {
+        let view = clipBar(pages: 1, current: 0, clips: [0], playhead: 0.5)
+        let bar = try #require(view.debugSegmentFrame(0))
+        var began = 0, ended: [Double?] = [], previews: [CGFloat] = []
+        view.onScrubBegan = { began += 1 }
+        view.onScrubEnded = { ended.append($0) }
+        view.onScrubPreview = { if let preview = $0 { previews.append(preview.x) } }
+
+        view.relativeDrag(.began, travel: 12)
+        view.relativeDrag(.changed, travel: bar.width * 0.25)
+        #expect(began == 1, "the slide did not take the playhead")
+        #expect(abs((view.debugHeldPlayhead ?? 0) - 0.75) < 0.02, "the slide is not relative to the playhead")
+        // The preview stands over the playhead on the strip, not under a
+        // finger that is on the caption.
+        let playheadX = bar.minX + bar.width * 0.75
+        #expect(abs((previews.last ?? 0) - playheadX) < 1, "the preview is not at the playhead")
+        view.relativeDrag(.ended, travel: bar.width * 0.25)
+        #expect(ended.count == 1)
+        #expect(abs(((ended.first ?? nil) ?? 0) - 0.75) < 0.02)
+    }
+
+    /// On a carousel's photograph it browses the pages from the one you are
+    /// on — a slot's width per page — with a step per page, never a tap.
+    @Test func aCaptionSlideBrowsesACarousel() {
+        let view = bar(pages: 12, current: 3)
+        var asked: [Int] = [], browsed: [Int] = [], began: [Int] = [], ended: [Int] = []
+        view.onPageRequested = { asked.append($0) }
+        view.onBrowseBegan = { began.append($0) }
+        view.onBrowse = { browsed.append($0) }
+        view.onBrowseEnded = { ended.append($0) }
+        let slot = view.browseSlotWidth
+
+        view.relativeDrag(.began, travel: 8)
+        view.relativeDrag(.changed, travel: slot)
+        view.relativeDrag(.changed, travel: slot * 2)
+        view.relativeDrag(.ended, travel: slot * 2)
+
+        #expect(began == [3], "the browse did not start on the page you were on")
+        #expect(browsed == [4, 5])
+        #expect(ended == [5])
+        #expect(view.browseTicks == 2, "one step per page crossed")
+        #expect(asked.isEmpty, "the slide asked for a page as a tap would")
+    }
+
+    /// ⚠️ A SLIDE NEVER SEEKS OR SELECTS ON ITS OWN RELEASE: it began past
+    /// its slop, so even one that came back to where it started is not a tap.
+    @Test func aCaptionSlideIsNeverATap() {
+        let clip = clipBar(pages: 1, current: 0, clips: [0], playhead: 0.4)
+        var seeks: [Double] = []
+        clip.onSeekRequested = { seeks.append($0) }
+        clip.relativeDrag(.began, travel: 2)
+        clip.relativeDrag(.ended, travel: 0)
+        #expect(seeks.isEmpty, "a slide's release sought like a tap")
+
+        let photos = bar(pages: 4, current: 1)
+        var asked: [Int] = []
+        photos.onPageRequested = { asked.append($0) }
+        photos.relativeDrag(.began, travel: 2)
+        photos.relativeDrag(.ended, travel: 0)
+        #expect(asked.isEmpty, "a slide's release selected like a tap")
+    }
+
+    /// No strip, no slide: a single photograph keeps the caption's own
+    /// behaviour, and the strip ignores a drag fed to it.
+    @Test func withoutAStripTheCaptionDoesNotSlide() {
+        let lone = bar(pages: 1)
+        #expect(!lone.acceptsRelativeDrag)
+        var began: [Int] = []
+        lone.onBrowseBegan = { began.append($0) }
+        lone.relativeDrag(.began, travel: 40)
+        lone.relativeDrag(.ended, travel: 40)
+        #expect(began.isEmpty)
+
+        let single = chrome(pages: 1)
+        #expect(!single.captionSlideMayBegin(velocity: CGPoint(x: 300, y: 0)), "a slide began without a strip")
+        let carousel = chrome(pages: 3)
+        #expect(carousel.captionSlideMayBegin(velocity: CGPoint(x: 300, y: 0)))
+        let clip = chrome(pages: 1, clipPages: [0])
+        clip.setMediaPlayhead(0.3, seconds: 20)
+        #expect(clip.captionSlideMayBegin(velocity: CGPoint(x: -300, y: 20)))
+    }
+
+    /// ⚠️ ONLY A CLEARLY HORIZONTAL TRAVEL: a vertical swipe that starts on
+    /// the caption pages the feed, with no added delay.
+    @Test func aVerticalSwipeOnTheCaptionIsNotTheSlides() {
+        let carousel = chrome(pages: 3)
+        #expect(!carousel.captionSlideMayBegin(velocity: CGPoint(x: 0, y: -400)))
+        #expect(!carousel.captionSlideMayBegin(velocity: CGPoint(x: 100, y: -120)), "a diagonal took the slide")
+        #expect(carousel.captionSlideMayBegin(velocity: CGPoint(x: 160, y: -60)))
+    }
+
+    /// Shots' sector pager asks the views under a drag whether it is theirs
+    /// (`HorizontalDragClaiming`): the caption claims it on a post with a
+    /// strip, and not without one.
+    @Test func theCaptionClaimsTheDragFromAPagerOnlyWithAStrip() throws {
+        let carousel = chrome(pages: 3)
+        let claiming = try #require(carousel.debugCaptionLabel as? HorizontalDragClaiming)
+        #expect(claiming.claimsHorizontalDrag(velocity: CGPoint(x: -300, y: 0)))
+        #expect(!claiming.claimsHorizontalDrag(velocity: CGPoint(x: 0, y: 300)))
+        let single = chrome(pages: 1)
+        let lone = try #require(single.debugCaptionLabel as? HorizontalDragClaiming)
+        #expect(!lone.claimsHorizontalDrag(velocity: CGPoint(x: -300, y: 0)))
+    }
+
+    /// The page's talk fades for a slide from the caption as for a drag on
+    /// the strip, and comes back (#2252 §3: the scrub's own fade).
+    @Test func aCaptionSlideTakesThePagesTalkDownAndGivesItBack() {
+        let view = chrome(pages: 1, clipPages: [0])
+        view.setMediaPlayhead(0.2, seconds: 120)
+        let resting = view.debugScrubFadedAlphas
+        view.debugPageBar.relativeDrag(.began, travel: 10)
+        view.debugPageBar.relativeDrag(.changed, travel: 40)
+        #expect(view.debugScrubFadedAlphas.allSatisfy { $0 == 0 }, "the caption and the stack stayed")
+        view.debugPageBar.relativeDrag(.cancelled, travel: 40)
+        #expect(view.debugScrubFadedAlphas == resting, "a cancel left the page faded")
+    }
 }
 
 private extension CALayer {
