@@ -205,6 +205,37 @@ public enum PostGridListLayout {
     public static let rowSpacing: CGFloat = 10
     public static let sideMargin: CGFloat = 16
 
+    /// A FLAT row's inset from the screen's edge (#2243): the page's side
+    /// margin less the row's own content inset (`PostGridListRowCell
+    /// .contentInset`, 12), so the row's words, its author and a media row's
+    /// preview stand on the page's margin — 16pt, the tiles' edge — while
+    /// the row itself (its press wash) runs nearly edge to edge. Written as a
+    /// number because the cell's static is the main actor's;
+    /// `FlatListLayoutTests` holds the two together.
+    ///
+    /// ⚠️ THE ROW'S OWN INSETS DO NOT MOVE, and that is why the section's do.
+    /// The cell's 12pt is shared with the post's page and with every reveal's
+    /// geometry; narrowing the section instead leaves all of that untouched.
+    public static let flatRowInset: CGFloat = 4
+
+    /// The gap between two FLAT rows (#2243): their hairline sits in its
+    /// middle (`PostGridListRowCell.flatSeparatorOffset`), so each post gets
+    /// half of it as air on top of its own padding — 16pt above the author
+    /// band, 18pt under the closing line. Smaller than the cards' 10 because
+    /// the line does the separating a card's edge did.
+    public static let flatRowSpacing: CGFloat = 8
+
+    /// A run of rows' side inset in `style`: the cards' margin, or the flat
+    /// rows' (`flatRowInset`).
+    public static func rowSideInset(for style: PostListStyle) -> CGFloat {
+        style == .flat ? flatRowInset : sideMargin
+    }
+
+    /// The gap between two rows in `style`.
+    public static func rowSpacing(for style: PostListStyle) -> CGFloat {
+        style == .flat ? flatRowSpacing : rowSpacing
+    }
+
     /// The bottom inset of a HEADED section: `Spacing.section` from its last
     /// row to the next header's title LINE, less the room that header holds
     /// above its line (`SectionHeaderPillButton.inlineTitleTop`). Its rows
@@ -225,8 +256,12 @@ public enum PostGridListLayout {
     /// nothing new in it is one unlabelled run of rows, and a layout that
     /// reserved header space anyway would leave a gap above the first row that
     /// no header ever fills. Nil means no section is titled.
+    ///
+    /// `listStyle` (#2243): cards, or flat rows — narrower side insets
+    /// (`flatRowInset`) and the flat gap (`flatRowSpacing`).
     public static func layout(
-        hasHeader: (@MainActor (Int) -> Bool)? = nil
+        hasHeader: (@MainActor (Int) -> Bool)? = nil,
+        listStyle: PostListStyle = .cards
     ) -> UICollectionViewCompositionalLayout {
         UICollectionViewCompositionalLayout { index, environment in
             let isHeaded = hasHeader?(index) == true
@@ -242,7 +277,7 @@ public enum PostGridListLayout {
                 subitems: [item]
             )
             let section = NSCollectionLayoutSection(group: group)
-            section.interGroupSpacing = rowSpacing
+            section.interGroupSpacing = rowSpacing(for: listStyle)
             // The margin that separates two sections is on the TRAILING edge of
             // the one above, never the leading edge of the one below.
             //
@@ -274,11 +309,12 @@ public enum PostGridListLayout {
             // (`sectionGap`). The sound sheet and For You's rows keep the same
             // distance through their own bars, the inbox's tables through
             // their footers.
+            let side = rowSideInset(for: listStyle)
             section.contentInsets = NSDirectionalEdgeInsets(
                 top: 0,
-                leading: sideMargin,
+                leading: side,
                 bottom: isHeaded ? sectionGap(traits: environment.traitCollection) : 0,
-                trailing: sideMargin
+                trailing: side
             )
             if isHeaded {
                 let header = NSCollectionLayoutBoundarySupplementaryItem(
@@ -293,9 +329,20 @@ public enum PostGridListLayout {
                 // Above the cells, or the rows scrolling under a glass capsule
                 // would draw on top of it.
                 header.zIndex = 2
+                header.contentInsets = headerInsets(for: listStyle)
                 section.boundarySupplementaryItems = [header]
             }
             return section
         }
+    }
+
+    /// A section title's own side insets in `style`: none under cards; under
+    /// flat rows, what keeps the title on the page's margin although the
+    /// section's insets narrowed to `flatRowInset` (#2243) — a title follows
+    /// its section's insets. Horizontal only: the title's height is estimated,
+    /// and an inset on an estimated axis is ignored.
+    public static func headerInsets(for style: PostListStyle) -> NSDirectionalEdgeInsets {
+        let extra = sideMargin - rowSideInset(for: style)
+        return NSDirectionalEdgeInsets(top: 0, leading: extra, bottom: 0, trailing: extra)
     }
 }

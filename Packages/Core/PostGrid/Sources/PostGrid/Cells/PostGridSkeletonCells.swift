@@ -25,8 +25,11 @@ public final class PostGridSkeletonListCell: UICollectionViewCell {
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    public func configure(variant: Int) {
+    /// `listStyle` (#2243): the card's bones, or a flat row's — no card,
+    /// the row's own column, and the hairline a flat row draws under it.
+    public func configure(variant: Int, listStyle: PostListStyle = .cards) {
         card.setLines(variant.isMultiple(of: 2) ? 3 : 2)
+        card.listStyle = listStyle
     }
 }
 
@@ -35,15 +38,33 @@ public final class PostGridSkeletonListCell: UICollectionViewCell {
 public final class PostGridSkeletonCard: UIView {
     private let thirdLine = SkeletonBoneView()
 
+    /// The card, or a flat row's bones (#2243) — the shape the rows of
+    /// either style hydrate into.
+    public var listStyle: PostListStyle = .cards {
+        didSet {
+            guard listStyle != oldValue else { return }
+            dress()
+        }
+    }
+
+    private var columnLeading: NSLayoutConstraint!
+    private var columnTrailing: NSLayoutConstraint!
+    /// A flat row's hairline, inset to its column, mid-gap under it.
+    private let rule = UIView()
+
     public init() {
         super.init(frame: .zero)
-        backgroundColor = PostGridListRowCell.cardFillColor
         // The shimmer has to be the shape content hydrates INTO — a literal
         // here silently stopped matching the day the card's curve moved.
-        layer.cornerRadius = PostGridListRowCell.cardCornerRadius
         layer.cornerCurve = .continuous
-        // …and the edge, for the same reason.
-        Surface.applyCardEdge(to: self)
+        // …and the edge, for the same reason: `dress`, re-run on a style flip.
+        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitDisplayScale.self]) {
+            (card: PostGridSkeletonCard, _: UITraitCollection) in
+            card.dress()
+        }
+        rule.backgroundColor = .separator
+        rule.isHidden = true
+        addSubview(rule)
 
         // Caption lines at body-text pitch: 14pt bones on the ~21pt line grid.
         let firstLine = SkeletonBoneView()
@@ -70,12 +91,17 @@ public final class PostGridSkeletonCard: UIView {
         column.axis = .vertical
         column.alignment = .leading
         column.spacing = 7
+        let columnLeading = column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16)
+        let columnTrailing = column.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16)
+        self.columnLeading = columnLeading
+        self.columnTrailing = columnTrailing
         column.constrain(in: self) { parent in
             column.topAnchor.constraint(equalTo: parent.topAnchor, constant: 18)
-            column.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: 16)
-            column.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -16)
+            columnLeading
+            columnTrailing
             column.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -18)
         }
+        dress()
 
         NSLayoutConstraint.activate([
             firstLine.heightAnchor.constraint(equalToConstant: 14),
@@ -102,6 +128,31 @@ public final class PostGridSkeletonCard: UIView {
 
     public func setLines(_ count: Int) {
         thirdLine.isHidden = count < 3
+    }
+
+    /// The card's tone, corner and edge, or none of them on a flat row —
+    /// whose bones then stand on the row's caption column (#2243).
+    private func dress() {
+        let flat = listStyle == .flat
+        backgroundColor = flat ? .clear : PostGridListRowCell.cardFillColor
+        layer.cornerRadius = flat ? .zero : PostGridListRowCell.cardCornerRadius
+        layer.borderWidth = flat ? .zero : Surface.hairline(for: traitCollection)
+        layer.borderColor = Surface.cardEdge.resolvedColor(with: traitCollection).cgColor
+        let side = flat ? PostGridListRowCell.captionInset : 16
+        columnLeading?.constant = side
+        columnTrailing?.constant = -side
+        rule.isHidden = !flat
+        setNeedsLayout()
+    }
+
+    override public func layoutSubviews() {
+        super.layoutSubviews()
+        let hairline = Surface.hairline(for: traitCollection)
+        let leading = PostGridListRowCell.captionInset
+        rule.frame = CGRect(
+            x: leading, y: bounds.height + PostGridListRowCell.flatSeparatorOffset - hairline / 2,
+            width: max(0, bounds.width + PostGridListLayout.flatRowInset - leading), height: hairline
+        )
     }
 }
 

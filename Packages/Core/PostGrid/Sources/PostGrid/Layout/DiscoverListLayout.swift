@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// The Discover list: full-width cards with pieces of the chaotic mosaic set
@@ -106,16 +107,23 @@ public enum DiscoverListLayout {
     /// `showsViewAll` keeps or drops the chunks' "View all" footers, and
     /// `endsGroup(section)` spends the app's section gap after the last
     /// stretch of a group, before the next one's title.
+    ///
+    /// `listStyle` (#2243): a run of cards, or of flat rows — the runs alone
+    /// change (`PostGridListLayout.rowSideInset`, `rowSpacing(for:)`); the
+    /// chunks and the pairs keep the page's margin, so a flat row's words
+    /// and the tiles under it stand on one edge.
     public static func layout(
         chunk: @escaping @MainActor (Int) -> MosaicChunk?,
         isPairs: @escaping @MainActor (Int) -> Bool = { _ in false },
         isTitled: @escaping @MainActor (Int) -> Bool = { _ in false },
         endsGroup: @escaping @MainActor (Int) -> Bool = { _ in false },
-        showsViewAll: @escaping @MainActor () -> Bool = { true }
+        showsViewAll: @escaping @MainActor () -> Bool = { true },
+        listStyle: PostListStyle = .cards
     ) -> UICollectionViewCompositionalLayout {
         UICollectionViewCompositionalLayout { index, environment in
             let section = stretch(
-                index, environment: environment, chunk: chunk, isPairs: isPairs, showsViewAll: showsViewAll()
+                index, environment: environment, chunk: chunk, isPairs: isPairs, showsViewAll: showsViewAll(),
+                listStyle: listStyle
             )
             if endsGroup(index) {
                 var insets = section.contentInsets
@@ -133,6 +141,10 @@ public enum DiscoverListLayout {
                 // host names the group in its bar once the title has gone
                 // under it (the Messages inbox's rule, #1301).
                 header.zIndex = 2
+                // A run's title stays on the page's margin when the run's
+                // own insets narrow for flat rows (#2243).
+                let isRun = chunk(index) == nil && !isPairs(index)
+                header.contentInsets = PostGridListLayout.headerInsets(for: isRun ? listStyle : .cards)
                 section.boundarySupplementaryItems.insert(header, at: 0)
             }
             return section
@@ -145,7 +157,8 @@ public enum DiscoverListLayout {
         environment: any NSCollectionLayoutEnvironment,
         chunk: @MainActor (Int) -> MosaicChunk?,
         isPairs: @MainActor (Int) -> Bool,
-        showsViewAll: Bool
+        showsViewAll: Bool,
+        listStyle: PostListStyle
     ) -> NSCollectionLayoutSection {
         do {
             let margin = PostGridListLayout.sideMargin
@@ -162,12 +175,13 @@ public enum DiscoverListLayout {
                     subitems: [item]
                 )
                 let section = NSCollectionLayoutSection(group: group)
-                section.interGroupSpacing = PostGridListLayout.rowSpacing
+                section.interGroupSpacing = PostGridListLayout.rowSpacing(for: listStyle)
                 // The gap to whatever follows goes on the TRAILING edge of
                 // this section — `PostGridListLayout` measured why a leading
                 // inset on the next one misbehaves.
+                let side = PostGridListLayout.rowSideInset(for: listStyle)
                 section.contentInsets = NSDirectionalEdgeInsets(
-                    top: 0, leading: margin, bottom: gapAboveChunk, trailing: margin
+                    top: 0, leading: side, bottom: gapAboveChunk, trailing: side
                 )
                 return section
             }

@@ -1979,11 +1979,16 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
     override public init(frame: CGRect) {
         super.init(frame: frame)
-        card.backgroundColor = Self.cardFillColor
-        card.layer.cornerRadius = Self.cardCornerRadius
         card.layer.cornerCurve = .continuous
-        // An edge in the dark and nothing in the light — see `Surface`.
-        Surface.applyCardEdge(to: card)
+        // The card's tone, corner and edge — an edge in the dark and nothing
+        // in the light, see `Surface` — or none of them on a flat row
+        // (#2243): `dressForListStyle`, re-run on a style flip.
+        dressForListStyle()
+        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitDisplayScale.self]) {
+            (cell: PostGridListRowCell, _: UITraitCollection) in
+            cell.dressForListStyle()
+        }
+        buildFlatChrome()
         card.pin(to: contentView)
 
         captionLabel.font = .appFont(forTextStyle: .body)
@@ -2564,6 +2569,138 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         authorBand.alpha = 1
     }
 
+    // MARK: - The flat style (#2243)
+
+    /// How this row draws (#2243): today's card, or a FLAT row — no ground,
+    /// no corner, no edge, a hairline between posts (`flatSeparators`) and a
+    /// wash under a press. Set by the page from its own style
+    /// (`ForYouGridPage.listStyle`), never read from the launch arguments
+    /// here.
+    ///
+    /// ⚠️ ONLY THE DRESS CHANGES. The insets, the band, the caption, the
+    /// closing line and the preview keep every number they have: a flat row
+    /// stands on the page's margin because its SECTION narrows
+    /// (`PostGridListLayout.flatRowInset`), so the reveal's geometry and the
+    /// post page's register — both built on this cell's constants — are
+    /// untouched.
+    public var listStyle: PostListStyle = .cards {
+        didSet {
+            guard listStyle != oldValue else { return }
+            dressForListStyle()
+        }
+    }
+
+    /// The hairlines this flat row draws above and below it — the page
+    /// decides from the row's neighbours (`FlatListSeparators`). Drawn only
+    /// in the flat style.
+    public var flatSeparators: FlatRowSeparators = .none {
+        didSet {
+            guard flatSeparators != oldValue else { return }
+            setNeedsLayout()
+        }
+    }
+
+    /// The hairline sits mid-gap between two flat rows, outside the row's
+    /// bounds: half the flat spacing below its foot (and above its head).
+    public static var flatSeparatorOffset: CGFloat { PostGridListLayout.flatRowSpacing / 2 }
+
+    /// Where an INSET hairline starts, from the row's leading edge: the text
+    /// column — after the band's avatar and its gap, as Threads draws it — or
+    /// the caption's own column under a bare band, which has no avatar.
+    public static func flatSeparatorLeading(showsIdentity: Bool) -> CGFloat {
+        showsIdentity
+            ? captionInset + PostAuthorBandView.avatarDiameter + Spacing.sm
+            : captionInset
+    }
+
+    /// What a collection's box and gutter show: the card's tone, or the page
+    /// through a flat row.
+    private var rowGround: UIColor { listStyle == .flat ? .clear : Self.cardFillColor }
+
+    private let topRule = UIView()
+    private let bottomRule = UIView()
+    /// A flat row's press: the `.label` wash `AppControl` lays under a card
+    /// action, here under the whole row — a card no longer gives way.
+    private let pressWash = UIView()
+
+    private func buildFlatChrome() {
+        for rule in [topRule, bottomRule] {
+            rule.backgroundColor = .separator
+            rule.isUserInteractionEnabled = false
+            rule.isHidden = true
+            addSubview(rule)
+        }
+        pressWash.backgroundColor = .label
+        pressWash.alpha = 0
+        pressWash.isUserInteractionEnabled = false
+        insertSubview(pressWash, at: 0)
+    }
+
+    /// The card's dress for the current style and traits.
+    private func dressForListStyle() {
+        let flat = listStyle == .flat
+        card.backgroundColor = flat ? .clear : Self.cardFillColor
+        card.layer.cornerRadius = flat ? .zero : Self.cardCornerRadius
+        card.layer.borderWidth = flat ? .zero : Surface.hairline(for: traitCollection)
+        card.layer.borderColor = Surface.cardEdge.resolvedColor(with: traitCollection).cgColor
+        if showsCarousel {
+            mediaView.backgroundColor = rowGround
+            carousel?.backgroundColor = rowGround
+        }
+        if !flat { pressWash.alpha = 0 }
+        setNeedsLayout()
+    }
+
+    override public func layoutSubviews() {
+        super.layoutSubviews()
+        layoutFlatChrome()
+    }
+
+    private func layoutFlatChrome() {
+        let flat = listStyle == .flat
+        let hairline = Surface.hairline(for: traitCollection)
+        let offset = Self.flatSeparatorOffset
+        // FULL means the screen's width: the row stands `flatRowInset` in
+        // from each edge.
+        let bleed = PostGridListLayout.flatRowInset
+        let showsIdentity = authorBand.model?.showsIdentity ?? true
+        func frame(_ kind: FlatRowSeparator, y: CGFloat) -> CGRect {
+            let leading = kind == .full ? -bleed : Self.flatSeparatorLeading(showsIdentity: showsIdentity)
+            return CGRect(x: leading, y: y, width: max(0, bounds.width + bleed - leading), height: hairline)
+        }
+        topRule.isHidden = !flat || flatSeparators.top == .none
+        bottomRule.isHidden = !flat || flatSeparators.bottom == .none
+        topRule.frame = frame(flatSeparators.top, y: -offset - hairline / 2)
+        bottomRule.frame = frame(flatSeparators.bottom, y: bounds.height + offset - hairline / 2)
+        // The wash spans the row and half the gap either side, so two
+        // neighbours' washes would meet on their hairline.
+        pressWash.frame = bounds.insetBy(dx: -bleed, dy: -offset)
+    }
+
+    override public var isHighlighted: Bool {
+        didSet {
+            guard listStyle == .flat, isHighlighted != oldValue else { return }
+            let target: CGFloat = isHighlighted ? AppControl.Metrics.pressedWash : 0
+            UIView.animate(
+                withDuration: PressFeedback.Metrics.response, delay: 0,
+                options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]
+            ) {
+                self.pressWash.alpha = target
+            }
+        }
+    }
+
+    /// The hairlines' frames in the row's space, nil when hidden. Tests.
+    public var debugFlatRuleFrames: (top: CGRect?, bottom: CGRect?) {
+        layoutIfNeeded()
+        return (topRule.isHidden ? nil : topRule.frame, bottomRule.isHidden ? nil : bottomRule.frame)
+    }
+
+    /// The card's ground, corner and edge as drawn. Tests.
+    public var debugCardDress: (fill: UIColor?, cornerRadius: CGFloat, borderWidth: CGFloat) {
+        (card.backgroundColor, card.layer.cornerRadius, card.layer.borderWidth)
+    }
+
     // MARK: - Select Text (#1498 §4)
 
     /// The caption made selectable in place, while a selection is up.
@@ -2767,9 +2904,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             // The box behind the pages is the CARD, not the placeholder fill a
             // single-media row uses: with a gutter between items and one cropped
             // at the edge, that fill is on screen at rest and has to be the
-            // surface the pages are lying on.
-            mediaView.backgroundColor = Self.cardFillColor
+            // surface the pages are lying on — the page itself on a flat
+            // row (#2243).
+            mediaView.backgroundColor = rowGround
             let carousel = makeCarouselIfNeeded()
+            carousel.backgroundColor = rowGround
             carousel.isHidden = false
             carousel.configure(with: post.pages, imagePipeline: imagePipeline)
             cover.reset()
@@ -2870,8 +3009,22 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// The tile's ground: the media ground under a picture (#1771) — the
     /// bone's own grey, so a tile reads the same loading, missing or failed —
     /// and the card's for words.
+    ///
+    /// ⚠️ THE CARD'S TONE ON THE PAGE OF THE STYLE (#2243): a tile of words —
+    /// a chunk's, a shelf's text card, a History square — is white on the
+    /// grey page, and one grey step down on the flat style's white page,
+    /// where white would have no edge (`PostListStyle.cardFill`). The launch's
+    /// style by default, the same answer for a tile and for every copy of it
+    /// (a flight's card, a close's stand-in, a window's floor) — none of which
+    /// has a page to ask. Under flat, every page that draws such tiles lies
+    /// on the white page too.
     public static func fillColor(for post: GalleryPost) -> UIColor {
-        post.kind == .text ? Surface.card : Surface.mediaGround
+        fillColor(for: post, style: .current)
+    }
+
+    /// The same, in a given style. Tests.
+    public static func fillColor(for post: GalleryPost, style: PostListStyle) -> UIColor {
+        post.kind == .text ? style.cardFill : Surface.mediaGround
     }
 
     /// The image the brick is currently showing — see `PostGridListRowCell`'s
