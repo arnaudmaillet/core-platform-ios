@@ -273,6 +273,9 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
         heroPager.onVerticalScroll = { [weak self] offset in
             guard let self else { return }
             self.applyHeaderOffset(offset)
+            #if DEBUG
+            self.pullIndicator.tracedScrollView = self.heroPager.activePage?.scrollView
+            #endif
             // Negative travel is the overscroll the indicator draws from.
             self.pullIndicator.setPull(
                 max(0, -offset), isTracking: self.heroPager.activePage?.scrollView.isTracking ?? false

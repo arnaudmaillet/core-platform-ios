@@ -37,8 +37,12 @@ public final class AppRefreshControl: UIRefreshControl {
         addSubview(loader)
         // A user's pull fires `.valueChanged` without `beginRefreshing()`.
         addAction(UIAction { [weak self] _ in
-            self?.started()
-            self?.loader.startAnimating()
+            guard let self else { return }
+            #if DEBUG
+            traceMoment(.trigger, note: " by=native")
+            #endif
+            started()
+            loader.startAnimating()
         }, for: .valueChanged)
     }
 
@@ -60,8 +64,14 @@ public final class AppRefreshControl: UIRefreshControl {
 
     /// The pull, as far past the list's top as the stock control's own reach.
     private func follow(_ scrollView: UIScrollView) {
-        guard !isRefreshing else { return }
         let pulled = -(scrollView.contentOffset.y + scrollView.adjustedContentInset.top)
+        #if DEBUG
+        trace.follow(
+            pulled: pulled, isTracking: scrollView.isTracking,
+            threshold: HeroPullToRefreshView.threshold, scrollView: scrollView
+        )
+        #endif
+        guard !isRefreshing else { return }
         // ⚠️ THE FOLD-BACK IS NOT A PULL (#1400): once the ring's fade ended,
         // the loader took the inset still closing for a pull and drew its
         // first pills for a frame or two. It follows again from rest, or
@@ -72,9 +82,12 @@ public final class AppRefreshControl: UIRefreshControl {
         }
         loader.setProgress(pulled / HeroPullToRefreshView.threshold)
         if pulled > 0, scrollView.isTracking, !thresholdFeedback.isArmed { thresholdFeedback.prepare() }
-        thresholdFeedback.update(
+        let ticked = thresholdFeedback.update(
             pulled: pulled, threshold: HeroPullToRefreshView.threshold, isTracking: scrollView.isTracking
         )
+        #if DEBUG
+        if ticked { traceMoment(.tick) }
+        #endif
     }
 
     public override func beginRefreshing() {
@@ -125,6 +138,15 @@ public final class AppRefreshControl: UIRefreshControl {
     }
 
     #if DEBUG
+    /// `-pull-refresh-trace` (#2235).
+    private lazy var trace = PullRefreshTrace(view: self)
+
+    private func traceMoment(_ moment: PullRefreshTrace.Moment, note: String = "") {
+        guard PullRefreshTrace.isEnabled, let scrollView = superview as? UIScrollView else { return }
+        let pulled = -(scrollView.contentOffset.y + scrollView.adjustedContentInset.top)
+        trace.mark(moment, pulled: pulled, isTracking: scrollView.isTracking, scrollView: scrollView, note: note)
+    }
+
     /// The loader this control drives — what a test reads.
     var debugLoader: AppLoaderView { loader }
     var debugThresholdFeedback: PullThresholdFeedback { thresholdFeedback }

@@ -71,6 +71,10 @@ public final class HeroPullToRefreshView: UIView {
     /// `isTracking` says a finger is on the list: only then does crossing the
     /// threshold tick (#1354) — a bounce-back drifting past it says nothing.
     public func setPull(_ distance: CGFloat, isTracking: Bool = false) {
+        #if DEBUG
+        lastPull = (distance, isTracking)
+        trace.follow(pulled: distance, isTracking: isTracking, threshold: Self.threshold, scrollView: tracedScrollView)
+        #endif
         guard !isRefreshing else { return }
         // ⚠️ THE FOLD-BACK IS NOT A PULL (#1400): once the ring's fade ended,
         // the loader took the list still closing for a pull and drew its
@@ -83,7 +87,10 @@ public final class HeroPullToRefreshView: UIView {
         // The mark is drawn out by the pull, rather than waiting to appear.
         loader.setProgress(min(max(distance / Self.threshold, 0), 1))
         if distance > 0, isTracking, !thresholdFeedback.isArmed { thresholdFeedback.prepare() }
-        thresholdFeedback.update(pulled: distance, threshold: Self.threshold, isTracking: isTracking)
+        let ticked = thresholdFeedback.update(pulled: distance, threshold: Self.threshold, isTracking: isTracking)
+        #if DEBUG
+        if ticked { trace.mark(.tick, pulled: distance, isTracking: isTracking, scrollView: tracedScrollView) }
+        #endif
     }
 
     /// Whether a release at `distance` should refresh.
@@ -96,6 +103,10 @@ public final class HeroPullToRefreshView: UIView {
         isRefreshing = true
         generation += 1
         startedAt = CACurrentMediaTime()
+        #if DEBUG
+        trace.mark(.trigger, pulled: lastPull.distance, isTracking: lastPull.isTracking,
+                   scrollView: tracedScrollView, note: " by=release")
+        #endif
         // From the frame the pull reached: no jump on release.
         loader.startAnimating()
     }
@@ -108,6 +119,11 @@ public final class HeroPullToRefreshView: UIView {
 
     #if DEBUG
     public var debugIsRefreshing: Bool { isRefreshing }
+    /// The list being pulled, for the trace's finger travel
+    /// (`-pull-refresh-trace`, #2235). The host names it.
+    public weak var tracedScrollView: UIScrollView?
+    private lazy var trace = PullRefreshTrace(view: self)
+    private var lastPull: (distance: CGFloat, isTracking: Bool) = (0, false)
     #endif
 
     /// Ends the spin. Idempotent — a host stops it wherever a load settles,
