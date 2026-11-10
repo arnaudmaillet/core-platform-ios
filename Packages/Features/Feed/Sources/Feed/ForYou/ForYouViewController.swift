@@ -343,8 +343,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // The page the cards lie on, a step below them — see `Surface`.
-        view.backgroundColor = Surface.page
+        // The page the cards lie on, a step below them — see `Surface` — or
+        // the plain page under flat rows (#2243).
+        view.backgroundColor = page.pageGround
         // ⚠️ **NO TITLE IN THE BAR.** "For You" was written here (the static
         // word); it went with the map tab's on 2026-09-22 —
         // the two roots' headers carry their controls and nothing else, and the
@@ -1433,7 +1434,13 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // Reduce Motion opens every post with the stack's own push: no window,
         // no flight (`HeroMotionPolicy`).
         let reducesMotion = HeroMotionPolicy.prefersNativePush
-        let revealing = !reducesMotion && installTextReveal(feed: feed, postID: tapped.id)
+        // ⚠️ A FLAT ROW OF WORDS OPENS WITH THE NATIVE PUSH (#2243): it has
+        // no card for the window to grow from. And it closes with the native
+        // pop, whatever the feed has paged onto — no flight rides along for a
+        // photograph's page, no window for a text one (the owner's rule,
+        // 2026-11-01: a screen closes the way it opened).
+        let flatPush = page.opensWithNativePush(tapped.id)
+        let revealing = !reducesMotion && !flatPush && installTextReveal(feed: feed, postID: tapped.id)
         // No window: the stack's own push, so its vertical closes are pulls
         // (#2045, #2046) and the release is that push's pop.
         textSlideDismissal.closesByPull = !revealing
@@ -1532,9 +1539,20 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // forward a hero pop straight back to it.
             // Reduce Motion: no flight rides along either, so a media page
             // closes with the window's own slide, not a hero home.
-            let alongside = reducesMotion
+            let alongside = reducesMotion || flatPush
                 ? nil
                 : attachFlightAlongsideCardClose(feed: feed, tappedID: tapped.id)
+            // A flat row's native push closes with the native pop (#2243): the
+            // slide forwards no `.hero` pop to a flight, and holds no window.
+            if flatPush {
+                // No hero grab on this screen to arbitrate with: every drag is
+                // the slide's, and its pop is the native one.
+                textSlideDismissal.arbitratesWithHeroGrab = false
+                textSlideDismissal.heroLandingAcceptsHero = { false }
+                textSlideDismissal.install(on: navigationController)
+                navigationController.pushViewController(feed, animated: true)
+                return
+            }
             textSlideDismissal.arbitratesWithHeroGrab = true
             // ⚠️ AND CLAIM THE DRAGS THE HERO DECLINES — asked of the hero's
             // own gate, see `heroLandingArbiter`.
