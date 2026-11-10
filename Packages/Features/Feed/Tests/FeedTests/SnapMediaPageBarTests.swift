@@ -467,14 +467,15 @@ struct SnapMediaPageBarTests {
 
     // MARK: - The thin bar and its cursor (#1544)
 
-    /// At rest a clip's bar is thinner than the strip's footprint, and its
-    /// cursor is the bar's own height: it melts into the indicator's end.
+    /// At rest a clip's bar is the 2 pt line, the strip's whole footprint
+    /// (#2252), and its cursor is the bar's own height: it melts into the
+    /// indicator's end.
     @Test func atRestTheBarIsThinAndItsCursorMeltsIn() throws {
         let view = clipBarOnScreen(playhead: 0.4)
         view.debugFinishTweens()
         let track = try #require(view.debugTrackHeight(0))
-        #expect(track == SnapMediaPageBarView.clipTrackHeight)
-        #expect(track < SnapMediaPageBarView.thickness, "the bar is no thinner than the strip")
+        #expect(track == SnapMediaPageBarView.thickness)
+        #expect(SnapMediaPageBarView.thickness == 2, "the resting line the owner asked for (#2252)")
         #expect(view.debugCursorSize == CGSize(width: track, height: track), "the cursor stands out at rest")
     }
 
@@ -485,7 +486,7 @@ struct SnapMediaPageBarTests {
         let view = clipBarOnScreen(playhead: 0.4)
         view.debugScrub(.began, atX: 150)
         view.debugFinishTweens()
-        #expect(view.debugTrackHeight(0) == SnapMediaPageBarView.handledTrackHeight)
+        #expect(view.debugTrackHeight(0) == SnapMediaPageBarView.touchedThickness)
         #expect(view.debugCursorSize == SnapMediaPageBarView.handledCursorSize)
         // The pill is as wide as the disc it grows out of (the owner, 2026-10-22).
         #expect(view.debugCursorSize?.width == SnapMediaPageBarView.cursorDiameter)
@@ -493,13 +494,13 @@ struct SnapMediaPageBarTests {
 
         view.debugScrub(.ended, atX: 150)
         view.debugFinishTweens()
-        #expect(view.debugTrackHeight(0) == SnapMediaPageBarView.clipTrackHeight)
+        #expect(view.debugTrackHeight(0) == SnapMediaPageBarView.thickness)
         let disc = SnapMediaPageBarView.cursorDiameter
         #expect(view.debugCursorSize == CGSize(width: disc, height: disc), "no disc after the release")
 
         view.debugElapseWake()
         view.debugFinishTweens()
-        let track = SnapMediaPageBarView.clipTrackHeight
+        let track = SnapMediaPageBarView.thickness
         #expect(view.debugCursorSize == CGSize(width: track, height: track), "the disc did not shrink into the bar")
         #expect(abs(view.debugContainerOpacity - SnapMediaPageBarView.restingOpacity) < 0.001)
     }
@@ -509,7 +510,7 @@ struct SnapMediaPageBarTests {
         let view = clipBarOnScreen(playhead: 0.4)
         view.debugScrub(.began, atX: 150)
         let first = try #require(view.debugTrackHeight(0))
-        #expect(first < SnapMediaPageBarView.handledTrackHeight, "the bar jumped to its handled height")
+        #expect(first < SnapMediaPageBarView.touchedThickness, "the bar jumped to its handled height")
         view.debugScrub(.ended, atX: 150)
     }
 
@@ -517,19 +518,73 @@ struct SnapMediaPageBarTests {
     /// they stood thicker than the progress bar), and it draws no cursor.
     @Test func aCarouselIsAsThinAsTheBar() {
         let view = bar(pages: 4)
-        #expect(view.debugTrackHeight(1) == SnapMediaPageBarView.clipTrackHeight)
+        #expect(view.debugTrackHeight(1) == SnapMediaPageBarView.thickness)
         #expect(view.debugCursorSize == nil)
     }
 
-    /// …and stays thin under the thumb (the owner, 2026-10-25): a drag hands
-    /// the segments' line to the filmstrip (#1734), so only a clip's bar —
-    /// the playhead's handle — grows when touched.
-    @Test func touchedSegmentsStayThin() {
+    /// …and grows under the thumb like a clip's bar (#2252, the owner
+    /// 2026-11-10): at 2 pt the line is a mark, not a handle, so whatever the
+    /// finger is on comes up to `touchedThickness` while it is held, and back
+    /// on release. (It stayed thin, the owner 2026-10-25, when it rested at 3.)
+    @Test func touchedSegmentsGrowAndComeBack() {
         let view = bar(pages: 4)
         view.debugScrub(.began, atX: 30)
         view.debugFinishTweens()
-        #expect(view.debugTrackHeight(1) == SnapMediaPageBarView.clipTrackHeight)
+        #expect(view.debugTrackHeight(1) == SnapMediaPageBarView.touchedThickness)
         view.debugScrub(.ended, atX: 30)
+        view.debugFinishTweens()
+        #expect(view.debugTrackHeight(1) == SnapMediaPageBarView.thickness)
+    }
+
+    /// ⚠️ UPWARD, OVER THE CONTENT, PUSHING NOTHING (#2252): the line's bottom
+    /// edge stays on the footprint's bottom edge, the touched line rises past
+    /// its top, and the view's own frame never changes.
+    @Test func theTouchedLineGrowsUpwardOnly() throws {
+        let view = clipBarOnScreen(playhead: 0.4)
+        let footprint = view.frame
+        let resting = try #require(view.debugSegmentFrame(0))
+        #expect(abs(resting.maxY - view.bounds.height) < 0.01)
+        #expect(abs(resting.minY) < 0.01, "the resting line is not the footprint")
+
+        view.debugScrub(.began, atX: 150)
+        view.debugFinishTweens()
+        let touched = try #require(view.debugSegmentFrame(0))
+        #expect(abs(touched.maxY - view.bounds.height) < 0.01, "the line grew downward")
+        #expect(abs(touched.minY - (view.bounds.height - SnapMediaPageBarView.touchedThickness)) < 0.01)
+        #expect(view.frame == footprint, "the strip's frame moved for the touch")
+        view.debugScrub(.ended, atX: 150)
+    }
+
+    /// The release comes back on a short spring (#2252): it dips past the
+    /// resting line once, then lands on it exactly — and only then stops.
+    @Test func theReleaseSpringsBackToTheRestingLine() {
+        #expect(SnapMediaPageBarView.Tween.springProgress(0) == 0)
+        #expect(abs(SnapMediaPageBarView.Tween.springProgress(1) - 1) < 0.001)
+        let peak = stride(from: 0.0, through: 1.0, by: 0.01).map(SnapMediaPageBarView.Tween.springProgress).max() ?? 0
+        #expect(peak > 1.02 && peak < 1.2, "no short overshoot: \(peak)")
+
+        var tween = SnapMediaPageBarView.Tween()
+        tween.settle(at: 1)
+        tween.move(to: 0, duration: 1, now: 0, curve: .spring)
+        tween.step(now: 0.4)
+        #expect(tween.value < 0, "the spring did not dip past the resting line")
+        #expect(tween.isMoving)
+        tween.step(now: 1)
+        #expect(tween.value == 0)
+        #expect(!tween.isMoving)
+        #expect(SnapMediaPageBarView.releaseSpringDuration > SnapMediaPageBarView.handleDuration)
+    }
+
+    /// The touch area stays a thumb's (#2252): 44 pt, invisible, centred on
+    /// the 2 pt line.
+    @Test func theTouchAreaIsCentredOnTheLine() {
+        let view = bar(pages: 4)
+        let half = SnapMediaPageBarView.minimumTouchHeight / 2
+        let line = view.bounds.midY
+        #expect(view.point(inside: CGPoint(x: 30, y: line - half + 0.5), with: nil))
+        #expect(view.point(inside: CGPoint(x: 30, y: line + half - 0.5), with: nil))
+        #expect(!view.point(inside: CGPoint(x: 30, y: line - half - 1), with: nil))
+        #expect(!view.point(inside: CGPoint(x: 30, y: line + half + 1), with: nil))
     }
 
     /// ⚠️ LOADING SHOWS THE PULSE, AND THE TWO CROSS-FADE (#1537): the
@@ -1191,19 +1246,36 @@ struct SnapMediaPageBarTests {
 
     // MARK: - Where it sits in the column
 
-    private func chrome(pages: Int) -> SnapChromeView {
+    private func chrome(
+        pages: Int, clipPages: Set<Int> = [], overTabBar: Bool = false,
+        caption: String? = "A caption long enough to take the two lines the page reserves for it."
+    ) -> SnapChromeView {
         let view = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         view.setFixedInsets(UIEdgeInsets(top: 103, left: 0, bottom: 83, right: 0))
+        view.sitsOverTabBar = overTabBar
         view.configure(with: FeedItemDisplayModel(
             id: PostID("post-1"), authorID: ProfileID("a"), authorName: "Ava",
             metaText: "@ava · 3m", avatarURL: nil,
-            caption: "A caption long enough to take the two lines the page reserves for it.",
+            caption: caption,
             mediaURL: URL(string: "mock://video/1"), mediaKind: .video,
             thumbnailURL: nil, audioText: nil, likeCount: 0, timestampText: "now"
         ))
-        view.setMediaPageCount(pages, current: 0)
+        view.setMediaPageCount(pages, current: 0, clipPages: clipPages)
         view.layoutIfNeeded()
         return view
+    }
+
+    /// The bottom bar's line in these chromes: the safe area they were handed.
+    private static let barLine: CGFloat = 874 - 83
+
+    /// The bottom of the caption's letters: its last baseline.
+    private func lettersBottom(_ view: SnapChromeView) -> CGFloat {
+        view.debugCaptionFrame.maxY - SnapChromeView.captionLetterDrop
+    }
+
+    /// The top of the bottom bar's glass: the toolbar's, or the tab bar's.
+    private func glassTop(overTabBar: Bool) -> CGFloat {
+        Self.barLine + (overTabBar ? SnapActionColumn.tabBarGlassDrop : SnapActionColumn.toolbarGlassDrop)
     }
 
     /// ⚠️ BETWEEN THE CAPTION AND THE BAR, which is the whole point of moving
@@ -1216,10 +1288,69 @@ struct SnapMediaPageBarTests {
         let caption = view.debugCaptionFrame
 
         #expect(strip.minY > caption.maxY)
-        #expect(strip.maxY <= view.bounds.height - 83) // the toolbar's line
+        #expect(strip.maxY < glassTop(overTabBar: false), "the strip reaches the toolbar's glass")
         #expect(abs(strip.minX - caption.minX) < 0.5)
         #expect(abs(strip.maxX - caption.maxX) < 0.5)
+        // The 2 pt line is the whole footprint (#2252).
         #expect(strip.height == SnapMediaPageBarView.thickness)
+    }
+
+    /// ⚠️ CENTRED BETWEEN THE LETTERS AND THE GLASS, ON BOTH SCREENS (#2252,
+    /// the owner 2026-11-10): halfway from the bottom of the caption's letters
+    /// to the top of the bottom bar's glass — the toolbar's on the post
+    /// screen, the tab bar's on Shots. The issue's expected gaps: about 10 pt
+    /// each side over the toolbar, about 8 over the tab bar.
+    @Test func theStripIsCentredBetweenTheLettersAndTheGlass() {
+        for overTabBar in [false, true] {
+            let view = chrome(pages: 3, overTabBar: overTabBar)
+            let strip = view.debugPageBarFrame
+            let above = strip.minY - lettersBottom(view)
+            let below = glassTop(overTabBar: overTabBar) - strip.maxY
+            #expect(abs(above - below) < 0.5, "over the tab bar: \(overTabBar) — \(above) above, \(below) below")
+            let expected: ClosedRange<CGFloat> = overTabBar ? 6.5...9.5 : 8.5...11.5
+            #expect(expected.contains(above), "over the tab bar: \(overTabBar) — \(above) pt from the letters")
+        }
+    }
+
+    /// ⚠️ ITS HEIGHT AT REST AND WHILE TOUCHED (#2252): 2 pt at rest; under
+    /// the finger the line is 6 pt, grown upward over the content, and the
+    /// strip's frame — and with it everything around it — stays put.
+    @Test func theStripIsThinAtRestAndThickerWhileTouched() throws {
+        let view = chrome(pages: 1, clipPages: [0])
+        view.setMediaPlayhead(0.2, seconds: 120)
+        view.layoutIfNeeded()
+        let strip = view.debugPageBarFrame
+        let caption = view.debugCaptionFrame
+        let bar = view.debugPageBar
+        #expect(try #require(bar.debugTrackHeight(0)) == SnapMediaPageBarView.thickness)
+
+        bar.debugScrub(.began, atX: strip.width / 2)
+        bar.debugFinishTweens()
+        let touched = try #require(bar.debugSegmentFrame(0))
+        #expect(touched.height == SnapMediaPageBarView.touchedThickness)
+        #expect(abs(touched.maxY - strip.height) < 0.01, "the touched line grew down toward the bar")
+        #expect(view.debugPageBarFrame == strip, "the strip moved for the touch")
+        #expect(view.debugCaptionFrame == caption, "the caption moved for the touch")
+
+        bar.debugScrub(.ended, atX: strip.width / 2)
+        bar.debugFinishTweens()
+        #expect(try #require(bar.debugTrackHeight(0)) == SnapMediaPageBarView.thickness)
+    }
+
+    /// ⚠️ A TAP ON THE CAPTION KEEPS PRIORITY (#2252): the strip's 44 pt touch
+    /// area reaches up over the caption's last line, and a tap there is still
+    /// the caption's.
+    @Test func aTapOnTheCaptionIsTheCaptionsOverTheStripsTouchArea() throws {
+        let view = chrome(pages: 3)
+        let strip = view.debugPageBarFrame
+        let caption = view.debugCaptionFrame
+        let overlap = CGPoint(x: strip.midX, y: caption.maxY - 2)
+        #expect(strip.midY - overlap.y < SnapMediaPageBarView.minimumTouchHeight / 2,
+                "the premise: the strip's touch area reaches the caption")
+        #expect(view.hitTest(overlap, with: nil) === view.debugCaptionLabel)
+        // Below the caption, the strip has it.
+        let gap = CGPoint(x: strip.midX, y: strip.maxY + 2)
+        #expect(view.hitTest(gap, with: nil) === view.debugPageBar)
     }
 
     /// ⚠️ THE CARD POINTS FROM ABOVE THE STRIP, AND STAYS INSIDE THE COLUMN.
@@ -1268,18 +1399,14 @@ struct SnapMediaPageBarTests {
     /// would give a collection a different resting geometry from every other
     /// format — which the hero flight's replica would then have to match, and
     /// the corner is deliberately format-agnostic (see `captionFloorGuide`).
-    /// ⚠️ AND IT STOPS SHORT OF THE TOOLBAR'S LINE. Flush against it the strip
-    /// and the bar's glass read as one stacked control, which is the one thing
-    /// they are not: the strip is the pictures' index, the bar is what you can
-    /// DO to the post.
-    @Test func theStripStopsShortOfTheToolbarsLine() {
+    /// ⚠️ AND IT STOPS SHORT OF THE BAR'S GLASS: flush against it the strip
+    /// and the glass would read as one stacked control, which is the one
+    /// thing they are not. Centred in the gap (#2252), it keeps the same
+    /// room from the glass as from the letters.
+    @Test func theStripStopsShortOfTheGlass() {
         let view = chrome(pages: 3)
-        let toolbarLine = view.bounds.height - 83
-
-        let gap = toolbarLine - view.debugPageBarFrame.maxY
-        // …and one breath over it (#1722).
-        #expect(abs(gap - SnapChromeView.pageBarToolbarGap - SnapActionColumn.bottomBreath) < 0.5,
-                Comment(rawValue: "the strip left \(gap)pt"))
+        let gap = glassTop(overTabBar: false) - view.debugPageBarFrame.maxY
+        #expect(gap > 6, Comment(rawValue: "the strip left \(gap)pt"))
     }
 
     // MARK: - What a scrub takes away
@@ -1357,17 +1484,52 @@ struct SnapMediaPageBarTests {
         #expect(view.debugScrubPreview.alpha == 1)
     }
 
-    /// With no strip, the caption comes down (the owner, 2026-10-16, then
-    /// #1726): from xl over the bar to the sound cover's line — and nothing
-    /// on the trailing column moves.
-    @Test func noStripLetsTheCaptionTakeItsPlace() {
-        let withStrip = chrome(pages: 4)
-        let without = chrome(pages: 0)
+    /// ⚠️ THE CAPTION'S BOTTOM IS THE SAME WITH AND WITHOUT A STRIP (#2252):
+    /// one seat, on the cover's line, for a single photo, a carousel and a
+    /// clip — it used to come down 22 pt with no strip, and everything on it
+    /// jumped between posts. Nothing on the trailing column moves either.
+    @Test func theCaptionStandsOnTheSameLineWithAndWithoutAStrip() {
+        let photo = chrome(pages: 0)
+        let carousel = chrome(pages: 4)
+        let long = chrome(pages: 12)
+        let clip = chrome(pages: 1, clipPages: [0])
+        #expect(photo.debugPageBar.isHidden)
+        #expect(!carousel.debugPageBar.isHidden && !clip.debugPageBar.isHidden)
+        let strips: [(name: String, view: SnapChromeView)] = [("carousel", carousel), ("12 pages", long), ("clip", clip)]
+        for (name, view) in strips {
+            #expect(view.debugCaptionFrame == photo.debugCaptionFrame, "\(name): the caption moved for the strip")
+            #expect(view.debugFrame(of: view.debugBoostButton) == photo.debugFrame(of: photo.debugBoostButton), "\(name)")
+        }
+        // On the cover's line.
+        let line = Self.barLine - SnapActionColumn.bottomBreath - SnapActionColumn.inputRestingGap
+        #expect(abs(photo.debugCaptionFrame.maxY - line) < 0.5, "the caption is off the cover's line")
+    }
 
-        #expect(without.debugPageBar.isHidden)
-        let drop = without.debugCaptionFrame.maxY - withStrip.debugCaptionFrame.maxY
-        #expect(abs(drop - (Spacing.xl - SnapActionColumn.inputRestingGap)) < 0.5, "the caption dropped \(drop)")
-        #expect(without.debugFrame(of: without.debugBoostButton) == withStrip.debugFrame(of: withStrip.debugBoostButton))
+    /// ⚠️ NOTHING SHIFTS BETWEEN POSTS (#2252): a one-line caption, a
+    /// two-line one, a long one and none all make a block two lines tall on
+    /// the same line, so its top — where the author row, the stream and the
+    /// danmaku stand — is one line on every post, strip or not.
+    @Test func theCaptionBlockIsTheSameOnEveryPost() {
+        let captions: [String?] = [
+            "Golden hour.",
+            "Rebuilt the whole deploy pipeline over a slow rainy weekend at the pier.",
+            String(repeating: "A long caption about the harbour at dusk. ", count: 8),
+            nil,
+        ]
+        let reference = chrome(pages: 0, caption: captions[0]).debugCaptionFrame
+        let twoLines = SnapChromeView.captionBlockHeight(scale: 3)
+        #expect(abs(reference.height - twoLines) < 0.5, "the block is \(reference.height) tall, not two lines")
+        let formats: [(pages: Int, clips: Set<Int>)] = [(0, []), (3, []), (1, [0])]
+        for caption in captions {
+            for (pages, clips) in formats {
+                let view = chrome(pages: pages, clipPages: clips, caption: caption)
+                #expect(abs(view.debugCaptionFrame.minY - reference.minY) < 0.5,
+                        "\(caption ?? "no caption"), \(pages) pages: the block's top moved")
+                #expect(abs(view.debugCaptionFrame.maxY - reference.maxY) < 0.5,
+                        "\(caption ?? "no caption"), \(pages) pages: the block's bottom moved")
+                #expect(!view.debugCaptionLabel.isHidden, "\(caption ?? "no caption"): no date shown")
+            }
+        }
     }
 }
 

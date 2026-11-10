@@ -60,9 +60,21 @@ import UIKit
 /// `PageDotsView` and `MediaCarouselView` both avoid the same way.
 ///
 final class SnapMediaPageBarView: UIView {
-    /// The strip's thickness — the card's dot diameter, so this reads as the
-    /// same ink stretched rather than as a different control.
-    static let thickness: CGFloat = MediaPageIndicatorView.dotDiameter
+    /// ⚠️ THE STRIP'S WHOLE FOOTPRINT IS ITS RESTING LINE (#2252, the owner
+    /// 2026-11-10): 2 pt, a carousel's segments and a clip's bar alike, and
+    /// the view is exactly that tall. It used to keep a 6 pt footprint (the
+    /// card's dot) and the caption kept a seat above it, 22 pt higher than
+    /// on a single photo — the whole stack over the caption jumped between
+    /// posts. Now the strip lies in the gap that already exists between the
+    /// caption and the bottom bar (`SnapChromeView.pageBarCenterOffset`) and
+    /// reserves nothing, as TikTok's and Instagram's do.
+    static let thickness: CGFloat = 2
+
+    /// The line while a finger is on it (#2252): today's thickness before
+    /// #2252 — the card's dot diameter — grown UPWARD, over the content
+    /// above, from the resting line's bottom edge. Nothing moves for it: the
+    /// view keeps its 2 pt footprint and the segments draw past its top.
+    static let touchedThickness: CGFloat = MediaPageIndicatorView.dotDiameter
 
     /// The gap between two segments. Small enough that the run reads as one
     /// strip, wide enough that the divisions are not a moiré at twelve pages.
@@ -107,23 +119,25 @@ final class SnapMediaPageBarView: UIView {
 
     // MARK: The clip's bar and its cursor (#1544, the owner 2026-10-21)
 
-    /// The strip's drawn thickness at rest, a clip's bar and a carousel's
-    /// segments alike (#1712): thinner than the strip's footprint
-    /// (`thickness`, which the layout keeps, so nothing around it moves).
-    static let clipTrackHeight: CGFloat = 3
-    /// The bar while it is handled — a touch, a scrub: taller, so the thumb
-    /// sees what it holds. It grows into the band around the strip, outside
-    /// the footprint, which costs the layout nothing.
-    static let handledTrackHeight: CGFloat = 8
+    // ⚠️ ONE THICKNESS, a carousel's segments and a clip's bar alike (#1712):
+    // `thickness` at rest, `touchedThickness` under a finger (#2252). The
+    // drawn line and the footprint are the same 2 pt since #2252 — it was a
+    // 3 pt line in a 6 pt footprint, growing to 8. The sound sheet's track
+    // keeps its own 3 and 8 (`PlayheadBarView.restingTrackHeight`).
+
     /// The cursor after a release, until the strip rests: a disc.
     static let cursorDiameter = PlayheadBarRenderer.cursorDiameter
     /// The cursor while handled: a vertical pill AS WIDE AS THE DISC — the
     /// owner after the device check, 2026-10-22: at 4 pt it read thinner
     /// than the cursor it grows out of and shrinks back into.
     static let handledCursorSize = PlayheadBarRenderer.handledCursorSize
-    /// How long the bar and its cursor take to grow when touched, and to
-    /// shrink back on release.
+    /// How long the bar and its cursor take to grow when touched.
     static let handleDuration: TimeInterval = 0.2
+    /// How long the line takes to come back to its resting 2 pt when the
+    /// finger lifts (#2252): a short spring (`Tween.Curve.spring`) — it dips
+    /// a little under the resting line and settles, so the release reads as
+    /// a let-go rather than a fade. To tune on the device.
+    static let releaseSpringDuration: TimeInterval = 0.35
 
     /// Whether the strip is up (a touch, a scrub): the indicator's full ink.
     private var isAwake = false
@@ -541,8 +555,11 @@ final class SnapMediaPageBarView: UIView {
         // ONE thickness, a carousel's segments and a clip's bar alike (#1712,
         // the owner: the segments stood thicker than the progress bar) — thin
         // at rest, taller when handled.
-        let trackHeight = Self.clipTrackHeight
-            + (Self.handledTrackHeight - Self.clipTrackHeight) * handling.value
+        let trackHeight: CGFloat = drawnLineHeight
+        // ⚠️ GROWN UPWARD (#2252): the line's bottom edge stays on the
+        // footprint's, and a touched line rises over the content above it —
+        // never down toward the bar, never pushing anything.
+        let trackCenterY: CGFloat = drawnLineCenterY
         let shown = segments.indices.map { index -> CGFloat in
             guard let clipWeights else { return rooms[index] }
             // ⚠️ A DISTANCE, NOT A BOOLEAN — the same mistake this file made in
@@ -592,7 +609,7 @@ final class SnapMediaPageBarView: UIView {
             // bounds and cancels the transform silently — the trap
             // `SnapFeedCell.pageStage` documents one view up.
             segment.bounds = CGRect(x: 0, y: 0, width: max(width, 0), height: trackHeight)
-            segment.center = CGPoint(x: x + width / 2, y: bounds.height / 2)
+            segment.center = CGPoint(x: x + width / 2, y: trackCenterY)
             segment.layer.cornerRadius = min(trackHeight, max(width, 0)) / 2
             // ⚠️ A CLIP'S BAR IS A TRACK, so the segment carrying it steps back
             // to the resting ink and the PLAYED part is the bright thing. Left
@@ -612,6 +629,19 @@ final class SnapMediaPageBarView: UIView {
             layoutFill(onPage: index, width: width, clipness: clipness)
             x += width + (index < gaps.count ? gaps[index] : 0)
         }
+    }
+
+    /// The line's drawn thickness now: `thickness` at rest, `touchedThickness`
+    /// under a finger, the `handling` tween between them (#2252). The release
+    /// spring dips it a little under the resting line before it settles.
+    private var drawnLineHeight: CGFloat {
+        max(Self.thickness + (Self.touchedThickness - Self.thickness) * handling.value, 1)
+    }
+
+    /// The line's centre, its bottom edge on the footprint's bottom edge: a
+    /// touched line grows upward only (#2252).
+    private var drawnLineCenterY: CGFloat {
+        bounds.height - drawnLineHeight / 2
     }
 
     /// How much of where the viewer IS, is clip.
@@ -688,7 +718,7 @@ final class SnapMediaPageBarView: UIView {
         let segment = segments[index]
         renderer.drawCursor(
             in: self, trackMinX: segment.center.x - segment.bounds.width / 2, trackWidth: segment.bounds.width,
-            centerY: bounds.height / 2, played: played, trackHeight: track,
+            centerY: segment.center.y, played: played, trackHeight: track,
             handling: handling.value, awakeness: awakeness.value, ink: fillInk, alpha: segment.alpha * alpha
         )
     }
@@ -700,36 +730,67 @@ final class SnapMediaPageBarView: UIView {
     /// playhead feed, and a `UIView` animation of its frames would be cut
     /// by the next feed.
     struct Tween {
+        /// How the value travels: an ease-out, or a short spring that
+        /// overshoots its target once and settles (#2252, the line's release).
+        enum Curve {
+            case easeOut
+            case spring
+        }
+
         private(set) var value: CGFloat = 0
         private var from: CGFloat = 0
         private var to: CGFloat = 0
         private var start: CFTimeInterval = 0
         private var duration: CFTimeInterval = 0
+        private var curve: Curve = .easeOut
+        /// Whether the value has reached its target. A flag rather than
+        /// `value != to`: a spring passes through its target on the way to
+        /// the overshoot, and must not stop there.
+        private var arrived = true
 
-        var isMoving: Bool { value != to }
+        var isMoving: Bool { !arrived }
 
         mutating func settle(at target: CGFloat) {
             value = target
             from = target
             to = target
             duration = 0
+            arrived = true
         }
 
-        mutating func move(to target: CGFloat, duration: CFTimeInterval, now: CFTimeInterval) {
+        mutating func move(
+            to target: CGFloat, duration: CFTimeInterval, now: CFTimeInterval, curve: Curve = .easeOut
+        ) {
             guard target != to || value != target else { return }
             guard duration > 0 else { return settle(at: target) }
             from = value
             to = target
             start = now
             self.duration = duration
+            self.curve = curve
+            arrived = false
         }
 
-        /// Advances to `now`, ease-out.
+        /// Advances to `now`, along the move's curve.
         mutating func step(now: CFTimeInterval) {
             guard isMoving else { return }
             let progress = min(max((now - start) / duration, 0), 1)
-            let eased = 1 - pow(1 - progress, 3)
-            value = progress >= 1 ? to : from + (to - from) * CGFloat(eased)
+            let eased: Double = curve == .spring ? Self.springProgress(progress) : 1 - pow(1 - progress, 3)
+            if progress >= 1 {
+                value = to
+                arrived = true
+            } else {
+                value = from + (to - from) * CGFloat(eased)
+            }
+        }
+
+        /// A damped spring over the move's duration: 0 at the start, exactly
+        /// 1 at the end (the cosine's quarter-turn lands there), one overshoot
+        /// of about 9 % around 40 % of the way.
+        static func springProgress(_ progress: Double) -> Double {
+            let damping: Double = 6
+            let frequency: Double = 2.5 * .pi
+            return 1 - exp(-damping * progress) * cos(frequency * progress)
         }
     }
 
@@ -741,9 +802,12 @@ final class SnapMediaPageBarView: UIView {
     private var clipHold = Tween()
     private var tweenLink: CADisplayLink?
 
-    private func animate(_ tween: ReferenceWritableKeyPath<SnapMediaPageBarView, Tween>, to target: CGFloat, duration: TimeInterval) {
+    private func animate(
+        _ tween: ReferenceWritableKeyPath<SnapMediaPageBarView, Tween>, to target: CGFloat,
+        duration: TimeInterval, curve: Tween.Curve = .easeOut
+    ) {
         let moves = window != nil && !UIAccessibility.isReduceMotionEnabled
-        self[keyPath: tween].move(to: target, duration: moves ? duration : 0, now: CACurrentMediaTime())
+        self[keyPath: tween].move(to: target, duration: moves ? duration : 0, now: CACurrentMediaTime(), curve: curve)
         guard handling.isMoving || awakeness.isMoving || clipHold.isMoving else { return layoutSegments() }
         guard tweenLink == nil else { return }
         let link = CADisplayLink(target: TweenTarget(self), selector: #selector(TweenTarget.tick))
@@ -943,10 +1007,13 @@ final class SnapMediaPageBarView: UIView {
             // the pages (#1734).
             dragMeansPlayhead = isScrubbingAClip
                 && segmentFrame(Int(position.rounded())).map { x >= $0.minX && x <= $0.maxX } == true
-            // Only the clip's bar grows under the thumb — it is the playhead's
-            // handle. Segments do not (the owner, 2026-10-25): a drag hands
-            // their line to the filmstrip, and a tap selects at once.
-            if dragMeansPlayhead { animate(\.handling, to: 1, duration: Self.handleDuration) }
+            // ⚠️ THE LINE GROWS UNDER ANY FINGER (#2252, the owner
+            // 2026-11-10): 2 pt is a mark, not a handle, so whatever the thumb
+            // landed on — a clip's bar, a carousel's segments — comes up to
+            // `touchedThickness` while it is held. (It was the clip's bar
+            // alone, the owner 2026-10-25, when the segments rested at 3 pt;
+            // a browse still hands the segments' line to the filmstrip.)
+            animate(\.handling, to: 1, duration: Self.handleDuration)
             // From what the bar SHOWS, which is a hold still waiting for the
             // player after the last release — anchoring on the player instead
             // would throw the bar back to where it was before that release.
@@ -972,7 +1039,8 @@ final class SnapMediaPageBarView: UIView {
             // `.ended` leaves a card hanging on screen.
             onScrubPreview(nil)
             wake()
-            animate(\.handling, to: 0, duration: Self.handleDuration)
+            // Back to the resting line on a short spring (#2252).
+            animate(\.handling, to: 0, duration: Self.releaseSpringDuration, curve: .spring)
             if isBrowsing {
                 endBrowsing()
                 return
@@ -1174,17 +1242,19 @@ final class SnapMediaPageBarView: UIView {
         return hit ?? Int(position.rounded())
     }
 
-    /// ⚠️ A STRIP THIS THIN NEEDS A TALLER TARGET. Six points is a legible
+    /// ⚠️ A STRIP THIS THIN NEEDS A TALLER TARGET. Two points is a legible
     /// mark and an unhittable control, so the touch area is grown to the
-    /// platform's minimum around it — outward only, which costs the layout
-    /// nothing because the band it grows into is the breathing room between
-    /// the caption and the bar.
+    /// platform's minimum around it, centred on the line (#2252) — outward
+    /// only and invisible, which costs the layout nothing. It reaches up over
+    /// the caption's last line; the chrome gives the caption those touches
+    /// first (`SnapChromeView.hitTest`), so a tap on the words still opens
+    /// the comments.
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         let grown = bounds.insetBy(dx: 0, dy: -(Self.minimumTouchHeight - bounds.height) / 2)
         return grown.contains(point)
     }
 
-    private static let minimumTouchHeight: CGFloat = 44
+    static let minimumTouchHeight: CGFloat = 44
 
     #if DEBUG
     /// Where a segment is drawn, so a spec can state the claims that make this
