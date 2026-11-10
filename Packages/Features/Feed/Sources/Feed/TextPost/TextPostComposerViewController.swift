@@ -52,6 +52,11 @@ final class TextPostComposerViewController: UIViewController {
     /// The thread's voice composer, on the text composer (#2209,
     /// `-voice-posts`): the first message can be a voice.
     private(set) var voiceComposer: VoiceComposer?
+    /// The card the screen was opened with (#2216, "Share as a Post"): a
+    /// channel's, attached above the composer until the author removes it.
+    private let openingEmbed: PostEmbed?
+    /// The attached card and its place, while there is one (#2216).
+    private(set) var showcaseAttachment: ShowcaseAttachmentView?
     /// Whether the sheet grew to make room for the keyboard — so it shrinks
     /// back when the keyboard goes, and only then.
     private var expandedForKeyboard = false
@@ -109,8 +114,10 @@ final class TextPostComposerViewController: UIViewController {
         wallet: WalletStore?,
         makeWalletSheet: (@MainActor () -> UIViewController)?,
         entities: EntityStore? = nil,
-        bookmarks: PostBookmarkStore = .shared
+        bookmarks: PostBookmarkStore = .shared,
+        attaching embed: PostEmbed? = nil
     ) {
+        self.openingEmbed = embed
         self.panel = panel
         self.drafts = drafts
         self.imagePipeline = imagePipeline
@@ -185,6 +192,72 @@ final class TextPostComposerViewController: UIViewController {
         present(alert, animated: true)
     }
 
+    // MARK: - Showcases (#2216)
+
+    /// A channel's "Share as a Post": its full card above the composer, the
+    /// words the author writes going above it on the post, and an optional
+    /// place. The invitation steps aside — the card is what is being posted.
+    /// Only for a draft that publishes embeds (`-channels`).
+    private func installShowcase() {
+        guard let openingEmbed, panel.viewModel.acceptsShowcase, showcaseAttachment == nil else { return }
+        let attachment = ShowcaseAttachmentView()
+        attachment.show(openingEmbed, pipeline: imagePipeline)
+        attachment.setPlace(nil)
+        attachment.onRemove = { [weak self] in self?.removeShowcase() }
+        attachment.onPickPlace = { [weak self] in self?.pickPlace() }
+        attachment.onClearPlace = { [weak self] in self?.setShowcasePlace(nil) }
+        attachment.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(attachment)
+        // Above the composer's input row, riding it up with the keyboard; it
+        // may slide under the header's frost on a short sheet rather than
+        // squeeze the card.
+        let top = attachment.topAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.topAnchor, constant: Spacing.sm)
+        top.priority = .defaultHigh
+        NSLayoutConstraint.activate([
+            attachment.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: Spacing.lg),
+            attachment.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Spacing.lg),
+            attachment.bottomAnchor.constraint(equalTo: panel.composeBar.inputRowTopAnchor, constant: -Spacing.md),
+            top,
+        ])
+        panel.viewModel.draftShowcase = DraftShowcase(embed: openingEmbed, place: nil)
+        panel.setDraftStreamHidden(true)
+        showcaseAttachment = attachment
+    }
+
+    /// The card's ✕: the words publish as a plain text post, with no place.
+    /// Internal for tests.
+    func removeShowcase() {
+        // A post on its way has already gone with its card.
+        guard showcaseAttachment != nil, !panel.isPublishing, publishedModel == nil else { return }
+        dropShowcaseAttachment()
+        panel.viewModel.draftShowcase = nil
+    }
+
+    private func dropShowcaseAttachment() {
+        showcaseAttachment?.removeFromSuperview()
+        showcaseAttachment = nil
+        panel.setDraftStreamHidden(false)
+    }
+
+    /// "Add a Place": the place search, on the sheet's stack.
+    private func pickPlace() {
+        guard publishedModel == nil, !panel.isPublishing else { return }
+        let picker = ShowcasePlacePickerViewController()
+        picker.onPick = { [weak self, weak picker] place in
+            self?.setShowcasePlace(place)
+            picker?.closeScreen()
+        }
+        navigationController?.pushViewController(picker, animated: true)
+    }
+
+    /// The place the showcase stands at on the map, or none. Internal for
+    /// tests.
+    func setShowcasePlace(_ place: TextPostPlace?) {
+        guard showcaseAttachment != nil, panel.viewModel.draftShowcase != nil else { return }
+        panel.viewModel.draftShowcase?.place = place
+        showcaseAttachment?.setPlace(place)
+    }
+
     // MARK: - Lifecycle
 
     override func viewDidLoad() {
@@ -212,6 +285,7 @@ final class TextPostComposerViewController: UIViewController {
         ]
         observeKeyboard()
         installVoiceComposer()
+        installShowcase()
         // The invitation grows with the text size, and so may the least the
         // sheet rests at.
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
@@ -569,6 +643,8 @@ final class TextPostComposerViewController: UIViewController {
     private func becomePublished(_ entry: FeedEntry) {
         if let editingDraftID { drafts.delete(editingDraftID) }
         editingDraftID = nil
+        // The card is the post's now, drawn on its page (#2216).
+        dropShowcaseAttachment()
         let model = FeedDisplayModelBuilder().build(entry, now: Date())
         publishedEntry = entry
         publishedModel = model
@@ -748,6 +824,8 @@ final class TextPostComposerViewController: UIViewController {
 
     #if DEBUG
     var debugIsPublished: Bool { publishedModel != nil }
+    /// The showcase the draft will publish (#2216): its card and its place.
+    var debugDraftShowcase: DraftShowcase? { panel.viewModel.draftShowcase }
     var debugRestingFloor: CGFloat? { restingFloor }
     /// The published post's id, once there is one.
     var debugPublishedPostID: PostID? { publishedModel?.id }

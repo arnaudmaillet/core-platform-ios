@@ -701,6 +701,14 @@ final class PostDetailViewController: UIViewController {
     /// A draft whose first message is on its way — already sent, past recall.
     var isPublishing: Bool { viewModel.isDraft && composeBar.isSending }
 
+    /// Hides the draft's stream — its invitation — while the host shows an
+    /// attachment in its place (#2216: a showcase's card, above the
+    /// composer). A published post's page always shows its stream.
+    func setDraftStreamHidden(_ hidden: Bool) {
+        loadViewIfNeeded()
+        streamSurface.isHidden = hidden && viewModel.isDraft
+    }
+
     #if DEBUG
     func debugSend(_ text: String) { composeBar.debugSend(text) }
     /// The boost button's spend, as its tap hands it over.
