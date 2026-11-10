@@ -447,10 +447,23 @@ open class HeroHeaderView: UIView {
             bannerView.isHidden = isBannerSuppressed || bannerFormat == .none
             bannerShadow.isHidden = isBannerSuppressed || bannerFormat != .band
             if isBannerSuppressed { setBannerVideoPlaying(false) }
+            onChromeGroundChange?()
         }
     }
 
     private var isBannerSuppressed: Bool { isHidden }
+
+    /// Whether a picture stands behind the navigation bar: a banner shown,
+    /// with its picture drawn. The bar's title reads white over it at rest,
+    /// and in the page's ink without one — a profile with no banner, or one
+    /// whose picture has not landed (#2248: the pushed profile's @handle).
+    public var hasPictureBehindChrome: Bool {
+        !isBannerSuppressed && bannerFormat != .none && bannerView.hasPicture
+    }
+
+    /// Fires when `hasPictureBehindChrome` may have changed — the page's bar
+    /// re-inks its title (`HeroPageViewController`).
+    public var onChromeGroundChange: (() -> Void)?
 
     /// Moves the banner OUT of the header, into `container` below `sibling` —
     /// behind the screen's scrolling content, so that content can pass over
@@ -488,6 +501,7 @@ open class HeroHeaderView: UIView {
         bannerView.setFormat(format)
         applyIdentityInk()
         setNeedsLayout()
+        onChromeGroundChange?()
     }
 
     /// The scroll, handed down to the banner: the picture lags the content,
@@ -926,6 +940,7 @@ open class HeroHeaderView: UIView {
         bannerView.onPicturePresenceChange = { [weak self] in
             self?.applyIdentityInk()
             self?.applyBannerShadowPresence(animated: true)
+            self?.onChromeGroundChange?()
         }
         // The blurred picture decides the type's ink — read it again the
         // moment it changes. Off the bake's own dissolve (it lands inside
