@@ -491,7 +491,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             switcherFactory: onLogout == nil ? nil : makeSwitcherFactory(),
             makeRelationshipsViewController: makeRelationshipsFactory(),
             identityStub: identityStub,
-            trayPlacement: trayPlacement
+            trayPlacement: trayPlacement,
+            channels: makeChannelsModel(isOwnProfile: true),
+            makeChannelCreation: makeChannelCreation
         )
         controller.feedHero = openFeedHero
         controller.staking = makeCardStaking?() ?? wallet.map(PostCardStaking.init)
@@ -525,6 +527,23 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         }
         return makePostGridPage
     }
+    /// The channels a profile owns (#2232): Chat's read, handed in by the
+    /// composition root — the only place that sees both features. Nil, or
+    /// nil answered (the channels off), and no profile has a Channels tab.
+    public var makeProfileChannels: (@MainActor () -> (any ProfileChannelsProviding)?)?
+    /// The new channel's sheet (Chat's, the "+" menu's), for the own
+    /// Channels tab's "Create a Channel" (#2232). Nil: the row isn't offered.
+    public var makeChannelCreation: (@MainActor () -> UIViewController?)?
+
+    /// The Channels tab's model for one profile screen, or nil with no
+    /// channels to read.
+    private func makeChannelsModel(isOwnProfile: Bool) -> ProfileChannelsViewModel? {
+        guard let provider = makeProfileChannels?() else { return nil }
+        return ProfileChannelsViewModel(
+            provider: provider, isOwnProfile: isOwnProfile, offersCreation: makeChannelCreation != nil
+        )
+    }
+
     /// The wallet the gallery cards' like chips stake from — the app's one
     /// instance. Nil leaves the chips counters.
     public var wallet: WalletStore?
@@ -643,7 +662,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             shareTargeting: shareTargeting,
             onLogout: nil,
             makeRelationshipsViewController: makeRelationshipsFactory(),
-            identityStub: known
+            identityStub: known,
+            // `isOwnProfile` follows the view model's source: a routed
+            // profile is read as someone's page, even the viewer's (#2232).
+            channels: makeChannelsModel(isOwnProfile: viewModel.isOwnProfile)
         )
         controller.feedHero = openFeedHero
         controller.staking = makeCardStaking?() ?? wallet.map(PostCardStaking.init)

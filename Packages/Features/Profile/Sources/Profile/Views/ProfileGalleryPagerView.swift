@@ -56,13 +56,19 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
     ///     opens on Posts alone, and the sources with nothing in them — most
     ///     of someone else's — never build theirs.
     ///   - makePage: For You's own grid page, in a style (#1273, epic #1269):
-    ///     every page of the profile is For You's, its tiles For You's tiles.
+    ///     every page of the profile's POSTS is For You's, its tiles For
+    ///     You's tiles.
+    ///   - makeChannelsPage: the Channels tab's page (#2232) — a list of
+    ///     channels, not posts. Nil (no channels) builds it as a grid page,
+    ///     which only a test whose tabs name Channels ever does.
     init(
         tabs: [ProfileTab] = ProfileTab.publicTabs,
         shown: [ProfileTab]? = nil,
+        makeChannelsPage: (() -> any PostGridPage)? = nil,
         makePage: @escaping (PostGridPageStyle) -> any PostGridPage
     ) {
         super.init(tabs: tabs, shown: shown) { tab in
+            if tab == .channels, let makeChannelsPage { return makeChannelsPage() }
             let page = makePage(ProfileGalleryPagerView.style(for: tab))
             // Post info by size on every tile (`PostTileInfo`'s three
             // levels) — the one tile contract.
@@ -106,7 +112,7 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
         }
         // A page built late is told what its elders were.
         page.staking = staking
-        if let lastSnapshot { show(lastSnapshot, for: tab, on: page, screen: presenceScreen()) }
+        if let lastSnapshot, tab != .channels { show(lastSnapshot, for: tab, on: page, screen: presenceScreen()) }
     }
 
     @available(*, unavailable)
@@ -121,6 +127,8 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
         case .format(.activity), .reposts, .tagged: .discover
         case .format(.media): .grid
         case .format(.short), .saved, .reactions: .list
+        // Its own page, not a grid (`ProfileChannelsPage`); a list if asked.
+        case .channels: .list
         }
     }
 
@@ -134,7 +142,9 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
     func render(_ snapshot: ProfileViewModel.GallerySnapshot) {
         lastSnapshot = snapshot
         let screen = presenceScreen()
-        for tab in allTabs {
+        // Channels' presence is its model's to remember (#2232): the
+        // snapshot holds posts, and says nothing about channels.
+        for tab in allTabs where tab != .channels {
             let state = snapshot.state(for: tab)
             let section = String(describing: tab)
             // Every tab's count, built or not: it decides the bones the tab
@@ -147,7 +157,7 @@ final class ProfileGalleryPagerView: HeroPagePager<ProfileTab> {
                 }
             }
         }
-        for (tab, page) in builtPages { show(snapshot, for: tab, on: page, screen: screen) }
+        for (tab, page) in builtPages where tab != .channels { show(snapshot, for: tab, on: page, screen: screen) }
     }
 
     /// The pages built so far, with their tabs.
