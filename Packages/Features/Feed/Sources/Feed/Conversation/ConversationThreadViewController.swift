@@ -278,6 +278,9 @@ final class ConversationThreadViewController: UIViewController {
     /// A channel's viewer who doesn't post (#2215): the bar in the
     /// composer's place. Built the first time one is needed.
     private var readerBar: ConversationReaderBar?
+    /// Whether the reader bar shows — what it was last told, not
+    /// `isHidden`, which stays false through its fade out (#2236).
+    private var readerBarShown = false
     /// The reader bar's write is on its way (a join, a withdrawal).
     private var readerActionInFlight = false
     /// Where the viewer stands, while they don't post (#2215, #2217) — kept
@@ -905,6 +908,11 @@ final class ConversationThreadViewController: UIViewController {
             composerBackdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             composerBackdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             composerBackdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            returnButton.trailingAnchor.constraint(equalTo: composeBar.trailingAnchor),
+            returnButton.widthAnchor.constraint(equalToConstant: SnapActionColumn.bubbleSize),
+            returnButton.heightAnchor.constraint(equalToConstant: SnapActionColumn.bubbleSize),
+        ])
+        composerFoot = [
             // From the INPUT ROW, as on the post: the lifted slot floats in
             // the band's ramp, and the band rides the keyboard with the row.
             composerBackdrop.topAnchor.constraint(
@@ -912,38 +920,121 @@ final class ConversationThreadViewController: UIViewController {
             ),
             // Over the row's own bubble, a breath above the row: it rides the
             // keyboard with it.
-            returnButton.trailingAnchor.constraint(equalTo: composeBar.trailingAnchor),
             returnButton.bottomAnchor.constraint(equalTo: composeBar.inputRowTopAnchor, constant: -Spacing.md),
-            returnButton.widthAnchor.constraint(equalToConstant: SnapActionColumn.bubbleSize),
-            returnButton.heightAnchor.constraint(equalToConstant: SnapActionColumn.bubbleSize),
-        ])
+        ]
+        // Neither composer nor reader bar (#2236): the band and the way
+        // back come down to the toolbar, where the composer would have
+        // stood — nothing floats over the last message.
+        bareFoot = [
+            composerBackdrop.topAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -SnapCommentsLayout.footerFrostLead
+            ),
+            returnButton.bottomAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -(SnapActionColumn.bottomBreath + Spacing.md)
+            ),
+        ]
+        NSLayoutConstraint.activate(composerFoot)
         composeBar.riseWithKeyboard(of: view.keyboardLayoutGuide)
+    }
+
+    /// The band's top and the way back's foot, on the composer's input row
+    /// (which the reader bar stands in for)…
+    private var composerFoot: [NSLayoutConstraint] = []
+    /// …or on the toolbar, while the footer is bare (#2236).
+    private var bareFoot: [NSLayoutConstraint] = []
+
+    /// The footer holds neither the composer nor the reader bar (#2236): a
+    /// channel's subscriber, a group closed to its reader. The thread takes
+    /// the composer's height back, and the footer is the pill and the ⋯, as
+    /// on a post.
+    private var footerIsBare: Bool { mode == .full && composeBar.isHidden && !readerBarShown }
+
+    /// Puts the band and the way back on the composer's row, or on the
+    /// toolbar while the footer is bare. The caller lays out.
+    private func placeFooterFoot() {
+        guard !composerFoot.isEmpty else { return }
+        let bare = footerIsBare
+        guard bareFoot[0].isActive != bare else { return }
+        if bare {
+            NSLayoutConstraint.deactivate(composerFoot)
+            NSLayoutConstraint.activate(bareFoot)
+        } else {
+            NSLayoutConstraint.deactivate(bareFoot)
+            NSLayoutConstraint.activate(composerFoot)
+        }
     }
 
     /// The post's footer, with the peer's pill where the post's author pill
     /// is (#671): [peer pill] … [⋯]. The emote strip that held the slot is
     /// gone — the composer's own emote button is the way to emotes.
     private func configureToolbar() {
-        // A channel's menu opens its info (#2215); a person's, their profile.
-        let profile = group?.isChannel == true
-            ? UIAction(title: "Channel Info", image: UIImage(systemName: "info.circle")) { [weak self] _ in
-                guard let self else { return }
-                self.driver.didTapGroupInfo(from: self)
-            }
-            : UIAction(title: "View Profile", image: UIImage(systemName: "person.crop.circle")) { [weak self] _ in
-                self?.driver.didTapIdentity()
-            }
-        let more = SnapFooterToolbar.makeMoreItem(menu: UIMenu(children: [profile]))
+        let more = SnapFooterToolbar.makeMoreItem(menu: overflowMenu())
+        moreItem = more
         toolbarItems = SnapFooterToolbar.items(
             leading: peerPill, leadingID: "conversation.peer-pill", actions: mediaItems(), more: more
         )
-        toolbarShape = ToolbarShape(isChannel: group?.isChannel == true, canPost: group?.canPost != false)
+        toolbarShape = ToolbarShape(
+            isChannel: group?.isChannel == true, isGroup: group != nil, canPost: group?.canPost != false
+        )
+    }
+
+    /// The footer's ⋯, kept so its menu follows the standing in place
+    /// (#2236): rebuilding the toolbar for a new entry would re-lay its
+    /// glass.
+    private var moreItem: UIBarButtonItem?
+
+    /// The ⋯ menu: the conversation's info first; then, for a reader, the
+    /// way out (#2236) — a section of its own, last.
+    ///
+    /// ⚠️ THE WAY OUT IS THE MENU'S, NOT THE BAR'S (#2236, the owner
+    /// 2026-11-10): a destructive, rarely used action doesn't sit under the
+    /// thumb on every read (Telegram, WhatsApp and Instagram all leave a
+    /// channel from its menu or its details). Each still asks first
+    /// (`confirmReader`). An owner or an admin posts, so they have no
+    /// standing and no Leave here: an owner hands the channel over first,
+    /// from the info screen.
+    private func overflowMenu() -> UIMenu {
+        let info: UIAction
+        if group?.isChannel == true {
+            // A channel's menu opens its info (#2215).
+            info = UIAction(title: "Channel Info", image: UIImage(systemName: "info.circle")) { [weak self] _ in
+                guard let self else { return }
+                self.driver.didTapGroupInfo(from: self)
+            }
+        } else if group != nil {
+            // A group has no one profile to open: its info (#2236).
+            info = UIAction(title: "Group Info", image: UIImage(systemName: "info.circle")) { [weak self] _ in
+                guard let self else { return }
+                self.driver.didTapGroupInfo(from: self)
+            }
+        } else {
+            info = UIAction(title: "View Profile", image: UIImage(systemName: "person.crop.circle")) { [weak self] _ in
+                self?.driver.didTapIdentity()
+            }
+        }
+        guard let exit = ConversationReaderExit(standing: readerStanding) else { return UIMenu(children: [info]) }
+        let leave = UIAction(
+            title: exit.title, image: UIImage(systemName: exit.symbol),
+            attributes: exit.isDestructive ? .destructive : []
+        ) { [weak self] _ in
+            self?.performReaderExit(exit)
+        }
+        return UIMenu(children: [
+            UIMenu(options: .displayInline, children: [info]),
+            UIMenu(options: .displayInline, children: [leave]),
+        ])
+    }
+
+    /// The ⋯ menu again, for a new standing or a new kind of conversation.
+    private func refreshOverflowMenu() {
+        moreItem?.menu = overflowMenu()
     }
 
     /// What the footer was last built for (#2215): rebuilt only when a
     /// channel's descriptor changes what it holds.
     private struct ToolbarShape: Equatable {
         var isChannel = false
+        var isGroup = false
         var canPost = true
     }
     private var toolbarShape = ToolbarShape()
@@ -1184,9 +1275,6 @@ final class ConversationThreadViewController: UIViewController {
     private func renderMuted(_ muted: Bool?) {
         let was = self.muted
         self.muted = muted
-        if let readerBar, !readerBar.isHidden {
-            readerBar.configure(standing: readerBar.standing, isMuted: muted == true)
-        }
         guard let muted else {
             if was != nil {
                 placeMuteItem()
@@ -1738,6 +1826,7 @@ final class ConversationThreadViewController: UIViewController {
         guard let newGroup else {
             peerPill.onGroupTapped = nil
             applyReaderStanding(nil)
+            if mode == .full, toolbarShape != ToolbarShape() { configureToolbar() }
             if wasGroup { adoptPeer(peer) }
             return
         }
@@ -1756,7 +1845,7 @@ final class ConversationThreadViewController: UIViewController {
         if newGroup.isChannel { view.accessibilityLabel = "Channel, \(newGroup.name)" }
         applyReaderStanding(newGroup.readerStanding)
         if mode == .full,
-           toolbarShape != ToolbarShape(isChannel: newGroup.isChannel, canPost: newGroup.canPost) {
+           toolbarShape != ToolbarShape(isChannel: newGroup.isChannel, isGroup: true, canPost: newGroup.canPost) {
             configureToolbar()
         }
         fitTrailingRun()
@@ -1766,33 +1855,77 @@ final class ConversationThreadViewController: UIViewController {
     // MARK: - A channel's reader (#2215)
 
     /// The composer for a viewer who posts; for one who doesn't, the reader
-    /// bar in its place. The composer stays laid out under the bar — hidden,
-    /// its height still the stream's clearance — so the transcript doesn't
-    /// move when one swaps for the other.
+    /// bar in its place — or nothing, for a standing with nothing to take
+    /// them in (#2236: a subscriber; #2217: a group closed to them). The
+    /// composer stays laid out under the bar — hidden, its height still the
+    /// stream's clearance — so the transcript doesn't move when one swaps
+    /// for the other.
+    ///
+    /// ⚠️ A BARE FOOTER GIVES THE HEIGHT BACK (#2236): with neither composer
+    /// nor bar, the inset, the band and the way back come down to the
+    /// toolbar (`footerIsBare`). A change of standing on screen — Join to
+    /// subscribed, Leave to Join — fades the bar and moves the clearance in
+    /// one animation, so the messages ride it rather than jump.
     private func applyReaderStanding(_ standing: ConversationThreadReaderStanding?) {
         guard mode == .full else { return }
         readerActionInFlight = false
         readerStanding = standing
-        guard let standing else {
+        let barWasShown = readerBarShown
+        let composerWasShown = !composeBar.isHidden
+        if let standing {
+            composeBar.endEditing(true)
+            driver.cancelReply()
+            composeBar.isHidden = true
+            let bar = readerBar ?? makeReaderBar()
+            bar.setWorking(false)
+            bar.configure(standing: standing)
+            readerBarShown = !ConversationReaderBar.spec(for: standing).isEmpty
+        } else {
             composeBar.isHidden = false
-            readerBar?.isHidden = true
             readerBar?.setWorking(false)
+            readerBarShown = false
+        }
+        refreshOverflowMenu()
+        let footerChanged = barWasShown != readerBarShown || composerWasShown == composeBar.isHidden
+        placeFooterFoot()
+        let animated = footerChanged && view.window != nil && transitionCoordinator == nil && hasRenderedContent
+            && !MotionPreference.reducesMotion
+        showReaderBar(readerBarShown, animated: animated)
+    }
+
+    /// The bar in or out — faded, the clearance moving with it, when
+    /// `animated`; at once otherwise.
+    private func showReaderBar(_ shows: Bool, animated: Bool) {
+        let bar = readerBar
+        bar?.isUserInteractionEnabled = shows
+        view.setNeedsLayout()
+        guard animated else {
+            bar?.isHidden = !shows
+            bar?.alpha = 1
             return
         }
-        composeBar.endEditing(true)
-        driver.cancelReply()
-        composeBar.isHidden = true
-        let bar = readerBar ?? makeReaderBar()
-        // A group closed to the viewer (#2217) offers nothing: no bar, the
-        // thread's own line says why.
-        bar.isHidden = ConversationReaderBar.spec(for: standing, isMuted: muted == true).isEmpty
-        bar.setWorking(false)
-        bar.configure(standing: standing, isMuted: muted == true)
-        view.setNeedsLayout()
+        if shows, let bar, bar.isHidden {
+            bar.isHidden = false
+            bar.alpha = 0
+        }
+        UIView.animate(
+            springDuration: 0.4, bounce: 0, options: [.beginFromCurrentState, .allowUserInteraction]
+        ) {
+            bar?.alpha = shows ? 1 : 0
+            // The band, the way back and the stream's clearance (laid out in
+            // `viewDidLayoutSubviews`) in the same spring.
+            self.view.layoutIfNeeded()
+        } completion: { _ in
+            // Shown again mid-fade: it stays.
+            guard let bar, !self.readerBarShown else { return }
+            bar.isHidden = true
+            bar.alpha = 1
+        }
     }
 
     private func makeReaderBar() -> ConversationReaderBar {
         let bar = ConversationReaderBar()
+        bar.isHidden = true
         bar.onAction = { [weak self] action in self?.performReaderAction(action) }
         view.addSubview(bar)
         bar.translatesAutoresizingMaskIntoConstraints = false
@@ -1805,38 +1938,39 @@ final class ConversationThreadViewController: UIViewController {
         return bar
     }
 
+    /// The bar's ways in (#2215, #2217).
     private func performReaderAction(_ action: ConversationReaderBar.Action) {
         switch action {
-        case .toggleMute:
-            guard let muted else { return }
-            setMuted(!muted, until: nil)
         case .join:
             guard !readerActionInFlight else { return }
             readerActionInFlight = true
             readerBar?.setWorking(true)
             driver.join()
         case .cancelRequest:
-            confirmReader(
-                title: "Withdraw your request?", message: "You can ask again later.", button: "Withdraw"
-            ) { [weak self] in
-                guard let self, !self.readerActionInFlight else { return }
-                self.readerActionInFlight = true
-                self.readerBar?.setWorking(true)
-                self.driver.cancelJoinRequest()
-            }
-        case .leave:
-            let name = group?.name ?? "this channel"
-            confirmReader(
-                title: "Leave \(name)?", message: "You won't see its posts any more.", button: "Leave"
-            ) { [weak self] in
-                guard let self else { return }
-                self.driver.leave(from: self)
-            }
+            withdrawRequest()
         case .follow:
             guard !readerActionInFlight else { return }
             readerActionInFlight = true
             readerBar?.setWorking(true)
             driver.follow()
+        }
+    }
+
+    /// The ⋯ menu's ways out (#2236), each confirmed as the bar's were.
+    private func performReaderExit(_ exit: ConversationReaderExit) {
+        switch exit {
+        case .leaveChannel:
+            let name = group?.name ?? "this channel"
+            confirmReader(
+                title: "Leave \(name)?", message: "You won't see its posts any more.", button: "Leave"
+            ) { [weak self] in
+                // No in-flight hold: an owner's refusal (a notice) brings no
+                // new standing to release it.
+                guard let self else { return }
+                self.driver.leave(from: self)
+            }
+        case .cancelRequest:
+            withdrawRequest()
         case .unfollow:
             let name = group?.name ?? "this group"
             confirmReader(
@@ -1845,19 +1979,51 @@ final class ConversationThreadViewController: UIViewController {
             ) { [weak self] in
                 guard let self, !self.readerActionInFlight else { return }
                 self.readerActionInFlight = true
-                self.readerBar?.setWorking(true)
                 self.driver.unfollow()
             }
         }
     }
 
+    /// Requested's tap, or the menu's Cancel Request: asked first, then the
+    /// bar's Requested shows the withdrawal on its way.
+    private func withdrawRequest() {
+        confirmReader(
+            title: "Withdraw your request?", message: "You can ask again later.", button: "Withdraw"
+        ) { [weak self] in
+            guard let self, !self.readerActionInFlight else { return }
+            self.readerActionInFlight = true
+            self.readerBar?.setWorking(true)
+            self.driver.cancelJoinRequest()
+        }
+    }
+
     private func confirmReader(title: String, message: String, button: String, _ confirmed: @escaping () -> Void) {
+        #if DEBUG
+        if let debugConfirmReader {
+            debugConfirmReader(ReaderConfirmation(title: title, message: message, button: button, confirm: confirmed))
+            return
+        }
+        #endif
         guard presentedViewController == nil else { return }
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         alert.addAction(UIAlertAction(title: button, style: .destructive) { _ in confirmed() })
         present(alert, animated: true)
     }
+
+    #if DEBUG
+    /// A confirmation the screen asks for (#2236). Tests.
+    struct ReaderConfirmation {
+        let title: String
+        let message: String
+        let button: String
+        let confirm: () -> Void
+    }
+
+    /// Stands in for the alert (#2236): a hosted test never sees a modal
+    /// complete. Tests.
+    var debugConfirmReader: ((ReaderConfirmation) -> Void)?
+    #endif
 
     private func adoptViewer(_ person: ConversationThreadPerson) {
         viewer = person
@@ -2064,10 +2230,20 @@ final class ConversationThreadViewController: UIViewController {
         collectionView.verticalScrollIndicatorInsets.bottom = inset
     }
 
+    /// The stream's bottom inset over a bare footer (#2236), on top of the
+    /// safe area the toolbar inflates.
+    static let bareBottomInset: CGFloat = SnapActionColumn.bottomBreath + Spacing.sm
+
     /// The bottom inset the composer asks for: clear of it, a little air.
     private var restingBottomInset: CGFloat? {
+        // Neither composer nor bar (#2236): clear of the toolbar alone, a
+        // breath over it as a post's bottom block stands.
+        if footerIsBare {
+            guard view.bounds.height > 0 else { return nil }
+            return Self.bareBottomInset
+        }
         // A channel's reader (#2215): clear of the bar in the composer's place.
-        if let readerBar, !readerBar.isHidden, readerBar.bounds.height > 0 {
+        if readerBarShown, let readerBar, readerBar.bounds.height > 0 {
             return max(0, view.bounds.height - min(readerBar.frame.minY, composeBar.occupiedMinY)
                 - view.safeAreaInsets.bottom) + Spacing.sm
         }
@@ -2554,10 +2730,27 @@ extension ConversationThreadViewController {
     var debugShowsComposer: Bool { !composeBar.isHidden }
     /// The reader bar's standing while it shows (#2215). Tests.
     var debugReaderStanding: ConversationThreadReaderStanding? { readerStanding }
-    /// Whether the reader bar shows — a group closed to the viewer hides it (#2217). Tests.
-    var debugShowsReaderBar: Bool { readerBar.map { !$0.isHidden } ?? false }
+    /// Whether the reader bar shows — a group closed to the viewer and a
+    /// channel's subscriber get none (#2217, #2236). Tests.
+    var debugShowsReaderBar: Bool { readerBarShown }
+    /// Whether the footer is bare, the band and the way back on the toolbar (#2236). Tests.
+    var debugFooterIsBare: Bool { footerIsBare }
+    /// The stream's bottom inset (#2236). Tests.
+    var debugBottomInset: CGFloat { collectionView.contentInset.bottom }
     /// A reader bar tap, as the bar sends it (#2217). Tests.
     func debugReaderAction(_ action: ConversationReaderBar.Action) { performReaderAction(action) }
+    /// The ⋯ menu's way out, picked (#2236). Tests.
+    func debugReaderExit(_ exit: ConversationReaderExit) { performReaderExit(exit) }
+    /// The footer's ⋯ menu (#2236). Tests.
+    var debugOverflowMenu: UIMenu? { moreItem?.menu }
+    /// The ⋯ menu's titles, flattened (#2236). Tests.
+    var debugOverflowMenuTitles: [String] {
+        func titles(_ element: UIMenuElement) -> [String] {
+            if let menu = element as? UIMenu { return menu.children.flatMap(titles) }
+            return [element.title]
+        }
+        return debugOverflowMenu.map(titles) ?? []
+    }
     /// Taps the header pill (#2214). Tests.
     func debugTapPill() { peerPill.debugTap() }
     #endif

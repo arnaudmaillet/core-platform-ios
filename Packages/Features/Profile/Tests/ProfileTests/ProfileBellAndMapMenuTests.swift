@@ -513,18 +513,35 @@ extension ProfileBellAndMapMenuTests {
 
     /// ⚠️ NEVER MID-PUSH (#756): Follow coming in while a child is being
     /// pushed over the profile waits for the bar to rest.
-    @Test func followArrivingMidPushWaitsForRest() async throws {
+    /// ⚠️ QUARANTINED (#2260): it forces the tray's state with
+    /// `debugSetTrayScrolledAway` without scrolling the page, and any layout
+    /// pass of the covered profile recomputes that state from the real
+    /// offset (`heroPageHeaderDidMove`, travelled 0) and takes Follow back
+    /// — under CI load that pass lands inside the wait, every time. The app
+    /// is right (a real scroll drives the state); the test must scroll for
+    /// real. To be rewritten.
+    @Test(.disabled("flaky under CI load: the tray state is forced without a scroll and a layout pass resets it — see #2260"))
+    func followArrivingMidPushWaitsForRest() async throws {
         let (screen, _, _, navigation, window) = hostedOnScreen(
             relationship: .other(isFollowing: false, isBlocked: false)
         )
         defer { window.isHidden = true }
         try #require(await settle { screen.followButtonState == .follow && screen.transitionCoordinator == nil })
 
+        // ⚠️ THE PUSH RUNS FAST, NOT ON THE RUNNER'S CLOCK: on a starved CI
+        // runner (#2254's and #2255's runs) the real-time push outlived the
+        // settle below and "Follow never came in" — the bar was waiting for a
+        // rest that hadn't come yet. The window's layers run 50× faster: the
+        // push is still a running transition when Follow is asked for, and
+        // its end comes in a few frames whatever the load.
+        window.layer.speed = 50
+        defer { window.layer.speed = 1 }
         navigation.pushViewController(UIViewController(), animated: true)
         try #require(screen.transitionCoordinator != nil, "guard: the push is running")
         screen.debugSetTrayScrolledAway(true)
         #expect(screen.debugBarRelationshipItem == nil, "Follow came in mid-push")
 
+        #expect(await settle { navigation.transitionCoordinator == nil }, "the push never ended")
         #expect(await settle { screen.debugBarRelationshipItem != nil }, "Follow never came in")
     }
 
