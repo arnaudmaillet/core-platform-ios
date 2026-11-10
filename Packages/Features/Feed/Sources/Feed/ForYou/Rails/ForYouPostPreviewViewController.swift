@@ -309,6 +309,10 @@ final class TextCardPreview {
     /// it. Bound to the post's voice, so a voice playing on the card shows
     /// here where it is.
     let voice = VoicePostCaptionView()
+    /// A showcase's card (#2216, behind `-channels`): the shared embed card,
+    /// full size, under the author's words. Display only — UIKit's preview
+    /// takes no touches; Join is the card's, on the list and the post page.
+    let embed = PostEmbedView()
     let rule = UIView()
     /// The comments shown — those that fit, in order.
     private(set) var rows: [CommentRowView] = []
@@ -319,7 +323,8 @@ final class TextCardPreview {
 
     init(
         post: GalleryPost, comments: [CommentEntry], width: CGFloat, imagePipeline: ImagePipeline,
-        showsVoice: Bool = VoicePosts.areDrawn, voiceHub: VoicePlaybackHub? = nil
+        showsVoice: Bool = VoicePosts.areDrawn, voiceHub: VoicePlaybackHub? = nil,
+        showsEmbed: Bool = PostEmbeds.areDrawn
     ) {
         let inset = Self.inset
         let inner = max(0, width - 2 * inset)
@@ -336,7 +341,9 @@ final class TextCardPreview {
         frames[band] = CGRect(x: inset, y: y, width: max(0, bandTrailing - inset), height: bandHeight)
         y += bandHeight + Self.gap
 
-        if let size = Self.voiceSize(for: post, showsVoice: showsVoice), let spoken = post.voice {
+        // A showcase's card outranks a voice (#2216), as on the list's card.
+        let embedSize = Self.embedSize(for: post, showsEmbed: showsEmbed)
+        if embedSize == nil, let size = Self.voiceSize(for: post, showsVoice: showsVoice), let spoken = post.voice {
             if let voiceHub { voice.hub = voiceHub }
             voice.show(
                 postID: post.id.rawValue, url: spoken.url, duration: spoken.duration, levels: spoken.waveform,
@@ -359,6 +366,18 @@ final class TextCardPreview {
         let captionHeight = ceil(caption.sizeThatFits(CGSize(width: inner, height: .greatestFiniteMagnitude)).height)
         frames[caption] = CGRect(x: inset, y: y, width: inner, height: captionHeight)
         y += captionHeight
+
+        if let embedSize, let shown = post.embed {
+            embed.show(shown, size: embedSize, pipeline: imagePipeline)
+            embed.isUserInteractionEnabled = false
+            let top = captionHeight > 0 ? y + Self.gap : y
+            let embedHeight = ceil(embed.systemLayoutSizeFitting(
+                CGSize(width: inner, height: UIView.layoutFittingCompressedSize.height),
+                withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+            ).height)
+            frames[embed] = CGRect(x: inset, y: top, width: inner, height: embedHeight)
+            y = top + embedHeight
+        }
 
         let maxHeight = (width * Self.maxHeightShare).rounded()
         let now = Date()
@@ -395,9 +414,16 @@ final class TextCardPreview {
         showsVoice && post.kind == .text && post.voice != nil ? .full : nil
     }
 
+    /// The size a lift gives a showcase's embed: full, under the words, for
+    /// a text post with one and the switch on (#2216). Pure.
+    static func embedSize(for post: GalleryPost, showsEmbed: Bool) -> PostEmbeds.Size? {
+        post.kind == .text && PostEmbeds.shown(post.embed, drawn: showsEmbed) != nil ? .full : nil
+    }
+
     /// Puts every piece in `view`, at its measured frame.
     func install(in view: UIView) {
-        let head: [UIView] = voice.isHidden ? [band, likes, caption] : [band, likes, voice, caption]
+        var head: [UIView] = voice.isHidden ? [band, likes, caption] : [band, likes, voice, caption]
+        if !embed.isHidden { head.append(embed) }
         let tail: [UIView] = rows.isEmpty ? [] : [rule]
         for piece in head + tail + rows {
             piece.translatesAutoresizingMaskIntoConstraints = true
