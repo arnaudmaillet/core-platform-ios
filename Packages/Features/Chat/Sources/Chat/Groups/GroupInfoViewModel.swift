@@ -56,7 +56,6 @@ final class GroupInfoViewModel {
             switch role {
             case .owner: "Owner"
             case .admin: "Admin"
-            case .subscriber: "Follower"
             default: nil
             }
         }

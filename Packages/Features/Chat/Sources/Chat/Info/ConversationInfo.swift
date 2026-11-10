@@ -167,10 +167,11 @@ enum ConversationInfoMenuEntry: Equatable, Sendable {
 /// The Posts page under the header (#2237): the text posts that showcase
 /// the conversation (#2216's embed). Until those are served for a
 /// conversation, the page's empty state — which, for owner and admins of a
-/// channel, offers to make the first.
+/// channel, offers to make the first. A group has no showcase yet (#2216
+/// embeds channels only): "No posts yet" for everyone.
 enum ConversationInfoPosts {
     static func status(channel: Bool, manages: Bool, canShareAsPost: Bool) -> PostGridPageStatus {
-        guard manages else {
+        guard manages, channel else {
             return PostGridPageStatus(
                 symbolName: "text.bubble", title: "No posts yet",
                 subtitle: channel ? "Posts that show this channel appear here." : "Posts that show this group appear here."
@@ -178,9 +179,7 @@ enum ConversationInfoPosts {
         }
         return PostGridPageStatus(
             symbolName: ChannelShowcase.shareSymbol, title: ChannelShowcase.shareTitle,
-            subtitle: channel
-                ? "Share the channel as a post: it shows here, and on the feed and the map."
-                : "Posts that show this group appear here.",
+            subtitle: "Share the channel as a post: it shows here, and on the feed and the map.",
             actionTitle: canShareAsPost ? ChannelShowcase.shareTitle : nil
         )
     }

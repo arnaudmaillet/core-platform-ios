@@ -209,19 +209,22 @@ class ConversationInfoPageViewController: HeroPageViewController<ConversationInf
     }()
 
     /// The trailing group for `muted` (nil: no bell): the "⋯" in the
-    /// corner, the bell inboard. A new set is written animated, never mid-
-    /// push (an item added then lands unanimated at its end, #756); a
-    /// changed mute redraws the glyph in place.
+    /// corner while it has something to offer, the bell inboard. A new set
+    /// is written animated, never mid-push (an item added then lands
+    /// unanimated at its end, #756); a changed mute redraws the glyph in
+    /// place.
     func applyBar(muted: Bool?) {
         let had = bellMuted
         bellMuted = muted
         if let muted { applyBellLook(muted: muted, animated: had != nil && had != muted) }
-        guard (had == nil) != (muted == nil) || ownTrailingBarItems.isEmpty else { return }
-        let items = muted == nil ? [moreItem] : [moreItem, bellItem]
+        var items: [UIBarButtonItem] = []
+        if !moreMenuElements().isEmpty { items.append(moreItem) }
+        if muted != nil { items.append(bellItem) }
+        guard !ownTrailingBarItems.elementsEqual(items, by: ===) else { return }
         if transitionCoordinator != nil, let navigationController {
             navigationController.whenAtRest { [weak self] in
                 guard let self else { return }
-                setOwnTrailingBarItems(bellMuted == nil ? [moreItem] : [moreItem, bellItem], animated: true)
+                applyBar(muted: bellMuted)
             }
             return
         }
