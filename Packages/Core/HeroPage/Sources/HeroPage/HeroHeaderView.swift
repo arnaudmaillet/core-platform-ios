@@ -822,7 +822,7 @@ open class HeroHeaderView: UIView {
     /// `ProfileIdentityInkTests` and the `-profile-ink-audit` launch argument.
     public func debugIdentityContrast() -> (name: HeroInkContrast, handle: HeroInkContrast)? {
         guard let measured = HeroInk.debugContrast(
-            of: [nameLabel, handleLabel], in: self, over: Surface.page
+            of: [nameLabel, handleLabel], in: self, over: HeroPageGround.color
         ), measured.count == 2 else { return nil }
         return (measured[0], measured[1])
     }
@@ -832,7 +832,7 @@ open class HeroHeaderView: UIView {
     /// stand on the picture too.
     public func debugBodyContrast() -> [(String, HeroInkContrast)]? {
         let labels = leadCounter.debugLabels + (bioLabel.isHidden ? [] : [bioLabel])
-        guard let measured = HeroInk.debugContrast(of: labels, in: self, over: Surface.page) else { return nil }
+        guard let measured = HeroInk.debugContrast(of: labels, in: self, over: HeroPageGround.color) else { return nil }
         // The lead counter by its caption ("followers" on a profile).
         let lead = leadCounter.accessibilityLabel?.lowercased() ?? "counter"
         return zip([lead, "caption", "bio"], measured).map { ($0, $1) }

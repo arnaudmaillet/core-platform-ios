@@ -130,8 +130,10 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
         NotificationCenter.default.addObserver(
             self, selector: #selector(decorativeMotionDidChange), name: .decorativeMotionDidChange, object: nil
         )
-        // The page the cards lie on, a step below them — see `Surface`.
-        view.backgroundColor = Surface.page
+        // The page the cards lie on, a step below them — see `Surface` — or
+        // the plain page under flat rows (#2243): a profile's and a place's
+        // pages are vertical post lists.
+        view.backgroundColor = HeroPageGround.color
         configureHeroNavigationBar()
         installHeroLayout()
     }
