@@ -38,19 +38,31 @@ public struct InboxListSections: Equatable, Sendable {
 
     /// The unread messages a section holds: what its header counts (#1210).
     func unreadMessages(in section: InboxListSection) -> Int {
-        Self.unreadMessages(in: section == .new ? new : earlier)
+        Self.unreadMessages(in: rows(of: section))
+    }
+
+    /// The rows `section` holds. The Join requests section holds no
+    /// conversation (#2230): its rows are the Requests page's own.
+    private func rows(of section: InboxListSection) -> [ConversationDisplayModel] {
+        switch section {
+        case .new: new
+        case .earlier: earlier
+        case .joinRequests: []
+        }
     }
 
     /// The unread messages of `rows` — a row's count is already zero once
-    /// it reads as read (`ConversationDisplayModel.unreadCount`).
+    /// it reads as read (`ConversationDisplayModel.unreadCount`). A muted
+    /// channel's are left out (#2230, `countsInBadge`): the badge leaves
+    /// them out, and the headers add up to the badge.
     static func unreadMessages(in rows: [ConversationDisplayModel]) -> Int {
-        rows.reduce(0) { $0 + ($1.isUnread ? $1.unreadCount : 0) }
+        rows.reduce(0) { $0 + ($1.isUnread && $1.countsInBadge ? $1.unreadCount : 0) }
     }
 
     /// The rows of `section` still unread, each one 1 — the Requests
     /// headers' count, as its badge's (#2171).
     func unreadRows(in section: InboxListSection) -> Int {
-        (section == .new ? new : earlier).count(where: \.isUnread)
+        rows(of: section).count(where: \.isUnread)
     }
 }
 
@@ -61,6 +73,9 @@ public struct InboxListSections: Equatable, Sendable {
 /// an inbox with no arrivals renders as one unlabelled list rather than as an
 /// empty header over everything.
 enum InboxListSection: Hashable {
+    /// The channels the viewer runs with requests waiting (#2230): Requests'
+    /// first section, one row per channel. Never in Chats.
+    case joinRequests
     case new
     case earlier
 }
@@ -73,8 +88,18 @@ enum InboxListSection: Hashable {
 extension InboxListSection {
     var title: String {
         switch self {
+        case .joinRequests: "Join requests"
         case .new: "New"
         case .earlier: "Recent"
+        }
+    }
+
+    /// A stable number per section, for the bar's section item.
+    var order: Int {
+        switch self {
+        case .new: 0
+        case .earlier: 1
+        case .joinRequests: 2
         }
     }
 }

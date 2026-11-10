@@ -37,9 +37,17 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
     /// the group (#2214): the row is then an invitation, with Accept and
     /// Decline. Nil otherwise.
     public let invitation: String?
-    /// The viewer runs this channel — owner or admin (#2215): the row wears
-    /// a small badge beside its name. False for everything else.
+    /// A channel (#2215): the row wears a small megaphone beside its name —
+    /// on EVERY channel since #2230, run or followed, now that channels sit
+    /// in Chats among the DMs and the groups and the mark is what tells one
+    /// apart. Its preview has no sender, and its menu's Delete is Leave.
+    public let isChannel: Bool
+    /// The viewer runs this channel — owner or admin (#2215): said to
+    /// VoiceOver. False for everything else.
     public let runsChannel: Bool
+    /// The viewer owns this channel (#2230): Leave sends them to the
+    /// transfer first — chat.v1 refuses an owner's Leave.
+    public let ownsChannel: Bool
 
     /// `joinedInvitation`: the viewer accepted this group's invitation ahead
     /// of the next load saying so — the row is a group's like any other.
@@ -72,7 +80,9 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
         self.isUnread = isUnread
         self.unreadCount = unreadCount
         groupPhotoURL = isGroup || isChannel ? conversation.identity?.photoURL : nil
+        self.isChannel = isChannel
         runsChannel = isChannel && conversation.identity?.viewerState.runsChannel == true
+        ownsChannel = isChannel && conversation.identity?.viewerState == .owner
         memberFaceURLs = isGroup && conversation.identity?.photoURL == nil
             ? Array(conversation.memberAvatarURLs.prefix(ConversationIdentity.stackedFaces))
             : []
@@ -83,6 +93,14 @@ public struct ConversationDisplayModel: Equatable, Sendable, Identifiable {
             ? Self.invitationLine(inviter: conversation.invitedByName, group: conversation.title)
             : nil
     }
+
+    /// Whether this row's unread messages count in the Chats badge and the
+    /// section headers that add up to it (#2230): everything but a MUTED
+    /// CHANNEL. A channel joins muted (WhatsApp's rule) and posts to an
+    /// audience; counted, a few followed channels would keep the badge lit
+    /// for news nobody asked to be told about. Its row still shows them —
+    /// bold, the count. A muted DM or group keeps counting, as before.
+    public var countsInBadge: Bool { !(isChannel && isMuted) }
 
     /// The first non-empty line of a post (#2215), trimmed.
     static func firstLine(of text: String) -> String {

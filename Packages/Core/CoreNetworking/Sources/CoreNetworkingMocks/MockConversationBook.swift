@@ -39,6 +39,12 @@ final class MockConversationBook: @unchecked Sendable {
     /// The public group the viewer follows (#2217): muted in their inbox,
     /// and the one `-mock-group-private-after` turns private.
     static let followedGroupID = "grp-riverside"
+    /// The channel the viewer follows, joined muted (#2230): its unread
+    /// posts show on its row and stay out of the Chats badge.
+    static let mutedChannelID = "ch-botanic"
+    /// The channel the viewer follows with notifications turned back on
+    /// (#2230): its unread posts count in the badge.
+    static let notifyingChannelID = "ch-tides"
 
     init(viewer: String, authors: [String], seedsGroups: Bool, seedsChannels: Bool, now: Int64) {
         self.viewer = viewer
@@ -89,10 +95,13 @@ final class MockConversationBook: @unchecked Sendable {
                       subscriberCount: 12_400),
                 members: [viewer: .owner, author(1): .admin], since: now - 200 * day,
                 requests: [])
-            add(.init(conversationID: "ch-botanic", kind: .channel, name: "Botanical prints", photoURL: photo("botanic"),
+            add(.init(conversationID: Self.mutedChannelID, kind: .channel, name: "Botanical prints", photoURL: photo("botanic"),
                       description: "New prints, studio notes and the odd sale.", visibility: .listedOnRequest,
                       subscriberCount: 820),
                 members: [author(29): .owner, viewer: .subscriber], since: now - 30 * day)
+            add(.init(conversationID: Self.notifyingChannelID, kind: .channel, name: "Tide tables", photoURL: photo("tides"),
+                      description: "High and low water, every morning.", visibility: .public, subscriberCount: 1_150),
+                members: [author(19): .owner, viewer: .subscriber], since: now - 10 * day)
             add(.init(conversationID: "ch-film", kind: .channel, name: "Film stock club", photoURL: photo("filmclub"),
                       description: "Stocks, labs, and what came back.", visibility: .listedOnRequest,
                       subscriberCount: 50_000, viewerState: .requested),
@@ -148,6 +157,25 @@ final class MockConversationBook: @unchecked Sendable {
     }
 
     func kind(of id: String) -> ProposedChat.Kind? { lock.withLock { records[id]?.details.kind } }
+
+    /// `profile`'s role in `id`, if they are in it.
+    func role(of profile: String, in id: String) -> ProposedChat.Role? {
+        lock.withLock { records[id]?.members[profile] }
+    }
+
+    /// Who a call lets into a conversation, and which (#2230): the viewer
+    /// joining or subscribing, or the requester an admin approves. Nil for
+    /// any other call.
+    static func joiner(of call: ProposedChat.Call) -> (profile: String, conversationID: String)? {
+        switch call {
+        case let .requestToJoin(viewer, id), let .subscribe(viewer, id):
+            return (profile: viewer, conversationID: id)
+        case let .answerJoinRequest(_, id, requester, approve) where approve:
+            return (profile: requester, conversationID: id)
+        default:
+            return nil
+        }
+    }
 
     func members(of id: String) -> [(profileID: String, role: ProposedChat.Role, joinedAtMs: Int64)] {
         lock.withLock {

@@ -89,6 +89,9 @@ final class ConversationListViewController: UIViewController {
     /// Builds the thread screen a context-menu long-press previews — injected
     /// by the feature builder so preview and push share one construction.
     var threadPreviewProvider: ((ConversationID) -> UIViewController)?
+    /// A channel's info screen, pushed (#2230): where the owner who asked
+    /// to leave hands the channel over first. Nil: the owner is told only.
+    var onOpenChannelInfo: ((_ presenter: UIViewController, _ id: ConversationID) -> Void)?
 
     // MARK: - InboxSurface chrome
 
@@ -175,6 +178,11 @@ final class ConversationListViewController: UIViewController {
         }
         // A group invitation's answer the server refused (#2214).
         viewModel.onInvitationRefused = { [weak self] message in
+            guard let self else { return }
+            Feedback.failure(message, from: self)
+        }
+        // A channel's Leave the server refused (#2230): the row is back.
+        viewModel.onLeaveRefused = { [weak self] message in
             guard let self else { return }
             Feedback.failure(message, from: self)
         }
@@ -664,13 +672,55 @@ extension ConversationListViewController: UITableViewDelegate {
             title: isMuted ? "Unmute" : "Mute",
             image: UIImage(systemName: isMuted ? "bell" : "bell.slash")
         ) { [weak self] _ in self?.viewModel.toggleMute(id) }
-        let delete = UIAction(
-            title: "Delete",
-            image: UIImage(systemName: "trash"),
-            attributes: .destructive
-        ) { [weak self] _ in self?.viewModel.delete([id]) }
+        let delete: UIAction
+        if let model = modelsByID[id], model.isChannel {
+            // A channel's Delete is Leave (#2230): deleting the row of a
+            // channel the viewer still follows would only hide it until the
+            // next launch, its posts still arriving. Said, and confirmed.
+            delete = UIAction(
+                title: "Leave Channel",
+                image: UIImage(systemName: "rectangle.portrait.and.arrow.right"),
+                attributes: .destructive
+            ) { [weak self] _ in self?.confirmLeave(model) }
+        } else {
+            delete = UIAction(
+                title: "Delete",
+                image: UIImage(systemName: "trash"),
+                attributes: .destructive
+            ) { [weak self] _ in self?.viewModel.delete([id]) }
+        }
         // Destructive action in its own inline section, per system menus.
         return UIMenu(children: [pin, mute, UIMenu(options: .displayInline, children: [delete])])
+    }
+
+    /// A channel's Leave, from its row (#2230): confirmed in words that say
+    /// so — the info screen's (#2215). The owner can't leave yet (chat.v1
+    /// refuses it): they are told why and offered the info screen, where
+    /// they hand the channel to an admin.
+    private func confirmLeave(_ model: ConversationDisplayModel) {
+        let alert: UIAlertController
+        if model.ownsChannel {
+            alert = UIAlertController(
+                title: "Make someone else the owner",
+                message: ChannelCopy.leaveBlockedReason(for: .owner), preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            if let onOpenChannelInfo {
+                alert.addAction(UIAlertAction(title: ChannelCopy.openInfoTitle, style: .default) { [weak self] _ in
+                    guard let self else { return }
+                    onOpenChannelInfo(self, model.id)
+                })
+            }
+        } else {
+            alert = UIAlertController(
+                title: ChannelCopy.leaveTitle(model.title), message: ChannelCopy.leaveMessage, preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+            alert.addAction(UIAlertAction(title: "Leave", style: .destructive) { [weak self] _ in
+                self?.viewModel.leaveChannel(model.id)
+            })
+        }
+        present(alert, animated: true)
     }
 }
 

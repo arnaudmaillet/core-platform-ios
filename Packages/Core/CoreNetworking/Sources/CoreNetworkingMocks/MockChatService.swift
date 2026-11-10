@@ -133,6 +133,11 @@ public final class MockChatService: @unchecked Sendable {
         )
         self.mayMessage = mayMessage
         self.admission = admission ?? { sender, recipient in mayMessage(sender, recipient) ? .open : .refused }
+        // A followed channel joined muted, as every join is (#2230): its
+        // posts on its row, out of the Chats badge.
+        if seedsChannels {
+            store.setMuted(true, until: 0, in: MockConversationBook.mutedChannelID, for: viewer)
+        }
         guard seedsGroups else { return }
         // The group the viewer follows sits muted in their inbox, as Follow
         // leaves it (#2217): the app mutes what it follows.
@@ -182,9 +187,21 @@ public final class MockChatService: @unchecked Sendable {
         }
         // Groups' and channels' needs (#2213), until chat.v1 carries them.
         bff.register(path: ProposedChat.path) { [self] (request: Google_Protobuf_StringValue) -> Result<Google_Protobuf_StringValue, ConnectError> in
-            guard let call = try? ProposedChat.unwrap(ProposedChat.Call.self, from: request),
-                  let reply = try? ProposedChat.wrap(book.answer(call, now: Int64(Date().timeIntervalSince1970 * 1000))) else {
+            guard let call = try? ProposedChat.unwrap(ProposedChat.Call.self, from: request) else {
                 return .failure(ConnectError(code: .invalidArgument, message: "unreadable call"))
+            }
+            let joiner = MockConversationBook.joiner(of: call)
+            let wasIn = joiner.map { book.role(of: $0.profile, in: $0.conversationID) != nil } ?? true
+            guard let reply = try? ProposedChat.wrap(book.answer(call, now: Int64(Date().timeIntervalSince1970 * 1000))) else {
+                return .failure(ConnectError(code: .invalidArgument, message: "unreadable call"))
+            }
+            // A channel joins MUTED (#2230, WhatsApp's rule, for #995): a
+            // subscriber's posts reach their inbox without a push until they
+            // turn notifications on — joined, subscribed, or approved. A
+            // channel its owner creates is not muted: nobody joins it.
+            if let joiner, !wasIn, book.kind(of: joiner.conversationID) == .channel,
+               book.role(of: joiner.profile, in: joiner.conversationID) == .subscriber {
+                store.setMuted(true, until: 0, in: joiner.conversationID, for: joiner.profile)
             }
             return .success(reply)
         }

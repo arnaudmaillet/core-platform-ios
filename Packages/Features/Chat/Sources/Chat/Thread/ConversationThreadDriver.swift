@@ -427,14 +427,24 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     /// Join or Request to Join (#2215): a public channel subscribes at
     /// once, one on request waits — the details read again say which. A
     /// refusal is said, and the bar comes back as it was.
+    ///
+    /// A channel the viewer subscribes to joins MUTED (#2230, WhatsApp's
+    /// rule): its posts reach Chats without a push until they turn
+    /// notifications on, from the row's menu or the info screen. chat.v1
+    /// has no muted subscription, so the app writes the mute, as Follow
+    /// does (#2217), and only then has the inbox read its rows again.
     func join() {
         guard let context = groupContext, let id = viewModel.currentConversationID else { return }
         let service = context.service
         Task { [weak self] in
             do {
-                _ = try await service.requestToJoin(id)
+                let standing = try await service.requestToJoin(id)
                 guard let self else { return }
-                context.onMembershipChange(id, false)
+                if self.channelIdentity != nil, standing == .subscriber {
+                    self.setMuted(true, until: nil) { _ in context.onMembershipChange(id, false) }
+                } else {
+                    context.onMembershipChange(id, false)
+                }
                 self.reloadAfterWrite("Couldn't join")
             } catch {
                 self?.channelWriteFailed(error, title: "Couldn't join")

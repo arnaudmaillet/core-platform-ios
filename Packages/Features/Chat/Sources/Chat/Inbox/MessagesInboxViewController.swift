@@ -527,10 +527,10 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     /// Names `section` after the bell, or takes the name away.
     private func applyPinnedSection(_ section: InboxPinnedSection?) {
-        // The page in front scrolls to its own section on a tap, so the
-        // index is the section's place in the inbox's two.
+        // The page in front scrolls to its own section on a tap; the index
+        // only tells the sections apart.
         sectionBinding.show(pinned: section.map { pinned in
-            (pinned.section == .new ? 0 : 1, .init(id: pinned.title, title: pinned.title, count: pinned.count))
+            (pinned.section.order, .init(id: pinned.title, title: pinned.title, count: pinned.count))
         })
     }
 

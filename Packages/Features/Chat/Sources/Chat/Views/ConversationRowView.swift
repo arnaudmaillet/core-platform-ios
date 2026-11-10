@@ -38,12 +38,14 @@ final class ConversationRowView: UIView {
     private let pinnedIcon = UIImageView(image: UIImage(systemName: "pin.fill"))
     /// The unread count, under the time at the row's trailing edge (#2049).
     private let unreadPill = UnreadCountPill()
-    /// A channel the viewer runs (#2215): a small badge right after its name.
-    private let runsBadge = UIImageView(image: UIImage(systemName: ConversationRowView.runsBadgeSymbol))
+    /// A channel (#2215): a small megaphone right after its name — on every
+    /// channel since #2230, where it marked only the ones the viewer runs.
+    private let channelBadge = UIImageView(image: UIImage(systemName: ConversationRowView.channelBadgeSymbol))
 
-    /// The badge on a channel the viewer runs: a megaphone — it is the one
-    /// who speaks there.
-    static let runsBadgeSymbol = "megaphone.fill"
+    /// The mark of a channel: a megaphone — one voice, to everyone who
+    /// follows it. Every channel wears it in Chats (#2230): mixed with the
+    /// DMs and the groups, it is what says a row is read, not answered.
+    static let channelBadgeSymbol = "megaphone.fill"
 
     /// Told when the face's "+" is tapped — never the row's own tap.
     var onFollowTapped: (() -> Void)? {
@@ -104,7 +106,7 @@ final class ConversationRowView: UIView {
         groupFaces.isHidden = !stacks
         avatarView.alpha = stacks ? 0 : 1
         titleLabel.text = model.title
-        runsBadge.isHidden = !model.runsChannel
+        channelBadge.isHidden = !model.isChannel
         let preview = model.preview.isEmpty ? "No messages yet" : model.previewLine
         if let voice = Self.voicePreview(model.preview) {
             // A group's voice message keeps its sender (#2214).
@@ -129,7 +131,7 @@ final class ConversationRowView: UIView {
 
         let states: [String?] = [
             model.title,
-            model.runsChannel ? "You run this channel" : nil,
+            Self.channelWords(model),
             Self.unreadWords(model),
             model.isPinned ? "Pinned" : nil,
             model.isMuted ? "Muted" : nil,
@@ -137,6 +139,12 @@ final class ConversationRowView: UIView {
             model.previewLine
         ]
         return states.compactMap(\.self).filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
+    /// "Channel", or "Channel, you run it" (#2230); nil for a DM or a group.
+    static func channelWords(_ model: ConversationDisplayModel) -> String? {
+        guard model.isChannel else { return nil }
+        return model.runsChannel ? "Channel, you run it" : "Channel"
     }
 
     /// "3 unread"; "Unread" when there is no count; nil when read.
@@ -274,18 +282,19 @@ final class ConversationRowView: UIView {
             icon.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
 
-        // The name, then the runs badge right after it (#2215); the spacer
-        // takes what is left, so the badge follows the name, not the column.
-        runsBadge.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption1)
-        runsBadge.tintColor = .tintColor
-        runsBadge.contentMode = .scaleAspectFit
-        runsBadge.isHidden = true
-        runsBadge.setContentHuggingPriority(.required, for: .horizontal)
-        runsBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        // The name, then the channel's megaphone right after it (#2215,
+        // #2230); the spacer takes what is left, so the badge follows the
+        // name, not the column.
+        channelBadge.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption1)
+        channelBadge.tintColor = .tintColor
+        channelBadge.contentMode = .scaleAspectFit
+        channelBadge.isHidden = true
+        channelBadge.setContentHuggingPriority(.required, for: .horizontal)
+        channelBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
         let titleSpacer = UIView()
         titleSpacer.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
         titleSpacer.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
-        let titleRow = UIStackView(arrangedSubviews: [titleLabel, runsBadge, titleSpacer])
+        let titleRow = UIStackView(arrangedSubviews: [titleLabel, channelBadge, titleSpacer])
         titleRow.axis = .horizontal
         titleRow.alignment = .center
         titleRow.spacing = Spacing.xs
@@ -372,8 +381,8 @@ extension ConversationRowView {
     var debugStackedFaceCount: Int { groupFaces.isHidden ? 0 : groupFaces.faceCount }
     /// The preview line. Tests.
     var debugPreviewText: String? { previewLabel.attributedText?.string ?? previewLabel.text }
-    /// Whether the runs badge shows (#2215). Tests.
-    var debugShowsRunsBadge: Bool { !runsBadge.isHidden }
+    /// Whether the channel's megaphone shows (#2215, #2230). Tests.
+    var debugShowsChannelBadge: Bool { !channelBadge.isHidden }
 }
 #endif
 
