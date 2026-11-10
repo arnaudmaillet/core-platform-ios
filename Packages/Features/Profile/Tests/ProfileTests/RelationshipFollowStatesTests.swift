@@ -390,29 +390,6 @@ struct RelationshipFollowStatesTests {
         #expect(inert.accessories.count == 1, "an inert row offers a button")
     }
 
-    /// The row action's bare words (#2231, `-row-action-style text`): no
-    /// ground inviting or acted, and every title still fits the column the
-    /// row reserves — the same width as the tinted look, so the list does
-    /// not move between them.
-    @Test func bareWordsDrawNoGroundAndFitTheSameColumn() {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
-        window.isHidden = true
-        let cell = RelationshipListCell(frame: CGRect(x: 0, y: 0, width: 390, height: 64))
-        window.addSubview(cell)
-        for action in [ProfileRelationshipsViewModel.RowAction.follow, .followBack, .following, .requested] {
-            cell.configure(with: row(action, id: "w-\(action)"), imagePipeline: nil)
-            let button = cell.debugActionButton
-            button.rowActionStyle = .tinted
-            let tinted = button.fittingSize(for: button.content)
-            button.rowActionStyle = .text
-            #expect(button.currentGround == nil, "\(action) grew a ground in words")
-            let text = button.fittingSize(for: button.content)
-            #expect(abs(tinted.width - text.width) < 0.01, "\(action): \(tinted) vs \(text)")
-            #expect(text.width <= cell.debugReservedActionWidth + 0.5)
-            button.rowActionStyle = .tinted
-        }
-    }
-
     /// A reused cell showing someone else takes their state at once — only
     /// the same person's change animates.
     @Test func aNewPersonOnAReusedRowDoesNotAnimate() {

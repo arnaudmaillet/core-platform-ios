@@ -30,58 +30,7 @@ open class AppButton: AppControl {
         /// and turns quiet once acted (Following, Requested). The one action
         /// that matters on a screen stays `.pill(.prominent)`: the profile
         /// header's Follow, a form's Continue, the reader bar's Join.
-        ///
-        /// `RowActionStyle` picks its look: the tinted ground, or (DEBUG,
-        /// `-row-action-style text`) bare words, for the owner's comparison.
         case rowAction
-    }
-
-    /// How a `.rowAction` is drawn (#2231). The tinted ground is the
-    /// decision; bare words stay a launch argument away while the owner
-    /// compares the two on his iPhone, and go with the flag once he has
-    /// chosen.
-    ///
-    /// | | Tinted | Text |
-    /// |---|---|---|
-    /// | Normal | the wash (`primaryContainer`), its words (`onPrimaryContainer`) | the words alone (`Palette.rowActionText`) |
-    /// | Selected | the quiet ground (`HeroTray.fill`), `.label` | the words in `.secondaryLabel` |
-    /// | Loading | the words blurred under the sheen, on the wash | the same, with no ground: the sheen on the words alone |
-    /// | Placeholder | the bone at the button's width | the bone at the words' width |
-    ///
-    /// Both looks measure the same — the same insets, the same words — so a
-    /// row never moves between them, and the bare words keep the 44 pt hit
-    /// region (`AppControl.hitRegion`).
-    public enum RowActionStyle: String, CaseIterable, Sendable {
-        case tinted
-        case text
-
-        /// The launch argument: `-row-action-style text` (or `tinted`).
-        public static let argument = "-row-action-style"
-
-        /// The look a new row action takes: the tinted ground, unless a
-        /// DEBUG launch asks for words — the argument's value, else the
-        /// debug dashboard's switch ("Row actions as words"). Release always
-        /// draws tinted.
-        public static var current: RowActionStyle {
-            #if DEBUG
-            return resolve(arguments: ProcessInfo.processInfo.arguments, switchedOn: DebugFlags.isOn("-row-action-style"))
-            #else
-            return .tinted
-            #endif
-        }
-
-        /// What `current` answers for `arguments` and `switchedOn`: a
-        /// look named after the argument wins (`text`, `tinted`); else words
-        /// when switched on — `current` reads it through `DebugFlags.isOn`,
-        /// on for the dashboard's switch and for the argument passed bare;
-        /// else tinted.
-        static func resolve(arguments: [String], switchedOn: Bool) -> RowActionStyle {
-            if let index = arguments.firstIndex(of: argument), index + 1 < arguments.count,
-               let style = RowActionStyle(rawValue: arguments[index + 1]) {
-                return style
-            }
-            return switchedOn ? .text : .tinted
-        }
     }
 
     public enum Shape: Equatable, Sendable {
@@ -211,22 +160,6 @@ open class AppButton: AppControl {
     public let shape: Shape
     public private(set) var content: Content
     public private(set) var phase: Phase = .content
-    /// How a `.rowAction` is drawn (#2231): `RowActionStyle.current` when
-    /// the button is made; the catalogues set it to show both looks side
-    /// by side. Only a `.rowAction` reads it.
-    public var rowActionStyle: RowActionStyle {
-        didSet {
-            guard rowActionStyle != oldValue else { return }
-            refresh()
-            invalidateIntrinsicContentSize()
-            setNeedsLayout()
-        }
-    }
-
-    /// Whether the button is a row action drawn as bare words: no ground in
-    /// any state (#2231).
-    public var isBareRowAction: Bool { aspect == .rowAction && rowActionStyle == .text }
-
     /// The ground while selected. Nil swaps prominent and quiet (Follow →
     /// Following) and keeps the others.
     public var selectedGround: Ground? { didSet { refresh() } }
@@ -314,9 +247,6 @@ open class AppButton: AppControl {
         self.size = size
         self.shape = shape
         self.content = content
-        // Read once, and only by a row action: every other button skips the
-        // launch arguments and the defaults.
-        self.rowActionStyle = aspect == .rowAction ? .current : .tinted
         // A pill presses as a system glass button does: it swells.
         super.init(pressStyle: .swell, sound: sound, dims: dims ?? false)
         veil.isUserInteractionEnabled = false
@@ -333,7 +263,7 @@ open class AppButton: AppControl {
         let ground = groundRect
         veil.frame = ground
         veil.layer.cornerRadius = groundCornerRadius
-        bone?.frame = boneRect
+        bone?.frame = ground
         bringSubviewToFront(veil)
         if let bone { bringSubviewToFront(bone) }
     }
@@ -415,22 +345,6 @@ open class AppButton: AppControl {
             bottom: margins.bottom,
             right: rightToLeft ? margins.leading : margins.trailing
         ))
-    }
-
-    /// Where a placeholder's bone stands: the ground — or, for bare words,
-    /// the words' own box, the ground less its insets (#2231): with no
-    /// capsule to stand for, a capsule-wide bone read as a ground that was
-    /// never there.
-    private var boneRect: CGRect {
-        let ground = groundRect
-        guard isBareRowAction else { return ground }
-        let insets = Self.insets(for: size)
-        let rightToLeft = effectiveUserInterfaceLayoutDirection == .rightToLeft
-        let words = ground.inset(by: UIEdgeInsets(
-            top: insets.top, left: rightToLeft ? insets.trailing : insets.leading,
-            bottom: insets.bottom, right: rightToLeft ? insets.leading : insets.trailing
-        ))
-        return words.width > 0 && words.height > 0 ? words : ground
     }
 
     /// The size the button takes for `content`, resolved now — not at the
@@ -795,23 +709,7 @@ open class AppButton: AppControl {
         let band = max(frame.bounds.height * 2, frame.bounds.width * 0.5)
         sheen.bounds = CGRect(x: 0, y: 0, width: band, height: frame.bounds.height)
         sheen.position = CGPoint(x: -band, y: frame.bounds.midY)
-        // Bare words (#2231): the sheen crosses the words alone — swept over
-        // the whole slot, it drew a pale capsule the button never has.
-        if isBareRowAction {
-            let wordsOnly = CALayer()
-            wordsOnly.frame = frame.bounds
-            let mask = CALayer()
-            mask.contentsScale = scale
-            mask.contentsGravity = .resize
-            mask.bounds = content.bounds
-            mask.position = content.position
-            mask.contents = images.last
-            wordsOnly.mask = mask
-            wordsOnly.addSublayer(sheen)
-            frame.layer.addSublayer(wordsOnly)
-        } else {
-            frame.layer.addSublayer(sheen)
-        }
+        frame.layer.addSublayer(sheen)
         let sweep = CABasicAnimation(keyPath: "position.x")
         sweep.fromValue = -band / 2
         sweep.toValue = frame.bounds.width + band / 2
@@ -1050,7 +948,7 @@ open class AppButton: AppControl {
     private func installBone() {
         guard bone == nil else { return }
         let bone = SkeletonBoneView(rounding: shape == .capsule ? .capsule : .fixed(Metrics.cardRadius))
-        bone.frame = boneRect
+        bone.frame = groundRect
         addSubview(bone)
         self.bone = bone
     }
@@ -1153,8 +1051,6 @@ open class AppButton: AppControl {
         case .pill(let pill):
             ground = pill
         case .rowAction:
-            // Bare words stand on nothing, in every state (#2231).
-            guard rowActionStyle == .tinted else { return nil }
             ground = .tinted
         }
         guard isSelected else { return ground }
@@ -1205,14 +1101,6 @@ open class AppButton: AppControl {
             // words vanished on the dark white (seen on the simulator).
             config.baseBackgroundColor = AppControl.monochromeFill
             config.baseForegroundColor = AppControl.monochromeInk
-        case nil where aspect == .rowAction:
-            // Bare words (#2231): the tint inviting, the secondary ink once
-            // acted. ⚠️ `.plain()` GROWS A TINTED GROUND WHEN SELECTED (the
-            // glyph's trap, `AppIconButton`: a liked heart came out on a
-            // pill), and "Following" would stand on one.
-            config = .plain()
-            config.baseForegroundColor = isSelected ? .secondaryLabel : Palette.rowActionText
-            config.background.backgroundColorTransformer = UIConfigurationColorTransformer { _ in .clear }
         case nil:
             config = .plain()
             config.baseForegroundColor = .label

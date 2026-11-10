@@ -535,57 +535,49 @@ final class AppButtonCatalogViewController: UIViewController {
 
     // MARK: - Row action
 
-    /// The row action (#2231) in both looks, side by side on a row's card —
-    /// tinted (the decision), then bare words (`-row-action-style text`) —
+    /// The row action (#2231) on its tinted ground, on a row's card,
     /// through its states. Tapping Follow walks it to Following through a
-    /// load, as the rows do; the chips jump every look at once.
+    /// load, as the rows do; the chips jump both buttons at once.
     private func buildRowAction() {
         section(
             "Row action",
-            source: "AppButton(aspect: .rowAction) — Follow · Accept · Approve on every row: tinted, then words (-row-action-style text)"
+            source: "AppButton(aspect: .rowAction) — Follow · Accept · Approve on every row, on the tinted ground"
         )
-        var follows: [AppButton] = []
-        var accepts: [AppButton] = []
-        for style in AppButton.RowActionStyle.allCases {
-            func rowAction(_ title: String) -> AppButton {
-                let button = track(AppButton(aspect: .rowAction, size: .row, content: .title(title)))
-                button.rowActionStyle = style
-                button.morphAnchor = .trailing
-                return button
-            }
-            let label = UILabel()
-            label.text = style == .tinted ? "Tinted" : "Words"
-            label.font = .appFont(forTextStyle: .subheadline)
-            label.textColor = .secondaryLabel
-            let follow = rowAction("Follow")
-            follow.isToggle = true
-            follow.reservedContents = [.title("Follow"), .title("Following")]
-            follow.addAction(UIAction { [weak follow] _ in
-                guard let follow else { return }
-                let following = !follow.isSelected
-                follow.busyLabel = following ? "Following…" : "Unfollowing…"
-                follow.setPhase(.loading, animated: true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak follow] in
-                    guard let follow else { return }
-                    follow.setContent(.title(following ? "Following" : "Follow"), selected: following, animated: true)
-                    follow.setPhase(.content, animated: true)
-                }
-            }, for: .primaryActionTriggered)
-            // Accept stands for Approve too: the same button, other words.
-            let accept = rowAction("Accept")
-            let dismiss = track(AppIconButton(style: .glyph, content: .symbol("xmark")))
-            dismiss.inkColor = .tertiaryLabel
-            row([label, UIView(), follow, accept, dismiss], fills: true, on: Surface.card)
-            follows.append(follow)
-            accepts.append(accept)
+        func rowAction(_ title: String) -> AppButton {
+            let button = track(AppButton(aspect: .rowAction, size: .row, content: .title(title)))
+            button.morphAnchor = .trailing
+            return button
         }
-        let all = follows + accepts
+        let label = UILabel()
+        label.text = "Tinted"
+        label.font = .appFont(forTextStyle: .subheadline)
+        label.textColor = .secondaryLabel
+        let follow = rowAction("Follow")
+        follow.isToggle = true
+        follow.reservedContents = [.title("Follow"), .title("Following")]
+        follow.addAction(UIAction { [weak follow] _ in
+            guard let follow else { return }
+            let following = !follow.isSelected
+            follow.busyLabel = following ? "Following…" : "Unfollowing…"
+            follow.setPhase(.loading, animated: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak follow] in
+                guard let follow else { return }
+                follow.setContent(.title(following ? "Following" : "Follow"), selected: following, animated: true)
+                follow.setPhase(.content, animated: true)
+            }
+        }, for: .primaryActionTriggered)
+        // Accept stands for Approve too: the same button, other words.
+        let accept = rowAction("Accept")
+        let dismiss = track(AppIconButton(style: .glyph, content: .symbol("xmark")))
+        dismiss.inkColor = .tertiaryLabel
+        row([label, UIView(), follow, accept, dismiss], fills: true, on: Surface.card)
+        let all = [follow, accept]
         states([
             ("Normal", {
-                follows.forEach { $0.setContent(.title("Follow"), selected: false, animated: true) }
+                follow.setContent(.title("Follow"), selected: false, animated: true)
                 all.forEach { $0.isEnabled = true; $0.setPhase(.content, animated: true) }
             }),
-            ("Selected", { follows.forEach { $0.setContent(.title("Following"), selected: true, animated: true) } }),
+            ("Selected", { follow.setContent(.title("Following"), selected: true, animated: true) }),
             ("Loading", { all.forEach { $0.setPhase(.loading, animated: true) } }),
             ("Placeholder", { all.forEach { $0.setPhase(.placeholder, animated: true) } }),
             ("Disabled", { all.forEach { $0.isEnabled = false } }),

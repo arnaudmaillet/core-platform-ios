@@ -199,39 +199,34 @@ public final class AppButtonGalleryViewController: UIViewController {
 
     // MARK: - Row action (#2231)
 
-    /// The row action in both looks — tinted (the decision), then bare
-    /// words (`-row-action-style text`) — through its states: normal,
+    /// The row action on its tinted ground through its states: normal,
     /// selected, greyed, loading, placeholder, and Follow → Following with
     /// its load on a tap.
     private func buildRowAction() {
-        for style in AppButton.RowActionStyle.allCases {
-            header("Row action · \(style.rawValue)")
-            func rowAction(_ title: String) -> AppButton {
-                let button = make(.rowAction, .row, .title(title))
-                button.rowActionStyle = style
-                return button
-            }
-            let demo = rowAction("Follow")
-            demo.isToggle = true
-            demo.haptic = .tick
-            demo.morphAnchor = .trailing
-            demo.addAction(UIAction { [weak self, weak demo] _ in
-                guard let demo else { return }
-                self?.cycleFollow(demo)
-            }, for: .primaryActionTriggered)
-            let selected = rowAction("Following")
-            selected.isSelected = true
-            let disabled = rowAction("Accept")
-            disabled.isEnabled = false
-            row([demo, selected, disabled])
-            let loading = rowAction("Approve")
-            loading.busyLabel = "Approving…"
-            loading.setPhase(.loading, animated: false)
-            let placeholder = rowAction("Follow")
-            placeholder.reservedContents = [.title("Follow"), .title("Following"), .title("Requested")]
-            placeholder.setPhase(.placeholder, animated: false)
-            row([loading, placeholder])
+        header("Row action")
+        func rowAction(_ title: String) -> AppButton {
+            make(.rowAction, .row, .title(title))
         }
+        let demo = rowAction("Follow")
+        demo.isToggle = true
+        demo.haptic = .tick
+        demo.morphAnchor = .trailing
+        demo.addAction(UIAction { [weak self, weak demo] _ in
+            guard let demo else { return }
+            self?.cycleFollow(demo)
+        }, for: .primaryActionTriggered)
+        let selected = rowAction("Following")
+        selected.isSelected = true
+        let disabled = rowAction("Accept")
+        disabled.isEnabled = false
+        row([demo, selected, disabled])
+        let loading = rowAction("Approve")
+        loading.busyLabel = "Approving…"
+        loading.setPhase(.loading, animated: false)
+        let placeholder = rowAction("Follow")
+        placeholder.reservedContents = [.title("Follow"), .title("Following"), .title("Requested")]
+        placeholder.setPhase(.placeholder, animated: false)
+        row([loading, placeholder])
     }
 
     // MARK: - Motion
