@@ -236,6 +236,9 @@ final class NotificationsViewController: UIViewController {
 
     // MARK: - Setup
 
+    /// The first section title's step under the large title.
+    private static let firstHeaderTopPadding: CGFloat = Spacing.sm
+
     private func makeLayout() -> UICollectionViewLayout {
         UICollectionViewCompositionalLayout { index, environment in
             var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
@@ -246,7 +249,7 @@ final class NotificationsViewController: UIViewController {
             // the app's one section gap under the rows above it
             // (`Spacing.section` to its line, the bar's own air counted in).
             configuration.headerTopPadding = index == 0
-                ? Spacing.sm
+                ? Self.firstHeaderTopPadding
                 : SectionTitleView.gapAbove(traits: environment.traitCollection)
             let section = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
             // A plain list pins its headers; these scroll with their rows.
@@ -263,13 +266,14 @@ final class NotificationsViewController: UIViewController {
     private func configureCollectionView() {
         collectionView.backgroundColor = .clear
         collectionView.delegate = self
-        // THE ONE LIST THAT KEEPS UIKIT'S EDGE EFFECT under its bar (asked for,
-        // 2026-09-28): rows scrolling up under "Notifications" soften into the
-        // system's own top-edge blur. Every other list hides it — see
-        // `prefersClearTopEdge` — so this is deliberately NOT called here, and
-        // the style is stated rather than left `.automatic`, so a change of
-        // UIKit default cannot silently turn it into the hard band.
-        collectionView.topEdgeEffect.style = .soft
+        // UIKit's soft edge effect under its bar (asked for, 2026-09-28):
+        // rows scrolling up under "Notifications" soften into the system's
+        // own top-edge blur — the titled header's rule since #1591. Through
+        // the contract, not the style by hand (#2240), but with no clearance:
+        // the list rests on its large title, so "New" already sits far below
+        // the fade, which only reaches the rows once the title has folded by
+        // scrolling (seen on the simulator: 40 pt of empty space with one).
+        collectionView.prefersSoftTopEdge(keepsContentBelowFade: false)
         collectionView.pin(to: view)
         // Named, not searched for: the effect is drawn where the navigation
         // bar's pocket meets the scroll view it TRACKS, and the skeleton and

@@ -1,5 +1,6 @@
 import CoreModels
 import Testing
+import DesignSystem
 import UIKit
 @testable import Notifications
 
@@ -31,6 +32,20 @@ struct NotificationsTopEdgeTests {
         let collection = try #require(list)
         #expect(!collection.topEdgeEffect.isHidden)
         #expect(collection.topEdgeEffect.style == .soft)
+    }
+
+    /// ⚠️ NO CLEARANCE UNDER THE LARGE TITLE (#2240): "Notifications"
+    /// rests on a large title, so "New" already starts far below the soft
+    /// fade, and the titled contract adds nothing (seen on the simulator:
+    /// 40 pt of empty space when it did). The skeleton stays pinned to the top.
+    @Test func theLargeTitleTakesNoClearance() throws {
+        let (controller, list) = makeList()
+        let collection = try #require(list)
+        controller.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        controller.view.layoutIfNeeded()
+        #expect(collection.topFadeClearance == 0)
+        let skeleton = try #require(controller.view.subviews.first { $0 is PersonListSkeletonView })
+        #expect(abs(skeleton.frame.minY) < 0.5)
     }
 
     /// The bar draws the effect over the scroll view it tracks; the skeleton

@@ -210,7 +210,12 @@ final class PostDetailViewController: UIViewController {
         guard !wearsSheetEdges else { return }
         wearsSheetEdges = true
         for stream in streams {
-            stream.collectionView.prefersSoftTopEdge()
+            // ⚠️ WITHOUT THE FADE'S CLEARANCE (#2240): the stream owns its
+            // top inset — its shapes (#2195) and the short stream's anchor
+            // re-assert it whenever it differs — so a clearance topped up
+            // under it would be undone and re-added on every pass. Its
+            // shapes would have to count the fade themselves.
+            stream.collectionView.prefersSoftTopEdge(keepsContentBelowFade: false)
             stream.collectionView.bottomEdgeEffect.isHidden = false
             stream.collectionView.bottomEdgeEffect.style = .soft
         }

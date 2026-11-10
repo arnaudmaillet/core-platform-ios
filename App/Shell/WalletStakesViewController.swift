@@ -166,7 +166,10 @@ final class WalletStakesViewController: UIViewController {
         collectionView.alwaysBounceVertical = true
         collectionView.contentInset = UIEdgeInsets(top: Spacing.sm, left: 0, bottom: Spacing.lg, right: 0)
         collectionView.translatesAutoresizingMaskIntoConstraints = false
-        collectionView.topEdgeEffect.style = .soft
+        // The titled header's soft blur (#1591), through the contract: it
+        // tops up the inset above with what the first day still needs to
+        // rest below the fade (#2240).
+        collectionView.applyTopEdge(for: .titled)
         view.addSubview(collectionView)
         collectionView.pin(to: view)
         setContentScrollView(collectionView, for: .top)

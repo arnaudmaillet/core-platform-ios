@@ -34,7 +34,9 @@ final class WalletHowItWorksViewController: UIViewController {
 
         let scroll = UIScrollView()
         scroll.alwaysBounceVertical = true
-        scroll.topEdgeEffect.style = .soft
+        // The titled header's soft blur, and the steps resting below its
+        // fade (#1591, #2240).
+        scroll.applyTopEdge(for: .titled)
         view.addSubview(scroll)
         scroll.pin(to: view)
         setContentScrollView(scroll, for: .top)
