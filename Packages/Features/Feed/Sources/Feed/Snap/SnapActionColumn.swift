@@ -105,6 +105,28 @@ enum SnapActionColumn {
     /// (`ios27-bar-item-width-traps`, `bar-item-wrapper-drift`).
     static let toolbarGlassDrop: CGFloat = 10
 
+    /// ⚠️ THE TAB BAR'S counterpart to `toolbarGlassDrop` (#2252): how far
+    /// the tab bar's GLASS stands below the bottom safe-area line of a screen
+    /// it holds (Shots, the For You root). The page strip centres itself
+    /// between the caption's letters and whichever bar's glass is under it,
+    /// so each bar needs its number.
+    ///
+    /// The tab bar is thicker than the toolbar, but mostly DOWNWARDS: the
+    /// safe area a tab bar leaves stops at the top of its capsule. Read off
+    /// the owner's iPhone Pro Max screenshots (2026-11-10, a Shots video):
+    /// the drawn strip ended about 18 pt above the glass, with the strip's
+    /// bottom at the margins line less 5.5 pt and the margins line
+    /// `shotsBottomBreath` (12 pt) over the safe-area line — so the glass
+    /// begins within about half a point of that line.
+    ///
+    /// Re-measure with `-dump-bars` on iOS 26 and 27:
+    /// `SnapActionColumnLayoutTests.theTabBarsGlassStandsWhereTheStripExpectsIt`
+    /// reads it off a real tab bar on whichever runtime runs the suite and
+    /// fails with the new number. A constant for the reason the toolbar's is
+    /// one: the bar is UIKit's, laid out after the screen, and moves with
+    /// every transition.
+    static let tabBarGlassDrop: CGFloat = 0
+
     /// ⚠️ THE ONE GAP between the composer's field and the toolbar's glass:
     /// the gap UIKit itself leaves between two neighbouring glass bubbles in
     /// that same bar, so the field reads as one more member of the bar.
@@ -131,6 +153,17 @@ enum SnapActionColumn {
     static let bottomBreath: CGFloat = 6
     /// Shots' breath over the tab bar (#1716): the For You root keeps 12 pt.
     static let shotsBottomBreath: CGFloat = Spacing.md
+
+    /// Where the bottom bar's glass begins below the chrome's margins line
+    /// (#2252): the breath the margins add over the safe-area line, plus the
+    /// bar's own drop under it — the toolbar's on a pushed post, the tab
+    /// bar's on Shots. `breathApplied` is false before a feed hands the
+    /// chrome its insets: the margins are then the bare safe area.
+    static func glassBelowMargins(overTabBar: Bool, breathApplied: Bool = true) -> CGFloat {
+        let breath: CGFloat = breathApplied ? (overTabBar ? shotsBottomBreath : bottomBreath) : 0
+        let drop: CGFloat = overTabBar ? tabBarGlassDrop : toolbarGlassDrop
+        return breath + drop
+    }
 
     // MARK: - The like pill (#669)
 

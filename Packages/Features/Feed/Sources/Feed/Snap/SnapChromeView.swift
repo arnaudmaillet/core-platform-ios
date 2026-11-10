@@ -145,8 +145,55 @@ final class SnapChromeView: UIView {
     /// caption and the bar, where a position is read rather than aimed at.
     private let mediaPageBar = SnapMediaPageBarView()
 
-    /// The hair of space between the page strip and the toolbar under it.
-    static let pageBarToolbarGap: CGFloat = Spacing.xs
+    /// Where the page strip's line is centred, below the margins line
+    /// (#2252, the owner 2026-11-10): halfway between the bottom of the
+    /// caption's letters and the top of the bottom bar's glass, whichever
+    /// bar it is — the toolbar on a pushed post, the tab bar on Shots.
+    ///
+    /// ⚠️ IT RESERVES NO HEIGHT. The caption stands on the cover's line on
+    /// every format (`captionOnCoverLine`); the strip lies in the gap that
+    /// was already there between the caption and the bar, so a video or a
+    /// carousel lays out exactly as a single photo does. Before #2252 the
+    /// caption sat 22 pt higher over a strip, and everything stacked on it
+    /// jumped between posts.
+    ///
+    /// The letters' bottom is the caption's last baseline: its frame's
+    /// bottom, less what its line box keeps under the baseline
+    /// (`captionLetterDrop`). Expected (the owner's measures, the issue):
+    /// about 10 pt either side of the line over the toolbar, about 8 over
+    /// the tab bar — the 2 pt difference between the two screens is
+    /// accepted, for one rule on both.
+    static func pageBarCenterOffset(overTabBar: Bool, breathApplied: Bool = true) -> CGFloat {
+        let letters: CGFloat = -(SnapActionColumn.inputRestingGap + captionLetterDrop)
+        let glass: CGFloat = SnapActionColumn.glassBelowMargins(overTabBar: overTabBar, breathApplied: breathApplied)
+        return (letters + glass) / 2
+    }
+
+    /// What the caption's line box keeps under its baseline: the bottom of
+    /// its letters stands this far above the label's bottom. Every line is
+    /// locked to the caption font's line height (`captionParagraphStyle`),
+    /// so it is that height less the font's ascender. Font-derived: it
+    /// follows Dynamic Type.
+    static var captionLetterDrop: CGFloat {
+        let font = UIFont.appFont(forTextStyle: CaptionRegister.textStyle)
+        return max(font.lineHeight - font.ascender, 0)
+    }
+
+    /// The strip's centre, re-stated when the bar under it or the text size
+    /// changes (`applyPageBarPlacement`).
+    private var pageBarCenterConstraint: NSLayoutConstraint?
+
+    /// (#2252) DEBUG `-strip-full-width`: the strip runs on to the action
+    /// column's trailing edge instead of stopping with the caption — it now
+    /// lies below the cover's bottom, so it can. The issue asks for both to be
+    /// shown; the owner picks. Off, it ends with the caption (#1716).
+    static var stripRunsToColumnEdge: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("-strip-full-width")
+        #else
+        return false
+        #endif
+    }
 
     /// The card a thumb dragging a clip's bar points with — the frame it would
     /// land on and the time it would land at. Frame-managed and out of the
@@ -248,6 +295,8 @@ final class SnapChromeView: UIView {
         didSet {
             guard sitsOverTabBar != oldValue else { return }
             applyFixedInsets()
+            // The strip centres on the tab bar's glass, not the toolbar's.
+            applyPageBarPlacement()
         }
     }
     /// The like pill's bottom above the margin line, without the capsule.
@@ -321,10 +370,14 @@ final class SnapChromeView: UIView {
     /// The floor guide's height constraint — its constant is the caption's
     /// two-line box, refreshed on Dynamic Type changes alongside the caption.
     private var captionFloorHeightConstraint: NSLayoutConstraint?
-    /// The caption's two seats: xl above the bar over a page strip, or — with
-    /// no strip — its bottom on the sound cover's line (`applyCaptionSeat`).
-    private var captionOverStripConstraint: NSLayoutConstraint?
-    private var captionOnBarConstraint: NSLayoutConstraint?
+    /// The caption's ONE seat (#2252): its bottom on the sound cover's line,
+    /// on every format. (Two seats until #2252 — xl over a page strip, the
+    /// cover's line without one, the owner 2026-10-16, #1716, #1726.)
+    private var captionOnCoverLine: NSLayoutConstraint?
+    /// The caption block's two-line floor on a media page (#2252): the label
+    /// is never shorter than two caption lines, whatever it holds. Off on a
+    /// text page, whose chrome draws no caption.
+    private var captionBlockFloor: NSLayoutConstraint?
     /// Top margins beyond this are transition churn (safe-area insets
     /// re-propagating into a cell mid-flight), not a settled state — a real
     /// settled top (status bar + transparent nav bar) stays well under it
@@ -540,8 +593,13 @@ final class SnapChromeView: UIView {
         // reused cells can never show two different caption sizes. The floor
         // guide's reserved height is font-derived too, so it re-resolves on
         // the same beat.
-        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: SnapChromeView, _) in
+        registerForTraitChanges([UITraitPreferredContentSizeCategory.self, UITraitDisplayScale.self]) { (self: SnapChromeView, _) in
             self.captionFloorHeightConstraint?.constant = Self.captionFloorHeight
+            // The two-line block and the strip's place follow the font too
+            // (#2252): two lines at every size, the line still centred under
+            // the letters.
+            self.captionBlockFloor?.constant = self.captionBlockHeight
+            self.applyPageBarPlacement()
             self.renderCaption()
         }
 
@@ -614,6 +672,16 @@ final class SnapChromeView: UIView {
     /// scroll; a full-cell chrome above it would otherwise swallow every
     /// drag and hand it to the pager, which is exactly the bug this fixed).
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        // ⚠️ THE CAPTION BEFORE THE STRIP (#2252). The strip's invisible
+        // 44 pt touch area is centred on its 2 pt line, about 10 pt under the
+        // letters, so it reaches up over the caption's last line — and the
+        // strip is the later sibling, so it would take a tap on the words. A
+        // tap on the caption keeps opening the comments; the strip has the
+        // gap down to the bar.
+        if !mediaPageBar.isHidden, mediaPageBar.alpha > 0.01, captionLabel.frame.contains(point),
+           let words = captionLabel.hitTest(convert(point, to: captionLabel), with: event) {
+            return words
+        }
         let hit = super.hitTest(point, with: event)
         return hit === self ? nil : hit
     }
@@ -667,18 +735,26 @@ final class SnapChromeView: UIView {
         captionLabel.constrain(in: self) { parent in
             captionLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
         }
-        // ⚠️ NO ROOM FOR A STRIP THAT IS NOT THERE (the owner, 2026-10-16,
-        // then #1716/#1726): above a strip the caption sits xl up; with none,
-        // its bottom sits on the sound cover's line, on every feed.
-        let captionOverStrip = captionLabel.bottomAnchor.constraint(
-            equalTo: layoutMarginsGuide.bottomAnchor, constant: -Spacing.xl
-        )
-        let captionOnBar = captionLabel.bottomAnchor.constraint(
+        // ⚠️ ONE SEAT, ON EVERY FORMAT (#2252, the owner 2026-11-10): the
+        // caption's bottom on the sound cover's line — the column's bottom —
+        // whatever the post: a single photo, a carousel, a clip. It used to
+        // sit xl up over a page strip (the owner, 2026-10-16, #1716/#1726),
+        // and the caption and everything stacked on it jumped 22 pt between a
+        // photo and a video. The strip now lies in the gap below
+        // (`pageBarCenterOffset`) and reserves nothing.
+        let captionOnCover = captionLabel.bottomAnchor.constraint(
             equalTo: layoutMarginsGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
         )
-        captionOverStripConstraint = captionOverStrip
-        captionOnBarConstraint = captionOnBar
-        captionOnBar.isActive = true
+        captionOnCoverLine = captionOnCover
+        captionOnCover.isActive = true
+        // ⚠️ AND ALWAYS TWO LINES TALL (#2252): the composition puts the date
+        // on line two whatever the caption (`composedCaption`), and this
+        // floor holds the box at two caption lines even when there is
+        // nothing to compose (no date, an unmeasured width) — so the author
+        // row, the stream and the danmaku over it never move between posts.
+        // A floor, not an equality: the label's own height for two lines is
+        // pixel-rounded, and a box a hair shorter would drop its second line.
+        captionBlockFloor = captionLabel.heightAnchor.constraint(greaterThanOrEqualToConstant: captionBlockHeight)
 
         // The caption FLOOR: a zero-content region co-located with the
         // caption label (same bottom, same horizontal margins) but with a
@@ -693,9 +769,8 @@ final class SnapChromeView: UIView {
         NSLayoutConstraint.activate([
             captionFloorGuide.leadingAnchor.constraint(equalTo: captionLabel.leadingAnchor),
             captionFloorGuide.trailingAnchor.constraint(equalTo: captionLabel.trailingAnchor),
-            // A FIXED line, not the label's bottom: the label moves (a short
-            // caption is one line, a lone picture has no strip), the corner
-            // that hangs off this floor does not.
+            // A FIXED line, not the label's bottom: the corner that hangs off
+            // this floor keeps its own rule (#2252 left it where it was).
             captionFloorGuide.bottomAnchor.constraint(equalTo: layoutMarginsGuide.bottomAnchor, constant: -Spacing.xl),
             floorHeight,
         ])
@@ -754,17 +829,15 @@ final class SnapChromeView: UIView {
         // what they are about, and two things stacked in one column read as
         // one thing only if they share an edge.
         //
-        // Pinned NEAR the bottom of the margins guide — the line the toolbar
-        // rests against — so it sits in the band between the caption and the
-        // bar without moving either. The caption keeps the position it has on
-        // every other format; a post with one picture simply has nothing here.
-        //
-        // ⚠️ AND IT STOPS SHORT OF THE LINE by a hair. Flush against the guide
-        // the strip and the toolbar's glass read as one stacked control, which
-        // is the one thing they are not: the strip is the pictures' index and
-        // the bar is what you can DO to the post. Four points is enough to say
-        // they are two things — less than the seam between two containers in
-        // the band above (md), because these two are closer kin than that.
+        // ⚠️ A 2 PT LINE IN THE GAP THAT ALREADY EXISTS (#2252, the owner
+        // 2026-11-10, as TikTok's and Instagram's): centred between the
+        // bottom of the caption's letters and the top of the bottom bar's
+        // glass (`pageBarCenterOffset`), reserving no height — the caption
+        // stands on the cover's line whether the strip is there or not, and a
+        // post with one picture simply has nothing in that gap. Centred, it
+        // stays clear of both: the strip is the pictures' index, the bar what
+        // you can DO to the post. (It was pinned 4 pt over the margins line
+        // in a 6 pt footprint, the caption seated 22 pt higher for it.)
         scrubPreview.translatesAutoresizingMaskIntoConstraints = true
         scrubPreview.frame = CGRect(origin: .zero, size: scrubPreview.totalSize)
         scrubPreview.onShapeChange = { [weak self] in
@@ -781,14 +854,15 @@ final class SnapChromeView: UIView {
         mediaPageBar.onBrowseEnded = { [weak self] page in self?.endBrowse(at: page) }
         mediaPageBar.constrain(in: self) { parent in
             mediaPageBar.leadingAnchor.constraint(equalTo: captionLabel.leadingAnchor)
-            mediaPageBar.bottomAnchor.constraint(
-                equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -Self.pageBarToolbarGap
-            )
             mediaPageBar.heightAnchor.constraint(equalToConstant: SnapMediaPageBarView.thickness)
         }
-        // The caption's trailing edge: the strip ends left of the sound
-        // cover, on every feed (#1716).
-        mediaPageBar.trailingAnchor.constraint(equalTo: captionLabel.trailingAnchor).isActive = true
+        let pageBarCenter = mediaPageBar.centerYAnchor.constraint(
+            equalTo: layoutMarginsGuide.bottomAnchor, constant: currentPageBarCenterOffset
+        )
+        pageBarCenterConstraint = pageBarCenter
+        pageBarCenter.isActive = true
+        // Its trailing edge: see `installSoundBubble` (the caption's, or the
+        // column's under `-strip-full-width`).
 
 
         // The shortcut rail owns the trailing column, layered OVER the
@@ -872,10 +946,11 @@ final class SnapChromeView: UIView {
         // surface starts at one position. The band stands on the zone, md
         // above it, and stops short of the rail like the zone does: with no
         // glass to nest in there, its trailing end dissolves.
-        // On the caption as it stands — one line or two (the owner,
-        // 2026-10-16: a short caption with its time on one line lets the
-        // stream and the band above it come down a line) — or on the author
-        // row standing on it, on the For You root (#1699).
+        // On the caption — always two lines tall on a media page since #2252
+        // (it was one line for a short caption with its time inline, the
+        // owner 2026-10-16, and the stream came down a line: a jump between
+        // posts) — or on the author row standing on it, on the For You root
+        // (#1699).
         subtitleOverCaption = subtitleView.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md)
         subtitleOverAuthor = subtitleView.bottomAnchor.constraint(equalTo: authorRow.topAnchor, constant: -Spacing.md)
         tickerOverStream = commentTicker.bottomAnchor.constraint(equalTo: subtitleView.topAnchor, constant: -Spacing.md)
@@ -944,6 +1019,14 @@ final class SnapChromeView: UIView {
         captionLabel.trailingAnchor.constraint(
             equalTo: soundStation.leadingAnchor, constant: -Spacing.md
         ).isActive = true
+        // The strip's trailing edge: the caption's, left of the sound cover,
+        // on every feed (#1716). Under `-strip-full-width` (#2252, for the
+        // owner to compare) it runs on under the cover to the column's edge:
+        // the strip now lies below the cover's bottom.
+        let stripEnd: NSLayoutXAxisAnchor = Self.stripRunsToColumnEdge
+            ? soundStation.trailingAnchor
+            : captionLabel.trailingAnchor
+        mediaPageBar.trailingAnchor.constraint(equalTo: stripEnd).isActive = true
         // The post's actions (#1681): one bubble wide, two tall, `gap` over
         // the sound bubble.
         postActionsStation.isUserInteractionEnabled = false
@@ -1190,6 +1273,38 @@ final class SnapChromeView: UIView {
         insets.bottom += sitsOverTabBar ? SnapActionColumn.shotsBottomBreath : SnapActionColumn.bottomBreath
         insetsLayoutMarginsFromSafeArea = false
         layoutMargins = insets
+        // The breath is in the margins now: the glass is that much nearer.
+        applyPageBarPlacement()
+    }
+
+    /// The strip's centre for this chrome as it stands: over the tab bar or
+    /// the toolbar, with the breath in its margins once a feed handed them.
+    private var currentPageBarCenterOffset: CGFloat {
+        Self.pageBarCenterOffset(overTabBar: sitsOverTabBar, breathApplied: fixedInsets != nil)
+    }
+
+    /// Re-centres the strip (#2252): the bar under it, the breath and the
+    /// caption's font all move the gap it is centred in.
+    private func applyPageBarPlacement() {
+        let offset = currentPageBarCenterOffset
+        guard let center = pageBarCenterConstraint, center.constant != offset else { return }
+        center.constant = offset
+        setNeedsLayout()
+    }
+
+    /// The caption block's height on a media page (#2252): two caption lines,
+    /// rounded up to this screen's pixels — the height the label takes for
+    /// two lines, so the floor never stretches a real two-line block.
+    private var captionBlockHeight: CGFloat {
+        let scale: CGFloat = traitCollection.displayScale > 0 ? traitCollection.displayScale : 3
+        return Self.captionBlockHeight(scale: scale)
+    }
+
+    /// Two caption lines, rounded up to `scale`'s pixels. Font-derived: it
+    /// follows Dynamic Type.
+    static func captionBlockHeight(scale: CGFloat) -> CGFloat {
+        let twoLines: CGFloat = 2 * UIFont.appFont(forTextStyle: CaptionRegister.textStyle).lineHeight
+        return (twoLines * scale).rounded(.up) / scale
     }
 
     /// Tracks the settled top margin into the rail's cell-relative top.
@@ -1225,11 +1340,13 @@ final class SnapChromeView: UIView {
         // is not — see its assignment.
         hasMedia = model.mediaURL != nil
         applyAuthorRowLayout()
-        // ⚠️ THE CAPTION'S SEAT AT CONFIGURE (#1724): it was only re-read when
-        // a page count arrived, which the flight replica of a single picture
-        // never gets — it flew at the old seat and the caption jumped at the
-        // landing (filmed by the owner, #1724).
-        applyCaptionSeat()
+        // ⚠️ THE CAPTION'S GEOMETRY AT CONFIGURE, never at a page count
+        // (#1724: the flight replica of a single picture never gets one, and
+        // the caption jumped at the landing). Since #2252 there is one seat;
+        // what configure decides is the two-line floor — a media page's
+        // block is two lines tall, a text page draws no caption.
+        captionBlockFloor?.constant = captionBlockHeight
+        captionBlockFloor?.isActive = hasMedia
         // Each page's declared shape, for the scrub card (#1724).
         pageAspects = model.mediaPages.enumerated().map { index, page in
             CGFloat(index == 0 ? (model.headAspectRatio ?? page.aspectRatio) : page.aspectRatio)
@@ -1245,7 +1362,9 @@ final class SnapChromeView: UIView {
         // Set the timestamp before the caption so the caption's didSet
         // composes with both already in hand.
         timestampText = hasMedia ? model.timestampText : nil
-        caption = hasMedia ? model.caption : nil
+        // A media post with no caption still draws its date, alone on the
+        // block's second line (#2252): the caption is then empty, not absent.
+        caption = hasMedia ? (model.caption ?? "") : nil
         applyCaptionVisibility()
         // THE BOOST ANCHOR IS FORMAT-SCOPED, NOT STATE-SCOPED — the rule the
         // compose "+" that held this slot established. Every media page owns
@@ -1328,8 +1447,11 @@ final class SnapChromeView: UIView {
     /// replica's first real layout — and skips when it hasn't.
     private var lastRenderedCaptionWidth: CGFloat = 0
 
+    /// Hidden on a text page only (#2252): a media page with no caption shows
+    /// its date on line two, the line above it left empty.
     private func applyCaptionVisibility() {
-        captionLabel.isHidden = caption?.isEmpty ?? true
+        let date = timestampText ?? ""
+        captionLabel.isHidden = caption == nil || (caption?.isEmpty == true && date.isEmpty)
     }
 
     /// Whether the represented post carries media. Text-only posts show an
@@ -1454,19 +1576,29 @@ final class SnapChromeView: UIView {
     /// The single source of caption typography for every media post and both
     /// chrome instances (live cell + flight replica) — a PURE function of
     /// (text, timestamp, width) so both resolve identically. It enforces a
-    /// two-line contract with the timestamp always visible and always inline:
+    /// two-line contract: the block is ALWAYS two lines tall, and the date
+    /// is never on line one (#2252, the owner 2026-11-10):
     ///
-    ///   • Case A — a short caption takes the timestamp on its ONE line
-    ///     (`Golden hour.  7 weeks`), so the block is one line tall (the
-    ///     owner, 2026-10-16).
-    ///   • Case B — a caption that fills two lines takes the timestamp inline
-    ///     at the end of line two (`…line two  7 weeks`).
+    ///   • A one-line caption — the date ALONE on line two
+    ///     (`Golden hour.` / `7 weeks`).
+    ///   • Case B — a caption that runs onto line two takes the date inline
+    ///     at that line's end (`…line two  7 weeks`).
     ///   • Case C — a longer caption truncates early on line two so the
-    ///     ellipsis + timestamp always sit un-clipped at that line's end
+    ///     ellipsis + date always sit un-clipped at that line's end
     ///     (`…cut off here…  7 weeks`).
+    ///   • No caption (media only) — line one empty, reserved, and the date
+    ///     on line two.
+    ///
+    /// ⚠️ CASE A IS GONE (#2252). A short caption took its date on its one
+    /// line (`Golden hour.  7 weeks`, the owner 2026-10-16, #1256): the
+    /// block was then one line tall and the stream above it came down a
+    /// line — a second jump between posts, after the strip's seat. The
+    /// block's bottom stands on the cover's line, so two lines on every post
+    /// keep the author row, the stream and the danmaku still.
     ///
     /// With no timestamp (or an unmeasured zero width) it returns the bare
-    /// caption — the label's own `numberOfLines`/truncation then applies.
+    /// caption — the label's own `numberOfLines`/truncation then applies, and
+    /// the chrome's two-line floor (`captionBlockFloor`) keeps the height.
     ///
     /// Emotes are marked BEFORE anything is measured (`EmoteText`): a `:code:`
     /// is already the one emoji glyph it draws as, so every measurement below
@@ -1491,10 +1623,19 @@ final class SnapChromeView: UIView {
         let timestampString = NSAttributedString(string: unbroken, attributes: captionAttributes(secondary: true))
         let gap = NSAttributedString(string: "  ", attributes: captionAttributes(secondary: false))
 
-        // Case A: the caption and its time inline, on ONE line when they fit
-        // there (the owner, 2026-10-16: the block is then one line tall, and
-        // the stream above it comes down), else on two — a short caption
-        // whose time wraps keeps it inline on the second line.
+        // A caption on ONE line (or none): the date alone on line two, behind
+        // a line break — never beside the caption on line one (#2252). Kept
+        // only if it really is two lines, which a caption ending in a break
+        // of its own might not be; else the cases below place the date.
+        if captionString.length == 0 || captionLineCount(captionString, width: width) <= 1 {
+            let stacked = NSMutableAttributedString(attributedString: captionString)
+            stacked.append(NSAttributedString(string: "\n", attributes: captionAttributes(secondary: false)))
+            stacked.append(timestampString)
+            if captionLineCount(stacked, width: width) == 2 { return stacked }
+        }
+
+        // Case B: the caption runs onto line two, and its date follows it
+        // there, inline.
         let inline = NSMutableAttributedString(attributedString: captionString)
         inline.append(gap)
         inline.append(timestampString)
@@ -1620,8 +1761,9 @@ final class SnapChromeView: UIView {
 
     func setMediaPageCount(_ count: Int, current: Int, clipPages: Set<Int> = []) {
         mediaPosition = CGFloat(current)
+        // Nothing else moves for it (#2252): the strip reserves no height,
+        // so a count arriving re-seats nothing.
         mediaPageBar.configure(count: count, current: current, clipPages: clipPages)
-        applyCaptionSeat()
         #if DEBUG
         runBrowseQAIfAsked(count: count)
         #endif
@@ -1651,21 +1793,6 @@ final class SnapChromeView: UIView {
         }
     }
     #endif
-
-    /// Seats the caption over the strip, or in its place when there is none.
-    private func applyCaptionSeat() {
-        let overStrip = !mediaPageBar.isHidden
-        setNeedsLayout()
-        guard captionOverStripConstraint?.isActive != overStrip else { return }
-        if overStrip {
-            captionOnBarConstraint?.isActive = false
-            captionOverStripConstraint?.isActive = true
-        } else {
-            captionOverStripConstraint?.isActive = false
-            captionOnBarConstraint?.isActive = true
-        }
-        setNeedsLayout()
-    }
 
     /// Where the page's BOTTOM READOUT begins — the top of the comment band.
     ///

@@ -237,6 +237,64 @@ struct SnapActionColumnLayoutTests {
                 "iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion): the glass \(glass) starts \(drop)pt under the safe-area line \(safeLine), not \(SnapActionColumn.toolbarGlassDrop)")
     }
 
+    // MARK: - The tab bar's glass (#2252)
+
+    /// ⚠️ THE TAB BAR'S NUMBER, CHECKED AGAINST A REAL BAR (#2252). Shots'
+    /// page strip centres itself between the caption's letters and the tab
+    /// bar's glass, and where that glass begins under the safe-area line of
+    /// the screen it holds is `SnapActionColumn.tabBarGlassDrop`. This puts a
+    /// tab bar controller in a window and reads the drop off the capsule
+    /// UIKit drew: the outermost view inside the bar that is narrower than
+    /// the bar itself (the floating glass is inset from the screen's edges;
+    /// the tab buttons and the selection pill are inside it). If UIKit moves
+    /// its bar, this fails with the new number.
+    @Test func theTabBarsGlassStandsWhereTheStripExpectsIt() async throws {
+        let tabs = UITabBarController()
+        let pages: [UIViewController] = ["Shots", "Messages", "Profile"].map { title in
+            let page = UIViewController()
+            page.tabBarItem = UITabBarItem(title: title, image: UIImage(systemName: "circle"), selectedImage: nil)
+            return page
+        }
+        tabs.viewControllers = pages
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = tabs
+        window.isHidden = false
+        defer { window.isHidden = true }
+        for _ in 0..<30 {
+            tabs.view.setNeedsLayout()
+            tabs.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let screen = try #require(pages.first)
+        try #require(screen.view.window != nil, "the tab bar controller never showed its page")
+
+        let safeLine = screen.view.convert(
+            CGPoint(x: 0, y: screen.view.bounds.height - screen.view.safeAreaInsets.bottom), to: window
+        ).y
+        let glass = try #require(Self.tabBarGlassFrame(of: tabs.tabBar, in: window), "no glass in the tab bar")
+        let drop = glass.minY - safeLine
+        #expect(abs(drop - SnapActionColumn.tabBarGlassDrop) < 0.75,
+                "iOS \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion): the tab bar's glass \(glass) starts \(drop)pt under the safe-area line \(safeLine), not \(SnapActionColumn.tabBarGlassDrop)")
+    }
+
+    /// The tab bar's floating glass, in `window`: the outermost descendant of
+    /// the bar, at least a tab tall, that is narrower than the bar — the
+    /// capsule is inset from the screen's edges, and what it holds is
+    /// smaller still.
+    static func tabBarGlassFrame(of bar: UITabBar, in window: UIWindow) -> CGRect? {
+        let barWidth: CGFloat = bar.bounds.width
+        var level: [UIView] = bar.subviews
+        while !level.isEmpty {
+            let visible: [UIView] = level.filter { !$0.isHidden && $0.alpha > 0.01 && $0.bounds.height >= 40 }
+            let inset: [UIView] = visible.filter { $0.bounds.width < barWidth - 1 && $0.bounds.width > barWidth / 2 }
+            if let capsule = inset.max(by: { $0.bounds.width < $1.bounds.width }) {
+                return capsule.convert(capsule.bounds, to: window)
+            }
+            level = level.flatMap(\.subviews)
+        }
+        return nil
+    }
+
     // MARK: - The media layout
 
     /// The sound bubble stands one md under the like pill, the pill's width,

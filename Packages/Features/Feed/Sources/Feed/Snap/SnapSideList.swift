@@ -160,16 +160,23 @@ enum SnapSideList {
         /// round.
         static let overlayBottomMargin: CGFloat = Spacing.lg
 
+        /// How far over the toolbar band the overlay's lowest element was
+        /// taken to rest when the travel was set (#1509): the page strip's
+        /// old gap over the margins line, 4 pt. #2252 moved the strip into
+        /// the gap under the caption — it now hangs a few points below the
+        /// margins line — and left this travel as it was; re-check the open
+        /// card's foot on the device.
+        static let overlayFootGap: CGFloat = Spacing.xs
+
         /// How far the page's overlay moves down, in the page's own space
         /// (#1509): into the band the bottom toolbar covers, which holds
         /// nothing once the page is a card between the bars — less what the
         /// card crops off the page's bottom (#1545), and stopping
         /// `overlayBottomMargin` short of the card's foot (#1549). The
-        /// overlay's lowest element rests at the toolbar band plus the
-        /// strip's gap (`SnapChromeView.pageBarToolbarGap`) above the page's
-        /// bottom.
+        /// overlay's lowest element rests at the toolbar band plus
+        /// `overlayFootGap` above the page's bottom.
         func overlayOffset(progress: CGFloat) -> CGFloat {
-            let travel = bars.bottom + SnapChromeView.pageBarToolbarGap - Self.overlayBottomMargin
+            let travel = bars.bottom + Self.overlayFootGap - Self.overlayBottomMargin
             return max(0, travel * progress - pageInset(progress: progress))
         }
 

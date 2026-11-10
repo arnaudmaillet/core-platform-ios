@@ -116,7 +116,7 @@ struct SnapSideListTests {
         // bottom at rest) lands `overlayBottomMargin` above the card's foot —
         // the page's bottom less the crop.
         let foot = geometry.size.height - geometry.pageInset(progress: 1)
-        let lowest = geometry.size.height - band - SnapChromeView.pageBarToolbarGap + geometry.overlayOffset(progress: 1)
+        let lowest = geometry.size.height - band - SnapSideList.Geometry.overlayFootGap + geometry.overlayOffset(progress: 1)
         #expect(abs(foot - lowest - SnapSideList.Geometry.overlayBottomMargin) < 0.01, "the foot's gap: \(foot - lowest)")
         #expect(geometry.overlayOffset(progress: 0.5) < geometry.overlayOffset(progress: 1))
     }

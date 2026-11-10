@@ -21,11 +21,11 @@ struct SnapChromeCaptionEmoteTests {
         return ids
     }
 
-    /// Case A: codes replaced by their glyph, every emote marked, timestamp
-    /// untouched.
+    /// A one-line caption: codes replaced by their glyph, every emote marked,
+    /// timestamp untouched, alone on line two (#2252).
     @Test func aShortCaptionMarksItsEmotes() {
         let composed = SnapChromeView.composedCaption("Trip 🔥 :lol:", timestamp: timestamp, width: width)
-        #expect(composed.string == "Trip 🔥 😆  7\u{00A0}weeks")
+        #expect(composed.string == "Trip 🔥 😆\n7\u{00A0}weeks")
         #expect(markedIDs(composed) == ["noto:1f525", "lol"])
     }
 
@@ -45,6 +45,6 @@ struct SnapChromeCaptionEmoteTests {
     @Test func aPlainCaptionCarriesNoMarks() {
         let composed = SnapChromeView.composedCaption("Golden hour.", timestamp: timestamp, width: width)
         #expect(markedIDs(composed).isEmpty)
-        #expect(composed.string == "Golden hour.  7\u{00A0}weeks")
+        #expect(composed.string == "Golden hour.\n7\u{00A0}weeks")
     }
 }
