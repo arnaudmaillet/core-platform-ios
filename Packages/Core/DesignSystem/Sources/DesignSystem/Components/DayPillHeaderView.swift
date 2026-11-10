@@ -15,6 +15,15 @@ public final class DayPillHeaderView: UICollectionReusableView {
 
     private let chip = UIVisualEffectView(effect: nil)
     private let label = UILabel()
+    private var chipBottom: NSLayoutConstraint!
+
+    /// The space above the chip, from the band's top.
+    public static let topGap: CGFloat = Spacing.sm
+    /// The space under the chip, down to its day's first row (#2238): at
+    /// least the space above it and close to the gap between two messages.
+    /// It was `Spacing.xs` (4 pt) and the chip read as glued to the message
+    /// under it and far from the one above (the owner, 2026-11-10).
+    public static let bottomGap: CGFloat = Spacing.md
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
@@ -28,11 +37,14 @@ public final class DayPillHeaderView: UICollectionReusableView {
         ))
 
         chip.clipsToBounds = true
-        chip.constrain(in: self) { parent in
-            chip.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            chip.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.sm)
-            chip.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.xs)
-        }
+        chip.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(chip)
+        chipBottom = chip.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Self.bottomGap)
+        NSLayoutConstraint.activate([
+            chip.centerXAnchor.constraint(equalTo: centerXAnchor),
+            chip.topAnchor.constraint(equalTo: topAnchor, constant: Self.topGap),
+            chipBottom,
+        ])
     }
 
     @available(*, unavailable)
@@ -53,6 +65,18 @@ public final class DayPillHeaderView: UICollectionReusableView {
     public func configure(title: String) {
         label.text = title
     }
+
+    /// The space under the chip, for a host whose rows sit differently
+    /// (#2238); `bottomGap` unless set.
+    public var gapBelow: CGFloat {
+        get { -chipBottom.constant }
+        set { chipBottom.constant = -newValue }
+    }
+
+    #if DEBUG
+    /// The chip's frame in the header, for tests.
+    public var debugChipFrame: CGRect { chip.frame }
+    #endif
 
     /// Caption 1 at semibold, still scaling with Dynamic Type. Local rather
     /// than a public `UIFont` extension: Chat declares its own `withWeight`,
