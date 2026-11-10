@@ -1148,7 +1148,11 @@ public final class MockSocialServices: @unchecked Sendable {
             view.commentFilters = storedCommentFilters(for: view.profileID)
             return .success(view)
         }
-        guard let author = dataset.author(for: request.profileID) else {
+        // A group's or a channel's made-up crowd (#2237) is people too: a
+        // subscriber's row opens a profile like anyone's.
+        let found = dataset.author(for: request.profileID)
+            ?? MockConversationBook.crowdAuthor(for: request.profileID, faces: dataset.authors)
+        guard let author = found else {
             return .failure(ConnectError(code: .notFound, message: "profile \(request.profileID) not found"))
         }
         var view = Profile_V1_ProfileView()

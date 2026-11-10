@@ -137,6 +137,22 @@ public struct ConversationMember: Equatable, Sendable, Identifiable {
     }
 }
 
+/// One page of a conversation's people (#2237): #995's paged `ListMembers`.
+/// `total` is every member of the roles asked — what a counter says, and so
+/// what the list must add up to.
+public struct ConversationMemberPage: Equatable, Sendable {
+    public let members: [ConversationMember]
+    /// Nil: the last page.
+    public let nextPageToken: String?
+    public let total: Int
+
+    public init(members: [ConversationMember], nextPageToken: String?, total: Int) {
+        self.members = members
+        self.nextPageToken = nextPageToken
+        self.total = total
+    }
+}
+
 /// A request to join, waiting for an admin (#2213, #2215).
 public struct ConversationJoinRequest: Equatable, Sendable, Identifiable {
     public let profileID: ProfileID
@@ -180,6 +196,12 @@ public struct ConversationDraft: Equatable, Sendable {
 public protocol ConversationManaging: Sendable {
     func details(of conversationID: ConversationID) async throws -> ConversationIdentity
     func members(of conversationID: ConversationID) async throws -> [ConversationMember]
+    /// One page of `roles`' members, `limit` at most, after `pageToken`
+    /// (nil: the first) — what the info screens' lists read (#2237): a
+    /// channel's 12 400 subscribers are never read at once.
+    func members(
+        of conversationID: ConversationID, roles: Set<ConversationRole>, after pageToken: String?, limit: Int
+    ) async throws -> ConversationMemberPage
     func create(_ draft: ConversationDraft) async throws -> ConversationID
     func editIdentity(of conversationID: ConversationID, name: String, photoURL: URL?, description: String) async throws
     func invite(_ profileIDs: [ProfileID], to conversationID: ConversationID) async throws
