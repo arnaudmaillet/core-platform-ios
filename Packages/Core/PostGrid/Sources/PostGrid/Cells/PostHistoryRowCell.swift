@@ -108,12 +108,18 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     ///
     /// A voice post's row (#2208) opens on its voice: "Voice post, 13
     /// seconds, From the ridge, by …".
+    ///
+    /// A showcase's row (#2216) names its card after the words: "Boats in at
+    /// six, Channel Harbour notes, 12.4K subscribers, by …".
     public static func accessibilityLabel(
-        for post: GalleryPost, viewedAt: Date?, now: Date, speaks: Bool = false
+        for post: GalleryPost, viewedAt: Date?, now: Date, speaks: Bool = false, showsEmbed: Bool = false
     ) -> String {
         var parts: [String] = []
         let title = title(for: post)
-        if speaks, let voice = post.voice {
+        if showsEmbed, let channel = post.embed?.channel {
+            if !title.isEmpty { parts.append(title) }
+            parts.append(ChannelEmbedCopy.accessibilityLabel(ChannelEmbedLocalState.applied(to: channel)))
+        } else if speaks, let voice = post.voice {
             parts.append(VoiceView.accessibilityLabel(
                 role: .post(author: nil), senderName: nil, duration: voice.duration, unplayed: false
             ))
@@ -192,6 +198,10 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     override public func updateConfiguration(using state: UICellConfigurationState) {
         super.updateConfiguration(using: state)
         authorView.isUserInteractionEnabled = !state.isEditing
+        // A press in the select mode selects the row, the card's button
+        // included (#2216).
+        isEditingRows = state.isEditing
+        syncEmbedInteraction()
         let selected = state.isEditing && state.isSelected
         if selected != isSelectedRow {
             isSelectedRow = selected
@@ -226,7 +236,7 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     /// Where the slid parts and the circle stand for the mode.
     private func applySelectionPlacement() {
         let shift = isSelecting ? CGAffineTransform(translationX: Self.selectionShift * layoutSign, y: 0) : .identity
-        for view in [square as UIView, titleLabel, voiceCaption, authorView] { view.transform = shift }
+        for view in [square as UIView, titleLabel, voiceCaption, embedCard, authorView] { view.transform = shift }
         selectionMark.alpha = isSelecting ? 1 : 0
         selectionMark.transform = isSelecting ? .identity : CGAffineTransform(scaleX: 0.5, y: 0.5)
     }
@@ -322,6 +332,20 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     /// voice component, full size, in the title's place — the post's words
     /// stay in the square's miniature, under it in reading order.
     private let voiceCaption = VoicePostCaptionView()
+    /// A showcase's card (#2216, behind `-channels`): the shared embed card,
+    /// full size, under the title — the author's words stay on the first
+    /// line, the card takes the room under them, the author's line under it.
+    /// The row grows for it; the square keeps its side, at the row's top.
+    private let embedCard = PostEmbedView()
+    /// Whether the list is in its select mode.
+    private var isEditingRows = false
+    /// The column's two placings: centred on the square (every row), or
+    /// hung from the row's top with the row closing under it (a showcase's,
+    /// taller than the square).
+    private var columnCentred: NSLayoutConstraint?
+    private var squareClosesRow: NSLayoutConstraint?
+    private var embedPlacing: [NSLayoutConstraint] = []
+    private weak var linesColumn: UIStackView?
     private let timeLabel = UILabel()
     private let authorView = UIView()
     private let avatar = AvatarView(diameter: 16, size: .avatar)
@@ -399,12 +423,18 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
             views.forEach(line.addArrangedSubview)
             line.spacing = Self.trailingGap
         }
-        let column = UIStackView(arrangedSubviews: [firstLine, secondLine])
+        embedCard.isHidden = true
+        let column = UIStackView(arrangedSubviews: [firstLine, embedCard, secondLine])
         column.axis = .vertical
         column.alignment = .fill
         column.spacing = Self.lineGap
+        // The card's own air after it; before it, set as it shows
+        // (`applyEmbed`) — a custom spacing after the title's line would
+        // also stand between the two lines of a row with no card.
+        column.setCustomSpacing(Self.embedGap, after: embedCard)
         column.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(column)
+        linesColumn = column
 
         let side = square.heightAnchor.constraint(equalToConstant: Self.minimumSquareSide)
         // ONE line, exactly: a caption with no words keeps it, and one whose
@@ -415,6 +445,18 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
         // The square IS the row's height; the self-sizing pass reads it.
         let bottom = square.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
         bottom.priority = .required - 1
+        let centred = column.centerYAnchor.constraint(equalTo: square.centerYAnchor)
+        // A showcase's row: the column from the row's top, at the lines'
+        // padding, and the row closing under whichever is taller.
+        let columnBottom = column.bottomAnchor.constraint(
+            equalTo: contentView.bottomAnchor, constant: -Self.verticalPadding
+        )
+        columnBottom.priority = .required - 1
+        embedPlacing = [
+            column.topAnchor.constraint(equalTo: square.topAnchor, constant: Self.verticalPadding),
+            columnBottom,
+            square.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor),
+        ]
         NSLayoutConstraint.activate([
             square.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             square.topAnchor.constraint(equalTo: contentView.topAnchor),
@@ -423,7 +465,7 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
             side,
             column.leadingAnchor.constraint(equalTo: square.trailingAnchor, constant: Self.mediaTextGap),
             column.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            column.centerYAnchor.constraint(equalTo: square.centerYAnchor),
+            centred,
             column.topAnchor.constraint(greaterThanOrEqualTo: contentView.topAnchor),
             titleHeight,
             avatar.leadingAnchor.constraint(equalTo: authorView.leadingAnchor),
@@ -437,6 +479,8 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
             nameLabel.topAnchor.constraint(greaterThanOrEqualTo: authorView.topAnchor),
         ])
         squareSide = side
+        columnCentred = centred
+        squareClosesRow = bottom
         self.titleHeight = titleHeight
         self.avatarSide = avatarSide
         applyFonts()
@@ -456,13 +500,16 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     /// read against `now`.
     public func configure(
         with post: GalleryPost, viewedAt: Date?, now: Date = Date(), imagePipeline: ImagePipeline?,
-        showsVoice: Bool = VoicePostDisplay.areDrawn
+        showsVoice: Bool = VoicePostDisplay.areDrawn, showsEmbed: Bool = PostEmbeds.areDrawn
     ) {
         self.post = post
         self.viewedAt = viewedAt
-        let voiced = Self.voiceSize(for: post, showsVoice: showsVoice) != nil
+        // A showcase's card outranks a voice (#2216), as on the list's card.
+        let embedSize = Self.embedSize(for: post, showsEmbed: showsEmbed)
+        let voiced = embedSize == nil && Self.voiceSize(for: post, showsVoice: showsVoice) != nil
         square.configure(with: post, imagePipeline: imagePipeline, speaks: voiced)
         applyVoice(voiced ? post : nil)
+        applyEmbed(embedSize, for: post, imagePipeline: imagePipeline)
         // A post with no caption keeps the line's height (`titleHeight`).
         titleLabel.attributedText = nil
         titleLabel.text = Self.title(for: post)
@@ -483,7 +530,9 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
         let hasAuthor = post.authorID != nil
         opening.hasPerson = { hasAuthor }
         likes.set(post.reactionCount)
-        accessibilityLabel = Self.accessibilityLabel(for: post, viewedAt: viewedAt, now: now, speaks: voiced)
+        accessibilityLabel = Self.accessibilityLabel(
+            for: post, viewedAt: viewedAt, now: now, speaks: voiced, showsEmbed: showsCard
+        )
         wrapWidth = -1
         setNeedsLayout()
     }
@@ -519,11 +568,59 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
         voiceCaption.leftScreen()
     }
 
+    // MARK: - A showcase (#2216)
+
+    /// Between the title's line and the card, and the card and the author.
+    public static let embedGap: CGFloat = Spacing.sm
+
+    /// The size a row gives a showcase's embed: full, under the title, for a
+    /// text post with one and the switch on. Pure.
+    public static func embedSize(for post: GalleryPost, showsEmbed: Bool) -> PostEmbeds.Size? {
+        post.kind == .text && PostEmbeds.shown(post.embed, drawn: showsEmbed) != nil ? .full : nil
+    }
+
+    /// Whether the row draws a showcase's card now.
+    private var showsCard: Bool { !embedCard.isHidden }
+
+    private func applyEmbed(_ size: PostEmbeds.Size?, for post: GalleryPost?, imagePipeline: ImagePipeline?) {
+        if let size, let embed = post?.embed {
+            embedCard.show(embed, size: size, pipeline: imagePipeline)
+            // The row's one VoiceOver element follows the card's answer.
+            embedCard.onEmbedChange = { [weak self] _ in self?.refreshEmbedAccessibility() }
+        } else {
+            embedCard.clear()
+            embedCard.onEmbedChange = nil
+        }
+        // Taller than the square: the column hangs from the row's top and
+        // closes it; otherwise centred on the square, as every row.
+        linesColumn?.setCustomSpacing(showsCard ? Self.embedGap : Self.lineGap, after: firstLine)
+        columnCentred?.isActive = !showsCard
+        squareClosesRow?.isActive = !showsCard
+        if showsCard { NSLayoutConstraint.activate(embedPlacing) } else { NSLayoutConstraint.deactivate(embedPlacing) }
+        syncEmbedInteraction()
+        refreshAccessibilityActions()
+    }
+
+    /// The card's button takes its tap out of the select mode only.
+    private func syncEmbedInteraction() {
+        embedCard.isUserInteractionEnabled = showsCard && !isEditingRows
+    }
+
+    private func refreshEmbedAccessibility() {
+        guard let post else { return }
+        accessibilityLabel = Self.accessibilityLabel(
+            for: post, viewedAt: viewedAt, now: Date(), speaks: speaks, showsEmbed: showsCard
+        )
+        refreshAccessibilityActions()
+    }
+
     /// New counters on the same post: the likes, and VoiceOver's words.
     public func updateCounts(from post: GalleryPost) {
         self.post = post
         likes.set(post.reactionCount)
-        accessibilityLabel = Self.accessibilityLabel(for: post, viewedAt: viewedAt, now: Date(), speaks: speaks)
+        accessibilityLabel = Self.accessibilityLabel(
+            for: post, viewedAt: viewedAt, now: Date(), speaks: speaks, showsEmbed: showsCard
+        )
     }
 
     private func applyFonts() {
@@ -611,6 +708,16 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
                 return player != nil
             })
         }
+        // …and its showcase's card acts through one (#2216): "Join".
+        if showsCard, case .channel(let channel)? = embedCard.embed, let action = channel.action {
+            actions.append(UIAccessibilityCustomAction(name: ChannelEmbedCopy.title(for: action)) { [weak self] _ in
+                guard let self else { return false }
+                // Requested's tap is its cancel's confirmation, a menu
+                // VoiceOver can't open from here: the cancel itself.
+                if action == .requested { embedCard.cancelRequest() } else { embedCard.performAction() }
+                return true
+            })
+        }
         if onAuthorHeld != nil {
             actions.append(UIAccessibilityCustomAction(name: Self.openProfileActionName) { [weak self] _ in
                 guard let self, post?.authorID != nil, let onAuthorHeld else { return false }
@@ -675,6 +782,8 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
         onCoverLoaded = nil
         // A voice it played stops: the row is another post's now (#2208).
         applyVoice(nil)
+        // A showcase's card, and a write in flight for it, go too (#2216).
+        applyEmbed(nil, for: nil, imagePipeline: nil)
         post = nil
         viewedAt = nil
     }
@@ -688,6 +797,8 @@ public final class PostHistoryRowCell: UICollectionViewListCell {
     public var debugVoicePart: VoicePostCaptionView { voiceCaption }
     /// Whether the title shows.
     public var debugShowsTitle: Bool { !titleLabel.isHidden }
+    /// The showcase's card under the title, nil for none (#2216).
+    public var debugEmbedCard: PostEmbedView? { showsCard ? embedCard : nil }
     public var debugViewedText: String? { timeLabel.isHidden ? nil : timeLabel.text }
     public var debugAuthor: String? { nameLabel.text }
     public var debugTitleLineBreakMode: NSLineBreakMode { titleLabel.lineBreakMode }
