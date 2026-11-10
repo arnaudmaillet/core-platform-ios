@@ -197,19 +197,16 @@ struct ConversationInfoTests {
     // MARK: - The lists behind the counters
 
     @Test func eachCounterPushesTheListsOnItsTab() async throws {
-        let model = ChannelInfoViewModel(conversationID: ConversationID("ch-studio-requests"), service: make())
-        let screen = ChannelInfoViewController(viewModel: model, imagePipeline: nil)
-        try await hosting(screen) { screen, stack in
-            await settle { model.state.phase == .loaded }
-            // Pushes without animation for the loop: UIKit drops a push made
-            // while the last transition still runs.
-            UIView.setAnimationsEnabled(false)
-            defer { UIView.setAnimationsEnabled(true) }
-            for (index, list) in screen.captions.enumerated() {
-                // ⚠️ Each push lands before the next tap: UIKit drops a push
-                // made while the last transition still runs, which left the
-                // first counter's lists on top (seen running the suite).
-                await settle { stack.transitionCoordinator == nil && stack.topViewController === screen }
+        // One fresh info screen per counter: resetting one stack between taps
+        // left UIKit dropping the next push (a test artifact — the app comes
+        // back by the back button).
+        let expected: [ConversationInfoList] = ConversationInfoList.counters(channel: true)
+        for (index, list) in expected.enumerated() {
+            let model = ChannelInfoViewModel(conversationID: ConversationID("ch-studio-requests"), service: make())
+            let screen = ChannelInfoViewController(viewModel: model, imagePipeline: nil)
+            try await hosting(screen) { screen, stack in
+                await settle { model.state.phase == .loaded }
+                #expect(screen.captions == expected)
                 let counter = screen.heroHeader.counters[index]
                 #expect(counter.isTappable, "\(list) does not open")
                 counter.sendActions(for: .touchUpInside)
@@ -217,8 +214,6 @@ struct ConversationInfoTests {
                 let lists = try #require(stack.topViewController as? PersonListsViewController, "\(list) pushed nothing")
                 #expect(lists.activeTab == list.rawValue, "opened \(lists.activeTab) for \(list.rawValue)")
                 #expect(lists.debugTabIDs == ["subscribers", "admins", "requests"])
-                await settle { stack.transitionCoordinator == nil }
-                stack.setViewControllers([screen], animated: false)
             }
         }
     }
