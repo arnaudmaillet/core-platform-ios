@@ -93,7 +93,10 @@ final class SoundSheetGalleryViewController: UIViewController {
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
-        collectionView.topEdgeEffect.style = .soft
+        // The titled header's soft blur (#1591), through the contract: it
+        // tops up the gutter above so the first tiles rest below the fade
+        // (#2240).
+        collectionView.applyTopEdge(for: .titled)
         // Named for both edges: the bar's soft blur and the toolbar's read
         // THIS scroll view.
         setContentScrollView(collectionView, for: [.top, .bottom])

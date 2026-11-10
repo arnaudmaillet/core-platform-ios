@@ -125,8 +125,15 @@ final class SearchFilterSheetViewController: UIViewController {
     fileprivate var contentHeight: CGFloat {
         let footers = groups.count { $0.footer != nil }
         // bar + per-group (title 22 + control 34 + spacing 20) + footers + inset
-        return 56 + CGFloat(groups.count) * 76 + CGFloat(footers) * 34 + 44
+        let rows: CGFloat = CGFloat(groups.count) * 76 + CGFloat(footers) * 34
+        // The titled contract rests the stack below the soft fade (#2240):
+        // what it adds over the stack's own top is part of the height.
+        let clearance: CGFloat = SoftTopEdge.clearance(below: Self.stackTop)
+        return 56 + rows + 44 + clearance
     }
+
+    /// The stack's top in the scroll view's content.
+    private static let stackTop: CGFloat = 16
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -178,7 +185,7 @@ final class SearchFilterSheetViewController: UIViewController {
             scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 16),
+            stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: Self.stackTop),
             stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -24),
             stack.leadingAnchor.constraint(equalTo: scroll.frameLayoutGuide.leadingAnchor, constant: 20),
             stack.trailingAnchor.constraint(equalTo: scroll.frameLayoutGuide.trailingAnchor, constant: -20)

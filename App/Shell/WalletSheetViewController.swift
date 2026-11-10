@@ -474,9 +474,10 @@ final class WalletSheetViewController: UIViewController {
     }
 
     /// The soft edge under the bar: the system draws the effect under the
-    /// bar it tracks.
+    /// bar it tracks. Through the titled contract (#1591), which also tops
+    /// up `topInset` so the head rests below the fade (#2240).
     private func buildChrome() {
-        collectionView.topEdgeEffect.style = .soft
+        collectionView.applyTopEdge(for: .titled)
         // Named, not searched for: the bar's edge effect reads THIS list.
         setContentScrollView(collectionView, for: .top)
     }
@@ -510,7 +511,11 @@ final class WalletSheetViewController: UIViewController {
             bottomInset: window?.safeAreaInsets.bottom ?? 0,
             gap: Spacing.sm
         )
-        let height = (barClearance() + Self.topInset + cell.frame.maxY + margin).rounded()
+        // The list's whole top inset, not `topInset` alone: the titled
+        // contract adds the fade's clearance to it (#2240), and a detent
+        // measured without it would cut the Claim by as much.
+        let listTopInset: CGFloat = collectionView.contentInset.top
+        let height = (barClearance() + listTopInset + cell.frame.maxY + margin).rounded()
         guard force || abs(height - detentHeight) > 0.5 else { return }
         detentHeight = height
         // ⚠️ NOT BEFORE THE SHEET IS UP (#2122). Measured from `viewDidLoad`,

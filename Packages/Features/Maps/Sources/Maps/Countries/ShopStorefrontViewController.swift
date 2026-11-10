@@ -154,7 +154,9 @@ public final class ShopStorefrontViewController: UIViewController {
         // sideways: only its scrolling axis is adjusted.
         scroll.contentInsetAdjustmentBehavior = .scrollableAxes
         scroll.backgroundColor = .clear
-        scroll.topEdgeEffect.style = .soft
+        // The titled header's soft blur, and the first card resting below
+        // its fade (#1591, #2240).
+        scroll.applyTopEdge(for: .titled)
         view.addSubview(scroll)
         scroll.pin(to: view)
         // The bar's soft edge is drawn where it meets this view.

@@ -122,7 +122,10 @@ public final class ContentFittingNavigationController: UINavigationController, U
         let sections = table.numberOfSections
         let end = sections > 0 ? table.rectForFooter(inSection: sections - 1).maxY : table.contentSize.height
         let added = view.window?.safeAreaInsets.bottom ?? 0
-        return max(0, bar + end - added).rounded(.up)
+        // The step's own top inset counts: a titled step's list rests below
+        // the soft fade (#2240), which the contract adds there.
+        let inset: CGFloat = table.contentInset.top
+        return max(0, bar + inset + end - added).rounded(.up)
     }
 
     private static let fittedIdentifier = UISheetPresentationController.Detent.Identifier("fittedContent")
