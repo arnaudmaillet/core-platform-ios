@@ -259,9 +259,26 @@ open class EmoteLabel: UILabel {
             text: text,
             size: CGSize(width: rect.width, height: rect.height + 1),
             numberOfLines: lines,
-            lineBreakMode: lineBreakMode
+            lineBreakMode: lastLineBreakMode
         )
         return true
+    }
+
+    /// How the last line ends when the text runs past it (#2197).
+    ///
+    /// ⚠️ **NOT `lineBreakMode` AS READ.** Once attributed text is set,
+    /// `UILabel` reports its paragraph style's mode, and `setEmoteText` gives
+    /// that paragraph the default word wrapping (a truncating one would make
+    /// every paragraph a single line). Handed to the text container as is,
+    /// the last line just stopped at a word, with no "…", where `UILabel`'s
+    /// own drawing puts an ellipsis on a cut last line. So a wrapping mode
+    /// ends its last line like `UILabel` does, with the tail truncated; an
+    /// explicit clip, head or middle truncation is kept.
+    var lastLineBreakMode: NSLineBreakMode {
+        switch lineBreakMode {
+        case .byWordWrapping, .byCharWrapping: .byTruncatingTail
+        default: lineBreakMode
+        }
     }
 
     /// Where the text container's origin sits in `rect`: vertically centred,
@@ -278,7 +295,7 @@ open class EmoteLabel: UILabel {
         guard let text = super.attributedText, text.length > 0, bounds.width > 0 else {
             return super.textRect(forBounds: bounds, limitedToNumberOfLines: numberOfLines)
         }
-        textLayout.configure(text: text, size: bounds.size, numberOfLines: numberOfLines, lineBreakMode: lineBreakMode)
+        textLayout.configure(text: text, size: bounds.size, numberOfLines: numberOfLines, lineBreakMode: lastLineBreakMode)
         let used = textLayout.usedSize
         let scale = max(traitCollection.displayScale, 1)
         return CGRect(
@@ -625,6 +642,13 @@ open class EmoteLabel: UILabel {
 
     /// How many emotes are placed (animating or waiting on art).
     var placedEmoteCount: Int { players.count }
+    /// Whether the text as last laid out ends its last line with an ellipsis.
+    var drawsEllipsis: Bool {
+        guard configureLayout(for: emoteTextRect(forBounds: bounds), lines: numberOfLines) else { return false }
+        let visible = textLayout.manager.glyphRange(for: textLayout.container)
+        guard visible.length > 0 else { return false }
+        return textLayout.manager.truncatedGlyphRange(inLineFragmentForGlyphAt: NSMaxRange(visible) - 1).location != NSNotFound
+    }
     /// How many are PLAYING art over their glyph.
     var showingEmoteCount: Int { players.values.filter { $0.isShowing && !$0.awaitsSlot }.count }
     /// How many hold their art's poster frame, waiting on a playback slot.
