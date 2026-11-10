@@ -63,6 +63,28 @@ extension ChatRepository: ConversationManaging {
         }
     }
 
+    public func members(
+        of conversationID: ConversationID, roles: Set<ConversationRole>, after pageToken: String?, limit: Int
+    ) async throws -> ConversationMemberPage {
+        // A stable order on the wire, whatever the set's.
+        let wireRoles: [ProposedChat.Role] = [ConversationRole.owner, .admin, .member, .subscriber, .guest]
+            .filter(roles.contains).map(\.wire)
+        let reply = try await propose("membersPage") {
+            .membersPage(
+                viewer: $0, conversationID: conversationID.rawValue, roles: wireRoles,
+                pageToken: pageToken ?? "", limit: limit
+            )
+        }
+        let members: [ConversationMember] = reply.members.map {
+            ConversationMember(
+                profileID: ProfileID($0.profileID), role: ConversationRole($0.role),
+                joinedAt: Date(timeIntervalSince1970: TimeInterval($0.joinedAtMs) / 1000)
+            )
+        }
+        let next = reply.nextPageToken.flatMap { $0.isEmpty ? nil : $0 }
+        return ConversationMemberPage(members: members, nextPageToken: next, total: reply.total ?? members.count)
+    }
+
     public func create(_ draft: ConversationDraft) async throws -> ConversationID {
         guard draft.kind != .direct else { throw ChatError.refused(message: "a DM opens with OpenDirectConversation") }
         if draft.kind == .group, draft.memberIDs.count + 1 > ConversationDraft.groupCap {
@@ -156,5 +178,19 @@ extension ChatRepository: ConversationManaging {
 
     public func unsubscribe(from conversationID: ConversationID) async throws {
         _ = try await propose("unsubscribe") { .unsubscribe(viewer: $0, conversationID: conversationID.rawValue) }
+    }
+}
+
+// MARK: - A profile's channels (#2232)
+
+extension ChatRepository: ProfileChannelsReading {
+    /// The channels `owner` owns that the viewer may see, in the server's
+    /// order: nothing with the channels off, so a profile has no tab.
+    public func ownedChannels(of owner: ProfileID) async throws -> [OwnedChannel] {
+        guard showsChannels else { return [] }
+        let reply = try await propose("ownedChannels") { .ownedChannels(viewer: $0, owner: owner.rawValue) }
+        return reply.details.filter { $0.kind == .channel }.map {
+            OwnedChannel(id: ConversationID($0.conversationID), identity: ConversationIdentity($0))
+        }
     }
 }

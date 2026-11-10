@@ -1605,6 +1605,15 @@ final class AppContainer {
         // screen. The SAME service the map itself writes through, so the rail
         // and the button cannot hold different opinions about who is pinned.
         builder.mapPinning = mapsFeature.profilePinning
+        // A profile's Channels tab (#2232): Chat's read of the channels a
+        // profile owns, and its new channel's sheet for "Create a Channel".
+        // Only with `-channels` — off, no profile asks, and opening one
+        // never builds Chat. The rows' Join / Request / Open are the
+        // showcase card's (`PostEmbedView.makeChannelActions`, above).
+        if DebugFlags.isOn("-channels") {
+            builder.makeProfileChannels = { [unowned self] in chatFeature.makeProfileChannels() }
+            builder.makeChannelCreation = { [unowned self] in chatFeature.makeChannelCreationViewController() }
+        }
         return builder
     }()
 
@@ -1885,6 +1894,10 @@ final class AppContainer {
         // The inbox and the last 50 conversations × 200 messages (#897).
         localStore: localStore,
         relations: inboxRelations,
+        // The Posts page under a group's or a channel's info header (#2237):
+        // For You's own grid, as the profile's and the place's pages — the
+        // text posts that showcase it, laid out as a profile's Posts.
+        postsPage: { [unowned self] in self.feedFeature.makePostGridPage(style: .list, savesPosts: false) },
         // A conversation is drawn by the feed's text-post screen. Lazy, like
         // every feature here: the feed builder reaches the router, and the
         // router reaches this.

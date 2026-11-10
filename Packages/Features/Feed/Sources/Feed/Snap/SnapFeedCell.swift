@@ -3076,6 +3076,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// The page indicator's scrub, so the screen can make its dismissal yield.
     var mediaScrubGesture: UIGestureRecognizer { chrome.mediaScrubGesture }
+    /// The caption's slide, which drives the strip on a post with one (#2269).
+    var captionSlideGesture: UIGestureRecognizer { chrome.captionSlide }
 
     /// Moves an ALREADY CONFIGURED page's collection to `page`.
     ///

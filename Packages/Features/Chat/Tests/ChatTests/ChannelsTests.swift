@@ -18,7 +18,8 @@ import UIKit
 /// The mock's viewer: owner of ch-daily (public, 12 400) and of
 /// ch-studio-requests (on request, three pending requests); subscriber of
 /// ch-botanic (joined muted) and of ch-tides (notifications on); a pending
-/// request on ch-film; not in ch-harbour (public, 10).
+/// request on ch-film; not in ch-harbour (public, 10). Owner too of
+/// ch-sketchbook (private, #2232): their own profile lists it with a lock.
 @MainActor
 struct ChannelsTests {
     private struct Session: AuthSessionProviding {
@@ -71,6 +72,7 @@ struct ChannelsTests {
     private let film = ConversationID("ch-film")
     private let harbour = ConversationID("ch-harbour")
     private let studio = ConversationID("ch-studio-requests")
+    private let sketchbook = ConversationID("ch-sketchbook")
 
     // MARK: - Channels in Chats (#2230)
 
@@ -78,14 +80,14 @@ struct ChannelsTests {
         let repository = make()
         let rows = try await repository.loadInbox(.inbox, after: nil).conversations
         let channels = rows.filter { $0.kind == .channel }
-        #expect(Set(channels.map(\.id)) == [daily, botanic, tides, studio], "\(channels.map(\.id.rawValue))")
+        #expect(Set(channels.map(\.id)) == [daily, botanic, tides, studio, sketchbook], "\(channels.map(\.id.rawValue))")
         #expect(rows.contains { $0.kind == .direct }, "the DMs went")
         // One list, newest activity first, channels among the DMs.
         #expect(rows == rows.sorted(by: Conversation.isOrderedBefore), "a channel sorted apart")
 
         let catalog = await loadedCatalog(repository)
         let active = catalog.snapshot.active
-        #expect(Set(active.filter { $0.kind == .channel }.map(\.id)) == [daily, botanic, tides, studio])
+        #expect(Set(active.filter { $0.kind == .channel }.map(\.id)) == [daily, botanic, tides, studio, sketchbook])
         #expect(active == active.sorted(by: Conversation.isOrderedBefore))
         // Pinned, a channel rises like any row.
         catalog.togglePin(botanic)
@@ -258,7 +260,7 @@ struct ChannelsTests {
         let digest = ChannelJoinRequestsDigest(catalog: catalog, service: repository)
         catalog.reload()
         await settle { digest.total == 3 }
-        #expect(Set(digest.runChannels.map(\.id)) == [daily, studio])
+        #expect(Set(digest.runChannels.map(\.id)) == [daily, studio, sketchbook])
         #expect(digest.entries.map(\.id) == [studio], "only the channel with requests: ch-daily has none")
         #expect(digest.entries.first?.count == 3)
         #expect(digest.entries.first?.channel.name == "Studio drops")
@@ -573,7 +575,8 @@ struct ChannelsTests {
         followed.load()
         await settle { followed.state.phase == .loaded }
         #expect(!followed.state.canEdit)
-        #expect(followed.state.subscribers.isEmpty, "a subscriber sees no subscribers")
+        #expect(!ChannelInfoViewModel.listTabs(for: followed.state).contains { $0.id == "subscribers" }, "a subscriber sees no subscribers")
+        #expect(try await followed.page(of: .subscribers, after: nil).rows.isEmpty)
         var left = false
         followed.onLeft = { left = true }
         followed.leave()

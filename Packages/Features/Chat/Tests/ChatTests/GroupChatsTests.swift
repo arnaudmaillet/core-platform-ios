@@ -288,10 +288,14 @@ struct GroupChatsTests {
         await settle { info.state.phase == .loaded }
         #expect(info.state.viewerRole == .owner)
         #expect(info.state.canEdit && info.state.canAddMembers)
-        #expect(info.state.members.first?.role == .owner, "the owner leads the list")
-        #expect(info.state.members.first?.isViewer == true)
-        #expect(info.state.members.first?.actions.isEmpty == true)
-        #expect(info.state.members.dropFirst().allSatisfy { !$0.actions.isEmpty })
+        #expect(info.state.admins.first?.role == .owner, "the owner leads the admins")
+        #expect(info.state.admins.first?.isViewer == true)
+        // The members, read as their list reads them (#2237): the owner
+        // first, the viewer's own row opens nothing and offers nothing.
+        let rows = try await info.page(of: .members, after: nil).rows
+        #expect(rows.first?.opens == false)
+        #expect(rows.first?.actions.isEmpty == true)
+        #expect(rows.dropFirst().allSatisfy { !$0.actions.isEmpty })
 
         var notice: String?
         var left = false
@@ -308,16 +312,18 @@ struct GroupChatsTests {
         let info = GroupInfoViewModel(conversationID: id, service: repository)
         info.load()
         await settle { info.state.phase == .loaded }
-        let plain = try #require(info.state.members.first { $0.role == .member })
-        info.perform(.remove, on: plain.id)
-        await settle { !info.state.members.contains { $0.id == plain.id } }
-        #expect(!info.state.members.contains { $0.id == plain.id })
+        let rows = try await info.page(of: .members, after: nil).rows
+        let plain = try #require(rows.first { info.member(ProfileID($0.id))?.role == .member })
+        let count = info.state.memberCount
+        info.perform(.remove, on: ProfileID(plain.id))
+        await settle { info.state.memberCount == count - 1 }
+        #expect(!(try await info.page(of: .members, after: nil).rows).contains { $0.id == plain.id })
 
-        let admin = try #require(info.state.members.first { $0.role == .admin })
+        let admin = try #require(info.state.admins.first { $0.role == .admin })
         info.perform(.transferOwnership, on: admin.id)
         await settle { info.state.viewerRole == .admin }
         #expect(info.state.viewerRole == .admin)
-        #expect(info.state.members.first { $0.id == admin.id }?.role == .owner)
+        #expect(info.state.admins.first { $0.id == admin.id }?.role == .owner)
     }
 
     @Test func aMemberManagesNoOneAndLeaves() async throws {
@@ -328,7 +334,7 @@ struct GroupChatsTests {
         await settle { info.state.phase == .loaded }
         #expect(info.state.viewerRole == .member)
         #expect(!info.state.canEdit && !info.state.canAddMembers)
-        #expect(info.state.members.allSatisfy { $0.actions.isEmpty })
+        #expect(try await info.page(of: .members, after: nil).rows.allSatisfy { $0.actions.isEmpty })
 
         var left = false
         info.onLeft = { left = true }

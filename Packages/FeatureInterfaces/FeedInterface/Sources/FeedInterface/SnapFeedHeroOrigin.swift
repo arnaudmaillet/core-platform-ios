@@ -443,6 +443,14 @@ public struct SnapFeedHeroOrigin {
     /// order (#638). `nil`: the window is the whole set (a place, a sound, a
     /// claim), and the feed ends where it does.
     public let continuation: SnapFeedContinuation?
+    /// ⚠️ THE POST OPENS WITH THE STACK'S OWN PUSH, and closes with its own
+    /// pop, even when it carries a window (`textReveal`) — a FLAT list row of
+    /// words (#2243): the window grows a card into the page, and a flat row
+    /// has no card to grow from. The close stays native whatever the feed has
+    /// paged onto by then (a photograph's page included), as every plain push
+    /// closes (#2015). False: the opening is decided as before — a flight for
+    /// a picture, the window for words.
+    public let opensWithNativePush: Bool
 
     public init(
         post: GalleryPost,
@@ -473,7 +481,8 @@ public struct SnapFeedHeroOrigin {
         mediaPage: Int? = nil,
         followMediaPage: ((PostID, Int) -> Void)? = nil,
         currentCover: (() -> UIImage?)? = nil,
-        continuation: SnapFeedContinuation? = nil
+        continuation: SnapFeedContinuation? = nil,
+        opensWithNativePush: Bool = false
     ) {
         self.post = post
         self.stream = stream
@@ -504,5 +513,6 @@ public struct SnapFeedHeroOrigin {
         self.followMediaPage = followMediaPage
         self.currentCover = currentCover
         self.continuation = continuation
+        self.opensWithNativePush = opensWithNativePush
     }
 }

@@ -121,7 +121,7 @@ final class SnapChromeView: UIView {
 
     /// An `EmoteLabel`: the caption's emoji and `:code:` emotes animate in
     /// place, at the caption's own size (`composedCaption` marks them).
-    private let captionLabel = EmoteLabel()
+    private let captionLabel = SnapCaptionLabel()
 
     /// The bucket the caption's emotes are drawn at — what the screen warms
     /// the next captions at (#1504).
@@ -991,6 +991,51 @@ final class SnapChromeView: UIView {
         // is said about them.
         captionLabel.isUserInteractionEnabled = true
         captionLabel.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(captionTapped)))
+        // …and a horizontal slide on it drives the strip (#2269).
+        captionSlide.addTarget(self, action: #selector(captionSlid(_:)))
+        captionSlideGate.mayBegin = { [weak self] travel in
+            self?.captionSlideMayBegin(velocity: travel) ?? false
+        }
+        captionSlide.delegate = captionSlideGate
+        captionLabel.addGestureRecognizer(captionSlide)
+        captionLabel.claimsDrag = { [weak self] velocity in
+            self?.captionSlideMayBegin(velocity: velocity) ?? false
+        }
+    }
+
+    // MARK: - The caption drives the strip (#2269)
+
+    /// A horizontal slide on the caption, on a post with a strip: the strip's
+    /// scrub or browse, relative (`SnapMediaPageBarView.relativeDrag`). The
+    /// owner, 2026-11-10: the 2 pt strip is hard to hit, and the caption
+    /// right above it is the natural place to slide.
+    ///
+    /// ⚠️ THE COST, ACCEPTED BY THE OWNER: on a clip or a carousel, a
+    /// horizontal slide that starts on the caption no longer goes back (a
+    /// pushed post) or changes sector (Shots). The media above it still does,
+    /// as does the leading edge. On a post without a strip the caption keeps
+    /// today's behaviour: the pan never begins.
+    let captionSlide = UIPanGestureRecognizer()
+    private let captionSlideGate = SnapCaptionSlideGate()
+
+    /// Whether the caption's slide may begin, for a drag heading the way
+    /// `velocity` says: a strip to drive, and a clearly horizontal travel —
+    /// so a vertical swipe that starts on the caption pages the feed at once.
+    func captionSlideMayBegin(velocity: CGPoint) -> Bool {
+        guard mediaPageBar.acceptsRelativeDrag else { return false }
+        return Self.isHorizontalSlide(velocity)
+    }
+
+    /// A travel (or velocity) clearly horizontal: x dominates y by half again.
+    static func isHorizontalSlide(_ vector: CGPoint) -> Bool {
+        abs(vector.x) > 0 && abs(vector.x) > abs(vector.y) * horizontalDominance
+    }
+
+    /// How much x must outweigh y for the slide to be the caption's.
+    static let horizontalDominance: CGFloat = 1.5
+
+    @objc private func captionSlid(_ pan: UIPanGestureRecognizer) {
+        mediaPageBar.relativeDrag(pan.state, travel: pan.translation(in: self).x)
     }
 
     /// The action column's media half (`SnapActionColumn`): the SOUND bubble
@@ -2519,5 +2564,32 @@ final class GradientView: UIView {
         CATransaction.setDisableActions(true)
         gradientLayer.colors = colors.map(\.cgColor)
         CATransaction.commit()
+    }
+}
+
+/// The caption slide's delegate: begins only on a clearly horizontal travel
+/// over a post with a strip (`SnapChromeView.captionSlideMayBegin`). An object
+/// of its own — the chrome is a `UIView`, whose own `gestureRecognizerShouldBegin`
+/// is asked of every recognizer attached to it.
+final class SnapCaptionSlideGate: NSObject, UIGestureRecognizerDelegate {
+    var mayBegin: (CGPoint) -> Bool = { _ in false }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+        // Past its slop, the travel says the direction; the velocity backs it
+        // when the travel is still too small to read.
+        let travel = pan.translation(in: pan.view)
+        return mayBegin(travel == .zero ? pan.velocity(in: pan.view) : travel)
+    }
+}
+
+/// The caption: an `EmoteLabel` that tells a horizontal pager above it
+/// (Shots' sector pager, `HorizontalDragClaiming`) when a slide starting on it
+/// is its own — on a post with a strip (#2269).
+final class SnapCaptionLabel: EmoteLabel, HorizontalDragClaiming {
+    var claimsDrag: (CGPoint) -> Bool = { _ in false }
+
+    func claimsHorizontalDrag(velocity: CGPoint) -> Bool {
+        claimsDrag(velocity)
     }
 }

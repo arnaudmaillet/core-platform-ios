@@ -1188,28 +1188,19 @@ final class ConversationThreadViewController: UIViewController {
 
     static let bellID = "conversation.bell"
 
-    /// How long a mute lasts, as the long press offers it (#729).
-    static let muteDurations: [(title: String, toast: String, seconds: TimeInterval?)] = [
-        ("For 1 Hour", "Muted for 1 hour", 3_600),
-        ("For 8 Hours", "Muted for 8 hours", 8 * 3_600),
-        ("For 1 Day", "Muted for 1 day", 86_400),
-        ("For 1 Week", "Muted for 1 week", 7 * 86_400),
-        ("Until I Turn It Back On", "Notifications muted", nil),
-    ]
+    /// How long a mute lasts, as the long press offers it (#729): the
+    /// shared bell's (`MuteMenu`, #2237), so a duration added there shows
+    /// here and on a group's or a channel's info screen alike.
+    static let muteDurations: [(title: String, toast: String, seconds: TimeInterval?)] =
+        MuteMenu.durations.map { (title: $0.title, toast: $0.toast, seconds: $0.seconds) }
 
+    /// The shared bell menu (`MuteMenu`, #2237).
     private func muteMenu(muted: Bool) -> UIMenu {
-        let durations = Self.muteDurations.map { duration in
-            UIAction(title: duration.title) { [weak self] _ in
-                self?.setMuted(true, until: duration.seconds.map { Date().addingTimeInterval($0) }, toast: duration.toast)
-            }
-        }
-        let mute = UIMenu(title: muted ? "Mute Again" : "Mute Notifications", image: UIImage(systemName: "bell.slash"),
-                          options: muted ? [] : .displayInline, children: durations)
-        guard muted else { return UIMenu(children: [mute]) }
-        let unmute = UIAction(title: "Unmute", image: UIImage(systemName: "bell")) { [weak self] _ in
+        MuteMenu.make(muted: muted) { [weak self] duration in
+            self?.setMuted(true, until: duration.end(), toast: duration.toast)
+        } onUnmute: { [weak self] in
             self?.setMuted(false, until: nil)
         }
-        return UIMenu(children: [unmute, mute])
     }
 
     /// A message's Copy says so (#803): the pasteboard is off-screen, and a

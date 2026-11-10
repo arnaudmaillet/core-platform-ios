@@ -98,7 +98,12 @@ extension ForYouGridPage {
             // A row draws the page it is on (`renderedCover`), and that page
             // outlives the viewer swiping on to another post (#1332).
             currentCover: { [weak self] in self?.heroAppearance(for: id)?.cover },
-            continuation: continuation
+            continuation: continuation,
+            // ⚠️ A FLAT ROW OF WORDS OPENS WITH THE NATIVE PUSH (#2243), its
+            // window kept for nothing but the record: there is no card for it
+            // to grow from, and a native push closes with the native pop
+            // whatever the feed pages onto (`presentSnapFeedHero`).
+            opensWithNativePush: opensWithNativePush(id)
         )
     }
 
