@@ -236,6 +236,17 @@ final class NotificationsViewController: UIViewController {
 
     // MARK: - Setup
 
+    /// The first section title's step under the large title.
+    private static let firstHeaderTopPadding: CGFloat = Spacing.sm
+
+    /// What the titled contract adds above that first title to clear the
+    /// soft fade (#2240), known before the list has a row: the skeleton, a
+    /// sibling of the list, moves down by exactly as much, so the rows land
+    /// where its bones stood.
+    static var skeletonTopClearance: CGFloat {
+        SoftTopEdge.clearance(below: firstHeaderTopPadding)
+    }
+
     private func makeLayout() -> UICollectionViewLayout {
         UICollectionViewCompositionalLayout { index, environment in
             var configuration = UICollectionLayoutListConfiguration(appearance: .plain)
@@ -246,7 +257,7 @@ final class NotificationsViewController: UIViewController {
             // the app's one section gap under the rows above it
             // (`Spacing.section` to its line, the bar's own air counted in).
             configuration.headerTopPadding = index == 0
-                ? Spacing.sm
+                ? Self.firstHeaderTopPadding
                 : SectionTitleView.gapAbove(traits: environment.traitCollection)
             let section = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
             // A plain list pins its headers; these scroll with their rows.
@@ -263,13 +274,12 @@ final class NotificationsViewController: UIViewController {
     private func configureCollectionView() {
         collectionView.backgroundColor = .clear
         collectionView.delegate = self
-        // THE ONE LIST THAT KEEPS UIKIT'S EDGE EFFECT under its bar (asked for,
-        // 2026-09-28): rows scrolling up under "Notifications" soften into the
-        // system's own top-edge blur. Every other list hides it — see
-        // `prefersClearTopEdge` — so this is deliberately NOT called here, and
-        // the style is stated rather than left `.automatic`, so a change of
-        // UIKit default cannot silently turn it into the hard band.
-        collectionView.topEdgeEffect.style = .soft
+        // UIKit's soft edge effect under its bar (asked for, 2026-09-28):
+        // rows scrolling up under "Notifications" soften into the system's
+        // own top-edge blur — the titled header's rule since #1591. Through
+        // the contract, not the style by hand: it also starts the first
+        // section below the fade at rest (#2240), where "New" sat softened.
+        collectionView.applyTopEdge(for: .titled)
         collectionView.pin(to: view)
         // Named, not searched for: the effect is drawn where the navigation
         // bar's pocket meets the scroll view it TRACKS, and the skeleton and
@@ -360,7 +370,7 @@ final class NotificationsViewController: UIViewController {
     }
 
     private func configureStatusViews() {
-        skeleton.pin(to: view)
+        skeleton.pin(to: view, insets: NSDirectionalEdgeInsets(top: Self.skeletonTopClearance, leading: 0, bottom: 0, trailing: 0))
         skeleton.isHidden = true
         emptyState.pin(to: view)
         emptyState.isHidden = true

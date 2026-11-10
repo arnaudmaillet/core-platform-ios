@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Testing
 import UIKit
 @testable import Profile
@@ -236,6 +237,15 @@ struct ProfileRelationshipsTabSyncTests {
         // filmed) — and the lists stay clear, or two bands would stack.
         #expect(!paging.topEdgeEffect.isHidden && paging.topEdgeEffect.style == .soft)
         #expect(all.allSatisfy { $0.topEdgeEffect.isHidden })
+        // ⚠️ AND EVERY LIST RESTS BELOW THE BLUR'S FADE (#2240, the owner's
+        // report: the first face softened at rest). The blur is the pager's,
+        // the space is each list's — the opening one and the ones made by
+        // paging alike — and none on the pager, whose content does not
+        // scroll under the bar.
+        #expect(all.allSatisfy { $0.topFadeClearance == SoftTopEdge.fadeLength },
+                "\(all.map(\.topFadeClearance))")
+        #expect(all.allSatisfy { $0.contentInset.top >= SoftTopEdge.fadeLength })
+        #expect(paging.contentInset.top == 0)
     }
 }
 

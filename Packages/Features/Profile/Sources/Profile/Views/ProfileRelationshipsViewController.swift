@@ -161,7 +161,9 @@ final class ProfileRelationshipsViewController: UIViewController {
         // ⚠️ THE TITLED HEADER'S SOFT BLUR, ON THE PAGER (#1591; the owner,
         // 2026-10-22, filmed: only the status band blurred). The lists are
         // nested in this scroll view and UIKit draws no edge effect for
-        // them; this one sits right under the bar, and covers it.
+        // them; this one sits right under the bar, and covers it. The
+        // pager passes the contract's clearance on to each list it hosts
+        // (#2240), so their first rows rest below the fade.
         pager.pagingScrollView.applyTopEdge(for: .titled)
 
         // Tap → page, shown directly (#1748): the lens flies on its own.

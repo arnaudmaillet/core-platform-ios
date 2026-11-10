@@ -99,7 +99,11 @@ final class ProfileRelationshipListViewController: UIViewController {
         // set soft and named the screen's content scroll view — measured: the
         // rows scrolled under a sharp bar. The pager's own scroll view, right
         // under the bar, wears the titled header's soft blur
-        // (`ProfileRelationshipsViewController.configurePager`).
+        // (`ProfileRelationshipsViewController.configurePager`) — and hands
+        // this list the space that rests its first row below the blur's fade
+        // (#2240: the owner's report, the first face softened at rest).
+        // `topFadeClearance` reads it; the skeleton rows are cells, so they
+        // start where the first row will.
         collectionView.prefersClearTopEdge()
         collectionView.pin(to: view)
 
