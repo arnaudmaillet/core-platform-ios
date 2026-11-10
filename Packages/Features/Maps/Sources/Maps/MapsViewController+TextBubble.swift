@@ -129,7 +129,9 @@ extension MapsViewController {
     private func showBubble(on annotation: any MKAnnotation, animated: Bool) {
         guard let pin = Self.textBubblePin(of: annotation) else { return }
         guard let post = textBubblePost(pin.postID) else { return loadTextBubblePosts([pin.postID]) }
-        let content = MapTextBubbleView.Content.of(post)
+        // The marker's own read of a showcase's card stands in for a post
+        // read without one (#2216).
+        let content = MapTextBubbleView.Content.of(post, pinEmbed: pin.embed)
         switch mapView.view(for: annotation) {
         case let single as MapAnnotationView: single.setBubble(content, animated: animated)
         case let group as MapClusterAnnotationView: group.setBubble(content, animated: animated)

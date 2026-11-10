@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import MediaCore
 import PostGrid
 import UIKit
 import VoiceKitUI
@@ -27,6 +28,10 @@ import VoiceKitUI
 ///   author — play / pause, the waveform, the timer — its words under it.
 ///   The voice's taps are its own; the rest of the bubble opens the post. It
 ///   stops when the bubble folds (the voice leaves the window).
+/// - **A channel's showcase (#2216, behind `-channels`)** keeps the bubble
+///   too: the shared embed card, full size, under the author's words —
+///   Join, Request to Join, Open from the map. Only its action button takes
+///   a touch; the rest of the bubble still opens the post.
 /// - **Liquid Glass**, the system's own, its round end concentric with the
 ///   round marker. No shadow: a shadow renders a glass or a blur offscreen,
 ///   cut off from the map it samples (a blur came out flat).
@@ -39,17 +44,28 @@ final class MapTextBubbleView: UIView {
         let caption: String
         /// The caption's voice (#2208), with `-voice-posts` on.
         var voice: PostVoice? = nil
+        /// A showcase's card (#2216), with `-channels` on. It outranks a
+        /// voice, as on every surface.
+        var embed: PostEmbed? = nil
 
         /// The bubble's words for `post`, its age read against `now`.
-        static func of(_ post: GalleryPost, now: Date = Date(), showsVoice: Bool = VoicePostDisplay.areDrawn) -> Content {
+        /// `pinEmbed` is the marker's own read of the card, for a post read
+        /// without one (#2216).
+        static func of(
+            _ post: GalleryPost, now: Date = Date(), showsVoice: Bool = VoicePostDisplay.areDrawn,
+            pinEmbed: PostEmbed? = nil, showsEmbed: Bool = PostEmbeds.areDrawn
+        ) -> Content {
             let name = post.authorName ?? post.authorHandle.map { "@\($0)" } ?? ""
             let published = Date(timeIntervalSince1970: TimeInterval(post.publishedAtMS) / 1000)
+            let isText = post.kind == .text
+            let embed: PostEmbed? = isText ? PostEmbeds.shown(post.embed ?? pinEmbed, drawn: showsEmbed) : nil
             return Content(
                 postID: post.id,
                 authorName: name,
                 age: post.publishedAtMS > 0 ? RelativeAgeFormatter.short(from: published, to: now) : "",
                 caption: post.caption.trimmingCharacters(in: .whitespacesAndNewlines),
-                voice: showsVoice && post.kind == .text ? post.voice : nil
+                voice: showsVoice && isText && embed == nil ? post.voice : nil,
+                embed: embed
             )
         }
     }
@@ -74,6 +90,8 @@ final class MapTextBubbleView: UIView {
     let label = UILabel()
     /// A voice post's voice, full size, between the author and the words.
     let voiceCaption = VoicePostCaptionView()
+    /// A showcase's card, full size, under the words (#2216).
+    let embedCard = PostEmbedView()
     private let glass = UIVisualEffectView(effect: UIGlassEffect())
     /// The author's line and the words, laid out as one column.
     private let column = UIView()
@@ -104,6 +122,7 @@ final class MapTextBubbleView: UIView {
         column.addSubview(voiceCaption)
         voiceCaption.inks = Self.voiceInks
         column.addSubview(label)
+        column.addSubview(embedCard)
         glass.contentView.addSubview(column)
         isAccessibilityElement = false
     }
@@ -132,6 +151,11 @@ final class MapTextBubbleView: UIView {
         } else {
             voiceCaption.clear()
         }
+        if let embed = content.embed {
+            embedCard.show(embed, size: .full, pipeline: imagePipeline)
+        } else {
+            embedCard.clear()
+        }
         sizeToFit()
         setNeedsLayout()
     }
@@ -155,18 +179,39 @@ final class MapTextBubbleView: UIView {
         let words = hasWords ? label.sizeThatFits(room) : .zero
         let voice = voiceSize
         let voiceBlock = voice.height > 0 ? Self.voiceGap + voice.height : 0
-        return CGSize(
-            width: ceil(min(Self.textWidth, max(author.width, words.width, voice.width))),
-            height: ceil(author.height) + voiceBlock + (hasWords ? Self.lineGap + ceil(words.height) : 0)
-        )
+        let wordsBlock = hasWords ? Self.lineGap + ceil(words.height) : 0
+        let card = embedHeight
+        // A card takes the column's whole width: its button runs edge to edge.
+        let cardBlock = card > 0 ? Self.embedGap + card : 0
+        let widest = card > 0 ? Self.textWidth : max(author.width, words.width, voice.width)
+        let height: CGFloat = ceil(author.height) + voiceBlock + wordsBlock + cardBlock
+        return CGSize(width: ceil(min(Self.textWidth, widest)), height: height)
+    }
+
+    /// Between the words and a showcase's card.
+    static let embedGap: CGFloat = 6
+
+    /// What a showcase card's photo loads through: its marker's pipeline,
+    /// handed over by the halo; nil draws the channel's initials.
+    var imagePipeline: ImagePipeline?
+
+    /// The card's height at the column's width, zero without one.
+    private var embedHeight: CGFloat {
+        guard !embedCard.isHidden else { return 0 }
+        return ceil(embedCard.systemLayoutSizeFitting(
+            CGSize(width: Self.textWidth, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+        ).height)
     }
 
     /// Between the author's line and the voice, and the voice and the words.
     static let voiceGap: CGFloat = 4
 
-    /// Whether the words show: always without a voice (as before), only
-    /// when there are any under one.
-    private var hasWords: Bool { voiceCaption.isHidden || !(label.text ?? "").isEmpty }
+    /// Whether the words show: always with neither a voice nor a card (as
+    /// before), only when there are any with one.
+    private var hasWords: Bool {
+        (voiceCaption.isHidden && embedCard.isHidden) || !(label.text ?? "").isEmpty
+    }
 
     /// The voice's size, zero without one: its length's width (`VoiceView
     /// .width`), held to the column, at its line's height.
@@ -206,14 +251,24 @@ final class MapTextBubbleView: UIView {
         voiceCaption.frame = CGRect(x: 0, y: author + Self.voiceGap, width: voice.width, height: voice.height)
         let wordsTop = voice.height > 0 ? voiceCaption.frame.maxY + Self.lineGap : author + Self.lineGap
         label.isHidden = !hasWords
-        label.frame = CGRect(x: 0, y: wordsTop, width: text.width, height: max(0, text.height - wordsTop))
+        let card = embedHeight
+        let wordsBottom = text.height - (card > 0 ? Self.embedGap + card : 0)
+        label.frame = CGRect(x: 0, y: wordsTop, width: text.width, height: max(0, wordsBottom - wordsTop))
+        let cardTop = hasWords ? label.frame.maxY + Self.embedGap : author + Self.embedGap
+        embedCard.frame = CGRect(x: 0, y: cardTop, width: text.width, height: card)
     }
 
     /// Only the voice's play button and waveform take a touch — and only
     /// while the words show; anywhere else the marker under it takes it and
     /// opens the post (#2208).
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard column.alpha > 0.01, let player = voiceCaption.voiceView, !voiceCaption.isHidden else { return nil }
+        guard column.alpha > 0.01 else { return nil }
+        // A showcase's card: its action button alone (#2216).
+        if !embedCard.isHidden {
+            let hit = embedCard.hitTest(convert(point, to: embedCard), with: event)
+            return PostEmbedView.keepsTouch(on: hit) ? hit : nil
+        }
+        guard let player = voiceCaption.voiceView, !voiceCaption.isHidden else { return nil }
         let local = convert(point, to: player)
         guard player.keepsPress(at: local) else { return nil }
         return player.hitTest(local, with: event)
@@ -242,5 +297,7 @@ final class MapTextBubbleView: UIView {
     var debugColumnFrame: CGRect { column.frame }
     /// The voice shown, nil for none (#2208).
     var debugVoice: VoicePostCaptionView? { voiceCaption.isHidden ? nil : voiceCaption }
+    /// The showcase's card shown, nil for none (#2216).
+    var debugEmbed: PostEmbedView? { embedCard.isHidden ? nil : embedCard }
     #endif
 }

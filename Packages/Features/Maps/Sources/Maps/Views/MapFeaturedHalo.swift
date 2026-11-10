@@ -1,5 +1,6 @@
 import CoreModels
 import DesignSystem
+import MediaCore
 import UIKit
 
 /// The text marker the map's bubble speaks for (`-map-text-bubble`, the
@@ -57,7 +58,12 @@ final class MapFeaturedHalo {
     /// does — and it moves with the map, as the marker does. Its glass
     /// materialises as it opens and dissolves as it folds: the system's own
     /// glass animation.
-    func setBubble(_ content: MapTextBubbleView.Content?, card: UIView, in host: UIView, animated: Bool) {
+    ///
+    /// `imagePipeline` loads a showcase card's photo (#2216).
+    func setBubble(
+        _ content: MapTextBubbleView.Content?, card: UIView, in host: UIView, animated: Bool,
+        imagePipeline: ImagePipeline? = nil
+    ) {
         let moves = animated && host.window != nil && !MotionPreference.reducesMotion
         guard let content else {
             bubbleContent = nil
@@ -73,6 +79,7 @@ final class MapFeaturedHalo {
         let grown = card.bounds.width * Self.scale
         UIView.performWithoutAnimation {
             shown.markerSide = grown
+            shown.imagePipeline = imagePipeline
             shown.setContent(content)
             // Behind the marker, which rides in it.
             if shown.superview !== host || (host.subviews.firstIndex(of: shown) ?? 0) > (host.subviews.firstIndex(of: card) ?? 0) {

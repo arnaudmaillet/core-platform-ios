@@ -3,6 +3,7 @@ import DesignSystem
 import MapKit
 import MediaCore
 import MediaPlayback
+import PostGrid
 import UIKit
 import VoiceKitUI
 
@@ -253,14 +254,17 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
     func configure(
         with pin: MapPin, dress: MapMarkerDress = .neutral, imagePipeline: ImagePipeline,
         iconCatalog: (any AnimatedIconProviding)? = nil, previewCatalog: AnimatedIconCatalog? = nil,
-        showsVoice: Bool = VoicePostDisplay.areDrawn
+        showsVoice: Bool = VoicePostDisplay.areDrawn, showsEmbed: Bool = PostEmbeds.areDrawn
     ) {
         self.imagePipeline = imagePipeline
         // ABOVE the guard, like the cluster's: an unlock changes the dress of
         // a pin whose post — and so everything below — is unchanged.
         applyDress(dress)
-        // A voice pin is a text pin with the mic (#2208); a cheap set.
-        applyVoiceMark(pin.wearsVoiceMark(showsVoice: showsVoice) ? pin.voice : nil)
+        // A voice pin is a text pin with the mic (#2208); a showcase's, with
+        // the channel's megaphone (#2216), which outranks it. Cheap sets.
+        let channel = pin.wearsChannelMark(showsEmbed: showsEmbed) ? pin.embed?.channel : nil
+        applyVoiceMark(channel == nil && pin.wearsVoiceMark(showsVoice: showsVoice) ? pin.voice : nil)
+        applyChannelMark(channel)
         // Idempotent: a reconcile re-configures every surviving marker, so a
         // marker already showing this post must be left exactly as it is —
         // blanking and re-fetching an unchanged thumbnail is what flashes it.
@@ -417,7 +421,7 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
     var bubblePostID: PostID? { featuredHalo.bubblePostID }
 
     func setBubble(_ content: MapTextBubbleView.Content?, animated: Bool) {
-        featuredHalo.setBubble(content, card: card, in: self, animated: animated)
+        featuredHalo.setBubble(content, card: card, in: self, animated: animated, imagePipeline: imagePipeline)
     }
 
     override func prepareForReuse() {
@@ -451,6 +455,7 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         applyIconArt(nil)
         card.setTextAvatar(nil)
         applyVoiceMark(nil)
+        applyChannelMark(nil)
         applyDress(.neutral)
         applyFace(.media)
     }
@@ -464,8 +469,18 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         }
     }
 
+    /// A showcase's mark on a text marker, and what VoiceOver adds for it
+    /// (#2216): "Channel Harbour notes, 12.4K subscribers". A mark takes no
+    /// touch: the marker's tap opens the post, as any text pin's.
+    private func applyChannelMark(_ channel: ChannelEmbed?) {
+        card.setChannelMark(channel != nil)
+        guard let channel else { return }
+        accessibilityValue = ChannelEmbedCopy.accessibilityLabel(ChannelEmbedLocalState.applied(to: channel))
+    }
+
     #if DEBUG
     var debugWearsVoiceMark: Bool { card.debugWearsVoiceMark }
+    var debugWearsChannelMark: Bool { card.debugWearsChannelMark }
     #endif
 
     /// See `MapClusterAnnotationView.applyDress`. A local lone pin speaks for

@@ -3,6 +3,7 @@ import DesignSystem
 import MapKit
 import MediaCore
 import MediaPlayback
+import PostGrid
 import UIKit
 import VoiceKitUI
 
@@ -156,11 +157,15 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
     func configure(
         with cluster: MapComputedCluster, dress: MapMarkerDress = .neutral, imagePipeline: ImagePipeline,
         iconCatalog: (any AnimatedIconProviding)? = nil, previewCatalog: AnimatedIconCatalog? = nil,
-        showsVoice: Bool = VoicePostDisplay.areDrawn
+        showsVoice: Bool = VoicePostDisplay.areDrawn, showsEmbed: Bool = PostEmbeds.areDrawn
     ) {
-        // A group led by a voice post wears its mic (#2208) — above the
-        // idempotence guard, a cheap set.
+        // A group led by a voice post wears its mic (#2208), one led by a
+        // showcase the channel's megaphone (#2216) — above the idempotence
+        // guard, cheap sets.
         card.setVoiceMark(cluster.representative.wearsVoiceMark(showsVoice: showsVoice))
+        card.setChannelMark(cluster.representative.wearsChannelMark(showsEmbed: showsEmbed))
+        // A showcase's card in the bubble loads its photo through this.
+        bubblePipeline = imagePipeline
         self.iconCatalog = iconCatalog
         self.previewCatalog = previewCatalog
         let url = cluster.representative.thumbnailURL
@@ -343,8 +348,12 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
     var bubblePostID: PostID? { featuredHalo.bubblePostID }
 
     /// `-map-text-bubble`: the bubble round the featured marker, or none.
+    /// The pipeline the last configure handed over, for the bubble's
+    /// showcase card (#2216).
+    private var bubblePipeline: ImagePipeline?
+
     func setBubble(_ content: MapTextBubbleView.Content?, animated: Bool) {
-        featuredHalo.setBubble(content, card: card, in: self, animated: animated)
+        featuredHalo.setBubble(content, card: card, in: self, animated: animated, imagePipeline: bubblePipeline)
     }
 
     override func prepareForReuse() {
@@ -380,6 +389,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
         card.setPreviewSheet(nil)
         card.resetCover()
         card.setVoiceMark(false)
+        card.setChannelMark(false)
         card.setTextAvatar(nil)
         applyDress(.neutral)
         applyFace(.media)

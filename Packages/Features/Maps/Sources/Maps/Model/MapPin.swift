@@ -135,6 +135,14 @@ public struct MapPin: Sendable, Equatable, Identifiable {
         showsVoice && isText && hasVoice
     }
 
+    /// Whether the marker wears a showcase's mark (#2216): a text pin
+    /// carrying an embed, with `-channels` on — a text pin with the
+    /// channel's megaphone. It outranks the voice's mark: the plate shows
+    /// one glyph.
+    public func wearsChannelMark(showsEmbed: Bool) -> Bool {
+        showsEmbed && isText && embed != nil
+    }
+
     public init(
         postID: PostID,
         latitude: Double,
