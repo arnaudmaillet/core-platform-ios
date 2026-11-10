@@ -28,6 +28,8 @@ struct PostMenuRows {
     /// Selects the caption where the card draws it (#1498 §4). Nil: no
     /// Select Text row — a tile, which draws no caption.
     var selectText: (() -> Void)?
+    /// Whether channel showcases are drawn (`-channels`); tests set it.
+    var showsEmbeds: Bool = PostEmbeds.areDrawn
 
     func rows(for post: GalleryPost, anchor: UIView) -> [PostCardMenuAction] {
         var rows: [PostCardMenuAction] = []
@@ -43,7 +45,11 @@ struct PostMenuRows {
             })
         }
         rows.append(.repost(isOn: false, perform: repost))
-        if let comment { rows.append(.comment(perform: comment)) }
+        // A channel's showcase takes no comments (#2216: the conversation is
+        // the channel), so its menu offers none — seen on a profile's list
+        // card on the simulator, its palette still holding a Comment.
+        let takesComments = PostEmbeds.shown(post.embed, drawn: showsEmbeds) == nil
+        if let comment, takesComments { rows.append(.comment(perform: comment)) }
         if let staking, let amounts = staking.stakeMenu(for: id, from: anchor) {
             rows.append(.like(isOn: staking.viewerStake(on: id) > 0, amounts: amounts))
         }
