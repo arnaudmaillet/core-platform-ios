@@ -209,8 +209,9 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
 
     /// The banner runs under the navigation area, so the bar is transparent
     /// while the header is at the scroll edge (white title over the banner's
-    /// top scrim) and stays transparent, with the title in the system's ink,
-    /// once content scrolls up underneath it.
+    /// top scrim — the page's ink with no picture behind it, #2248) and stays
+    /// transparent, with the title in the system's ink, once content scrolls
+    /// up underneath it.
     private func configureHeroNavigationBar() {
         // A custom leading item silently disables the navigation controller's
         // interactive pop gesture. The page must keep the native edge swipe in
@@ -220,9 +221,10 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
         navigationItem.leftItemsSupplementBackButton = true
         let transparent = UINavigationBarAppearance()
         transparent.configureWithTransparentBackground()
-        transparent.titleTextAttributes = [.foregroundColor: UIColor.white]
+        transparent.titleTextAttributes = [.foregroundColor: restingTitleInk]
         transparentBarAppearance = transparent
         navigationItem.scrollEdgeAppearance = transparent
+        heroHeader.onChromeGroundChange = { [weak self] in self?.refreshRestingTitleInk() }
         // ⚠️ TRANSPARENT HERE TOO, not a fresh `UINavigationBarAppearance()`: a
         // default one is the system's material slab, and this bar wears none in
         // any state — `updateBarTransparency` only ever changes the title's
@@ -508,6 +510,49 @@ open class HeroPageViewController<Tab: Equatable>: UIViewController {
         navigationItem.compactAppearance = appearance
         forceNavigationBarLayout()
     }
+
+    /// The title's ink while the bar is see-through: white over the banner's
+    /// picture (its top scrim under it), the page's own ink — `.label`, which
+    /// turns with the appearance — when no picture stands behind the bar.
+    ///
+    /// ⚠️ **WHITE ALONE WAS INVISIBLE WITHOUT A BANNER (#2248).** No page
+    /// drew a title in this bar until the pushed profile's @handle, so the
+    /// white of a banner-less profile, on the light page, was never seen.
+    private var restingTitleInk: UIColor { heroHeader.hasPictureBehindChrome ? .white : .label }
+
+    /// Re-inks the see-through dress when the ground behind the bar changes
+    /// (a picture landing, a profile with none) — and the bar now, if it
+    /// wears that dress. Only the slots holding the see-through dress take
+    /// the new one: the docked dress keeps the system's ink.
+    ///
+    /// ⚠️ Told apart by their INK, not by identity: the item's appearance
+    /// slots are `@NSCopying`, so what it holds is never the object handed
+    /// to it. The docked dress sets no title colour at all.
+    private func refreshRestingTitleInk() {
+        guard let previous = transparentBarAppearance else { return }
+        let ink = restingTitleInk
+        let previousInk = previous.titleTextAttributes[.foregroundColor] as? UIColor
+        guard previousInk != ink else { return }
+        let appearance = previous.copy()
+        appearance.titleTextAttributes = [.foregroundColor: ink]
+        transparentBarAppearance = appearance
+        guard isBarTransparent else { return }
+        let wearsSeeThrough: (UINavigationBarAppearance?) -> Bool = { slot in
+            guard let slot, let previousInk else { return false }
+            return (slot.titleTextAttributes[.foregroundColor] as? UIColor) == previousInk
+        }
+        if wearsSeeThrough(navigationItem.scrollEdgeAppearance) { navigationItem.scrollEdgeAppearance = appearance }
+        if wearsSeeThrough(navigationItem.standardAppearance) { navigationItem.standardAppearance = appearance }
+        if wearsSeeThrough(navigationItem.compactAppearance) { navigationItem.compactAppearance = appearance }
+        forceNavigationBarLayout()
+    }
+
+    #if DEBUG
+    /// The see-through dress's title ink — what a test reads.
+    public var debugRestingTitleInk: UIColor? {
+        transparentBarAppearance?.titleTextAttributes[.foregroundColor] as? UIColor
+    }
+    #endif
 
     /// The bar's dress once the header has scrolled behind it: the same
     /// transparent background, with the title back in the system's ink.

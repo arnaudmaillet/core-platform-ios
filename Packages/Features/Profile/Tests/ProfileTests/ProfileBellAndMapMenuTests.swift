@@ -47,7 +47,6 @@ struct ProfileBellAndMapMenuTests {
         let coins = UIBarButtonItem(customView: UIView())
         coins.accessibilityLabel = "Balance"
         screen.setTrailingAccessoryItem(coins)
-        screen.makePersonBarItem = { PersonBarItems.make() }
         screen.loadViewIfNeeded()
         return (screen, viewModel, repository)
     }
@@ -375,79 +374,255 @@ struct ProfileBellAndMapMenuTests {
     }
 }
 
-// MARK: - The bar's identity (#1451)
+// MARK: - The bar's corner and title (#2248)
 
-/// Once the header's action tray has scrolled out of sight, the bar carries
-/// the profile's identity: the post page's person pill, its relation a badge
-/// on the face whose "+" follows — never a Follow item. ⚠️ LEADING since
-/// #1590: `[‹][pill] … [balance]`, and `… [balance][bell]` once followed.
-/// Never while the tray shows, never on the viewer's own profile.
+/// No identity pill in the bar any more (#2248, the owner 2026-11-10,
+/// replacing #1451 / #1590): someone else's pushed profile reads
+/// `[‹ @handle] … [coins][Follow]` once the header's tray has scrolled away,
+/// `… [coins][Requested]` on a private profile the viewer asked to follow,
+/// and `… [coins][bell]` once followed — the bell always, Follow and
+/// Requested only where the pill came in. Each corner item native, under its
+/// own identifier, its tap the tray's own path. The tab root keeps
+/// `[bell] … [day][coins][gear]` and no title.
 extension ProfileBellAndMapMenuTests {
-    private func pill(_ screen: ProfileViewController) throws -> any PersonBarItem {
-        try #require(screen.debugBarIdentityPill, "no pill was built")
-    }
-
-    @Test func aStrangersProfileWearsThePillWithAPlusAndNoFollowItem() async throws {
+    /// Not followed: nothing in the corner while the tray is on screen;
+    /// once it has gone, `[Follow][space][coins]` — Follow in the corner, its
+    /// own bubble — and nothing leading but the chevron. Back with the tray.
+    @Test func aStrangersProfileWearsFollowInTheCornerOnceTheTrayHasGone() async throws {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
         try #require(await settle { screen.followButtonState == .follow })
-        #expect(screen.debugBarRelationshipItem == nil, "the pill showed with the tray on screen")
+        #expect(screen.debugBarRelationshipItem == nil, "Follow showed in the bar with the tray's Follow on screen")
+        #expect(screen.navigationItem.rightBarButtonItems?.map(\.accessibilityLabel) == ["Balance"])
 
         screen.debugSetTrayScrolledAway(true)
-        let item = try #require(screen.debugBarRelationshipItem)
-        #expect(item.customView === (try pill(screen)).view)
-        #expect(try pill(screen).followBadge == .follow, "no + on a profile not followed")
+        let follow = try #require(screen.debugBarRelationshipItem, "no Follow once the tray had gone")
         let items = try #require(screen.navigationItem.rightBarButtonItems)
-        #expect(!items.contains { $0.title == "Follow" }, "a Follow item in the bar")
-        // Trailing is the balance alone; the pill leads, after the chevron.
-        #expect(items.count == 1)
-        #expect(items[0].accessibilityLabel == "Balance", "the balance is not in the corner")
-        #expect(!items.contains { $0 === item }, "the pill stayed trailing")
-        #expect(screen.navigationItem.leftBarButtonItems?.last === item, "the pill does not lead")
-        #expect(screen.navigationItem.leftItemsSupplementBackButton, "the pill would replace the chevron")
+        #expect(items.count == 3, "no space between Follow and the balance")
+        #expect(items[0] === follow, "Follow is not in the corner")
+        #expect(items[2].accessibilityLabel == "Balance")
+        #expect(follow.title == "Follow")
+        #expect(follow.customView == nil, "Follow is a hosted view, not a native item")
+        #expect(follow.identifier == ProfileViewController.followItemID)
+        #expect((screen.navigationItem.leftBarButtonItems ?? []).isEmpty, "a leading item beside the chevron")
         #expect(screen.debugMuteBellItem == nil)
 
         screen.debugSetTrayScrolledAway(false)
-        #expect(screen.debugBarRelationshipItem == nil, "the pill stayed with the tray back")
+        #expect(screen.debugBarRelationshipItem == nil, "Follow stayed with the tray back")
+        #expect(screen.navigationItem.rightBarButtonItems?.map(\.accessibilityLabel) == ["Balance"])
     }
 
-    /// Followed: `[pill][coins][bell]`, the bell keeping the corner.
-    @Test func aFollowedProfileReadsPillBalanceBell() async throws {
+    /// Requested, on a private profile: its own item, under its own
+    /// identifier, in the same corner and by the same scroll rule.
+    @Test func aRequestedProfileWearsRequestedInTheCorner() async throws {
+        let (screen, _, _) = makeScreen(relationship: .requested)
+        try #require(await settle { screen.followButtonState == .requested })
+        #expect(screen.debugBarRelationshipItem == nil, "Requested showed with the tray on screen")
+
+        screen.debugSetTrayScrolledAway(true)
+        let requested = try #require(screen.debugBarRelationshipItem, "no Requested once the tray had gone")
+        let items = try #require(screen.navigationItem.rightBarButtonItems)
+        #expect(items.first === requested, "Requested is not in the corner")
+        #expect(items.last?.accessibilityLabel == "Balance")
+        #expect(requested.title == "Requested")
+        #expect(requested.identifier == ProfileViewController.requestedItemID)
+        #expect(requested.accessibilityHint == "Withdraws your follow request.")
+        #expect(screen.debugMuteBellItem == nil)
+    }
+
+    /// Followed: `[bell][space][coins]`, scrolled or not — never Follow nor
+    /// Following up here: once followed, the corner is the bell's.
+    @Test func aFollowedProfileKeepsTheBellInTheCorner() async throws {
         let (screen, viewModel, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
         try #require(await settle { screen.followButtonState == .following && viewModel.canModerate })
         try #require(await settle { screen.debugMuteBellItem != nil })
+        for away in [false, true] {
+            screen.debugSetTrayScrolledAway(away)
+            let items = try #require(screen.navigationItem.rightBarButtonItems)
+            #expect(items.count == 3, "away=\(away)")
+            #expect(items[0] === screen.debugMuteBellItem, "the bell lost the corner, away=\(away)")
+            #expect(items[2].accessibilityLabel == "Balance")
+            #expect(screen.debugBarRelationshipItem == nil, "a Follow item on a followed profile, away=\(away)")
+            #expect(!items.contains { $0.title == "Following" }, "a Following item in the bar")
+        }
+    }
+
+    /// Three items, three identifiers: UIKit tells them apart and morphs one
+    /// into the other (#1679, R3).
+    @Test func theCornerItemsHaveTheirOwnIdentifiers() {
+        let ids = [ProfileViewController.followItemID, ProfileViewController.requestedItemID,
+                   ProfileViewController.muteBellID]
+        #expect(Set(ids).count == ids.count, "\(ids)")
+    }
+
+    /// No Follow where following is impossible or meaningless: blocked, a
+    /// profile that blocks the viewer, the viewer's own.
+    @Test(arguments: [
+        ProfileRelationship.other(isFollowing: false, isBlocked: true),
+        .cannotFollow,
+    ])
+    func noFollowWhereNoFollowApplies(relationship: ProfileRelationship) async throws {
+        let (screen, viewModel, _) = makeScreen(relationship: relationship)
+        try #require(await settle { viewModel.isRelationshipSettled })
         screen.debugSetTrayScrolledAway(true)
-        let item = try #require(screen.debugBarRelationshipItem)
+        #expect(screen.debugBarRelationshipItem == nil, "\(relationship)")
+        #expect(screen.debugMuteBellItem == nil, "\(relationship)")
+    }
+
+    /// The bar's Follow is the tray's Follow — `headerView.onFollowTapped`,
+    /// the member gate, the optimistic flip — so both turn at once.
+    @Test func theBarsFollowFollowsThroughTheTraysPath() async throws {
+        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .follow })
+        var trayCalls = 0
+        let trayPath = screen.headerView.onFollowTapped
+        screen.headerView.onFollowTapped = {
+            trayCalls += 1
+            trayPath?()
+        }
+        screen.debugSetTrayScrolledAway(true)
+        let follow = try #require(screen.debugBarRelationshipItem)
+        follow.primaryAction?.performWithSender(nil, target: nil)
+        #expect(trayCalls == 1, "the bar's Follow went around the tray's path")
+        try #require(await settle { screen.followButtonState == .following }, "the bar's Follow did not follow")
+        #expect(screen.headerView.debugFollowTitle == "Following", "the tray was left behind")
+        #expect(screen.debugBarRelationshipItem == nil, "Follow stayed once followed")
+    }
+
+    /// Follow from the bar → the bell: one ANIMATED write of the group, so
+    /// UIKit morphs Follow into the bell (R3), on a bar at rest.
+    @Test func followFromTheBarMorphsIntoTheBell() async throws {
+        let (screen, viewModel, _, _, window) = hostedOnScreen(
+            relationship: .other(isFollowing: false, isBlocked: false)
+        )
+        defer { window.isHidden = true }
+        try #require(await settle { screen.followButtonState == .follow && screen.transitionCoordinator == nil })
+        try #require(viewModel.canMute)
+        screen.debugSetTrayScrolledAway(true)
+        let follow = try #require(screen.debugBarRelationshipItem)
+        let before = screen.debugBarWrites.count
+
+        // The optimistic flip recomposes the bar on this same turn.
+        follow.primaryAction?.performWithSender(nil, target: nil)
+
+        let bell = try #require(screen.debugMuteBellItem, "following from the bar brought no bell")
+        #expect(screen.navigationItem.rightBarButtonItems?.first === bell, "the bell is not in the corner")
+        #expect(screen.debugBarRelationshipItem == nil, "Follow stayed beside the bell")
+        #expect(screen.debugBarWrites.count > before, "the bar was never written")
+        #expect(screen.debugBarWrites.last == true, "Follow did not morph into the bell")
+    }
+
+    /// ⚠️ NEVER MID-PUSH (#756): Follow coming in while a child is being
+    /// pushed over the profile waits for the bar to rest.
+    @Test func followArrivingMidPushWaitsForRest() async throws {
+        let (screen, _, _, navigation, window) = hostedOnScreen(
+            relationship: .other(isFollowing: false, isBlocked: false)
+        )
+        defer { window.isHidden = true }
+        try #require(await settle { screen.followButtonState == .follow && screen.transitionCoordinator == nil })
+
+        navigation.pushViewController(UIViewController(), animated: true)
+        try #require(screen.transitionCoordinator != nil, "guard: the push is running")
+        screen.debugSetTrayScrolledAway(true)
+        #expect(screen.debugBarRelationshipItem == nil, "Follow came in mid-push")
+
+        #expect(await settle { screen.debugBarRelationshipItem != nil }, "Follow never came in")
+    }
+
+    /// ⚠️ AT REST THE TRAY IS ON SCREEN: a push placed the header before it
+    /// had laid out, read the tray as gone, and the bar's relationship showed
+    /// over a profile that had not moved (the owner, on a device,
+    /// 2026-10-15). Not followed, so Follow is what would show.
+    @Test func aProfileAtRestWearsNoRelationshipInTheBar() async throws {
+        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .follow })
+        screen.debugApplyHeaderOffset(0)
+        #expect(screen.debugBarRelationshipItem == nil, "Follow showed at rest")
+        screen.debugApplyHeaderOffset(-40)
+        #expect(screen.debugBarRelationshipItem == nil, "Follow showed on a pull")
+    }
+
+    /// ⚠️ HISTORY'S DAY GOES TRAILING (#1590), innermost of the screen's own
+    /// trailing items: `[Follow][space][coins][sep][day]` — the corner
+    /// keeps Follow.
+    @Test func historysDayIsTheInnermostTrailingItem() async throws {
+        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .follow })
+        screen.debugSetTrayScrolledAway(true)
+        screen.debugApplyPinnedSection(PostGridPinnedSection(index: 1, title: "Yesterday"))
+        let day = try #require(screen.debugSectionItem, "the day is not trailing")
         let items = try #require(screen.navigationItem.rightBarButtonItems)
-        #expect(items.count == 3)
-        #expect(items[0] === screen.debugMuteBellItem, "the bell lost the corner")
-        #expect(items[2].accessibilityLabel == "Balance")
-        #expect(screen.navigationItem.leftBarButtonItems?.last === item, "the pill does not lead")
-        #expect(try pill(screen).followBadge == .following)
-        let shown = (try pill(screen).view as? SnapAuthorIdentityView)?.debugShownLines ?? []
-        #expect(shown.contains("Lena Fischer") && shown.contains("@lena"), "\(shown)")
-        let budget = (try pill(screen).view as? SnapAuthorIdentityView)?.widthCap ?? 0
-        #expect(budget > 0 && budget < screen.view.bounds.width, "the pill is not capped by the bar's room")
+        #expect(items.last === day, "the day is not the innermost trailing item")
+        #expect(items[0] === screen.debugBarRelationshipItem, "Follow lost the corner")
+        #expect(!(screen.navigationItem.leftBarButtonItems ?? []).contains { $0 === day }, "the day went leading")
+
+        screen.debugApplyPinnedSection(nil)
+        #expect(screen.debugSectionItem == nil, "the day stayed after the list went back to the top")
     }
 
-    /// The badge is the post page's, from the relation.
-    @Test func theBadgeFollowsTheRelation() {
-        #expect(ProfileViewController.barBadge(for: .follow, mutual: false) == .follow)
-        #expect(ProfileViewController.barBadge(for: .requested, mutual: false) == .pending)
-        #expect(ProfileViewController.barBadge(for: .following, mutual: false) == .following)
-        #expect(ProfileViewController.barBadge(for: .following, mutual: true) == .friends)
-        #expect(ProfileViewController.barBadge(for: .unavailable, mutual: false) == nil)
-        #expect(ProfileViewController.barBadge(for: .hidden, mutual: false) == nil)
+    /// The @handle, native and leading (#2248): `navigationItem.title` with
+    /// the `.browser` style — no title view, no leading item — at all times
+    /// on a pushed profile.
+    @Test func aPushedProfileIsTitledWithItsHandleLeading() async throws {
+        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
+        try #require(await settle { screen.navigationItem.title == "@lena" }, "the bar is not titled with the handle")
+        #expect(screen.navigationItem.style == .browser, "the title does not lead")
+        #expect(screen.navigationItem.titleView == nil, "a custom title view")
+        #expect(screen.navigationItem.backButtonDisplayMode == .minimal)
+        #expect(screen.navigationItem.largeTitleDisplayMode == .never)
+        #expect(screen.navigationItem.leftItemsSupplementBackButton)
+        screen.debugSetTrayScrolledAway(true)
+        #expect(screen.navigationItem.title == "@lena", "the title left with the scroll")
+        // No banner on this profile: the see-through bar's title wears the
+        // page's ink, not the white it wears over a picture.
+        #expect(screen.debugRestingTitleInk == .label, "a white title over a page with no banner")
     }
 
-    // MARK: - The avatar's relation mark (#2014, #2050)
+    /// The tab root (the viewer's own) keeps no title and the stock style:
+    /// its leading group is the bell and the day (#1642).
+    @Test func theOwnProfileWearsNothing() async throws {
+        let (screen, viewModel, _) = makeScreen(relationship: .me, own: true)
+        try #require(await settle { viewModel.isOwnProfile && viewModel.profile != nil })
+        screen.debugSetTrayScrolledAway(true)
+        #expect(screen.debugBarRelationshipItem == nil)
+        #expect(screen.navigationItem.title == nil, "the tab root is titled")
+        #expect(screen.navigationItem.style == .navigator)
+    }
 
+    /// Your own profile: the day goes LEADING (#1642, the owner 2026-10-23),
+    /// after the shell's bell — the inbox's arrangement — and the trailing
+    /// group keeps the balance and the gear alone.
+    @Test func theOwnProfilesDayLeads() async throws {
+        let (screen, viewModel, _) = makeScreen(relationship: .me, own: true)
+        try #require(await settle { viewModel.isOwnProfile })
+        let bell = UIBarButtonItem(image: UIImage(systemName: "bell"))
+        screen.setLeadingAccessoryItem(bell)
+        screen.debugApplyPinnedSection(PostGridPinnedSection(index: 0, title: "Today"))
+        let day = try #require(screen.debugSectionItem)
+        let leading = screen.navigationItem.leftBarButtonItems ?? []
+        #expect(leading.count == 2 && leading[0] === bell && leading[1] === day, "the day is not after the bell")
+        #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains { $0 === day }, "the day stayed trailing")
+        #expect(screen.debugBarRelationshipItem == nil)
+
+        // The bell rebuilt by the shell keeps the day after it.
+        screen.debugRebuildNavigationState()
+        #expect((screen.navigationItem.leftBarButtonItems ?? []).last === day)
+
+        screen.debugApplyPinnedSection(nil)
+        #expect(screen.debugSectionItem == nil, "the day stayed after the list went back to the top")
+        #expect((screen.navigationItem.leftBarButtonItems ?? []).elementsEqual([bell], by: ===))
+    }
+}
+
+// MARK: - The avatar's relation mark (#2014, #2050)
+
+extension ProfileBellAndMapMenuTests {
     /// ONE MARK EVERYWHERE, THE "+" INCLUDED (#2050, the owner 2026-11-02,
-    /// reversing #2014's "no '+'"): the bar's own mapping, whole — "+",
-    /// the clock, the check, friends. Nothing for someone blocked, the
-    /// viewer's own profile or one not followable; the skeleton's badge for
-    /// one not read yet (#2098), never on the viewer's own. A guest
-    /// is not an exception: their relation reads as not followed, so the
-    /// "+" (behind the member gate), as the author pill shows a guest.
+    /// reversing #2014's "no '+'"): the one mapping, whole — "+", the
+    /// clock, the check, friends. Nothing for someone blocked, the viewer's
+    /// own profile or one not followable; the skeleton's badge for one not
+    /// read yet (#2098), never on the viewer's own. A guest is not an
+    /// exception: their relation reads as not followed, so the "+" (behind
+    /// the member gate), as the author pill shows a guest.
     @Test func theAvatarWearsTheWholeMark() {
         typealias Header = ProfileHeaderView
         #expect(Header.avatarMark(for: .follow, mutual: false, blocked: false, isOwnProfile: false) == .follow)
@@ -457,7 +632,7 @@ extension ProfileBellAndMapMenuTests {
         for state in [ProfileViewModel.FollowButton.follow, .requested, .following] {
             #expect(Header.avatarMark(for: state, mutual: true, blocked: true, isOwnProfile: false) == PersonPill.Badge.none, "\(state)")
             #expect(Header.avatarMark(for: state, mutual: false, blocked: false, isOwnProfile: false)
-                    == ProfileViewController.barBadge(for: state, mutual: false), "the avatar and the bar disagree")
+                    == Header.relationBadge(for: state, mutual: false), "the avatar left the one mapping")
         }
         for state in [ProfileViewModel.FollowButton.edit, .unavailable] {
             #expect(Header.avatarMark(for: state, mutual: false, blocked: false, isOwnProfile: false) == PersonPill.Badge.none, "\(state)")
@@ -470,13 +645,10 @@ extension ProfileBellAndMapMenuTests {
         #expect(Header.avatarMark(for: .hidden, mutual: false, blocked: true, isOwnProfile: false) == PersonPill.Badge.none)
     }
 
-    /// Friends on the avatar, as in the bar: the two people and the accent
-    /// ring.
+    /// Friends on the avatar: the two people and the accent ring.
     @Test func theProfilesAvatarWearsTheRelation() async throws {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: true, isMutual: true, isBlocked: false))
-        try #require(await settle { screen.headerView.relationMark == .friends })
-        screen.debugSetTrayScrolledAway(true)
-        #expect(try pill(screen).followBadge == .friends, "the bar and the avatar disagree")
+        #expect(await settle { screen.headerView.relationMark == .friends })
     }
 
     /// The viewer's own profile: no mark, and no edge (#2082).
@@ -489,7 +661,7 @@ extension ProfileBellAndMapMenuTests {
     }
 
     /// Not followed, the avatar wears the "+"; the tray's Follow brings the
-    /// check, as it turns the bar's pill.
+    /// check.
     @Test func theTraysFollowBringsTheAvatarsCheck() async throws {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
         try #require(await settle { screen.followButtonState == .follow })
@@ -498,8 +670,6 @@ extension ProfileBellAndMapMenuTests {
         #expect(screen.headerView.debugTapFollow())
         try #require(await settle { screen.followButtonState == .following }, "the tray did not follow")
         #expect(screen.headerView.relationMark == .following, "the tray's Follow left the avatar behind")
-        screen.debugSetTrayScrolledAway(true)
-        #expect(try pill(screen).followBadge == .following)
     }
 
     /// THE AVATAR'S "+" IS THE TRAY'S FOLLOW (#2050): the check comes, and
@@ -552,97 +722,6 @@ extension ProfileBellAndMapMenuTests {
         #expect(follows == 1, "the + did not call the follow")
         #expect(badge.isAccessibilityElement && badge.accessibilityTraits.contains(.button))
         #expect(badge.accessibilityLabel == "Follow")
-    }
-
-    /// The "+" follows, through the tray's own path: the badge turns.
-    @Test func thePlusFollows() async throws {
-        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
-        try #require(await settle { screen.followButtonState == .follow })
-        screen.debugSetTrayScrolledAway(true)
-        let shown = try pill(screen)
-        shown.onFollowTapped?(subject.id)
-        try #require(await settle { screen.followButtonState == .following }, "the + did not follow")
-        #expect(shown.followBadge == .following, "the badge did not turn")
-    }
-
-    /// ⚠️ AT REST THE TRAY IS ON SCREEN: a push placed the header before it
-    /// had laid out, read the tray as gone, and the pill showed over a
-    /// profile that had not moved (the owner, on a device, 2026-10-15).
-    @Test func aProfileAtRestWearsNoRelationshipInTheBar() async throws {
-        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
-        try #require(await settle { screen.followButtonState == .following })
-        screen.debugApplyHeaderOffset(0)
-        #expect(screen.debugBarRelationshipItem == nil, "the pill showed at rest")
-        screen.debugApplyHeaderOffset(-40)
-        #expect(screen.debugBarRelationshipItem == nil, "the pill showed on a pull")
-    }
-
-    /// ⚠️ HISTORY'S DAY GOES TRAILING (#1590), innermost of the screen's
-    /// own trailing items, beside the pill now leading.
-    @Test func historysDayIsTheInnermostTrailingItem() async throws {
-        let (screen, viewModel, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
-        try #require(await settle { screen.followButtonState == .following && viewModel.canModerate })
-        try #require(await settle { screen.debugMuteBellItem != nil })
-        screen.debugSetTrayScrolledAway(true)
-        screen.debugApplyPinnedSection(PostGridPinnedSection(index: 1, title: "Yesterday"))
-        let day = try #require(screen.debugSectionItem, "the day is not trailing")
-        let items = try #require(screen.navigationItem.rightBarButtonItems)
-        #expect(items.last === day, "the day is not the innermost trailing item")
-        #expect(items[0] === screen.debugMuteBellItem, "the bell lost the corner")
-        #expect(!(screen.navigationItem.leftBarButtonItems ?? []).contains { $0 === day }, "the day stayed leading")
-        #expect(screen.debugBarRelationshipItem != nil, "the pill left the leading group")
-
-        screen.debugApplyPinnedSection(nil)
-        #expect(screen.debugSectionItem == nil, "the day stayed after the list went back to the top")
-    }
-
-    /// The pill's room is the bar's width less the chevron and the trailing
-    /// group — History's day included (#1590), on an SE and an 18 Pro.
-    @Test(arguments: [375.0, 402.0])
-    func thePillsWidthIsTheBarsRoom(width: CGFloat) async throws {
-        let (screen, viewModel, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
-        try #require(await settle { screen.followButtonState == .following && viewModel.canModerate })
-        try #require(await settle { screen.debugMuteBellItem != nil })
-        screen.view.frame = CGRect(x: 0, y: 0, width: width, height: 874)
-        screen.debugSetTrayScrolledAway(true)
-        let free = (try pill(screen).view as? SnapAuthorIdentityView)?.widthCap ?? 0
-        #expect(free > 0 && free < width - 88, "the pill is not capped by the bar's room at \(width)")
-        screen.debugApplyPinnedSection(PostGridPinnedSection(index: 1, title: "Yesterday"))
-        screen.debugSetTrayScrolledAway(false)
-        screen.debugSetTrayScrolledAway(true)
-        let withDay = (try pill(screen).view as? SnapAuthorIdentityView)?.widthCap ?? 0
-        #expect(withDay < free, "the day's bubble did not take its room from the pill at \(width)")
-    }
-
-    /// Your own profile: the day goes LEADING (#1642, the owner 2026-10-23),
-    /// after the shell's bell — the inbox's arrangement — and the trailing
-    /// group keeps the balance and the gear alone.
-    @Test func theOwnProfilesDayLeads() async throws {
-        let (screen, viewModel, _) = makeScreen(relationship: .me, own: true)
-        try #require(await settle { viewModel.isOwnProfile })
-        let bell = UIBarButtonItem(image: UIImage(systemName: "bell"))
-        screen.setLeadingAccessoryItem(bell)
-        screen.debugApplyPinnedSection(PostGridPinnedSection(index: 0, title: "Today"))
-        let day = try #require(screen.debugSectionItem)
-        let leading = screen.navigationItem.leftBarButtonItems ?? []
-        #expect(leading.count == 2 && leading[0] === bell && leading[1] === day, "the day is not after the bell")
-        #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains { $0 === day }, "the day stayed trailing")
-        #expect(screen.debugBarRelationshipItem == nil)
-
-        // The bell rebuilt by the shell keeps the day after it.
-        screen.debugRebuildNavigationState()
-        #expect((screen.navigationItem.leftBarButtonItems ?? []).last === day)
-
-        screen.debugApplyPinnedSection(nil)
-        #expect(screen.debugSectionItem == nil, "the day stayed after the list went back to the top")
-        #expect((screen.navigationItem.leftBarButtonItems ?? []).elementsEqual([bell], by: ===))
-    }
-
-    @Test func theOwnProfileWearsNothing() async throws {
-        let (screen, viewModel, _) = makeScreen(relationship: .me, own: true)
-        try #require(await settle { viewModel.isOwnProfile })
-        screen.debugSetTrayScrolledAway(true)
-        #expect(screen.debugBarRelationshipItem == nil)
     }
 }
 

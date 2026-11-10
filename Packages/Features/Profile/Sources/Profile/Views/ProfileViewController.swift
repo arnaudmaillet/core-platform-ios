@@ -67,9 +67,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// screen only describes where the post is (see `SnapFeedHeroOrigin`).
     /// Nil leaves every tap on the plain route, which still opens the feed.
     var feedHero: (([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)?
-    /// Builds the bar's identity pill — the post page's (#1451). Nil: no
-    /// identity in the bar.
-    var makePersonBarItem: (@MainActor () -> any PersonBarItem)?
     /// The gallery cards' stakes — see `PostCardStaking`.
     var staking: PostCardStaking? {
         didSet { galleryPager.staking = staking }
@@ -138,10 +135,12 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     private lazy var muteBellItem = makeMuteBellItem()
     /// Whether the bell on the bar shows `bell.slash`.
     private var muteBellShowsMuted = false
-    /// Keeps the bell and the shell's balance two bubbles: iOS 26 groups
-    /// adjacent bar items into one platter (the feed's note on
-    /// `setEngagedChrome`). Kept for the same by-reference reason.
-    private let muteBellSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
+    /// Keeps the corner item — the bell, or Follow / Requested (#2248) — and
+    /// the shell's balance two bubbles: iOS 26 groups adjacent bar items into
+    /// one platter (the feed's note on `setEngagedChrome`). One space for
+    /// all three, since only one of them stands at a time. Kept for the same
+    /// by-reference reason.
+    private let cornerSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     /// Keeps History's Select / Done its own bubble, apart from the gear.
     private let historySelectSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     /// An item the SHELL owns at the head of the leading group — the
@@ -160,52 +159,49 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// `applyNavigationState`.
     private var trailingAccessoryItem: UIBarButtonItem?
     /// Whether the header's action tray has scrolled under the bar: the bar
-    /// then carries the profile's identity pill, outboard of the balance
-    /// (#1451). Never on the viewer's own profile.
+    /// then carries the profile's Follow (or Requested) in its corner — at
+    /// exactly the point the identity pill used to come in (#1451, #2248),
+    /// so the page never shows two Follows at once. Never on the viewer's
+    /// own profile.
     private(set) var isTrayScrolledAway = false
-    /// The profile's identity: the post page's pill (#1451, replacing #1224's
-    /// Follow item and #1277's badge-less pill), with the relation as the
-    /// badge on its face — "+" follows, as the tray's Follow does. A tap
-    /// elsewhere on it brings the page back to its top, where the tray is.
-    private lazy var barIdentityPill: (any PersonBarItem)? = {
-        guard let pill = makePersonBarItem?() else { return nil }
-        pill.setOverMedia(false)
-        pill.view.accessibilityHint = "Scrolls back to the top of the profile."
-        pill.onPersonTapped = { [weak self] _ in self?.galleryPager.scrollActivePageToHeaderTop() }
-        pill.onFollowTapped = { [weak self] _ in self?.headerView.onFollowTapped?() }
-        return pill
-    }()
-    private lazy var barIdentityItem: UIBarButtonItem? = barIdentityPill.map {
-        BarItems.container(id: "profile.identity-pill", view: $0.view)
-    }
-    private let relationshipSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     /// Keeps History's day in its own bubble, inboard of the trailing group.
     private let sectionSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
-    /// The identity pill as the LEADING group shows it (#1590), nil while
-    /// the tray is on screen.
-    private var shownBarPill: UIBarButtonItem?
-    /// The relationship capsule: Follow / Following.
+    /// The bar's Follow, in the corner where the bell stands once the
+    /// profile is followed (#2248, the owner 2026-11-10) — replacing the
+    /// identity pill whose "+" was the bar's only Follow (#1451).
     ///
-    /// **A stock titled item — deliberately not a custom-view item,
-    /// and not a `UIButton` of any kind.** Two independent reasons, and both
-    /// have bitten this screen:
+    /// **A stock titled item (`BarItems.title`) — deliberately not a
+    /// custom-view item, and not a `UIButton` of any kind.** Two independent
+    /// reasons, and both have bitten this screen:
     ///
     /// 1. *Rendering.* The iOS 26 bar wraps every item in its own Liquid Glass
     ///    capsule. A glass-configured button hosted as a custom view stacks a
     ///    second material inside that capsule — a visible double-background
-    ///    bleed — and `.done`/prominent styling floods the capsule with tint.
-    ///    Handing UIKit a title and letting it draw the chrome is the only way
-    ///    to get exactly one capsule.
+    ///    bleed. Handing UIKit a title and letting it draw the chrome is the
+    ///    only way to get exactly one capsule.
     /// 2. *Transitions.* A custom view is opaque to the bar's push/pop
     ///    choreography: UIKit can cross-fade and slide items it owns, but a
     ///    hosted view is just a subview it has to carry, which is what makes
     ///    custom bar items snap while native ones interpolate.
     ///
+    /// Kept, as the bell is: the trailing run is compared by reference (the
+    /// bar's identical-group guard), so a fresh item would be a rebuild.
+    private lazy var followBarItem = makeRelationshipBarItem(requested: false)
+    /// Requested, on a private profile the viewer asked to follow: its own
+    /// item under its own identifier, so the bar morphs Follow into it
+    /// (#1679, R3). A tap withdraws the request, as the tray's does.
+    private lazy var requestedBarItem = makeRelationshipBarItem(requested: true)
 
-    /// The loaded profile's @handle — the screen title once known. Stashed so
-    /// `viewWillAppear` can bind the bar from current state before the push
-    /// animation starts, whenever the data beat the transition.
-    private var currentHandle: String?
+    /// The loaded profile's @handle — the bar's title once known (#2248).
+    /// Stashed so `viewWillAppear` can bind the bar from current state before
+    /// the push animation starts, whenever the data beat the transition; a
+    /// change once the view is up rides the transition it lands in.
+    private var currentHandle: String? {
+        didSet {
+            guard currentHandle != oldValue, isViewLoaded else { return }
+            alongsideTransition { screen, _ in screen.applyBarTitle() }
+        }
+    }
 
     /// Internal (not private) only for the +QA hooks.
     private(set) var followButtonState: ProfileViewModel.FollowButton = .hidden
@@ -1368,6 +1364,69 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         muteBellShowsMuted = !scopes.isEmpty
     }
 
+    // MARK: - Follow in the corner (#2248)
+
+    static let followItemID = "profile.follow"
+    static let requestedItemID = "profile.follow-requested"
+
+    /// The item the bar's corner wears for the relation, or nil: the bell
+    /// once followed (`showsMuteBell`, its own rule — always), Follow or
+    /// Requested only once the tray has scrolled away (the owner,
+    /// 2026-11-10), where the identity pill came in before (#1451) — so the
+    /// page never shows the tray's Follow and the bar's at once.
+    ///
+    /// | Relation        | Corner      |
+    /// |-----------------|-------------|
+    /// | not followed    | Follow      |
+    /// | requested       | Requested   |
+    /// | followed        | the bell    |
+    /// | blocked, nobody, the viewer's own, not read yet | nothing |
+    ///
+    /// A guest reads as not followed, so Follow — behind the member gate,
+    /// as the tray's Follow is (`headerView.onFollowTapped`).
+    private var cornerItem: UIBarButtonItem? {
+        if showsMuteBell { return muteBellItem }
+        guard showsRelationshipItem else { return nil }
+        switch followButtonState {
+        case .follow: return followBarItem
+        case .requested: return requestedBarItem
+        default: return nil
+        }
+    }
+
+    /// Whether Follow / Requested may stand in the corner now: someone
+    /// else's profile, read, not blocked, its tray out of sight.
+    private var showsRelationshipItem: Bool {
+        guard isTrayScrolledAway, !viewModel.namesNoOne, !viewModel.isBlocked else { return false }
+        guard !viewModel.isOwnProfile, !identityStubIsSelf, makeEditViewController == nil else { return false }
+        return followButtonState == .follow || followButtonState == .requested
+    }
+
+    /// Whether the bar wears Follow or Requested right now.
+    private var isShowingRelationshipItem: Bool {
+        ownTrailingBarItems.contains { $0 === followBarItem || $0 === requestedBarItem }
+    }
+
+    /// Follow, or Requested: a titled native item (the bar contract, #1679)
+    /// whose tap is the tray's own — `headerView.onFollowTapped`: the member
+    /// gate for a guest, the optimistic flip, its haptic, a request on a
+    /// private profile and its withdrawal on Requested. One path, so the bar
+    /// and the tray can never disagree on what a tap did.
+    ///
+    /// Plain by default; `-profile-follow-prominent` wears the bar's
+    /// `.prominent` style (the brand's tint) — the two the owner picks from
+    /// (#2248).
+    private func makeRelationshipBarItem(requested: Bool) -> UIBarButtonItem {
+        let prominent = !requested && DebugFlags.isOn("-profile-follow-prominent")
+        let item = BarItems.title(
+            id: requested ? Self.requestedItemID : Self.followItemID,
+            title: requested ? "Requested" : "Follow",
+            prominent: prominent
+        ) { [weak self] in self?.headerView.onFollowTapped?() }
+        if requested { item.accessibilityHint = "Withdraws your follow request." }
+        return item
+    }
+
     #if DEBUG
     /// Stands in for the scroll: the tray out of sight, or back.
     /// The scroll's own path: the header placed for `travelled`, the tray's
@@ -1377,11 +1436,10 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         isTrayScrolledAway = away
         updateActionBarItem(followButtonState)
     }
-    /// The bar's identity pill, if it shows one.
+    /// The bar's Follow or Requested, if it shows one (#2248).
     var debugBarRelationshipItem: UIBarButtonItem? {
-        (navigationItem.leftBarButtonItems ?? []).first { $0 === barIdentityItem }
+        ownTrailingBarItems.first { $0 === followBarItem || $0 === requestedBarItem }
     }
-    var debugBarIdentityPill: (any PersonBarItem)? { barIdentityPill }
     /// Every write of the bar's trailing group, in order: whether it was
     /// animated, so UIKit could morph it (#1903). A test reads how the bell
     /// left.
@@ -1706,11 +1764,12 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
 
     // MARK: - History's day in the bar (#1344)
 
-    /// The leading group: the tab root's bell, then — once the tray has
-    /// scrolled away — the identity pill (#1590, the owner 2026-10-22: the
-    /// profile's info goes LEFT; History's day went right).
+    /// The leading group: the tab root's bell. A pushed profile leads with
+    /// its back button and its @handle, a native title (#2248) — the
+    /// identity pill that came in beside the chevron is gone (#1590's
+    /// leading placement with it).
     private var leadingItems: [UIBarButtonItem] {
-        [leadingAccessoryItem, shownBarPill].compactMap { $0 }
+        [leadingAccessoryItem].compactMap { $0 }
     }
 
     /// History's day in the bar (#1344): the app's one section contract
@@ -1719,7 +1778,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// mid-push. A tap: the day's first post under the bar.
     ///
     /// - Someone else's profile: innermost of the TRAILING group (#1590) —
-    ///   the identity pill holds the leading one — through
+    ///   the leading side is the chevron and the @handle (#2248) — through
     ///   `setOwnTrailingBarItems`.
     /// - The viewer's own (`dayLeads`): LEADING, after the bell (the owner,
     ///   2026-10-23, #1642) — the Messages inbox's arrangement. The leading
@@ -1747,44 +1806,6 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         let shown = viewModel.namesNoOne ? nil : section
         sectionBinding.show(pinned: shown.map { ($0.index, .init(id: $0.title, title: $0.title, count: $0.count)) })
     }
-
-    /// Puts the leading group — the bell, the pill — where the state says,
-    /// ONCE, on the next turn: a scroll can move the tray twice in one turn,
-    /// and a second write cut the first one's animation short.
-    private func scheduleLeadingPlacement() {
-        // The own profile's leading group is the contract's (#1642): it
-        // defers the same way, with the day after these.
-        guard !dayLeads else {
-            sectionBinding.leadingPrefix = leadingItems
-            return
-        }
-        guard view.window != nil else {
-            navigationItem.leftBarButtonItems = leadingItems
-            return
-        }
-        guard !leadingPlacementScheduled else { return }
-        leadingPlacementScheduled = true
-        DispatchQueue.main.async { [weak self] in self?.placeLeadingAfterTransition() }
-    }
-
-    /// ⚠️ NOT DURING A PUSH (#756): items set while the bar is in its push
-    /// transition land with it, unanimated, when it ends. A placement due
-    /// mid-transition waits for its end, then animates.
-    private func placeLeadingAfterTransition() {
-        if let coordinator = transitionCoordinator,
-           coordinator.animate(alongsideTransition: nil, completion: { [weak self] _ in
-               // Off the completion's turn, which still belongs to the transition.
-               DispatchQueue.main.async { self?.placeLeadingAfterTransition() }
-           }) {
-            return
-        }
-        leadingPlacementScheduled = false
-        if !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leadingItems, by: ===) {
-            navigationItem.setLeftBarButtonItems(leadingItems, animated: true)
-        }
-    }
-
-    private var leadingPlacementScheduled = false
 
     #if DEBUG
     /// The bar's day item while it is shown — what a test reads.
@@ -1890,10 +1911,11 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     }
 
     /// The single application point for everything the navigation bar shows —
-    /// title (@handle once loaded, "Profile" until then) and the relationship
-    /// action. Idempotent, driven from three places: viewDidLoad (initial
-    /// composition), viewWillAppear (synchronous pre-transition bind), and the
-    /// async data callbacks (via `alongsideTransition`).
+    /// the @handle as a leading title on a pushed profile (#2248), the shell's
+    /// items, the bell or Follow in the corner. Idempotent, driven from three
+    /// places: viewDidLoad (initial composition), viewWillAppear (synchronous
+    /// pre-transition bind), and the async data callbacks (via
+    /// `alongsideTransition`).
     private func applyNavigationState(animated: Bool = false) {
         // ⚠️ **AND THE CHEVRON KEEPS ITS SILENCE.** A titled root gives every
         // screen pushed from it a WORDED back button, and two pushed bars were
@@ -1917,8 +1939,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // No content-source filter on any profile (#772): its sources are
         // pages at the foot, your own as anyone else's (#696).
         //   tab root  [bell] … [day][coins][switcher gear]
-        //   pushed    [back][pill] … [day][coins][bell] (the pill once the
-        //             tray has scrolled away, the day on History — #1590)
+        //   pushed    [‹ @handle] … [day][coins][Follow | Requested | bell]
+        //             (Follow / Requested once the tray has scrolled away,
+        //             the bell whenever followed, the day on History — #2248)
         // Written only when it changed — the same "say nothing" rule as the
         // trailing run below, for the same torn-capsule reason.
         let leading = leadingItems
@@ -1927,8 +1950,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             // at once, as below, and only if it changed.
             sectionBinding.leadingPrefix = leading
             sectionBinding.placeNow()
-        } else if !leadingPlacementScheduled,
-           !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leading, by: ===) {
+        } else if !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leading, by: ===) {
             navigationItem.leftBarButtonItems = leading
         }
         // ⚠️ **WITHOUT THIS THE ITEM REPLACES THE BACK BUTTON**, and UIKit
@@ -1936,26 +1958,49 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // tab root, which has no back button to supplement.
         navigationItem.leftItemsSupplementBackButton = true
 
-        // ⚠️ **NO NAME IN THIS BAR, AND THE ISOLATION IS WHY.** It was asked
-        // for and it does not fit: with the filter leading, no title renders at
-        // all — not truncated, ABSENT. `-header-bar-tree` showed the three
-        // platters and an empty `HostedViewContainer`; dropping the leading
-        // item made the same label draw immediately, left-aligned, at its full
-        // 106pt. This bar's trailing group is 223pt (gear+switcher share a
-        // 115pt pill, the wallet wears its own 80pt platter) against For You's
-        // ~115, and For You wears a leading glyph AND a title perfectly well.
-        // So it is crowding here, not a rule about leading items.
-        //
-        // Three other explanations were tried against that symptom first and
-        // all three were wrong: `largeTitleDisplayMode` (`.never` changed
-        // nothing), the compression priority (`.defaultLow` → `.defaultHigh`,
-        // nothing), and the unlaid-frame trap the accessory host records
-        // (`sizeToFit`, nothing). Recorded so the next person does not spend
-        // the same three builds on it.
-        //
-        // The identity block says the name in full a finger's width below, and
-        // every item up here is a control.
+        applyBarTitle()
         updateActionBarItem(followButtonState, animated: animated)
+    }
+
+    // MARK: - The @handle in the bar (#2248)
+
+    /// The bar's title: the profile's @handle on a pushed profile, nil on the
+    /// tab root (its leading group is the bell and the day, #1642) and over a
+    /// page for no one (#800, #1406). A stub that knew only the name (#1858)
+    /// waits for the handle rather than titling the bar with a name that
+    /// would then be replaced: a native title changes without a fade.
+    private var barTitle: String? {
+        guard !dayLeads, !viewModel.namesNoOne, let handle = currentHandle, handle.hasPrefix("@") else { return nil }
+        return handle
+    }
+
+    /// The @handle, NATIVE, beside the chevron (#2248, the owner 2026-11-10 —
+    /// Instagram's arrangement): `navigationItem.title` with the `.browser`
+    /// style, which draws the title LEADING, next to the back button, with
+    /// no custom view — the wallet's History and Stakes screens wear it.
+    /// Shown at all times on a pushed profile: a native title does not fade
+    /// in and out (`bar-contract`), and the handle complements the name the
+    /// header shows. UIKit truncates it at the tail when room runs out.
+    ///
+    /// ⚠️ **NO LEADING ITEM BESIDE IT.** Until #2248 this bar drew no title,
+    /// and crowding was why: with an item in the leading group the title was
+    /// not truncated but ABSENT (`-header-bar-tree` showed the platters and
+    /// an empty `HostedViewContainer`), and dropping the leading item made the
+    /// same label draw at once, left-aligned, at its full width. Three other
+    /// explanations were tried first and were wrong: `largeTitleDisplayMode`,
+    /// the compression priority, `sizeToFit`. The identity pill — the last
+    /// leading item on a pushed profile — went with #2248, so the leading
+    /// group of a pushed profile is the chevron alone.
+    ///
+    /// Its ink over the banner is the hero page's (`HeroPageViewController`):
+    /// white over a picture at rest, the page's own ink with no picture
+    /// behind the bar, the system's once the header has gone under it.
+    private func applyBarTitle() {
+        let title = barTitle
+        if navigationItem.title != title { navigationItem.title = title }
+        // The tab root keeps the stock style: it has no title to lead with.
+        let style: UINavigationItem.ItemStyle = dayLeads ? .navigator : .browser
+        if navigationItem.style != style { navigationItem.style = style }
     }
 
     /// Whether the bar wears the bell right now.
@@ -2014,19 +2059,17 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         change(self, view.window != nil)
     }
 
-    /// Installs the nav-bar relationship action per the current state, absent
-    /// until the relationship is known. Plain titled items on purpose: iOS 26
-    /// wraps bar items in the bar's own neutral Liquid Glass capsule — a
-    /// glass-configured custom button here would stack a second material on
-    /// top of it (a visible "double background" bleed), and `.done`/prominent
-    /// styling floods the capsule with tint. The own-profile overflow menu
-    /// keeps its slot next to it either way.
+    /// Composes the trailing group per the current state: the own profile's
+    /// gear, the corner item (`cornerItem` — the bell, or Follow / Requested
+    /// once the tray has scrolled away, #2248), the shell's balance, and
+    /// History's day. Nothing relational until the relationship is known.
+    /// Native items only (the bar contract, #1679): iOS 26 wraps each in the
+    /// bar's own Liquid Glass capsule, and a glass-configured custom button
+    /// would stack a second material on top of it.
     private func updateActionBarItem(_ state: ProfileViewModel.FollowButton, animated: Bool = false) {
         // Edit is no longer a bar item — it lives in the header tray beside the
         // avatar (see `ProfileHeaderView.configureAction`), so own-profile keeps
         // only its account overflow menu here.
-        // One item, retitled — never a new one. See `followActionItem`.
-        //
         // `.hidden` yields no item at all. It used to install a bare custom
         // view as a placeholder pill, which was both unreachable — every path
         // into `followButtonState` sets a concrete state, the view model never
@@ -2034,12 +2077,12 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // — and the one thing in this slot that UIKit could not animate across
         // a transition. An absent item is the honest native answer for "no
         // relationship applies".
-        // ⚠️ NO RELATIONSHIP ITEM UP HERE ANY MORE. Follow / Following sits
-        // in the header's tray beside Message — see
-        // `ProfileHeaderView.configureAction` — so the bar carries only the
-        // own-profile chrome and whatever the shell injects. `state` still
-        // arrives, because a rebuild is keyed on it and the guard below
-        // decides whether anything actually changed.
+        // Follow / Following lives in the header's tray beside Message — see
+        // `ProfileHeaderView.configureAction`. The bar takes Follow (or
+        // Requested) over only once that tray has scrolled out of sight
+        // (#2248), and never Following: once followed, the corner is the
+        // bell's. `state` still arrives, because a rebuild is keyed on it and
+        // the guard below decides whether anything actually changed.
         _ = state
         // The switcher sits in the LEADING slot, opposite the gear.
         //
@@ -2081,24 +2124,16 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // way to settings and to another profile.
         let namesNoOne = viewModel.namesNoOne
         if let settingsItem { items.append(settingsItem) }
-        // The mute bell (#689), someone else's followed profile only: `[0]`
-        // is the corner, as the gear is on your own. On screen, someone
-        // else's profile reads `[pill][coins][bell]` once followed and
-        // `[pill][coins]` before (#1451), the pill only once the tray has
-        // scrolled away — never a Follow item: following from the bar is the
-        // pill's "+".
-        // ⚠️ THE PILL GOES LEADING (#1590): computed here, where the relation
-        // is read, and placed by the leading group's own once-per-turn write.
-        let pill = namesNoOne ? nil : barIdentityItem(for: followButtonState)
-        if pill !== shownBarPill {
-            shownBarPill = pill
-            scheduleLeadingPlacement()
-        }
-        if namesNoOne {
-            // Nothing to mute, follow or spend on.
-        } else if showsMuteBell {
-            muteBellItem.isEnabled = isMuteBellEnabled
-            items.append(muteBellItem)
+        // The corner, someone else's profile only: `[0]`, as the gear is on
+        // your own. The bell once followed (#689, #1398), always; Follow or
+        // Requested before, once the tray has scrolled away (#2248, where the
+        // identity pill came in before, #1451) — `[coins][Follow]`, then
+        // `[coins][bell]`. Each its own item under its own identifier, so a
+        // follow from the bar is UIKit's morph of one into the other (R3).
+        let corner = namesNoOne ? nil : cornerItem
+        if let corner {
+            if corner === muteBellItem { muteBellItem.isEnabled = isMuteBellEnabled }
+            items.append(corner)
         }
         // The shell's accessory next: the gear keeps the corner and the
         // balance sits inboard — the Explore header's arrangement ([coins]
@@ -2111,7 +2146,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             items.append(historySelectSpacer)
             items.append(historyItem)
         } else if let trailingAccessoryItem, !namesNoOne {
-            if showsMuteBell { items.append(muteBellSpacer) }
+            if corner != nil { items.append(cornerSpacer) }
             items.append(trailingAccessoryItem)
         }
         // History's day, innermost (#1590), is the section contract's
@@ -2127,10 +2162,13 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             if !dayLeads { sectionBinding.trailingItems = items }
             return
         }
-        // ⚠️ THE BELL ARRIVING waits for rest too, then comes in animated
-        // (#1398): added mid-push it would pop in unanimated at the end
-        // (#756).
-        if showsMuteBell, !isShowingMuteBell, transitionCoordinator != nil {
+        // ⚠️ THE CORNER CHANGING waits for rest, then comes in animated
+        // (#1398, #2248): the bell or Follow added mid-push would pop in
+        // unanimated at the end (#756) — and so would Follow taken away (a
+        // removal of the bell has its own path, `removeMuteBell`).
+        let cornerArrives = corner.map { item in !ownTrailingBarItems.contains { $0 === item } } ?? false
+        let relationshipLeaves = isShowingRelationshipItem && corner !== followBarItem && corner !== requestedBarItem
+        if cornerArrives || relationshipLeaves, transitionCoordinator != nil {
             navigationController?.whenAtRest { [weak self] in
                 guard let self else { return }
                 updateActionBarItem(followButtonState, animated: view.window != nil)
@@ -2180,75 +2218,13 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         }
     }
 
-    /// The bar's identity pill, or nil: none until the tray has scrolled
-    /// away, none on the viewer's own profile. Its badge says the relation
-    /// (#1451).
-    private func barIdentityItem(for state: ProfileViewModel.FollowButton) -> UIBarButtonItem? {
-        guard isTrayScrolledAway, !viewModel.isOwnProfile, !identityStubIsSelf,
-              makeEditViewController == nil else { return nil }
-        guard let badge = Self.barBadge(for: state, mutual: viewModel.isMutualFollow),
-              let profile = viewModel.profile, let barIdentityPill, let barIdentityItem else { return nil }
-        // Known as the pill comes in: drawn as it is, never faded over its
-        // bars (`setPerson`).
-        barIdentityPill.setPerson(
-            id: profile.id, name: profile.displayName, meta: "@\(profile.handle)",
-            avatarURL: profile.avatarURL, pipeline: imagePipeline, animated: barIdentityPill.view.window != nil
-        )
-        barIdentityPill.setFollowBadge(badge, animated: barIdentityPill.view.window != nil)
-        // Never narrower than its face.
-        barIdentityPill.setWidthBudget(max(PersonPill.wrapperHeight, floor(barIdentityWidthBudget())))
-        // Coming into the bar: laid out first, so the bar's animation fades
-        // it in and nothing inside it slides (`settleLayout`).
-        if barIdentityPill.view.window == nil { barIdentityPill.settleLayout() }
-        return barIdentityItem
-    }
-
-    /// The badge for the relation (#1451) — the avatar's own mapping
-    /// (`ProfileHeaderView.relationBadge`, #2014). Nil: no pill (a profile
-    /// the viewer cannot follow).
-    static func barBadge(for state: ProfileViewModel.FollowButton, mutual: Bool) -> PersonPill.Badge? {
-        ProfileHeaderView.relationBadge(for: state, mutual: mutual)
-    }
-
-    /// Wears the relationship on the header's avatar (#2014), as the bar's
-    /// pill does.
+    /// Wears the relationship on the header's avatar (#2014).
     private func applyRelationMark() {
         headerView.configureRelationMark(
             followButtonState, mutual: viewModel.isMutualFollow, blocked: viewModel.isBlocked,
             isOwnProfile: viewModel.isOwnProfile
         )
     }
-
-    /// The bar's width less the back button and the trailing group — the
-    /// balance, the bell, History's day — with the bar's margins and gaps.
-    private func barIdentityWidthBudget() -> CGFloat {
-        let barWidth = navigationController?.navigationBar.bounds.width ?? view.bounds.width
-        var others: CGFloat = Self.barControlSide // the back button
-        if let accessory = trailingAccessoryItem?.customView {
-            // A badge laid out by constraints has no intrinsic width: fit it.
-            let intrinsic = accessory.intrinsicContentSize.width
-            others += intrinsic > 0
-                ? intrinsic
-                : accessory.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
-        }
-        if showsMuteBell { others += Self.barControlSide }
-        if let title = sectionBinding.item?.title {
-            // The day's glass bubble: its title and the bubble's own padding.
-            let font = UIFont.appFont(forTextStyle: .body)
-            others += ceil((title as NSString).size(withAttributes: [.font: font]).width) + Spacing.lg * 2
-        }
-        // ⚠️ LEADING, THE BAR KEEPS MORE AIR (#1590): between the two groups
-        // UIKit reserves the title's slot, and a pill sized to the trailing
-        // gaps alone made it fold the balance and the bell into an overflow
-        // "•••" on an SE.
-        let gaps = Spacing.md * 4 + Spacing.lg * 2 + Self.leadingGroupAir
-        return barWidth - others - gaps
-    }
-
-    private static let barControlSide: CGFloat = 44
-    /// The extra room the bar keeps between a leading pill and the trailing
-    /// group (#1590), measured on an SE.
-    static let leadingGroupAir: CGFloat = 40
 
     /// Whether the header's action tray is out of sight: under the
     /// navigation bar, by the header's coming position (`travelled` — the
@@ -2617,8 +2593,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// A profile with no gallery (a page for no one) needs no air under it.
     override var heroPageBottomBreathingRoom: CGFloat { viewModel.hasGallery ? 8 : 0 }
 
-    /// Once the tray has scrolled under the bar, the bar carries the
-    /// profile's identity (#1451) — and gives it back on the way down.
+    /// Once the tray has scrolled under the bar, the bar's corner carries the
+    /// profile's Follow or Requested (#2248) — and gives it back to the tray
+    /// on the way down.
     override func heroPageHeaderDidMove(travelled: CGFloat) {
         let trayGone = isActionRowUnderBar(travelled: travelled)
         guard trayGone != isTrayScrolledAway else { return }
@@ -2957,8 +2934,8 @@ extension ProfileViewController {
 // MARK: - Tab re-tap (#1309)
 
 extension ProfileViewController: TabReselectScrolling {
-    /// Back to the PROFILE's top — the identity and its tray at rest, as the
-    /// bar's identity pill does — not merely the active tab's first row.
+    /// Back to the PROFILE's top — the identity and its tray at rest — not
+    /// merely the active tab's first row.
     func scrollToTopForTabReselect() {
         galleryPager.scrollActivePageToHeaderTop()
     }

@@ -81,7 +81,8 @@ let package = Package(
             dependencies: [
                 "Profile",
                 "Feed",
-                // `PersonBarItem`, the bar pill's contract (#1451).
+                // The feed's interface the suites' grid pages and hero
+                // origins are built against.
                 "FeedInterface",
                 // `ProfileReference` / `ProfileLookup`, for the handle and
                 // share-token lookup suite (#800).
