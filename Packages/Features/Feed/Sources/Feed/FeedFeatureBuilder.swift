@@ -1762,10 +1762,36 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         makeTextPostScreen(publisher: publisher, bookmarks: .shared)
     }
 
+    /// A channel's "Share as a Post" (#2216): the same screen, its card
+    /// attached above the composer — removable — with an optional place.
+    /// Opened at its full height: the card and the words need the room the
+    /// keyboard would ask for anyway. Without `-channels`, the plain screen.
+    public func makeTextPostScreen(publisher: any TextPostPublishing, attaching embed: PostEmbed) -> UIViewController {
+        makeTextPostScreen(publisher: publisher, bookmarks: .shared, attaching: embed)
+    }
+
     /// The same, over `bookmarks` — the app's one pile outside tests.
-    func makeTextPostScreen(publisher: any TextPostPublishing, bookmarks: PostBookmarkStore) -> UIViewController {
+    /// `showsEmbeds`: whether a card can be attached (`-channels`).
+    func makeTextPostScreen(
+        publisher: any TextPostPublishing, bookmarks: PostBookmarkStore, attaching embed: PostEmbed? = nil,
+        showsEmbeds: Bool = PostEmbeds.areDrawn
+    ) -> UIViewController {
         let repository = repository
         let commentsProvider = commentsProvider
+        // A showcase (#2216): the same priming as a text post's; none
+        // without `-channels`.
+        let publishShowcase: (@Sendable (String, PostEmbed, TextPostPlace?, AuthorSummary?) async throws -> FeedEntry)?
+        if showsEmbeds {
+            publishShowcase = { text, embed, place, author in
+                let entry = try await publisher.publishTextPost(text, embed: embed, place: place, as: author)
+                await repository.remember(entry)
+                commentsProvider?.seedTopComments([], for: entry.post.id)
+                return entry
+            }
+        } else {
+            publishShowcase = nil
+        }
+        let attached: PostEmbed? = showsEmbeds ? embed : nil
         // A voice post (#2209): the same priming as a text post's; none
         // without `-voice-posts`.
         let publishVoice: (@Sendable (String, TextPostVoice, AuthorSummary?) async throws -> FeedEntry)?
@@ -1784,7 +1810,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             await repository.remember(entry)
             commentsProvider?.seedTopComments([], for: entry.post.id)
             return entry
-        }, publishVoice: publishVoice)
+        }, publishVoice: publishVoice, publishShowcase: publishShowcase)
         let panel = Self.makeCommentsPanel(
             viewModel: PostDetailViewModel(
                 draft: draft,
@@ -1809,7 +1835,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             makeWalletSheet: makeWalletSheet,
             // A save made elsewhere while the page shows the post (#1067).
             entities: entities,
-            bookmarks: bookmarks
+            bookmarks: bookmarks,
+            attaching: attached
         )
         let navigation = UINavigationController(rootViewController: composer)
         navigation.modalPresentationStyle = .pageSheet
@@ -1819,6 +1846,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // for the keyboard, which the composer grows the sheet for.
             sheet.detents = [composer.makeRestingDetent(), .large()]
             sheet.prefersGrabberVisible = true
+            // A showcase opens full height (#2216): its card is taller than
+            // the invitation it stands in for.
+            if attached != nil { sheet.selectedDetentIdentifier = .large }
         }
         return navigation
     }

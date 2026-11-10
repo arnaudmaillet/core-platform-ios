@@ -35,4 +35,33 @@ struct ComposerTextPostPublisher: TextPostPublishing {
         intent.settle()
         return entry
     }
+
+    /// A showcase (#2216): the text post created carrying the embed and the
+    /// place. The key covers both: another channel, or another place, is
+    /// another post.
+    func publishTextPost(
+        _ text: String, embed: PostEmbed, place: TextPostPlace?, as author: AuthorSummary?
+    ) async throws -> FeedEntry {
+        let content = Self.showcaseContent(text, embed: embed, place: place, author: author)
+        let entry = try await composer.publishShowcasePost(
+            caption: text, embed: embed, place: place, as: author, idempotencyKey: intent.key(for: content)
+        )
+        intent.settle()
+        return entry
+    }
+
+    /// What a showcase's key is minted from (#795): the author, the words,
+    /// the conversation and the place.
+    static func showcaseContent(
+        _ text: String, embed: PostEmbed, place: TextPostPlace?, author: AuthorSummary?
+    ) -> String {
+        let authorID: String = author?.id.rawValue ?? ""
+        let trimmed: String = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let target: String
+        switch embed {
+        case .channel(let channel): target = "channel:" + channel.conversationID.rawValue
+        }
+        let point: String = place.map { "\($0.latitude),\($0.longitude)" } ?? ""
+        return [authorID, trimmed, target, point].joined(separator: "\u{1F}")
+    }
 }

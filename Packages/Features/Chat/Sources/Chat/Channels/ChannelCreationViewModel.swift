@@ -4,7 +4,9 @@ import Foundation
 
 /// A new channel (#2215): its name, its description, and who may join —
 /// public (anyone, at once) or on request (listed, an admin approves);
-/// then "Create", which lands the creator in it.
+/// then "Create", which lands the creator in it — or, with the showcases
+/// (#2216, `-channels`), on a last step that offers "Share as a Post" beside
+/// "Open Channel".
 ///
 /// ⚠️ NO PHOTO PICKED YET, as a group's (#2214, `GroupCreationViewModel`): a
 /// channel's photo is a URL, and nothing in the app uploads a picture for a
@@ -16,12 +18,16 @@ final class ChannelCreationViewModel {
         case editing
         case creating
         case failed(String)
+        /// The channel exists (#2216): the step offers to share it as a
+        /// post, or to open it.
+        case created(ConversationID)
     }
 
     var onPhaseChange: ((Phase) -> Void)?
     /// Whether "Create" may be tapped changed: a channel needs a name.
     var onCanCreateChange: ((Bool) -> Void)?
-    /// The channel exists: its id. The host lands in its thread.
+    /// The channel exists: its id. The host lands in its thread — at once,
+    /// or from the created step when it shares showcases (#2216).
     var onCreated: ((ConversationID) -> Void)?
 
     private(set) var phase: Phase = .editing { didSet { onPhaseChange?(phase) } }
@@ -31,16 +37,38 @@ final class ChannelCreationViewModel {
     private(set) var visibility: ConversationVisibility = .public
 
     private let service: any ConversationManaging
+    /// Whether creating ends on the "Share as a Post" step (#2216,
+    /// `-channels`): handed in by whoever builds the screen.
+    let sharesShowcases: Bool
 
-    init(service: any ConversationManaging) {
+    init(service: any ConversationManaging, sharesShowcases: Bool = false) {
         self.service = service
+        self.sharesShowcases = sharesShowcases
+    }
+
+    /// The card "Share as a Post" opens the composer with (#2216): the new
+    /// channel as created — its creator its owner. Nil before it exists, or
+    /// without the showcases.
+    var showcaseEmbed: PostEmbed? {
+        guard sharesShowcases, case .created(let id) = phase else { return nil }
+        let created = draft
+        return ChannelShowcase.embed(
+            id, name: created.name, photoURL: created.photoURL, description: created.description, subscriberCount: 0,
+            visibility: created.visibility
+        )
     }
 
     /// The longest name a channel takes.
     static let nameLimit = 64
 
     /// A channel is named — unlike a group, nobody's names stand in.
-    var canCreate: Bool { !trimmedName.isEmpty && phase != .creating }
+    var canCreate: Bool {
+        guard !trimmedName.isEmpty else { return false }
+        switch phase {
+        case .creating, .created: return false
+        case .editing, .failed: return true
+        }
+    }
 
     private var trimmedName: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -80,7 +108,7 @@ final class ChannelCreationViewModel {
             do {
                 let id = try await channelService.create(request)
                 guard let self else { return }
-                self.phase = .editing
+                self.phase = self.sharesShowcases ? .created(id) : .editing
                 self.onCreated?(id)
             } catch {
                 guard let self else { return }

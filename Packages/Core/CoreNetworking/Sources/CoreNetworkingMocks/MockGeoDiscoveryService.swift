@@ -43,6 +43,12 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// The showcase a post is (#2216), its channel's card hydrated at the
     /// read: its pin carries it. Nil unless channels are seeded.
     private let showcase: (@Sendable (_ postID: String) -> PostEmbed?)?
+    /// The posts published this session (#2216): one given a place stands
+    /// on the map there, as the backend indexes a post by its `location`.
+    private let postStore: MockPostStore?
+    /// An authored showcase's embed, read for the viewer now (#2216) — the
+    /// same hydration as its page's (`MockSocialServices.setEmbedHydration`).
+    private let hydrateEmbed: (@Sendable (PostEmbed) -> PostEmbed)?
 
     /// Central Paris — the map's default region centers here.
     private static let baseLat = 48.8566
@@ -69,9 +75,13 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         spreadsHierarchy: Bool = false,
         likeCount: @escaping @Sendable (String) -> Int64 = { _ in 0 },
         countryOf: (@Sendable (Double, Double) -> String?)? = nil,
-        showcase: (@Sendable (_ postID: String) -> PostEmbed?)? = nil
+        showcase: (@Sendable (_ postID: String) -> PostEmbed?)? = nil,
+        postStore: MockPostStore? = nil,
+        hydrateEmbed: (@Sendable (PostEmbed) -> PostEmbed)? = nil
     ) {
         self.showcase = showcase
+        self.postStore = postStore
+        self.hydrateEmbed = hydrateEmbed
         self.dataset = dataset
         self.spreadsHierarchy = spreadsHierarchy
         self.likeCount = likeCount
@@ -625,11 +635,37 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         // ⚠️ The Top-K cap is lifted for the density fixture. It is 200 by
         // default, and a saturated lattice is allowed to exceed that — capping
         // it here would silently thin the very field the flag exists to build.
-        let replicated = Self.replicated(pins, across: viewport)
+        // The session's own placed posts come first (#2216), so the cut,
+        // made in order, never drops the post the viewer just published.
+        let replicated = Self.replicated(authoredPins(in: viewport, filter: filter) + pins, across: viewport)
         response.pins = Array(replicated.prefix(Self.density > 1 ? replicated.count : Self.topK))
         // Stand-in tile count: scales with how wide the viewport is.
         response.tileCount = Int32(max(1, pins.count / 12 + 1))
         return .success(response)
+    }
+
+    /// The posts published this session with a place, inside `viewport`
+    /// (#2216): a showcase published "at the Bercy skatepark" is found on the
+    /// map there, its pin carrying its card. Text only — an authored media
+    /// post carries no place yet. A filter that names people or saved places
+    /// leaves them out, but the author's own (`profile:<id>`).
+    func authoredPins(in viewport: GeoDiscovery_V1_Viewport, filter: String?) -> [GeoDiscovery_V1_RadarPin] {
+        guard let postStore else { return [] }
+        return postStore.publishedRecords.compactMap { record -> GeoDiscovery_V1_RadarPin? in
+            guard record.media == nil, let location = record.location,
+                  Self.contains(viewport: viewport, lat: location.latitude, lng: location.longitude)
+            else { return nil }
+            if let filter, filter != "all", filter != "profile:\(record.profileID)" { return nil }
+            var pin = GeoDiscovery_V1_RadarPin()
+            pin.postID = record.postID
+            pin.lat = location.latitude
+            pin.lng = location.longitude
+            // An empty thumbnail: the wire's "no cover", a text marker.
+            pin.thumbnailURL = ""
+            if let voice = record.voice { PostVoiceWire.write(voice, to: &pin) }
+            if let embed = record.embed { PostEmbedWire.write(hydrateEmbed?(embed) ?? embed, to: &pin) }
+            return pin
+        }
     }
 
     /// Spreads `density` copies of each pin over the viewport.

@@ -77,6 +77,9 @@ final class ChannelInfoViewModel {
         var requestCount = 0
         var isMuted = false
         var isWorking = false
+        /// Whether the screen offers "Share as a Post" at all (#2216,
+        /// `-channels`): set once, by whoever builds the screen.
+        var sharesShowcases = false
 
         var viewerRole: ConversationRole? { viewerState.role }
         /// Owner and admins edit the identity and the visibility, and see
@@ -87,6 +90,12 @@ final class ChannelInfoViewModel {
         /// Anyone in it mutes and leaves it.
         var isIn: Bool { viewerRole != nil }
         var subtitle: String { ChannelCopy.subscriberCount(subscriberCount) }
+        /// "Share as a Post" (#2216): owner and admins of a channel the card
+        /// can show — never a private one — once it is loaded.
+        var canShareAsPost: Bool {
+            sharesShowcases && phase == .loaded
+                && ChannelShowcase.canShare(viewerState: viewerState, visibility: visibility)
+        }
     }
 
     var onStateChange: ((State) -> Void)?
@@ -113,13 +122,27 @@ final class ChannelInfoViewModel {
         isMuted: @escaping @MainActor () -> Bool = { false },
         setMuted: @escaping @MainActor (_ muted: Bool, _ completion: @escaping @MainActor (Bool) -> Void) -> Void = { _, done in
             done(false)
-        }
+        },
+        sharesShowcases: Bool = false
     ) {
         self.conversationID = conversationID
         self.service = service
         self.isMuted = isMuted
         self.setMuted = setMuted
         state.isMuted = isMuted()
+        state.sharesShowcases = sharesShowcases
+    }
+
+    // MARK: - Showcase (#2216)
+
+    /// The card "Share as a Post" opens the composer with: the channel as
+    /// this screen shows it. Nil when the viewer may not share it.
+    var showcaseEmbed: PostEmbed? {
+        guard state.canShareAsPost else { return nil }
+        return ChannelShowcase.embed(
+            conversationID, name: state.name, photoURL: state.photoURL, description: state.description,
+            subscriberCount: state.subscriberCount, visibility: state.visibility
+        )
     }
 
     // MARK: - Roles

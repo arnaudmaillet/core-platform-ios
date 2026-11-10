@@ -89,6 +89,12 @@ public enum AppRoute: Equatable, Sendable {
     /// other side) when it still exists — a supervision notification's tap
     /// (#1106). A link that has ended opens the page alone.
     case supervision(otherAccountID: String)
+    /// A conversation's "Share as a Post" (#2216): the Text Post screen,
+    /// presented with `embed`'s card attached — a channel's, as its owner's
+    /// screen knows it — a text to write and an optional place. Chat emits
+    /// it from a channel's creation and info screens; the app opens Upload's
+    /// composer, which Chat can't reach (no feature imports another).
+    case composeShowcase(PostEmbed)
 }
 
 public extension AppRoute {
