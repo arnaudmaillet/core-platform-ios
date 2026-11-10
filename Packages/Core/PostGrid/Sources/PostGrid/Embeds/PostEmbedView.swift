@@ -44,8 +44,10 @@ public final class PostEmbedView: UIView {
     /// Chat before anyone taps (#2216).
     public static var makeChannelActions: (@MainActor () -> (any ChannelEmbedActing)?)?
 
-    /// The actions a tap uses: the ones set, or the ones made now.
-    static var resolvedChannelActions: (any ChannelEmbedActing)? {
+    /// The actions a tap uses: the ones set, or the ones made now. Public
+    /// for a profile's Channels rows (#2232), which act as the card does —
+    /// through the same instance, so Chats reloads the same catalog.
+    public static var resolvedChannelActions: (any ChannelEmbedActing)? {
         if let channelActions { return channelActions }
         channelActions = makeChannelActions?()
         return channelActions
@@ -382,9 +384,32 @@ public final class PostEmbedView: UIView {
     /// screen — a map pin's mark under its bubble, a list card under its
     /// lift. Deliberately not through `ChannelEmbedLocalState.applied`,
     /// which forgets a change when it meets a read that already shows it.
-    static let channelStateDidChange = Notification.Name("PostEmbedView.channelStateDidChange")
+    public static let channelStateDidChange = Notification.Name("PostEmbedView.channelStateDidChange")
     private static let conversationKey = "conversationID"
     private static let stateKey = "viewerState"
+
+    /// A channel's standing changed somewhere other than a card — a
+    /// profile's Channels row (#2232): remembered for the session
+    /// (`ChannelEmbedLocalState`) and drawn at once by every card on screen
+    /// showing that channel, as a card's own tap is.
+    public static func announceChannelStanding(
+        _ id: ConversationID, from: ChannelEmbed.ViewerState, to: ChannelEmbed.ViewerState
+    ) {
+        ChannelEmbedLocalState.record(id, from: from, to: to)
+        NotificationCenter.default.post(
+            name: channelStateDidChange, object: nil,
+            userInfo: [conversationKey: id, stateKey: to]
+        )
+    }
+
+    /// The channel and its new standing a `channelStateDidChange` carries —
+    /// for a surface that draws channels without a card (a profile's
+    /// Channels rows, #2232). Nil for a note that says neither.
+    public static func channelStanding(in note: Notification) -> (id: ConversationID, state: ChannelEmbed.ViewerState)? {
+        guard let id = note.userInfo?[conversationKey] as? ConversationID,
+              let state = note.userInfo?[stateKey] as? ChannelEmbed.ViewerState else { return nil }
+        return (id, state)
+    }
 
     @objc private func otherCardChanged(_ note: Notification) {
         guard note.object as? PostEmbedView !== self,

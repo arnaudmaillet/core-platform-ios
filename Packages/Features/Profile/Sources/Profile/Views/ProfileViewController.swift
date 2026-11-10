@@ -78,6 +78,12 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     private var tabs: [ProfileTab]
     /// Every tab this profile can have.
     private let allTabs: [ProfileTab]
+    /// The Channels tab's model (#2232): the channels this profile owns,
+    /// read through Chat's seam. Nil with the channels off — no tab at all.
+    /// Internal for tests.
+    let channels: ProfileChannelsViewModel?
+    /// The new channel's sheet, for the own tab's "Create a Channel" (#2232).
+    private let makeChannelCreation: (@MainActor () -> UIViewController?)?
     /// The strip's home when the tab bar is under this screen. Nil on a pushed
     /// profile, where the bottom toolbar carries it instead.
     ///
@@ -269,9 +275,13 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             (ProfileRelationshipsViewModel.Subject, RelationshipDirection) -> UIViewController
         )? = nil,
         identityStub: ProfileIdentityStub? = nil,
-        trayPlacement: ProfileTrayPlacement = .navigationToolbar
+        trayPlacement: ProfileTrayPlacement = .navigationToolbar,
+        channels: ProfileChannelsViewModel? = nil,
+        makeChannelCreation: (@MainActor () -> UIViewController?)? = nil
     ) {
         self.trayPlacement = trayPlacement
+        self.channels = channels
+        self.makeChannelCreation = makeChannelCreation
         self.makeGridPage = makeGridPage
         self.identityStubIsSelf = identityStub?.isSelf == true
         self.viewModel = viewModel
@@ -289,7 +299,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // Every profile can carry Saved and Liked (#411, #837): someone
         // else's only when its owner shows them — the server answers empty
         // otherwise, and an empty source is no tab (#742).
-        let allTabs = ProfileTab.ownTabs
+        // Channels only with its model (#2232): the flag off, no tab can show.
+        let allTabs = ProfileTab.ownTabs.filter { $0 != .channels || channels != nil }
         self.allTabs = allTabs
         // Posts alone until the other sources answer (#742): a source shows
         // up only with something in it.
@@ -297,7 +308,20 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         self.tabs = shown
         let savesPosts = viewModel.bookmarks != nil
         // A tab's page is built the first time it is shown (#2125).
-        let pager = ProfileGalleryPagerView(tabs: allTabs, shown: shown) { style in makeGridPage(style, savesPosts) }
+        // The Channels page draws its model (#2232); "Create a Channel" asks
+        // the model, which this screen answers with the sheet.
+        var makeChannelsPage: (() -> any PostGridPage)?
+        if let channels {
+            makeChannelsPage = { [imagePipeline] () -> any PostGridPage in
+                let page = ProfileChannelsPage(model: channels, pipeline: imagePipeline)
+                // The model holds no page: the page may keep it.
+                page.onCreate = { channels.requestCreation() }
+                return page
+            }
+        }
+        let pager = ProfileGalleryPagerView(tabs: allTabs, shown: shown, makeChannelsPage: makeChannelsPage) { style in
+            makeGridPage(style, savesPosts)
+        }
         pager.presenceScreen = { [weak viewModel] in viewModel?.presenceScreen }
         galleryPager = pager
         // The gallery's format selector — the SAME `PagedTabBar` For You and
@@ -496,6 +520,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             self?.auditPostMenu(snapshot)
             #endif
         }
+        bindChannels()
         galleryPager.onItemTapped = { [weak self] post, stream in
             self?.openGalleryPost(post, stream: stream, showingComments: false)
         }
@@ -560,6 +585,10 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
         // A guest is known only once a gate is up the chain (#2014).
         applyRelationMark()
         Task { [weak self] in await self?.viewModel.refreshShareToken() }
+        // Back from a channel's thread or the new channel's sheet (#2232):
+        // a join there, or a channel just created, shows on the rows. Only
+        // once they were read — the first read waits for the profile.
+        if channels?.phase == .loaded { channels?.reload() }
         // ⚠️ **AS EARLY AS THE TRANSITION ALLOWS, AND `viewDidAppear` IS NOT
         // EARLY.** Measured on a tab switch, headless: `viewWillAppear` at
         // +36ms, `viewDidAppear` at +947ms — nine hundred milliseconds of empty
@@ -2527,7 +2556,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// fill. One tab left is no selector at all, in the tab
     /// bar's accessory as in a pushed profile's toolbar.
     private func showTabs(for snapshot: ProfileViewModel.GallerySnapshot) {
-        var shown = Self.shownTabs(allTabs, in: snapshot, isOwnProfile: viewModel.isOwnProfile)
+        var shown = Self.shownTabs(
+            allTabs, in: snapshot, isOwnProfile: viewModel.isOwnProfile, hasChannels: showsChannelsTab
+        )
         // ⚠️ SECTIONS BY PRESENCE (#1773): a source still loading whose tab
         // had posts last time keeps its tab from the first frame — it does
         // not pop in when its source answers.
@@ -2535,6 +2566,7 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             allTabs, in: snapshot, screen: viewModel.presenceScreen, presence: galleryPager.presence
         )
         shown = allTabs.filter { shown.contains($0) || remembered.contains($0) }
+        shown = Self.withPostsBesideChannels(shown)
         if shown.isEmpty { shown = [.format(.activity)] }
         guard shown != tabs else { return }
         let active = tabs.indices.contains(galleryPager.activePageIndex) ? tabs[galleryPager.activePageIndex] : nil
@@ -2571,14 +2603,78 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// The tabs `snapshot` gives something to show, in `all`'s order (#742,
     /// #1422): those whose source holds posts, and the viewer's own Posts.
     /// Empty when nothing has posts yet — `showTabs` then shows Posts alone.
+    ///
+    /// Channels (#2232) is no source of posts: it shows when the profile
+    /// owns a channel the viewer may see (`hasChannels`), like any tab only
+    /// with something in it.
     static func shownTabs(
-        _ all: [ProfileTab], in snapshot: ProfileViewModel.GallerySnapshot, isOwnProfile: Bool
+        _ all: [ProfileTab], in snapshot: ProfileViewModel.GallerySnapshot, isOwnProfile: Bool,
+        hasChannels: Bool = false
     ) -> [ProfileTab] {
         all.filter { tab in
+            if tab == .channels { return hasChannels }
             if tab == .format(.activity), isOwnProfile { return true }
             if case .content(let posts) = snapshot.state(for: tab) { return !posts.isEmpty }
             return false
         }
+    }
+
+    /// ⚠️ CHANNELS NEVER STANDS ALONE (#2232): a profile with channels and
+    /// no post yet — or a private one the viewer doesn't follow — keeps
+    /// Posts first, so its "No Posts Yet" or its lock stays where the viewer
+    /// looks for it, and the channels are the second tab. Pure, for tests.
+    static func withPostsBesideChannels(_ shown: [ProfileTab]) -> [ProfileTab] {
+        shown == [.channels] ? [.format(.activity), .channels] : shown
+    }
+
+    /// Whether Channels is a tab now (#2232): with a channel listed, or
+    /// while its read is on its way for a profile that had one last time
+    /// (sections by presence, #1773) — so it doesn't pop in under the
+    /// viewer when the answer lands.
+    private var showsChannelsTab: Bool {
+        guard let channels else { return false }
+        if channels.hasChannels { return true }
+        guard channels.phase == .loading, let screen = viewModel.presenceScreen else { return false }
+        return (galleryPager.presence.count(screen: screen, section: Self.channelsPresenceSection) ?? 0) > 0
+    }
+
+    /// The key Channels' presence is remembered under (#1773).
+    private static let channelsPresenceSection = String(describing: ProfileTab.channels)
+
+    /// Follows the Channels model (#2232): its tab comes and goes with its
+    /// channels, its page redraws, a refused write shakes its row's button,
+    /// and "Create a Channel" presents the new channel's sheet.
+    private func bindChannels() {
+        guard let channels else { return }
+        channels.onChange = { [weak self] in self?.channelsDidChange() }
+        channels.onActionFailed = { [weak self] id in self?.channelsPage?.showFailure(for: id) }
+        channels.onCreate = { [weak self] in self?.presentChannelCreation() }
+    }
+
+    /// The Channels page, once its tab has been shown.
+    private var channelsPage: ProfileChannelsPage? {
+        galleryPager.builtPage(for: .channels) as? ProfileChannelsPage
+    }
+
+    private func channelsDidChange() {
+        guard let channels else { return }
+        if channels.phase == .loaded, let screen = viewModel.presenceScreen {
+            galleryPager.presence.remember(
+                channels.channels.count, screen: screen, section: Self.channelsPresenceSection
+            )
+        }
+        let snapshot = lastGallerySnapshot ?? viewModel.publishedGallery
+            ?? ProfileViewModel.GallerySnapshot(activity: .loading, media: .loading, isComplete: false)
+        showTabs(for: snapshot)
+        channelsPage?.render()
+    }
+
+    /// The new channel's sheet over the profile; Create lands in Messages
+    /// with the channel's thread (#2230), and the profile lists it on the
+    /// way back (`viewWillAppear`).
+    private func presentChannelCreation() {
+        guard presentedViewController == nil, let sheet = makeChannelCreation?() else { return }
+        present(sheet, animated: true)
     }
 
     // MARK: - The hero page's contract
@@ -2586,6 +2682,8 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
     /// A pull released past its threshold, or a page asking.
     override func heroPageRefresh() {
         viewModel.refresh()
+        // The channels too (#2232): a pull reads the whole profile again.
+        channels?.reload()
         // History too, even held (#2170, the owner).
         viewModel.refreshHistory()
     }
@@ -2669,6 +2767,9 @@ final class ProfileViewController: HeroPageViewController<ProfileTab>, HeaderAcc
             // Content usually lands mid-push; rebind inside the transition
             // so the bar text doesn't snap in after the animation settles.
             currentHandle = model.handle
+            // Whose channels to list, once the profile is known (#2232) —
+            // again after an account switch, never on a mere re-render.
+            if let channels, channels.owner != model.id { channels.load(owner: model.id) }
             // ⚠️ Once. The bar's state does not follow the model, and a
             // refresh re-rendering content cross-dissolved the whole bar —
             // a snapshot of it — for nothing.

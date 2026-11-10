@@ -20,6 +20,13 @@ import UIKit
 /// decides where the pages end up, and it is easy to get wrong in ways a
 /// screenshot will not show: an off-by-one clamp only bites at the ends, and a
 /// wrong throw only bites on a flick.
+extension ProfileTab {
+    /// The three post pages, Channels left out (#2232): it is among the
+    /// public tabs but shown only with a channel, and these suites count
+    /// pages.
+    static let postTabsForTests: [ProfileTab] = [.format(.activity), .reposts, .tagged]
+}
+
 @MainActor
 struct ProfileGalleryScrubTests {
     private struct SilentFetcher: ImageFetching {
@@ -28,7 +35,7 @@ struct ProfileGalleryScrubTests {
 
     /// A pager with real bounds, so offsets and page widths are meaningful.
     private func makePager(width: CGFloat = 400) -> ProfileGalleryPagerView {
-        let pager = ProfileGalleryPagerView(tabs: ProfileTab.publicTabs, makePage: TestGridPages.pageMaker())
+        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, makePage: TestGridPages.pageMaker())
         pager.frame = CGRect(x: 0, y: 0, width: width, height: 600)
         pager.layoutIfNeeded()
         return pager
@@ -190,7 +197,7 @@ struct ProfileGalleryOffsetSyncTests {
     }
 
     private func makePager() -> ProfileGalleryPagerView {
-        let pager = ProfileGalleryPagerView(tabs: ProfileTab.publicTabs, makePage: TestGridPages.pageMaker())
+        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, makePage: TestGridPages.pageMaker())
         pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
         pager.layoutIfNeeded()
         return pager
@@ -206,7 +213,8 @@ struct ProfileGalleryOffsetSyncTests {
     @Test func settingTheOffsetReachesEveryPage() {
         let pager = makePager()
         pager.setVerticalOffset(0)
-        #expect(pager.debugVerticalOffsets.count == 3)
+        // Every page the pager was given (the three post pages here, #2232).
+        #expect(pager.debugVerticalOffsets.count == ProfileTab.postTabsForTests.count)
     }
 
     /// A page can be excluded — the one currently under the finger, which is
@@ -358,7 +366,7 @@ struct ProfileGalleryOffsetSyncTests {
 @MainActor
 struct ProfileGalleryPullTests {
     @Test func aPullReleasedOnTheActivePageReachesTheScreen() throws {
-        let pager = ProfileGalleryPagerView(tabs: ProfileTab.publicTabs, makePage: TestGridPages.pageMaker())
+        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, makePage: TestGridPages.pageMaker())
         pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
         pager.layoutIfNeeded()
         var released: [CGFloat] = []
@@ -384,7 +392,7 @@ struct ProfileTabPresenceTests {
 
     @Test func theAnswerIsRemembered() throws {
         let defaults = try #require(UserDefaults(suiteName: "presence-\(UUID().uuidString)"))
-        let pager = ProfileGalleryPagerView(tabs: ProfileTab.publicTabs, makePage: TestGridPages.pageMaker())
+        let pager = ProfileGalleryPagerView(tabs: ProfileTab.postTabsForTests, makePage: TestGridPages.pageMaker())
         pager.presence = SectionPresenceStore(defaults: defaults)
         pager.presenceScreen = { "profile.ada" }
         var snapshot = ProfileViewModel.GallerySnapshot(activity: .empty(message: ""), media: .empty(message: ""))

@@ -26,10 +26,11 @@ struct ProfileTabsTests {
 
     /// ⚠️ THE PUBLIC PAGES, THEN SAVED AND LIKED (#772): Reposts and Tagged
     /// left the bar's source menu for the selector, as on anyone else's
-    /// profile; Saved and Liked stay yours alone (#631).
+    /// profile; Saved and Liked stay yours alone (#631). Channels follows
+    /// Posts (#2232), shown only with a channel.
     @Test func yourOwnProfileCarriesThePublicPagesThenSavedAndLiked() {
-        #expect(ProfileTab.ownTabs == [.format(.activity), .reposts, .tagged, .saved, .history, .reactions])
-        #expect(ProfileTab.ownTabs.map(\.title) == ["Posts", "Reposts", "Tagged", "Saved", "History", "Liked"])
+        #expect(ProfileTab.ownTabs == [.format(.activity), .channels, .reposts, .tagged, .saved, .history, .reactions])
+        #expect(ProfileTab.ownTabs.map(\.title) == ["Posts", "Channels", "Reposts", "Tagged", "Saved", "History", "Liked"])
     }
 
     /// ⚠️ And nobody else's does. A saved pile has no owner but the device it
@@ -41,10 +42,11 @@ struct ProfileTabsTests {
     }
 
     /// ⚠️ THREE PAGES (#696): anyone else's profile is Posts · Reposts ·
-    /// Tagged, each its own list, where it was one list and a top filter.
+    /// Tagged, each its own list, where it was one list and a top filter —
+    /// and Channels after Posts when it owns one (#2232).
     @Test func someoneElsesProfileIsPostsRepostsTagged() {
-        #expect(ProfileTab.publicTabs == [.format(.activity), .reposts, .tagged])
-        #expect(ProfileTab.publicTabs.map(\.title) == ["Posts", "Reposts", "Tagged"])
+        #expect(ProfileTab.publicTabs == [.format(.activity), .channels, .reposts, .tagged])
+        #expect(ProfileTab.publicTabs.map(\.title) == ["Posts", "Channels", "Reposts", "Tagged"])
     }
 
     /// Posts comes first on both, so a profile opens on the list a viewer
@@ -55,9 +57,10 @@ struct ProfileTabsTests {
     }
 
     /// Reposts and Tagged load more as they scroll, like Posts; Saved and
-    /// Liked arrive whole.
+    /// Liked arrive whole, and so do a profile's channels (#2232).
     @Test func thePublishedPagesPage() {
-        #expect(ProfileTab.publicTabs.allSatisfy { $0.pages })
+        #expect(ProfileTab.publicTabs.filter { $0 != .channels }.allSatisfy { $0.pages })
+        #expect(!ProfileTab.channels.pages)
         #expect(!ProfileTab.saved.pages && !ProfileTab.reactions.pages)
         #expect(ProfileTab.reposts.format == nil && ProfileTab.tagged.format == nil)
     }
@@ -112,8 +115,8 @@ struct ProfileTabsTests {
     /// count used to be a constant, and a selector with more segments than
     /// the pager has pages indexes past the end on the last tab.
     @Test func thePagerBuildsOnePageForEachTab() {
-        #expect(pager(ProfileTab.ownTabs).debugVerticalOffsets.count == 6)
-        #expect(pager(ProfileTab.publicTabs).debugVerticalOffsets.count == 3)
+        #expect(pager(ProfileTab.ownTabs).debugVerticalOffsets.count == 7)
+        #expect(pager(ProfileTab.publicTabs).debugVerticalOffsets.count == 4)
     }
 
     /// And the new pages join the same coordinator as the old: each keeps its

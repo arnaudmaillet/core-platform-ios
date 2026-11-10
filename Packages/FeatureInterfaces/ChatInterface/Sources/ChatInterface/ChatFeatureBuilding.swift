@@ -55,6 +55,11 @@ public protocol ChatFeatureBuilding {
     /// channels off. The shell registers it once (`PostEmbedView`).
     func makeChannelEmbedActions() -> (any ChannelEmbedActing)?
 
+    /// The channels a profile owns (#2232), for the profile's Channels tab,
+    /// which can't depend on Chat. Nil with the channels off — no profile
+    /// then shows the tab. The shell hands it to Profile.
+    func makeProfileChannels() -> (any ProfileChannelsProviding)?
+
     /// The new channel's sheet, for the tab bar's "+" menu (#2230): Create
     /// closes it and lands in Messages, on Chats, with the channel's thread
     /// pushed. Nil with the channels off — the menu then offers no channel.
@@ -64,6 +69,9 @@ public protocol ChatFeatureBuilding {
 extension ChatFeatureBuilding {
     /// No channels: a builder that has none draws no actions.
     public func makeChannelEmbedActions() -> (any ChannelEmbedActing)? { nil }
+
+    /// No channels: no profile lists any.
+    public func makeProfileChannels() -> (any ProfileChannelsProviding)? { nil }
 
     /// No channels: nothing to create.
     public func makeChannelCreationViewController() -> UIViewController? { nil }

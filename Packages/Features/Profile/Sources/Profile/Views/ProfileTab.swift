@@ -30,6 +30,12 @@ public enum ProfileTab: Equatable, Sendable {
     /// Posts the viewer viewed (#1344): their own profile only, newest
     /// first, kept on the device until the backend keeps it (#944).
     case history
+    /// The channels the profile owns (#2232, behind `-channels`): a
+    /// channel is its owner's broadcast, attached to their profile (#2211).
+    /// Not a corpus of posts at all — its page is a list of channels
+    /// (`ProfileChannelsPage`), read through Chat's seam — and, like every
+    /// tab, shown only with one in it (#742).
+    case channels
 
     /// What the selector calls it.
     ///
@@ -49,6 +55,7 @@ public enum ProfileTab: Equatable, Sendable {
         case .reposts: "Reposts"
         case .tagged: "Tagged"
         case .history: "History"
+        case .channels: "Channels"
         }
     }
 
@@ -57,7 +64,7 @@ public enum ProfileTab: Equatable, Sendable {
     var pages: Bool {
         switch self {
         case .format, .reposts, .tagged: true
-        case .saved, .reactions, .history: false
+        case .saved, .reactions, .history, .channels: false
         }
     }
 
@@ -75,7 +82,10 @@ public enum ProfileTab: Equatable, Sendable {
     /// their own posts WITHOUT reposts, Reposts only those, Tagged others'
     /// posts that mention them. It was one list narrowed by a top source
     /// filter (#631) — "it is no longer a sort".
-    public static let publicTabs: [ProfileTab] = [.format(.activity), .reposts, .tagged]
+    ///
+    /// Channels follows Posts (#2232, the owner 2026-11-10): a channel is
+    /// the person's own creation, like their posts.
+    public static let publicTabs: [ProfileTab] = [.format(.activity), .channels, .reposts, .tagged]
 
     /// The public pages, then Saved and Liked: what the viewer sees on their
     /// own, and on anyone else's whose owner shows them (#411) — each only
@@ -127,6 +137,9 @@ extension ProfileTab {
             ("at", "No Tagged Posts", "Posts that mention them will appear here.")
         case .history:
             ("clock.arrow.circlepath", "No History Yet", "Posts you watch will appear here.")
+        case .channels:
+            // Never drawn: the tab leaves with its last channel (#2232).
+            ("megaphone", "No Channels", "Channels will appear here.")
         }
     }
 }

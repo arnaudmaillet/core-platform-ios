@@ -128,6 +128,49 @@ final class MockConversationBook: @unchecked Sendable {
             add(.init(conversationID: "ch-backroom", kind: .channel, name: "Backroom sessions", photoURL: photo("backroom"),
                       description: "Live sets, invite only.", visibility: .private, subscriberCount: 95),
                 members: [author(18): .owner], since: now - 15 * day)
+            seedProfileChannels(author: author, photo: photo, now: now, day: day)
+        }
+    }
+
+    /// The viewer's private channel (#2232): members only, so their own
+    /// profile lists it with a lock and nobody else's read answers it.
+    static let privateOwnChannelID = "ch-sketchbook"
+
+    /// The channels that give profiles one, two and five of them (#2232),
+    /// beside the ones seeded for Chats and the showcases:
+    ///
+    /// - **one:** author 12 (Harbour notes, Join) — and authors 19 and 29,
+    ///   whose one the viewer follows (Open);
+    /// - **two:** author 16 (Print room, Request; Press marks, Join). Author
+    ///   17 admins Print room and owns none: no tab;
+    /// - **five:** author 11 (Film stock club, Requested, and four more —
+    ///   Join and Request), plus a private sixth only its owner would see;
+    /// - **the viewer:** Daily light, Studio drops, and a private one (the
+    ///   lock).
+    ///
+    /// None but the viewer's own puts the viewer in a channel, so Chats
+    /// lists exactly what it did, plus the viewer's private channel.
+    private func seedProfileChannels(
+        author: (Int) -> String, photo: (String) -> String, now: Int64, day: Int64
+    ) {
+        add(.init(conversationID: Self.privateOwnChannelID, kind: .channel, name: "Sketchbook", photoURL: photo("sketchbook"),
+                  description: "Unfinished pages, for a few friends.", visibility: .private, subscriberCount: 6),
+            members: [viewer: .owner], since: now - 5 * day)
+        add(.init(conversationID: "ch-pressmarks", kind: .channel, name: "Press marks", photoURL: photo("pressmarks"),
+                  description: "Colophons, printers' marks and the stories behind them.", visibility: .public,
+                  subscriberCount: 1_900),
+            members: [author(16): .owner], since: now - 45 * day)
+        let film: [(id: String, name: String, about: String, visibility: ProposedChat.Visibility, count: Int)] = [
+            ("ch-labnotes", "Lab notes", "Development times, pushes and pulls.", .public, 8_200),
+            ("ch-scans", "Scan day", "The week's scans, straight off the bed.", .public, 3_400),
+            ("ch-expired", "Expired stock", "What a forty-year-old roll still holds.", .listedOnRequest, 2_100),
+            ("ch-darkroom-chem", "Darkroom chemistry", "Mixing, storing, and what not to pour away.", .listedOnRequest, 640),
+            ("ch-film-friends", "Contact sheets", "Whole rolls, for close friends.", .private, 40),
+        ]
+        for (offset, channel) in film.enumerated() {
+            add(.init(conversationID: channel.id, kind: .channel, name: channel.name, photoURL: photo(channel.id),
+                      description: channel.about, visibility: channel.visibility, subscriberCount: channel.count),
+                members: [author(11): .owner], since: now - Int64(100 + offset * 30) * day)
         }
     }
 
@@ -490,6 +533,27 @@ final class MockConversationBook: @unchecked Sendable {
                 records[id]?.details.subscriberCount -= 1
             }
             return ProposedChat.Reply()
+        case let .ownedChannels(viewer, owner):
+            return ProposedChat.Reply(details: ownedChannels(of: owner, for: viewer))
+        }
+    }
+
+    /// The channels `owner` owns, as `viewer` may see them (#2232): only
+    /// the ones whose owner they are — an admin's channel stays off the
+    /// admin's profile, and a transfer moves it to the new owner's —
+    /// someone else's private ones left out (they can't be probed), the
+    /// most subscribed first, then by name, so the order holds still
+    /// between two reads.
+    private func ownedChannels(of owner: String, for viewer: String) -> [ProposedChat.Details] {
+        let owned = order.compactMap { id -> ProposedChat.Details? in
+            guard let record = records[id], record.details.kind == .channel,
+                  record.members[owner] == .owner else { return nil }
+            if record.details.visibility == .private, viewer != owner { return nil }
+            return details(id, for: viewer)
+        }
+        return owned.sorted { lhs, rhs in
+            if lhs.subscriberCount != rhs.subscriberCount { return lhs.subscriberCount > rhs.subscriberCount }
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
         }
     }
 }
