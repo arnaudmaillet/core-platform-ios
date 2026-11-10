@@ -666,6 +666,11 @@ final class SnapFeedViewController: UIViewController {
         // builds the dismissal, ahead of the reveal geometry.
         view.backgroundColor = emptyGround
         configureCollectionView()
+        #if DEBUG
+        // The comments sheet's catalogue checked at launch (#2195 § 5): read
+        // here, a broken one fails its assertion before any sheet opens.
+        _ = CommentsSheetShape.catalogue
+        #endif
         if installsSideList {
             let sideList = SnapSideListController(host: self, imagePipeline: imagePipeline, videoPlayback: videoPlayback)
             sideList.install(in: view)

@@ -1545,78 +1545,37 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         Self.commentsSheetCut(of: mediaCard.wholePictureRect).size
     }
 
-    /// The three shapes a picture takes under the comments sheet (#2184, the
-    /// owner, 2026-11-07): a little of the picture is lost, and the sheet
-    /// gets one height per shape instead of one per ratio.
-    enum CommentsSheetShape: Equatable, CaseIterable {
-        /// Below `squareFrom` (width / height): cut to 3:4.
-        case portrait
-        /// From `squareFrom` to `landscapeFrom`: cut to 1:1.
-        case square
-        /// Above `landscapeFrom`: cut to 4:3.
-        case landscape
-
-        /// The ratio (width / height) the shape cuts to.
-        var aspect: CGFloat {
-            switch self {
-            case .portrait: 3.0 / 4.0
-            case .square: 1
-            case .landscape: 4.0 / 3.0
-            }
-        }
-
-        /// The midpoints between the shapes: √(3/4) and √(4/3). A 4:5 photo
-        /// is a portrait, and loses 6 % of its width.
-        static let squareFrom: CGFloat = (3.0 / 4.0).squareRoot()
-        static let landscapeFrom: CGFloat = (4.0 / 3.0).squareRoot()
-
-        /// The shape of a picture `size` — or of its cut, which keeps it.
-        /// Nil for a picture not known yet.
-        static func of(_ size: CGSize) -> CommentsSheetShape? {
-            guard size.width > 0, size.height > 0 else { return nil }
-            let ratio = size.width / size.height
-            if ratio < squareFrom { return .portrait }
-            return ratio > landscapeFrom ? .landscape : .square
-        }
-    }
-
     /// The part of the picture `whole` (the card's coordinates) the comments
-    /// sheet shows, centred in it (#2184): the picture sorted into one of
-    /// three shapes (`CommentsSheetShape`) and cut to that shape's ratio —
-    /// across its width or its height, whichever is in excess — by
-    /// `commentsSheetMostCut` of that dimension at most. A 9:16 clip reaches
-    /// 3:4 exactly, a 16:9 one 4:3; a picture beyond (a screenshot, a
-    /// panorama) keeps the rest. A picture wider than tall also loses at
-    /// least `landscapeSideTrim` on each side.
-    static func commentsSheetCut(of whole: CGRect) -> CGRect {
-        guard let shape = CommentsSheetShape.of(whole.size) else { return whole }
+    /// sheet shows, centred in it (#2184, #2195): the picture sorted into the
+    /// catalogue's shape nearest its ratio (`CommentsSheetShape.of`) and cut
+    /// to that shape's ratio — across its width or its height, whichever is
+    /// in excess — by `CommentsSheetLayout.mostCut` of that dimension at
+    /// most. Within the catalogue's ends the cut stays under that bound (13 %
+    /// at worst between today's neighbours); a picture beyond them (a
+    /// screenshot, a panorama) keeps the rest. A picture wider than tall also
+    /// loses at least `CommentsSheetLayout.landscapeSideTrim` on each side.
+    static func commentsSheetCut(
+        of whole: CGRect,
+        catalogue: [CommentsSheetShape] = CommentsSheetShape.catalogue,
+        layout: CommentsSheetLayout = .standard
+    ) -> CGRect {
+        guard let shape = CommentsSheetShape.of(whole.size, in: catalogue) else { return whole }
         let ratio = whole.width / whole.height
+        let keeps = 1 - layout.mostCut
         var cut = whole
         if ratio > shape.aspect {
-            let kept = max(whole.height * shape.aspect, whole.width * (1 - commentsSheetMostCut))
+            let kept = max(whole.height * shape.aspect, whole.width * keeps)
             cut = whole.insetBy(dx: max(0, (whole.width - kept) / 2), dy: 0)
         } else if ratio < shape.aspect {
-            let kept = max(whole.width / shape.aspect, whole.height * (1 - commentsSheetMostCut))
+            let kept = max(whole.width / shape.aspect, whole.height * keeps)
             cut = whole.insetBy(dx: 0, dy: max(0, (whole.height - kept) / 2))
         }
-        if whole.width > whole.height, whole.maxX - cut.maxX < landscapeSideTrim {
-            cut = CGRect(x: whole.minX + landscapeSideTrim, y: cut.minY,
-                         width: whole.width - 2 * landscapeSideTrim, height: cut.height)
+        let trim = layout.landscapeSideTrim
+        if whole.width > whole.height, whole.maxX - cut.maxX < trim {
+            cut = CGRect(x: whole.minX + trim, y: cut.minY, width: whole.width - 2 * trim, height: cut.height)
         }
         return cut
     }
-
-    /// The most the cut takes off a picture's width or height, half on each
-    /// side: a 9:16 clip reaches 3:4 by it exactly, and a 16:9 one 4:3; a
-    /// taller or wider one keeps the rest — no bands, no harder cut.
-    static let commentsSheetMostCut: CGFloat = 0.25
-
-    /// What a landscape picture loses on each side once shrunk, in the card's
-    /// points (the owner, 2026-11-03): a clip often carries a dark sliver
-    /// down its sides, baked into the file (clip-98: 4 px of 1280), which its
-    /// rounded corners cut through on the sides and not at the top — the
-    /// curves read uneven.
-    static let landscapeSideTrim: CGFloat = 1.5
 
     /// The page under the comments sheet, at `progress` of the way from rest
     /// (0) to the sheet up (1): the page's interface fades out, and the media
@@ -1675,12 +1634,13 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // The scale that fits it in the region, and the move that centres it
         // there — about the card's centre, its transform's anchor.
         //
-        // ⚠️ A SQUARE OR LANDSCAPE CUT MAY GROW (#2184): its whole width comes
-        // first, and the cut of a 16:9 clip to 4:3 stands narrower on the page
-        // than the screen — capped at 1, it never reached the full width the
-        // sheet's height was reckoned from (measured on the simulator: 325 of
-        // 386 pt). A portrait cut still never grows past the page.
-        let growCap: CGFloat = CommentsSheetShape.of(shown.size) == .portrait ? 1 : .greatestFiniteMagnitude
+        // ⚠️ A FULL-WIDTH SHAPE'S CUT MAY GROW (#2184): its whole width comes
+        // first, and a cut standing narrower on the page than the screen —
+        // capped at 1, it never reached the full width the sheet's height was
+        // reckoned from (measured on the simulator: 325 of 386 pt). A shape
+        // that shrinks into the room never grows past the page.
+        let shrinksIntoRoom = CommentsSheetShape.of(shown.size)?.layout == .shrinksIntoRoom
+        let growCap: CGFloat = shrinksIntoRoom ? 1 : .greatestFiniteMagnitude
         let fit = min(mediaRegion.width / shown.width, mediaRegion.height / shown.height, growCap)
         let scale = 1 + (fit - 1) * t
         let cardCenter = mediaCard.center
