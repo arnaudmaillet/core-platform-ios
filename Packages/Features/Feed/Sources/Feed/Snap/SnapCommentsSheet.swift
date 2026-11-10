@@ -1030,10 +1030,10 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
     /// the media above shrinking and moving with it — and the height held
     /// while the keys carried the sheet existed only for that refit (a
     /// comment sent with the keys up refitted it 85 pt above them): it went
-    /// with it. A change of content now only offers the expanded detent, or takes it
-    /// back, as the comments outgrow the collapsed sheet or no longer do: a
-    /// change of the list alone, with the collapsed detent selected, which
-    /// moves nothing.
+    /// with it. A change of content now only offers the expanded detent, or
+    /// takes it back, as the comments outgrow the collapsed sheet or no
+    /// longer do: a change of the list alone, with the collapsed detent
+    /// selected, which moves nothing.
     ///
     /// Never on the way out, nor while the detached composer holds the list
     /// (`holdDetent`), nor while the keys carry the sheet: UIKit lays the
@@ -1076,8 +1076,7 @@ final class SnapCommentsSheetSession: NSObject, UISheetPresentationControllerDel
     private func holdDetent(_ hold: Bool) {
         guard hold != holdsDetent, let controller = sheet.sheetPresentationController else { return }
         holdsDetent = hold
-        // On the way out (the keys going down with a sheet swiped away from
-        // expanded, #2195), the list is left to the exit.
+        // On the way out, the list is left to the exit.
         guard !isLeaving else { return }
         // ⚠️ THE UNDIMMED DETENT WITH IT (the owner, 2026-11-04): left on the
         // expanded one, missing from a list held at the collapsed one, UIKit
