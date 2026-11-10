@@ -437,6 +437,18 @@ open class HeroPagePager<Tab: Equatable>: UIView {
         allPages.forEach { $0.setMinimumScrollTravel(travel) }
     }
 
+    /// Whether the header's bar wears UIKit's soft top edge (#2268): the
+    /// pager's own scroll view spans the bar, so its edge effect is the one
+    /// drawn there — soft once the screen says its bar is titled, clear
+    /// otherwise (`prefersClearTopEdge`, the default every hero page keeps).
+    public private(set) var hasSoftTopEdge = false
+
+    public func setSoftTopEdge(_ soft: Bool) {
+        guard soft != hasSoftTopEdge else { return }
+        hasSoftTopEdge = soft
+        if soft { scrollView.prefersSoftTopEdge() } else { scrollView.prefersClearTopEdge() }
+    }
+
     /// The active page's vertical offset.
     public var verticalOffset: CGFloat {
         pages[activeIndex].verticalOffset

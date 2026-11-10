@@ -583,21 +583,65 @@ extension ProfileBellAndMapMenuTests {
     }
 
     /// The @handle, native and leading (#2248): `navigationItem.title` with
-    /// the `.browser` style — no title view, no leading item — at all times
-    /// on a pushed profile.
+    /// the `.browser` style — no title view, no leading item. ⚠️ ONLY ONCE
+    /// THE TRAY HAS SCROLLED AWAY (#2268): at rest the header shows it.
     @Test func aPushedProfileIsTitledWithItsHandleLeading() async throws {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .follow })
+        #expect(screen.navigationItem.title == nil, "the bar was titled at rest")
+        screen.debugSetTrayScrolledAway(true)
         try #require(await settle { screen.navigationItem.title == "@lena" }, "the bar is not titled with the handle")
         #expect(screen.navigationItem.style == .browser, "the title does not lead")
         #expect(screen.navigationItem.titleView == nil, "a custom title view")
         #expect(screen.navigationItem.backButtonDisplayMode == .minimal)
         #expect(screen.navigationItem.largeTitleDisplayMode == .never)
         #expect(screen.navigationItem.leftItemsSupplementBackButton)
-        screen.debugSetTrayScrolledAway(true)
-        #expect(screen.navigationItem.title == "@lena", "the title left with the scroll")
         // No banner on this profile: the see-through bar's title wears the
         // page's ink, not the white it wears over a picture.
         #expect(screen.debugRestingTitleInk == .label, "a white title over a page with no banner")
+        screen.debugSetTrayScrolledAway(false)
+        #expect(screen.navigationItem.title == nil, "the title stayed with the tray back")
+    }
+
+    /// ⚠️ FOLLOW, THE @HANDLE AND THE BLUR COME AND GO TOGETHER (#2268, the
+    /// owner 2026-11-10): one trigger, the tray going under the bar. The blur
+    /// is UIKit's soft top edge on the pager, which spans the bar.
+    @Test func followTheHandleAndTheBlurAreInSync() async throws {
+        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .follow && screen.navigationItem.title == nil })
+        let paging = try #require(screen.galleryPager.subviews.compactMap { $0 as? UIScrollView }.first)
+        #expect(screen.debugBarRelationshipItem == nil)
+        #expect(!screen.galleryPager.hasSoftTopEdge && paging.topEdgeEffect.isHidden, "a bar-tall blur at rest")
+
+        screen.debugSetTrayScrolledAway(true)
+        #expect(screen.debugBarRelationshipItem != nil, "no Follow")
+        #expect(screen.navigationItem.title == "@lena", "no handle")
+        #expect(screen.galleryPager.hasSoftTopEdge, "no blur")
+        #expect(!paging.topEdgeEffect.isHidden && paging.topEdgeEffect.style == .soft, "the blur is not UIKit's soft edge")
+
+        screen.debugSetTrayScrolledAway(false)
+        #expect(screen.debugBarRelationshipItem == nil)
+        #expect(screen.navigationItem.title == nil)
+        #expect(!screen.galleryPager.hasSoftTopEdge && paging.topEdgeEffect.isHidden, "the blur stayed")
+    }
+
+    /// Follow wears the primary colour (the bar's `.prominent`); Requested
+    /// stays plain (#2268).
+    @Test func followIsProminentAndRequestedPlain() async throws {
+        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .follow })
+        screen.debugSetTrayScrolledAway(true)
+        let follow = try #require(screen.debugBarRelationshipItem)
+        #expect(follow.title == "Follow")
+        #expect(follow.style == .prominent, "Follow is not in the primary colour")
+
+        let (asked, _, _) = makeScreen(relationship: .requested)
+        try #require(await settle { asked.followButtonState == .requested })
+        asked.debugSetTrayScrolledAway(true)
+        let requested = try #require(asked.debugBarRelationshipItem)
+        #expect(requested.title == "Requested")
+        #expect(requested.style == .plain, "Requested wears the colour")
+        #expect(!DebugFlags.all.contains { $0.argument == "-profile-follow-prominent" }, "the flag is still listed")
     }
 
     /// The tab root (the viewer's own) keeps no title and the stock style:
