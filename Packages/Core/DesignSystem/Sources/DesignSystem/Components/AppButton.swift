@@ -70,9 +70,11 @@ open class AppButton: AppControl {
             #endif
         }
 
-        /// What `current` answers for `arguments` and the dashboard's
-        /// switch: a value after the argument wins (`text`, `tinted`); the
-        /// argument alone, or the switch, means words; nothing means tinted.
+        /// What `current` answers for `arguments` and `switchedOn`: a
+        /// look named after the argument wins (`text`, `tinted`); else words
+        /// when switched on — `current` reads it through `DebugFlags.isOn`,
+        /// on for the dashboard's switch and for the argument passed bare;
+        /// else tinted.
         static func resolve(arguments: [String], switchedOn: Bool) -> RowActionStyle {
             if let index = arguments.firstIndex(of: argument), index + 1 < arguments.count,
                let style = RowActionStyle(rawValue: arguments[index + 1]) {
@@ -1206,7 +1208,8 @@ open class AppButton: AppControl {
         case nil where aspect == .rowAction:
             // Bare words (#2231): the tint inviting, the secondary ink once
             // acted. ⚠️ `.plain()` GROWS A TINTED GROUND WHEN SELECTED (the
-            // glyph's trap, `AppIconButton`): "Following" came out on a pill.
+            // glyph's trap, `AppIconButton`: a liked heart came out on a
+            // pill), and "Following" would stand on one.
             config = .plain()
             config.baseForegroundColor = isSelected ? .secondaryLabel : Palette.rowActionText
             config.background.backgroundColorTransformer = UIConfigurationColorTransformer { _ in .clear }
