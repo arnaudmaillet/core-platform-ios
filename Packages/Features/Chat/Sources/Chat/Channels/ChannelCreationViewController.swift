@@ -6,11 +6,20 @@ import UIKit
 /// no picker yet — `ChannelCreationViewModel`), its name, its description,
 /// who may join — Public or On request, each said in a line — and
 /// "Create".
+///
+/// With the showcases (#2216), creating ends on a last step: the channel is
+/// ready, "Share as a Post" (prominent: a new channel's first readers come
+/// from its showcase) and "Open Channel".
 final class ChannelCreationViewController: UIViewController {
     private let viewModel: ChannelCreationViewModel
 
     /// Cancel: the host dismisses the sheet.
     var onCancel: (() -> Void)?
+    /// The created step's "Open Channel" (#2216): the host lands in it.
+    var onOpen: ((ConversationID) -> Void)?
+    /// The created step's "Share as a Post" (#2216): the host lands in the
+    /// channel and opens the Text Post screen with its card.
+    var onShareAsPost: ((ConversationID, PostEmbed) -> Void)?
 
     private let scrollView = UIScrollView()
     private let disc = MonogramAvatarView(diameter: GroupNameViewController.discDiameter)
@@ -20,6 +29,14 @@ final class ChannelCreationViewController: UIViewController {
     private let visibilityNote = UILabel()
     private let errorLabel = UILabel()
     private let createButton = AppButton(aspect: .pill(.prominent), size: .form, content: .title("Create"))
+    // The created step (#2216).
+    private let createdTitle = UILabel()
+    private let createdNote = UILabel()
+    private let shareButton = AppButton(
+        aspect: .pill(.prominent), size: .form,
+        content: AppButton.Content(title: ChannelShowcase.shareTitle, symbol: ChannelShowcase.shareSymbol)
+    )
+    private let openButton = AppButton(aspect: .pill(.quiet), size: .form, content: .title("Open Channel"))
 
     init(viewModel: ChannelCreationViewModel) {
         self.viewModel = viewModel
@@ -73,8 +90,26 @@ final class ChannelCreationViewController: UIViewController {
 
         createButton.addAction(UIAction { [weak self] _ in self?.create() }, for: .primaryActionTriggered)
 
+        createdTitle.font = .appFont(forTextStyle: .title2)
+        createdTitle.textAlignment = .center
+        createdTitle.numberOfLines = 0
+        createdNote.font = .appFont(forTextStyle: .subheadline)
+        createdNote.textColor = .secondaryLabel
+        createdNote.textAlignment = .center
+        createdNote.numberOfLines = 0
+        createdNote.text = Self.createdNoteText
+        for label in [createdTitle, createdNote] {
+            label.adjustsFontForContentSizeCategory = true
+            label.isHidden = true
+        }
+        shareButton.isHidden = true
+        openButton.isHidden = true
+        shareButton.addAction(UIAction { [weak self] _ in self?.shareAsPost() }, for: .primaryActionTriggered)
+        openButton.addAction(UIAction { [weak self] _ in self?.openCreated() }, for: .primaryActionTriggered)
+
         let stack = UIStackView(arrangedSubviews: [
             disc, nameField, descriptionField, visibilityControl, visibilityNote, errorLabel, createButton,
+            createdTitle, createdNote, shareButton, openButton,
         ])
         stack.axis = .vertical
         stack.alignment = .center
@@ -95,6 +130,10 @@ final class ChannelCreationViewController: UIViewController {
             visibilityControl.widthAnchor.constraint(equalTo: stack.widthAnchor)
             visibilityNote.widthAnchor.constraint(equalTo: stack.widthAnchor)
             createButton.widthAnchor.constraint(equalTo: stack.widthAnchor)
+            createdTitle.widthAnchor.constraint(equalTo: stack.widthAnchor)
+            createdNote.widthAnchor.constraint(equalTo: stack.widthAnchor)
+            shareButton.widthAnchor.constraint(equalTo: stack.widthAnchor)
+            openButton.widthAnchor.constraint(equalTo: stack.widthAnchor)
         }
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
@@ -142,6 +181,7 @@ final class ChannelCreationViewController: UIViewController {
     }
 
     private func render(_ phase: ChannelCreationViewModel.Phase) {
+        if case .created = phase { return showCreated() }
         createButton.setPhase(phase == .creating ? .loading : .content, animated: view.window != nil)
         nameField.isEnabled = phase != .creating
         descriptionField.isEnabled = phase != .creating
@@ -153,6 +193,46 @@ final class ChannelCreationViewController: UIViewController {
             errorLabel.isHidden = true
         }
     }
+}
+
+// MARK: - The created step (#2216)
+
+extension ChannelCreationViewController {
+    static let createdNoteText = "Share it as a post so people find it in the feed and on the map."
+
+    /// The channel exists: the form steps aside for its two ways on. No
+    /// Cancel — there is nothing left to cancel; a swipe down leaves it on
+    /// the Channels tab, which lists it.
+    private func showCreated() {
+        view.endEditing(true)
+        createButton.setPhase(.content, animated: false)
+        for part in [nameField, descriptionField, visibilityControl, visibilityNote, errorLabel, createButton] as [UIView] {
+            part.isHidden = true
+        }
+        createdTitle.text = "\(viewModel.draft.name) is ready"
+        for part in [createdTitle, createdNote, shareButton, openButton] as [UIView] {
+            part.isHidden = false
+        }
+        navigationItem.leftBarButtonItem = nil
+        UIAccessibility.post(notification: .screenChanged, argument: createdTitle)
+    }
+
+    private func shareAsPost() {
+        guard case .created(let id) = viewModel.phase, let embed = viewModel.showcaseEmbed else { return }
+        onShareAsPost?(id, embed)
+    }
+
+    private func openCreated() {
+        guard case .created(let id) = viewModel.phase else { return }
+        onOpen?(id)
+    }
+
+    #if DEBUG
+    /// Whether the created step shows, with "Share as a Post".
+    var debugOffersShareAsPost: Bool { !shareButton.isHidden }
+    func debugShareAsPost() { shareAsPost() }
+    func debugOpenCreated() { openCreated() }
+    #endif
 }
 
 // MARK: - How it is left (#1144)
