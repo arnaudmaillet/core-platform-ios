@@ -6,6 +6,7 @@ import CoreStorage
 import DesignSystem
 import FeedInterface
 import MediaCore
+import PostGrid
 import ProfileInterface
 import UIKit
 
@@ -100,6 +101,16 @@ final class CommentStream: NSObject {
     private var seededCaption: (text: String, timestamp: String)? { host.seededCaption }
     /// The seeded caption's voice (#2207), when voice posts are drawn.
     private var seededVoice: PostVoice? { host.seededVoice }
+    /// The seeded caption's card (#2216), when showcases are drawn.
+    private var seededEmbed: PostEmbed? { host.seededEmbed }
+    /// Whether the post is a channel's showcase (#2216): it takes no
+    /// comments, so the stream is its caption row alone — no bones, no
+    /// "no comments yet", no threads. The hydrated post decides once it has
+    /// landed; the opener's seed until then.
+    /// The hydrated post's card, behind the switch like the seed's: off, a
+    /// showcase is the text post it is, comments and all.
+    private var latestEmbed: PostEmbed? { PostEmbeds.shown(latestPost?.embed) }
+    private var isShowcase: Bool { latestPost == nil ? seededEmbed != nil : latestEmbed != nil }
     private var seededAuthor: (name: String, monogram: String, avatarURL: URL?)? { host.seededAuthor }
     private var knownCommentCount: Int64? { host.knownCommentCount }
     private var expandedReplyParents: Set<String> {
@@ -1198,7 +1209,8 @@ final class CommentStream: NSObject {
                     likeCount: self.captionLikeCount,
                     imagePipeline: self.imagePipeline,
                     voice: self.seededVoice,
-                    postID: self.viewModel.postID
+                    postID: self.viewModel.postID,
+                    embed: self.seededEmbed
                 )
             } else {
                 return
@@ -1315,6 +1327,8 @@ final class CommentStream: NSObject {
     }
 
     private func streamItems() -> [StreamItem] {
+        // A showcase's page is its caption and its card (#2216).
+        if isShowcase { return [.caption] }
         var items: [StreamItem] = []
         // The caption leads the stream — item #0, above the skeletons as well
         // as above the comments, so it is on screen from the first frame and
@@ -1574,7 +1588,13 @@ final class CommentStream: NSObject {
             // The voice is part of the key (#2207): the same words with a
             // voice above them stand taller.
             let speaks = (latestPost?.voice ?? seededVoice) != nil
-            let caption = (latestPost?.caption ?? seededCaption?.text ?? "") + (speaks ? "\u{1}voice" : "")
+            // …and so is the card (#2216), whose drawing follows its state.
+            // Typed parts, not one chain: Xcode 26 gives up on a long one.
+            let shownEmbed: PostEmbed? = latestEmbed ?? seededEmbed
+            let card: String = shownEmbed.map { "\u{1}embed\($0.hashValue)" } ?? ""
+            let words: String = latestPost?.caption ?? seededCaption?.text ?? ""
+            let voiceKey: String = speaks ? "\u{1}voice" : ""
+            let caption = words + voiceKey + card
             if let known = captionHeight, known.caption == caption { return known.height }
             let height = captionRowHeight(width: width)
             captionHeight = (caption, height)
@@ -2046,7 +2066,8 @@ final class CommentStream: NSObject {
                 likeCount: captionLikeCount,
                 imagePipeline: nil,
                 voice: seededVoice,
-                postID: viewModel.postID
+                postID: viewModel.postID,
+                embed: seededEmbed
             )
         } else {
             return 0

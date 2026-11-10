@@ -177,6 +177,9 @@ struct ProfileDiskRecord: Codable, Equatable {
         /// The caption's voice (#2206); optional, so a row stored before it
         /// decodes with none.
         var voice: PostVoice?
+        /// A showcase's card (#2216); optional, so a row stored before it
+        /// decodes with none.
+        var embed: PostEmbed?
 
         struct Page: Codable, Equatable {
             var thumbnailURL: URL?
@@ -342,6 +345,7 @@ extension ProfileDiskRecord.Post {
         reactionCount = post.reactionCount
         commentCount = post.commentCount
         voice = post.voice
+        embed = post.embed
     }
 
     var galleryPost: GalleryPost? {
@@ -369,6 +373,7 @@ extension ProfileDiskRecord.Post {
             commentCount: commentCount
         )
         post.voice = voice
+        post.embed = embed
         return post
     }
 }

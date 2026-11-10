@@ -108,6 +108,14 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         directory.forgetAll()
     }
 
+    /// The showcase card's actions (#2216), with the channels on: over the
+    /// same repository the Channels tab reads, reloading its catalog when the
+    /// viewer's standing changes.
+    public func makeChannelEmbedActions() -> (any ChannelEmbedActing)? {
+        guard let channels else { return nil }
+        return ChannelEmbedActions(service: channels, router: router) { [catalog] in catalog.reload() }
+    }
+
     public func makeInboxViewController(
         initialCategory: MessagesCategory,
         onUnreadCountChange: ((Int) -> Void)? = nil

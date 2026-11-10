@@ -4279,8 +4279,12 @@ final class SnapFeedViewController: UIViewController {
         // The caption the FEED already has, so the row exists while the hero
         // is in the air rather than arriving with the post fetch.
         let seededVoice = VoicePosts.areDrawn ? modelsByID[id]?.voice : nil
-        if let model = modelsByID[id], let caption = model.caption ?? (seededVoice == nil ? nil : ""),
-           !caption.isEmpty || seededVoice != nil {
+        // A showcase's card travels too (#2216): its page opens on it, with
+        // no comments.
+        let seededEmbed = PostEmbeds.shown(modelsByID[id]?.embed)
+        let carriesMore = seededVoice != nil || seededEmbed != nil
+        if let model = modelsByID[id], let caption = model.caption ?? (carriesMore ? "" : nil),
+           !caption.isEmpty || carriesMore {
             // The AUTHOR travels with the caption: the row is an avatar beside
             // a bubble for every post now, and this path — the text page's
             // resting interface — is the one that mounts before any fetch, so
@@ -4293,7 +4297,8 @@ final class SnapFeedViewController: UIViewController {
                 avatarURL: model.avatarURL,
                 metrics: model.cardMetrics
                     ?? PostCardMetrics(reactions: model.likeCount, comments: nil),
-                voice: seededVoice
+                voice: seededVoice,
+                embed: seededEmbed
             )
         }
         // The count the feed knows: no comment bones for a post with none.

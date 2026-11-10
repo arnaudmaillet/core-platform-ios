@@ -132,7 +132,8 @@ final class PostDetailViewController: UIViewController {
     /// The count reached the threshold: the Popular tab comes in. Opened on
     /// it when the opening tab is still to choose.
     private func popularBecameAvailable() {
-        guard !showsPopular else { return }
+        // A showcase has no comments to rank (#2216).
+        guard !showsPopular, takesComments else { return }
         showsPopular = true
         let opensOnPopular = !hasChosenOpeningTab
         hasChosenOpeningTab = true
@@ -297,6 +298,13 @@ final class PostDetailViewController: UIViewController {
     var seededCaption: (text: String, timestamp: String)?
     /// The seeded caption's voice (#2207): a voice post's row opens speaking.
     var seededVoice: PostVoice?
+    /// The seeded caption's card (#2216): a showcase's row opens with it, and
+    /// its page with no comments.
+    var seededEmbed: PostEmbed?
+    /// Whether the post takes comments (#2216): a channel's showcase takes
+    /// none — no comment stream, no input row; its like and Share stay in
+    /// the composer's column.
+    private(set) var takesComments = true
     /// The post's comment count from the opener, before the fetch: the
     /// stream draws no more bones than that — none for zero (#1773).
     var knownCommentCount: Int64?
@@ -1189,6 +1197,7 @@ final class PostDetailViewController: UIViewController {
         // this, and a re-render must not have to go back to the view model.
         let hadCaption = latestPost?.hasCaption == true
         latestPost = model
+        setTakesComments(model.takesComments)
         // The footer band's veil, from the post's own format — the model
         // already knows, so this needs no signal from the host.
         composerBackdrop.setVeilOpacity(
@@ -1214,6 +1223,33 @@ final class PostDetailViewController: UIViewController {
                 hasAppliedStream: stream.hasAppliedStream,
                 introducesCaption: model.hasCaption && !hadCaption
             ))
+        }
+    }
+
+    /// A showcase's page takes no comments (#2216): the composer keeps its
+    /// column — the like, Share — and loses its input row; a reply aimed
+    /// before it was known has nowhere to go.
+    private func setTakesComments(_ takes: Bool) {
+        guard takes != takesComments else { return }
+        takesComments = takes
+        composeBar.takesComments = takes
+        guard !takes else { return }
+        clearReplyState()
+        // ⚠️ THE TABS GO TOO, EVEN THOUGH "ONCE THERE, IT STAYS". The opener's
+        // comment count can bring Popular in before the page knows it is a
+        // showcase — a page opened from a cached entry seeds the count first
+        // (seen on the simulator: Popular / Recent over a showcase). A
+        // showcase has no comments to rank, so the panel goes back to Recent
+        // alone and tells its host, which reads `showsPopular` again.
+        if showsPopular {
+            showsPopular = false
+            if isViewLoaded {
+                pager.setActivePage(Self.recentPage, animated: false)
+                pager.isPagingEnabled = false
+                if lastSettledStream !== stream { visibleStreamDidChange() }
+            }
+            onPopularTabChange?(false)
+            onCommentCountChange?(commentCount)
         }
     }
 
@@ -1288,12 +1324,15 @@ final class PostDetailViewController: UIViewController {
         monogram: String = "",
         avatarURL: URL? = nil,
         metrics: PostCardMetrics? = nil,
-        voice: PostVoice? = nil
+        voice: PostVoice? = nil,
+        embed: PostEmbed? = nil
     ) {
-        // A voice alone is a caption too (#2207).
-        guard !text.isEmpty || voice != nil, latestPost == nil else { return }
+        // A voice alone is a caption too (#2207), and so is a card (#2216).
+        guard !text.isEmpty || voice != nil || embed != nil, latestPost == nil else { return }
         seededCaption = (text, timestamp)
         seededVoice = voice
+        seededEmbed = embed
+        setTakesComments(embed == nil)
         seededAuthor = (authorName, monogram, avatarURL)
         seededCardMetrics = metrics
         loadViewIfNeeded()

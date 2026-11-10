@@ -5,6 +5,7 @@ import FeedInterface
 import MediaCore
 import MediaPlayback
 import NotificationsInterface
+import PostGrid
 import ProfileInterface
 import UIKit
 import DesignSystem
@@ -217,6 +218,8 @@ final class MainTabCoordinator: NSObject, Coordinator {
         if !isMember {
             // The next viewer must never see this one's conversations.
             container.chatFeature.forgetViewer()
+            // …nor the channels they joined from a showcase (#2216).
+            ChannelEmbedLocalState.reset()
         }
         profileTab?.show(member: isMember)
         messagesTab?.show(member: isMember)
@@ -428,6 +431,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // still a member.
         if isMember {
             container.chatFeature.forgetViewer()
+            ChannelEmbedLocalState.reset()
             // A fresh inbox stack (its search and suggestions too), primed for
             // the new profile.
             messagesTab?.show(member: true)

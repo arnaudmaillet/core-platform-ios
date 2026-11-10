@@ -130,6 +130,9 @@ public struct GalleryPost: Equatable, Sendable {
 
     /// Whether the caption speaks: the one test a tile reads (#2206).
     public var hasVoice: Bool { voice != nil }
+    /// What the post shows as a card in its caption's place (#2216): a
+    /// channel's showcase stays `.text` — only its caption becomes the card.
+    public var embed: PostEmbed?
 
     public init(
         id: PostID,

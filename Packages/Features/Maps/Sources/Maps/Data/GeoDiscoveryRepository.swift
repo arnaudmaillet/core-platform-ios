@@ -150,7 +150,10 @@ public actor GeoDiscoveryRepository: GeoDiscoveryProviding {
             previewVideoURL: previewVideoURL(for: pin, kind: kind, thumbnailURL: thumbnailURL),
             // A text post's voice (#2206), from the pin's `has_voice` summary
             // once #994 lands; the proposed field until then.
-            voice: kind == .text ? PostVoiceWire.voice(in: pin) : nil
+            voice: kind == .text ? PostVoiceWire.voice(in: pin) : nil,
+            // A showcase's card (#2216), hydrated with the pin (#995); a
+            // text pin's alone — a cover never shows a card.
+            embed: kind == .text ? PostEmbedWire.embed(in: pin) : nil
         )
     }
 

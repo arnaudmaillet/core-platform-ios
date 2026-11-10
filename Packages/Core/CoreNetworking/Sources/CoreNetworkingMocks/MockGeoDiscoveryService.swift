@@ -40,6 +40,9 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// the app's borders (`CountryAtlas`), which this package can't see.
     /// Without it, a country lists nothing.
     private let countryOf: (@Sendable (Double, Double) -> String?)?
+    /// The showcase a post is (#2216), its channel's card hydrated at the
+    /// read: its pin carries it. Nil unless channels are seeded.
+    private let showcase: (@Sendable (_ postID: String) -> PostEmbed?)?
 
     /// Central Paris — the map's default region centers here.
     private static let baseLat = 48.8566
@@ -65,8 +68,10 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         dataset: MockSocialDataset,
         spreadsHierarchy: Bool = false,
         likeCount: @escaping @Sendable (String) -> Int64 = { _ in 0 },
-        countryOf: (@Sendable (Double, Double) -> String?)? = nil
+        countryOf: (@Sendable (Double, Double) -> String?)? = nil,
+        showcase: (@Sendable (_ postID: String) -> PostEmbed?)? = nil
     ) {
+        self.showcase = showcase
         self.dataset = dataset
         self.spreadsHierarchy = spreadsHierarchy
         self.likeCount = likeCount
@@ -612,6 +617,8 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
             if let seeded = dataset.seededVoice(forPostID: post.postID) {
                 PostVoiceWire.write(seeded.voice, to: &pin)
             }
+            // A showcase's pin carries its channel's card (#2216).
+            if let embed = showcase?(post.postID) { PostEmbedWire.write(embed, to: &pin) }
             return pin
         }
 

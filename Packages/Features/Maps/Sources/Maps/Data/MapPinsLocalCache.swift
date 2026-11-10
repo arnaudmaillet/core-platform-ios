@@ -156,6 +156,9 @@ final class MapPinsLocalCache: Sendable {
         /// The caption's voice (#2206); optional, so a file stored before it
         /// decodes with none.
         var voice: PostVoice?
+        /// A showcase's card (#2216), as last read; optional, so a file
+        /// stored before it decodes with none.
+        var embed: PostEmbed?
 
         init(_ pin: MapPin) {
             id = pin.postID.rawValue
@@ -169,6 +172,7 @@ final class MapPinsLocalCache: Sendable {
             }
             likeCount = pin.likeCount
             voice = pin.voice
+            embed = pin.embed
         }
 
         var pin: MapPin {
@@ -179,7 +183,8 @@ final class MapPinsLocalCache: Sendable {
             }
             return MapPin(
                 postID: PostID(id), latitude: latitude, longitude: longitude,
-                thumbnailURL: thumbnailURL, kind: storedKind, likeCount: likeCount, voice: voice
+                thumbnailURL: thumbnailURL, kind: storedKind, likeCount: likeCount, voice: voice,
+                embed: embed
             )
         }
     }

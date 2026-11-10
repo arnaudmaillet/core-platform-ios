@@ -584,7 +584,9 @@ public actor FeedRepository: FeedProviding {
             },
             publishedAt: Date(timeIntervalSince1970: TimeInterval(view.publishedAtMs) / 1000),
             // A text post's voice (#2206), never an attachment.
-            voice: PostVoiceWire.voice(in: view)
+            voice: PostVoiceWire.voice(in: view),
+            // A showcase's card (#2216), never an attachment.
+            embed: PostEmbedWire.embed(in: view)
         )
     }
 }

@@ -22,23 +22,13 @@ public enum PostVoiceWire {
 
     /// The voice `message` carries, if any.
     public static func voice(in message: some SwiftProtobuf.Message) -> PostVoice? {
-        guard let reference = string(field: fieldNumber, in: message.unknownFields.data) else { return nil }
+        guard let reference = UnknownFieldWire.string(field: fieldNumber, in: message) else { return nil }
         return decode(reference)
     }
 
     /// Adds `voice` to `message`.
     public static func write<Message: SwiftProtobuf.Message>(_ voice: PostVoice, to message: inout Message) {
-        let payload = Data(encode(voice).utf8)
-        var bytes = Data()
-        appendVarint(UInt64(fieldNumber << 3 | 2), to: &bytes)
-        appendVarint(UInt64(payload.count), to: &bytes)
-        bytes.append(payload)
-        // Appended on the wire and read back: a decoder keeps a field it
-        // doesn't know as an unknown field (`UnknownStorage.append` is not
-        // public).
-        guard let serialized = try? message.serializedData(),
-              let decoded = try? Message(serializedBytes: serialized + bytes) else { return }
-        message = decoded
+        UnknownFieldWire.write(encode(voice), field: fieldNumber, to: &message)
     }
 
     // MARK: - The reference
@@ -77,51 +67,5 @@ public enum PostVoiceWire {
 
     public static func levels(_ string: String) -> [UInt8] {
         string.compactMap { character in digits.firstIndex(of: character).map(UInt8.init) }
-    }
-
-    // MARK: - Unknown fields
-
-    /// The first length-delimited `field` in `data`, as UTF-8.
-    private static func string(field: Int, in data: Data) -> String? {
-        var index = data.startIndex
-        while index < data.endIndex {
-            guard let key = readVarint(data, &index) else { return nil }
-            let number = Int(key >> 3), wire = Int(key & 7)
-            switch wire {
-            case 0: guard readVarint(data, &index) != nil else { return nil }
-            case 1: index = data.index(index, offsetBy: 8, limitedBy: data.endIndex) ?? data.endIndex
-            case 5: index = data.index(index, offsetBy: 4, limitedBy: data.endIndex) ?? data.endIndex
-            case 2:
-                guard let length = readVarint(data, &index),
-                      let end = data.index(index, offsetBy: Int(length), limitedBy: data.endIndex) else { return nil }
-                if number == field { return String(data: data[index..<end], encoding: .utf8) }
-                index = end
-            default: return nil
-            }
-        }
-        return nil
-    }
-
-    private static func readVarint(_ data: Data, _ index: inout Data.Index) -> UInt64? {
-        var value: UInt64 = 0
-        var shift: UInt64 = 0
-        while index < data.endIndex, shift < 64 {
-            let byte = data[index]
-            index = data.index(after: index)
-            value |= UInt64(byte & 0x7f) << shift
-            if byte & 0x80 == 0 { return value }
-            shift += 7
-        }
-        return nil
-    }
-
-    private static func appendVarint(_ value: UInt64, to data: inout Data) {
-        var value = value
-        repeat {
-            var byte = UInt8(value & 0x7f)
-            value >>= 7
-            if value != 0 { byte |= 0x80 }
-            data.append(byte)
-        } while value != 0
     }
 }

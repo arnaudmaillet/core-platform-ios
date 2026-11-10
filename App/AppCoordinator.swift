@@ -7,6 +7,7 @@ import CoreRealtime
 import CoreStorage
 import DesignSystem
 import MediaPlayback
+import PostGrid
 import Profile
 import MediaCore
 import UIKit
@@ -133,11 +134,22 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             window.makeKeyAndVisible()
             return
         }
+        // `-embed-catalog`: the embed card's sizes and states (#2216), also
+        // in the dashboard's Screens.
+        if EmbedCatalogViewController.isRequested {
+            window.rootViewController = UINavigationController(
+                rootViewController: EmbedCatalogViewController(pipeline: container.imagePipeline)
+            )
+            window.makeKeyAndVisible()
+            return
+        }
         #endif
         window.rootViewController = LaunchViewController()
         window.makeKeyAndVisible()
         // Which avatars have a sprite sheet (#1358).
         container.installAnimatedAvatars()
+        // What a channel showcase's card does (#2216), made on its first tap.
+        container.installChannelEmbedActions()
         // The blur behind the status bar, on every screen and through every
         // transition: one band in the window, over everything the app draws —
         // see `StatusBarBlurView`. Root swaps replace the root's view only.
@@ -660,6 +672,19 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             if !ids.isEmpty {
                 let all = Array(ids)
                 container.router.route(to: .post(PostID(all[turn % all.count])))
+            }
+        }
+        // `-open-showcase [n]` (#2216): the mock's n-th channel showcase, in
+        // the corpus's order — the channels come in turn (Join, Request to
+        // join, Requested, Open, the viewer's own, deleted, private), so 0–6
+        // open one of each. With `-channels` it is drawn with its card.
+        if let index = arguments.firstIndex(of: "-open-showcase") {
+            let turn = index + 1 < arguments.count ? Int(arguments[index + 1]) ?? 0 : 0
+            let dataset = container.mockBackend.dataset
+            let showcases = dataset.channelShowcases()
+            let ids = dataset.posts.map(\.postID).filter { showcases[$0] != nil }
+            if !ids.isEmpty {
+                container.router.route(to: .post(PostID(ids[turn % ids.count])))
             }
         }
         #endif

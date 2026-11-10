@@ -1,4 +1,5 @@
 import Connect
+import CoreModels
 import CoreContracts
 import CoreNetworking
 import Foundation
@@ -144,6 +145,19 @@ public final class MockChatService: @unchecked Sendable {
                 book.turnPrivateByOwner(MockConversationBook.followedGroupID, now: Int64(Date().timeIntervalSince1970 * 1000))
             }
         }
+    }
+
+    /// Channel `id` as a showcase's card shows it to the viewer (#2216),
+    /// read now: its identity, count, visibility, the viewer's standing —
+    /// what a join or a request made here has just changed — and the first
+    /// line of its last message. Nil for a conversation that is not a
+    /// channel; a channel in no record reads as deleted.
+    public func channelEmbed(_ id: String, blocksOwner: (String) -> Bool = { _ in false }) -> ChannelEmbed? {
+        let last = book.kind(of: id) == .channel
+            ? store.messages(for: id, seed: seedHistory(for: id)).last?.body
+            : nil
+        let firstLine = last?.split(whereSeparator: \.isNewline).first.map(String.init)
+        return book.channelEmbed(id, for: viewer, lastMessage: firstLine, blocksOwner: blocksOwner)
     }
 
     public func register(on bff: MockBFF) {

@@ -370,6 +370,8 @@ struct HydratedPost {
         )
         // A text post's voice (#2206): the tile stays `.text`.
         built.voice = PostVoiceWire.voice(in: view)
+        // …and a showcase's card (#2216): the tile stays `.text`.
+        built.embed = PostEmbedWire.embed(in: view)
         post = built
         authorProfileID = ProfileID(view.profileID)
     }

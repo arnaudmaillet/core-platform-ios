@@ -1,4 +1,5 @@
 import Connect
+import CoreModels
 import CoreNetworking
 import Foundation
 
@@ -218,7 +219,7 @@ public struct MockBackend: Sendable {
             hidesAuthor: hiddenFromReaders
         ).register(on: bff)
         // A message to someone who takes none is refused (#397).
-        MockChatService(dataset: dataset, mayMessage: { _, recipient in
+        let chatService = MockChatService(dataset: dataset, mayMessage: { _, recipient in
             socialServices.messageAudience(of: recipient) != .noOne
         }, admission: { sender, recipient in
             // The recipient's "Who Can Message" (#397) decides a DM's opening
@@ -238,7 +239,31 @@ public struct MockBackend: Sendable {
         seedsChannels: seedsChannels,
         // The followed public group turned private by its owner (#2217).
         groupGoesPrivateAfter: groupGoesPrivateAfter
-        ).register(on: bff)
+        )
+        chatService.register(on: bff)
+        // Channel showcases (#2216), with the channels: text posts whose
+        // card shows one, hydrated from the conversation book at every read
+        // — a join or a request made in Messages shows on the next read of
+        // the post. A block either way with the channel's owner hides it.
+        let showcase: (@Sendable (String) -> (embed: PostEmbed, text: String)?)?
+        if seedsChannels {
+            let picked = dataset.channelShowcases()
+            let viewer = MockSocialDataset.viewerProfileID
+            showcase = { postID in
+                guard let pick = picked[postID],
+                      let channel = chatService.channelEmbed(pick.conversationID, blocksOwner: { owner in
+                          socialGraph.isBlockedEitherWay(viewer, owner)
+                      }) else { return nil }
+                return (.channel(channel), pick.text)
+            }
+        } else {
+            showcase = nil
+        }
+        var pinShowcase: (@Sendable (String) -> PostEmbed?)?
+        if let showcase {
+            socialServices.setShowcases(showcase)
+            pinShowcase = { showcase($0)?.embed }
+        }
         socialGraph.register(on: bff)
         // Contacts find a profile only through a channel its owner left on,
         // and never across a block (#412, backend #806).
@@ -250,7 +275,8 @@ public struct MockBackend: Sendable {
         ).register(on: bff)
         let geoDiscovery = MockGeoDiscoveryService(
             dataset: dataset, spreadsHierarchy: seedsMapHierarchy,
-            likeCount: { counterStore.likeCount(for: $0) }, countryOf: countryOf
+            likeCount: { counterStore.likeCount(for: $0) }, countryOf: countryOf,
+            showcase: pinShowcase
         )
         geoDiscovery.register(on: bff)
         moderationService.register(on: bff)
