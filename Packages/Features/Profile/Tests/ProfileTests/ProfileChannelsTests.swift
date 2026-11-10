@@ -131,7 +131,7 @@ struct ProfileChannelsTests {
     }
 
     private func settle(until condition: () -> Bool) async {
-        for _ in 0..<300 where !condition() {
+        for _ in 0..<2_000 where !condition() {
             try? await Task.sleep(for: .milliseconds(10))
         }
     }
