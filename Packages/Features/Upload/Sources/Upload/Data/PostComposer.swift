@@ -212,6 +212,15 @@ public protocol PostComposing: Sendable {
     func publishVoicePost(
         caption: String, voice: TextPostVoice, as author: AuthorSummary?, idempotencyKey: String
     ) async throws -> FeedEntry
+
+    /// A showcase (#2216): a TEXT post carrying `embed` — a channel's card —
+    /// with `caption` above it, at `place` on the map when one is given. No
+    /// attachment, no `audio_ref`: the embed and the place ride the create
+    /// request.
+    @discardableResult
+    func publishShowcasePost(
+        caption: String, embed: PostEmbed, place: TextPostPlace?, as author: AuthorSummary?, idempotencyKey: String
+    ) async throws -> FeedEntry
 }
 
 public extension PostComposing {
@@ -221,6 +230,14 @@ public extension PostComposing {
         caption: String, voice: TextPostVoice, as author: AuthorSummary?, idempotencyKey: String
     ) async throws -> FeedEntry {
         throw TextPostVoiceUnsupported()
+    }
+
+    /// Composers that send no embed (fakes).
+    @discardableResult
+    func publishShowcasePost(
+        caption: String, embed: PostEmbed, place: TextPostPlace?, as author: AuthorSummary?, idempotencyKey: String
+    ) async throws -> FeedEntry {
+        throw TextPostEmbedUnsupported()
     }
 
     /// Composers with no key to send (fakes): the publish as it was.
@@ -478,6 +495,33 @@ public actor PostComposer: PostComposing {
         return entry
     }
 
+    // MARK: - Showcases (#2216)
+
+    public func publishShowcasePost(
+        caption: String, embed: PostEmbed, place: TextPostPlace?, as author: AuthorSummary?, idempotencyKey: String
+    ) async throws -> FeedEntry {
+        // The card is the post's content: the words above it may be empty.
+        let trimmedCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        let viewer = try await resolveViewer(as: author)
+        let postID = try await createDraft(
+            profileID: viewer.author.id, caption: trimmedCaption, attachments: [], hasMedia: false,
+            idempotencyKey: idempotencyKey, embed: embed, place: place
+        )
+        try await publishDraft(postID: postID, profileID: viewer.author.id)
+        // The card as the author's screen knew it, until the next read
+        // hydrates it for whoever reads the post.
+        let entry = FeedEntry(
+            post: Post(
+                id: postID, authorID: viewer.author.id, caption: trimmedCaption, attachments: [],
+                publishedAt: now(), embed: embed
+            ),
+            author: viewer.author,
+            likeCount: 0
+        )
+        await composedChannel.publish(entry)
+        return entry
+    }
+
     // MARK: - Steps
 
     private func uploadImage(_ picked: PickedImage, ownerID: AccountID) async throws -> MediaAttachment {
@@ -645,7 +689,7 @@ public actor PostComposer: PostComposing {
     /// wait fails like any other.
     private func createDraft(
         profileID: ProfileID, caption: String, attachments: [Post_V1_MediaAttachmentInput], hasMedia: Bool,
-        idempotencyKey: String, voice: PostVoice? = nil
+        idempotencyKey: String, voice: PostVoice? = nil, embed: PostEmbed? = nil, place: TextPostPlace? = nil
     ) async throws -> PostID {
         var request = Post_V1_CreatePostRequest()
         request.profileID = profileID.rawValue
@@ -656,6 +700,15 @@ public actor PostComposer: PostComposing {
         // A voice post's voice (#2209), on the proposed field until backend
         // #994: never an attachment, never `audio_ref`.
         if let voice { PostVoiceWire.write(voice, to: &request) }
+        // A showcase's embed (#2216), on the proposed field until backend
+        // #995 — never an attachment — and the place it stands at on the map.
+        if let embed { PostEmbedWire.write(embed, to: &request) }
+        if let place {
+            var point = Post_V1_GeoPoint()
+            point.lat = place.latitude
+            point.lng = place.longitude
+            request.location = point
+        }
 
         var waits = inFlightRetryDelays[...]
         while true {
