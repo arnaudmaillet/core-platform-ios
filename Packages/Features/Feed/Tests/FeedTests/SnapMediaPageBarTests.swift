@@ -467,14 +467,15 @@ struct SnapMediaPageBarTests {
 
     // MARK: - The thin bar and its cursor (#1544)
 
-    /// At rest a clip's bar is thinner than the strip's footprint, and its
-    /// cursor is the bar's own height: it melts into the indicator's end.
+    /// At rest a clip's bar is the 2 pt line, the strip's whole footprint
+    /// (#2252), and its cursor is the bar's own height: it melts into the
+    /// indicator's end.
     @Test func atRestTheBarIsThinAndItsCursorMeltsIn() throws {
         let view = clipBarOnScreen(playhead: 0.4)
         view.debugFinishTweens()
         let track = try #require(view.debugTrackHeight(0))
-        #expect(track == SnapMediaPageBarView.clipTrackHeight)
-        #expect(track < SnapMediaPageBarView.thickness, "the bar is no thinner than the strip")
+        #expect(track == SnapMediaPageBarView.thickness)
+        #expect(SnapMediaPageBarView.thickness == 2, "the resting line the owner asked for (#2252)")
         #expect(view.debugCursorSize == CGSize(width: track, height: track), "the cursor stands out at rest")
     }
 
@@ -485,7 +486,7 @@ struct SnapMediaPageBarTests {
         let view = clipBarOnScreen(playhead: 0.4)
         view.debugScrub(.began, atX: 150)
         view.debugFinishTweens()
-        #expect(view.debugTrackHeight(0) == SnapMediaPageBarView.handledTrackHeight)
+        #expect(view.debugTrackHeight(0) == SnapMediaPageBarView.touchedThickness)
         #expect(view.debugCursorSize == SnapMediaPageBarView.handledCursorSize)
         // The pill is as wide as the disc it grows out of (the owner, 2026-10-22).
         #expect(view.debugCursorSize?.width == SnapMediaPageBarView.cursorDiameter)
@@ -493,13 +494,13 @@ struct SnapMediaPageBarTests {
 
         view.debugScrub(.ended, atX: 150)
         view.debugFinishTweens()
-        #expect(view.debugTrackHeight(0) == SnapMediaPageBarView.clipTrackHeight)
+        #expect(view.debugTrackHeight(0) == SnapMediaPageBarView.thickness)
         let disc = SnapMediaPageBarView.cursorDiameter
         #expect(view.debugCursorSize == CGSize(width: disc, height: disc), "no disc after the release")
 
         view.debugElapseWake()
         view.debugFinishTweens()
-        let track = SnapMediaPageBarView.clipTrackHeight
+        let track = SnapMediaPageBarView.thickness
         #expect(view.debugCursorSize == CGSize(width: track, height: track), "the disc did not shrink into the bar")
         #expect(abs(view.debugContainerOpacity - SnapMediaPageBarView.restingOpacity) < 0.001)
     }
@@ -509,7 +510,7 @@ struct SnapMediaPageBarTests {
         let view = clipBarOnScreen(playhead: 0.4)
         view.debugScrub(.began, atX: 150)
         let first = try #require(view.debugTrackHeight(0))
-        #expect(first < SnapMediaPageBarView.handledTrackHeight, "the bar jumped to its handled height")
+        #expect(first < SnapMediaPageBarView.touchedThickness, "the bar jumped to its handled height")
         view.debugScrub(.ended, atX: 150)
     }
 
@@ -517,19 +518,73 @@ struct SnapMediaPageBarTests {
     /// they stood thicker than the progress bar), and it draws no cursor.
     @Test func aCarouselIsAsThinAsTheBar() {
         let view = bar(pages: 4)
-        #expect(view.debugTrackHeight(1) == SnapMediaPageBarView.clipTrackHeight)
+        #expect(view.debugTrackHeight(1) == SnapMediaPageBarView.thickness)
         #expect(view.debugCursorSize == nil)
     }
 
-    /// …and stays thin under the thumb (the owner, 2026-10-25): a drag hands
-    /// the segments' line to the filmstrip (#1734), so only a clip's bar —
-    /// the playhead's handle — grows when touched.
-    @Test func touchedSegmentsStayThin() {
+    /// …and grows under the thumb like a clip's bar (#2252, the owner
+    /// 2026-11-10): at 2 pt the line is a mark, not a handle, so whatever the
+    /// finger is on comes up to `touchedThickness` while it is held, and back
+    /// on release. (It stayed thin, the owner 2026-10-25, when it rested at 3.)
+    @Test func touchedSegmentsGrowAndComeBack() {
         let view = bar(pages: 4)
         view.debugScrub(.began, atX: 30)
         view.debugFinishTweens()
-        #expect(view.debugTrackHeight(1) == SnapMediaPageBarView.clipTrackHeight)
+        #expect(view.debugTrackHeight(1) == SnapMediaPageBarView.touchedThickness)
         view.debugScrub(.ended, atX: 30)
+        view.debugFinishTweens()
+        #expect(view.debugTrackHeight(1) == SnapMediaPageBarView.thickness)
+    }
+
+    /// ⚠️ UPWARD, OVER THE CONTENT, PUSHING NOTHING (#2252): the line's bottom
+    /// edge stays on the footprint's bottom edge, the touched line rises past
+    /// its top, and the view's own frame never changes.
+    @Test func theTouchedLineGrowsUpwardOnly() throws {
+        let view = clipBarOnScreen(playhead: 0.4)
+        let footprint = view.frame
+        let resting = try #require(view.debugSegmentFrame(0))
+        #expect(abs(resting.maxY - view.bounds.height) < 0.01)
+        #expect(abs(resting.minY) < 0.01, "the resting line is not the footprint")
+
+        view.debugScrub(.began, atX: 150)
+        view.debugFinishTweens()
+        let touched = try #require(view.debugSegmentFrame(0))
+        #expect(abs(touched.maxY - view.bounds.height) < 0.01, "the line grew downward")
+        #expect(abs(touched.minY - (view.bounds.height - SnapMediaPageBarView.touchedThickness)) < 0.01)
+        #expect(view.frame == footprint, "the strip's frame moved for the touch")
+        view.debugScrub(.ended, atX: 150)
+    }
+
+    /// The release comes back on a short spring (#2252): it dips past the
+    /// resting line once, then lands on it exactly — and only then stops.
+    @Test func theReleaseSpringsBackToTheRestingLine() {
+        #expect(SnapMediaPageBarView.Tween.springProgress(0) == 0)
+        #expect(abs(SnapMediaPageBarView.Tween.springProgress(1) - 1) < 0.001)
+        let peak = stride(from: 0.0, through: 1.0, by: 0.01).map(SnapMediaPageBarView.Tween.springProgress).max() ?? 0
+        #expect(peak > 1.02 && peak < 1.2, "no short overshoot: \(peak)")
+
+        var tween = SnapMediaPageBarView.Tween()
+        tween.settle(at: 1)
+        tween.move(to: 0, duration: 1, now: 0, curve: .spring)
+        tween.step(now: 0.4)
+        #expect(tween.value < 0, "the spring did not dip past the resting line")
+        #expect(tween.isMoving)
+        tween.step(now: 1)
+        #expect(tween.value == 0)
+        #expect(!tween.isMoving)
+        #expect(SnapMediaPageBarView.releaseSpringDuration > SnapMediaPageBarView.handleDuration)
+    }
+
+    /// The touch area stays a thumb's (#2252): 44 pt, invisible, centred on
+    /// the 2 pt line.
+    @Test func theTouchAreaIsCentredOnTheLine() {
+        let view = bar(pages: 4)
+        let half = SnapMediaPageBarView.minimumTouchHeight / 2
+        let line = view.bounds.midY
+        #expect(view.point(inside: CGPoint(x: 30, y: line - half + 0.5), with: nil))
+        #expect(view.point(inside: CGPoint(x: 30, y: line + half - 0.5), with: nil))
+        #expect(!view.point(inside: CGPoint(x: 30, y: line - half - 1), with: nil))
+        #expect(!view.point(inside: CGPoint(x: 30, y: line + half + 1), with: nil))
     }
 
     /// ⚠️ LOADING SHOWS THE PULSE, AND THE TWO CROSS-FADE (#1537): the

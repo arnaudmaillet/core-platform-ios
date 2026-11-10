@@ -58,7 +58,7 @@ struct PlayheadBarTests {
 
         bar.debugScrub(.began, atX: 100)
         bar.debugFinishTweens()
-        #expect(bar.debugTrackHeight == SnapMediaPageBarView.handledTrackHeight)
+        #expect(bar.debugTrackHeight == PlayheadBarView.handledTrackHeight)
         #expect(bar.debugCursorSize == SnapMediaPageBarView.handledCursorSize)
 
         bar.debugScrub(.changed, atX: 150)
@@ -67,7 +67,7 @@ struct PlayheadBarTests {
         bar.debugScrub(.ended, atX: 150)
         bar.debugFinishTweens()
         #expect(ended.count == 1 && abs((ended[0] ?? 0) - 0.75) < 0.001)
-        #expect(bar.debugTrackHeight == SnapMediaPageBarView.clipTrackHeight)
+        #expect(bar.debugTrackHeight == PlayheadBarView.restingTrackHeight)
         #expect(bar.debugHeldPlayhead != nil, "the released position was not held")
         // The player catches up: the bar is the player's again.
         bar.setProgress(0.75)
