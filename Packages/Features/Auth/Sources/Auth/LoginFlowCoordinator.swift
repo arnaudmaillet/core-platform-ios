@@ -186,14 +186,14 @@ final class LoginFlowCoordinator {
                 let challenge = try await signUp.startVerification(
                     channel, to: destination, locale: Locale.current.identifier(.bcp47)
                 )
-                step?.setWorking(false)
+                await step?.endWorking()
                 // The form swiped away while the code was on its way: the
                 // viewer went back to the list, and no form comes back
                 // unasked (#1908).
                 guard let self, self.isInForm(step) else { return }
                 showCode(challenge, display: display)
             } catch {
-                step?.setWorking(false)
+                await step?.endWorking()
                 self?.presentFlowError(error, on: step as? SignUpStepViewController)
             }
         }
@@ -247,16 +247,16 @@ final class LoginFlowCoordinator {
                 case .existing(let account):
                     await self?.finishSignIn(account, from: step)
                 case .needsSecondStep(let challenge):
-                    step?.setWorking(false)
+                    await step?.endWorking()
                     self?.showSecondStep(challenge)
                 case .needsSignUp:
-                    step?.setWorking(false)
+                    await step?.endWorking()
                     self?.credential = credential
                     self?.suggestedName = nil
                     self?.showBirthday()
                 }
             } catch {
-                step?.setWorking(false)
+                await step?.endWorking()
                 self?.presentFlowError(error, on: step)
                 step?.clearCode()
             }
@@ -284,7 +284,10 @@ final class LoginFlowCoordinator {
                 let nonce = try await signUp.startFederatedSignIn()
                 let result = try await federated.signIn(with: provider, nonce: nonce)
                 let credential = SignInCredential.idToken(provider, token: result.idToken, nonce: nonce)
-                switch try await signUp.signIn(credential) {
+                let outcome = try await signUp.signIn(credential)
+                // The answer waits for the load it ends (#2270).
+                await methods?.endWorking()
+                switch outcome {
                 case .existing(let account):
                     self?.suggestedName = result.displayName
                     await self?.finishSignIn(account, from: nil)
@@ -299,6 +302,7 @@ final class LoginFlowCoordinator {
             } catch is FederatedSignInCancelled {
                 return
             } catch {
+                await methods?.endWorking()
                 self?.presentFlowError(error, on: nil)
             }
         }
@@ -324,7 +328,11 @@ final class LoginFlowCoordinator {
             do {
                 let request = try await signUp.startPasskeySignIn()
                 let assertion = try await passkeys.assertPasskey(request)
-                switch try await signUp.signIn(.passkey(assertion)) {
+                let outcome = try await signUp.signIn(.passkey(assertion))
+                // The answer — the sheet going down, a step, an error —
+                // waits for the load it ends (#2270).
+                await methods?.endWorking()
+                switch outcome {
                 case .existing(let account):
                     await self?.finishSignIn(account, from: nil)
                 case .needsSecondStep(let challenge):
@@ -337,6 +345,7 @@ final class LoginFlowCoordinator {
             } catch is PasskeyCancelled {
                 return
             } catch {
+                await methods?.endWorking()
                 self?.presentFlowError(error, on: nil)
             }
         }
@@ -348,7 +357,7 @@ final class LoginFlowCoordinator {
     private func finishSignIn(_ account: PendingAccount, from step: SignUpStepViewController?) async {
         guard let signUp else { return }
         if let profileSetup, await !profileSetup.hasProfile(account) {
-            step?.setWorking(false)
+            await step?.endWorking()
             showProfileSetup(for: account, setup: profileSetup, finishing: true)
             return
         }
@@ -376,10 +385,10 @@ final class LoginFlowCoordinator {
                 await finishSignIn(account, from: step)
             } catch AuthError.secondStepExpired {
                 // The challenge is gone: back to where the sign-in began.
-                step?.setWorking(false)
+                await step?.endWorking()
                 presentSecondStepExpired()
             } catch {
-                step?.setWorking(false)
+                await step?.endWorking()
                 presentFlowError(error, on: step)
                 step?.clearCode()
             }
@@ -435,21 +444,21 @@ final class LoginFlowCoordinator {
                 )
                 switch try await signUp.signUp(credential, details: details) {
                 case .created(let pending):
-                    step?.setWorking(false)
+                    await step?.endWorking()
                     if let self, let profileSetup {
                         showProfileSetup(for: pending, setup: profileSetup)
                     } else {
                         try await signUp.completeSignUp(pending)
                     }
                 case .existingAccount(let method):
-                    step?.setWorking(false)
+                    await step?.endWorking()
                     self?.presentExistingAccount(method)
                 }
             } catch AuthError.underMinimumAge {
-                step?.setWorking(false)
+                await step?.endWorking()
                 self?.presentUnderMinimumAge()
             } catch {
-                step?.setWorking(false)
+                await step?.endWorking()
                 self?.presentFlowError(error, on: step)
             }
         }
@@ -465,7 +474,7 @@ final class LoginFlowCoordinator {
                     try await setup.createProfile(for: pending, handle: handle, displayName: name)
                     try await signUp.completeSignUp(pending) // the presenter dismisses on the session
                 } catch {
-                    step?.setWorking(false)
+                    await step?.endWorking()
                     self?.presentFlowError(error, on: step)
                 }
             }

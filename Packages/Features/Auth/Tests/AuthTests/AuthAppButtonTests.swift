@@ -103,17 +103,25 @@ struct AuthAppButtonTests {
         #expect(picked == Self.methods)
     }
 
-    /// A running sign-in: its button in its held load, the others gated, ×
-    /// disabled — and all of it cleared with nil.
-    @Test func aRunningSignInHoldsItsButtonAndGatesTheRest() throws {
-        let list = MethodSelectionViewController(methods: Self.methods)
+    /// The sheet in a window, on a stepped clock for its buttons' loads.
+    private static func hostedList(_ time: ManualLoadingClock) -> (MethodSelectionViewController, UIWindow) {
+        let list = MethodSelectionViewController(methods: methods, loadClock: time.clock)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         window.rootViewController = UINavigationController(rootViewController: list)
         window.isHidden = false
-        defer { window.isHidden = true }
         list.view.layoutIfNeeded()
+        return (list, window)
+    }
+
+    /// A running sign-in: its button in its held load, the others gated, ×
+    /// disabled once the load shows — and all of it cleared with nil.
+    @Test func aRunningSignInHoldsItsButtonAndGatesTheRest() throws {
+        let time = ManualLoadingClock()
+        let (list, window) = Self.hostedList(time)
+        defer { window.isHidden = true }
 
         list.setWorking(.provider(.apple))
+        time.advance(AppButton.MorphMetrics.loadGrace)
         for method in Self.methods {
             let button = try #require(list.debugButton(for: method))
             if method == .provider(.apple) {
@@ -127,10 +135,75 @@ struct AuthAppButtonTests {
         #expect(!list.debugCloseItem.isEnabled, "× closed under a running sign-in")
 
         list.setWorking(nil)
+        time.advance(AppButton.MorphMetrics.loadMinimum + 0.05)
         for method in Self.methods {
             let button = try #require(list.debugButton(for: method))
             #expect(button.phase == .content)
             #expect(button.isEnabled)
+            #expect(button.acceptsTaps)
+        }
+        #expect(list.debugCloseItem.isEnabled)
+    }
+
+    /// ⚠️ LOCKED AT ONCE, GREY ONLY AFTER THE GRACE (#2270): the others and
+    /// × refuse taps from the tap on, but turn grey only once the button's
+    /// grace has passed with the call still running; the answer — the lock
+    /// lifting, the caller going on — waits for the load's minimum.
+    @Test func theOthersAreLockedAtOnceButGreyOnlyAfterTheGrace() throws {
+        let time = ManualLoadingClock()
+        let (list, window) = Self.hostedList(time)
+        defer { window.isHidden = true }
+        let others = Self.methods.filter { $0 != .passkey }
+
+        list.setWorking(.passkey)
+        #expect(list.locksOthers, "× takes a tap under a running sign-in")
+        for method in others {
+            let button = try #require(list.debugButton(for: method))
+            #expect(!button.acceptsTaps, "\(method) takes a tap under a running sign-in")
+            #expect(button.isEnabled, "\(method) greyed before the grace")
+        }
+        #expect(list.debugCloseItem.isEnabled, "× greyed before the grace")
+
+        time.advance(AppButton.MorphMetrics.loadGrace - 0.02)
+        #expect(others.allSatisfy { list.debugButton(for: $0)?.isEnabled == true }, "greyed before the grace")
+        time.advance(0.04)
+        for method in others {
+            #expect(list.debugButton(for: method)?.isEnabled == false, "\(method) not grey past the grace")
+        }
+        #expect(!list.debugCloseItem.isEnabled, "× not grey past the grace")
+        #expect(list.debugButton(for: .passkey)?.isEnabled == true)
+
+        var answered = false
+        list.setWorking(nil) { answered = true }
+        #expect(!answered, "the answer showed before the load's minimum")
+        #expect(list.locksOthers)
+        #expect(list.debugButton(for: .email)?.isEnabled == false)
+
+        time.advance(AppButton.MorphMetrics.loadMinimum)
+        #expect(answered)
+        #expect(!list.locksOthers)
+        #expect(others.allSatisfy { list.debugButton(for: $0)?.acceptsTaps == true })
+        #expect(list.debugCloseItem.isEnabled)
+    }
+
+    /// A fast sign-in shows nothing but the press: nothing greys, and the
+    /// caller goes on at once.
+    @Test func aFastSignInGreysNothing() throws {
+        let time = ManualLoadingClock()
+        let (list, window) = Self.hostedList(time)
+        defer { window.isHidden = true }
+        list.setWorking(.passkey)
+        time.advance(AppButton.MorphMetrics.loadGrace / 2)
+        var answered = false
+        list.setWorking(nil) { answered = true }
+        #expect(answered, "the caller waited for a load never drawn")
+        #expect(time.pendingCount == 0, "the grace was left scheduled")
+        time.advance(1)
+        for method in Self.methods {
+            let button = try #require(list.debugButton(for: method))
+            #expect(button.isEnabled)
+            #expect(button.acceptsTaps)
+            #expect(!button.isLoadShown)
         }
         #expect(list.debugCloseItem.isEnabled)
     }

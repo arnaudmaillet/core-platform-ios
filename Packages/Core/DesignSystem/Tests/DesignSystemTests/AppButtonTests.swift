@@ -176,14 +176,20 @@ struct AppButtonTests {
     /// model unseen, and morphs to it when the load ends (the owner,
     /// 2026-10-23).
     @Test func aDrawnLoadHoldsTheBlurAndMorphsToTheAnswer() async {
+        let time = ManualLoadingClock()
         let button = follow()
+        button.loadClock = time.clock
         let (window, _) = hosted(button)
         defer { window.isHidden = true }
         button.setPhase(.loading, animated: true)
+        // Drawn once the grace has passed (#2270).
+        time.advance(AppButton.MorphMetrics.loadGrace)
         #expect(button.debugVeilIsShown, "the load was not drawn")
         #expect(button.debugIsUnderStandIn)
         button.setContent(.title("Following"), selected: true, animated: true)
         #expect(button.debugVeilIsShown, "the answer showed before the load ended")
+        // Past the load's minimum, the end is at once.
+        time.advance(AppButton.MorphMetrics.loadMinimum)
         button.setPhase(.content, animated: true)
         #expect(button.events.last == .blurMorph)
         #expect(await settle { button.configuration?.title == "Following" && !button.debugVeilIsShown && !button.debugIsUnderStandIn })
@@ -192,12 +198,17 @@ struct AppButtonTests {
 
     /// A drawn load that ends in a placeholder shows the bone, not a morph.
     @Test func aDrawnLoadIntoAPlaceholderShowsTheBone() {
+        let time = ManualLoadingClock()
         let button = follow()
+        button.loadClock = time.clock
         let (window, _) = hosted(button)
         defer { window.isHidden = true }
         button.setPhase(.loading, animated: true)
+        time.advance(AppButton.MorphMetrics.loadGrace)
         #expect(button.debugIsUnderStandIn)
         button.setPhase(.placeholder, animated: true)
+        #expect(!button.debugHasBone, "the bone came before the load's minimum")
+        time.advance(AppButton.MorphMetrics.loadMinimum)
         #expect(button.debugHasBone, "the load into a placeholder skipped the bone")
         #expect(!button.debugIsUnderStandIn)
         #expect(!button.debugVeilIsShown)

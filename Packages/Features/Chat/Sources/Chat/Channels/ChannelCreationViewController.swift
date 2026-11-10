@@ -101,6 +101,8 @@ final class ChannelCreationViewController: UIViewController {
         errorLabel.isHidden = true
 
         createButton.addAction(UIAction { [weak self] _ in self?.create() }, for: .primaryActionTriggered)
+        // The inputs grey only once the load shows (#2270).
+        createButton.onLoadShownChange = { [weak self] shown in self?.setInputsGreyed(shown) }
 
         createdTitle.font = .appFont(forTextStyle: .title2)
         createdTitle.textAlignment = .center
@@ -193,18 +195,40 @@ final class ChannelCreationViewController: UIViewController {
         viewModel.create()
     }
 
+    /// ⚠️ THE INPUTS ARE LOCKED AT ONCE, GREY ONLY ONCE THE LOAD SHOWS
+    /// (#2270): a fast answer shows nothing but the press. The answer — the
+    /// created step, an error — waits for the load it ends.
     private func render(_ phase: ChannelCreationViewModel.Phase) {
-        if case .created = phase { return showCreated() }
-        createButton.setPhase(phase == .creating ? .loading : .content, animated: view.window != nil)
-        nameField.isEnabled = phase != .creating
-        descriptionField.isEnabled = phase != .creating
-        visibilityControl.isEnabled = phase != .creating
-        if case .failed(let message) = phase {
-            errorLabel.text = message
-            errorLabel.isHidden = false
-        } else {
+        let animated = view.window != nil
+        guard phase != .creating else {
+            setInputsLocked(true)
             errorLabel.isHidden = true
+            createButton.setPhase(.loading, animated: animated)
+            return
         }
+        createButton.setPhase(.content, animated: animated) { [weak self] in
+            guard let self else { return }
+            setInputsLocked(false)
+            if case .created = phase { return showCreated() }
+            if case .failed(let message) = phase {
+                errorLabel.text = message
+                errorLabel.isHidden = false
+            } else {
+                errorLabel.isHidden = true
+            }
+        }
+    }
+
+    private var inputs: [UIView] { [nameField, descriptionField, visibilityControl] }
+
+    private func setInputsLocked(_ locked: Bool) {
+        for input in inputs { input.isUserInteractionEnabled = !locked }
+    }
+
+    private func setInputsGreyed(_ greyed: Bool) {
+        nameField.isEnabled = !greyed
+        descriptionField.isEnabled = !greyed
+        visibilityControl.isEnabled = !greyed
     }
 }
 

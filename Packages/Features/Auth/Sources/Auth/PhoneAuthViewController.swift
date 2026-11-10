@@ -45,6 +45,10 @@ final class PhoneAuthViewController: AuthStepTableViewController {
     private lazy var continueButton: AppButton = {
         let button = AppButton(aspect: .pill(.prominent), size: .form, content: .title("Continue"))
         button.addAction(UIAction { [weak self] _ in self?.continueTapped() }, for: .primaryActionTriggered)
+        // × and the back grey only once the load shows (#2270).
+        button.onLoadShownChange = { [weak self] shown in
+            (self?.navigationController as? ContentFittingNavigationController)?.setFormGreyed(shown)
+        }
         return button
     }()
 
@@ -171,17 +175,32 @@ final class PhoneAuthViewController: AuthStepTableViewController {
 
     /// Continue's held load (#2020), × and back disabled, inputs locked —
     /// while the code is sent. The sign-up steps' `setWorking`, on this
-    /// screen's own button.
+    /// screen's own button: locked at once, greyed only once the load shows
+    /// (#2270).
     func setWorking(_ working: Bool) {
-        isWorking = working
-        continueButton.setPhase(working ? .loading : .content, animated: true)
-        (navigationController as? ContentFittingNavigationController)?.setFormWorking(working)
-        view.isUserInteractionEnabled = !working
-        if working {
+        guard !working else {
+            isWorking = true
+            continueButton.setPhase(.loading, animated: true)
+            (navigationController as? ContentFittingNavigationController)?.setFormWorking(true)
+            view.isUserInteractionEnabled = false
             continueButton.isEnabled = true
             view.endEditing(true)
-        } else {
-            continueButton.isEnabled = country.isValidNationalNumber(nationalDigits)
+            return
+        }
+        endWorking {}
+    }
+
+    /// The load ends — after its minimum when drawn — and the screen opens
+    /// again with it, then `completion` (#2270).
+    func endWorking(completion: @escaping @MainActor () -> Void) {
+        continueButton.setPhase(.content, animated: true) { [weak self] in
+            if let self {
+                isWorking = false
+                (navigationController as? ContentFittingNavigationController)?.setFormWorking(false)
+                view.isUserInteractionEnabled = true
+                continueButton.isEnabled = country.isValidNationalNumber(nationalDigits)
+            }
+            completion()
         }
     }
 

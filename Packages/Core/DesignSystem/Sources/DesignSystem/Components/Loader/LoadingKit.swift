@@ -37,19 +37,61 @@ public enum TakingLongerCopy {
 public struct LoadingClock {
     public var now: @MainActor () -> TimeInterval
     public var after: @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void
+    /// `after`, called off on demand: nil schedules through `after`, the
+    /// work skipped once cancelled.
+    private var cancellableAfter: (@MainActor (TimeInterval, @escaping @MainActor () -> Void) -> LoadingTimer)?
 
     public init(
         now: @escaping @MainActor () -> TimeInterval,
-        after: @escaping @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void
+        after: @escaping @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void,
+        cancellableAfter: (@MainActor (TimeInterval, @escaping @MainActor () -> Void) -> LoadingTimer)? = nil
     ) {
         self.now = now
         self.after = after
+        self.cancellableAfter = cancellableAfter
+    }
+
+    /// `work` after `delay`, unless the timer handed back is cancelled
+    /// first — on the system clock the work item itself is called off, so
+    /// a cancelled wait leaves nothing scheduled (#2270).
+    @MainActor
+    @discardableResult
+    public func schedule(_ delay: TimeInterval, _ work: @escaping @MainActor () -> Void) -> LoadingTimer {
+        if let cancellableAfter { return cancellableAfter(delay, work) }
+        let timer = LoadingTimer()
+        after(delay) { [timer] in
+            guard !timer.isCancelled else { return }
+            work()
+        }
+        return timer
     }
 
     public static var system: LoadingClock {
         LoadingClock(now: { CACurrentMediaTime() }, after: { delay, work in
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { work() } }
+        }, cancellableAfter: { delay, work in
+            let item = DispatchWorkItem { MainActor.assumeIsolated { work() } }
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+            return LoadingTimer { item.cancel() }
         })
+    }
+}
+
+/// A wait `LoadingClock.schedule` started: `cancel` calls it off.
+@MainActor
+public final class LoadingTimer {
+    public private(set) var isCancelled = false
+    private var onCancel: (@MainActor () -> Void)?
+
+    public init(onCancel: (@MainActor () -> Void)? = nil) {
+        self.onCancel = onCancel
+    }
+
+    public func cancel() {
+        guard !isCancelled else { return }
+        isCancelled = true
+        onCancel?()
+        onCancel = nil
     }
 }
 
@@ -60,15 +102,29 @@ public struct LoadingClock {
 @MainActor
 public final class ManualLoadingClock {
     public private(set) var now: TimeInterval = 0
-    private var pending: [(at: TimeInterval, work: @MainActor () -> Void)] = []
+    private var pending: [(id: Int, at: TimeInterval, work: @MainActor () -> Void)] = []
+    private var nextID = 0
 
     public init() {}
 
+    /// The work still waiting: a cancelled wait is gone from it (#2270).
+    public var pendingCount: Int { pending.count }
+
     public var clock: LoadingClock {
         LoadingClock(now: { [weak self] in self?.now ?? 0 }, after: { [weak self] delay, work in
-            guard let self else { return }
-            pending.append((now + delay, work))
+            _ = self?.enqueue(delay, work)
+        }, cancellableAfter: { [weak self] delay, work in
+            guard let self else { return LoadingTimer() }
+            let id = enqueue(delay, work)
+            return LoadingTimer { [weak self] in self?.pending.removeAll { $0.id == id } }
         })
+    }
+
+    @discardableResult
+    private func enqueue(_ delay: TimeInterval, _ work: @escaping @MainActor () -> Void) -> Int {
+        nextID += 1
+        pending.append((nextID, now + delay, work))
+        return nextID
     }
 
     /// Moves time on by `seconds`, running each piece of work that fell
